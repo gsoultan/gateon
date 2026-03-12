@@ -50,15 +50,19 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		w.Header().Set("Content-Type", "application/json")
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
+		_, routesCount := d.RouteService.ListPaginated(0, 0, "")
+		_, servicesCount := d.ServiceService.ListPaginated(0, 0, "")
+		_, epsCount := d.EpService.ListPaginated(0, 0, "")
+		_, mwsCount := d.MwService.ListPaginated(0, 0, "")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":             "running",
 			"version":            d.Version,
 			"uptime":             time.Since(d.StartTime).Seconds(),
 			"memory_usage":       m.Alloc,
-			"routes_count":       len(d.RouteReg.List()),
-			"services_count":     len(d.ServiceReg.List()),
-			"entry_points_count": len(d.EpReg.List()),
-			"middlewares_count":  len(d.MwReg.List()),
+			"routes_count":       routesCount,
+			"services_count":     servicesCount,
+			"entry_points_count": epsCount,
+			"middlewares_count":  mwsCount,
 		})
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

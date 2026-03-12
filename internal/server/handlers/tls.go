@@ -4,13 +4,12 @@ import (
 	"net/http"
 
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
-	"github.com/google/uuid"
 )
 
 func registerTLSOptionHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/tls-options", func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
-		opts, total := d.TLSOptReg.ListPaginated(page, pageSize, search)
+		opts, total := d.TLSOptService.ListPaginated(page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListTLSOptionsResponse{
 			TlsOptions: opts, TotalCount: total, Page: page, PageSize: pageSize,
 		})
@@ -21,10 +20,7 @@ func registerTLSOptionHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if opt.Id == "" {
-			opt.Id = uuid.NewString()
-		}
-		if err := d.TLSOptReg.Update(&opt); err != nil {
+		if err := d.TLSOptService.SaveTLSOption(&opt); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to save tls option")
 			return
 		}
@@ -36,7 +32,7 @@ func registerTLSOptionHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "missing tls option id")
 			return
 		}
-		if err := d.TLSOptReg.Delete(id); err != nil {
+		if err := d.TLSOptService.DeleteTLSOption(id); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete tls option")
 			return
 		}

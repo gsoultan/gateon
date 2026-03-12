@@ -14,13 +14,39 @@ import (
 type ApiService struct {
 	gateonv1.UnimplementedApiServiceServer
 	Version     string
-	Routes      *config.RouteRegistry
-	Services    *config.ServiceRegistry
-	Globals     *config.GlobalRegistry
-	EntryPoints *config.EntryPointRegistry
-	Middlewares *config.MiddlewareRegistry
-	TLSOptions  *config.TLSOptionRegistry
-	Auth        *auth.Manager
+	Routes      config.RouteStore
+	Services    config.ServiceStore
+	Globals     config.GlobalConfigStore
+	EntryPoints config.EntryPointStore
+	Middlewares config.MiddlewareStore
+	TLSOptions  config.TLSOptionStore
+	Auth        auth.Service
+}
+
+// ApiServiceConfig holds dependencies for ApiService (Factory pattern).
+type ApiServiceConfig struct {
+	Version     string
+	Routes      config.RouteStore
+	Services    config.ServiceStore
+	Globals     config.GlobalConfigStore
+	EntryPoints config.EntryPointStore
+	Middlewares config.MiddlewareStore
+	TLSOptions  config.TLSOptionStore
+	Auth        auth.Service
+}
+
+// NewApiService creates an ApiService from config (Factory pattern).
+func NewApiService(cfg ApiServiceConfig) *ApiService {
+	return &ApiService{
+		Version:     cfg.Version,
+		Routes:      cfg.Routes,
+		Services:    cfg.Services,
+		Globals:     cfg.Globals,
+		EntryPoints: cfg.EntryPoints,
+		Middlewares: cfg.Middlewares,
+		TLSOptions:  cfg.TLSOptions,
+		Auth:        cfg.Auth,
+	}
 }
 
 func (s *ApiService) ListEntryPoints(_ context.Context, _ *gateonv1.ListEntryPointsRequest) (*gateonv1.ListEntryPointsResponse, error) {
