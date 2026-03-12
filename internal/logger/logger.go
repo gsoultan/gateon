@@ -9,8 +9,25 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// L is the global logger instance
+// Logger defines the minimal logging interface for dependency injection (Dependency Inversion).
+// Implementations can be swapped for testing or alternative backends.
+type Logger interface {
+	Info() *zerolog.Event
+	Error() *zerolog.Event
+	Debug() *zerolog.Event
+	Fatal() *zerolog.Event
+}
+
+// zerologAdapter adapts *zerolog.Logger to Logger (zerolog uses pointer receivers).
+type zerologAdapter struct{ *zerolog.Logger }
+
+// L is the global logger instance.
 var L zerolog.Logger
+
+// Default returns the global logger as Logger interface (for injection).
+func Default() Logger {
+	return &zerologAdapter{&L}
+}
 
 type LogBroadcast struct {
 	mu          sync.Mutex

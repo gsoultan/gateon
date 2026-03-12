@@ -11,21 +11,25 @@ import (
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 )
 
+// BaseHandlerDeps holds narrow dependencies for CreateBaseHandler (Interface Segregation).
+type BaseHandlerDeps struct {
+	ProxyHandler http.Handler
+	RouteStore   config.RouteStore
+	GlobalReg    config.GlobalConfigStore
+	ApiService   *api.ApiService
+}
+
 // CreateBaseHandler builds the main HTTP handler that routes to proxy or local API/UI.
 func CreateBaseHandler(
 	uiHandler http.Handler,
-	s *Server,
-	globalReg *config.GlobalRegistry,
-	apiService *api.ApiService,
+	deps BaseHandlerDeps,
 	wrapped *grpcweb.WrappedGrpcServer,
 	mux *http.ServeMux,
 ) http.Handler {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
-	})
+	handler := deps.ProxyHandler
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rt := router.SelectRoute(r, s.RouteReg.List()); rt != nil {
+		if rt := router.SelectRoute(r, deps.RouteStore.List()); rt != nil {
 			handler.ServeHTTP(w, r)
 			return
 		}
@@ -38,7 +42,7 @@ func CreateBaseHandler(
 			uiHandler.ServeHTTP(w, r)
 		})
 
-		if gc := globalReg.Get(); gc != nil && gc.Auth != nil && gc.Auth.Enabled && apiService.Auth != nil {
+		if gc := deps.GlobalReg.Get(); gc != nil && gc.Auth != nil && gc.Auth.Enabled && deps.ApiService.Auth != nil {
 			isAPI := strings.HasPrefix(r.URL.Path, "/v1/")
 			isMetrics := r.URL.Path == "/metrics"
 			isLogin := r.URL.Path == "/v1/login"
@@ -59,7 +63,7 @@ func CreateBaseHandler(
 					r.Header.Set("Authorization", "Bearer "+auth)
 				}
 			}
-			middleware.PasetoAuth(apiService.Auth)(internal).ServeHTTP(w, r)
+			middleware.PasetoAuth(deps.ApiService.Auth)(internal).ServeHTTP(w, r)
 			return
 		}
 

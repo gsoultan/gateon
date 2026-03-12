@@ -56,8 +56,15 @@ func CreateTLSManager(globalReg *config.GlobalRegistry) *gtls.Manager {
 	return gtls.NewManager(cfg)
 }
 
+// SNIDeps holds narrow dependencies for SetupSNI (Interface Segregation).
+type SNIDeps struct {
+	RouteStore  config.RouteStore
+	GlobalStore config.GlobalConfigStore
+	TLSOptStore config.TLSOptionStore
+}
+
 // SetupSNI configures the TLS config for SNI-based certificate selection.
-func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, s *Server) {
+func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, deps SNIDeps) {
 	if tlsConfig == nil {
 		return
 	}
@@ -66,7 +73,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, s *Server) {
 		if sniHost == "" {
 			return nil, nil
 		}
-		for _, rt := range s.RouteReg.List() {
+		for _, rt := range deps.RouteStore.List() {
 			if rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
 				continue
 			}
@@ -75,7 +82,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, s *Server) {
 				continue
 			}
 			var certs []tls.Certificate
-			gc := s.GlobalReg.Get()
+			gc := deps.GlobalStore.Get()
 			if gc == nil || gc.Tls == nil {
 				continue
 			}
@@ -97,7 +104,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, s *Server) {
 			newCfg := tlsConfig.Clone()
 			newCfg.Certificates = certs
 			if rt.Tls.OptionId != "" {
-				if opt, ok := s.TLSOptReg.Get(rt.Tls.OptionId); ok {
+				if opt, ok := deps.TLSOptStore.Get(rt.Tls.OptionId); ok {
 					if opt.MinTlsVersion != "" {
 						newCfg.MinVersion = parseTLSVersion(opt.MinTlsVersion)
 					}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gateon/gateon/internal/api"
 	"github.com/gateon/gateon/internal/config"
+	"github.com/gateon/gateon/internal/domain"
 	"github.com/gateon/gateon/internal/server/handlers"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
@@ -18,16 +19,14 @@ import (
 
 func handlerDeps(s *Server) *handlers.Deps {
 	return &handlers.Deps{
-		RouteReg:              s.RouteReg,
-		ServiceReg:            s.ServiceReg,
-		EpReg:                 s.EpReg,
-		MwReg:                 s.MwReg,
-		TLSOptReg:             s.TLSOptReg,
-		InvalidateRouteProxy:  s.InvalidateRouteProxy,
-		InvalidateRouteProxies: s.InvalidateRouteProxies,
-		AuthManager:          s.AuthManager,
-		Version:              s.Version,
-		StartTime:             s.StartTime(),
+		RouteService:   domain.NewRouteService(s.RouteReg, s.InvalidateRouteProxy),
+		ServiceService: domain.NewServiceService(s.ServiceReg, s.RouteReg, s.InvalidateRouteProxies),
+		EpService:      domain.NewEntryPointService(s.EpReg),
+		MwService:      domain.NewMiddlewareService(s.MwReg, s.RouteReg, s.InvalidateRouteProxies),
+		TLSOptService:  domain.NewTLSOptionService(s.TLSOptReg),
+		AuthManager:    s.AuthManager,
+		Version:        s.Version,
+		StartTime:      s.StartTime(),
 	}
 }
 
@@ -64,10 +63,10 @@ func TestIntegration_ProxyRequest(t *testing.T) {
 	_ = s.RouteReg.Update(rt)
 
 	grpcServer := grpc.NewServer()
-	apiService := &api.ApiService{
+	apiService := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteReg, Services: s.ServiceReg, Globals: globalReg,
 		EntryPoints: s.EpReg, Middlewares: s.MwReg, TLSOptions: s.TLSOptReg,
-	}
+	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	wrapped := grpcweb.WrapServer(grpcServer)
 	mux := http.NewServeMux()
@@ -120,10 +119,10 @@ func TestIntegration_RestApiAndProxy(t *testing.T) {
 	})
 
 	grpcServer := grpc.NewServer()
-	apiService := &api.ApiService{
+	apiService := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteReg, Services: s.ServiceReg, Globals: globalReg,
 		EntryPoints: s.EpReg, Middlewares: s.MwReg, TLSOptions: s.TLSOptReg,
-	}
+	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	wrapped := grpcweb.WrapServer(grpcServer)
 	mux := http.NewServeMux()
@@ -169,10 +168,10 @@ func TestIntegration_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	apiService := &api.ApiService{
+	apiService := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteReg, Services: s.ServiceReg, Globals: s.GlobalReg,
 		EntryPoints: s.EpReg, Middlewares: s.MwReg, TLSOptions: s.TLSOptReg,
-	}
+	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 	wrapped := grpcweb.WrapServer(grpc.NewServer())

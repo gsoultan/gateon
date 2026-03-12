@@ -7,6 +7,7 @@ import (
 
 	"github.com/gateon/gateon/internal/api"
 	"github.com/gateon/gateon/internal/config"
+	"github.com/gateon/gateon/internal/domain"
 	"github.com/gateon/gateon/internal/logger"
 	"github.com/gateon/gateon/internal/server/entrypoint"
 	"github.com/gateon/gateon/internal/server/handlers"
@@ -23,7 +24,7 @@ const ShutdownTimeout = 30 * time.Second
 // It blocks until ctx is cancelled, then shuts down all servers gracefully and returns.
 // globalReg is used for TLS and base handler auth.
 func Run(ctx context.Context, s *Server, uiHandler http.Handler, globalReg *config.GlobalRegistry) {
-	apiService := &api.ApiService{
+	apiService := api.NewApiService(api.ApiServiceConfig{
 		Version:     s.Version,
 		Routes:      s.RouteReg,
 		Services:    s.ServiceReg,
@@ -32,32 +33,49 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler, globalReg *conf
 		Middlewares: s.MwReg,
 		TLSOptions:  s.TLSOptReg,
 		Auth:        s.AuthManager,
-	}
+	})
+
+	routeService := domain.NewRouteService(s.RouteReg, s.InvalidateRouteProxy)
+	serviceService := domain.NewServiceService(s.ServiceReg, s.RouteReg, s.InvalidateRouteProxies)
+	epService := domain.NewEntryPointService(s.EpReg)
+	mwService := domain.NewMiddlewareService(s.MwReg, s.RouteReg, s.InvalidateRouteProxies)
+	tlsOptService := domain.NewTLSOptionService(s.TLSOptReg)
+
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(1024))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	wrapped := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(string) bool { return true }))
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, &handlers.Deps{
-		RouteReg:              s.RouteReg,
-		ServiceReg:            s.ServiceReg,
-		EpReg:                 s.EpReg,
-		MwReg:                 s.MwReg,
-		TLSOptReg:             s.TLSOptReg,
-		InvalidateRouteProxy:  s.InvalidateRouteProxy,
-		InvalidateRouteProxies: s.InvalidateRouteProxies,
-		AuthManager:          s.AuthManager,
-		Version:               s.Version,
-		StartTime:             s.StartTime(),
+		RouteService:  routeService,
+		ServiceService: serviceService,
+		EpService:     epService,
+		MwService:     mwService,
+		TLSOptService: tlsOptService,
+		AuthManager:   s.AuthManager,
+		Version:       s.Version,
+		StartTime:     s.StartTime(),
 	})
 
-	baseHandler := CreateBaseHandler(uiHandler, s, globalReg, apiService, wrapped, mux)
+	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.HandleProxyOrLocal(w, r, wrapped, mux)
+	})
+	baseHandler := CreateBaseHandler(uiHandler, BaseHandlerDeps{
+		ProxyHandler: proxyHandler,
+		RouteStore:   s.RouteReg,
+		GlobalReg:    globalReg,
+		ApiService:   apiService,
+	}, wrapped, mux)
 	c := BuildCORS()
 	tlsManager := CreateTLSManager(globalReg)
 	tlsConfig, err := tlsManager.GetTLSConfig()
 	if err != nil {
 		logger.L.Fatal().Err(err).Msg("failed to initialize tls")
 	}
-	SetupSNI(tlsConfig, tlsManager, s)
+	SetupSNI(tlsConfig, tlsManager, SNIDeps{
+		RouteStore:  s.RouteReg,
+		GlobalStore: globalReg,
+		TLSOptStore: s.TLSOptReg,
+	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
 	var wg syncutil.WaitGroup

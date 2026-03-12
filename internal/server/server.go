@@ -19,7 +19,7 @@ type Server struct {
 	MwReg       *config.MiddlewareRegistry
 	TLSOptReg   *config.TLSOptionRegistry
 	GlobalReg   *config.GlobalRegistry
-	AuthManager *auth.Manager
+	AuthManager auth.Service
 	RedisClient *redis.Client
 	Port        string
 	Version     string
