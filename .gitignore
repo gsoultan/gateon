@@ -40,3 +40,5 @@ tls_options.json
 internal/ui/dist
 ui/bun.lock
 ui/package-lock.json
+gateon.exe
+gateon_test.exe

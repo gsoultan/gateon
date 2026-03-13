@@ -1,0 +1,131 @@
+---
+description: Go backend — programming by interface and design patterns
+globs: internal/**/*.go,pkg/**/*.go,**/*.go
+alwaysApply: false
+---
+
+# Go Backend Guidelines
+
+All backend code must use **SOLID principles**, **programming by interface**, and appropriate **design patterns**.
+
+## SOLID Principles
+
+| Principle | Apply in Go |
+|-----------|-------------|
+| **S**ingle Responsibility | One reason to change per type; split large structs/functions |
+| **O**pen/Closed | Extend via new implementations, not by modifying existing code |
+| **L**iskov Substitution | Implementations must honor the interface contract; substitutable |
+| **I**nterface Segregation | Small, focused interfaces; clients depend only on what they use |
+| **D**ependency Inversion | Depend on interfaces (abstractions), not concrete types |
+
+## Programming by Interface
+
+- **Define interfaces for dependencies** — depend on abstractions, not concrete types
+- **Inject dependencies** — pass interfaces into constructors/structs; use dependency injection
+- **Keep interfaces small** — prefer many small interfaces (e.g., `io.Reader`, `io.Writer`)
+
+```go
+// ✅ GOOD — depend on interface
+type RouteStore interface {
+    GetRoute(ctx context.Context, id string) (*Route, error)
+    ListRoutes(ctx context.Context) ([]*Route, error)
+}
+
+type Handler struct {
+    store RouteStore
+}
+
+// ❌ BAD — concrete dependency
+type Handler struct {
+    store *PostgresRouteStore
+}
+```
+
+## Design Patterns to Use
+
+1. **Repository** — abstract data access behind interfaces
+2. **Factory** — create complex objects (e.g., middleware factory)
+3. **Strategy** — interchangeable algorithms (e.g., load balancing, routing)
+4. **Adapter** — adapt external APIs to project interfaces
+5. **Options pattern** — for configurable structs: `NewServer(opts...Option)`
+
+## Folder & File Organization
+
+- **Organize by domain** — group packages and files by business/feature domain, not by technical type
+- Prefer `internal/domain/route/`, `internal/domain/service/`, `pkg/proxy/` over `internal/handlers/`, `internal/models/`
+- Each domain folder owns its types, interfaces, and implementations
+
+## Structure
+
+- **One interface or struct per file** — each `.go` file defines a single type
+- **Avoid god struct** — structs must have a single responsibility; split large structs
+- Put interfaces in the **consumer package**, not the implementer
+- Interfaces should define what is needed, not what exists
+- Use `context.Context` as first parameter in RPC/API methods
+
+## Avoid God Struct
+
+- Keep structs focused — if a struct has many fields or does too much, split it
+- Prefer composition: embed or compose smaller structs instead of one monolithic type
+
+## Naming Conventions
+
+| Kind | Convention | Example |
+|------|------------|---------|
+| Packages | lowercase, single word, no underscores | `route`, `handler` |
+| Interfaces | `er` suffix or noun | `RouteStore`, `Reader`, `Handler` |
+| Structs | PascalCase, noun | `RouteHandler`, `ProxyConfig` |
+| Functions/Methods | PascalCase (exported), camelCase (unexported) | `GetRoute`, `parseConfig` |
+| Variables | camelCase | `routeID`, `configPath` |
+| Constants | PascalCase or SCREAMING_SNAKE | `DefaultPort`, `MaxRetries` |
+| Files | snake_case | `route_handler.go`, `proxy_config.go` |
+
+## Handler Style — Avoid Deep Nesting
+
+- **Prefer early return (guard clauses)** — return as soon as a condition is met; avoid `if { ... } else { ... }`
+- **Flatten nesting** — keep handler logic at one or two levels; if you go deeper, extract logic
+- **Extract conditions** — give complex boolean logic a name: `needsAuth := gc != nil && gc.Auth != nil && gc.Auth.Enabled`
+- **Extract helpers** — move path checks, auth logic, or routing decisions into small functions: `isPublicPath(path string) bool`, `pathRequiresAuth(path string) bool`
+- **Use switch for path routing** — prefer `switch r.URL.Path { case "/healthz": ... case "/v1/login": ... }` over long if-chains
+- **Prefer positive conditions** — `if isPublic { return }` instead of `if !needsAuth { ... } else { ... }` when it reduces nesting
+
+```go
+// ✅ GOOD — early return, flat structure
+func handle(w http.ResponseWriter, r *http.Request) {
+    if rt := router.SelectRoute(r, routes); rt != nil {
+        proxy.ServeHTTP(w, r)
+        return
+    }
+    if isPublicPath(r.URL.Path) {
+        internal.ServeHTTP(w, r)
+        return
+    }
+    if !needsAuth(r) {
+        internal.ServeHTTP(w, r)
+        return
+    }
+    authMiddleware(internal).ServeHTTP(w, r)
+}
+
+// ❌ BAD — deeply nested
+func handle(w http.ResponseWriter, r *http.Request) {
+    if rt := router.SelectRoute(r, routes); rt != nil {
+        proxy.ServeHTTP(w, r)
+    } else {
+        if gc != nil && gc.Auth != nil {
+            if isAPI || isMetrics {
+                if !(isLogin || isSetup || isHealth) {
+                    authMiddleware(internal).ServeHTTP(w, r)
+                    return
+                }
+            }
+            internal.ServeHTTP(w, r)
+        }
+    }
+}
+```
+
+## Testing
+
+- Mock interfaces, not concrete types — enables easy unit testing
+- Prefer table-driven tests

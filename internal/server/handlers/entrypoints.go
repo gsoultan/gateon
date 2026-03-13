@@ -9,7 +9,7 @@ import (
 func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/entrypoints", func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
-		eps, total := d.EpService.ListPaginated(page, pageSize, search)
+		eps, total := d.EpService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListEntryPointsResponse{
 			EntryPoints: eps, TotalCount: total, Page: page, PageSize: pageSize,
 		})
@@ -20,7 +20,7 @@ func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := d.EpService.SaveEntryPoint(&ep); err != nil {
+		if err := d.EpService.SaveEntryPoint(r.Context(), &ep); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -32,7 +32,7 @@ func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "missing entrypoint id")
 			return
 		}
-		if err := d.EpService.DeleteEntryPoint(id); err != nil {
+		if err := d.EpService.DeleteEntryPoint(r.Context(), id); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete entrypoint")
 			return
 		}

@@ -14,21 +14,7 @@ import (
 
 // GetOrCreateProxy returns a cached proxy handler for the route or creates one.
 func (s *Server) GetOrCreateProxy(rt *gateonv1.Route) http.Handler {
-	s.ProxiesMu.RLock()
-	h, ok := s.Proxies[rt.Id]
-	s.ProxiesMu.RUnlock()
-	if ok {
-		return h
-	}
-	s.ProxiesMu.Lock()
-	defer s.ProxiesMu.Unlock()
-	if h, ok = s.Proxies[rt.Id]; ok {
-		return h
-	}
-	pHandler := proxy.NewProxyHandler(rt, s.ServiceReg)
-	h = router.ApplyRouteMiddlewares(pHandler, rt, s.RedisClient, s.MwReg)
-	s.Proxies[rt.Id] = h
-	return h
+	return s.proxyCache().GetOrCreate(rt)
 }
 
 // HandleProxyOrLocal routes the request to a proxied backend or to the local mux/gRPC.
@@ -36,7 +22,7 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, wrap
 	isGRPC := (r.ProtoMajor == 2 || r.ProtoMajor == 3) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 	isGRPCWeb := wrapped.IsGrpcWebRequest(r) || wrapped.IsAcceptableGrpcCorsRequest(r) || wrapped.IsGrpcWebSocketRequest(r)
 
-	if rt := router.SelectRoute(r, s.RouteReg.List()); rt != nil {
+	if rt := router.SelectRoute(r, s.RouteStore.List(r.Context())); rt != nil {
 		if rt.Tls != nil && r.TLS == nil {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte("HTTPS required"))
@@ -69,48 +55,20 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, wrap
 
 // InvalidateRouteProxy removes the cached proxy for the given route ID.
 func (s *Server) InvalidateRouteProxy(routeID string) {
-	if routeID == "" {
-		return
-	}
-	s.ProxiesMu.Lock()
-	defer s.ProxiesMu.Unlock()
-	s.invalidateProxy(routeID)
+	s.proxyCache().InvalidateRoute(routeID)
 }
 
 // InvalidateRouteProxies removes cached proxies for routes matching the strategy.
 func (s *Server) InvalidateRouteProxies(strategy func(*gateonv1.Route) bool) {
-	if strategy == nil {
-		return
-	}
-	s.ProxiesMu.Lock()
-	defer s.ProxiesMu.Unlock()
-	for _, rt := range s.RouteReg.List() {
-		if strategy(rt) {
-			s.invalidateProxy(rt.Id)
-		}
-	}
+	s.proxyCache().InvalidateRoutes(strategy)
 }
 
-func (s *Server) invalidateProxy(id string) {
-	if old, ok := s.Proxies[id]; ok {
-		type closer interface{ Close() }
-		if c, ok := old.(closer); ok {
-			c.Close()
-		} else if ph, ok := old.(*proxy.ProxyHandler); ok {
-			ph.Close()
-		} else if wh, ok := old.(interface{ Unwrap() http.Handler }); ok {
-			if c, ok := wh.Unwrap().(closer); ok {
-				c.Close()
-			}
-		}
-	}
-	delete(s.Proxies, id)
+// GetRouteStats returns target stats for a route, or nil if not found.
+func (s *Server) GetRouteStats(routeID string) []proxy.TargetStats {
+	return s.proxyCache().GetRouteStats(routeID)
 }
 
-// SyncProxies runs periodic proxy cache maintenance (e.g. logging).
+// SyncProxies runs periodic proxy cache maintenance (e.g. metrics).
 func (s *Server) SyncProxies() {
-	s.ProxiesMu.Lock()
-	defer s.ProxiesMu.Unlock()
-	// Optional: cleanup or metrics
-	_ = len(s.Proxies)
+	s.proxyCache().Sync()
 }

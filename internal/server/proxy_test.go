@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -39,13 +40,13 @@ func setupProxyTest(t *testing.T, routeType string) (*Server, *atomic.Int64, *gr
 			{Url: backend.URL, Weight: 1},
 		},
 	}
-	if err := s.ServiceReg.Update(svc); err != nil {
+	if err := s.ServiceStore.Update(context.Background(), svc); err != nil {
 		t.Fatalf("update service: %v", err)
 	}
 	rt := &gateonv1.Route{
 		Id: "route", ServiceId: svc.Id, Rule: "PathPrefix(`/`)", Type: routeType,
 	}
-	if err := s.RouteReg.Update(rt); err != nil {
+	if err := s.RouteStore.Update(context.Background(), rt); err != nil {
 		t.Fatalf("update route: %v", err)
 	}
 

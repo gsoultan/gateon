@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -20,12 +21,12 @@ func NewEntryPointService(store config.EntryPointStore) EntryPointService {
 }
 
 // ListPaginated returns paginated entrypoints.
-func (s *EntryPointServiceImpl) ListPaginated(page, pageSize int32, search string) ([]*gateonv1.EntryPoint, int32) {
-	return s.store.ListPaginated(page, pageSize, search)
+func (s *EntryPointServiceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.EntryPoint, int32) {
+	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
 // SaveEntryPoint validates, assigns ID if needed, infers type, and persists.
-func (s *EntryPointServiceImpl) SaveEntryPoint(ep *gateonv1.EntryPoint) error {
+func (s *EntryPointServiceImpl) SaveEntryPoint(ctx context.Context, ep *gateonv1.EntryPoint) error {
 	if ep.Address == "" {
 		return errors.New("missing address")
 	}
@@ -33,15 +34,15 @@ func (s *EntryPointServiceImpl) SaveEntryPoint(ep *gateonv1.EntryPoint) error {
 		ep.Id = uuid.NewString()
 	}
 	inferEntryPointType(ep)
-	return s.store.Update(ep)
+	return s.store.Update(ctx, ep)
 }
 
 // DeleteEntryPoint removes the entrypoint.
-func (s *EntryPointServiceImpl) DeleteEntryPoint(id string) error {
+func (s *EntryPointServiceImpl) DeleteEntryPoint(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("missing entrypoint id")
 	}
-	return s.store.Delete(id)
+	return s.store.Delete(ctx, id)
 }
 
 func inferEntryPointType(ep *gateonv1.EntryPoint) {
@@ -76,6 +77,6 @@ func inferEntryPointType(ep *gateonv1.EntryPoint) {
 		}
 	}
 	if hasTCP && hasUDP && (tlsEnabled || isHTTPPort) {
-		ep.Type = gateonv1.EntryPoint_HTTP
+		ep.Type = gateonv1.EntryPoint_HTTP3
 	}
 }

@@ -2,8 +2,6 @@ package proxy
 
 import (
 	"context"
-	"crypto/tls"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -11,9 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 
 	"github.com/gateon/gateon/internal/config"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
@@ -39,12 +34,20 @@ func (p *syncBufferPool) Put(b []byte) {
 	p.pool.Put(b)
 }
 
+// CircuitState represents circuit breaker state for a target.
+const (
+	CircuitClosed   = "CLOSED"   // healthy, accepting traffic
+	CircuitOpen     = "OPEN"     // failing, not accepting traffic
+	CircuitHalfOpen = "HALF-OPEN" // testing recovery
+)
+
 // LoadBalancer defines the interface for selecting backend targets.
 type LoadBalancer interface {
 	Next() string
 	NextState() *targetState
 	UpdateWeightedTargets(targets []*gateonv1.Target)
 	GetStats() []TargetStats
+	SetAlive(url string, alive bool)
 }
 
 type targetState struct {
@@ -60,6 +63,7 @@ type targetState struct {
 type TargetStats struct {
 	URL          string `json:"url"`
 	Alive        bool   `json:"alive"`
+	CircuitState string `json:"circuit_state"` // CLOSED, OPEN, HALF-OPEN
 	RequestCount uint64 `json:"request_count"`
 	ErrorCount   uint64 `json:"error_count"`
 	AvgLatencyMs uint64 `json:"avg_latency_ms"`
@@ -97,8 +101,17 @@ func (lb *RoundRobinLB) NextState() *targetState {
 	if len(targets) == 0 {
 		return nil
 	}
+	// Round-robin among alive targets only (circuit breaker: skip OPEN targets)
 	n := atomic.AddUint64(&lb.current, 1)
-	return targets[(n-1)%uint64(len(targets))]
+	start := (n - 1) % uint64(len(targets))
+	for i := uint64(0); i < uint64(len(targets)); i++ {
+		idx := (start + i) % uint64(len(targets))
+		t := targets[idx]
+		if t.alive {
+			return t
+		}
+	}
+	return nil // no alive targets
 }
 
 func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
@@ -110,23 +123,23 @@ func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	}
 }
 
+func (lb *RoundRobinLB) SetAlive(url string, alive bool) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	for _, t := range lb.targets {
+		if t.url == url {
+			t.alive = alive
+			return
+		}
+	}
+}
+
 func (lb *RoundRobinLB) GetStats() []TargetStats {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
 	stats := make([]TargetStats, len(lb.targets))
 	for i, t := range lb.targets {
-		avg := uint64(0)
-		if atomic.LoadUint64(&t.requestCount) > 0 {
-			avg = atomic.LoadUint64(&t.latencySumMs) / atomic.LoadUint64(&t.requestCount)
-		}
-		stats[i] = TargetStats{
-			URL:          t.url,
-			Alive:        t.alive,
-			RequestCount: atomic.LoadUint64(&t.requestCount),
-			ErrorCount:   atomic.LoadUint64(&t.errorCount),
-			AvgLatencyMs: avg,
-			ActiveConn:   atomic.LoadInt32(&t.activeConn),
-		}
+		stats[i] = targetStatsFromState(t)
 	}
 	return stats
 }
@@ -169,7 +182,7 @@ func (lb *LeastConnLB) NextState() *targetState {
 		}
 	}
 	if best == nil {
-		return lb.targets[0]
+		return nil // no alive targets (circuit breaker: all OPEN)
 	}
 	return best
 }
@@ -183,23 +196,23 @@ func (lb *LeastConnLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	}
 }
 
+func (lb *LeastConnLB) SetAlive(url string, alive bool) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	for _, t := range lb.targets {
+		if t.url == url {
+			t.alive = alive
+			return
+		}
+	}
+}
+
 func (lb *LeastConnLB) GetStats() []TargetStats {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
 	stats := make([]TargetStats, len(lb.targets))
 	for i, t := range lb.targets {
-		avg := uint64(0)
-		if atomic.LoadUint64(&t.requestCount) > 0 {
-			avg = atomic.LoadUint64(&t.latencySumMs) / atomic.LoadUint64(&t.requestCount)
-		}
-		stats[i] = TargetStats{
-			URL:          t.url,
-			Alive:        t.alive,
-			RequestCount: atomic.LoadUint64(&t.requestCount),
-			ErrorCount:   atomic.LoadUint64(&t.errorCount),
-			AvgLatencyMs: avg,
-			ActiveConn:   atomic.LoadInt32(&t.activeConn),
-		}
+		stats[i] = targetStatsFromState(t)
 	}
 	return stats
 }
@@ -242,7 +255,7 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 	}
 
 	if totalWeight <= 0 {
-		return lb.targets[0]
+		return nil // no alive targets (circuit breaker: all OPEN)
 	}
 
 	n := atomic.AddUint64(&lb.current, 1)
@@ -270,26 +283,51 @@ func (lb *WeightedRoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target
 	}
 }
 
+func (lb *WeightedRoundRobinLB) SetAlive(url string, alive bool) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	for _, t := range lb.targets {
+		if t.url == url {
+			t.alive = alive
+			return
+		}
+	}
+}
+
 func (lb *WeightedRoundRobinLB) GetStats() []TargetStats {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
 	stats := make([]TargetStats, len(lb.targets))
 	for i, t := range lb.targets {
-		avg := uint64(0)
-		if atomic.LoadUint64(&t.requestCount) > 0 {
-			avg = atomic.LoadUint64(&t.latencySumMs) / atomic.LoadUint64(&t.requestCount)
-		}
-		stats[i] = TargetStats{
-			URL:          t.url,
-			Alive:        t.alive,
-			RequestCount: atomic.LoadUint64(&t.requestCount),
-			ErrorCount:   atomic.LoadUint64(&t.errorCount),
-			AvgLatencyMs: avg,
-			ActiveConn:   atomic.LoadInt32(&t.activeConn),
-		}
+		stats[i] = targetStatsFromState(t)
 	}
 	return stats
 }
+
+func targetStatsFromState(t *targetState) TargetStats {
+	avg := uint64(0)
+	if atomic.LoadUint64(&t.requestCount) > 0 {
+		avg = atomic.LoadUint64(&t.latencySumMs) / atomic.LoadUint64(&t.requestCount)
+	}
+	circuit := CircuitClosed
+	if !t.alive {
+		circuit = CircuitOpen
+	}
+	return TargetStats{
+		URL:          t.url,
+		Alive:        t.alive,
+		CircuitState: circuit,
+		RequestCount: atomic.LoadUint64(&t.requestCount),
+		ErrorCount:   atomic.LoadUint64(&t.errorCount),
+		AvgLatencyMs: avg,
+		ActiveConn:   atomic.LoadInt32(&t.activeConn),
+	}
+}
+
+// context key for passing targetState to shared ErrorHandler
+type contextKey int
+
+const targetStateContextKey contextKey = 0
 
 // ProxyHandler handles the proxying of requests to backend services.
 type ProxyHandler struct {
@@ -298,100 +336,17 @@ type ProxyHandler struct {
 	healthCheckPath string
 	stopHealthCheck chan struct{}
 	transport       http.RoundTripper
+	proxyPool       sync.Map // map[targetURL string]*httputil.ReverseProxy
 }
 
-// NewProxyHandler creates a new ProxyHandler based on the route and its linked service.
-func NewProxyHandler(rt *gateonv1.Route, serviceRegistry *config.ServiceRegistry) *ProxyHandler {
-	var lb LoadBalancer
-	var healthCheckPath string
-	var targets []*gateonv1.Target
+// NewProxyHandler creates a ProxyHandler from route and ServiceStore (DIP).
+func NewProxyHandler(rt *gateonv1.Route, serviceStore config.ServiceStore) *ProxyHandler {
+	return NewProxyHandlerWithFactory(rt, serviceStore, nil)
+}
 
-	if rt.ServiceId != "" && serviceRegistry != nil {
-		if svc, ok := serviceRegistry.Get(rt.ServiceId); ok {
-			targets = svc.WeightedTargets
-			healthCheckPath = svc.HealthCheckPath
-
-			targetUrls := make([]string, len(targets))
-			for i, t := range targets {
-				targetUrls[i] = t.Url
-			}
-
-			switch strings.ToLower(svc.LoadBalancerPolicy) {
-			case "least_conn":
-				lb = NewLeastConnLB(targetUrls)
-			case "weighted_round_robin":
-				lb = NewWeightedRoundRobinLB(targets)
-			default:
-				lb = NewRoundRobinLB(targetUrls)
-			}
-		}
-	}
-
-	if lb == nil {
-		lb = NewRoundRobinLB([]string{})
-	}
-
-	// Use h2c transport if any target uses h2c://, or h3 if h3://
-	useH2 := false
-	useH2C := false
-	useH3 := false
-	for _, t := range targets {
-		lowerURL := strings.ToLower(t.Url)
-		if strings.HasPrefix(lowerURL, "h2c://") {
-			useH2C = true
-		}
-		if strings.HasPrefix(lowerURL, "h2://") {
-			useH2 = true
-		}
-		if strings.HasPrefix(lowerURL, "h3://") {
-			useH3 = true
-		}
-	}
-
-	var transport http.RoundTripper
-	if useH3 {
-		transport = &http3.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	} else if useH2C {
-		transport = &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, network, addr)
-			},
-		}
-	} else if useH2 {
-		transport = &http2.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	} else {
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.MaxIdleConns = 10000
-		t.MaxIdleConnsPerHost = 1000
-		t.IdleConnTimeout = 90 * time.Second
-		t.ForceAttemptHTTP2 = true
-		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		transport = t
-	}
-
-	h := &ProxyHandler{
-		lb:              lb,
-		routeType:       rt.Type,
-		healthCheckPath: healthCheckPath,
-		stopHealthCheck: make(chan struct{}),
-		transport:       transport,
-	}
-
-	if h.healthCheckPath != "" && len(targets) > 0 {
-		targetUrls := make([]string, len(targets))
-		for i, t := range targets {
-			targetUrls[i] = t.Url
-		}
-		go h.runHealthCheck(targetUrls)
-	}
-
-	return h
+// NewProxyHandlerWithFactory creates a ProxyHandler with an explicit LoadBalancerFactory.
+func NewProxyHandlerWithFactory(rt *gateonv1.Route, serviceStore config.ServiceStore, lbFactory LoadBalancerFactory) *ProxyHandler {
+	return NewProxyHandlerBuilder(rt, serviceStore, lbFactory).Build()
 }
 
 func (h *ProxyHandler) runHealthCheck(urls []string) {
@@ -415,34 +370,10 @@ func (h *ProxyHandler) runHealthCheck(urls []string) {
 				}
 				fullURL := strings.TrimSuffix(uForHealth, "/") + h.healthCheckPath
 				resp, err := client.Get(fullURL)
-
-				var state *targetState
-				if rlb, ok := h.lb.(*RoundRobinLB); ok {
-					for _, t := range rlb.targets {
-						if t.url == u {
-							state = t
-						}
-					}
-				} else if lclb, ok := h.lb.(*LeastConnLB); ok {
-					for _, t := range lclb.targets {
-						if t.url == u {
-							state = t
-						}
-					}
-				} else if wrrlb, ok := h.lb.(*WeightedRoundRobinLB); ok {
-					for _, t := range wrrlb.targets {
-						if t.url == u {
-							state = t
-						}
-					}
-				}
-
-				if state != nil {
-					alive := err == nil && resp != nil && resp.StatusCode < 500
-					state.alive = alive
-					if resp != nil {
-						resp.Body.Close()
-					}
+				alive := err == nil && resp != nil && resp.StatusCode < 500
+				h.lb.SetAlive(u, alive)
+				if resp != nil {
+					resp.Body.Close()
 				}
 			}
 		case <-h.stopHealthCheck:
@@ -456,6 +387,34 @@ func (h *ProxyHandler) Close() {
 	if c, ok := h.transport.(interface{ Close() error }); ok {
 		_ = c.Close()
 	}
+}
+
+// getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.
+// Reusing proxies avoids per-request allocations at high throughput (100k+ req/s).
+func (h *ProxyHandler) getOrCreateProxy(targetURL *url.URL) *httputil.ReverseProxy {
+	key := targetURL.String()
+	if v, ok := h.proxyPool.Load(key); ok {
+		return v.(*httputil.ReverseProxy)
+	}
+	// Clone target to avoid mutation affecting the cache key
+	target := &url.URL{
+		Scheme: targetURL.Scheme,
+		Host:   targetURL.Host,
+		Path:   targetURL.Path,
+	}
+	rp := httputil.NewSingleHostReverseProxy(target)
+	rp.Transport = h.transport
+	rp.BufferPool = bufferPool
+	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if st, ok := r.Context().Value(targetStateContextKey).(*targetState); ok && st != nil {
+			atomic.AddUint64(&st.errorCount, 1)
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}
+	if v, loaded := h.proxyPool.LoadOrStore(key, rp); loaded {
+		return v.(*httputil.ReverseProxy)
+	}
+	return rp
 }
 
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -485,13 +444,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		targetURL.Scheme = "https"
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	proxy.Transport = h.transport
-	proxy.BufferPool = bufferPool
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		atomic.AddUint64(&state.errorCount, 1)
-		w.WriteHeader(http.StatusBadGateway)
-	}
+	// Pass state via context for shared ErrorHandler
+	ctx := context.WithValue(r.Context(), targetStateContextKey, state)
+	r = r.WithContext(ctx)
+
+	proxy := h.getOrCreateProxy(targetURL)
 
 	// Update request headers for proxying
 	r.URL.Host = targetURL.Host

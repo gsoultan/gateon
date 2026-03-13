@@ -1,0 +1,72 @@
+---
+description: React best practices and design patterns for frontend code
+globs: ui/**/*.tsx,ui/**/*.ts
+alwaysApply: false
+---
+
+# React Frontend Guidelines
+
+All frontend code must follow React best practices and established design patterns.
+
+## Core Principles
+
+- **Functional components only** — no class components
+- **Hooks for logic** — extract reusable logic into custom hooks (useRouteStatsHistory, etc.)
+- **Composition over inheritance** — prefer composition and small, focused components
+
+## Design Patterns
+
+1. **Container/Presentational (Smart/Dumb)** — separate data-fetching containers from presentational components
+2. **Custom hooks** — encapsulate stateful logic (API calls, subscriptions, form handling)
+3. **Controlled components** — for forms; use single source of truth
+4. **Compound components** — when components work together (e.g., RouteForm + RoutingConfig)
+
+## Folder & File Organization
+
+- **Organize by domain** — group by feature/business domain, not by technical type
+- Prefer `routes/`, `services/`, `entrypoints/` (domain) over flat `components/`, `hooks/` (type)
+- Colocate domain logic: components, hooks, types, and utils for a domain in the same folder
+
+## Structure
+
+```tsx
+// ✅ GOOD — focused component, props interface
+interface StatusCardProps {
+  label: string;
+  value: string | number;
+}
+
+export function StatusCard({ label, value }: StatusCardProps) {
+  return (/* ... */);
+}
+```
+
+## State & Data Fetching
+
+- Use **TanStack Query** for server state; Zustand for client-only state
+- Keep server and client state separate; avoid duplicating server data in local state
+- Use `useQuery` / `useMutation` with proper keys and invalidation
+
+## Performance
+
+- Memoize expensive computations with `useMemo`, callbacks with `useCallback` when passed to children
+- Avoid premature optimization; profile first
+- Lazy-load routes and heavy components with `React.lazy` + `Suspense`
+
+## Naming Conventions
+
+| Kind | Convention | Example |
+|------|------------|---------|
+| Components | PascalCase | `StatusCard`, `RouteForm` |
+| Hooks | `use` prefix, camelCase | `useRouteStatsHistory`, `useAuth` |
+| Props interfaces | `ComponentNameProps` | `StatusCardProps` |
+| Event handlers | `handle` or `on` prefix | `handleSubmit`, `onClick` |
+| Files | PascalCase for components | `StatusCard.tsx`, `RouteForm.tsx` |
+| Constants | SCREAMING_SNAKE or PascalCase | `API_BASE`, `DefaultTimeout` |
+| Types/interfaces | PascalCase | `Route`, `ServiceConfig` |
+
+## Accessibility
+
+- Use semantic HTML and ARIA where needed
+- Ensure keyboard navigation works
+- Prefer Mantine components; they handle a11y by default

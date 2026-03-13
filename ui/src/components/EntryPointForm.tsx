@@ -4,25 +4,25 @@ import {
   Stack,
   Group,
   Button,
-  Select,
   Switch,
   Divider,
   Checkbox,
+  Alert,
+  Text,
 } from "@mantine/core";
 import {
   IconCheck,
-  IconWorld,
   IconServer,
   IconShieldLock,
   IconClock,
-  IconNetwork,
   IconHash,
   IconLock,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
-import { EntryPointType, Protocol } from "../types/gateon";
+import { Protocol } from "../types/gateon";
 import type { EntryPoint } from "../types/gateon";
 import { apiFetch } from "../hooks/useGateon";
 
@@ -69,12 +69,13 @@ export function EntryPointForm({
     },
   });
 
+  // @ts-expect-error TanStack Form expects 12 type params; EntryPoint works at runtime
   const form = useForm<EntryPoint>({
     defaultValues: {
       id: "",
       name: "",
       address: "",
-      type: 0,
+      type: 0, // Inferred by backend from address + protocols + TLS
       protocol: 0,
       protocols: [Protocol.TCP],
       tls: { enabled: false },
@@ -95,9 +96,9 @@ export function EntryPointForm({
   useEffect(() => {
     if (initialData) {
       form.setFieldValue("id", initialData.id);
+      form.setFieldValue("type", initialData.type ?? 0);
       form.setFieldValue("name", initialData.name);
       form.setFieldValue("address", initialData.address);
-      form.setFieldValue("type", initialData.type);
       form.setFieldValue("protocol", initialData.protocol ?? Protocol.TCP);
       form.setFieldValue(
         "protocols",
@@ -122,24 +123,21 @@ export function EntryPointForm({
     }
   }, [initialData, form]);
 
-  // Keep protocol/TLS consistent with detected service type on mount and change
-  useEffect(() => {
-    const t = form.state.values.type;
-    const p = form.state.values.protocol;
-
-    if (t === EntryPointType.HTTP || t === EntryPointType.HTTP2) {
-      if (p !== Protocol.TCP) {
-        form.setFieldValue("protocol", Protocol.TCP);
-      }
-    } else if (t === EntryPointType.HTTP3) {
-      if (p !== Protocol.UDP) {
-        form.setFieldValue("protocol", Protocol.UDP);
-      }
-      if (!form.state.values.tls?.enabled) {
-        form.setFieldValue("tls.enabled", true);
-      }
-    }
-  }, [form.state.values.type]);
+  const protocols = form.state.values.protocols ?? [Protocol.TCP];
+  const tlsEnabled = form.state.values.tls?.enabled ?? false;
+  const addr = form.state.values.address ?? "";
+  const isHttpPort =
+    addr.endsWith(":80") ||
+    addr.endsWith(":443") ||
+    addr.endsWith(":8080") ||
+    addr.endsWith(":8443") ||
+    addr.includes("http");
+  const hasTCP = protocols.includes(Protocol.TCP);
+  const hasUDP = protocols.includes(Protocol.UDP);
+  // Inferred L4: TCP-only or UDP-only without TLS and not HTTP port
+  const isL4TCP = hasTCP && !hasUDP && !tlsEnabled && !isHttpPort;
+  const isL4UDP = hasUDP && !hasTCP && !tlsEnabled && !isHttpPort;
+  const isL4 = isL4TCP || isL4UDP;
 
   return (
     <form
@@ -150,7 +148,6 @@ export function EntryPointForm({
       }}
     >
       <Stack gap="md">
-
         <form.Field
           name="name"
           children={(field) => (
@@ -186,6 +183,22 @@ export function EntryPointForm({
           )}
         />
 
+        {isL4 && (
+          <Alert
+            icon={<IconInfoCircle size={18} />}
+            color="blue"
+            variant="light"
+            radius="md"
+            title="L4 TCP/UDP proxy"
+          >
+            <Text size="sm" c="dimmed">
+              Backends are configured via <strong>Routes</strong> and <strong>Services</strong>. Create a Route with
+              type &quot;tcp&quot; or &quot;udp&quot;, select this entrypoint, and choose a Service with backend type
+              tcp/udp and host:port targets.
+            </Text>
+          </Alert>
+        )}
+
         <form.Field
           name="protocols"
           children={(field) => (
@@ -193,7 +206,7 @@ export function EntryPointForm({
               label="Network Protocols"
               description="Select one or both (TCP and UDP)"
               required
-              value={field.state.value.map((v) => v.toString())}
+              value={(field.state.value ?? [Protocol.TCP]).map((v) => v.toString())}
               onChange={(vals) => field.handleChange(vals.map(Number))}
             >
               <Group mt="xs">
@@ -226,12 +239,11 @@ export function EntryPointForm({
             <Switch
               label="Enable TLS"
               description={
-                form.state.values.type === EntryPointType.HTTP3
-                  ? "Mandatory for HTTP/3"
+                hasUDP && !hasTCP
+                  ? "Enable for HTTP/3 (QUIC); leave off for raw UDP L4"
                   : "Enable secure encrypted communication"
               }
               checked={field.state.value}
-              disabled={form.state.values.type === EntryPointType.HTTP3}
               thumbIcon={
                 field.state.value ? (
                   <IconLock size={12} color="var(--mantine-color-teal-6)" />

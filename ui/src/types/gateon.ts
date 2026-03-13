@@ -1,3 +1,22 @@
+export type LimitStats = {
+  rate_limit_rejected: Record<string, number>;
+  inflight_rejected: Record<string, number>;
+  buffering_rejected: Record<string, number>;
+};
+
+export type MiddlewarePresetItem = {
+  type: string;
+  name: string;
+  config: Record<string, string>;
+};
+
+export type MiddlewarePreset = {
+  id: string;
+  name: string;
+  description: string;
+  middlewares: MiddlewarePresetItem[];
+};
+
 export type PathStats = {
   host: string;
   path: string;
@@ -13,11 +32,15 @@ export type TargetStats = {
   error_count: number;
   avg_latency_ms: number;
   active_conn: number;
+  circuit_state?: string;
+  status_codes?: Record<string, number>;
 };
 
 export type Target = {
   url: string;
   weight: number;
+  /** For HTTP: "http" | "https"; for gRPC: "h2" | "h2c" */
+  protocol?: string;
 };
 
 export type Service = {
@@ -26,6 +49,10 @@ export type Service = {
   weighted_targets: Target[];
   load_balancer_policy: string;
   health_check_path: string;
+  backend_type?: "http" | "grpc" | "graphql" | "tcp" | "udp";
+  l4_health_check_interval_ms?: number;
+  l4_health_check_timeout_ms?: number;
+  l4_udp_session_timeout_s?: number;
 };
 
 export type RouteTLSConfig = {
@@ -48,13 +75,14 @@ export type TLSOption = {
 export type Route = {
   id: string;
   name?: string;
-  type: "http" | "grpc";
+  type: "http" | "grpc" | "graphql" | "tcp" | "udp";
   entrypoints: string[];
   rule: string;
   priority: number;
   middlewares: string[];
   service_id: string;
   tls?: RouteTLSConfig;
+  disabled?: boolean;
 };
 
 export type StatusResponse = {

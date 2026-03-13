@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/gateon/gateon/internal/config"
@@ -14,25 +17,45 @@ import (
 	"github.com/gateon/gateon/internal/syncutil"
 	gtls "github.com/gateon/gateon/internal/tls"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
-	"github.com/rs/cors"
 )
+
+// GATEON_ENTRYPOINT_RATE_LIMIT_QPS: per-IP requests per second (0 = disabled).
+// GATEON_ENTRYPOINT_RATE_LIMIT_BURST: burst size (default 2x QPS).
+// Aligned with Traefik: attach ratelimit middleware to routes for per-route limits.
+func entrypointRateLimiter() middleware.RateLimiter {
+	qpsStr := os.Getenv("GATEON_ENTRYPOINT_RATE_LIMIT_QPS")
+	qps, _ := strconv.Atoi(qpsStr)
+	if qps <= 0 {
+		return middleware.NoopRateLimiter{}
+	}
+	burstStr := os.Getenv("GATEON_ENTRYPOINT_RATE_LIMIT_BURST")
+	burst, _ := strconv.Atoi(burstStr)
+	if burst <= 0 {
+		burst = qps * 2
+		if burst < 10 {
+			burst = 10
+		}
+	}
+	return middleware.NewQPSRateLimiter(qps, burst)
+}
 
 // StartServers starts all entrypoints (HTTP, TCP, UDP) in goroutines.
 // shutdownReg is used for graceful shutdown; pass nil to skip registering shutdown.
+// l4Resolver resolves L4 backends from Route->Service.
 func StartServers(
-	epReg *config.EntryPointRegistry,
+	epStore config.EntryPointStore,
 	port string,
 	baseHandler http.Handler,
-	wrapped *grpcweb.WrappedGrpcServer,
+	wrapped GRPCWebHandler,
 	tlsConfig *tls.Config,
-	tlsManager *gtls.Manager,
-	c *cors.Cors,
+	tlsManager gtls.TLSManager,
+	corsProvider CORSProvider,
 	wg *syncutil.WaitGroup,
 	shutdownReg *ShutdownRegistry,
+	l4Resolver L4Resolver,
 ) {
-	limiter := middleware.NewQPSRateLimiter(10, 20)
-	entryPoints := epReg.List()
+	limiter := entrypointRateLimiter()
+	entryPoints := epStore.List(context.Background())
 	if len(entryPoints) == 0 {
 		entryPoints = append(entryPoints, &gateonv1.EntryPoint{
 			Id: "default", Name: "Default", Address: ":" + port, Type: gateonv1.EntryPoint_HTTP,
@@ -42,11 +65,12 @@ func StartServers(
 		Port:             port,
 		BaseHandler:      baseHandler,
 		Wrapped:          wrapped,
-		CORS:             c,
+		CORS:             corsProvider,
 		TLSConfig:        tlsConfig,
 		TLSManager:       tlsManager,
 		Limiter:          limiter,
 		ShutdownRegistry: shutdownReg,
+		L4Resolver:       l4Resolver,
 	}
 	for _, ep := range entryPoints {
 		epCopy := ep
@@ -60,12 +84,12 @@ func StartServers(
 	}
 }
 
-func startTCPServer(addr string, tlsConfig *tls.Config, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
-	logger.L.Info().Str("addr", addr).Msg("starting TCP entrypoint")
+func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
+	logger.L.Info().Str("addr", addr).Str("ep", ep.Id).Msg("starting TCP entrypoint")
 	var l net.Listener
 	var err error
-	if tlsConfig != nil {
-		l, err = tls.Listen("tcp", addr, tlsConfig)
+	if deps.TLSConfig != nil {
+		l, err = tls.Listen("tcp", addr, deps.TLSConfig)
 	} else {
 		l, err = net.Listen("tcp", addr)
 	}
@@ -80,20 +104,36 @@ func startTCPServer(addr string, tlsConfig *tls.Config, wg *syncutil.WaitGroup, 
 	}
 	wg.Go(func() {
 		defer l.Close()
+		plaintext := deps.TLSConfig == nil
 		for {
 			conn, err := l.Accept()
 			if err != nil {
 				return
 			}
-			wg.Go(func() {
-				defer conn.Close()
-				handleTCPConn(conn)
-			})
+			c := conn
+			if plaintext {
+				wg.Go(func() {
+					handleTCPConnWithInspection(c, ep, deps, wg)
+				})
+			} else {
+				var p TCPProxy
+				if deps.L4Resolver != nil {
+					p = deps.L4Resolver.ResolveTCP(ep)
+				}
+				wg.Go(func() {
+					defer c.Close()
+					if p != nil {
+						handleTCPProxyL4(c, p)
+					} else {
+						handleTCPConn(c)
+					}
+				})
+			}
 		}
 	})
 }
 
-func startUDPServer(addr string, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
+func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
 	logger.L.Info().Str("addr", addr).Msg("starting UDP entrypoint")
 	laddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
@@ -110,23 +150,84 @@ func startUDPServer(addr string, wg *syncutil.WaitGroup, shutdownReg *ShutdownRe
 			return conn.Close()
 		})
 	}
+	var proxy UDPProxy
+	if deps.L4Resolver != nil {
+		proxy = deps.L4Resolver.ResolveUDP(ep)
+	}
 	wg.Go(func() {
 		defer conn.Close()
-		handleUDPConn(conn)
+		if proxy != nil {
+			handleUDPProxyL4(conn, proxy)
+		} else {
+			handleUDPConn(conn)
+		}
 	})
 }
 
+const peekTimeout = 200 * time.Millisecond
+
+func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(peekTimeout))
+	peek := make([]byte, PeekSize)
+	n, err := io.ReadFull(conn, peek)
+	conn.SetReadDeadline(time.Time{})
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		conn.Close()
+		return
+	}
+	peeked := peek[:n]
+	if n > 0 && IsTCPAppHTTP(peeked) {
+		serveConnAsHTTP(conn, peeked, ep, deps)
+		return
+	}
+	var p TCPProxy
+	if deps.L4Resolver != nil {
+		p = deps.L4Resolver.ResolveTCP(ep)
+	}
+	if p != nil {
+		connWithPeek := newPeekedConn(conn, peeked)
+		handleTCPProxyL4(connWithPeek, p)
+	} else {
+		connWithPeek := newPeekedConn(conn, peeked)
+		handleTCPConn(connWithPeek)
+	}
+}
+
 func handleTCPConn(conn net.Conn) {
-	fmt.Fprintf(conn, "Gateon TCP Entrypoint - %s\n", time.Now().String())
+	_, _ = fmt.Fprintf(conn, "Gateon TCP Entrypoint - %s\n", time.Now().String())
+}
+
+func handleTCPProxyL4(client net.Conn, pool TCPProxy) {
+	pool.ProxyTCP(context.Background(), client)
+}
+
+func copyAndClose(dst net.Conn, src net.Conn) (int64, error) {
+	defer dst.Close()
+	return io.Copy(dst, src)
 }
 
 func handleUDPConn(conn *net.UDPConn) {
-	buf := make([]byte, 1024)
+	buf := make([]byte, 65535)
 	for {
 		n, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			return
 		}
 		logger.L.Debug().Str("addr", addr.String()).Int("bytes", n).Msg("received UDP packet")
+	}
+}
+
+func handleUDPProxyL4(conn *net.UDPConn, proxy UDPProxy) {
+	buf := make([]byte, 65535)
+	for {
+		n, addr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		// Copy data: HandlePacket may write async; buffer is reused next iteration.
+		packet := make([]byte, n)
+		copy(packet, buf[:n])
+		proxy.HandlePacket(conn, addr, packet)
 	}
 }

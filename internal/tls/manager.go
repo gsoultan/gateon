@@ -12,6 +12,14 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+// TLSManager defines the contract for TLS certificate loading and ACME challenge handling.
+// It is implemented by Manager.
+type TLSManager interface {
+	GetTLSConfig() (*tls.Config, error)
+	LoadCertificate(certFile, keyFile, caFile string) (*tls.Certificate, *x509.CertPool, error)
+	HTTPChallengeHandler(fallback http.Handler) http.Handler
+}
+
 // Config holds TLS configuration.
 type Config struct {
 	Enabled           bool

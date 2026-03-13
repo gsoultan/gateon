@@ -6,6 +6,7 @@ const StatusCard = lazy(() => import('../components/StatusCard'))
 const RouteList = lazy(() => import('../components/RouteList'))
 const PathStatsTable = lazy(() => import('../components/PathStatsTable').then(m => ({ default: m.PathStatsTable })))
 const LiveLogs = lazy(() => import('../components/LiveLogs'))
+const LimitRejectionsCard = lazy(() => import('../components/LimitRejectionsCard').then(m => ({ default: m.LimitRejectionsCard })))
 
 const STATUS_FALLBACK = <Text>Loading status...</Text>;
 const ROUTE_LIST_FALLBACK = <Card withBorder h={200}><Loader /></Card>;
@@ -40,6 +41,9 @@ export default function Dashboard() {
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 4 }}>
           <Stack gap="md">
+            <Suspense fallback={<Card withBorder h={120}><Loader /></Card>}>
+              <LimitRejectionsCard />
+            </Suspense>
             <Suspense fallback={LIVE_LOGS_FALLBACK}>
               <LiveLogs height={500} />
             </Suspense>

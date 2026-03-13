@@ -6,6 +6,11 @@
 
 html, body, #root {
   height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  min-width: 320px;
 }
 
 @keyframes pulse {

@@ -31,22 +31,32 @@ import {
   IconRouteOff,
   IconLock,
   IconSettingsAutomation,
+  IconWorld,
 } from "@tabler/icons-react";
 import type { Route } from "../types/gateon";
 
 export default function RouteList({
   limit,
   onEdit,
+  onClone,
   onDelete,
 }: {
   limit?: number;
   onEdit?: (route: Route) => void;
+  onClone?: (route: Route) => void;
+  onPause?: (route: Route) => void;
   onDelete?: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState<string | null>("all");
+  const [hostFilter, setHostFilter] = useState("");
   const pageSize = 10;
+
+  const hostFromRule = (rule: string) => {
+    const m = rule.match(/Host\(`([^`]+)`\)/);
+    return m ? m[1].toLowerCase() : "";
+  };
 
   const { data, isLoading } = useRoutes({
     page: page - 1,
@@ -56,9 +66,16 @@ export default function RouteList({
 
   const allRoutes = data?.routes || [];
   const routes = useMemo(() => {
-    if (!typeFilter || typeFilter === "all") return allRoutes;
-    return allRoutes.filter((r) => r.type === typeFilter);
-  }, [allRoutes, typeFilter]);
+    let list = allRoutes;
+    if (typeFilter && typeFilter !== "all") {
+      list = list.filter((r) => r.type === typeFilter);
+    }
+    if (hostFilter.trim()) {
+      const h = hostFilter.trim().toLowerCase();
+      list = list.filter((r) => hostFromRule(r.rule || "").includes(h) || (r.rule || "").toLowerCase().includes(h));
+    }
+    return list;
+  }, [allRoutes, typeFilter, hostFilter]);
   const totalCount = data?.total_count ?? 0;
   const filteredCount = routes.length;
 
@@ -100,19 +117,31 @@ export default function RouteList({
                 size="xs"
                 w={280}
               />
+              <TextInput
+                placeholder="Host filter (e.g. example.com)"
+                leftSection={<IconWorld size={14} />}
+                value={hostFilter}
+                onChange={(e) => {
+                  setHostFilter(e.currentTarget.value);
+                  setPage(1);
+                }}
+                size="xs"
+                w={180}
+              />
               <Select
                 placeholder="Type"
                 size="xs"
-                w={120}
+                w={100}
                 value={typeFilter}
                 onChange={(v) => {
                   setTypeFilter(v ?? "all");
                   setPage(1);
                 }}
                 data={[
-                  { value: "all", label: "All types" },
+                  { value: "all", label: "All" },
                   { value: "http", label: "HTTP" },
                   { value: "grpc", label: "gRPC" },
+                  { value: "graphql", label: "GraphQL" },
                 ]}
               />
             </Group>
@@ -244,10 +273,15 @@ export default function RouteList({
                       <Badge
                         size="sm"
                         variant="light"
-                        color={route.type === "grpc" ? "blue" : "indigo"}
+                        color={route.type === "grpc" ? "blue" : route.type === "graphql" ? "violet" : "indigo"}
                       >
                         {route.type.toUpperCase()}
                       </Badge>
+                      {route.disabled && (
+                        <Badge size="xs" variant="filled" color="gray">
+                          PAUSED
+                        </Badge>
+                      )}
                       {route.entrypoints && route.entrypoints.length > 0 ? (
                         <Group gap={4}>
                           {route.entrypoints.map((ep) => (
@@ -330,11 +364,17 @@ export default function RouteList({
                         >
                           Edit
                         </Menu.Item>
-                        <Menu.Item leftSection={<IconCopy size={14} />}>
+                        <Menu.Item
+                          leftSection={<IconCopy size={14} />}
+                          onClick={() => onClone?.(route)}
+                        >
                           Clone
                         </Menu.Item>
-                        <Menu.Item leftSection={<IconPlayerPause size={14} />}>
-                          Pause
+                        <Menu.Item
+                          leftSection={<IconPlayerPause size={14} />}
+                          onClick={() => onPause?.(route)}
+                        >
+                          {route.disabled ? "Resume" : "Pause"}
                         </Menu.Item>
                         <Menu.Divider />
                         <Menu.Item

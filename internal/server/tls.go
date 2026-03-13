@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"strings"
 
@@ -10,9 +11,9 @@ import (
 )
 
 // CreateTLSManager builds the TLS manager from global config.
-func CreateTLSManager(globalReg *config.GlobalRegistry) *gtls.Manager {
+func CreateTLSManager(globalStore config.GlobalConfigStore) *gtls.Manager {
 	tlsManager := gtls.NewManager(gtls.InitFromEnv())
-	gc := globalReg.Get()
+	gc := globalStore.Get(context.Background())
 	if gc == nil || gc.Tls == nil || !gc.Tls.Enabled {
 		return tlsManager
 	}
@@ -64,16 +65,17 @@ type SNIDeps struct {
 }
 
 // SetupSNI configures the TLS config for SNI-based certificate selection.
-func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, deps SNIDeps) {
+func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	if tlsConfig == nil {
 		return
 	}
+	ctx := context.Background()
 	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		sniHost := strings.TrimSpace(hello.ServerName)
 		if sniHost == "" {
 			return nil, nil
 		}
-		for _, rt := range deps.RouteStore.List() {
+		for _, rt := range deps.RouteStore.List(ctx) {
 			if rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
 				continue
 			}
@@ -82,7 +84,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, deps SNIDeps) {
 				continue
 			}
 			var certs []tls.Certificate
-			gc := deps.GlobalStore.Get()
+			gc := deps.GlobalStore.Get(ctx)
 			if gc == nil || gc.Tls == nil {
 				continue
 			}
@@ -104,7 +106,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager *gtls.Manager, deps SNIDeps) {
 			newCfg := tlsConfig.Clone()
 			newCfg.Certificates = certs
 			if rt.Tls.OptionId != "" {
-				if opt, ok := deps.TLSOptStore.Get(rt.Tls.OptionId); ok {
+				if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
 					if opt.MinTlsVersion != "" {
 						newCfg.MinVersion = parseTLSVersion(opt.MinTlsVersion)
 					}

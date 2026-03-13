@@ -9,50 +9,50 @@ import (
 // ServerOption configures the Server (functional options / builder pattern).
 type ServerOption func(*Server) error
 
-// WithRouteRegistry sets the route registry.
+// WithRouteRegistry sets the route store (DIP: accepts implementation, stores interface).
 func WithRouteRegistry(r *config.RouteRegistry) ServerOption {
 	return func(s *Server) error {
-		s.RouteReg = r
+		s.RouteStore = r
 		return nil
 	}
 }
 
-// WithServiceRegistry sets the service registry.
+// WithServiceRegistry sets the service store.
 func WithServiceRegistry(r *config.ServiceRegistry) ServerOption {
 	return func(s *Server) error {
-		s.ServiceReg = r
+		s.ServiceStore = r
 		return nil
 	}
 }
 
-// WithEntryPointRegistry sets the entrypoint registry.
+// WithEntryPointRegistry sets the entrypoint store.
 func WithEntryPointRegistry(r *config.EntryPointRegistry) ServerOption {
 	return func(s *Server) error {
-		s.EpReg = r
+		s.EpStore = r
 		return nil
 	}
 }
 
-// WithMiddlewareRegistry sets the middleware registry.
+// WithMiddlewareRegistry sets the middleware store.
 func WithMiddlewareRegistry(r *config.MiddlewareRegistry) ServerOption {
 	return func(s *Server) error {
-		s.MwReg = r
+		s.MwStore = r
 		return nil
 	}
 }
 
-// WithTLSOptionRegistry sets the TLS option registry.
+// WithTLSOptionRegistry sets the TLS option store.
 func WithTLSOptionRegistry(r *config.TLSOptionRegistry) ServerOption {
 	return func(s *Server) error {
-		s.TLSOptReg = r
+		s.TLSOptStore = r
 		return nil
 	}
 }
 
-// WithGlobalRegistry sets the global config registry.
+// WithGlobalRegistry sets the global config store.
 func WithGlobalRegistry(r *config.GlobalRegistry) ServerOption {
 	return func(s *Server) error {
-		s.GlobalReg = r
+		s.GlobalStore = r
 		return nil
 	}
 }

@@ -3,16 +3,29 @@ package entrypoint
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"sync"
 
 	"github.com/gateon/gateon/internal/logger"
 	"github.com/gateon/gateon/internal/syncutil"
 	gtls "github.com/gateon/gateon/internal/tls"
+	"github.com/gateon/gateon/pkg/l4"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
-	"github.com/rs/cors"
 )
+
+// CORSProvider provides CORS middleware wrapping (e.g. *cors.Cors).
+type CORSProvider interface {
+	Handler(h http.Handler) http.Handler
+}
+
+// GRPCWebHandler handles gRPC-Web requests (e.g. *grpcweb.WrappedGrpcServer).
+type GRPCWebHandler interface {
+	IsGrpcWebRequest(r *http.Request) bool
+	IsAcceptableGrpcCorsRequest(r *http.Request) bool
+	IsGrpcWebSocketRequest(r *http.Request) bool
+	ServeHTTP(w http.ResponseWriter, r *http.Request)
+}
 
 // Runner is the strategy interface for starting one kind of entrypoint.
 type Runner interface {
@@ -45,18 +58,53 @@ func (r *ShutdownRegistry) ShutdownAll(ctx context.Context) {
 	}
 }
 
+// TCPProxy proxies a single TCP connection to a backend (Interface Segregation).
+type TCPProxy interface {
+	ProxyTCP(ctx context.Context, client net.Conn)
+}
+
+// UDPProxy handles UDP packets for session-based proxying.
+type UDPProxy interface {
+	HandlePacket(conn *net.UDPConn, addr *net.UDPAddr, packet []byte)
+	Stop()
+}
+
+// L4Resolver resolves L4 backends from Route -> Service. Nil for HTTP-only setups.
+// Returns interfaces so consumers depend on abstractions (DIP).
+type L4Resolver interface {
+	ResolveTCP(ep *gateonv1.EntryPoint) TCPProxy
+	ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy
+}
+
+// WrapL4Resolver adapts *l4.Resolver to L4Resolver (concrete returns -> interface returns).
+func WrapL4Resolver(r *l4.Resolver) L4Resolver {
+	if r == nil {
+		return nil
+	}
+	return &l4ResolverAdapter{r: r}
+}
+
+type l4ResolverAdapter struct{ r *l4.Resolver }
+
+func (a *l4ResolverAdapter) ResolveTCP(ep *gateonv1.EntryPoint) TCPProxy { return a.r.ResolveTCP(ep) }
+func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy { return a.r.ResolveUDP(ep) }
+
 // Deps holds dependencies needed to run entrypoints.
 type Deps struct {
 	Port             string
 	BaseHandler      http.Handler
-	Wrapped          *grpcweb.WrappedGrpcServer
-	CORS             *cors.Cors
-	TLSConfig       *tls.Config
-	TLSManager      *gtls.Manager
-	Limiter         interface {
-		Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler
-	}
+	Wrapped          GRPCWebHandler
+	CORS             CORSProvider
+	TLSConfig        *tls.Config
+	TLSManager       gtls.TLSManager
+	Limiter          RateLimiter
 	ShutdownRegistry *ShutdownRegistry
+	L4Resolver       L4Resolver
+}
+
+// RateLimiter provides per-key rate limiting middleware.
+type RateLimiter interface {
+	Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler
 }
 
 func runnerFor(epType gateonv1.EntryPoint_Type) Runner {

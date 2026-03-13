@@ -103,7 +103,7 @@ function Root() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <MantineProvider theme={theme} defaultColorScheme={colorScheme === 'auto' ? 'dark' : colorScheme}>
+      <MantineProvider theme={theme} defaultColorScheme={colorScheme}>
         <Notifications position="top-right" zIndex={2000} />
         <App />
       </MantineProvider>

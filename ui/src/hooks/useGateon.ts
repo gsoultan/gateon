@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "../store/useAuthStore";
 import type {
@@ -11,6 +12,8 @@ import type {
   TLSOption,
   Certificate,
   PathStats,
+  LimitStats,
+  MiddlewarePreset,
   User,
   IsSetupRequiredResponse,
   SetupRequest,
@@ -44,11 +47,15 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "";
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const token = useAuthStore.getState().token;
-  const headers = {
-    ...options.headers,
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const headers: Record<string, string> = { ...(options.headers as Record<string, string>) };
+  if (token && token !== "__cookie__") {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers,
+    credentials: "include", // send HttpOnly session cookie when present
+  });
   if (res.status === 401 && path !== "/v1/setup/required") {
     useAuthStore.getState().logout();
   }
@@ -100,6 +107,75 @@ export function useRouteStats(routeId: string) {
       return res.json();
     },
     refetchInterval: 5000,
+  });
+}
+
+export function useLimitStats() {
+  return useQuery<LimitStats>({
+    queryKey: ["limit-stats"],
+    queryFn: async () => {
+      const res = await apiFetch("/v1/diag/limit-stats");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    refetchInterval: 5000,
+  });
+}
+
+function sumLimitStats(stats: LimitStats | undefined): number {
+  if (!stats) return 0;
+  const r = (stats.rate_limit_rejected && typeof stats.rate_limit_rejected === "object")
+    ? Object.values(stats.rate_limit_rejected).reduce((a, b) => a + Number(b), 0) : 0;
+  const i = (stats.inflight_rejected && typeof stats.inflight_rejected === "object")
+    ? Object.values(stats.inflight_rejected).reduce((a, b) => a + Number(b), 0) : 0;
+  const b = (stats.buffering_rejected && typeof stats.buffering_rejected === "object")
+    ? Object.values(stats.buffering_rejected).reduce((a, v) => a + Number(v), 0) : 0;
+  return r + i + b;
+}
+
+const LIMIT_HISTORY_LEN = 24;
+
+/** Rolling delta history of limit rejections per poll interval (e.g. 5s). */
+export function useLimitStatsHistory() {
+  const { data, ...rest } = useLimitStats();
+  const [history, setHistory] = useState<number[]>([]);
+  const prevTotal = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (data == null) return;
+    const total = sumLimitStats(data);
+    if (prevTotal.current !== null) {
+      const delta = Math.max(0, total - prevTotal.current);
+      setHistory((h) => [...h.slice(-(LIMIT_HISTORY_LEN - 1)), delta]);
+    }
+    prevTotal.current = total;
+  }, [data]);
+
+  return { data, history, ...rest };
+}
+
+/** Attempt to restore session from HttpOnly cookie (e.g. after refresh). */
+export async function restoreSessionFromCookie(): Promise<boolean> {
+  const res = await apiFetch("/v1/me");
+  if (!res.ok) return false;
+  const data = await res.json();
+  const user = data?.user;
+  if (user?.id && user?.username) {
+    // Use sentinel so beforeLoad passes; API uses cookie via credentials: 'include'
+    useAuthStore.getState().setAuth("__cookie__", user);
+    return true;
+  }
+  return false;
+}
+
+export function useMiddlewarePresets() {
+  return useQuery<MiddlewarePreset[]>({
+    queryKey: ["middleware-presets"],
+    queryFn: async () => {
+      const res = await apiFetch("/v1/middlewares/presets");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
   });
 }
 

@@ -1,15 +1,35 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
+	"github.com/gateon/gateon/pkg/proxy"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
 func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
+	mux.HandleFunc("GET /v1/routes/{id}/stats", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			WriteHTTPError(w, http.StatusBadRequest, "missing route id")
+			return
+		}
+		if d.RouteStatsProvider == nil {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		stats := d.RouteStatsProvider(id)
+		if stats == nil {
+			stats = []proxy.TargetStats{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(stats)
+	})
 	mux.HandleFunc("GET /v1/routes", func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
-		routes, total := d.RouteService.ListPaginated(page, pageSize, search)
+		routes, total := d.RouteService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListRoutesResponse{
 			Routes: routes, TotalCount: total, Page: page, PageSize: pageSize,
 		})
@@ -20,7 +40,7 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := d.RouteService.SaveRoute(&rt); err != nil {
+		if err := d.RouteService.SaveRoute(r.Context(), &rt); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -32,7 +52,7 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "missing route id")
 			return
 		}
-		if err := d.RouteService.DeleteRoute(id); err != nil {
+		if err := d.RouteService.DeleteRoute(r.Context(), id); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete route")
 			return
 		}

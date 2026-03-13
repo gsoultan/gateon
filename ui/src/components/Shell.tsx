@@ -1,6 +1,7 @@
 import {
   AppShell,
   Burger,
+  Flex,
   Group,
   ScrollArea,
   NavLink,
@@ -12,13 +13,12 @@ import {
   Stack,
   Divider,
   Box,
-  UnstyledButton,
   useMantineColorScheme,
-  useMantineTheme,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import { useGateonStatus } from "../hooks/useGateon";
+import { GlobalHealthBar } from "./GlobalHealthBar";
 import { useThemeStore } from "../store/useThemeStore";
 import { useAuthStore } from "../store/useAuthStore";
 import {
@@ -40,6 +40,7 @@ import {
   IconChevronRight,
   IconSun,
   IconMoon,
+  IconCircuitSwitchClosed,
 } from "@tabler/icons-react";
 
 export function Shell() {
@@ -51,7 +52,6 @@ export function Shell() {
   const setGlobalColorScheme = useThemeStore((state) => state.setColorScheme);
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
-  const theme = useMantineTheme();
 
   const toggleColorScheme = () => {
     const nextScheme = colorScheme === "dark" ? "light" : "dark";
@@ -64,6 +64,7 @@ export function Shell() {
     { label: "Routes", to: "/routes", icon: IconRoute },
     { label: "Services", to: "/services", icon: IconServer },
     { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
+    { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
     { label: "EntryPoints", to: "/entrypoints", icon: IconAccessPoint },
   ];
 
@@ -114,12 +115,22 @@ export function Shell() {
               ? "var(--mantine-color-dark-7)"
               : "var(--mantine-color-white)",
           borderBottom: `1px solid ${colorScheme === "dark" ? "var(--mantine-color-dark-4)" : "var(--mantine-color-gray-2)"}`,
+          overflow: "hidden",
+          boxShadow: colorScheme === "dark" ? "0 1px 0 rgba(255,255,255,0.03)" : "0 1px 3px rgba(0,0,0,0.04)",
         },
       }}
     >
       <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group>
+        <Flex
+          h="100%"
+          px="md"
+          align="center"
+          justify="space-between"
+          gap="md"
+          wrap="nowrap"
+          style={{ minHeight: 64, minWidth: 0 }}
+        >
+          <Group gap="xs" style={{ flexShrink: 0 }}>
             <Burger
               opened={mobileOpened}
               onClick={toggleMobile}
@@ -131,6 +142,7 @@ export function Shell() {
               visibleFrom="sm"
               variant="subtle"
               color="gray"
+              size="lg"
             >
               {desktopOpened ? (
                 <IconChevronLeft size={18} />
@@ -140,17 +152,25 @@ export function Shell() {
             </ActionIcon>
             <Group gap="xs">
               <IconActivity
-                size={24}
+                size={22}
                 color="var(--mantine-color-indigo-filled)"
               />
-              <Title order={3} fw={800} style={{ letterSpacing: -1 }}>
+              <Title order={4} fw={800} style={{ letterSpacing: -0.5 }}>
                 GATEON
               </Title>
             </Group>
           </Group>
 
-          <Group gap="lg" visibleFrom="md">
-            <Group gap="md">
+          <Flex
+            align="center"
+            gap={{ base: "xs", md: "sm", lg: "lg" }}
+            visibleFrom="sm"
+            style={{ flex: 1, minWidth: 0, justifyContent: "flex-end" }}
+          >
+            <Group visibleFrom="lg" style={{ flexShrink: 0 }}>
+              <GlobalHealthBar />
+            </Group>
+            <Group gap={{ base: "xs", md: "sm" }} style={{ flexShrink: 0 }}>
               <Stack gap={0} align="flex-end">
                 <Text size="xs" fw={700} c="dimmed" lh={1}>
                   STATUS
@@ -165,7 +185,7 @@ export function Shell() {
                 </Badge>
               </Stack>
 
-              <Stack gap={0} align="flex-end">
+              <Stack gap={0} align="flex-end" visibleFrom="lg">
                 <Text size="xs" fw={700} c="dimmed" lh={1}>
                   VERSION
                 </Text>
@@ -175,7 +195,7 @@ export function Shell() {
               </Stack>
             </Group>
 
-            <Group gap="xs">
+            <Group gap="xs" style={{ flexShrink: 0 }}>
               <Tooltip
                 label={
                   colorScheme === "dark" ? "Switch to Light" : "Switch to Dark"
@@ -184,7 +204,7 @@ export function Shell() {
                 <ActionIcon
                   variant="default"
                   onClick={toggleColorScheme}
-                  size="lg"
+                  size="md"
                   radius="md"
                 >
                   {colorScheme === "dark" ? (
@@ -198,6 +218,7 @@ export function Shell() {
                 <ActionIcon
                   variant="subtle"
                   color="gray"
+                  size="md"
                   onClick={() => refetch()}
                   loading={isFetching}
                 >
@@ -208,14 +229,15 @@ export function Shell() {
                 <ActionIcon
                   variant="light"
                   color="red"
+                  size="md"
                   onClick={() => logout()}
                 >
                   <IconPower size={18} />
                 </ActionIcon>
               </Tooltip>
             </Group>
-          </Group>
-        </Group>
+          </Flex>
+        </Flex>
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
@@ -391,7 +413,15 @@ export function Shell() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Box style={{ maxWidth: 1400, margin: "0 auto", paddingBottom: 40 }}>
+        <Box
+          style={{
+            maxWidth: 1400,
+            margin: "0 auto",
+            paddingBottom: 40,
+            width: "100%",
+            minWidth: 0,
+          }}
+        >
           <Outlet />
         </Box>
       </AppShell.Main>

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -84,12 +85,12 @@ func (r *RouteRegistry) saveLocked() error {
 	return nil
 }
 
-func (r *RouteRegistry) List() []*gateonv1.Route {
-	items, _ := r.ListPaginated(0, 0, "")
+func (r *RouteRegistry) List(ctx context.Context) []*gateonv1.Route {
+	items, _ := r.ListPaginated(ctx, 0, 0, "")
 	return items
 }
 
-func (r *RouteRegistry) ListPaginated(page, pageSize int32, search string) ([]*gateonv1.Route, int32) {
+func (r *RouteRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Route, int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -126,20 +127,20 @@ func (r *RouteRegistry) ListPaginated(page, pageSize int32, search string) ([]*g
 	return filtered[start:end], totalCount
 }
 
-func (r *RouteRegistry) All() map[string]*gateonv1.Route {
+func (r *RouteRegistry) All(ctx context.Context) map[string]*gateonv1.Route {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return maps.Clone(r.routes)
 }
 
-func (r *RouteRegistry) Get(id string) (*gateonv1.Route, bool) {
+func (r *RouteRegistry) Get(ctx context.Context, id string) (*gateonv1.Route, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	rt, ok := r.routes[id]
 	return rt, ok
 }
 
-func (r *RouteRegistry) Update(rt *gateonv1.Route) error {
+func (r *RouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -147,7 +148,7 @@ func (r *RouteRegistry) Update(rt *gateonv1.Route) error {
 	return r.saveLocked()
 }
 
-func (r *RouteRegistry) Delete(id string) error {
+func (r *RouteRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

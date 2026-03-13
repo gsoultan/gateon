@@ -1,15 +1,71 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
+// MiddlewarePreset defines a predefined bundle of middlewares.
+type MiddlewarePreset struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Middlewares []MiddlewarePresetItem `json:"middlewares"`
+}
+
+type MiddlewarePresetItem struct {
+	Type   string            `json:"type"`
+	Name   string            `json:"name"`
+	Config map[string]string `json:"config"`
+}
+
+var middlewarePresets = []MiddlewarePreset{
+	{
+		ID:          "secure-api",
+		Name:        "Secure API Route",
+		Description: "Rate limit, in-flight limits, max body (10MB), and security headers",
+		Middlewares: []MiddlewarePresetItem{
+			{Type: "ratelimit", Name: "Rate Limit", Config: map[string]string{"requests_per_minute": "100", "burst": "20", "per_ip": "true", "storage": "local"}},
+			{Type: "inflightreq", Name: "In-Flight Limit", Config: map[string]string{"amount": "10", "per_ip": "true"}},
+			{Type: "buffering", Name: "Max Body 10MB", Config: map[string]string{"max_request_body_bytes": "10485760"}},
+			{Type: "headers", Name: "Security Headers", Config: map[string]string{
+				"set_response_X-Content-Type-Options": "nosniff", "set_response_X-Frame-Options": "DENY",
+				"set_response_Referrer-Policy": "strict-origin-when-cross-origin",
+				"sts_seconds": "31536000", "sts_include_subdomains": "true", "sts_preload": "true",
+			}},
+		},
+	},
+	{
+		ID:          "file-upload",
+		Name:        "File Upload Route",
+		Description: "Large body (100MB) and moderate in-flight limit",
+		Middlewares: []MiddlewarePresetItem{
+			{Type: "buffering", Name: "Max Body 100MB", Config: map[string]string{"max_request_body_bytes": "104857600"}},
+			{Type: "inflightreq", Name: "In-Flight Limit", Config: map[string]string{"amount": "5", "per_ip": "true"}},
+		},
+	},
+	{
+		ID:          "admin-api",
+		Name:        "Admin API Route",
+		Description: "Strict limits for sensitive endpoints",
+		Middlewares: []MiddlewarePresetItem{
+			{Type: "ratelimit", Name: "Strict Rate Limit", Config: map[string]string{"requests_per_minute": "60", "burst": "5", "per_ip": "true", "storage": "local"}},
+			{Type: "inflightreq", Name: "In-Flight Limit", Config: map[string]string{"amount": "5", "per_ip": "true"}},
+			{Type: "buffering", Name: "Max Body 1MB", Config: map[string]string{"max_request_body_bytes": "1048576"}},
+		},
+	},
+}
+
 func registerMiddlewareHandlers(mux *http.ServeMux, d *Deps) {
+	mux.HandleFunc("GET /v1/middlewares/presets", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(middlewarePresets)
+	})
 	mux.HandleFunc("GET /v1/middlewares", func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
-		mws, total := d.MwService.ListPaginated(page, pageSize, search)
+		mws, total := d.MwService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListMiddlewaresResponse{
 			Middlewares: mws, TotalCount: total, Page: page, PageSize: pageSize,
 		})
@@ -20,7 +76,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := d.MwService.SaveMiddleware(&mw); err != nil {
+		if err := d.MwService.SaveMiddleware(r.Context(), &mw); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to save middleware")
 			return
 		}
@@ -32,7 +88,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "missing middleware id")
 			return
 		}
-		if err := d.MwService.DeleteMiddleware(id); err != nil {
+		if err := d.MwService.DeleteMiddleware(r.Context(), id); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete middleware")
 			return
 		}

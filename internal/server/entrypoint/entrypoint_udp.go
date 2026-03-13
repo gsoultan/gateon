@@ -18,5 +18,5 @@ func (*udpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps, 
 	if !hasUDP {
 		return
 	}
-	startUDPServer(addr, wg, deps.ShutdownRegistry)
+	startUDPServer(addr, ep, deps, wg, deps.ShutdownRegistry)
 }
