@@ -18,6 +18,10 @@ import {
   Center,
   Select,
   MultiSelect,
+  ActionIcon,
+  Tooltip,
+  Code,
+  CopyButton,
 } from "@mantine/core";
 import {
   IconSun,
@@ -28,9 +32,15 @@ import {
   IconAdjustments,
   IconNetwork,
   IconShieldLock,
+  IconBolt,
+  IconCopy,
+  IconCheck,
+  IconRocket,
+  IconDownload,
+  IconUpload,
 } from "@tabler/icons-react";
-import { Link, useLocation } from "@tanstack/react-router";
 import { useThemeStore } from "../store/useThemeStore";
+import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
 import { useAuthStore } from "../store/useAuthStore";
 import type { GlobalConfig } from "../types/gateon";
 import { apiFetch } from "../hooks/useGateon";
@@ -109,6 +119,35 @@ export default function SettingsPage() {
   const redis = config.redis || { enabled: false };
   const otel = config.otel || { enabled: false };
 
+  const applyPreset = (preset: "development" | "production" | "high-throughput") => {
+    const base = { ...config };
+    if (preset === "development") {
+      setConfig({
+        ...base,
+        log: { level: "debug", development: true, format: "text", path_stats_retention_days: 7 },
+        tls: { ...tls, enabled: false },
+        redis: { ...redis, enabled: false },
+        otel: { ...otel, enabled: false },
+      });
+    } else if (preset === "production") {
+      setConfig({
+        ...base,
+        log: { level: "info", development: false, format: "json", path_stats_retention_days: 30 },
+        tls: { ...tls, enabled: true },
+        redis: { ...redis, enabled: true },
+        otel: { ...otel, enabled: true },
+      });
+    } else if (preset === "high-throughput") {
+      setConfig({
+        ...base,
+        log: { level: "warn", development: false, format: "json", path_stats_retention_days: 7 },
+        tls: tls,
+        redis: redis,
+        otel: otel,
+      });
+    }
+  };
+
   return (
     <Stack gap="xl">
       <div>
@@ -119,6 +158,40 @@ export default function SettingsPage() {
           Manage your gateway preferences and UI appearance.
         </Text>
       </div>
+
+      <Card withBorder padding="xl" radius="lg" shadow="xs">
+        <Stack gap="md">
+          <Group gap="md">
+            <Paper p="xs" radius="md" bg="teal.6">
+              <IconRocket size={20} color="white" />
+            </Paper>
+            <div>
+              <Title order={4} fw={700}>
+                Quick Presets
+              </Title>
+              <Text c="dimmed" size="xs">
+                One-click apply common configuration scenarios.
+              </Text>
+            </div>
+          </Group>
+          <Group gap="sm">
+            <Button variant="light" color="gray" size="sm" radius="md" onClick={() => applyPreset("development")}>
+              Development
+            </Button>
+            <Button variant="light" color="blue" size="sm" radius="md" onClick={() => applyPreset("production")}>
+              Production
+            </Button>
+            <Button variant="light" color="teal" size="sm" radius="md" onClick={() => applyPreset("high-throughput")}>
+              High-Throughput (100k+ req/s)
+            </Button>
+          </Group>
+          <Text size="xs" c="dimmed">
+            Presets update Gateway Configuration below. Remember to save after applying.
+          </Text>
+        </Stack>
+      </Card>
+
+      <ConfigImportExportCard apiUrl={apiUrl} />
 
       <Card withBorder padding="xl" radius="lg" shadow="xs">
         <Stack gap="lg">
@@ -191,8 +264,7 @@ export default function SettingsPage() {
             variant="light"
             radius="md"
           >
-            Some settings (TLS, Redis, OTEL) may require a server restart to
-            fully apply.
+            Some settings (TLS, Redis, OTEL) may require a server restart to fully apply.
           </Alert>
 
           <Box>
@@ -696,6 +768,65 @@ export default function SettingsPage() {
               Configuration successfully updated!
             </Text>
           )}
+        </Stack>
+      </Card>
+
+      <Card withBorder padding="xl" radius="lg" shadow="xs">
+        <Stack gap="lg">
+          <Group gap="md">
+            <Paper p="xs" radius="md" bg="orange.6">
+              <IconBolt size={20} color="white" />
+            </Paper>
+            <div>
+              <Title order={4} fw={700}>
+                Performance & High-Throughput
+              </Title>
+              <Text c="dimmed" size="xs">
+                Environment variables for 100k+ req/s. Set before starting the gateway.
+              </Text>
+            </div>
+          </Group>
+          <Alert icon={<IconInfoCircle size={16} />} color="orange" variant="light" radius="md">
+            These are process-level env vars. Configure before starting Gateon or via your deployment (Docker, Kubernetes, systemd).
+          </Alert>
+          <Stack gap="sm">
+            <Box>
+              <Text size="sm" fw={600} mb={4}>Entrypoint Rate Limit</Text>
+              <Text size="xs" c="dimmed" mb={4}>
+                Per-IP requests/sec. Use <Code>0</Code> to disable for high throughput.
+              </Text>
+              <Group gap="xs">
+                <Code block style={{ flex: 1 }}>GATEON_ENTRYPOINT_RATE_LIMIT_QPS=0</Code>
+                <CopyButton value="GATEON_ENTRYPOINT_RATE_LIMIT_QPS=0">
+                  {({ copied, copy }) => (
+                    <Tooltip label={copied ? "Copied" : "Copy"}>
+                      <ActionIcon color={copied ? "teal" : "gray"} variant="subtle" onClick={copy}>
+                        {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </CopyButton>
+              </Group>
+            </Box>
+            <Box>
+              <Text size="sm" fw={600} mb={4}>Access Log Sampling</Text>
+              <Text size="xs" c="dimmed" mb={4}>
+                Log 1 in N requests. Use <Code>1000</Code> or <Code>10000</Code> for high traffic.
+              </Text>
+              <Group gap="xs">
+                <Code block style={{ flex: 1 }}>GATEON_ACCESS_LOG_SAMPLE_RATE=1000</Code>
+                <CopyButton value="GATEON_ACCESS_LOG_SAMPLE_RATE=1000">
+                  {({ copied, copy }) => (
+                    <Tooltip label={copied ? "Copied" : "Copy"}>
+                      <ActionIcon color={copied ? "teal" : "gray"} variant="subtle" onClick={copy}>
+                        {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </CopyButton>
+              </Group>
+            </Box>
+          </Stack>
         </Stack>
       </Card>
 

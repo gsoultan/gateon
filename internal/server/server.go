@@ -1,7 +1,6 @@
 package server
 
 import (
-	"net/http"
 	"sync"
 	"time"
 
@@ -11,32 +10,34 @@ import (
 )
 
 // Server is the main application container (Dependency Injection).
-// All registries, proxy cache, and config are held here.
+// Composes config (stores), ProxyCache (runtime), and lifecycle.
 type Server struct {
-	RouteReg    *config.RouteRegistry
-	ServiceReg  *config.ServiceRegistry
-	EpReg       *config.EntryPointRegistry
-	MwReg       *config.MiddlewareRegistry
-	TLSOptReg   *config.TLSOptionRegistry
-	GlobalReg   *config.GlobalRegistry
-	AuthManager auth.Service
-	RedisClient *redis.Client
-	Port        string
-	Version     string
+	RouteStore   config.RouteStore
+	ServiceStore config.ServiceStore
+	EpStore      config.EntryPointStore
+	MwStore      config.MiddlewareStore
+	TLSOptStore  config.TLSOptionStore
+	GlobalStore  config.GlobalConfigStore
+	AuthManager  auth.Service
+	RedisClient  *redis.Client
+	Port         string
+	Version      string
+	startTime    time.Time
 
-	Proxies   map[string]http.Handler
-	ProxiesMu *sync.RWMutex
+	cache     *ProxyCache
+	cacheOnce sync.Once
+}
 
-	startTime time.Time
+func (s *Server) proxyCache() *ProxyCache {
+	s.cacheOnce.Do(func() {
+		s.cache = NewProxyCache(s.RouteStore, s.ServiceStore, s.MwStore, s.RedisClient)
+	})
+	return s.cache
 }
 
 // NewServer builds a Server with the given options (Builder / Functional Options pattern).
 func NewServer(opts ...ServerOption) (*Server, error) {
-	s := &Server{
-		Proxies:   make(map[string]http.Handler),
-		ProxiesMu: &sync.RWMutex{},
-		startTime: time.Now(),
-	}
+	s := &Server{startTime: time.Now()}
 	for _, opt := range opts {
 		if err := opt(s); err != nil {
 			return nil, err

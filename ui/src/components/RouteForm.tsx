@@ -90,9 +90,14 @@ export default function RouteForm({
         certificate_ids: [],
         option_id: "",
       },
+      disabled: false,
     },
     onSubmit: async ({ value }) => {
-      mutation.mutate(value);
+      const v = { ...value };
+      if (v.type === "tcp" || v.type === "udp") {
+        v.rule = "L4()";
+      }
+      mutation.mutate(v);
     },
   });
 
@@ -101,7 +106,11 @@ export default function RouteForm({
       form.setFieldValue("id", initialData.id);
       form.setFieldValue("name", initialData.name || "");
       form.setFieldValue("type", initialData.type || "http");
-      form.setFieldValue("rule", initialData.rule || "");
+      const t = initialData.type || "http";
+      form.setFieldValue(
+        "rule",
+        t === "tcp" || t === "udp" ? "L4()" : (initialData.rule || ""),
+      );
       form.setFieldValue("priority", initialData.priority || 0);
       form.setFieldValue("entrypoints", initialData.entrypoints || []);
       form.setFieldValue("middlewares", initialData.middlewares || []);
@@ -110,6 +119,7 @@ export default function RouteForm({
         "tls",
         initialData.tls || { certificate_ids: [], option_id: "" },
       );
+      form.setFieldValue("disabled", initialData.disabled ?? false);
     }
   }, [initialData, form]);
 
@@ -118,10 +128,17 @@ export default function RouteForm({
   const prevStep = () =>
     setActive((current) => (current > 0 ? current - 1 : current));
 
-  const epOptions = (epData?.entry_points || []).map((ep) => ({
+  const routeType = form.state.values.type;
+  const epOptionsAll = (epData?.entry_points || []).map((ep) => ({
     value: ep.id,
     label: `${ep.name} (${ep.address})`,
+    type: ep.type,
   }));
+  const epOptions = epOptionsAll.filter((ep) => {
+    if (routeType === "tcp") return ep.type === 2; // EntryPointType.TCP
+    if (routeType === "udp") return ep.type === 3; // EntryPointType.UDP
+    return ep.type !== 2 && ep.type !== 3; // HTTP/gRPC: exclude L4 entrypoints
+  }).map(({ value, label }) => ({ value, label }));
 
   const mwOptions = (mwData?.middlewares || []).map((mw) => ({
     value: mw.id,
@@ -138,10 +155,17 @@ export default function RouteForm({
     label: c.name,
   }));
 
-  const serviceOptions = (serviceData?.services || []).map((s) => ({
-    value: s.id,
-    label: s.name,
-  }));
+  const serviceOptions = (serviceData?.services || [])
+    .filter((s) => {
+      if (routeType === "tcp" || routeType === "udp") {
+        return (s.backend_type || "http") === routeType;
+      }
+      return (s.backend_type || "http") !== "tcp" && (s.backend_type || "http") !== "udp";
+    })
+    .map((s) => ({
+      value: s.id,
+      label: `${s.name} (${s.backend_type || "http"})`,
+    }));
 
   return (
     <form
@@ -206,18 +230,23 @@ export default function RouteForm({
                       state.values.rule,
                       state.values.service_id,
                     ]}
-                    children={([name, rule, service_id]) => (
+                    children={([name, rule, service_id]) => {
+                      const type = form.state.values.type;
+                      const isL4 = type === "tcp" || type === "udp";
+                      const ruleOk = isL4 ? true : !!rule;
+                      return (
                       <Button
                         type="submit"
                         size="md"
                         radius="md"
                         loading={mutation.isPending}
-                        disabled={!name || !rule || !service_id}
+                        disabled={!name || !ruleOk || !service_id}
                         w={200}
                       >
                         Save Route
                       </Button>
-                    )}
+                      );
+                    }}
                   />
                 </Stack>
               </Stepper.Completed>
@@ -237,19 +266,23 @@ export default function RouteForm({
                     state.values.service_id,
                     state.values.type,
                   ]}
-                  children={([name, rule, service_id, type]) => (
+                  children={([name, rule, service_id, type]) => {
+                    const isL4 = type === "tcp" || type === "udp";
+                    const ruleOk = isL4 ? true : !!rule;
+                    return (
                     <Button
                       onClick={nextStep}
                       radius="md"
                       px="xl"
                       disabled={
-                        (active === 0 && (!name || !rule)) ||
-                        (active === 1 && (!service_id || !type))
+                        (active === 0 && (!name || !ruleOk || !type)) ||
+                        (active === 1 && !service_id)
                       }
                     >
                       Next Step
                     </Button>
-                  )}
+                    );
+                  }}
                 />
               )}
             </Group>

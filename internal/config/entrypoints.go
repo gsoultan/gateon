@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -84,12 +85,12 @@ func (r *EntryPointRegistry) saveLocked() error {
 	return nil
 }
 
-func (r *EntryPointRegistry) List() []*gateonv1.EntryPoint {
-	items, _ := r.ListPaginated(0, 0, "")
+func (r *EntryPointRegistry) List(ctx context.Context) []*gateonv1.EntryPoint {
+	items, _ := r.ListPaginated(ctx, 0, 0, "")
 	return items
 }
 
-func (r *EntryPointRegistry) ListPaginated(page, pageSize int32, search string) ([]*gateonv1.EntryPoint, int32) {
+func (r *EntryPointRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.EntryPoint, int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -126,14 +127,14 @@ func (r *EntryPointRegistry) ListPaginated(page, pageSize int32, search string) 
 	return filtered[start:end], totalCount
 }
 
-func (r *EntryPointRegistry) Get(id string) (*gateonv1.EntryPoint, bool) {
+func (r *EntryPointRegistry) Get(ctx context.Context, id string) (*gateonv1.EntryPoint, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	ep, ok := r.entryPoints[id]
 	return ep, ok
 }
 
-func (r *EntryPointRegistry) Update(ep *gateonv1.EntryPoint) error {
+func (r *EntryPointRegistry) Update(ctx context.Context, ep *gateonv1.EntryPoint) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -141,7 +142,7 @@ func (r *EntryPointRegistry) Update(ep *gateonv1.EntryPoint) error {
 	return r.saveLocked()
 }
 
-func (r *EntryPointRegistry) Delete(id string) error {
+func (r *EntryPointRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

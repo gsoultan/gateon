@@ -23,18 +23,6 @@ type ApiService struct {
 	Auth        auth.Service
 }
 
-// ApiServiceConfig holds dependencies for ApiService (Factory pattern).
-type ApiServiceConfig struct {
-	Version     string
-	Routes      config.RouteStore
-	Services    config.ServiceStore
-	Globals     config.GlobalConfigStore
-	EntryPoints config.EntryPointStore
-	Middlewares config.MiddlewareStore
-	TLSOptions  config.TLSOptionStore
-	Auth        auth.Service
-}
-
 // NewApiService creates an ApiService from config (Factory pattern).
 func NewApiService(cfg ApiServiceConfig) *ApiService {
 	return &ApiService{
@@ -49,28 +37,28 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 	}
 }
 
-func (s *ApiService) ListEntryPoints(_ context.Context, _ *gateonv1.ListEntryPointsRequest) (*gateonv1.ListEntryPointsResponse, error) {
+func (s *ApiService) ListEntryPoints(ctx context.Context, _ *gateonv1.ListEntryPointsRequest) (*gateonv1.ListEntryPointsResponse, error) {
 	if s.EntryPoints == nil {
 		return &gateonv1.ListEntryPointsResponse{EntryPoints: nil}, nil
 	}
-	return &gateonv1.ListEntryPointsResponse{EntryPoints: s.EntryPoints.List()}, nil
+	return &gateonv1.ListEntryPointsResponse{EntryPoints: s.EntryPoints.List(ctx)}, nil
 }
 
-func (s *ApiService) UpdateEntryPoint(_ context.Context, req *gateonv1.UpdateEntryPointRequest) (*gateonv1.UpdateEntryPointResponse, error) {
+func (s *ApiService) UpdateEntryPoint(ctx context.Context, req *gateonv1.UpdateEntryPointRequest) (*gateonv1.UpdateEntryPointResponse, error) {
 	if s.EntryPoints == nil || req == nil || req.EntryPoint == nil {
 		return &gateonv1.UpdateEntryPointResponse{Success: false}, nil
 	}
-	if err := s.EntryPoints.Update(req.EntryPoint); err != nil {
+	if err := s.EntryPoints.Update(ctx, req.EntryPoint); err != nil {
 		return &gateonv1.UpdateEntryPointResponse{Success: false}, err
 	}
 	return &gateonv1.UpdateEntryPointResponse{Success: true}, nil
 }
 
-func (s *ApiService) DeleteEntryPoint(_ context.Context, req *gateonv1.DeleteEntryPointRequest) (*gateonv1.DeleteEntryPointResponse, error) {
+func (s *ApiService) DeleteEntryPoint(ctx context.Context, req *gateonv1.DeleteEntryPointRequest) (*gateonv1.DeleteEntryPointResponse, error) {
 	if s.EntryPoints == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteEntryPointResponse{Success: false}, nil
 	}
-	if err := s.EntryPoints.Delete(req.Id); err != nil {
+	if err := s.EntryPoints.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteEntryPointResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteEntryPointResponse{Success: true}, nil
@@ -78,17 +66,17 @@ func (s *ApiService) DeleteEntryPoint(_ context.Context, req *gateonv1.DeleteEnt
 
 var startTime = time.Now()
 
-func (s *ApiService) GetStatus(_ context.Context, _ *gateonv1.GetStatusRequest) (*gateonv1.GetStatusResponse, error) {
+func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest) (*gateonv1.GetStatusResponse, error) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
 	routesCount := 0
 	if s.Routes != nil {
-		routesCount = len(s.Routes.List())
+		routesCount = len(s.Routes.List(ctx))
 	}
 	servicesCount := 0
 	if s.Services != nil {
-		servicesCount = len(s.Services.List())
+		servicesCount = len(s.Services.List(ctx))
 	}
 
 	return &gateonv1.GetStatusResponse{
@@ -101,68 +89,68 @@ func (s *ApiService) GetStatus(_ context.Context, _ *gateonv1.GetStatusRequest) 
 	}, nil
 }
 
-func (s *ApiService) ListRoutes(_ context.Context, _ *gateonv1.ListRoutesRequest) (*gateonv1.ListRoutesResponse, error) {
+func (s *ApiService) ListRoutes(ctx context.Context, _ *gateonv1.ListRoutesRequest) (*gateonv1.ListRoutesResponse, error) {
 	if s.Routes == nil {
 		return &gateonv1.ListRoutesResponse{Routes: nil}, nil
 	}
-	return &gateonv1.ListRoutesResponse{Routes: s.Routes.List()}, nil
+	return &gateonv1.ListRoutesResponse{Routes: s.Routes.List(ctx)}, nil
 }
 
-func (s *ApiService) UpdateRoute(_ context.Context, req *gateonv1.UpdateRouteRequest) (*gateonv1.UpdateRouteResponse, error) {
+func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteRequest) (*gateonv1.UpdateRouteResponse, error) {
 	if s.Routes == nil || req == nil || req.Route == nil {
 		return &gateonv1.UpdateRouteResponse{Success: false}, nil
 	}
-	if err := s.Routes.Update(req.Route); err != nil {
+	if err := s.Routes.Update(ctx, req.Route); err != nil {
 		return &gateonv1.UpdateRouteResponse{Success: false}, err
 	}
 	return &gateonv1.UpdateRouteResponse{Success: true}, nil
 }
 
-func (s *ApiService) DeleteRoute(_ context.Context, req *gateonv1.DeleteRouteRequest) (*gateonv1.DeleteRouteResponse, error) {
+func (s *ApiService) DeleteRoute(ctx context.Context, req *gateonv1.DeleteRouteRequest) (*gateonv1.DeleteRouteResponse, error) {
 	if s.Routes == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteRouteResponse{Success: false}, nil
 	}
-	if err := s.Routes.Delete(req.Id); err != nil {
+	if err := s.Routes.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteRouteResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteRouteResponse{Success: true}, nil
 }
 
-func (s *ApiService) ListServices(_ context.Context, _ *gateonv1.ListServicesRequest) (*gateonv1.ListServicesResponse, error) {
+func (s *ApiService) ListServices(ctx context.Context, _ *gateonv1.ListServicesRequest) (*gateonv1.ListServicesResponse, error) {
 	if s.Services == nil {
 		return &gateonv1.ListServicesResponse{Services: nil}, nil
 	}
-	return &gateonv1.ListServicesResponse{Services: s.Services.List()}, nil
+	return &gateonv1.ListServicesResponse{Services: s.Services.List(ctx)}, nil
 }
 
-func (s *ApiService) UpdateService(_ context.Context, req *gateonv1.UpdateServiceRequest) (*gateonv1.UpdateServiceResponse, error) {
+func (s *ApiService) UpdateService(ctx context.Context, req *gateonv1.UpdateServiceRequest) (*gateonv1.UpdateServiceResponse, error) {
 	if s.Services == nil || req == nil || req.Service == nil {
 		return &gateonv1.UpdateServiceResponse{Success: false}, nil
 	}
-	if err := s.Services.Update(req.Service); err != nil {
+	if err := s.Services.Update(ctx, req.Service); err != nil {
 		return &gateonv1.UpdateServiceResponse{Success: false}, err
 	}
 	return &gateonv1.UpdateServiceResponse{Success: true}, nil
 }
 
-func (s *ApiService) DeleteService(_ context.Context, req *gateonv1.DeleteServiceRequest) (*gateonv1.DeleteServiceResponse, error) {
+func (s *ApiService) DeleteService(ctx context.Context, req *gateonv1.DeleteServiceRequest) (*gateonv1.DeleteServiceResponse, error) {
 	if s.Services == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteServiceResponse{Success: false}, nil
 	}
-	if err := s.Services.Delete(req.Id); err != nil {
+	if err := s.Services.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteServiceResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteServiceResponse{Success: true}, nil
 }
 
-func (s *ApiService) GetGlobalConfig(_ context.Context, _ *gateonv1.GetGlobalConfigRequest) (*gateonv1.GlobalConfig, error) {
+func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalConfigRequest) (*gateonv1.GlobalConfig, error) {
 	if s.Globals == nil {
 		return &gateonv1.GlobalConfig{}, nil
 	}
-	return s.Globals.Get(), nil
+	return s.Globals.Get(ctx), nil
 }
 
-func (s *ApiService) UpdateGlobalConfig(_ context.Context, req *gateonv1.UpdateGlobalConfigRequest) (*gateonv1.UpdateGlobalConfigResponse, error) {
+func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.UpdateGlobalConfigRequest) (*gateonv1.UpdateGlobalConfigResponse, error) {
 	if s.Globals == nil || req == nil || req.Config == nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, nil
 	}
@@ -180,61 +168,61 @@ func (s *ApiService) UpdateGlobalConfig(_ context.Context, req *gateonv1.UpdateG
 		}
 	}
 
-	if err := s.Globals.Update(req.Config); err != nil {
+	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
 	}
 	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
 }
 
-func (s *ApiService) ListMiddlewares(_ context.Context, _ *gateonv1.ListMiddlewaresRequest) (*gateonv1.ListMiddlewaresResponse, error) {
+func (s *ApiService) ListMiddlewares(ctx context.Context, _ *gateonv1.ListMiddlewaresRequest) (*gateonv1.ListMiddlewaresResponse, error) {
 	if s.Middlewares == nil {
 		return &gateonv1.ListMiddlewaresResponse{Middlewares: nil}, nil
 	}
-	return &gateonv1.ListMiddlewaresResponse{Middlewares: s.Middlewares.List()}, nil
+	return &gateonv1.ListMiddlewaresResponse{Middlewares: s.Middlewares.List(ctx)}, nil
 }
 
-func (s *ApiService) UpdateMiddleware(_ context.Context, req *gateonv1.UpdateMiddlewareRequest) (*gateonv1.UpdateMiddlewareResponse, error) {
+func (s *ApiService) UpdateMiddleware(ctx context.Context, req *gateonv1.UpdateMiddlewareRequest) (*gateonv1.UpdateMiddlewareResponse, error) {
 	if s.Middlewares == nil || req == nil || req.Middleware == nil {
 		return &gateonv1.UpdateMiddlewareResponse{Success: false}, nil
 	}
-	if err := s.Middlewares.Update(req.Middleware); err != nil {
+	if err := s.Middlewares.Update(ctx, req.Middleware); err != nil {
 		return &gateonv1.UpdateMiddlewareResponse{Success: false}, err
 	}
 	return &gateonv1.UpdateMiddlewareResponse{Success: true}, nil
 }
 
-func (s *ApiService) DeleteMiddleware(_ context.Context, req *gateonv1.DeleteMiddlewareRequest) (*gateonv1.DeleteMiddlewareResponse, error) {
+func (s *ApiService) DeleteMiddleware(ctx context.Context, req *gateonv1.DeleteMiddlewareRequest) (*gateonv1.DeleteMiddlewareResponse, error) {
 	if s.Middlewares == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteMiddlewareResponse{Success: false}, nil
 	}
-	if err := s.Middlewares.Delete(req.Id); err != nil {
+	if err := s.Middlewares.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteMiddlewareResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteMiddlewareResponse{Success: true}, nil
 }
 
-func (s *ApiService) ListTLSOptions(_ context.Context, _ *gateonv1.ListTLSOptionsRequest) (*gateonv1.ListTLSOptionsResponse, error) {
+func (s *ApiService) ListTLSOptions(ctx context.Context, _ *gateonv1.ListTLSOptionsRequest) (*gateonv1.ListTLSOptionsResponse, error) {
 	if s.TLSOptions == nil {
 		return &gateonv1.ListTLSOptionsResponse{TlsOptions: nil}, nil
 	}
-	return &gateonv1.ListTLSOptionsResponse{TlsOptions: s.TLSOptions.List()}, nil
+	return &gateonv1.ListTLSOptionsResponse{TlsOptions: s.TLSOptions.List(ctx)}, nil
 }
 
-func (s *ApiService) UpdateTLSOption(_ context.Context, req *gateonv1.UpdateTLSOptionRequest) (*gateonv1.UpdateTLSOptionResponse, error) {
+func (s *ApiService) UpdateTLSOption(ctx context.Context, req *gateonv1.UpdateTLSOptionRequest) (*gateonv1.UpdateTLSOptionResponse, error) {
 	if s.TLSOptions == nil || req == nil || req.TlsOption == nil {
 		return &gateonv1.UpdateTLSOptionResponse{Success: false}, nil
 	}
-	if err := s.TLSOptions.Update(req.TlsOption); err != nil {
+	if err := s.TLSOptions.Update(ctx, req.TlsOption); err != nil {
 		return &gateonv1.UpdateTLSOptionResponse{Success: false}, err
 	}
 	return &gateonv1.UpdateTLSOptionResponse{Success: true}, nil
 }
 
-func (s *ApiService) DeleteTLSOption(_ context.Context, req *gateonv1.DeleteTLSOptionRequest) (*gateonv1.DeleteTLSOptionResponse, error) {
+func (s *ApiService) DeleteTLSOption(ctx context.Context, req *gateonv1.DeleteTLSOptionRequest) (*gateonv1.DeleteTLSOptionResponse, error) {
 	if s.TLSOptions == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteTLSOptionResponse{Success: false}, nil
 	}
-	if err := s.TLSOptions.Delete(req.Id); err != nil {
+	if err := s.TLSOptions.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteTLSOptionResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteTLSOptionResponse{Success: true}, nil
@@ -251,7 +239,7 @@ func (s *ApiService) Login(_ context.Context, req *gateonv1.LoginRequest) (*gate
 	return &gateonv1.LoginResponse{Token: token, User: user}, nil
 }
 
-func (s *ApiService) IsSetupRequired(_ context.Context, _ *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error) {
+func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error) {
 	if s.Auth == nil {
 		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
 	}
@@ -264,7 +252,7 @@ func (s *ApiService) IsSetupRequired(_ context.Context, _ *gateonv1.IsSetupRequi
 
 	pasetoSecret := ""
 	if s.Globals != nil {
-		conf := s.Globals.Get()
+		conf := s.Globals.Get(ctx)
 		if conf != nil && conf.Auth != nil {
 			pasetoSecret = conf.Auth.PasetoSecret
 		}
@@ -283,7 +271,7 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		// Initialize Auth Manager if it doesn't exist
 		sqlitePath := "gateon.db"
 		if s.Globals != nil {
-			conf := s.Globals.Get()
+			conf := s.Globals.Get(ctx)
 			if conf.Auth != nil && conf.Auth.SqlitePath != "" {
 				sqlitePath = conf.Auth.SqlitePath
 			}
@@ -307,14 +295,14 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	}
 
 	// 2. Update Global Config (Paseto Secret)
-	conf := s.Globals.Get()
+	conf := s.Globals.Get(ctx)
 	if conf.Auth == nil {
 		conf.Auth = &gateonv1.AuthConfig{}
 	}
 	conf.Auth.PasetoSecret = req.PasetoSecret
 	conf.Auth.Enabled = true
 
-	if err := s.Globals.Update(conf); err != nil {
+	if err := s.Globals.Update(ctx, conf); err != nil {
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to update config: " + err.Error()}, nil
 	}
 

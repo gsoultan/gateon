@@ -18,5 +18,5 @@ func (*tcpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps, 
 	if !hasTCP {
 		return
 	}
-	startTCPServer(addr, deps.TLSConfig, wg, deps.ShutdownRegistry)
+	startTCPServer(addr, ep, deps, wg, deps.ShutdownRegistry)
 }

@@ -1,0 +1,27 @@
+---
+description: Universal coding standards — all generated code must follow
+alwaysApply: true
+---
+
+# Code Standards
+
+All generated code must follow these guidelines.
+
+## Organization
+
+- **Separate files and folders by domain** — structure by business/feature domain, not technical type
+
+## Frontend (React)
+
+- Follow **naming conventions** (PascalCase components, `use` prefix for hooks, etc.)
+- Use **React best practices** and **design patterns**
+- Functional components, custom hooks, composition
+- See `react-guidelines` for details (applies when editing `ui/**/*.tsx`)
+
+## Backend (Go)
+
+- Follow **naming conventions** (packages lowercase, interfaces `er` suffix, files snake_case, etc.)
+- Follow **SOLID principles** (SRP, OCP, LSP, ISP, DIP)
+- Use **programming by interface** — depend on abstractions, inject dependencies
+- Apply appropriate **design patterns** (Repository, Factory, Strategy, Adapter, Options)
+- See `backend-guidelines` for details (applies when editing `internal/**/*.go`, `pkg/**/*.go`)

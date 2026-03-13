@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -84,12 +85,12 @@ func (r *MiddlewareRegistry) saveLocked() error {
 	return nil
 }
 
-func (r *MiddlewareRegistry) List() []*gateonv1.Middleware {
-	items, _ := r.ListPaginated(0, 0, "")
+func (r *MiddlewareRegistry) List(ctx context.Context) []*gateonv1.Middleware {
+	items, _ := r.ListPaginated(ctx, 0, 0, "")
 	return items
 }
 
-func (r *MiddlewareRegistry) ListPaginated(page, pageSize int32, search string) ([]*gateonv1.Middleware, int32) {
+func (r *MiddlewareRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Middleware, int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -126,20 +127,20 @@ func (r *MiddlewareRegistry) ListPaginated(page, pageSize int32, search string) 
 	return filtered[start:end], totalCount
 }
 
-func (r *MiddlewareRegistry) Get(id string) (*gateonv1.Middleware, bool) {
+func (r *MiddlewareRegistry) Get(ctx context.Context, id string) (*gateonv1.Middleware, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	m, ok := r.middlewares[id]
 	return m, ok
 }
 
-func (r *MiddlewareRegistry) All() map[string]*gateonv1.Middleware {
+func (r *MiddlewareRegistry) All(ctx context.Context) map[string]*gateonv1.Middleware {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return maps.Clone(r.middlewares)
 }
 
-func (r *MiddlewareRegistry) Update(m *gateonv1.Middleware) error {
+func (r *MiddlewareRegistry) Update(ctx context.Context, m *gateonv1.Middleware) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -147,7 +148,7 @@ func (r *MiddlewareRegistry) Update(m *gateonv1.Middleware) error {
 	return r.saveLocked()
 }
 
-func (r *MiddlewareRegistry) Delete(id string) error {
+func (r *MiddlewareRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

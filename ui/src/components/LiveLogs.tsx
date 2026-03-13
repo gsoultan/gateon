@@ -22,11 +22,17 @@ import {
 } from "@tabler/icons-react";
 import { useAuthStore } from "../store/useAuthStore";
 
-export default function LiveLogs({ height = 400 }: { height?: number }) {
+interface LiveLogsProps {
+  height?: number;
+}
+
+export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const [logs, setLogs] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [paused, setPaused] = useState(false);
   const [search, setSearch] = useState("");
+  const [routeFilter, setRouteFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   useEffect(() => {
     const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8080";
@@ -52,11 +58,25 @@ export default function LiveLogs({ height = 400 }: { height?: number }) {
   }, [paused]);
 
   const filteredLogs = useMemo(() => {
-    if (!search) return logs;
-    return logs.filter((log) =>
-      log.toLowerCase().includes(search.toLowerCase()),
-    );
-  }, [logs, search]);
+    return logs.filter((log) => {
+      if (search) {
+        if (!log.toLowerCase().includes(search.toLowerCase())) return false;
+      }
+      if (routeFilter || statusFilter) {
+        try {
+          const parsed = JSON.parse(log) as Record<string, unknown>;
+          if (routeFilter && (parsed.route_id as string)?.toLowerCase().indexOf(routeFilter.toLowerCase()) === -1) return false;
+          if (statusFilter) {
+            const s = String(parsed.status ?? "");
+            if (s !== statusFilter && !s.startsWith(statusFilter)) return false;
+          }
+        } catch {
+          if (routeFilter || statusFilter) return false;
+        }
+      }
+      return true;
+    });
+  }, [logs, search, routeFilter, statusFilter]);
 
   const getLogColor = (log: string) => {
     if (log.includes('"level":"error"') || log.includes("ERROR"))
@@ -161,13 +181,29 @@ export default function LiveLogs({ height = 400 }: { height?: number }) {
           </Group>
           <Group gap="xs">
             <TextInput
-              placeholder="Filter by text..."
+              placeholder="Text search..."
               size="xs"
               leftSection={<IconSearch size={14} />}
               value={search}
               onChange={(e) => setSearch(e.currentTarget.value)}
-              w={200}
-              title="Filter logs by any text"
+              w={140}
+              title="Filter by any text"
+            />
+            <TextInput
+              placeholder="Route ID"
+              size="xs"
+              value={routeFilter}
+              onChange={(e) => setRouteFilter(e.currentTarget.value)}
+              w={120}
+              title="Filter by route_id"
+            />
+            <TextInput
+              placeholder="Status (e.g. 200, 5xx)"
+              size="xs"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.currentTarget.value)}
+              w={110}
+              title="Filter by HTTP status code"
             />
             <Tooltip label={paused ? "Resume" : "Pause"}>
               <ActionIcon

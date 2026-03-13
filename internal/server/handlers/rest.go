@@ -9,6 +9,7 @@ import (
 // RegisterRESTHandlers registers all REST handlers on mux (routes, services, entrypoints, etc.).
 func RegisterRESTHandlers(mux *http.ServeMux, apiService *api.ApiService, d *Deps) {
 	registerRouteHandlers(mux, d)
+	registerConfigImportExport(mux, d)
 	registerEntryPointHandlers(mux, d)
 	registerMiddlewareHandlers(mux, d)
 	registerServiceHandlers(mux, d)

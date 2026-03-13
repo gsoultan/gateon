@@ -2,7 +2,9 @@
 package router
 
 import (
+	"context"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/gateon/gateon/internal/config"
@@ -40,6 +42,9 @@ type matcher struct {
 	host       string
 	path       string
 	pathPrefix string
+	pathRegex  *regexp.Regexp
+	methods    map[string]bool
+	headers    map[string]string // header name -> expected value
 }
 
 func parseRule(rule string) matcher {
@@ -53,6 +58,59 @@ func parseRule(rule string) matcher {
 	if strings.Contains(rule, "Path(`") {
 		m.path = extractValue(rule, "Path(`", "`)")
 	}
+	if s := extractValue(rule, "PathRegex(`", "`)"); s != "" {
+		if re, err := regexp.Compile(s); err == nil {
+			m.pathRegex = re
+		}
+	}
+	// Methods(`GET`, `POST`) - extract content between Methods(` and `), split by `, `
+	if i := strings.Index(rule, "Methods(`"); i >= 0 {
+		tail := rule[i+9:]
+		end := strings.Index(tail, "`)")
+		if end > 0 {
+			inner := tail[:end]
+			m.methods = make(map[string]bool)
+			for _, part := range strings.Split(inner, "`, `") {
+				method := strings.TrimSpace(strings.ToUpper(strings.Trim(part, "`")))
+				if method != "" {
+					m.methods[method] = true
+				}
+			}
+		}
+	}
+	// Headers(`Name`, `value`) - name ends at `, value ends at `)
+	for {
+		idx := strings.Index(rule, "Headers(`")
+		if idx < 0 {
+			break
+		}
+		rest := rule[idx+9:]
+		backtick := strings.Index(rest, "`")
+		if backtick < 0 {
+			break
+		}
+		name := rest[:backtick]
+		rest = strings.TrimLeft(rest[backtick+1:], " ")
+		if !strings.HasPrefix(rest, ",") {
+			break
+		}
+		rest = strings.TrimLeft(rest[1:], " ")
+		// value is between ` and `)
+		if !strings.HasPrefix(rest, "`") {
+			break
+		}
+		rest = rest[1:]
+		end := strings.Index(rest, "`)")
+		if end < 0 {
+			break
+		}
+		value := rest[:end]
+		if m.headers == nil {
+			m.headers = make(map[string]string)
+		}
+		m.headers[http.CanonicalHeaderKey(name)] = value
+		rule = rest[end+2:]
+	}
 	return m
 }
 
@@ -65,6 +123,17 @@ func (m matcher) Match(r *http.Request) bool {
 	}
 	if m.path != "" && r.URL.Path != m.path {
 		return false
+	}
+	if m.pathRegex != nil && !m.pathRegex.MatchString(r.URL.Path) {
+		return false
+	}
+	if len(m.methods) > 0 && !m.methods[r.Method] {
+		return false
+	}
+	for name, want := range m.headers {
+		if r.Header.Get(name) != want {
+			return false
+		}
 	}
 	return true
 }
@@ -104,6 +173,9 @@ func SelectRoute(r *http.Request, routes []*gateonv1.Route) *gateonv1.Route {
 
 	var best *gateonv1.Route
 	for _, rt := range routes {
+		if rt.Disabled {
+			continue
+		}
 		// 1. Filter by EntryPoints if specified
 		if len(rt.Entrypoints) > 0 {
 			matchEP := false
@@ -154,8 +226,8 @@ func extractValue(s, prefix, suffix string) string {
 	return s[start : start+end]
 }
 
-// ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the registry.
-func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient *redis.Client, mwReg *config.MiddlewareRegistry) http.Handler {
+// ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
+func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient *redis.Client, mwStore config.MiddlewareStore) http.Handler {
 	var chain []middleware.Middleware
 	mwFactory := middleware.NewFactory(redisClient)
 
@@ -170,8 +242,8 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient *redi
 			continue
 		}
 
-		if mwReg != nil {
-			if mwConf, ok := mwReg.Get(mid); ok {
+		if mwStore != nil {
+			if mwConf, ok := mwStore.Get(context.Background(), mid); ok {
 				mw, err := mwFactory.Create(mwConf)
 				if err == nil {
 					chain = append(chain, mw)

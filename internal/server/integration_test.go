@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,18 +13,21 @@ import (
 	"github.com/gateon/gateon/internal/config"
 	"github.com/gateon/gateon/internal/domain"
 	"github.com/gateon/gateon/internal/server/handlers"
+	"github.com/gateon/gateon/pkg/l4"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"google.golang.org/grpc"
 )
 
 func handlerDeps(s *Server) *handlers.Deps {
+	l4Resolver := l4.NewResolver(s.RouteStore, s.ServiceStore)
+	proxyInvalidator := NewServerProxyInvalidator(s, l4Resolver, s.RouteStore)
 	return &handlers.Deps{
-		RouteService:   domain.NewRouteService(s.RouteReg, s.InvalidateRouteProxy),
-		ServiceService: domain.NewServiceService(s.ServiceReg, s.RouteReg, s.InvalidateRouteProxies),
-		EpService:      domain.NewEntryPointService(s.EpReg),
-		MwService:      domain.NewMiddlewareService(s.MwReg, s.RouteReg, s.InvalidateRouteProxies),
-		TLSOptService:  domain.NewTLSOptionService(s.TLSOptReg),
+		RouteService:   domain.NewRouteService(s.RouteStore, proxyInvalidator),
+		ServiceService: domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator),
+		EpService:      domain.NewEntryPointService(s.EpStore),
+		MwService:      domain.NewMiddlewareService(s.MwStore, s.RouteStore, proxyInvalidator),
+		TLSOptService:  domain.NewTLSOptionService(s.TLSOptStore),
 		AuthManager:    s.AuthManager,
 		Version:        s.Version,
 		StartTime:      s.StartTime(),
@@ -50,22 +54,22 @@ func TestIntegration_ProxyRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	globalReg := s.GlobalReg
+	globalStore := s.GlobalStore
 
 	svc := &gateonv1.Service{
 		Id: "test-service", Name: "test-service",
 		WeightedTargets: []*gateonv1.Target{{Url: backend.URL, Weight: 1}},
 	}
-	_ = s.ServiceReg.Update(svc)
+	_ = s.ServiceStore.Update(context.Background(), svc)
 	rt := &gateonv1.Route{
 		Id: "test-route", ServiceId: svc.Id, Rule: "PathPrefix(`/test`)", Type: "http",
 	}
-	_ = s.RouteReg.Update(rt)
+	_ = s.RouteStore.Update(context.Background(), rt)
 
 	grpcServer := grpc.NewServer()
 	apiService := api.NewApiService(api.ApiServiceConfig{
-		Routes: s.RouteReg, Services: s.ServiceReg, Globals: globalReg,
-		EntryPoints: s.EpReg, Middlewares: s.MwReg, TLSOptions: s.TLSOptReg,
+		Routes: s.RouteStore, Services: s.ServiceStore, Globals: globalStore,
+		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
 	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	wrapped := grpcweb.WrapServer(grpcServer)
@@ -111,17 +115,17 @@ func TestIntegration_RestApiAndProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	globalReg := s.GlobalReg
+	globalStore := s.GlobalStore
 
-	_ = s.ServiceReg.Update(&gateonv1.Service{
+	_ = s.ServiceStore.Update(context.Background(), &gateonv1.Service{
 		Id: "dynamic-service", Name: "dynamic-service",
 		WeightedTargets: []*gateonv1.Target{{Url: backend.URL, Weight: 1}},
 	})
 
 	grpcServer := grpc.NewServer()
 	apiService := api.NewApiService(api.ApiServiceConfig{
-		Routes: s.RouteReg, Services: s.ServiceReg, Globals: globalReg,
-		EntryPoints: s.EpReg, Middlewares: s.MwReg, TLSOptions: s.TLSOptReg,
+		Routes: s.RouteStore, Services: s.ServiceStore, Globals: globalStore,
+		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
 	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	wrapped := grpcweb.WrapServer(grpcServer)
@@ -169,8 +173,8 @@ func TestIntegration_NotFound(t *testing.T) {
 		t.Fatalf("NewServer: %v", err)
 	}
 	apiService := api.NewApiService(api.ApiServiceConfig{
-		Routes: s.RouteReg, Services: s.ServiceReg, Globals: s.GlobalReg,
-		EntryPoints: s.EpReg, Middlewares: s.MwReg, TLSOptions: s.TLSOptReg,
+		Routes: s.RouteStore, Services: s.ServiceStore, Globals: s.GlobalStore,
+		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))

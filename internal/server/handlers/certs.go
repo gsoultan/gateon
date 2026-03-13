@@ -14,7 +14,7 @@ import (
 func registerCertHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 	mux.HandleFunc("GET /v1/certs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		gc := apiService.Globals.Get()
+		gc := apiService.Globals.Get(r.Context())
 		if gc == nil || gc.Tls == nil {
 			_, _ = w.Write([]byte("[]"))
 			return

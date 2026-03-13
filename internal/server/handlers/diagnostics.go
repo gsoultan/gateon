@@ -62,6 +62,10 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 			"uptime_seconds": time.Since(d.StartTime).Seconds(), "memory_alloc": m.Alloc,
 		})
 	})
+	mux.HandleFunc("GET /v1/diag/limit-stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(telemetry.GetLimitStats())
+	})
 	mux.HandleFunc("GET /v1/diag/path-stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		daysStr := r.URL.Query().Get("days")

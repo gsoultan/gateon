@@ -11,7 +11,7 @@ import {
 import { lazy, Suspense } from "react";
 import { Shell } from "./components/Shell";
 import { useAuthStore } from "./store/useAuthStore";
-import { apiFetch } from "./hooks/useGateon";
+import { apiFetch, restoreSessionFromCookie } from "./hooks/useGateon";
 
 const Dashboard = lazy(() => import("./routes/Dashboard"));
 const RoutesPage = lazy(() => import("./routes/RoutesPage"));
@@ -25,6 +25,7 @@ const MiddlewaresPage = lazy(() => import("./routes/MiddlewaresPage"));
 const TLSOptionsPage = lazy(() => import("./routes/TLSOptionsPage"));
 const SettingsPage = lazy(() => import("./routes/SettingsPage"));
 const UsersPage = lazy(() => import("./routes/UsersPage"));
+const CircuitBreakerPage = lazy(() => import("./routes/CircuitBreakerPage"));
 const LoginPage = lazy(() => import("./routes/LoginPage"));
 const SetupPage = lazy(() => import("./routes/SetupPage"));
 
@@ -72,7 +73,11 @@ const authenticatedRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: "authenticated",
   beforeLoad: async ({ location }) => {
-    const token = useAuthStore.getState().token;
+    let token = useAuthStore.getState().token;
+    if (!token) {
+      const restored = await restoreSessionFromCookie();
+      if (restored) token = useAuthStore.getState().token;
+    }
     if (!token) {
       throw redirect({
         to: "/login",
@@ -157,6 +162,12 @@ const usersRoute = createRoute({
   component: () => <UsersPage />,
 });
 
+const circuitBreakerRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/circuit-breaker",
+  component: () => <CircuitBreakerPage />,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
@@ -166,6 +177,7 @@ const routeTree = rootRoute.addChildren([
     servicesRoute,
     logsRoute,
     pathMetricsRoute,
+    circuitBreakerRoute,
     certificatesRoute,
     clientAuthoritiesRoute,
     entryPointsRoute,

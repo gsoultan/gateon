@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -84,7 +85,7 @@ func TestProxyHandler_Protocols(t *testing.T) {
 			tmpDir := t.TempDir()
 			servicePath := filepath.Join(tmpDir, "services.json")
 			serviceReg := config.NewServiceRegistry(servicePath)
-			_ = serviceReg.Update(svc)
+			_ = serviceReg.Update(context.Background(), svc)
 
 			ph := NewProxyHandler(rt, serviceReg)
 			defer ph.Close()
@@ -129,7 +130,7 @@ func TestProxyHandler_WeightedLoadBalancing(t *testing.T) {
 	tmpDir := t.TempDir()
 	servicePath := filepath.Join(tmpDir, "services.json")
 	serviceReg := config.NewServiceRegistry(servicePath)
-	_ = serviceReg.Update(svc)
+	_ = serviceReg.Update(context.Background(), svc)
 
 	rt := &gateonv1.Route{
 		Id:        "weighted-route",

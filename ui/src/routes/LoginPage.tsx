@@ -80,10 +80,9 @@ export default function LoginPage() {
     try {
       const res = await fetch(`${API_BASE_URL}/v1/login`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values),
+        credentials: "include", // allow session cookie to be set
       });
 
       if (res.ok) {

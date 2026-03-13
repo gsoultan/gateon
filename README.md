@@ -17,7 +17,7 @@ Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balanc
   - gRPC routing and grpc-web proxying on the same listener
   - Minimal REST endpoints for UI parity
   - Health and readiness endpoints
-  - **Dynamic Routing with Hot-Reload** (Host and Path based)
+  - **Dynamic Routing with Hot-Reload**: Host, Path, PathPrefix, PathRegex, Methods, Headers matchers (Traefik-compatible rules). Routes can be **paused** (disabled) without deletion.
   - **Configuration**: Supports JSON and YAML for route definitions.
   - **HTTP Management**: Advanced proxy configuration (custom headers, timeouts) and real-time metrics (request count, error rate, latency, active connections) per route.
   - **AuthN/Z**: JWT (HMAC/JWKS) and API Key validation per route
@@ -25,6 +25,8 @@ Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balanc
   - **Distributed Rate Limiting**: Redis-backed rate limiting for multitenant workloads.
   - **Multitenant Rate Limiting**: Per-IP and Per-Tenant (context-aware)
   - **SSL/TLS Certificate Management**: Built-in support for uploading and managing custom certificates per domain directly from the UI.
+- **TCP/UDP L4 Proxy**: TCP and UDP entrypoints forward traffic to backends via Route → Service (configure a Route with type tcp/udp and a Service with backend_type tcp/udp).
+- **Config Import/Export**: Backup and restore via `/v1/config/export` and `/v1/config/import`. Validate before import with `POST /v1/config/validate`.
 - React UI (Vite + TypeScript + Mantine + Tailwind)
   - Status dashboard and route management
 - **Clean modular structure with protobuf generation**
@@ -35,6 +37,8 @@ Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balanc
   - `Errors` (Custom error pages)
   - `Retry`
   - `Headers` (Add/Set/Del for Request and Response)
+  - `IPFilter` (allow/deny by IP or CIDR)
+  - `Cache` (in-memory response cache for GET)
 
 ## Repository Structure
 ```
@@ -45,6 +49,13 @@ internal/        # Server logic and shared packages (server, logger, config, rou
 proto/           # Protobuf definitions (generated Go under proto/gateon/v1/)
 ui/              # React UI (Vite + TS + Mantine + Tailwind); built to internal/ui/dist for embed
 ```
+
+## Architecture Notes
+
+- **Dependency inversion**: The server depends on store interfaces (`RouteStore`, `ServiceStore`, etc.), not concrete registries. TLS manager and middleware factory receive interfaces via constructors.
+- **Proxy caching**: HTTP proxy instances are cached per route and invalidated on route changes. See `internal/server/proxy_cache.go`.
+- **Context propagation**: Domain services and config stores use `context.Context` as the first parameter for cancellation and tracing.
+- **Handler style**: REST handlers follow early returns, minimal nesting, and extracted helpers (e.g. `writeJSONError`, `decodeGlobalConfig`, `validateConfigExport`). See `.cursor/rules/backend-guidelines.mdc`.
 
 ## Getting Started (Backend)
 Requirements:
@@ -115,6 +126,9 @@ Generated files live only in `proto/gateon/v1/`; do not commit root-level `*.pb.
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: Endpoint for OTLP traces (e.g., http://localhost:4318). If empty, tracing is disabled.
 - `GATEON_JWT_SECRET`: Shared secret for HMAC-based JWT validation.
 - `GATEON_API_KEYS`: Comma-separated list of `key:tenant_id` pairs for static API key management (e.g., `key1:tenantA,key2:tenantB`).
+- `GATEON_ENTRYPOINT_RATE_LIMIT_QPS`: Per-IP requests per second for entrypoints. Use `0` to disable (recommended for high throughput, e.g. 100k req/s).
+- `GATEON_ENTRYPOINT_RATE_LIMIT_BURST`: Burst size when rate limiting is enabled (default 2× QPS).
+- `GATEON_ACCESS_LOG_SAMPLE_RATE`: Access log sampling. `1` = log all; `N` = log 1 in N requests; `0` = no access log. Use `1000`+ for high-throughput to reduce I/O.
 
 ## UI (React + Vite + Mantine + Tailwind)
 The UI is automatically built and embedded into the Go binary during the build process. When Gateon is running, the dashboard is accessible on the same port as the gateway (default: `http://localhost:8080`).

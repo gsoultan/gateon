@@ -9,7 +9,7 @@ import (
 func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
-		svcs, total := d.ServiceService.ListPaginated(page, pageSize, search)
+		svcs, total := d.ServiceService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListServicesResponse{
 			Services: svcs, TotalCount: total, Page: page, PageSize: pageSize,
 		})
@@ -20,7 +20,7 @@ func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := d.ServiceService.SaveService(&svc); err != nil {
+		if err := d.ServiceService.SaveService(r.Context(), &svc); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to save service")
 			return
 		}
@@ -32,7 +32,7 @@ func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "missing service id")
 			return
 		}
-		if err := d.ServiceService.DeleteService(id); err != nil {
+		if err := d.ServiceService.DeleteService(r.Context(), id); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete service")
 			return
 		}

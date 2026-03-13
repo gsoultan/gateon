@@ -103,21 +103,26 @@ message Middleware {
   // Type of the middleware.
   // Supported types:
   // - "ratelimit": Config: requests_per_minute, burst, per_ip, per_tenant, storage
-  // - "auth": Config: type (jwt/apikey), issuer, audience, secret
-  // - "headers": Config: add_request_X, set_request_X, del_request_X, add_response_X, set_response_X, del_response_X
+  // - "inflightreq": Config: amount, per_ip (limit concurrent requests per IP/host)
+  // - "buffering": Config: max_request_body_bytes (reject large bodies with 413)
+  // - "auth": Config: type (jwt/apikey/basic); jwt: issuer, audience, secret; apikey: header, key_X=value; basic: username, password, or users (user:pass,), realm
+  // - "headers": Config: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header (HSTS); add_request_X, set_request_X, add_response_X, set_response_X, del_request_X, del_response_X
   // - "rewrite": Config: path, pattern, replacement, query_X
   // - "addprefix": Config: prefix
   // - "stripprefix": Config: prefixes (comma separated)
   // - "stripprefixregex": Config: regex
   // - "replacepath": Config: path
   // - "replacepathregex": Config: pattern, replacement
-  // - "compress": No config needed
+  // - "compress": Config: min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes
+  // - "forwardauth": Config: address (required), auth_response_headers, auth_request_headers, trust_forward_header, forward_body, preserve_request_method, max_body_size, tls_insecure_skip_verify
   // - "accesslog": Config: route_id
   // - "metrics": Config: route_id
   // - "errors": Config: status_codes (comma separated), page_404, page_500, etc.
   // - "retry": Config: attempts
   // - "cors": Config: allowed_origins, allowed_methods, allowed_headers, etc.
   // - "grpcweb": No config needed
+  // - "ipfilter": Config: allow_list (comma-separated IPs/CIDRs), deny_list
+  // - "cache": Config: ttl_seconds, max_entries, max_body_kb
   string type = 3;
   map<string, string> config = 4;
 }
@@ -202,6 +207,11 @@ message Service {
   repeated Target weighted_targets = 3;
   string load_balancer_policy = 4; // "round_robin", "least_conn", "weighted_round_robin"
   string health_check_path = 5;
+  string backend_type = 6; // "http", "grpc", "graphql", "tcp", "udp"
+  // L4-specific (used when backend_type is "tcp" or "udp")
+  int32 l4_health_check_interval_ms = 7;  // TCP health check interval. 0 = disable. Default 10000.
+  int32 l4_health_check_timeout_ms = 8;   // TCP health check dial timeout. Default 3000.
+  int32 l4_udp_session_timeout_s = 9;     // UDP session idle timeout. Default 60.
 }
 
 message GetGlobalConfigRequest {}
@@ -358,8 +368,10 @@ message GetStatusResponse {
 }
 
 message Target {
-  string url = 1;
+  string url = 1;  // HTTP/gRPC: "http://host:port". L4: "host:port"
   int32 weight = 2; // For weighted load balancing
+  // HTTP/gRPC: "http", "https", "h2", "h2c". L4: unused
+  string protocol = 3;
 }
 
 message ListRoutesRequest {
@@ -391,13 +403,14 @@ message DeleteRouteResponse {
 message Route {
   string id = 1;
   string name = 2;
-  string type = 3; // "http", "grpc"
+  string type = 3; // "http", "grpc", "graphql", "tcp", "udp"
   repeated string entrypoints = 4;
-  string rule = 5;
+  string rule = 5;  // For L4 routes use "L4()" (matching by entrypoint only)
   int32 priority = 6;
   repeated string middlewares = 7;
   string service_id = 8;
   RouteTLSConfig tls = 9;
+  bool disabled = 10; // When true, route is not matched (paused)
 }
 
 message RouteTLSConfig {

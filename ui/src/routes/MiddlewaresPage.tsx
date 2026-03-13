@@ -284,6 +284,8 @@ export default function MiddlewaresPage() {
             label="Type"
             data={[
               { label: "Rate Limiting", value: "ratelimit" },
+              { label: "In-Flight Requests (conn limit)", value: "inflightreq" },
+              { label: "Buffering (max body)", value: "buffering" },
               { label: "Authentication", value: "auth" },
               { label: "Header Manipulation", value: "headers" },
               { label: "Path Rewrite", value: "rewrite" },
@@ -293,7 +295,10 @@ export default function MiddlewaresPage() {
               { label: "Replace Path", value: "replacepath" },
               { label: "Replace Path Regex", value: "replacepathregex" },
               { label: "Gzip Compression", value: "compress" },
+              { label: "Forward Auth", value: "forwardauth" },
               { label: "CORS", value: "cors" },
+              { label: "IP Filter", value: "ipfilter" },
+              { label: "Response Cache", value: "cache" },
               { label: "gRPC-Web", value: "grpcweb" },
               { label: "Custom Errors", value: "errors" },
               { label: "Retry", value: "retry" },
@@ -354,10 +359,14 @@ export default function MiddlewaresPage() {
                 <Text size="xs" c="dimmed">
                   {editingMW?.type === "ratelimit" &&
                     "Keys: requests_per_minute, burst, per_ip (true/false), storage (local/redis)"}
+                  {editingMW?.type === "inflightreq" &&
+                    "Keys: amount (required), per_ip (true/false)"}
+                  {editingMW?.type === "buffering" &&
+                    "Keys: max_request_body_bytes (required)"}
                   {editingMW?.type === "auth" &&
-                    "Keys: type (jwt/apikey), issuer, audience, secret"}
+                    "Keys: type (jwt/apikey/basic); jwt: issuer, audience, secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
                   {editingMW?.type === "headers" &&
-                    "Keys: add_request_X, set_request_X, del_request_X, etc."}
+                    "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, add_response_X, set_response_X, del_request_X, del_response_X"}
                   {editingMW?.type === "rewrite" &&
                     "Keys: path, pattern, replacement, query_X"}
                   {editingMW?.type === "addprefix" && "Keys: prefix"}
@@ -369,6 +378,10 @@ export default function MiddlewaresPage() {
                     "Keys: pattern, replacement"}
                   {editingMW?.type === "cors" &&
                     "Keys: allowed_origins, allowed_methods, allowed_headers, exposed_headers, allow_credentials (true/false), max_age"}
+                  {editingMW?.type === "compress" &&
+                    "Keys: min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes"}
+                  {editingMW?.type === "forwardauth" &&
+                    "Keys: address (required), auth_response_headers, auth_request_headers, trust_forward_header, forward_body, preserve_request_method, max_body_size, tls_insecure_skip_verify"}
                   {editingMW?.type === "grpcweb" && "No config needed"}
                   {editingMW?.type === "errors" &&
                     "Keys: status_codes (comma separated), page_404, page_500, etc."}

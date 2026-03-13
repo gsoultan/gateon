@@ -12,13 +12,13 @@ import {
 } from "@mantine/core";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 
-interface Props {
+interface MiddlewareConfigEditorProps {
   type: string;
   config: Record<string, string>;
   onChange: (config: Record<string, string>) => void;
 }
 
-export function MiddlewareConfigEditor({ type, config, onChange }: Props) {
+export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareConfigEditorProps) {
   const updateConfig = (key: string, value: string) => {
     onChange({ ...config, [key]: value });
   };
@@ -144,6 +144,46 @@ export function MiddlewareConfigEditor({ type, config, onChange }: Props) {
         </Stack>
       );
 
+    case "inflightreq":
+      return (
+        <Stack gap="md">
+          <NumberInput
+            label="Max Concurrent Requests (amount)"
+            description="Max in-flight requests per source. Returns 429 when exceeded."
+            value={parseInt(config.amount) || 0}
+            onChange={(val) => updateConfig("amount", val?.toString() || "0")}
+            min={1}
+          />
+          <Switch
+            label="Per IP Address"
+            description="Limit per client IP. If false, limits per request host."
+            checked={config.per_ip !== "false"}
+            onChange={(e) =>
+              updateConfig(
+                "per_ip",
+                e.currentTarget.checked ? "true" : "false"
+              )
+            }
+          />
+        </Stack>
+      );
+
+    case "buffering":
+      return (
+        <NumberInput
+          label="Max Request Body (bytes)"
+          description="Rejects requests exceeding this size with 413."
+          value={parseInt(config.max_request_body_bytes) || 0}
+          onChange={(val) =>
+            updateConfig(
+              "max_request_body_bytes",
+              val?.toString() || "0"
+            )
+          }
+          min={1}
+        />
+      );
+
     case "auth":
       return (
         <Stack gap="md">
@@ -152,20 +192,68 @@ export function MiddlewareConfigEditor({ type, config, onChange }: Props) {
             data={[
               { label: "JWT", value: "jwt" },
               { label: "API Key", value: "apikey" },
+              { label: "Basic Auth", value: "basic" },
             ]}
             value={config.type || "jwt"}
             onChange={(val) => updateConfig("type", val || "jwt")}
           />
-          {config.type === "apikey" ? (
-            <KeyValueList
-              title="API Keys"
-              prefix="key_"
-              placeholderKey="key-name"
-              placeholderValue="actual-api-key"
-              keyLabel="Tenant/Name"
-              valueLabel="Key"
-            />
-          ) : (
+          {config.type === "apikey" && (
+            <>
+              <TextInput
+                label="API Key Header"
+                description="Header to read API key from. Default: X-API-Key"
+                placeholder="X-API-Key"
+                value={config.header || ""}
+                onChange={(e) => updateConfig("header", e.currentTarget.value)}
+              />
+              <KeyValueList
+                title="API Keys"
+                prefix="key_"
+                placeholderKey="tenant-name"
+                placeholderValue="actual-api-key"
+                keyLabel="Tenant/Name"
+                valueLabel="Key"
+              />
+            </>
+          )}
+          {config.type === "basic" && (
+            <>
+              <TextInput
+                label="Users"
+                description="Single: use Username + Password below. Multiple: user1:pass1,user2:pass2"
+                placeholder="admin:secret,user:pass"
+                value={config.users || ""}
+                onChange={(e) => updateConfig("users", e.currentTarget.value)}
+              />
+              <Group grow>
+                <TextInput
+                  label="Username (single user)"
+                  placeholder="admin"
+                  value={config.username || ""}
+                  onChange={(e) =>
+                    updateConfig("username", e.currentTarget.value)
+                  }
+                />
+                <TextInput
+                  label="Password (single user)"
+                  type="password"
+                  placeholder="••••••••"
+                  value={config.password || ""}
+                  onChange={(e) =>
+                    updateConfig("password", e.currentTarget.value)
+                  }
+                />
+              </Group>
+              <TextInput
+                label="Realm"
+                description="Shown in browser auth prompt"
+                placeholder="Gateon"
+                value={config.realm || ""}
+                onChange={(e) => updateConfig("realm", e.currentTarget.value)}
+              />
+            </>
+          )}
+          {config.type === "jwt" && (
             <>
               <TextInput
                 label="Issuer"
@@ -195,6 +283,58 @@ export function MiddlewareConfigEditor({ type, config, onChange }: Props) {
     case "headers":
       return (
         <Stack gap="md">
+          <Text size="sm" fw={600} c="dimmed" tt="uppercase">
+            HSTS (Traefik-style)
+          </Text>
+          <Group grow>
+            <NumberInput
+              label="STS Seconds (max-age)"
+              description="Set > 0 to add Strict-Transport-Security. 0 = disabled."
+              value={parseInt(config.sts_seconds) || 0}
+              onChange={(val) =>
+                updateConfig("sts_seconds", (val ?? 0).toString())
+              }
+              min={0}
+              placeholder="31536000"
+            />
+            <Switch
+              label="Include Subdomains"
+              description="stsIncludeSubdomains"
+              checked={config.sts_include_subdomains === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "sts_include_subdomains",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+              mt={20}
+            />
+          </Group>
+          <Group grow>
+            <Switch
+              label="Preload"
+              description="Allow HSTS preload list submission"
+              checked={config.sts_preload === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "sts_preload",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+            />
+            <Switch
+              label="Force STS (HTTP dev)"
+              description="Add header over HTTP (for development)"
+              checked={config.force_sts_header === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "force_sts_header",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+            />
+          </Group>
+          <Divider label="Custom Headers" labelPosition="center" />
           <KeyValueList
             title="Add Request Headers"
             prefix="add_request_"
@@ -212,6 +352,12 @@ export function MiddlewareConfigEditor({ type, config, onChange }: Props) {
           <KeyValueList
             title="Add Response Headers"
             prefix="add_response_"
+            placeholderKey="X-Header"
+            placeholderValue="Value"
+          />
+          <KeyValueList
+            title="Set Response Headers"
+            prefix="set_response_"
             placeholderKey="X-Header"
             placeholderValue="Value"
           />
@@ -417,9 +563,151 @@ export function MiddlewareConfigEditor({ type, config, onChange }: Props) {
 
     case "compress":
       return (
-        <Text size="sm" c="dimmed">
-          No configuration needed for Gzip compression.
-        </Text>
+        <Stack gap="md">
+          <NumberInput
+            label="Min Response Body (bytes)"
+            description="Only compress responses larger than this. Default: 1024"
+            value={parseInt(config.min_response_body_bytes) || 1024}
+            onChange={(val) =>
+              updateConfig(
+                "min_response_body_bytes",
+                (val ?? 1024).toString()
+              )
+            }
+            min={0}
+          />
+          <TextInput
+            label="Excluded Content-Types"
+            description="Comma-separated; never compress these (e.g. image/png,image/jpeg)"
+            placeholder="image/png, image/jpeg, image/gif"
+            value={config.excluded_content_types || ""}
+            onChange={(e) =>
+              updateConfig("excluded_content_types", e.currentTarget.value)
+            }
+          />
+          <TextInput
+            label="Included Content-Types"
+            description="If set, only compress these; leave empty to compress all except excluded"
+            placeholder="text/html, application/json"
+            value={config.included_content_types || ""}
+            onChange={(e) =>
+              updateConfig("included_content_types", e.currentTarget.value)
+            }
+          />
+          <NumberInput
+            label="Max Buffer (bytes)"
+            description="Responses larger than this bypass compression (stream through). Default: 10MB"
+            value={
+              parseInt(config.max_buffer_bytes) || 10 * 1024 * 1024
+            }
+            onChange={(val) =>
+              updateConfig(
+                "max_buffer_bytes",
+                (val ?? 10 * 1024 * 1024).toString()
+              )
+            }
+            min={1024}
+          />
+        </Stack>
+      );
+
+    case "forwardauth":
+      return (
+        <Stack gap="md">
+          <TextInput
+            label="Address"
+            description="Auth service URL (required). e.g. https://auth.example.com/verify"
+            placeholder="https://auth.example.com/verify"
+            value={config.address || ""}
+            onChange={(e) =>
+              updateConfig("address", e.currentTarget.value)
+            }
+            required
+          />
+          <TextInput
+            label="Auth Response Headers"
+            description="Comma-separated headers from auth 2xx to copy to the forwarded request (e.g. X-Forwarded-User)"
+            placeholder="X-Forwarded-User, X-Auth-Request-Email"
+            value={config.auth_response_headers || ""}
+            onChange={(e) =>
+              updateConfig("auth_response_headers", e.currentTarget.value)
+            }
+          />
+          <TextInput
+            label="Auth Request Headers"
+            description="Comma-separated headers to forward to auth service. Empty = all headers"
+            placeholder="Cookie, Authorization"
+            value={config.auth_request_headers || ""}
+            onChange={(e) =>
+              updateConfig("auth_request_headers", e.currentTarget.value)
+            }
+          />
+          <Group grow>
+            <NumberInput
+              label="Max Body Size (bytes)"
+              description="Limit when forwarding body. Default 1MB. -1 = unlimited"
+              value={
+                config.max_body_size
+                  ? parseInt(config.max_body_size)
+                  : 1048576
+              }
+              onChange={(val) =>
+                updateConfig(
+                  "max_body_size",
+                  (val ?? 1048576).toString()
+                )
+              }
+              min={-1}
+            />
+            <Switch
+              label="Trust Forward Header"
+              description="Trust X-Forwarded-* from incoming request"
+              checked={config.trust_forward_header === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "trust_forward_header",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+              mt={20}
+            />
+          </Group>
+          <Group grow>
+            <Switch
+              label="Forward Body"
+              description="Forward request body to auth service"
+              checked={config.forward_body === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "forward_body",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+            />
+            <Switch
+              label="Preserve Request Method"
+              description="Use same HTTP method for auth request"
+              checked={config.preserve_request_method === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "preserve_request_method",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+            />
+            <Switch
+              label="TLS Insecure Skip Verify"
+              description="Skip TLS cert verification (dev only)"
+              checked={config.tls_insecure_skip_verify === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "tls_insecure_skip_verify",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+            />
+          </Group>
+        </Stack>
       );
 
     case "grpcweb":
@@ -428,6 +716,52 @@ export function MiddlewareConfigEditor({ type, config, onChange }: Props) {
           No configuration needed. This middleware automatically converts
           gRPC-Web requests to standard gRPC.
         </Text>
+      );
+
+    case "ipfilter":
+      return (
+        <Stack gap="md">
+          <TextInput
+            label="Allow List (comma-separated IPs/CIDRs)"
+            placeholder="10.0.0.0/8, 192.168.1.1"
+            value={config.allow_list || ""}
+            onChange={(e) => updateConfig("allow_list", e.currentTarget.value)}
+            description="If set, only these IPs are allowed. Empty = allow all (except deny list)."
+          />
+          <TextInput
+            label="Deny List (comma-separated IPs/CIDRs)"
+            placeholder="10.0.0.100, 192.168.0.0/24"
+            value={config.deny_list || ""}
+            onChange={(e) => updateConfig("deny_list", e.currentTarget.value)}
+            description="These IPs are always rejected. Takes precedence over allow list."
+          />
+        </Stack>
+      );
+
+    case "cache":
+      return (
+        <Stack gap="md">
+          <NumberInput
+            label="TTL (seconds)"
+            value={parseInt(config.ttl_seconds) || 60}
+            onChange={(val) => updateConfig("ttl_seconds", (val ?? 60).toString())}
+            min={1}
+            description="How long to cache GET responses"
+          />
+          <NumberInput
+            label="Max Entries"
+            value={parseInt(config.max_entries) || 1024}
+            onChange={(val) => updateConfig("max_entries", (val ?? 1024).toString())}
+            min={1}
+          />
+          <NumberInput
+            label="Max Body (KB)"
+            value={parseInt(config.max_body_kb) || 256}
+            onChange={(val) => updateConfig("max_body_kb", (val ?? 256).toString())}
+            min={1}
+            description="Skip caching responses larger than this"
+          />
+        </Stack>
       );
 
     default:

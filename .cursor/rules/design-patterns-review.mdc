@@ -1,0 +1,97 @@
+---
+description: Design patterns in gateon — current usage and implementation opportunities
+globs: internal/**/*.go,pkg/**/*.go
+alwaysApply: false
+---
+
+# Design Patterns Review — Gateon
+
+## Patterns Already in Use
+
+| Pattern | Location | Notes |
+|---------|----------|-------|
+| **Repository/Store** | `config/interfaces.go` | RouteStore, ServiceStore, EntryPointStore, MiddlewareStore, TLSOptionStore, GlobalConfigStore; implemented by `*Registry` |
+| **Factory** | `middleware/factory.go` | `Factory.Create(m)` builds middleware from config by type |
+| **Strategy** | `entrypoint/entrypoint.go` | `Runner` (httpRunner, tcpRunner, udpRunner) per entrypoint type |
+| **Strategy** | `pkg/proxy/proxy.go` | `LoadBalancer` (RoundRobin, LeastConn, WeightedRoundRobin) |
+| **Options** | `server/options.go` | `NewServer(opts...ServerOption)` — functional options pattern |
+| **Chain of Responsibility** | `router.ApplyRouteMiddlewares` | Middleware wraps handler in chain |
+| **Decorator** | `middleware/` | Middleware wraps `http.Handler`; `StatusResponseWriter` wraps ResponseWriter |
+| **Adapter** | `entrypoint/entrypoint.go` | CORSProvider, GRPCWebHandler, L4Resolver adapt external libs |
+| **Adapter** | `logger/logger.go` | zerologAdapter adapts zerolog to Logger |
+| **Proxy** | `pkg/proxy/proxy.go` | ProxyHandler forwards HTTP to backends |
+| **Dependency Injection** | `server/`, `domain/` | Server holds store interfaces (DIP); domain services take Store interfaces; options inject implementations |
+| **Singleton** | `telemetry/store.go`, `logger/` | pathStatsStore (sync.Once); global logger |
+
+## Implementation Opportunities
+
+### 1. Abstract Factory / Load Balancer Factory
+
+**Current:** `NewProxyHandler` switches on `LoadBalancerPolicy` and creates concrete LBs.
+
+**Opportunity:** Introduce `LoadBalancerFactory` interface so proxy package depends on abstraction; policy selection stays outside.
+
+```go
+type LoadBalancerFactory interface {
+    Create(targets []*gateonv1.Target) LoadBalancer
+}
+```
+
+### 2. Builder for ProxyHandler
+
+**Current:** `NewProxyHandler` is a large function (transport selection, LB creation, health checks).
+
+**Opportunity:** Use Builder pattern for stepwise construction of ProxyHandler (targets, LB policy, transport type, health check, etc.).
+
+### 3. ~~Service Lookup Interface~~ ✅ Done
+
+**Current:** N/A — implemented.
+
+### 4. Template Method for Entry Point Runners
+
+**Current:** `httpRunner`, `tcpRunner`, `udpRunner` share structure: resolve deps → listen → loop → handle.
+
+**Opportunity:** Extract common skeleton (e.g. `runEntrypoint(ctx, ep, deps, listenFn, handleFn)`) if duplication grows.
+
+### 5. State for Circuit Breaker
+
+**Current:** Circuit breaker states (CLOSED, OPEN, HALF-OPEN) appear in UI; backend may use simple alive flags.
+
+**Opportunity:** Implement explicit State pattern for target health (CircuitState interface + ClosedState, OpenState, HalfOpenState) for clearer transitions.
+
+### 6. Visitor for Config Export/Validation
+
+**Current:** Config import/export and validation likely traverse routes, services, etc. ad hoc.
+
+**Opportunity:** Define `ConfigVisitor` and `Accept(visitor)` on domain types for validation, export, and audit without coupling.
+
+### 7. Object Pool
+
+**Current:** `sync.Pool` for buffers in proxy; `sync.Map` for proxy handlers.
+
+**Opportunity:** Consider pool for `httputil.ReverseProxy` instances or connections where allocation pressure exists.
+
+### 8. Observer for Proxy Invalidation
+
+**Current:** Domain services call proxy invalidation directly.
+
+**Opportunity:** Introduce `ProxyInvalidationObserver` so domain emits events; server subscribes and invalidates. Decouples domain from server.
+
+---
+
+## Implemented (Production Ready)
+
+| Recommendation | Implementation |
+|----------------|----------------|
+| **Load Balancer Factory** | `pkg/proxy/lb_factory.go` — LoadBalancerFactory, DefaultLoadBalancerFactory |
+| **ProxyHandler Builder** | `pkg/proxy/builder.go` — ProxyHandlerBuilder, stepwise construction |
+| **ServiceStore (DIP)** | NewProxyHandler(rt, config.ServiceStore) — depends on interface |
+| **ProxyInvalidator (Observer)** | domain.ProxyInvalidator, server.serverProxyInvalidator |
+| **Circuit Breaker State** | TargetStats.CircuitState (CLOSED/OPEN), LoadBalancer.SetAlive |
+| **Config Visitor** | internal/config/visitor.go — ConfigVisitor, Accept* |
+| **Server Store Interfaces** | Server holds RouteStore, ServiceStore, etc. (interfaces); options inject concrete registries |
+| **ProxyCache (SRP)** | `internal/server/proxy_cache.go` — proxy creation, caching, invalidation; Server composes ProxyCache |
+| **L4Resolver interfaces** | `entrypoint.TCPProxy`, `entrypoint.UDPProxy` — L4Resolver returns interfaces; `WrapL4Resolver` adapts *l4.Resolver |
+| **BaseHandlerDeps Auth** | BaseHandlerDeps.Auth auth.Service — depends on interface, not ApiService |
+| **context.Context** | Store and domain service interfaces use `ctx` as first parameter |
+| **ApiServiceConfig** | `internal/api/config.go` — one type per file |

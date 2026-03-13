@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -81,13 +82,13 @@ func (r *GlobalRegistry) saveLocked() error {
 	return nil
 }
 
-func (r *GlobalRegistry) Get() *gateonv1.GlobalConfig {
+func (r *GlobalRegistry) Get(ctx context.Context) *gateonv1.GlobalConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.config
 }
 
-func (r *GlobalRegistry) Update(conf *gateonv1.GlobalConfig) error {
+func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.config = conf

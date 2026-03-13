@@ -4,19 +4,23 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gateon/gateon/internal/api"
+	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/config"
+	"github.com/gateon/gateon/internal/httputil"
+	"github.com/gateon/gateon/internal/logger"
 	"github.com/gateon/gateon/internal/middleware"
 	"github.com/gateon/gateon/internal/router"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 )
 
 // BaseHandlerDeps holds narrow dependencies for CreateBaseHandler (Interface Segregation).
+// Auth may be nil when auth is disabled.
 type BaseHandlerDeps struct {
-	ProxyHandler http.Handler
-	RouteStore   config.RouteStore
-	GlobalReg    config.GlobalConfigStore
-	ApiService   *api.ApiService
+	ProxyHandler  http.Handler
+	RouteStore    config.RouteStore
+	GlobalReg     config.GlobalConfigStore
+	Auth          auth.Service
+	LoginLimiter  middleware.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
 }
 
 // CreateBaseHandler builds the main HTTP handler that routes to proxy or local API/UI.
@@ -29,7 +33,7 @@ func CreateBaseHandler(
 	handler := deps.ProxyHandler
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rt := router.SelectRoute(r, deps.RouteStore.List()); rt != nil {
+		if rt := router.SelectRoute(r, deps.RouteStore.List(r.Context())); rt != nil {
 			handler.ServeHTTP(w, r)
 			return
 		}
@@ -42,7 +46,7 @@ func CreateBaseHandler(
 			uiHandler.ServeHTTP(w, r)
 		})
 
-		if gc := deps.GlobalReg.Get(); gc != nil && gc.Auth != nil && gc.Auth.Enabled && deps.ApiService.Auth != nil {
+		if gc := deps.GlobalReg.Get(r.Context()); gc != nil && gc.Auth != nil && gc.Auth.Enabled && deps.Auth != nil {
 			isAPI := strings.HasPrefix(r.URL.Path, "/v1/")
 			isMetrics := r.URL.Path == "/metrics"
 			isLogin := r.URL.Path == "/v1/login"
@@ -54,7 +58,20 @@ func CreateBaseHandler(
 				internal.ServeHTTP(w, r)
 				return
 			}
-			if isLogin || isSetup || isHealth || isStatus {
+			if isLogin {
+				if deps.LoginLimiter != nil {
+					limited := deps.LoginLimiter.Handler(middleware.PerIP)(internal)
+					rec := &httputil.StatusRecorder{ResponseWriter: w, Status: 200}
+					limited.ServeHTTP(rec, r)
+					if rec.Status == http.StatusTooManyRequests {
+						logger.SecurityEvent("login_rate_limit", r, "too_many_attempts")
+					}
+				} else {
+					internal.ServeHTTP(w, r)
+				}
+				return
+			}
+			if isSetup || isHealth || isStatus {
 				internal.ServeHTTP(w, r)
 				return
 			}
@@ -63,7 +80,7 @@ func CreateBaseHandler(
 					r.Header.Set("Authorization", "Bearer "+auth)
 				}
 			}
-			middleware.PasetoAuth(deps.ApiService.Auth)(internal).ServeHTTP(w, r)
+			middleware.PasetoAuth(deps.Auth)(internal).ServeHTTP(w, r)
 			return
 		}
 

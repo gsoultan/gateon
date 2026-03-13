@@ -9,13 +9,33 @@ import (
 	"time"
 
 	"github.com/gateon/gateon/internal/httputil"
+	"github.com/gateon/gateon/internal/telemetry"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/time/rate"
+)
+
+var (
+	rateLimitRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gateon_ratelimit_rejected_total",
+		Help: "Total number of requests rejected by the rate limiter",
+	}, []string{"backend"})
 )
 
 // RateLimiter defines the interface for rate limiting.
 type RateLimiter interface {
 	Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler
+}
+
+// NoopRateLimiter passes all requests through; use when GATEON_ENTRYPOINT_RATE_LIMIT_QPS=0 for high throughput.
+type NoopRateLimiter struct{}
+
+// Handler returns a middleware that passes through without rate limiting.
+func (NoopRateLimiter) Handler(_ func(*http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return next
+	}
 }
 
 // LocalRateLimiter implements a flexible local rate limiter.
@@ -81,6 +101,8 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 
 			limiter := rl.getLimiter(key)
 			if !limiter.Allow() {
+				rateLimitRejectedTotal.WithLabelValues("local").Inc()
+				telemetry.IncRateLimitRejected("local")
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests", "")
 				return
@@ -146,6 +168,8 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			}
 
 			if int(count.Val()) > rl.rate+rl.burst {
+				rateLimitRejectedTotal.WithLabelValues("redis").Inc()
+				telemetry.IncRateLimitRejected("redis")
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests (distributed)", "")
 				return

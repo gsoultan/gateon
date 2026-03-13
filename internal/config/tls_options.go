@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -84,12 +85,12 @@ func (r *TLSOptionRegistry) saveLocked() error {
 	return nil
 }
 
-func (r *TLSOptionRegistry) List() []*gateonv1.TLSOption {
-	items, _ := r.ListPaginated(0, 0, "")
+func (r *TLSOptionRegistry) List(ctx context.Context) []*gateonv1.TLSOption {
+	items, _ := r.ListPaginated(ctx, 0, 0, "")
 	return items
 }
 
-func (r *TLSOptionRegistry) ListPaginated(page, pageSize int32, search string) ([]*gateonv1.TLSOption, int32) {
+func (r *TLSOptionRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.TLSOption, int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -126,20 +127,20 @@ func (r *TLSOptionRegistry) ListPaginated(page, pageSize int32, search string) (
 	return filtered[start:end], totalCount
 }
 
-func (r *TLSOptionRegistry) Get(id string) (*gateonv1.TLSOption, bool) {
+func (r *TLSOptionRegistry) Get(ctx context.Context, id string) (*gateonv1.TLSOption, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	opt, ok := r.options[id]
 	return opt, ok
 }
 
-func (r *TLSOptionRegistry) All() map[string]*gateonv1.TLSOption {
+func (r *TLSOptionRegistry) All(ctx context.Context) map[string]*gateonv1.TLSOption {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return maps.Clone(r.options)
 }
 
-func (r *TLSOptionRegistry) Update(opt *gateonv1.TLSOption) error {
+func (r *TLSOptionRegistry) Update(ctx context.Context, opt *gateonv1.TLSOption) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -147,7 +148,7 @@ func (r *TLSOptionRegistry) Update(opt *gateonv1.TLSOption) error {
 	return r.saveLocked()
 }
 
-func (r *TLSOptionRegistry) Delete(id string) error {
+func (r *TLSOptionRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

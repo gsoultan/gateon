@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -84,12 +85,12 @@ func (r *ServiceRegistry) saveLocked() error {
 	return nil
 }
 
-func (r *ServiceRegistry) List() []*gateonv1.Service {
-	items, _ := r.ListPaginated(0, 0, "")
+func (r *ServiceRegistry) List(ctx context.Context) []*gateonv1.Service {
+	items, _ := r.ListPaginated(ctx, 0, 0, "")
 	return items
 }
 
-func (r *ServiceRegistry) ListPaginated(page, pageSize int32, search string) ([]*gateonv1.Service, int32) {
+func (r *ServiceRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Service, int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -126,14 +127,14 @@ func (r *ServiceRegistry) ListPaginated(page, pageSize int32, search string) ([]
 	return filtered[start:end], totalCount
 }
 
-func (r *ServiceRegistry) Get(id string) (*gateonv1.Service, bool) {
+func (r *ServiceRegistry) Get(ctx context.Context, id string) (*gateonv1.Service, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	s, ok := r.services[id]
 	return s, ok
 }
 
-func (r *ServiceRegistry) Update(s *gateonv1.Service) error {
+func (r *ServiceRegistry) Update(ctx context.Context, s *gateonv1.Service) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -141,7 +142,7 @@ func (r *ServiceRegistry) Update(s *gateonv1.Service) error {
 	return r.saveLocked()
 }
 
-func (r *ServiceRegistry) Delete(id string) error {
+func (r *ServiceRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

@@ -65,6 +65,34 @@ export default function RoutesPage() {
     open();
   };
 
+  const pauseMutation = useMutation({
+    mutationFn: async (route: Route) => {
+      const res = await apiFetch("/v1/routes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...route, disabled: !route.disabled }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["routes"] });
+      notifications.show({ title: "Route Updated", message: "Pause/Resume applied.", color: "blue" });
+    },
+    onError: (err: Error) => {
+      notifications.show({ title: "Error", message: err.message, color: "red" });
+    },
+  });
+
+  const handleClone = (route: Route) => {
+    setEditingRoute({
+      ...route,
+      id: "",
+      name: `${route.name || route.id} (copy)`,
+    });
+    open();
+  };
+
   return (
     <Stack gap="lg">
       <Group justify="space-between" align="center">
@@ -89,6 +117,8 @@ export default function RoutesPage() {
       <Suspense fallback={ROUTE_LIST_FALLBACK}>
         <RouteList
           onEdit={handleEdit}
+          onClone={handleClone}
+          onPause={(route) => pauseMutation.mutate(route)}
           onDelete={(id) => deleteMutation.mutate(id)}
         />
       </Suspense>
@@ -98,7 +128,7 @@ export default function RoutesPage() {
         onClose={close}
         title={
           <Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>
-            {editingRoute ? "Edit Route" : "Create New Route"}
+            {editingRoute?.id ? "Edit Route" : editingRoute ? "Clone Route" : "Create New Route"}
           </Text>
         }
         position="right"

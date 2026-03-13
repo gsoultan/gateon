@@ -3,8 +3,10 @@ package middleware
 import (
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gateon/gateon/internal/logger"
@@ -54,6 +56,17 @@ func (w *StatusResponseWriter) WriteHeader(code int) {
 
 // AccessLog returns a middleware that logs request details.
 func AccessLog(routeID string) Middleware {
+	return AccessLogSampled(routeID, accessLogSampleRate())
+}
+
+// AccessLogSampled returns a middleware that logs a sample of requests.
+// When sampleRate is 0, no requests are logged. When 1, all requests are logged.
+// When >1, logs approximately 1 in sampleRate requests (for high-throughput, use 1000+).
+func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
+	if sampleRate == 0 {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	var counter uint64
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -61,18 +74,33 @@ func AccessLog(routeID string) Middleware {
 
 			next.ServeHTTP(sw, r)
 
-			duration := time.Since(start)
-			logger.L.Info().
-				Str("host", r.Host).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Str("remote_addr", r.RemoteAddr).
-				Int("status", sw.Status).
-				Dur("latency", duration).
-				Str("route_id", routeID).
-				Msg("access log")
+			if sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0) {
+				duration := time.Since(start)
+				logger.L.Info().
+					Str("host", r.Host).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Str("remote_addr", r.RemoteAddr).
+					Int("status", sw.Status).
+					Dur("latency", duration).
+					Str("route_id", routeID).
+					Msg("access log")
+			}
 		})
 	}
+}
+
+// accessLogSampleRate returns GATEON_ACCESS_LOG_SAMPLE_RATE (1=all, 0=none, N=1-in-N). Default 1.
+func accessLogSampleRate() uint32 {
+	s := os.Getenv("GATEON_ACCESS_LOG_SAMPLE_RATE")
+	if s == "" {
+		return 1
+	}
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil || n == 0 {
+		return 0 // invalid or 0 => no access log
+	}
+	return uint32(n)
 }
 
 // Metrics returns a middleware that records prometheus metrics.
