@@ -248,9 +248,8 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	var chain []middleware.Middleware
 	mwFactory := middleware.NewFactory(redisClient)
 
-	// Infrastructure Middlewares (Logging & Monitoring)
-	chain = append(chain, middleware.AccessLog(rt.Id))
-	chain = append(chain, middleware.Metrics(rt.Id))
+	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
+	chain = append(chain, middleware.Recovery(), middleware.AccessLog(rt.Id), middleware.Metrics(rt.Id))
 
 	// Resolve and append user-defined middlewares from the registry
 	for _, mid := range rt.Middlewares {

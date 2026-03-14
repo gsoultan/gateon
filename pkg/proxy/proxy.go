@@ -27,7 +27,11 @@ type syncBufferPool struct {
 }
 
 func (p *syncBufferPool) Get() []byte {
-	return p.pool.Get().([]byte)
+	b := p.pool.Get()
+	if b == nil {
+		return make([]byte, 32*1024)
+	}
+	return b.([]byte)
 }
 
 func (p *syncBufferPool) Put(b []byte) {
@@ -271,7 +275,7 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 			return t
 		}
 	}
-	return lb.targets[0]
+	return nil // defensive: loop should always return; no alive target
 }
 
 func (lb *WeightedRoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
@@ -335,6 +339,7 @@ type ProxyHandler struct {
 	routeType       string
 	healthCheckPath string
 	stopHealthCheck chan struct{}
+	closeOnce       sync.Once
 	transport       http.RoundTripper
 	proxyPool       sync.Map // map[targetURL string]*httputil.ReverseProxy
 }
@@ -392,10 +397,12 @@ func (h *ProxyHandler) runHealthCheck(urls []string) {
 }
 
 func (h *ProxyHandler) Close() {
-	close(h.stopHealthCheck)
-	if c, ok := h.transport.(interface{ Close() error }); ok {
-		_ = c.Close()
-	}
+	h.closeOnce.Do(func() {
+		close(h.stopHealthCheck)
+		if c, ok := h.transport.(interface{ Close() error }); ok {
+			_ = c.Close()
+		}
+	})
 }
 
 // DrainAndClose waits for in-flight requests to complete (up to timeout), then closes.
