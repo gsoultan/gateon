@@ -29,6 +29,30 @@ archives:
       - goos: windows
         formats:
           - zip
+    files:
+      - packaging/gateon-service.xml
+    wrap_in_directory: true
+
+nfpms:
+  - id: default
+    package_name: gateon
+    bindir: /usr/bin
+    formats:
+      - deb
+      - rpm
+    description: Gateon - API Gateway and Reverse Proxy
+    vendor: Gateon
+    homepage: https://github.com/gateon/gateon
+    contents:
+      - src: packaging/gateon.service
+        dst: /lib/systemd/system/gateon.service
+      - dst: /etc/gateon
+        type: dir
+        file_info:
+          mode: 0755
+    scripts:
+      postinstall: scripts/postinstall.sh
+      postremove: scripts/postremove.sh
 
 checksum:
   name_template: checksums.txt

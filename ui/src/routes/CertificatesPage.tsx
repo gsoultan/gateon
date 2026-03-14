@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal } from '@mantine/core'
+import { useState, useEffect, useMemo } from 'react'
+import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center } from '@mantine/core'
 import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, IconKey, IconTrash, IconPencil } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import type { GlobalConfig, Certificate } from '../types/gateon'
@@ -132,6 +132,16 @@ export default function CertificatesPage() {
   }
 
   const certificates = config.tls?.certificates || []
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+  const paginatedCerts = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE
+    return certificates.slice(start, start + PAGE_SIZE)
+  }, [certificates, page])
+  const totalPages = Math.max(1, Math.ceil(certificates.length / PAGE_SIZE))
+  useEffect(() => {
+    if (page > totalPages && totalPages > 0) setPage(totalPages)
+  }, [certificates.length, totalPages, page])
 
   return (
     <Stack gap="xl">
@@ -151,7 +161,7 @@ export default function CertificatesPage() {
 
       <Card withBorder padding={0} radius="lg" shadow="xs">
         <ScrollArea>
-          <Table verticalSpacing="md" horizontalSpacing="xl">
+          <Table verticalSpacing="md" horizontalSpacing="xl" highlightOnHover>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Name</Table.Th>
@@ -163,12 +173,14 @@ export default function CertificatesPage() {
             <Table.Tbody>
               {certificates.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={4} style={{ textAlign: 'center' }}>
-                    <Text c="dimmed" py="xl">No certificates configured</Text>
+                  <Table.Td colSpan={4}>
+                    <Center py="xl">
+                      <Text c="dimmed">No certificates configured</Text>
+                    </Center>
                   </Table.Td>
                 </Table.Tr>
               ) : (
-                certificates.map((cert) => (
+                paginatedCerts.map((cert) => (
                   <Table.Tr key={cert.id}>
                     <Table.Td>
                       <Group gap="sm">
@@ -204,6 +216,22 @@ export default function CertificatesPage() {
             </Table.Tbody>
           </Table>
         </ScrollArea>
+        {certificates.length > PAGE_SIZE && (
+          <Box p="md" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+            <Group justify="space-between" align="center">
+              <Text size="xs" c="dimmed">
+                Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, certificates.length)} of {certificates.length}
+              </Text>
+              <Pagination
+                total={totalPages}
+                value={page}
+                onChange={setPage}
+                size="sm"
+                radius="md"
+              />
+            </Group>
+          </Box>
+        )}
       </Card>
 
       <Modal opened={opened} onClose={close} title={editingCert?.name ? 'Edit Certificate' : 'Add Certificate'} radius="lg">

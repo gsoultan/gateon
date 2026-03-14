@@ -1,0 +1,28 @@
+[Unit]
+Description=Gateon - API Gateway and Reverse Proxy
+Documentation=https://github.com/gateon/gateon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gateon
+Restart=on-failure
+RestartSec=5s
+
+# Config: place global.json, routes.json, etc. in /etc/gateon
+WorkingDirectory=/etc/gateon
+
+# Override with: systemctl edit gateon
+# Environment=PORT=8080
+# Environment=GLOBAL_CONFIG_FILE=/etc/gateon/global.json
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/etc/gateon /var/lib/gateon
+
+[Install]
+WantedBy=multi-user.target

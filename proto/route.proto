@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+message ListRoutesRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string search = 3;
+}
+
+message ListRoutesResponse {
+  repeated Route routes = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateRouteRequest {
+  Route route = 1;
+}
+
+message UpdateRouteResponse {
+  bool success = 1;
+}
+
+message DeleteRouteRequest {
+  string id = 1;
+}
+
+message DeleteRouteResponse {
+  bool success = 1;
+}
+
+message Route {
+  string id = 1;
+  string name = 2;
+  string type = 3; // "http", "grpc", "graphql", "tcp", "udp"
+  repeated string entrypoints = 4;
+  string rule = 5;  // For L4 routes use "L4()" (matching by entrypoint only)
+  int32 priority = 6;
+  repeated string middlewares = 7;
+  string service_id = 8;
+  RouteTLSConfig tls = 9;
+  bool disabled = 10; // When true, route is not matched (paused)
+}
+
+message RouteTLSConfig {
+  repeated string certificate_ids = 1;
+  string option_id = 2;
+}

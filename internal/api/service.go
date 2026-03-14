@@ -8,6 +8,7 @@ import (
 
 	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/config"
+	"github.com/gateon/gateon/internal/db"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
@@ -21,6 +22,11 @@ type ApiService struct {
 	Middlewares config.MiddlewareStore
 	TLSOptions  config.TLSOptionStore
 	Auth        auth.Service
+}
+
+// GetGlobals returns the global config store for REST handlers.
+func (s *ApiService) GetGlobals() config.GlobalConfigStore {
+	return s.Globals
 }
 
 // NewApiService creates an ApiService from config (Factory pattern).
@@ -240,6 +246,10 @@ func (s *ApiService) Login(_ context.Context, req *gateonv1.LoginRequest) (*gate
 }
 
 func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error) {
+	// First run: no global.json file — setup required
+	if s.Globals != nil && !s.Globals.ConfigFileExists() {
+		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
+	}
 	if s.Auth == nil {
 		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
 	}
@@ -269,16 +279,16 @@ func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupReq
 func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error) {
 	if s.Auth == nil {
 		// Initialize Auth Manager if it doesn't exist
-		sqlitePath := "gateon.db"
+		databaseURL := "gateon.db"
 		if s.Globals != nil {
 			conf := s.Globals.Get(ctx)
-			if conf.Auth != nil && conf.Auth.SqlitePath != "" {
-				sqlitePath = conf.Auth.SqlitePath
+			if conf != nil && conf.Auth != nil {
+				databaseURL = db.AuthDatabaseURL(conf.Auth)
 			}
 		}
 
 		var err error
-		s.Auth, err = auth.NewManager(sqlitePath, req.PasetoSecret)
+		s.Auth, err = auth.NewManager(databaseURL, req.PasetoSecret)
 		if err != nil {
 			return &gateonv1.SetupResponse{Success: false, Error: "failed to initialize auth manager: " + err.Error()}, nil
 		}

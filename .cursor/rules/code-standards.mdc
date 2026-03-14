@@ -17,6 +17,14 @@ All generated code must follow these guidelines.
 
 - **Separate files and folders by domain** — structure by business/feature domain, not technical type
 
+- **String queries as constants/vars** — put SQL, GraphQL, or other query strings in a dedicated file (e.g. `queries.go`, `queries.sql`) within the domain; use `const` or `var`, avoid inline literals
+
+## Proto
+
+- **Separate proto files by domain** — one proto file per domain/feature; avoid God proto files
+- **Keep each file clear and focused** — one responsibility per file; use `import` to share messages across files
+- **No monolithic proto** — split large `.proto` files into smaller, domain-scoped files (e.g. `route.proto`, `service.proto`, `auth.proto`)
+
 ## Functions & Algorithms
 
 - **Keep the algorithm in a function small** — extract complex logic into smaller, well-named functions

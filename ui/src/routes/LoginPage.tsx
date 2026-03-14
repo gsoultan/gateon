@@ -235,12 +235,6 @@ export default function LoginPage() {
                   </Button>
                 </Stack>
               </form>
-
-              <Box mt={30} p="md" style={{ borderRadius: "8px", background: "var(--mantine-color-gray-0)" }}>
-                <Text size="xs" ta="center" c="dimmed">
-                  Developer access: <code style={{ fontWeight: 700 }}>admin</code> / <code style={{ fontWeight: 700 }}>password</code>
-                </Text>
-              </Box>
             </Paper>
           </Box>
         </Box>

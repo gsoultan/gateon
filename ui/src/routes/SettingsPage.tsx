@@ -12,10 +12,8 @@ import {
   Switch,
   useMantineColorScheme,
   Alert,
-  SegmentedControl,
   Paper,
   Box,
-  Center,
   Select,
   MultiSelect,
   ActionIcon,
@@ -24,31 +22,39 @@ import {
   CopyButton,
 } from "@mantine/core";
 import {
-  IconSun,
-  IconMoon,
   IconInfoCircle,
-  IconDeviceDesktop,
-  IconPalette,
-  IconAdjustments,
   IconNetwork,
   IconShieldLock,
   IconBolt,
   IconCopy,
   IconCheck,
-  IconRocket,
-  IconDownload,
-  IconUpload,
   IconUsers,
   IconKey,
   IconChartDots,
+  IconRefresh,
 } from "@tabler/icons-react";
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
+import { GeneralSettingsCard } from "../components/settings/GeneralSettingsCard";
+import { PresetsCard } from "../components/settings/PresetsCard";
+import { AppearanceCard } from "../components/settings/AppearanceCard";
 import { usePermissions } from "../hooks/usePermissions";
 import { useAuthStore } from "../store/useAuthStore";
 import { useApiConfigStore } from "../store/useApiConfigStore";
-import type { GlobalConfig } from "../types/gateon";
+import type { GlobalConfig, DatabaseConfig } from "../types/gateon";
+import { generateRandomString } from "../utils/random";
 import { Link } from "@tanstack/react-router";
 import { apiFetch } from "../hooks/useGateon";
+
+function inferDriver(
+  databaseUrl?: string,
+  sqlitePath?: string
+): DatabaseConfig["driver"] {
+  const raw = databaseUrl || sqlitePath || "";
+  if (raw.startsWith("postgres")) return "postgres";
+  if (raw.startsWith("mysql")) return "mysql";
+  if (raw.startsWith("mariadb")) return "mariadb";
+  return "sqlite";
+}
 
 export default function SettingsPage() {
   const { canEditGlobal, canImportConfig, canExportConfig } = usePermissions();
@@ -172,93 +178,18 @@ export default function SettingsPage() {
         </Text>
       </div>
 
-      <Card withBorder padding="xl" radius="lg" shadow="xs">
-        <Stack gap="md">
-          <Group gap="md">
-            <Paper p="xs" radius="md" bg="teal.6">
-              <IconRocket size={20} color="white" />
-            </Paper>
-            <div>
-              <Title order={4} fw={700}>
-                Quick Presets
-              </Title>
-              <Text c="dimmed" size="xs">
-                One-click apply common configuration scenarios.
-              </Text>
-            </div>
-          </Group>
-          <Group gap="sm">
-            <Button variant="light" color="gray" size="sm" radius="md" disabled={formDisabled} onClick={() => applyPreset("development")}>
-              Development
-            </Button>
-            <Button variant="light" color="blue" size="sm" radius="md" disabled={formDisabled} onClick={() => applyPreset("production")}>
-              Production
-            </Button>
-            <Button variant="light" color="teal" size="sm" radius="md" disabled={formDisabled} onClick={() => applyPreset("high-throughput")}>
-              High-Throughput (100k+ req/s)
-            </Button>
-          </Group>
-          <Text size="xs" c="dimmed">
-            Presets update Gateway Configuration below. Remember to save after applying.
-          </Text>
-        </Stack>
-      </Card>
+      <PresetsCard disabled={formDisabled} onApply={applyPreset} />
 
       <ConfigImportExportCard canImport={canImportConfig} canExport={canExportConfig} />
 
-      <Card withBorder padding="xl" radius="lg" shadow="xs">
-        <Stack gap="lg">
-          <Group gap="md">
-            <Paper p="xs" radius="md" bg="blue.6">
-              <IconAdjustments size={20} color="white" />
-            </Paper>
-            <div>
-              <Title order={4} fw={700}>
-                General Settings
-              </Title>
-              <Text c="dimmed" size="xs">
-                Configure UI behavior and connection to the gateway.
-              </Text>
-            </div>
-          </Group>
-
-          <Divider />
-
-          <Stack gap="md">
-            <TextInput
-              label="Gateway API URL"
-              description="The base URL of the Gateon Management API"
-              placeholder="http://localhost:8080"
-              value={apiUrlDraft}
-              onChange={(e) => setApiUrlDraft(e.currentTarget.value)}
-              radius="md"
-            />
-
-            <NumberInput
-              label="Metrics Refresh Interval (seconds)"
-              description="How often to poll the gateway for real-time metrics"
-              min={1}
-              max={60}
-              value={refreshIntervalDraft}
-              onChange={(val) =>
-                setRefreshIntervalDraft(typeof val === "number" ? val : 10)
-              }
-              radius="md"
-            />
-          </Stack>
-
-          <Group justify="flex-end" mt="md" gap="sm">
-            {generalSavedOk && (
-              <Text size="sm" c="green" fw={500}>
-                Saved
-              </Text>
-            )}
-            <Button onClick={handleSave} radius="md" px="xl">
-              Save Settings
-            </Button>
-          </Group>
-        </Stack>
-      </Card>
+      <GeneralSettingsCard
+        apiUrlDraft={apiUrlDraft}
+        setApiUrlDraft={setApiUrlDraft}
+        refreshIntervalDraft={refreshIntervalDraft}
+        setRefreshIntervalDraft={setRefreshIntervalDraft}
+        generalSavedOk={generalSavedOk}
+        onSave={handleSave}
+      />
 
       <Card withBorder padding="xl" radius="lg" shadow="xs">
         <Stack gap="lg">
@@ -431,7 +362,7 @@ export default function SettingsPage() {
                     <Select
                       label="Min TLS Version"
                       disabled={formDisabled}
-                      data={["TLS1.0", "TLS1.1", "TLS1.2", "TLS1.3"]}
+                      data={["TLS1.2", "TLS1.3"]}
                       value={tls.min_tls_version || "TLS1.2"}
                       onChange={(val) =>
                         setConfig({
@@ -444,7 +375,7 @@ export default function SettingsPage() {
                     <Select
                       label="Max TLS Version"
                       disabled={formDisabled}
-                      data={["TLS1.0", "TLS1.1", "TLS1.2", "TLS1.3"]}
+                      data={["TLS1.2", "TLS1.3"]}
                       value={tls.max_tls_version || ""}
                       placeholder="Default"
                       onChange={(val) =>
@@ -786,7 +717,7 @@ export default function SettingsPage() {
             <Divider
               label={
                 <Text size="xs" fw={800}>
-                  SECURITY (PASETO + SQLite)
+                  SECURITY (PASETO + Database)
                 </Text>
               }
               labelPosition="left"
@@ -809,50 +740,287 @@ export default function SettingsPage() {
               />
               {config?.auth?.enabled && (
                 <Stack gap="md">
-                  <Group grow>
-                    <TextInput
-                      label="PASETO Symmetric Key"
-                      placeholder="32 characters minimum"
-                      disabled={formDisabled}
-                      value={config?.auth?.paseto_secret || ""}
-                      onChange={(e) =>
+                  <TextInput
+                    label="PASETO Symmetric Key"
+                    placeholder="32 characters minimum"
+                    disabled={formDisabled}
+                    value={config?.auth?.paseto_secret || ""}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        auth: {
+                          ...(config?.auth || {}),
+                          paseto_secret: e.currentTarget.value,
+                        },
+                      })
+                    }
+                    radius="md"
+                    type="password"
+                    rightSection={
+                      <Tooltip label="Generate">
+                        <ActionIcon
+                          variant="subtle"
+                          onClick={() =>
+                            setConfig({
+                              ...config,
+                              auth: {
+                                ...(config?.auth || {}),
+                                paseto_secret: generateRandomString(32),
+                              },
+                            })
+                          }
+                          disabled={formDisabled}
+                        >
+                          <IconRefresh size="1.1rem" />
+                        </ActionIcon>
+                      </Tooltip>
+                    }
+                  />
+                  <Box>
+                    <Text size="sm" fw={600} mb="xs" required>
+                      Database
+                    </Text>
+                    <Select
+                      label="Driver"
+                      placeholder="Select database"
+                      data={[
+                        { value: "sqlite", label: "SQLite" },
+                        { value: "postgres", label: "PostgreSQL" },
+                        { value: "mysql", label: "MySQL" },
+                        { value: "mariadb", label: "MariaDB" },
+                      ]}
+                      value={
+                        config?.auth?.database_config?.driver ||
+                        inferDriver(
+                          config?.auth?.database_url,
+                          config?.auth?.sqlite_path
+                        )
+                      }
+                      onChange={(v) =>
                         setConfig({
                           ...config,
                           auth: {
                             ...(config?.auth || {}),
-                            paseto_secret: e.currentTarget.value,
+                            database_config: {
+                              ...(config?.auth?.database_config || {}),
+                              driver: (v as DatabaseConfig["driver"]) || "sqlite",
+                              host: v && v !== "sqlite" ? config?.auth?.database_config?.host || "127.0.0.1" : undefined,
+                              port: v === "postgres" ? 5432 : v === "mysql" || v === "mariadb" ? 3306 : undefined,
+                              database: v && v !== "sqlite" ? config?.auth?.database_config?.database || "gateon" : undefined,
+                              ssl_mode: v === "postgres" ? "disable" : undefined,
+                            },
+                            database_url: undefined,
+                            sqlite_path: undefined,
                           },
                         })
                       }
-                      radius="md"
-                      type="password"
-                    />
-                    <TextInput
-                      label="SQLite Database Path"
-                      placeholder="gateon.db"
                       disabled={formDisabled}
-                      value={config?.auth?.sqlite_path || ""}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          auth: {
-                            ...(config?.auth || {}),
-                            sqlite_path: e.currentTarget.value,
-                          },
-                        })
-                      }
                       radius="md"
+                      mb="md"
                     />
-                  </Group>
+                    {(config?.auth?.database_config?.driver === "sqlite" ||
+                      !config?.auth?.database_config?.driver) && (
+                      <TextInput
+                        label="SQLite path"
+                        placeholder="gateon.db"
+                        disabled={formDisabled}
+                        value={
+                          config?.auth?.database_config?.sqlite_path ??
+                          config?.auth?.sqlite_path ??
+                          (config?.auth?.database_url &&
+                          !config.auth.database_url.includes("://")
+                            ? config.auth.database_url
+                            : "")
+                        }
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            auth: {
+                              ...(config?.auth || {}),
+                              database_config: {
+                                ...(config?.auth?.database_config || {}),
+                                driver: "sqlite",
+                                sqlite_path: e.currentTarget.value || "gateon.db",
+                              },
+                              database_url: undefined,
+                              sqlite_path: undefined,
+                            },
+                          })
+                        }
+                        radius="md"
+                      />
+                    )}
+                    {(config?.auth?.database_config?.driver === "postgres" ||
+                      config?.auth?.database_config?.driver === "mysql" ||
+                      config?.auth?.database_config?.driver === "mariadb") && (
+                      <Stack gap="md">
+                        <TextInput
+                          label="Host"
+                          placeholder="127.0.0.1"
+                          disabled={formDisabled}
+                          value={config?.auth?.database_config?.host || ""}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              auth: {
+                                ...(config?.auth || {}),
+                                database_config: {
+                                  ...(config?.auth?.database_config || {}),
+                                  host: e.currentTarget.value,
+                                },
+                              },
+                            })
+                          }
+                          radius="md"
+                        />
+                        <NumberInput
+                          label="Port"
+                          placeholder={
+                            config?.auth?.database_config?.driver === "postgres"
+                              ? "5432"
+                              : "3306"
+                          }
+                          min={1}
+                          max={65535}
+                          disabled={formDisabled}
+                          value={
+                            config?.auth?.database_config?.port ||
+                            (config?.auth?.database_config?.driver === "postgres"
+                              ? 5432
+                              : 3306)
+                          }
+                          onChange={(v) =>
+                            setConfig({
+                              ...config,
+                              auth: {
+                                ...(config?.auth || {}),
+                                database_config: {
+                                  ...(config?.auth?.database_config || {}),
+                                  port: typeof v === "string" ? parseInt(v, 10) || 0 : v ?? 0,
+                                },
+                              },
+                            })
+                          }
+                          radius="md"
+                        />
+                        <TextInput
+                          label="User"
+                          placeholder="gateon"
+                          disabled={formDisabled}
+                          value={config?.auth?.database_config?.user || ""}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              auth: {
+                                ...(config?.auth || {}),
+                                database_config: {
+                                  ...(config?.auth?.database_config || {}),
+                                  user: e.currentTarget.value,
+                                },
+                              },
+                            })
+                          }
+                          radius="md"
+                        />
+                        <TextInput
+                          label="Password"
+                          type="password"
+                          placeholder="••••••••"
+                          disabled={formDisabled}
+                          value={config?.auth?.database_config?.password || ""}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              auth: {
+                                ...(config?.auth || {}),
+                                database_config: {
+                                  ...(config?.auth?.database_config || {}),
+                                  password: e.currentTarget.value,
+                                },
+                              },
+                            })
+                          }
+                          radius="md"
+                          rightSection={
+                            <Tooltip label="Generate">
+                              <ActionIcon
+                                variant="subtle"
+                                onClick={() =>
+                                  setConfig({
+                                    ...config,
+                                    auth: {
+                                      ...(config?.auth || {}),
+                                      database_config: {
+                                        ...(config?.auth?.database_config || {}),
+                                        password: generateRandomString(24),
+                                      },
+                                    },
+                                  })
+                                }
+                                disabled={formDisabled}
+                              >
+                                <IconRefresh size="1.1rem" />
+                              </ActionIcon>
+                            </Tooltip>
+                          }
+                        />
+                        <TextInput
+                          label="Database"
+                          placeholder="gateon"
+                          disabled={formDisabled}
+                          value={config?.auth?.database_config?.database || ""}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              auth: {
+                                ...(config?.auth || {}),
+                                database_config: {
+                                  ...(config?.auth?.database_config || {}),
+                                  database: e.currentTarget.value,
+                                },
+                              },
+                            })
+                          }
+                          radius="md"
+                        />
+                        {config?.auth?.database_config?.driver === "postgres" && (
+                          <Select
+                            label="SSL mode"
+                            data={[
+                              { value: "disable", label: "disable" },
+                              { value: "require", label: "require" },
+                              { value: "verify-ca", label: "verify-ca" },
+                              { value: "verify-full", label: "verify-full" },
+                            ]}
+                            value={config?.auth?.database_config?.ssl_mode || "disable"}
+                            onChange={(v) =>
+                              setConfig({
+                                ...config,
+                                auth: {
+                                  ...(config?.auth || {}),
+                                  database_config: {
+                                    ...(config?.auth?.database_config || {}),
+                                    ssl_mode: v || "disable",
+                                  },
+                                },
+                              })
+                            }
+                            disabled={formDisabled}
+                            radius="md"
+                          />
+                        )}
+                      </Stack>
+                    )}
+                  </Box>
                   <Alert
                     icon={<IconInfoCircle size={16} />}
                     color="blue"
                     variant="light"
                     radius="md"
                   >
-                    Changing the secret key will invalidate all existing
-                    sessions. The SQLite database stores users and roles for
-                    RBAC.
+                    Sensitive values (database URL, password) are encrypted in
+                    global.json when GATEON_ENCRYPTION_KEY is set. Changing the
+                    secret key invalidates all sessions.
                   </Alert>
                 </Stack>
               )}
@@ -985,69 +1153,7 @@ export default function SettingsPage() {
         </Stack>
       </Card>
 
-      <Card withBorder padding="xl" radius="lg" shadow="xs">
-        <Stack gap="lg">
-          <Group gap="md">
-            <Paper p="xs" radius="md" bg="violet.6">
-              <IconPalette size={20} color="white" />
-            </Paper>
-            <div>
-              <Title order={4} fw={700}>
-                Appearance
-              </Title>
-              <Text c="dimmed" size="xs">
-                Customize the look and feel of the dashboard.
-              </Text>
-            </div>
-          </Group>
-
-          <Divider />
-
-          <Stack gap="xs">
-            <Text size="sm" fw={700}>
-              Theme Mode
-            </Text>
-            <SegmentedControl
-              value={colorScheme}
-              onChange={(value: "light" | "dark" | "auto") =>
-                setColorScheme(value)
-              }
-              data={[
-                {
-                  value: "light",
-                  label: (
-                    <Center style={{ gap: 10 }}>
-                      <IconSun size={16} />
-                      <span>Light</span>
-                    </Center>
-                  ),
-                },
-                {
-                  value: "dark",
-                  label: (
-                    <Center style={{ gap: 10 }}>
-                      <IconMoon size={16} />
-                      <span>Dark</span>
-                    </Center>
-                  ),
-                },
-                {
-                  value: "auto",
-                  label: (
-                    <Center style={{ gap: 10 }}>
-                      <IconDeviceDesktop size={16} />
-                      <span>System</span>
-                    </Center>
-                  ),
-                },
-              ]}
-              radius="md"
-              size="md"
-              fullWidth
-            />
-          </Stack>
-        </Stack>
-      </Card>
+      <AppearanceCard colorScheme={colorScheme} setColorScheme={setColorScheme} />
     </Stack>
   );
 }

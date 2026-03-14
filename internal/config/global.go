@@ -10,6 +10,7 @@ import (
 
 	"github.com/gateon/gateon/internal/logger"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,29 +59,50 @@ func (r *GlobalRegistry) load() {
 			return
 		}
 	}
+	decryptSensitiveFields(r.config)
 	logger.L.Info().Str("path", r.path).Msg("loaded global config")
 }
 
 func (r *GlobalRegistry) saveLocked() error {
-	conf := r.config
+	conf := proto.Clone(r.config).(*gateonv1.GlobalConfig)
+	encryptSensitiveFields(conf)
 
 	var data []byte
 	var err error
-
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		data, err = yaml.Marshal(conf)
 	} else {
 		data, err = json.MarshalIndent(conf, "", "  ")
 	}
-
 	if err != nil {
 		return fmt.Errorf("marshal global config: %w", err)
 	}
-
 	if err := os.WriteFile(r.path, data, 0644); err != nil {
 		return fmt.Errorf("write global config file: %w", err)
 	}
 	return nil
+}
+
+func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
+	if c == nil || c.Auth == nil {
+		return
+	}
+	c.Auth.PasetoSecret = DecryptIfEncrypted(c.Auth.PasetoSecret)
+	c.Auth.DatabaseUrl = DecryptIfEncrypted(c.Auth.DatabaseUrl)
+	if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
+		c.Auth.DatabaseConfig.Password = DecryptIfEncrypted(c.Auth.DatabaseConfig.Password)
+	}
+}
+
+func encryptSensitiveFields(c *gateonv1.GlobalConfig) {
+	if c == nil || c.Auth == nil {
+		return
+	}
+	c.Auth.PasetoSecret = EncryptIfKeySet(c.Auth.PasetoSecret)
+	c.Auth.DatabaseUrl = EncryptIfKeySet(c.Auth.DatabaseUrl)
+	if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
+		c.Auth.DatabaseConfig.Password = EncryptIfKeySet(c.Auth.DatabaseConfig.Password)
+	}
 }
 
 func (r *GlobalRegistry) Get(ctx context.Context) *gateonv1.GlobalConfig {
@@ -94,4 +116,11 @@ func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig
 	defer r.mu.Unlock()
 	r.config = conf
 	return r.saveLocked()
+}
+
+// ConfigFileExists returns true if the global config file exists on disk.
+// Used to detect first run (no global.json).
+func (r *GlobalRegistry) ConfigFileExists() bool {
+	_, err := os.Stat(r.path)
+	return err == nil
 }

@@ -72,7 +72,7 @@ func TestAPIKeyValidator(t *testing.T) {
 	keys := map[string]string{
 		"key1": "tenant1",
 	}
-	v := NewAPIKeyValidator(keys, "X-API-Key")
+	v := NewAPIKeyValidator(keys, "X-API-Key", "")
 
 	handler := v.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -98,6 +98,14 @@ func TestAPIKeyValidator(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("expected status 401, got %d", rr.Code)
+	}
+
+	// API key via query (WebSocket)
+	req = httptest.NewRequest("GET", "/?api_key=key1", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status 200 with api_key query, got %d", rr.Code)
 	}
 }
 

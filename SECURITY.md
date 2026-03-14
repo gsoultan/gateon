@@ -1,5 +1,12 @@
 # Security
 
+## Setup Flow and Secrets
+
+- **Run setup in a controlled environment.** The `/v1/setup` endpoint initializes auth and creates the admin user. Restrict access to this endpoint (e.g. firewall, VPN) until setup is complete.
+- **Default Paseto secret.** The default secret (`YELLOW SUBMARINE, BLACK WIZARDRY`) is used only to detect "setup required". Never use it as an actual key in production; always run setup and set a strong, unique Paseto secret.
+- **Secret strength.** Use a Paseto secret of at least 32 cryptographically random bytes. Avoid weak or predictable values.
+- **`GATEON_ENCRYPTION_KEY`.** When set (min 16 chars), `database_url`, `paseto_secret`, and database password are encrypted in `global.json`. Use this for production deployments.
+
 ## Dependency Updates
 
 Gateon uses security-sensitive dependencies including Coraza WAF, OWASP CRS, and authentication libraries. **Update them regularly** to address CVEs and zero-day fixes.

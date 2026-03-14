@@ -48,22 +48,22 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 	return v, nil
 }
 
-// Handler returns a middleware that validates JWT tokens.
+// Handler returns a middleware that validates JWT tokens. Supports Authorization
+// Bearer, query param token, and query param access_token (for WebSocket clients).
 func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header missing", "")
+			tokenString := bearerToken(r)
+			if tokenString == "" {
+				tokenString = r.URL.Query().Get("token")
+			}
+			if tokenString == "" {
+				tokenString = r.URL.Query().Get("access_token")
+			}
+			if tokenString == "" {
+				httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header or token query param required", "")
 				return
 			}
 
-			parts := strings.Split(authHeader, " ")
-			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid authorization header format", "")
-				return
-			}
-
-			tokenString := parts[1]
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 			if v.kf != nil {
 				return v.kf.Keyfunc(token)
@@ -134,26 +134,37 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 	})
 }
 
-// APIKeyValidator validates API keys from a configurable header.
+// APIKeyValidator validates API keys from header or query (for WebSocket clients).
 type APIKeyValidator struct {
-	Keys       map[string]string // Key -> TenantID mapping
-	HeaderName string            // e.g. "X-API-Key"
+	Keys        map[string]string // Key -> TenantID mapping
+	HeaderName  string            // e.g. "X-API-Key"
+	QueryParam  string            // e.g. "api_key" for ?api_key=xxx (optional)
 }
 
 // NewAPIKeyValidator creates a new APIKeyValidator. headerName defaults to "X-API-Key".
-func NewAPIKeyValidator(keys map[string]string, headerName string) *APIKeyValidator {
+// queryParam enables ?api_key=xxx for WebSocket; "none" or empty = header only.
+func NewAPIKeyValidator(keys map[string]string, headerName, queryParam string) *APIKeyValidator {
 	if headerName == "" {
 		headerName = "X-API-Key"
 	}
-	return &APIKeyValidator{Keys: keys, HeaderName: headerName}
+	qp := strings.TrimSpace(queryParam)
+	if strings.EqualFold(qp, "none") || strings.EqualFold(qp, "disabled") {
+		qp = ""
+	} else if qp == "" {
+		qp = "api_key" // default for WebSocket compatibility
+	}
+	return &APIKeyValidator{Keys: keys, HeaderName: headerName, QueryParam: qp}
 }
 
 // Handler returns a middleware that validates API keys.
 func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiKey := r.Header.Get(v.HeaderName)
+		if apiKey == "" && v.QueryParam != "" {
+			apiKey = r.URL.Query().Get(v.QueryParam)
+		}
 		if apiKey == "" {
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "API key missing", "")
+			httputil.WriteJSONError(w, http.StatusUnauthorized, "API key missing (header or query)", "")
 			return
 		}
 
@@ -194,11 +205,26 @@ func ClearSessionCookie(w http.ResponseWriter, isTLS bool) {
 	w.Header().Add("Set-Cookie", v)
 }
 
-// extractToken returns the token from Cookie (gateon_session) or Authorization Bearer.
+// extractToken returns the token from Cookie (gateon_session), Authorization Bearer,
+// or query params (token, access_token) for WebSocket clients that cannot set headers.
 func extractToken(r *http.Request) string {
 	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		return c.Value
 	}
+	if t := bearerToken(r); t != "" {
+		return t
+	}
+	if t := r.URL.Query().Get("token"); t != "" {
+		return t
+	}
+	if t := r.URL.Query().Get("access_token"); t != "" {
+		return t
+	}
+	return ""
+}
+
+// bearerToken returns the Bearer token from the Authorization header.
+func bearerToken(r *http.Request) string {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		return ""
@@ -216,7 +242,7 @@ func PasetoAuth(verifier TokenVerifier) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractToken(r)
 			if token == "" {
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "Authorization header or session cookie required", "")
+				httputil.WriteJSONError(w, http.StatusUnauthorized, "Authorization header, session cookie, or token/access_token query required", "")
 				return
 			}
 

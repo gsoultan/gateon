@@ -170,15 +170,12 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 
 func parseTLSVersion(v string, defaultVer uint16) uint16 {
 	switch v {
-	case "TLS1.0":
-		return tls.VersionTLS10
-	case "TLS1.1":
-		return tls.VersionTLS11
 	case "TLS1.2":
 		return tls.VersionTLS12
 	case "TLS1.3":
 		return tls.VersionTLS13
 	default:
+		// TLS 1.0 and 1.1 are deprecated; treat unknown as default (TLS 1.2)
 		return defaultVer
 	}
 }

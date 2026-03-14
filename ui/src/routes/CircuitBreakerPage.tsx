@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   Card,
   Title,
@@ -12,6 +12,8 @@ import {
   Select,
   SimpleGrid,
   Paper,
+  Pagination,
+  Box,
 } from "@mantine/core";
 import {
   IconCircuitSwitchClosed,
@@ -19,93 +21,23 @@ import {
   IconCircleCheck,
   IconLoader2,
 } from "@tabler/icons-react";
-import { useRoutes, useRouteStats, useAggStats } from "../hooks/useGateon";
+import { useRoutes, useAggStats } from "../hooks/useGateon";
+import { CircuitRow, type CircuitState } from "../components/CircuitRow";
 
-type CircuitState = "all" | "CLOSED" | "OPEN" | "HALF-OPEN";
-
-function CircuitRow({
-  routeId,
-  routeName,
-  stateFilter,
-}: {
-  routeId: string;
-  routeName: string;
-  stateFilter: CircuitState;
-}) {
-  const { data: stats, isLoading } = useRouteStats(routeId);
-
-  const rows = useMemo(() => {
-    if (!stats || stats.length === 0) return [];
-    return stats
-      .map((s) => ({
-        url: s.url,
-        alive: s.alive,
-        circuit:
-          (s as { circuit_state?: string }).circuit_state ??
-          (s.alive ? "CLOSED" : "OPEN"),
-        errors: s.error_count,
-        reqs: s.request_count,
-      }))
-      .filter(
-        (r) =>
-          stateFilter === "all" || r.circuit === stateFilter
-      );
-  }, [stats, stateFilter]);
-
-  if (isLoading) return null;
-  if (rows.length === 0) return null;
-
-  return (
-    <>
-      {rows.map((r) => (
-        <Table.Tr key={r.url}>
-          <Table.Td>
-            <Text size="sm" fw={600}>
-              {routeName || routeId}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {routeId}
-            </Text>
-          </Table.Td>
-          <Table.Td>
-            <Text size="xs" truncate maw={200}>
-              {r.url}
-            </Text>
-          </Table.Td>
-          <Table.Td>
-            <Badge
-              color={
-                r.circuit === "CLOSED"
-                  ? "green"
-                  : r.circuit === "HALF-OPEN"
-                    ? "yellow"
-                    : "red"
-              }
-              variant="light"
-            >
-              {r.circuit}
-            </Badge>
-          </Table.Td>
-          <Table.Td>
-            <Text size="xs">{r.reqs}</Text>
-          </Table.Td>
-          <Table.Td>
-            <Text size="xs" c={r.errors > 0 ? "red" : undefined}>
-              {r.errors}
-            </Text>
-          </Table.Td>
-        </Table.Tr>
-      ))}
-    </>
-  );
-}
+const PAGE_SIZE = 15;
 
 export default function CircuitBreakerPage() {
-  const { data, isLoading } = useRoutes({ page_size: 100 });
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useRoutes({
+    page: page - 1,
+    page_size: PAGE_SIZE,
+  });
   const { data: aggStats } = useAggStats();
   const [stateFilter, setStateFilter] = useState<CircuitState>("all");
 
   const routes = data?.routes ?? [];
+  const totalCount = data?.total_count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const closed = aggStats?.healthy_targets ?? 0;
   const open = aggStats?.open_circuits ?? 0;
   const halfOpen = aggStats?.half_open_circuits ?? 0;
@@ -242,27 +174,45 @@ export default function CircuitBreakerPage() {
             <Text c="dimmed">No routes configured. Create routes to see circuit states.</Text>
           </Center>
         ) : (
-          <Table verticalSpacing="md" withRowBorders highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Route</Table.Th>
-                <Table.Th>Target URL</Table.Th>
-                <Table.Th>Circuit State</Table.Th>
-                <Table.Th>Requests</Table.Th>
-                <Table.Th>Errors</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {routes.map((r) => (
-                <CircuitRow
-                  key={r.id}
-                  routeId={r.id}
-                  routeName={r.name || r.id}
-                  stateFilter={stateFilter}
-                />
-              ))}
-            </Table.Tbody>
-          </Table>
+          <>
+            <Table verticalSpacing="md" withRowBorders highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Route</Table.Th>
+                  <Table.Th>Target URL</Table.Th>
+                  <Table.Th>Circuit State</Table.Th>
+                  <Table.Th>Requests</Table.Th>
+                  <Table.Th>Errors</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {routes.map((r) => (
+                  <CircuitRow
+                    key={r.id}
+                    routeId={r.id}
+                    routeName={r.name || r.id}
+                    stateFilter={stateFilter}
+                  />
+                ))}
+              </Table.Tbody>
+            </Table>
+            {totalCount > PAGE_SIZE && (
+              <Box p="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+                <Group justify="space-between" align="center">
+                  <Text size="xs" c="dimmed">
+                    Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} routes
+                  </Text>
+                  <Pagination
+                    total={totalPages}
+                    value={page}
+                    onChange={setPage}
+                    size="sm"
+                    radius="md"
+                  />
+                </Group>
+              </Box>
+            )}
+          </>
         )}
       </Card>
     </Stack>

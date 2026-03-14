@@ -16,6 +16,8 @@ import {
   Tooltip,
   Divider,
   Badge,
+  Stepper,
+  Code,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useNavigate } from "@tanstack/react-router";
@@ -36,20 +38,15 @@ import {
 import { setupGateon } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
 import { useClipboard } from "@mantine/hooks";
+import { generateRandomString } from "../utils/random";
 
-const generateRandomString = (length: number) => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+";
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-};
+const WIZARD_STEPS = 3; // Admin Account, Security, Review & Confirm
 
 export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  const [wizardStep, setWizardStep] = useState(0);
   const clipboard = useClipboard({ timeout: 2000 });
   const navigate = useNavigate();
 
@@ -77,6 +74,29 @@ export default function SetupPage() {
     }, 4000);
     return () => clearInterval(interval);
   }, []);
+
+  const nextStep = () => {
+    const adminValid = form.validateField("admin_username").hasError === false &&
+      form.validateField("admin_password").hasError === false &&
+      form.validateField("confirm_password").hasError === false;
+    const securityValid = form.validateField("paseto_secret").hasError === false;
+
+    if (wizardStep === 0 && !adminValid) {
+      form.validate();
+      return;
+    }
+    if (wizardStep === 1 && !securityValid) {
+      form.validate();
+      return;
+    }
+    setWizardStep((s) => Math.min(s + 1, WIZARD_STEPS - 1));
+    setError(null);
+  };
+
+  const prevStep = () => {
+    setWizardStep((s) => Math.max(s - 1, 0));
+    setError(null);
+  };
 
   const form = useForm({
     initialValues: {
@@ -236,8 +256,19 @@ export default function SetupPage() {
                 </Alert>
               )}
 
-              <form onSubmit={form.onSubmit(handleSubmit)}>
-                <Stack gap="lg">
+              <form
+                onSubmit={form.onSubmit(handleSubmit)}
+                id="setup-form"
+              >
+                <Stepper
+                  active={wizardStep}
+                  onStepClick={(s) => s < wizardStep && setWizardStep(s)}
+                  allowNextStepsSelect={false}
+                  size="sm"
+                  mb="xl"
+                >
+                  <Stepper.Step label="Account" description="Admin user">
+                    <Stack gap="lg" mt="md">
                   <Box>
                     <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                       Administrator Account
@@ -296,9 +327,11 @@ export default function SetupPage() {
                       </SimpleGrid>
                     </Stack>
                   </Box>
+                    </Stack>
+                  </Stepper.Step>
 
-                  <Divider variant="dashed" my="sm" />
-
+                  <Stepper.Step label="Security" description="PASETO key">
+                    <Stack gap="lg" mt="md">
                   <Box>
                     <Group justify="space-between" mb={10}>
                       <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -341,10 +374,51 @@ export default function SetupPage() {
                       This secret is used to encrypt your session tokens. Keep it safe.
                     </Text>
                   </Box>
+                    </Stack>
+                  </Stepper.Step>
 
+                  <Stepper.Step label="Confirm" description="Review & complete">
+                    <Stack gap="lg" mt="md">
+                      <Text size="sm" c="dimmed">
+                        Review your configuration. global.json will be created when you confirm.
+                      </Text>
+                      <Paper p="md" withBorder radius="md" bg="gray.0">
+                        <Stack gap="xs">
+                          <Group gap="xs">
+                            <Text size="xs" fw={600} c="dimmed">Username:</Text>
+                            <Code>{form.values.admin_username}</Code>
+                          </Group>
+                          <Group gap="xs">
+                            <Text size="xs" fw={600} c="dimmed">PASETO Secret:</Text>
+                            <Code>•••••••• ({form.values.paseto_secret.length} chars)</Code>
+                          </Group>
+                        </Stack>
+                      </Paper>
+                    </Stack>
+                  </Stepper.Step>
+                </Stepper>
+
+                <Group justify="space-between" mt="xl">
                   <Button
-                    fullWidth
-                    mt="xl"
+                    variant="default"
+                    onClick={prevStep}
+                    disabled={wizardStep === 0}
+                    size="md"
+                    radius="md"
+                  >
+                    Back
+                  </Button>
+                  {wizardStep < WIZARD_STEPS - 1 ? (
+                    <Button
+                      size="md"
+                      radius="md"
+                      className="bg-indigo-600 hover:bg-indigo-700"
+                      onClick={nextStep}
+                    >
+                      Next
+                    </Button>
+                  ) : (
+                  <Button
                     type="submit"
                     loading={loading}
                     size="md"
@@ -353,7 +427,8 @@ export default function SetupPage() {
                   >
                     Complete System Setup
                   </Button>
-                </Stack>
+                  )}
+                </Group>
               </form>
             </Paper>
           </Box>

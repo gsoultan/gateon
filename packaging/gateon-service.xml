@@ -1,0 +1,21 @@
+<!--
+  WinSW service config for Gateon.
+  Usage:
+  1. Download winsw from https://github.com/winsw/winsw/releases
+  2. Rename winsw.exe to gateon-service.exe
+  3. Rename this file to gateon-service.xml (same name stem as the exe)
+  4. Put both next to gateon.exe
+  5. Run as admin: gateon-service.exe install
+  6. gateon-service.exe start
+-->
+<service>
+  <id>gateon</id>
+  <name>Gateon</name>
+  <description>Gateon - API Gateway and Reverse Proxy</description>
+  <executable>gateon.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

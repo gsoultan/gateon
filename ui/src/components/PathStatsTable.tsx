@@ -1,4 +1,4 @@
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useTransition, useEffect } from "react";
 import { usePathStats } from "../hooks/useGateon";
 import {
   Table,
@@ -11,13 +11,17 @@ import {
   Skeleton,
   Box,
   TextInput,
+  Pagination,
 } from "@mantine/core";
 import { IconActivity, IconSearch } from "@tabler/icons-react";
+
+const PAGE_SIZE = 15;
 
 export function PathStatsTable() {
   const { data, isLoading } = usePathStats();
   const [hostFilter, setHostFilter] = useState("");
   const [deferredFilter, setDeferredFilter] = useState("");
+  const [page, setPage] = useState(1);
   const [isPending, startTransition] = useTransition();
 
   const filteredData = useMemo(() => {
@@ -30,8 +34,20 @@ export function PathStatsTable() {
     );
   }, [data, deferredFilter]);
 
+  const paginatedData = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredData.slice(start, start + PAGE_SIZE);
+  }, [filteredData, page]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / PAGE_SIZE));
+
+  useEffect(() => {
+    if (page > totalPages && totalPages > 0) setPage(totalPages);
+  }, [filteredData.length, totalPages, page]);
+
   const handleFilterChange = (val: string) => {
     setHostFilter(val);
+    setPage(1);
     startTransition(() => {
       setDeferredFilter(val);
     });
@@ -86,7 +102,7 @@ export function PathStatsTable() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}>
-              {filteredData.map((stat) => (
+              {paginatedData.map((stat) => (
                 <Table.Tr key={`${stat.host}${stat.path}`}>
                   <Table.Td>
                     <Text size="sm" fw={500}>
@@ -122,6 +138,14 @@ export function PathStatsTable() {
             </Text>
           )}
         </Box>
+        {filteredData.length > PAGE_SIZE && (
+          <Group justify="space-between" align="center" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+            <Text size="xs" c="dimmed">
+              Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, filteredData.length)} of {filteredData.length}
+            </Text>
+            <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
+          </Group>
+        )}
       </Stack>
     </Card>
   );

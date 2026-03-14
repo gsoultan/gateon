@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+import "status.proto";
+import "route.proto";
+import "service.proto";
+import "global.proto";
+import "entrypoint.proto";
+import "middleware.proto";
+import "tls.proto";
+import "auth.proto";
+
+service ApiService {
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse);
+  rpc UpdateRoute(UpdateRouteRequest) returns (UpdateRouteResponse);
+  rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
+
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+  rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
+  rpc DeleteService(DeleteServiceRequest) returns (DeleteServiceResponse);
+
+  rpc GetGlobalConfig(GetGlobalConfigRequest) returns (GlobalConfig);
+  rpc UpdateGlobalConfig(UpdateGlobalConfigRequest) returns (UpdateGlobalConfigResponse);
+
+  rpc ListEntryPoints(ListEntryPointsRequest) returns (ListEntryPointsResponse);
+  rpc UpdateEntryPoint(UpdateEntryPointRequest) returns (UpdateEntryPointResponse);
+  rpc DeleteEntryPoint(DeleteEntryPointRequest) returns (DeleteEntryPointResponse);
+
+  rpc ListMiddlewares(ListMiddlewaresRequest) returns (ListMiddlewaresResponse);
+  rpc UpdateMiddleware(UpdateMiddlewareRequest) returns (UpdateMiddlewareResponse);
+  rpc DeleteMiddleware(DeleteMiddlewareRequest) returns (DeleteMiddlewareResponse);
+
+  rpc ListTLSOptions(ListTLSOptionsRequest) returns (ListTLSOptionsResponse);
+  rpc UpdateTLSOption(UpdateTLSOptionRequest) returns (UpdateTLSOptionResponse);
+  rpc DeleteTLSOption(DeleteTLSOptionRequest) returns (DeleteTLSOptionResponse);
+
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc IsSetupRequired(IsSetupRequiredRequest) returns (IsSetupRequiredResponse);
+  rpc Setup(SetupRequest) returns (SetupResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+}

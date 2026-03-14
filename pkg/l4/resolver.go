@@ -134,6 +134,7 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 		HealthCheckInterval: interval,
 		HealthCheckTimeout:  timeout,
 		UDPSessionTimeout:   sessionTimeout,
+		ProxyProtocol:       svc.L4ProxyProtocol,
 	}
 }
 
@@ -153,7 +154,7 @@ func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint) *TCPBackendPool {
 	}
 	r.mu.RUnlock()
 
-	pool := NewTCPBackendPool(cfg.Backends, cfg.LoadBalancer, cfg.HealthCheckInterval, cfg.HealthCheckTimeout)
+	pool := NewTCPBackendPool(cfg.Backends, cfg.LoadBalancer, cfg.HealthCheckInterval, cfg.HealthCheckTimeout, cfg.ProxyProtocol)
 	if pool != nil && cfg.HealthCheckInterval > 0 {
 		go pool.StartHealthChecks()
 	}
@@ -213,8 +214,12 @@ func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string) *L4C
 
 func configHash(cfg *L4Config) uint64 {
 	h := fnv.New64a()
+	proxy := "0"
+	if cfg.ProxyProtocol {
+		proxy = "1"
+	}
 	parts := append([]string{cfg.LoadBalancer, fmt.Sprintf("%d", cfg.HealthCheckInterval),
-		fmt.Sprintf("%d", cfg.HealthCheckTimeout), fmt.Sprintf("%d", cfg.UDPSessionTimeout)},
+		fmt.Sprintf("%d", cfg.HealthCheckTimeout), fmt.Sprintf("%d", cfg.UDPSessionTimeout), proxy},
 		cfg.Backends...)
 	sort.Strings(parts)
 	for _, p := range parts {

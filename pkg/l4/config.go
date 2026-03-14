@@ -4,7 +4,8 @@ package l4
 type L4Config struct {
 	Backends            []string
 	LoadBalancer        string
-	HealthCheckInterval int // ms, 0 = disabled
-	HealthCheckTimeout  int // ms
-	UDPSessionTimeout   int // seconds
+	HealthCheckInterval int  // ms, 0 = disabled
+	HealthCheckTimeout  int  // ms
+	UDPSessionTimeout   int  // seconds
+	ProxyProtocol       bool // send HAProxy PROXY protocol v1 header (TCP only)
 }

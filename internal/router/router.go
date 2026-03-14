@@ -144,6 +144,12 @@ func HostFromRule(rule string) string {
 	return getMatcher(rule).host
 }
 
+// RouteHostIsExact returns true if routeHost is an exact host (e.g. api.example.com),
+// false if it is a wildcard (e.g. *.example.com). Used by SNI to prefer exact matches.
+func RouteHostIsExact(routeHost string) bool {
+	return routeHost != "" && !strings.HasPrefix(strings.ToLower(routeHost), "*.")
+}
+
 // HostMatches checks if the request host matches the route's host specification,
 // supporting wildcards like *.example.com.
 func HostMatches(routeHost string, reqHost string) bool {

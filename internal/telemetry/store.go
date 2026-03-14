@@ -8,7 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/gateon/gateon/internal/db"
+	"github.com/gateon/gateon/internal/logger"
 )
 
 // Persistent store for path metrics with retention control.
@@ -16,6 +17,7 @@ import (
 // - Append/increment aggregated rows per (day, host, path)
 // - Batch updates via a buffered channel to keep hot path non-blocking
 // - Periodic pruning based on retention days
+// Supports SQLite, PostgreSQL, MySQL, and MariaDB.
 
 var (
 	store     *pathStatsStore
@@ -31,6 +33,7 @@ type increment struct {
 
 type pathStatsStore struct {
 	db            *sql.DB
+	dialect       db.Dialect
 	inCh          chan increment
 	stopCh        chan struct{}
 	stopped       atomic.Bool
@@ -38,37 +41,41 @@ type pathStatsStore struct {
 	retentionDays atomic.Int32
 }
 
-// InitPathStatsStore initializes the SQLite-backed store. It is safe to call multiple times; only the first call takes effect.
-func InitPathStatsStore(dbPath string, retentionDays int) error {
+// InitPathStatsStore initializes the database-backed store.
+// databaseURL: sqlite:path, postgres://..., mysql://..., mariadb://...
+// Plain path (e.g. "gateon.db") is treated as SQLite.
+// It is safe to call multiple times; only the first call takes effect.
+func InitPathStatsStore(databaseURL string, retentionDays int) error {
 	var initErr error
 	storeOnce.Do(func() {
-		initErr = initStore(dbPath, retentionDays)
+		initErr = initStore(databaseURL, retentionDays)
 	})
 	return initErr
 }
 
-func initStore(dbPath string, retentionDays int) error {
-	db, err := sql.Open("sqlite", dbPath)
+func initStore(databaseURL string, retentionDays int) error {
+	database, dialect, err := db.Open(databaseURL)
 	if err != nil {
-		return fmt.Errorf("open sqlite: %w", err)
-	}
-	if err := db.Ping(); err != nil {
-		_ = db.Close()
-		return fmt.Errorf("ping sqlite: %w", err)
+		return fmt.Errorf("open database: %w", err)
 	}
 
-	// Pragmas for durability vs performance tradeoff (safe defaults)
-	_, _ = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`)
+	if dialect.Driver == db.DriverSQLite {
+		if _, err := database.Exec(SQLitePragmas); err != nil {
+			_ = database.Close()
+			return fmt.Errorf("sqlite pragmas: %w", err)
+		}
+	}
 
 	st := &pathStatsStore{
-		db:     db,
-		inCh:   make(chan increment, 4096),
-		stopCh: make(chan struct{}),
+		db:      database,
+		dialect: dialect,
+		inCh:    make(chan increment, 4096),
+		stopCh:  make(chan struct{}),
 	}
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
 
 	if err := st.migrate(); err != nil {
-		_ = db.Close()
+		_ = database.Close()
 		return err
 	}
 
@@ -80,18 +87,20 @@ func initStore(dbPath string, retentionDays int) error {
 }
 
 func (s *pathStatsStore) migrate() error {
-	_, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS path_stats (
-		  day TEXT NOT NULL,
-		  host TEXT NOT NULL,
-		  path TEXT NOT NULL,
-		  req_count INTEGER NOT NULL DEFAULT 0,
-		  latency_sum_s REAL NOT NULL DEFAULT 0,
-		  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		  PRIMARY KEY(day, host, path)
-		);
-	`)
+	query := QueryCreatePathStatsDefault
+	if s.dialect.Driver == db.DriverSQLite {
+		query = QueryCreatePathStatsSQLite
+	}
+	_, err := s.db.Exec(query)
 	return err
+}
+
+func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
+	if s.dialect.Driver == db.DriverMySQL {
+		return tx.Prepare(QueryUpsertPathStatsMySQL)
+	}
+	q := s.dialect.Rebind(QueryUpsertPathStatsConflict)
+	return tx.Prepare(q)
 }
 
 func (s *pathStatsStore) loop() {
@@ -108,28 +117,30 @@ func (s *pathStatsStore) loop() {
 		}
 		tx, err := s.db.Begin()
 		if err != nil {
+			logger.Default().Error().Err(err).Msg("path stats: begin transaction failed")
 			batch = batch[:0]
 			return
 		}
-		stmt, err := tx.Prepare(`
-			INSERT INTO path_stats (day, host, path, req_count, latency_sum_s, updated_at)
-			VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-			ON CONFLICT(day, host, path) DO UPDATE SET
-			  req_count = req_count + excluded.req_count,
-			  latency_sum_s = latency_sum_s + excluded.latency_sum_s,
-			  updated_at = CURRENT_TIMESTAMP;
-		`)
-		if err != nil {
+		defer func() {
 			_ = tx.Rollback()
+		}()
+		stmt, err := s.upsertStmt(tx)
+		if err != nil {
 			batch = batch[:0]
 			return
 		}
+		defer stmt.Close()
 		for _, inc := range batch {
 			day := inc.atTime.UTC().Format("2006-01-02")
-			_, _ = stmt.Exec(day, inc.host, inc.path, 1, inc.latS)
+			if _, err := stmt.Exec(day, inc.host, inc.path, 1, inc.latS); err != nil {
+				logger.Default().Error().Err(err).Msg("path stats: upsert failed")
+				batch = batch[:0]
+				return
+			}
 		}
-		_ = stmt.Close()
-		_ = tx.Commit()
+		if err := tx.Commit(); err != nil {
+			logger.Default().Error().Err(err).Msg("path stats: commit failed")
+		}
 		batch = batch[:0]
 	}
 
@@ -157,7 +168,10 @@ func (s *pathStatsStore) prune() {
 		return
 	}
 	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
-	_, _ = s.db.Exec(`DELETE FROM path_stats WHERE day < ?`, cutoff)
+	q := s.dialect.Rebind(QueryPrunePathStats)
+	if _, err := s.db.Exec(q, cutoff); err != nil {
+		logger.Default().Error().Err(err).Msg("path stats: prune failed")
+	}
 }
 
 // ClosePathStatsStore stops background processing and closes the database.
@@ -207,19 +221,14 @@ func recordToStore(host, path string, latencySeconds float64, at time.Time) {
 // GetPathStatsWindow returns aggregated stats from storage for the last `days` days.
 func GetPathStatsWindow(days int) []PathStats {
 	if store == nil {
-		// fallback to in-memory aggregation
 		return GetPathStats()
 	}
 	if days <= 0 {
 		days = int(store.retentionDays.Load())
 	}
 	cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
-	rows, err := store.db.Query(`
-		SELECT host, path, SUM(req_count) AS rc, SUM(latency_sum_s) AS lsum
-		FROM path_stats
-		WHERE day >= ?
-		GROUP BY host, path
-	`, cutoff)
+	q := store.dialect.Rebind(QueryGetPathStatsWin)
+	rows, err := store.db.Query(q, cutoff)
 	if err != nil {
 		return nil
 	}
@@ -230,6 +239,7 @@ func GetPathStatsWindow(days int) []PathStats {
 		var rc int64
 		var lsum float64
 		if err := rows.Scan(&host, &p, &rc, &lsum); err != nil {
+			logger.Default().Error().Err(err).Msg("path stats: scan row failed")
 			continue
 		}
 		avg := 0.0
