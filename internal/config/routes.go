@@ -86,20 +86,68 @@ func (r *RouteRegistry) saveLocked() error {
 }
 
 func (r *RouteRegistry) List(ctx context.Context) []*gateonv1.Route {
-	items, _ := r.ListPaginated(ctx, 0, 0, "")
+	items, _ := r.ListPaginated(ctx, 0, 0, "", nil)
 	return items
 }
 
-func (r *RouteRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Route, int32) {
+func hostFromRule(rule string) string {
+	if idx := strings.Index(rule, "Host(`"); idx >= 0 {
+		rest := rule[idx+6:]
+		end := strings.Index(rest, "`)")
+		if end > 0 {
+			return strings.ToLower(rest[:end])
+		}
+	}
+	return ""
+}
+
+func pathFromRule(rule string) string {
+	for _, prefix := range []string{"PathPrefix(`", "Path(`", "PathRegex(`"} {
+		if idx := strings.Index(rule, prefix); idx >= 0 {
+			rest := rule[idx+len(prefix):]
+			end := strings.Index(rest, "`)")
+			if end > 0 {
+				return strings.ToLower(rest[:end])
+			}
+		}
+	}
+	return strings.ToLower(rule)
+}
+
+func (r *RouteRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *RouteFilter) ([]*gateonv1.Route, int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var filtered []*gateonv1.Route
 	search = strings.ToLower(search)
 	for _, rt := range r.routes {
-		if search == "" || strings.Contains(strings.ToLower(rt.Id), search) || strings.Contains(strings.ToLower(rt.Name), search) || strings.Contains(strings.ToLower(rt.Rule), search) || strings.Contains(strings.ToLower(rt.ServiceId), search) {
-			filtered = append(filtered, rt)
+		if search != "" && !strings.Contains(strings.ToLower(rt.Id), search) && !strings.Contains(strings.ToLower(rt.Name), search) && !strings.Contains(strings.ToLower(rt.Rule), search) && !strings.Contains(strings.ToLower(rt.ServiceId), search) {
+			continue
 		}
+		if filter != nil {
+			if filter.Type != "" && strings.ToLower(rt.Type) != strings.ToLower(filter.Type) {
+				continue
+			}
+			if filter.Host != "" {
+				h := hostFromRule(rt.Rule)
+				if !strings.Contains(h, strings.ToLower(filter.Host)) && !strings.Contains(strings.ToLower(rt.Rule), strings.ToLower(filter.Host)) {
+					continue
+				}
+			}
+			if filter.Path != "" {
+				p := pathFromRule(rt.Rule)
+				if !strings.Contains(p, strings.ToLower(filter.Path)) && !strings.Contains(strings.ToLower(rt.Rule), strings.ToLower(filter.Path)) {
+					continue
+				}
+			}
+			if filter.Status == "active" && rt.Disabled {
+				continue
+			}
+			if filter.Status == "paused" && !rt.Disabled {
+				continue
+			}
+		}
+		filtered = append(filtered, rt)
 	}
 
 	slices.SortFunc(filtered, func(a, b *gateonv1.Route) int {

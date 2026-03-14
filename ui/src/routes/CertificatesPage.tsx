@@ -4,10 +4,12 @@ import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, 
 import { useDisclosure } from '@mantine/hooks'
 import type { GlobalConfig, Certificate } from '../types/gateon'
 import { apiFetch } from '../hooks/useGateon'
+import { usePermissions } from '../hooks/usePermissions'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 export default function CertificatesPage() {
+  const { canUploadCerts } = usePermissions()
   const [config, setConfig] = useState<GlobalConfig>({
     tls: { enabled: false },
   })
@@ -138,7 +140,9 @@ export default function CertificatesPage() {
           <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Certificates</Title>
           <Text c="dimmed" size="sm">Manage SSL/TLS certificates for your domains.</Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={startAdd}>Add Certificate</Button>
+        {canUploadCerts && (
+          <Button leftSection={<IconPlus size={16} />} onClick={startAdd}>Add Certificate</Button>
+        )}
       </Group>
 
       <Alert icon={<IconInfoCircle size={16} />} color="blue" variant="light" radius="md">
@@ -179,18 +183,20 @@ export default function CertificatesPage() {
                       <Text size="sm" ff="monospace" c="dimmed">{cert.key_file}</Text>
                     </Table.Td>
                     <Table.Td>
-                      <Group gap="xs" justify="flex-end">
-                        <Tooltip label="Edit">
-                          <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)}>
-                            <IconPencil size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Remove">
-                          <ActionIcon variant="subtle" color="red" onClick={() => removeCertificate(cert.id)}>
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
+                      {canUploadCerts && (
+                        <Group gap="xs" justify="flex-end">
+                          <Tooltip label="Edit">
+                            <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)}>
+                              <IconPencil size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Remove">
+                            <ActionIcon variant="subtle" color="red" onClick={() => removeCertificate(cert.id)}>
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      )}
                     </Table.Td>
                   </Table.Tr>
                 ))

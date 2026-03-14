@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { Card, Stack, Group, Button, Text, Paper, Alert, Title } from "@mantine/core";
 import { IconDownload, IconUpload } from "@tabler/icons-react";
+import { getApiBaseUrl } from "../store/useApiConfigStore";
 
 interface ConfigImportExportCardProps {
-  apiUrl: string;
+  canImport?: boolean;
+  canExport?: boolean;
 }
 
-export function ConfigImportExportCard({ apiUrl }: ConfigImportExportCardProps) {
+export function ConfigImportExportCard({ canImport = true, canExport = true }: ConfigImportExportCardProps) {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
-  const base = apiUrl.replace(/\/$/, "");
+  const base = getApiBaseUrl();
 
   const getAuthHeaders = () => {
     try {
@@ -101,24 +103,28 @@ export function ConfigImportExportCard({ apiUrl }: ConfigImportExportCardProps) 
           </Alert>
         )}
         <Group>
-          <Button
-            leftSection={<IconDownload size={16} />}
-            variant="light"
-            onClick={handleExport}
-            radius="md"
-          >
-            Export Config
-          </Button>
-          <Button
-            leftSection={<IconUpload size={16} />}
-            variant="light"
-            color="orange"
-            onClick={handleImport}
-            loading={importing}
-            radius="md"
-          >
-            Import Config
-          </Button>
+          {canExport && (
+            <Button
+              leftSection={<IconDownload size={16} />}
+              variant="light"
+              onClick={handleExport}
+              radius="md"
+            >
+              Export Config
+            </Button>
+          )}
+          {canImport && (
+            <Button
+              leftSection={<IconUpload size={16} />}
+              variant="light"
+              color="orange"
+              onClick={handleImport}
+              loading={importing}
+              radius="md"
+            >
+              Import Config
+            </Button>
+          )}
         </Group>
         <Text size="xs" c="dimmed">
           Export downloads gateon-config.json. Import merges the uploaded config (services first, then entrypoints, middlewares, routes).

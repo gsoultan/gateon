@@ -21,6 +21,7 @@ import {
   IconTerminal,
 } from "@tabler/icons-react";
 import { useAuthStore } from "../store/useAuthStore";
+import { useApiConfigStore } from "../store/useApiConfigStore";
 
 interface LiveLogsProps {
   height?: number;
@@ -33,14 +34,14 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const [search, setSearch] = useState("");
   const [routeFilter, setRouteFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [clientIpFilter, setClientIpFilter] = useState("");
+  const apiUrl = useApiConfigStore((s) => s.apiUrl);
 
   useEffect(() => {
-    const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8080";
+    const base = apiUrl.replace(/\/$/, "");
+    const baseUrl = base.replace(/^http/, "ws");
     const token = useAuthStore.getState().token;
-    const wsUrl =
-      baseUrl.replace("http", "ws") +
-      "/v1/logs" +
-      (token ? `?auth=${token}` : "");
+    const wsUrl = `${baseUrl}/v1/logs` + (token ? `?auth=${token}` : "");
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => setConnected(true);
@@ -55,14 +56,14 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     };
 
     return () => ws.close();
-  }, [paused]);
+  }, [paused, apiUrl]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
       if (search) {
         if (!log.toLowerCase().includes(search.toLowerCase())) return false;
       }
-      if (routeFilter || statusFilter) {
+      if (routeFilter || statusFilter || clientIpFilter) {
         try {
           const parsed = JSON.parse(log) as Record<string, unknown>;
           if (routeFilter && (parsed.route_id as string)?.toLowerCase().indexOf(routeFilter.toLowerCase()) === -1) return false;
@@ -70,13 +71,17 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
             const s = String(parsed.status ?? "");
             if (s !== statusFilter && !s.startsWith(statusFilter)) return false;
           }
+          if (clientIpFilter) {
+            const ip = String(parsed.ip ?? parsed.remote_addr ?? parsed.client_ip ?? "").toLowerCase();
+            if (!ip.includes(clientIpFilter.toLowerCase())) return false;
+          }
         } catch {
-          if (routeFilter || statusFilter) return false;
+          if (routeFilter || statusFilter || clientIpFilter) return false;
         }
       }
       return true;
     });
-  }, [logs, search, routeFilter, statusFilter]);
+  }, [logs, search, routeFilter, statusFilter, clientIpFilter]);
 
   const getLogColor = (log: string) => {
     if (log.includes('"level":"error"') || log.includes("ERROR"))
@@ -204,6 +209,14 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
               onChange={(e) => setStatusFilter(e.currentTarget.value)}
               w={110}
               title="Filter by HTTP status code"
+            />
+            <TextInput
+              placeholder="Client IP"
+              size="xs"
+              value={clientIpFilter}
+              onChange={(e) => setClientIpFilter(e.currentTarget.value)}
+              w={110}
+              title="Filter by client IP (ip, remote_addr)"
             />
             <Tooltip label={paused ? "Resume" : "Pause"}>
               <ActionIcon

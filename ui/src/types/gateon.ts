@@ -153,6 +153,12 @@ export type LogConfig = {
   path_stats_retention_days?: number;
 };
 
+export type TransportConfig = {
+  max_idle_conns?: number;
+  max_idle_conns_per_host?: number;
+  idle_conn_timeout_seconds?: number;
+};
+
 export type AuthConfig = {
   enabled?: boolean;
   paseto_secret?: string;
@@ -199,6 +205,7 @@ export type GlobalConfig = {
   otel?: OtelConfig;
   log?: LogConfig;
   auth?: AuthConfig;
+  transport?: TransportConfig;
 };
 
 export enum EntryPointType {

@@ -341,12 +341,21 @@ type ProxyHandler struct {
 
 // NewProxyHandler creates a ProxyHandler from route and ServiceStore (DIP).
 func NewProxyHandler(rt *gateonv1.Route, serviceStore config.ServiceStore) *ProxyHandler {
-	return NewProxyHandlerWithFactory(rt, serviceStore, nil)
+	return NewProxyHandlerWithOpts(rt, serviceStore, nil, nil)
 }
 
 // NewProxyHandlerWithFactory creates a ProxyHandler with an explicit LoadBalancerFactory.
 func NewProxyHandlerWithFactory(rt *gateonv1.Route, serviceStore config.ServiceStore, lbFactory LoadBalancerFactory) *ProxyHandler {
-	return NewProxyHandlerBuilder(rt, serviceStore, lbFactory).Build()
+	return NewProxyHandlerWithOpts(rt, serviceStore, lbFactory, nil)
+}
+
+// NewProxyHandlerWithOpts creates a ProxyHandler with optional LB factory and transport config.
+func NewProxyHandlerWithOpts(rt *gateonv1.Route, serviceStore config.ServiceStore, lbFactory LoadBalancerFactory, transportConfig *TransportConfig) *ProxyHandler {
+	b := NewProxyHandlerBuilder(rt, serviceStore, lbFactory)
+	if transportConfig != nil {
+		b.SetTransportConfig(transportConfig)
+	}
+	return b.Build()
 }
 
 func (h *ProxyHandler) runHealthCheck(urls []string) {
@@ -387,6 +396,27 @@ func (h *ProxyHandler) Close() {
 	if c, ok := h.transport.(interface{ Close() error }); ok {
 		_ = c.Close()
 	}
+}
+
+// DrainAndClose waits for in-flight requests to complete (up to timeout), then closes.
+// Use for zero-downtime config reload: remove handler from routing first, then DrainAndClose.
+func (h *ProxyHandler) DrainAndClose(timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if h.activeConnCount() == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	h.Close()
+}
+
+func (h *ProxyHandler) activeConnCount() int32 {
+	var total int32
+	for _, s := range h.lb.GetStats() {
+		total += s.ActiveConn
+	}
+	return total
 }
 
 // getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.

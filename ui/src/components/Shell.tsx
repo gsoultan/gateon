@@ -1,8 +1,10 @@
 import {
+  Alert,
   AppShell,
   Burger,
   Flex,
   Group,
+  Menu,
   ScrollArea,
   NavLink,
   Title,
@@ -18,8 +20,8 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import { useGateonStatus } from "../hooks/useGateon";
+import { usePermissions } from "../hooks/usePermissions";
 import { GlobalHealthBar } from "./GlobalHealthBar";
-import { useThemeStore } from "../store/useThemeStore";
 import { useAuthStore } from "../store/useAuthStore";
 import {
   IconDashboard,
@@ -40,6 +42,7 @@ import {
   IconChevronRight,
   IconSun,
   IconMoon,
+  IconDeviceDesktop,
   IconCircuitSwitchClosed,
 } from "@tabler/icons-react";
 
@@ -49,14 +52,12 @@ export function Shell() {
   const location = useLocation();
   const { data: status, refetch, isFetching } = useGateonStatus();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const setGlobalColorScheme = useThemeStore((state) => state.setColorScheme);
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
+  const { isViewer } = usePermissions();
 
-  const toggleColorScheme = () => {
-    const nextScheme = colorScheme === "dark" ? "light" : "dark";
-    setColorScheme(nextScheme);
-    setGlobalColorScheme(nextScheme);
+  const cycleScheme = (next: "light" | "dark" | "auto") => {
+    setColorScheme(next);
   };
 
   const coreLinks = [
@@ -185,6 +186,20 @@ export function Shell() {
                 </Badge>
               </Stack>
 
+              {user?.role && (
+                <Stack gap={0} align="flex-end" visibleFrom="md">
+                  <Text size="xs" fw={700} c="dimmed" lh={1}>
+                    ROLE
+                  </Text>
+                  <Badge
+                    size="sm"
+                    variant="light"
+                    color={user.role === "admin" ? "red" : user.role === "operator" ? "blue" : "gray"}
+                  >
+                    {user.role}
+                  </Badge>
+                </Stack>
+              )}
               <Stack gap={0} align="flex-end" visibleFrom="lg">
                 <Text size="xs" fw={700} c="dimmed" lh={1}>
                   VERSION
@@ -196,24 +211,41 @@ export function Shell() {
             </Group>
 
             <Group gap="xs" style={{ flexShrink: 0 }}>
-              <Tooltip
-                label={
-                  colorScheme === "dark" ? "Switch to Light" : "Switch to Dark"
-                }
-              >
-                <ActionIcon
-                  variant="default"
-                  onClick={toggleColorScheme}
-                  size="md"
-                  radius="md"
-                >
-                  {colorScheme === "dark" ? (
-                    <IconSun size={18} />
-                  ) : (
-                    <IconMoon size={18} />
-                  )}
-                </ActionIcon>
-              </Tooltip>
+              <Menu shadow="md" width={160} position="bottom-end">
+                <Menu.Target>
+                  <Tooltip label="Theme (Light / Dark / System)">
+                    <ActionIcon variant="default" size="md" radius="md">
+                      {colorScheme === "auto" ? (
+                        <IconDeviceDesktop size={18} />
+                      ) : colorScheme === "dark" ? (
+                        <IconMoon size={18} />
+                      ) : (
+                        <IconSun size={18} />
+                      )}
+                    </ActionIcon>
+                  </Tooltip>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item
+                    leftSection={<IconSun size={16} />}
+                    onClick={() => cycleScheme("light")}
+                  >
+                    Light
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconMoon size={16} />}
+                    onClick={() => cycleScheme("dark")}
+                  >
+                    Dark
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconDeviceDesktop size={16} />}
+                    onClick={() => cycleScheme("auto")}
+                  >
+                    System
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
               <Tooltip label="Refresh Status">
                 <ActionIcon
                   variant="subtle"
@@ -413,6 +445,18 @@ export function Shell() {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        {isViewer && (
+          <Alert
+            mb="md"
+            radius="md"
+            color="blue"
+            variant="light"
+            title="View only"
+            styles={{ root: { maxWidth: 1400, margin: "0 auto" } }}
+          >
+            You have read-only access. Create, edit, and delete actions are restricted.
+          </Alert>
+        )}
         <Box
           style={{
             maxWidth: 1400,

@@ -27,8 +27,7 @@ import {
   IconServer,
 } from "@tabler/icons-react";
 import { useAuthStore } from "../store/useAuthStore";
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+import { getApiBaseUrl } from "../store/useApiConfigStore";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +77,7 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/v1/login`, {
+      const res = await fetch(`${getApiBaseUrl()}/v1/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values),

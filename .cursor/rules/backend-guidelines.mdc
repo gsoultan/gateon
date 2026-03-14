@@ -125,6 +125,12 @@ func handle(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+## Performance & Lightweight
+
+- **No memory leaks** — always `Close()` connections and response bodies; `Cancel()` contexts when done; avoid goroutine leaks by using bounded workers or select-with-context
+- **High performance** — avoid allocations in hot paths; reuse buffers; prefer `sync.Pool` for frequently allocated objects; use `strings.Builder` for string concatenation; profile before optimizing
+- **Lightweight** — keep dependencies minimal; prefer stdlib; avoid heavy reflection or codegen where simple code suffices
+
 ## Testing
 
 - Mock interfaces, not concrete types — enables easy unit testing

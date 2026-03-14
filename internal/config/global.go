@@ -22,11 +22,12 @@ type GlobalRegistry struct {
 func NewGlobalRegistry(path string) *GlobalRegistry {
 	reg := &GlobalRegistry{
 		config: &gateonv1.GlobalConfig{
-			Tls:   &gateonv1.TlsConfig{},
-			Redis: &gateonv1.RedisConfig{},
-			Otel:  &gateonv1.OtelConfig{},
-			Log:   &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
-			Auth:  &gateonv1.AuthConfig{},
+			Tls:       &gateonv1.TlsConfig{},
+			Redis:     &gateonv1.RedisConfig{},
+			Otel:      &gateonv1.OtelConfig{},
+			Log:       &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
+			Auth:      &gateonv1.AuthConfig{},
+			Transport: &gateonv1.TransportConfig{},
 		},
 		path: path,
 	}

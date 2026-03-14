@@ -3,7 +3,7 @@ package server
 import (
 	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/config"
-	"github.com/redis/go-redis/v9"
+	redigo "github.com/redis/go-redis/v9"
 )
 
 // ServerOption configures the Server (functional options / builder pattern).
@@ -66,7 +66,7 @@ func WithAuthManager(a *auth.Manager) ServerOption {
 }
 
 // WithRedisClient sets the Redis client.
-func WithRedisClient(c *redis.Client) ServerOption {
+func WithRedisClient(c *redigo.Client) ServerOption {
 	return func(s *Server) error {
 		s.RedisClient = c
 		return nil

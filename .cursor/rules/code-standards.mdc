@@ -7,9 +7,19 @@ alwaysApply: true
 
 All generated code must follow these guidelines.
 
+## Performance & Resource
+
+- **No memory leaks** — close connections, cancel contexts, release resources; avoid unbounded growth
+- **High performance** — minimize allocations, avoid unnecessary copies, use pooling where appropriate
+- **Lightweight** — keep dependencies minimal; avoid heavy abstractions that add overhead
+
 ## Organization
 
 - **Separate files and folders by domain** — structure by business/feature domain, not technical type
+
+## Functions & Algorithms
+
+- **Keep the algorithm in a function small** — extract complex logic into smaller, well-named functions
 
 ## Frontend (React)
 

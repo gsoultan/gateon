@@ -4,7 +4,6 @@ import { MantineProvider, createTheme, virtualColor, ColorSchemeScript } from '@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Notifications } from '@mantine/notifications'
 import App from './App'
-import { useThemeStore } from './store/useThemeStore'
 import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 import './styles.css'
@@ -99,11 +98,13 @@ const theme = createTheme({
 })
 
 function Root() {
-  const colorScheme = useThemeStore((state) => state.colorScheme)
-
   return (
     <QueryClientProvider client={queryClient}>
-      <MantineProvider theme={theme} defaultColorScheme={colorScheme}>
+      <MantineProvider
+        theme={theme}
+        defaultColorScheme="auto"
+        storageKey="gateon-color-scheme"
+      >
         <Notifications position="top-right" zIndex={2000} />
         <App />
       </MantineProvider>
@@ -113,7 +114,10 @@ function Root() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ColorSchemeScript defaultColorScheme="dark" />
+    <ColorSchemeScript
+      defaultColorScheme="auto"
+      storageKey="gateon-color-scheme"
+    />
     <Root />
   </React.StrictMode>,
 )

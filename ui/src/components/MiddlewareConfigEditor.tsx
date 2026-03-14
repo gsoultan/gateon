@@ -129,17 +129,41 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
               value={config.storage || "local"}
               onChange={(val) => updateConfig("storage", val || "local")}
             />
-            <Switch
-              label="Per IP Address"
-              checked={config.per_ip === "true"}
-              onChange={(e) =>
-                updateConfig(
-                  "per_ip",
-                  e.currentTarget.checked ? "true" : "false",
-                )
-              }
-              mt={25}
-            />
+            <Stack gap="xs">
+              <Switch
+                label="Per IP Address"
+                description="Limit per client IP"
+                checked={config.per_ip === "true"}
+                onChange={(e) =>
+                  updateConfig(
+                    "per_ip",
+                    e.currentTarget.checked ? "true" : "false",
+                  )
+                }
+              />
+              <Switch
+                label="Per Tenant"
+                description="Limit per tenant (requires auth middleware upstream to set tenant context)"
+                checked={config.per_tenant === "true"}
+                onChange={(e) =>
+                  updateConfig(
+                    "per_tenant",
+                    e.currentTarget.checked ? "true" : "false",
+                  )
+                }
+              />
+              <Switch
+                label="Trust Cloudflare Headers"
+                description="Use CF-Connecting-IP when behind Cloudflare. Or set GATEON_TRUST_CLOUDFLARE_HEADERS=true"
+                checked={config.trust_cloudflare_headers === "true"}
+                onChange={(e) =>
+                  updateConfig(
+                    "trust_cloudflare_headers",
+                    e.currentTarget.checked ? "true" : "false",
+                  )
+                }
+              />
+            </Stack>
           </Group>
         </Stack>
       );
@@ -191,6 +215,7 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
             label="Authentication Type"
             data={[
               { label: "JWT", value: "jwt" },
+              { label: "PASETO", value: "paseto" },
               { label: "API Key", value: "apikey" },
               { label: "Basic Auth", value: "basic" },
             ]}
@@ -270,8 +295,31 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
                 }
               />
               <TextInput
-                label="Secret (Optional if using JWKS)"
+                label="JWKS URL"
+                description="For RS256/ES256 validation. If set, secret is optional."
+                placeholder="https://auth.example.com/.well-known/jwks.json"
+                value={config.jwks_url || ""}
+                onChange={(e) =>
+                  updateConfig("jwks_url", e.currentTarget.value)
+                }
+              />
+              <TextInput
+                label="Secret (required if not using JWKS)"
+                description="HS256 shared secret, or GATEON_JWT_SECRET env"
                 placeholder="HS256 Secret"
+                type="password"
+                value={config.secret || ""}
+                onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+              />
+            </>
+          )}
+          {config.type === "paseto" && (
+            <>
+              <TextInput
+                label="PASETO Secret (32+ bytes)"
+                description="Symmetric key for v2 local tokens. Or GATEON_PASETO_SECRET env."
+                type="password"
+                placeholder="32+ character secret"
                 value={config.secret || ""}
                 onChange={(e) => updateConfig("secret", e.currentTarget.value)}
               />
@@ -712,10 +760,18 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
 
     case "grpcweb":
       return (
-        <Text size="sm" c="dimmed">
-          No configuration needed. This middleware automatically converts
-          gRPC-Web requests to standard gRPC.
-        </Text>
+        <Stack gap="xs">
+          <Text size="sm" c="dimmed">
+            Required for grpc routes when clients run in the browser. Converts
+            gRPC-Web requests to standard gRPC before proxying. No configuration
+            needed.
+          </Text>
+          <Text size="xs" c="dimmed">
+            Add this middleware to grpc routes that will be called from web apps
+            (e.g. via @improbable-eng/grpc-web). Without it, gRPC-Web requests
+            return 415.
+          </Text>
+        </Stack>
       );
 
     case "ipfilter":
@@ -735,12 +791,204 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
             onChange={(e) => updateConfig("deny_list", e.currentTarget.value)}
             description="These IPs are always rejected. Takes precedence over allow list."
           />
+          <Switch
+            label="Trust Cloudflare Headers"
+            description="Use CF-Connecting-IP when behind Cloudflare"
+            checked={config.trust_cloudflare_headers === "true"}
+            onChange={(e) =>
+              updateConfig(
+                "trust_cloudflare_headers",
+                e.currentTarget.checked ? "true" : "false",
+              )
+            }
+          />
+        </Stack>
+      );
+
+    case "waf":
+      return (
+        <Stack gap="md">
+          <Switch
+            label="Use OWASP CRS"
+            description="Enable OWASP Core Rule Set (recommended)"
+            checked={config.use_crs !== "false"}
+            onChange={(e) =>
+              updateConfig(
+                "use_crs",
+                e.currentTarget.checked ? "true" : "false",
+              )
+            }
+          />
+          <NumberInput
+            label="Paranoia Level"
+            description="CRS paranoia 1-4. Higher = stricter, more false positives. Default: 1"
+            value={parseInt(config.paranoia_level) || 1}
+            onChange={(val) =>
+              updateConfig(
+                "paranoia_level",
+                (val ?? 1).toString(),
+              )
+            }
+            min={1}
+            max={4}
+          />
+          <TextInput
+            label="Custom Directives File"
+            description="Optional path to custom SecLang rules (advanced)"
+            placeholder="/etc/gateon/waf.conf"
+            value={config.directives_file || ""}
+            onChange={(e) =>
+              updateConfig("directives_file", e.currentTarget.value)
+            }
+          />
+          <Switch
+            label="Trust Cloudflare Headers"
+            description="Use CF-Connecting-IP for WAF REMOTE_ADDR"
+            checked={config.trust_cloudflare_headers === "true"}
+            onChange={(e) =>
+              updateConfig(
+                "trust_cloudflare_headers",
+                e.currentTarget.checked ? "true" : "false",
+              )
+            }
+          />
+          <Switch
+            label="Audit Only"
+            description="Log matched rules but do not block requests (SecRuleEngine DetectionOnly)"
+            checked={config.audit_only === "true"}
+            onChange={(e) =>
+              updateConfig(
+                "audit_only",
+                e.currentTarget.checked ? "true" : "false",
+              )
+            }
+          />
+        </Stack>
+      );
+
+    case "turnstile":
+      return (
+        <Stack gap="md">
+          <TextInput
+            label="Secret Key"
+            description="Cloudflare Turnstile secret. Or set GATEON_TURNSTILE_SECRET env"
+            placeholder="0x4AAAAAAA..."
+            type="password"
+            value={config.secret || ""}
+            onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+          />
+          <TextInput
+            label="Token Header"
+            description="Header containing the token. Default: CF-Turnstile-Response"
+            placeholder="CF-Turnstile-Response"
+            value={config.header || ""}
+            onChange={(e) => updateConfig("header", e.currentTarget.value)}
+          />
+          <TextInput
+            label="Methods to Verify"
+            description="Comma-separated HTTP methods. Default: POST,PUT,PATCH,DELETE"
+            placeholder="POST, PUT, PATCH, DELETE"
+            value={config.methods || ""}
+            onChange={(e) => updateConfig("methods", e.currentTarget.value)}
+          />
+        </Stack>
+      );
+
+    case "geoip":
+      return (
+        <Stack gap="md">
+          <TextInput
+            label="GeoIP Database Path"
+            description="Path to GeoLite2-Country.mmdb. Or set GATEON_GEOIP_DB_PATH env"
+            placeholder="/etc/gateon/GeoLite2-Country.mmdb"
+            value={config.db_path || ""}
+            onChange={(e) => updateConfig("db_path", e.currentTarget.value)}
+          />
+          <TextInput
+            label="Allow Countries"
+            description="Comma-separated ISO 3166-1 alpha-2 codes (e.g. US,GB,DE). Empty = allow all except deny list."
+            placeholder="US, GB, DE, FR"
+            value={config.allow_countries || ""}
+            onChange={(e) => updateConfig("allow_countries", e.currentTarget.value)}
+          />
+          <TextInput
+            label="Deny Countries"
+            description="Comma-separated ISO codes. Takes precedence over allow list."
+            placeholder="CN, RU"
+            value={config.deny_countries || ""}
+            onChange={(e) => updateConfig("deny_countries", e.currentTarget.value)}
+          />
+          <Switch
+            label="Trust Cloudflare Headers"
+            description="Use CF-Connecting-IP for client IP"
+            checked={config.trust_cloudflare_headers === "true"}
+            onChange={(e) =>
+              updateConfig(
+                "trust_cloudflare_headers",
+                e.currentTarget.checked ? "true" : "false",
+              )
+            }
+          />
+        </Stack>
+      );
+
+    case "hmac":
+      return (
+        <Stack gap="md">
+          <TextInput
+            label="Secret"
+            description="HMAC secret for signature verification. Or GATEON_HMAC_SECRET env"
+            type="password"
+            placeholder="webhook-secret"
+            value={config.secret || ""}
+            onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+          />
+          <TextInput
+            label="Signature Header"
+            description="Header containing the HMAC. Default: X-Signature-256"
+            placeholder="X-Signature-256"
+            value={config.header || ""}
+            onChange={(e) => updateConfig("header", e.currentTarget.value)}
+          />
+          <TextInput
+            label="Signature Prefix"
+            description="Prefix to strip from header value (e.g. sha256= for GitHub)"
+            placeholder="sha256="
+            value={config.prefix || ""}
+            onChange={(e) => updateConfig("prefix", e.currentTarget.value)}
+          />
+          <TextInput
+            label="Methods to Verify"
+            description="Comma-separated. Empty = verify all methods"
+            placeholder="POST, PUT"
+            value={config.methods || ""}
+            onChange={(e) => updateConfig("methods", e.currentTarget.value)}
+          />
+          <NumberInput
+            label="Body Limit (bytes)"
+            description="Max body size to read for HMAC. Default: 1MB"
+            value={parseInt(config.body_limit) || 1048576}
+            onChange={(val) =>
+              updateConfig("body_limit", (val ?? 1048576).toString())
+            }
+            min={1024}
+          />
         </Stack>
       );
 
     case "cache":
       return (
         <Stack gap="md">
+          <Select
+            label="Storage"
+            data={[
+              { label: "Memory (Local)", value: "memory" },
+              { label: "Redis (Distributed)", value: "redis" },
+            ]}
+            value={config.storage || "memory"}
+            onChange={(val) => updateConfig("storage", val || "memory")}
+            description="Redis requires Redis enabled in Settings. Use for multi-instance deployments."
+          />
           <NumberInput
             label="TTL (seconds)"
             value={parseInt(config.ttl_seconds) || 60}
@@ -753,6 +1001,7 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
             value={parseInt(config.max_entries) || 1024}
             onChange={(val) => updateConfig("max_entries", (val ?? 1024).toString())}
             min={1}
+            description="Memory only; Redis has no local limit"
           />
           <NumberInput
             label="Max Body (KB)"

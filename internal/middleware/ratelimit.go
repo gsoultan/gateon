@@ -2,17 +2,17 @@ package middleware
 
 import (
 	"fmt"
-	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/gateon/gateon/internal/httputil"
+	"github.com/gateon/gateon/internal/redis"
+	"github.com/gateon/gateon/internal/request"
 	"github.com/gateon/gateon/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/redis/go-redis/v9"
+	redigo "github.com/redis/go-redis/v9"
 	"golang.org/x/time/rate"
 )
 
@@ -114,12 +114,12 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 
 // RedisRateLimiter implements a flexible distributed rate limiter using Redis.
 type RedisRateLimiter struct {
-	client *redis.Client
+	client redis.Client
 	rate   int // requests per minute
 	burst  int
 }
 
-func NewRedisRateLimiter(client *redis.Client, r int, b int) *RedisRateLimiter {
+func NewRedisRateLimiter(client redis.Client, r int, b int) *RedisRateLimiter {
 	return &RedisRateLimiter{
 		client: client,
 		rate:   r,
@@ -149,7 +149,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			// Remove entries older than 1 minute
 			pipe.ZRemRangeByScore(r.Context(), redisKey, "0", fmt.Sprintf("%d", minMs))
 			// Add current request
-			pipe.ZAdd(r.Context(), redisKey, redis.Z{Score: float64(nowMs), Member: fmt.Sprintf("%d-%d", nowMs, now.UnixNano())})
+			pipe.ZAdd(r.Context(), redisKey, redigo.Z{Score: float64(nowMs), Member: fmt.Sprintf("%d-%d", nowMs, now.UnixNano())})
 			// Count requests in the window
 			pipe.ZCard(r.Context(), redisKey)
 			// Set expiration to clean up unused keys
@@ -161,7 +161,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				return
 			}
 
-			count, ok := cmds[2].(*redis.IntCmd)
+			count, ok := cmds[2].(*redigo.IntCmd)
 			if !ok {
 				next.ServeHTTP(w, r)
 				return
@@ -180,17 +180,16 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 	}
 }
 
-// PerIP returns the client's IP address, normalized (no port) for consistent rate-limit keys.
+// PerIP returns the client's IP address for rate-limit keys (uses X-Forwarded-For by default).
 func PerIP(r *http.Request) string {
-	raw := r.RemoteAddr
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		raw = strings.TrimSpace(strings.Split(xff, ",")[0])
+	return request.GetClientIP(r, request.TrustCloudflareFromEnv())
+}
+
+// PerIPWithTrust returns a keyFunc that uses the given trustCloudflare setting.
+func PerIPWithTrust(trustCloudflare bool) func(*http.Request) string {
+	return func(r *http.Request) string {
+		return request.GetClientIP(r, trustCloudflare)
 	}
-	ip, _, err := net.SplitHostPort(raw)
-	if err != nil {
-		return raw
-	}
-	return ip
 }
 
 // PerTenant returns the tenant ID from context.

@@ -31,7 +31,8 @@ import { useDisclosure } from "@mantine/hooks";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { TLSOption } from "../types/gateon";
-import { useTLSOptions, apiFetch } from "../hooks/useGateon";
+import { useTLSOptions, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
+import { usePermissions } from "../hooks/usePermissions";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
@@ -60,6 +61,7 @@ const CIPHER_SUITES = [
 ];
 
 export default function TLSOptionsPage() {
+  const { canWrite } = usePermissions();
   const queryClient = useQueryClient();
   const [opened, { open, close }] = useDisclosure(false);
   const [editingOption, setEditingOption] = useState<TLSOption | null>(null);
@@ -75,7 +77,7 @@ export default function TLSOptionsPage() {
 
   const mutation = useMutation({
     mutationFn: async (opt: TLSOption) => {
-      const res = await apiFetch("/v1/tlsoptions", {
+      const res = await apiFetch("/v1/tls-options", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(opt),
@@ -93,10 +95,10 @@ export default function TLSOptionsPage() {
       });
       close();
     },
-    onError: (err) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Error Saving TLS Option",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },
@@ -105,7 +107,7 @@ export default function TLSOptionsPage() {
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await apiFetch(
-        `/v1/tlsoptions/${encodeURIComponent(id)}`,
+        `/v1/tls-options/${encodeURIComponent(id)}`,
         {
           method: "DELETE",
         },
@@ -173,13 +175,15 @@ export default function TLSOptionsPage() {
               setPage(1);
             }}
           />
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={startAdd}
-            radius="md"
-          >
-            Add TLS Option
-          </Button>
+          {canWrite && (
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={startAdd}
+              radius="md"
+            >
+              Add TLS Option
+            </Button>
+          )}
         </Group>
       </Group>
 
@@ -255,34 +259,36 @@ export default function TLSOptionsPage() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Group gap="xs" justify="flex-end">
-                        <Tooltip label="Edit">
-                          <ActionIcon
-                            variant="subtle"
-                            color="blue"
-                            onClick={() => startEdit(opt)}
-                          >
-                            <IconPencil size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Remove">
-                          <ActionIcon
-                            variant="subtle"
-                            color="red"
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  "Are you sure you want to delete this TLS option?",
-                                )
-                              ) {
-                                deleteMutation.mutate(opt.id);
-                              }
-                            }}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
+                      {canWrite && (
+                        <Group gap="xs" justify="flex-end">
+                          <Tooltip label="Edit">
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              onClick={() => startEdit(opt)}
+                            >
+                              <IconPencil size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Remove">
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    "Are you sure you want to delete this TLS option?",
+                                  )
+                                ) {
+                                  deleteMutation.mutate(opt.id);
+                                }
+                              }}
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      )}
                     </Table.Td>
                   </Table.Tr>
                 ))

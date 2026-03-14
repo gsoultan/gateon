@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Stack, MultiSelect, Select, Divider } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
-import { apiFetch } from "../../hooks/useGateon";
+import { apiFetch, getApiErrorMessage } from "../../hooks/useGateon";
 import { useMiddlewarePresets } from "../../hooks/useGateon";
 import type { RouteFormApi } from "./RoutingConfig";
 import type { Middleware } from "../../types/gateon";
@@ -58,10 +58,10 @@ export function PipelineConfig({
         color: "green",
       });
     },
-    onError: (err: Error) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Preset Failed",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },

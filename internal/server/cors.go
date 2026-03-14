@@ -9,8 +9,9 @@ import (
 	"github.com/rs/cors"
 )
 
-// BuildCORS returns CORS options from env. GATEON_CORS_ORIGINS, GATEON_CORS_ALLOW_CREDENTIALS.
-func BuildCORS() *cors.Cors {
+// parseAllowedOrigins returns allowed origins from GATEON_CORS_ORIGINS (comma-separated).
+// Defaults to ["*"] when unset or empty.
+func parseAllowedOrigins() []string {
 	originsStr := os.Getenv("GATEON_CORS_ORIGINS")
 	if originsStr == "" {
 		originsStr = "*"
@@ -25,6 +26,12 @@ func BuildCORS() *cors.Cors {
 	if len(origins) == 0 {
 		origins = []string{"*"}
 	}
+	return origins
+}
+
+// BuildCORS returns CORS options from env. GATEON_CORS_ORIGINS, GATEON_CORS_ALLOW_CREDENTIALS.
+func BuildCORS() *cors.Cors {
+	origins := parseAllowedOrigins()
 	allowCreds, _ := strconv.ParseBool(os.Getenv("GATEON_CORS_ALLOW_CREDENTIALS"))
 	if allowCreds {
 		for _, o := range origins {

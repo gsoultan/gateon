@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"runtime"
@@ -66,6 +67,63 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(telemetry.GetLimitStats())
 	})
+	mux.HandleFunc("GET /v1/diag/agg-stats", func(w http.ResponseWriter, r *http.Request) {
+		if d.RouteStatsProvider == nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"total_requests": 0, "requests_per_second": 0, "total_errors": 0,
+				"active_connections": 0, "open_circuits": 0, "half_open_circuits": 0,
+				"healthy_targets": 0, "total_targets": 0,
+			})
+			return
+		}
+		// RouteService is on api config, not Deps. Use RouteStatsProvider for each route.
+		// We need route IDs - get from route handler deps. Deps has RouteService via registerRouteHandlers.
+		// registerDiagnosticHandlers receives same d - Deps has RouteService.
+		routes, _ := d.RouteService.ListPaginated(context.Background(), 0, 500, "", nil)
+		var totalReqs, totalErrs, activeConn uint64
+		var openCircuits, halfOpenCircuits, healthyTargets, totalTargets int
+		for _, rt := range routes {
+			stats := d.RouteStatsProvider(rt.Id)
+			for _, s := range stats {
+				totalReqs += s.RequestCount
+				totalErrs += s.ErrorCount
+				activeConn += uint64(s.ActiveConn)
+				totalTargets++
+				circuit := s.CircuitState
+				if circuit == "" {
+					if s.Alive {
+						circuit = "CLOSED"
+					} else {
+						circuit = "OPEN"
+					}
+				}
+				switch circuit {
+				case "OPEN":
+					openCircuits++
+				case "HALF-OPEN":
+					halfOpenCircuits++
+				case "CLOSED":
+					healthyTargets++
+				}
+			}
+		}
+		pathStats := telemetry.GetPathStats()
+		var pathTotalReqs uint64
+		for _, p := range pathStats {
+			pathTotalReqs += p.RequestCount
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"total_requests":     pathTotalReqs,
+			"total_errors":       totalErrs,
+			"active_connections": activeConn,
+			"open_circuits":      openCircuits,
+			"half_open_circuits": halfOpenCircuits,
+			"healthy_targets":    healthyTargets,
+			"total_targets":      totalTargets,
+		})
+	})
 	mux.HandleFunc("GET /v1/diag/path-stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		daysStr := r.URL.Query().Get("days")
@@ -96,7 +154,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 			req.Method = "GET"
 		}
 		client := &http.Client{Timeout: 5 * time.Second}
-		proxyReq, err := http.NewRequest(req.Method, req.Target, nil)
+		proxyReq, err := http.NewRequestWithContext(r.Context(), req.Method, req.Target, nil)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})

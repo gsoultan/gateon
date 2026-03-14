@@ -24,7 +24,7 @@ import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
 import { Protocol } from "../types/gateon";
 import type { EntryPoint } from "../types/gateon";
-import { apiFetch } from "../hooks/useGateon";
+import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
@@ -60,10 +60,10 @@ export function EntryPointForm({
       });
       onSuccess?.();
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Error Saving EntryPoint",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },

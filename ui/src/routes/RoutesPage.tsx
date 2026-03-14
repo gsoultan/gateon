@@ -10,7 +10,8 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconPlus } from "@tabler/icons-react";
-import { apiFetch } from "../hooks/useGateon";
+import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
+import { usePermissions } from "../hooks/usePermissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { Route } from "../types/gateon";
@@ -26,6 +27,7 @@ const ROUTE_LIST_FALLBACK = (
 const FORM_FALLBACK = <Text>Loading form...</Text>;
 
 export default function RoutesPage() {
+  const { canWrite } = usePermissions();
   const [opened, { open, close }] = useDisclosure(false);
   const [editingRoute, setEditingRoute] = useState<Route | null>(null);
   const queryClient = useQueryClient();
@@ -46,10 +48,10 @@ export default function RoutesPage() {
         color: "green",
       });
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Error",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },
@@ -79,8 +81,12 @@ export default function RoutesPage() {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       notifications.show({ title: "Route Updated", message: "Pause/Resume applied.", color: "blue" });
     },
-    onError: (err: Error) => {
-      notifications.show({ title: "Error", message: err.message, color: "red" });
+    onError: (err: unknown) => {
+      notifications.show({
+        title: "Error",
+        message: getApiErrorMessage(err),
+        color: "red",
+      });
     },
   });
 
@@ -104,14 +110,16 @@ export default function RoutesPage() {
             Manage your API gateway routes and their policies.
           </Text>
         </div>
-        <Button
-          leftSection={<IconPlus size={18} />}
-          onClick={handleCreate}
-          size="md"
-          radius="md"
-        >
-          Create Route
-        </Button>
+        {canWrite && (
+          <Button
+            leftSection={<IconPlus size={18} />}
+            onClick={handleCreate}
+            size="md"
+            radius="md"
+          >
+            Create Route
+          </Button>
+        )}
       </Group>
 
       <Suspense fallback={ROUTE_LIST_FALLBACK}>
@@ -120,6 +128,7 @@ export default function RoutesPage() {
           onClone={handleClone}
           onPause={(route) => pauseMutation.mutate(route)}
           onDelete={(id) => deleteMutation.mutate(id)}
+          readOnly={!canWrite}
         />
       </Suspense>
 

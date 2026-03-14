@@ -6,7 +6,7 @@ import (
 
 	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/config"
-	"github.com/redis/go-redis/v9"
+	"github.com/gateon/gateon/internal/redis"
 )
 
 // Server is the main application container (Dependency Injection).
@@ -19,7 +19,7 @@ type Server struct {
 	TLSOptStore  config.TLSOptionStore
 	GlobalStore  config.GlobalConfigStore
 	AuthManager  auth.Service
-	RedisClient  *redis.Client
+	RedisClient  redis.Client
 	Port         string
 	Version      string
 	startTime    time.Time
@@ -30,7 +30,7 @@ type Server struct {
 
 func (s *Server) proxyCache() *ProxyCache {
 	s.cacheOnce.Do(func() {
-		s.cache = NewProxyCache(s.RouteStore, s.ServiceStore, s.MwStore, s.RedisClient)
+		s.cache = NewProxyCache(s.RouteStore, s.ServiceStore, s.MwStore, s.RedisClient, s.GlobalStore)
 	})
 	return s.cache
 }

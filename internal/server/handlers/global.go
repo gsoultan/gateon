@@ -41,7 +41,10 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
 	})
-	mux.HandleFunc("POST /v1/global", func(w http.ResponseWriter, r *http.Request) {
+	handleUpdateGlobal := func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		var conf gateonv1.GlobalConfig
 		body, err := io.ReadAll(r.Body)
@@ -61,7 +64,9 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 			telemetry.ConfigureRetention(int(conf.Log.PathStatsRetentionDays))
 		}
 		_ = json.NewEncoder(w).Encode(struct{ Success bool `json:"success,omitzero"` }{Success: true})
-	})
+	}
+	mux.HandleFunc("POST /v1/global", handleUpdateGlobal)
+	mux.HandleFunc("PUT /v1/global", handleUpdateGlobal)
 	mux.HandleFunc("PUT /v1/config", func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/v1/global"
 		mux.ServeHTTP(w, r)
@@ -85,7 +90,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		w.Header().Set("Content-Type", "application/json")
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		_, routesCount := d.RouteService.ListPaginated(r.Context(), 0, 0, "")
+		_, routesCount := d.RouteService.ListPaginated(r.Context(), 0, 0, "", nil)
 		_, servicesCount := d.ServiceService.ListPaginated(r.Context(), 0, 0, "")
 		_, epsCount := d.EpService.ListPaginated(r.Context(), 0, 0, "")
 		_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
@@ -156,6 +161,9 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /v1/users", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceUsers) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		page, pageSize, search := ParsePagination(r)
 		resp, err := apiService.ListUsers(r.Context(), &gateonv1.ListUsersRequest{
@@ -169,10 +177,17 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("PUT /v1/users", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.User
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if !auth.ValidRole(req.Role) {
+			writeJSONError(w, http.StatusBadRequest, "invalid role: must be admin, operator, or viewer")
 			return
 		}
 		resp, err := apiService.UpdateUser(r.Context(), &gateonv1.UpdateUserRequest{User: &req})
@@ -184,6 +199,9 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("DELETE /v1/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		id := r.PathValue("id")
 		resp, err := apiService.DeleteUser(r.Context(), &gateonv1.DeleteUserRequest{Id: id})

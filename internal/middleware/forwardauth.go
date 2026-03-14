@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/gateon/gateon/internal/request"
 )
 
 const defaultForwardAuthTimeout = 10 * time.Second
@@ -106,7 +108,7 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" && cfg.TrustForwardHeader {
 				authReq.Header.Set("X-Forwarded-For", xff)
 			} else {
-				authReq.Header.Set("X-Forwarded-For", clientIP(r))
+				authReq.Header.Set("X-Forwarded-For", request.GetClientIP(r, request.TrustCloudflareFromEnv()))
 			}
 
 			// Copy request headers
@@ -164,13 +166,3 @@ func scheme(r *http.Request) string {
 	return "http"
 }
 
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	ip := r.RemoteAddr
-	if i := strings.LastIndex(ip, ":"); i >= 0 {
-		ip = ip[:i]
-	}
-	return ip
-}

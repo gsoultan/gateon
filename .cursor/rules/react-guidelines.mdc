@@ -41,6 +41,12 @@ export function StatusCard({ label, value }: StatusCardProps) {
 }
 ```
 
+## Components Best Practices
+
+- **One component per file** — one main export per file; name the file after the component (e.g. `StatusCard.tsx`, `RouteForm.tsx`)
+- **Avoid God components** — keep components small and focused; if a component handles layout, data, and many sub-features, split it into smaller components
+- **Avoid God pages** — pages should orchestrate, not implement; delegate UI and logic to child components and hooks; keep page files thin
+
 ## State & Data Fetching
 
 - Use **TanStack Query** for server state; Zustand for client-only state
@@ -52,6 +58,19 @@ export function StatusCard({ label, value }: StatusCardProps) {
 - Memoize expensive computations with `useMemo`, callbacks with `useCallback` when passed to children
 - Avoid premature optimization; profile first
 - Lazy-load routes and heavy components with `React.lazy` + `Suspense`
+
+## Hooks Best Practices
+
+- **One hook per file** — one custom hook per file; name the file after the hook (e.g. `useRoutes.ts`, `useGateonStatus.ts`)
+- **Avoid God hooks** — keep hooks small and focused; if a hook does many unrelated things, split it or compose smaller hooks
+- **Extract reusable logic** — create a custom hook when logic is used in 2+ components or when it combines state + effects
+- **One responsibility** — keep each hook focused; compose smaller hooks (e.g. `useLimitStatsHistory` wraps `useLimitStats`)
+- **`use` prefix and camelCase** — `useRoutes`, `useGateonStatus`, `useAuth`
+- **Colocate by domain** — place domain-specific hooks in the same folder as the feature (e.g. `routes/useRouteStats.ts`); use a shared `hooks/` folder only for cross-cutting concerns (e.g. `useGateon`, `useAuth`)
+- **TanStack Query in hooks** — encapsulate `useQuery`/`useMutation` in hooks; use stable `queryKey` arrays (include params); set `enabled: false` for conditional fetching
+- **Return stable shapes** — return objects or arrays; avoid changing return shape between renders; destructure what callers need
+- **Cleanup in `useEffect`** — clear timers, subscriptions, and listeners in the effect cleanup
+- **No conditional hook calls** — always call hooks at the top level; use `enabled` or early returns inside the hook, not before calling it
 
 ## Naming Conventions
 

@@ -12,7 +12,15 @@ import (
 	"github.com/gateon/gateon/internal/middleware"
 	"github.com/gateon/gateon/internal/syncutil"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
+)
+
+const (
+	quicMaxIdleTimeout        = 30 * time.Second
+	quicKeepAlivePeriod       = 10 * time.Second
+	quicMaxIncomingStreams    = 1000
+	quicMaxIncomingUniStreams = 500
 )
 
 type httpRunner struct{}
@@ -49,9 +57,34 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		epTLSConfig = deps.TLSConfig.Clone()
 	}
 	finalEPHandler = deps.TLSManager.HTTPChallengeHandler(finalEPHandler)
+
+	// Start HTTP/3 (QUIC) in parallel with TCP when configured — production-ready settings.
+	needH3 := ep.Type == gateonv1.EntryPoint_HTTP3 && hasUDP && epTLSConfig != nil
+	var tcpHandler http.Handler = finalEPHandler
+	if needH3 {
+		h3Server := newHTTP3Server(addr, finalEPHandler, epTLSConfig)
+		tcpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ProtoMajor < 3 {
+				_ = h3Server.SetQUICHeaders(w.Header())
+			}
+			finalEPHandler.ServeHTTP(w, r)
+		})
+		if deps.ShutdownRegistry != nil {
+			deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+				return h3Server.Close()
+			})
+		}
+		wg.Go(func() {
+			logger.L.Info().Str("addr", addr).Msg("starting HTTP/3 (QUIC) entrypoint")
+			if err := h3Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.L.Error().Err(err).Str("addr", addr).Msg("HTTP/3 server failed")
+			}
+		})
+	}
+
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           finalEPHandler,
+		Handler:           tcpHandler,
 		TLSConfig:         epTLSConfig,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Duration(ep.ReadTimeoutMs) * time.Millisecond,
@@ -79,22 +112,19 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 			}
 		}
 	}
-	if ep.Type == gateonv1.EntryPoint_HTTP3 && hasUDP && epTLSConfig != nil {
-		logger.L.Info().Str("addr", addr).Msg("starting HTTP/3 entrypoint")
-		h3Server := &http3.Server{Addr: addr, Handler: finalEPHandler, TLSConfig: epTLSConfig}
-		if deps.ShutdownRegistry != nil {
-			deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-				return h3Server.Close()
-			})
-		}
-		origHandler := server.Handler
-		server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = h3Server.SetQUICHeaders(w.Header())
-			origHandler.ServeHTTP(w, r)
-		})
-		if err := h3Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.L.Error().Err(err).Str("addr", addr).Msg("HTTP/3 server failed")
-		}
+}
+
+func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *http3.Server {
+	return &http3.Server{
+		Addr:      addr,
+		Handler:   handler,
+		TLSConfig: tlsConfig,
+		QUICConfig: &quic.Config{
+			MaxIdleTimeout:        quicMaxIdleTimeout,
+			KeepAlivePeriod:       quicKeepAlivePeriod,
+			MaxIncomingStreams:    quicMaxIncomingStreams,
+			MaxIncomingUniStreams: quicMaxIncomingUniStreams,
+		},
 	}
 }
 

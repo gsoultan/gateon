@@ -2,8 +2,14 @@ import { Suspense, lazy } from 'react'
 import { Card, Loader, Stack, Text, Grid, Title, Group } from '@mantine/core'
 import { useGateonStatus } from '../hooks/useGateon'
 
-const StatusCard = lazy(() => import('../components/StatusCard'))
-const RouteList = lazy(() => import('../components/RouteList'))
+const StatusCard = lazy(() => import("../components/StatusCard"));
+const ServiceOverviewCards = lazy(
+  () =>
+    import("../components/ServiceOverviewCards").then((m) => ({
+      default: m.ServiceOverviewCards,
+    }))
+);
+const RouteList = lazy(() => import("../components/RouteList"));
 const PathStatsTable = lazy(() => import('../components/PathStatsTable').then(m => ({ default: m.PathStatsTable })))
 const LiveLogs = lazy(() => import('../components/LiveLogs'))
 const LimitRejectionsCard = lazy(() => import('../components/LimitRejectionsCard').then(m => ({ default: m.LimitRejectionsCard })))
@@ -26,6 +32,10 @@ export default function Dashboard() {
 
       <Suspense fallback={STATUS_FALLBACK}>
         <StatusCard />
+      </Suspense>
+
+      <Suspense fallback={<Card withBorder h={120}><Loader /></Card>}>
+        <ServiceOverviewCards />
       </Suspense>
 
       <Grid gutter="md">

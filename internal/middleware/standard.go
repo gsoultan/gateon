@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gateon/gateon/internal/logger"
+	"github.com/gateon/gateon/internal/request"
 	"github.com/gateon/gateon/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -124,14 +125,11 @@ func Metrics(routeID string) Middleware {
 	}
 }
 
-// IPFilter returns a middleware that filters requests by IP address.
-func IPFilter(allowList, denyList []string) Middleware {
+// IPFilterWithClientIP returns a middleware that filters requests by IP address using the given clientIP resolver.
+func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Request) string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			remoteAddr, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				remoteAddr = r.RemoteAddr
-			}
+			remoteAddr := clientIP(r)
 
 			// Deny list takes precedence
 			for _, ip := range denyList {
@@ -173,6 +171,14 @@ func matchIP(clientIP, target string) bool {
 		return ipnet.Contains(ip)
 	}
 	return false
+}
+
+// IPFilter returns a middleware that filters requests by IP address, using X-Forwarded-For and RemoteAddr.
+// For Cloudflare, use IPFilterWithClientIP with a resolver that uses CF-Connecting-IP.
+func IPFilter(allowList, denyList []string) Middleware {
+	return IPFilterWithClientIP(allowList, denyList, func(r *http.Request) string {
+		return request.GetClientIP(r, request.TrustCloudflareFromEnv())
+	})
 }
 
 func lastIndex(s, sep string) int {

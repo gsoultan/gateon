@@ -6,11 +6,9 @@ import (
 
 	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/httputil"
-	"github.com/gateon/gateon/internal/logger"
 	"github.com/gateon/gateon/internal/middleware"
 	"github.com/gateon/gateon/internal/router"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
+	"github.com/gateon/gateon/internal/server/entrypoint"
 )
 
 // BaseHandlerDeps holds narrow dependencies for CreateBaseHandler (Interface Segregation).
@@ -27,10 +25,11 @@ type BaseHandlerDeps struct {
 func CreateBaseHandler(
 	uiHandler http.Handler,
 	deps BaseHandlerDeps,
-	wrapped *grpcweb.WrappedGrpcServer,
+	grpcWeb entrypoint.GRPCWebHandler,
 	mux *http.ServeMux,
 ) http.Handler {
 	handler := deps.ProxyHandler
+	_ = grpcWeb // reserved for future gRPC-web routing in base handler
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if rt := router.SelectRoute(r, deps.RouteStore.List(r.Context())); rt != nil {
@@ -46,44 +45,29 @@ func CreateBaseHandler(
 			uiHandler.ServeHTTP(w, r)
 		})
 
-		if gc := deps.GlobalReg.Get(r.Context()); gc != nil && gc.Auth != nil && gc.Auth.Enabled && deps.Auth != nil {
-			isAPI := strings.HasPrefix(r.URL.Path, "/v1/")
-			isMetrics := r.URL.Path == "/metrics"
-			isLogin := r.URL.Path == "/v1/login"
-			isSetup := r.URL.Path == "/v1/setup" || r.URL.Path == "/v1/setup/required"
-			isHealth := r.URL.Path == "/healthz" || r.URL.Path == "/readyz"
-			isStatus := r.URL.Path == "/v1/status"
-
-			if !isAPI && !isMetrics {
-				internal.ServeHTTP(w, r)
-				return
-			}
-			if isLogin {
-				if deps.LoginLimiter != nil {
-					limited := deps.LoginLimiter.Handler(middleware.PerIP)(internal)
-					rec := &httputil.StatusRecorder{ResponseWriter: w, Status: 200}
-					limited.ServeHTTP(rec, r)
-					if rec.Status == http.StatusTooManyRequests {
-						logger.SecurityEvent("login_rate_limit", r, "too_many_attempts")
-					}
-				} else {
-					internal.ServeHTTP(w, r)
-				}
-				return
-			}
-			if isSetup || isHealth || isStatus {
-				internal.ServeHTTP(w, r)
-				return
-			}
-			if r.URL.Path == "/v1/logs" && r.Header.Get("Authorization") == "" {
-				if auth := r.URL.Query().Get("auth"); auth != "" {
-					r.Header.Set("Authorization", "Bearer "+auth)
-				}
-			}
-			middleware.PasetoAuth(deps.Auth)(internal).ServeHTTP(w, r)
+		gc := deps.GlobalReg.Get(r.Context())
+		if !needsAuth(gc, deps) {
+			internal.ServeHTTP(w, r)
 			return
 		}
 
-		internal.ServeHTTP(w, r)
+		if !isAPIMetricsPath(r.URL.Path) {
+			internal.ServeHTTP(w, r)
+			return
+		}
+		if isLoginPath(r.URL.Path) {
+			handleLoginWithRateLimit(w, r, internal, deps)
+			return
+		}
+		if isPublicAuthPath(r.URL.Path) {
+			internal.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/v1/logs" && r.Header.Get("Authorization") == "" {
+			if auth := r.URL.Query().Get("auth"); auth != "" {
+				r.Header.Set("Authorization", "Bearer "+auth)
+			}
+		}
+		middleware.PasetoAuth(deps.Auth)(internal).ServeHTTP(w, r)
 	})
 }

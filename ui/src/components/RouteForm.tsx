@@ -9,7 +9,9 @@ import {
   ScrollArea,
   Paper,
   Divider,
+  SegmentedControl,
 } from "@mantine/core";
+import { stringify as yamlStringify } from "yaml";
 import type { Route } from "../types/gateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
@@ -21,6 +23,7 @@ import {
   useCertificates,
   useServices,
   apiFetch,
+  getApiErrorMessage,
 } from "../hooks/useGateon";
 import {
   IconCheck,
@@ -39,6 +42,7 @@ export default function RouteForm({
 }) {
   const queryClient = useQueryClient();
   const [active, setActive] = useState(0);
+  const [previewFormat, setPreviewFormat] = useState<"json" | "yaml">("json");
 
   // Data for form selections
   const { data: epData } = useEntryPoints();
@@ -67,10 +71,10 @@ export default function RouteForm({
       });
       onSuccess?.();
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Error Saving Route",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },
@@ -185,24 +189,24 @@ export default function RouteForm({
               size="sm"
             >
               <Stepper.Step
-                label="Routing"
-                description="Entry & Matching"
+                label="Basics"
+                description="ID, Type, Rule"
                 icon={<IconRoute size={18} />}
               >
                 <RoutingConfig form={form} entryPointOptions={epOptions} />
               </Stepper.Step>
 
               <Stepper.Step
-                label="Backend"
-                description="Service & Type"
+                label="Upstream"
+                description="Targets & Load Balancing"
                 icon={<IconServer size={18} />}
               >
                 <UpstreamConfig form={form} serviceOptions={serviceOptions} />
               </Stepper.Step>
 
               <Stepper.Step
-                label="Pipeline"
-                description="Logic & Security"
+                label="Security"
+                description="Middlewares & TLS"
                 icon={<IconShieldLock size={18} />}
               >
                 <PipelineConfig
@@ -290,26 +294,34 @@ export default function RouteForm({
         </Paper>
 
         <Stack gap="xs">
-          <Divider
-            label={
-              <Text fw={800} size="xs" c="dimmed">
-                Route Definition Preview
-              </Text>
-            }
-            labelPosition="center"
-          />
+          <Group justify="space-between">
+            <Text fw={800} size="xs" c="dimmed">
+              Configuration Preview
+            </Text>
+            <SegmentedControl
+              size="xs"
+              value={previewFormat}
+              onChange={(v) => setPreviewFormat(v as "json" | "yaml")}
+              data={[
+                { value: "json", label: "JSON" },
+                { value: "yaml", label: "YAML" },
+              ]}
+            />
+          </Group>
           <Paper
             withBorder
             p="md"
             bg="var(--mantine-color-black)"
             radius="lg"
           >
-            <ScrollArea h={200} offsetScrollbars>
+            <ScrollArea h={220} offsetScrollbars>
               <form.Subscribe
                 selector={(state) => state.values}
                 children={(values) => (
                   <Code block bg="transparent" c="indigo.3" style={{ fontSize: 12 }}>
-                    {JSON.stringify(values, null, 2)}
+                    {previewFormat === "yaml"
+                      ? yamlStringify(values, { indent: 2 })
+                      : JSON.stringify(values, null, 2)}
                   </Code>
                 )}
               />

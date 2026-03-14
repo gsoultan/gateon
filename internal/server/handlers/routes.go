@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/pkg/proxy"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
@@ -29,12 +30,16 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 	})
 	mux.HandleFunc("GET /v1/routes", func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
-		routes, total := d.RouteService.ListPaginated(r.Context(), page, pageSize, search)
+		filter := ParseRouteFilters(r)
+		routes, total := d.RouteService.ListPaginated(r.Context(), page, pageSize, search, filter)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListRoutesResponse{
 			Routes: routes, TotalCount: total, Page: page, PageSize: pageSize,
 		})
 	})
 	mux.HandleFunc("PUT /v1/routes", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceRoutes) {
+			return
+		}
 		var rt gateonv1.Route
 		if err := DecodeRequestBody(r, &rt); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
@@ -47,6 +52,9 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 		WriteProtoResponse(w, http.StatusOK, &rt)
 	})
 	mux.HandleFunc("DELETE /v1/routes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceRoutes) {
+			return
+		}
 		id := r.PathValue("id")
 		if id == "" {
 			WriteHTTPError(w, http.StatusBadRequest, "missing route id")

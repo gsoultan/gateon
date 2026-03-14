@@ -2,7 +2,8 @@ package logger
 
 import (
 	"net/http"
-	"strings"
+
+	"github.com/gateon/gateon/internal/request"
 )
 
 // SecurityEvent logs a security-relevant event for audit and monitoring.
@@ -15,13 +16,20 @@ func SecurityEvent(event string, r *http.Request, reason string) {
 		Msg("security event")
 }
 
+// RBACPermissionDenied logs an RBAC denial for audit.
+func RBACPermissionDenied(r *http.Request, userID, role, action, resource string) {
+	L.Warn().
+		Str("event", "rbac_permission_denied").
+		Str("ip", clientIP(r)).
+		Str("path", r.URL.Path).
+		Str("method", r.Method).
+		Str("user_id", userID).
+		Str("role", role).
+		Str("action", action).
+		Str("resource", resource).
+		Msg("RBAC permission denied")
+}
+
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	ip := r.RemoteAddr
-	if i := strings.LastIndex(ip, ":"); i >= 0 {
-		ip = ip[:i]
-	}
-	return ip
+	return request.GetClientIP(r, request.TrustCloudflareFromEnv())
 }

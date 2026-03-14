@@ -22,8 +22,8 @@ func NewRouteService(store config.RouteStore, invalidator ProxyInvalidator) Rout
 }
 
 // ListPaginated returns paginated routes.
-func (s *RouteServiceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Route, int32) {
-	return s.store.ListPaginated(ctx, page, pageSize, search)
+func (s *RouteServiceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *config.RouteFilter) ([]*gateonv1.Route, int32) {
+	return s.store.ListPaginated(ctx, page, pageSize, search, filter)
 }
 
 // SaveRoute validates, assigns ID if needed, persists, and invalidates proxy.
