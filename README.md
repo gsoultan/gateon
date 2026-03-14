@@ -48,12 +48,30 @@ Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balanc
 ## Repository Structure
 ```
 cmd/gateon/      # Application entry point (HTTP + gRPC + gRPC-Web)
+doc/             # Setup guides and documentation (e.g. doc/email-backend-setup.md)
 internal/        # Server logic and shared packages (server, logger, config, router, etc.)
   - server/      # API Gateway implementation
   - router/      # Routers connect incoming requests to the services that handle them.
 proto/           # Protobuf definitions (generated Go under proto/gateon/v1/)
 ui/              # React UI (Vite + TS + Mantine + Tailwind); built to internal/ui/dist for embed
+  docs/          # Documentation content (displayed in UI Docs page)
 ```
+
+## Releases and Services
+
+Release binaries (Linux, macOS, Windows) are built by [GoReleaser](https://goreleaser.com/) on tag push.
+
+**Install as a service** (no separate scripts):
+
+```bash
+# Linux
+sudo gateon install
+
+# Windows (run as Administrator)
+gateon install
+```
+
+Uninstall: `gateon uninstall`. See [doc/services.md](doc/services.md) for package-based install and WinSW fallback.
 
 ## Architecture Notes
 
@@ -105,7 +123,7 @@ curl -s http://localhost:8080/v1/status | jq
 
 `protoc` is required for developing and maintaining Gateon itself because:
 
-1.  **Management API**: Gateon's own control plane (routing, status, metrics) is defined using Protocol Buffers (`proto/gateon.proto`).
+1.  **Management API**: Gateon's own control plane (routing, status, metrics) is defined using Protocol Buffers (domain proto files in `proto/`, with `api.proto` defining the service).
 2.  **Internal Communication**: The backend uses generated Go code to handle these management requests efficiently.
 3.  **Extensibility**: If you want to extend Gateon with custom gRPC services or modify the management API, you will need to re-generate the Go bindings.
 
@@ -122,12 +140,14 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 2) Generate Go code (output goes to `proto/gateon/v1/` per `go_package`):
 ```bash
-protoc \
+protoc -I proto \
   --go_out=. --go_opt=module=github.com/gateon/gateon \
   --go-grpc_out=. --go-grpc_opt=module=github.com/gateon/gateon \
-  proto/gateon.proto
+  proto/common.proto proto/route.proto proto/service.proto proto/entrypoint.proto \
+  proto/middleware.proto proto/tls.proto proto/global.proto proto/auth.proto \
+  proto/status.proto proto/api.proto
 ```
-Generated files live only in `proto/gateon/v1/`; do not commit root-level `*.pb.go` in `proto/`.
+Proto files are split by domain (route, service, auth, etc.); `api.proto` defines the ApiService.
 
 3) Services are fully implemented and registered in `internal/server` and wired from `cmd/gateon`.
 
@@ -143,6 +163,7 @@ Generated files live only in `proto/gateon/v1/`; do not commit root-level `*.pb.
 - `GATEON_TURNSTILE_SECRET`: Cloudflare Turnstile secret key (fallback when middleware config omits it).
 - `GATEON_GEOIP_DB_PATH`: Path to GeoLite2-Country.mmdb for GeoIP middleware (fallback when config omits db_path).
 - `GATEON_HMAC_SECRET`: HMAC secret for webhook signature verification (fallback when middleware config omits it).
+- `GATEON_ENCRYPTION_KEY`: Optional. When set (min 16 chars), `database_url`, `paseto_secret`, and database password are encrypted in global.json.
 
 ## UI (React + Vite + Mantine + Tailwind)
 The UI is automatically built and embedded into the Go binary during the build process. When Gateon is running, the dashboard is accessible on the same port as the gateway (default: `http://localhost:8080`).

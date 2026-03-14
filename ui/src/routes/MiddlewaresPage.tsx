@@ -371,7 +371,7 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "buffering" &&
                     "Keys: max_request_body_bytes (required)"}
                   {editingMW?.type === "auth" &&
-                    "Keys: type (jwt/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret; paseto: secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
+                    "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret; oidc: issuer, audience; oauth2: introspection_url, client_id, client_secret; paseto: secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
                   {editingMW?.type === "headers" &&
                     "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, add_response_X, set_response_X, del_request_X, del_response_X"}
                   {editingMW?.type === "rewrite" &&

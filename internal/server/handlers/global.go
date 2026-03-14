@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/gateon/gateon/internal/api"
 	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/logger"
 	"github.com/gateon/gateon/internal/middleware"
@@ -34,10 +33,10 @@ func writeJSONError(w http.ResponseWriter, statusCode int, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *Deps) {
+func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/global", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		gc := apiService.Globals.Get(r.Context())
+		gc := svc.GetGlobals().Get(r.Context())
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
 	})
@@ -56,7 +55,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := apiService.Globals.Update(r.Context(), &conf); err != nil {
+		if err := svc.GetGlobals().Update(r.Context(), &conf); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to update global config")
 			return
 		}
@@ -115,7 +114,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 	})
 	mux.HandleFunc("GET /v1/setup/required", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		resp, err := apiService.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{})
+		resp, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{})
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -131,7 +130,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
 			return
 		}
-		resp, err := apiService.Setup(r.Context(), &req)
+		resp, err := svc.Setup(r.Context(), &req)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -147,7 +146,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 			writeJSONError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		resp, err := apiService.Login(r.Context(), &req)
+		resp, err := svc.Login(r.Context(), &req)
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidCredentials) {
 				logger.SecurityEvent("auth_failure", r, "invalid_credentials")
@@ -166,7 +165,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		}
 		w.Header().Set("Content-Type", "application/json")
 		page, pageSize, search := ParsePagination(r)
-		resp, err := apiService.ListUsers(r.Context(), &gateonv1.ListUsersRequest{
+		resp, err := svc.ListUsers(r.Context(), &gateonv1.ListUsersRequest{
 			Page: page, PageSize: pageSize, Search: search,
 		})
 		if err != nil {
@@ -190,7 +189,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 			writeJSONError(w, http.StatusBadRequest, "invalid role: must be admin, operator, or viewer")
 			return
 		}
-		resp, err := apiService.UpdateUser(r.Context(), &gateonv1.UpdateUserRequest{User: &req})
+		resp, err := svc.UpdateUser(r.Context(), &gateonv1.UpdateUserRequest{User: &req})
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -204,7 +203,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		}
 		w.Header().Set("Content-Type", "application/json")
 		id := r.PathValue("id")
-		resp, err := apiService.DeleteUser(r.Context(), &gateonv1.DeleteUserRequest{Id: id})
+		resp, err := svc.DeleteUser(r.Context(), &gateonv1.DeleteUserRequest{Id: id})
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return

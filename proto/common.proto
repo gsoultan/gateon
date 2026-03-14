@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+message Target {
+  string url = 1;      // HTTP/gRPC: "http://host:port". L4: "host:port"
+  int32 weight = 2;    // For weighted load balancing
+  string protocol = 3; // HTTP/gRPC: "http", "https", "h2", "h2c". L4: unused
+}
+
+message TlsConfig {
+  bool enabled = 1;
+  string email = 2;
+  repeated string domains = 3;
+  bool auto_redirect = 6;
+  reserved 4, 5, 7;
+  string min_tls_version = 8;  // "TLS1.0", "TLS1.1", "TLS1.2", "TLS1.3"
+  string max_tls_version = 9;
+  string client_auth_type = 10; // "NoClientCert", "RequestClientCert", etc.
+  repeated string cipher_suites = 11;
+  repeated Certificate certificates = 12;
+  repeated ClientAuthority client_authorities = 13;
+  AcmeConfig acme = 14;
+}
+
+message AcmeConfig {
+  bool enabled = 1;
+  string email = 2;
+  string ca_server = 3;    // e.g. https://acme-v02.api.letsencrypt.org/directory
+  string challenge_type = 4; // "http", "tls-alpn", "dns"
+  string dns_provider = 5;   // e.g. "cloudflare", "digitalocean" (for DNS-01)
+  map<string, string> dns_config = 6;
+}
+
+message Certificate {
+  string id = 1;
+  string name = 2;
+  string cert_file = 3;
+  string key_file = 4;
+}
+
+message ClientAuthority {
+  string id = 1;
+  string name = 2;
+  string ca_file = 3;
+}
+
+// DatabaseConfig holds structured DB connection params.
+message DatabaseConfig {
+  string driver = 1;      // sqlite | postgres | mysql | mariadb
+  string sqlite_path = 2; // For sqlite only
+  string host = 3;
+  int32 port = 4;
+  string user = 5;
+  string password = 6;
+  string database = 7;
+  string ssl_mode = 8;    // For postgres: disable, require, verify-full, etc.
+}
+
+// TransportConfig tunes HTTP transport connection pooling for high-throughput backends.
+message TransportConfig {
+  int32 max_idle_conns = 1;
+  int32 max_idle_conns_per_host = 2;
+  int32 idle_conn_timeout_seconds = 3;
+}
+
+message RedisConfig {
+  bool enabled = 4;
+  string addr = 1;
+  string password = 2;
+  int32 db = 3;
+}
+
+message OtelConfig {
+  bool enabled = 2;
+  string endpoint = 1;
+  string service_name = 3;
+}
+
+message LogConfig {
+  string level = 1;  // "debug", "info", "warn", "error"
+  bool development = 2;
+  string format = 3; // "json", "text"
+  int32 path_stats_retention_days = 4;
+}

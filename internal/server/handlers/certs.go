@@ -7,15 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gateon/gateon/internal/api"
 	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/logger"
 )
 
-func registerCertHandlers(mux *http.ServeMux, apiService *api.ApiService) {
+func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 	mux.HandleFunc("GET /v1/certs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		gc := apiService.Globals.Get(r.Context())
+		gc := svc.GetGlobals().Get(r.Context())
 		if gc == nil || gc.Tls == nil {
 			_, _ = w.Write([]byte("[]"))
 			return

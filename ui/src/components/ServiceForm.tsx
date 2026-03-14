@@ -11,6 +11,7 @@ import {
   NumberInput,
   Alert,
   Tooltip,
+  Switch,
 } from "@mantine/core";
 import { IconPlus, IconTrash, IconCheck, IconInfoCircle } from "@tabler/icons-react";
 import type { Service } from "../types/gateon";
@@ -77,6 +78,7 @@ export function ServiceForm({
       l4_health_check_interval_ms: 10000,
       l4_health_check_timeout_ms: 3000,
       l4_udp_session_timeout_s: 60,
+      l4_proxy_protocol: false,
     },
     onSubmit: async ({ value }) => {
       const bt = value.backend_type || "http";
@@ -163,6 +165,7 @@ export function ServiceForm({
         "l4_udp_session_timeout_s",
         initialData.l4_udp_session_timeout_s ?? 60,
       );
+      form.setFieldValue("l4_proxy_protocol", initialData.l4_proxy_protocol ?? false);
     }
   }, [initialData, form]);
 
@@ -446,7 +449,26 @@ export function ServiceForm({
           selector={(s) => s.values.backend_type}
           children={(backendType) =>
             (backendType === "tcp" || backendType === "udp") ? (
-              <Group grow>
+              <>
+                {backendType === "tcp" && (
+                  <form.Field
+                    name="l4_proxy_protocol"
+                    children={(field) => (
+                      <Tooltip label="Send HAProxy PROXY protocol v1 header so the backend (e.g. mail server) sees the original client IP. Required for correct SPF checks when proxying SMTP/IMAP/POP3.">
+                        <div>
+                          <Switch
+                            label="Send PROXY protocol (TCP)"
+                            description="Enable for email backends (SPF uses client IP)"
+                            checked={field.state.value ?? false}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.currentTarget.checked)}
+                          />
+                        </div>
+                      </Tooltip>
+                    )}
+                  />
+                )}
+                <Group grow>
                 <form.Field
                   name="l4_health_check_interval_ms"
                   children={(field) => (
@@ -489,6 +511,7 @@ export function ServiceForm({
                   )}
                 />
               </Group>
+              </>
             ) : null
           }
         />

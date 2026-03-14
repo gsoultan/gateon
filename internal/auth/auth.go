@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gateon/gateon/internal/db"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 	"github.com/google/uuid"
 	"github.com/o1egl/paseto/v2"
 	"golang.org/x/crypto/bcrypt"
-	_ "modernc.org/sqlite"
 )
 
 // Roles defined for RBAC
@@ -26,6 +26,7 @@ var (
 
 type Manager struct {
 	db           *sql.DB
+	dialect      db.Dialect
 	paseto       *paseto.V2
 	symmetricKey []byte
 }
@@ -49,23 +50,24 @@ type Claims struct {
 	paseto.JSONToken
 }
 
-func NewManager(sqlitePath, symmetricKey string) (*Manager, error) {
-	db, err := sql.Open("sqlite", sqlitePath)
+// NewManager creates an auth manager using the given database URL.
+// Supported: sqlite:path, postgres://..., mysql://..., mariadb://...
+// Plain path (e.g. "gateon.db") is treated as SQLite for backward compatibility.
+func NewManager(databaseURL, symmetricKey string) (*Manager, error) {
+	database, dialect, err := db.Open(databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open sqlite: %w", err)
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping sqlite: %w", err)
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	m := &Manager{
-		db:           db,
+		db:           database,
+		dialect:      dialect,
 		paseto:       paseto.NewV2(),
 		symmetricKey: []byte(symmetricKey),
 	}
 
 	if err := m.bootstrap(); err != nil {
+		_ = database.Close()
 		return nil, err
 	}
 
@@ -73,24 +75,16 @@ func NewManager(sqlitePath, symmetricKey string) (*Manager, error) {
 }
 
 func (m *Manager) bootstrap() error {
-	query := `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		username TEXT UNIQUE NOT NULL,
-		password TEXT NOT NULL,
-		role TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);`
-	if _, err := m.db.Exec(query); err != nil {
+	if _, err := m.db.Exec(QueryCreateUsersTable); err != nil {
 		return fmt.Errorf("failed to create users table: %w", err)
 	}
-
 	return nil
 }
 
 func (m *Manager) IsSetupDone() bool {
 	var count int
-	err := m.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	q := m.dialect.Rebind(QueryCountUsers)
+	err := m.db.QueryRow(q).Scan(&count)
 	if err != nil {
 		return false
 	}
@@ -100,7 +94,8 @@ func (m *Manager) IsSetupDone() bool {
 func (m *Manager) Authenticate(username, password string) (string, *gateonv1.User, error) {
 	var user gateonv1.User
 	var hashed string
-	err := m.db.QueryRow("SELECT id, username, password, role FROM users WHERE username = ?", username).
+	q := m.dialect.Rebind(QueryUserByUsername)
+	err := m.db.QueryRow(q, username).
 		Scan(&user.Id, &user.Username, &hashed, &user.Role)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -132,7 +127,6 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 		return "", nil, fmt.Errorf("failed to encrypt token: %w", err)
 	}
 
-	// Don't return password in user object
 	user.Password = ""
 	return token, &user, nil
 }
@@ -152,20 +146,22 @@ func (m *Manager) VerifyToken(token string) (any, error) {
 }
 
 func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.User, int32, error) {
+	searchArg := "%" + search + "%"
+	qCount := m.dialect.Rebind(QueryCountUsersSearch)
 	var totalCount int
-	err := m.db.QueryRow("SELECT COUNT(*) FROM users WHERE username LIKE ?", "%"+search+"%").Scan(&totalCount)
+	err := m.db.QueryRow(qCount, searchArg).Scan(&totalCount)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	query := "SELECT id, username, role FROM users WHERE username LIKE ? ORDER BY username ASC"
+	query := QueryListUsersBase
 	var args []any
-	args = append(args, "%"+search+"%")
-
+	args = append(args, searchArg)
 	if pageSize > 0 {
-		query += " LIMIT ? OFFSET ?"
+		query += QueryListUsersLimitOffset
 		args = append(args, pageSize, page*pageSize)
 	}
+	query = m.dialect.Rebind(query)
 
 	rows, err := m.db.Query(query, args...)
 	if err != nil {
@@ -194,24 +190,41 @@ func (m *Manager) UpsertUser(u *gateonv1.User) error {
 		if err != nil {
 			return err
 		}
-		_, err = m.db.Exec(`
-			INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET username=excluded.username, password=excluded.password, role=excluded.role
-			ON CONFLICT(username) DO UPDATE SET password=excluded.password, role=excluded.role`,
-			u.Id, u.Username, string(hashed), u.Role)
+		return m.upsertUserWithPassword(u.Id, u.Username, string(hashed), u.Role)
+	}
+	return m.upsertUserWithPassword(u.Id, u.Username, "", u.Role)
+}
+
+func (m *Manager) upsertUserWithPassword(id, username, password, role string) error {
+	if m.dialect.Driver == db.DriverMySQL {
+		return m.upsertMySQL(id, username, password, role)
+	}
+	return m.upsertSQLitePostgres(id, username, password, role)
+}
+
+func (m *Manager) upsertSQLitePostgres(id, username, password, role string) error {
+	if password != "" {
+		q := m.dialect.Rebind(QueryInsertUserSQLitePostgresWithPassword)
+		_, err := m.db.Exec(q, id, username, password, role)
 		return err
 	}
+	q := m.dialect.Rebind(QueryInsertUserSQLitePostgresNoPassword)
+	_, err := m.db.Exec(q, id, username, "", role)
+	return err
+}
 
-	_, err := m.db.Exec(`
-		INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET username=excluded.username, role=excluded.role
-		ON CONFLICT(username) DO UPDATE SET role=excluded.role`,
-		u.Id, u.Username, "", u.Role)
+func (m *Manager) upsertMySQL(id, username, password, role string) error {
+	if password != "" {
+		_, err := m.db.Exec(QueryInsertUserMySQLWithPassword, id, username, password, role)
+		return err
+	}
+	_, err := m.db.Exec(QueryInsertUserMySQLNoPassword, id, username, "", role)
 	return err
 }
 
 func (m *Manager) DeleteUser(id string) error {
-	_, err := m.db.Exec("DELETE FROM users WHERE id = ?", id)
+	q := m.dialect.Rebind(QueryDeleteUser)
+	_, err := m.db.Exec(q, id)
 	return err
 }
 

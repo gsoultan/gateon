@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+import "common.proto";
+
+message ListEntryPointsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string search = 3;
+}
+
+message ListEntryPointsResponse {
+  repeated EntryPoint entry_points = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateEntryPointRequest {
+  EntryPoint entry_point = 1;
+}
+
+message UpdateEntryPointResponse {
+  bool success = 1;
+}
+
+message DeleteEntryPointRequest {
+  string id = 1;
+}
+
+message DeleteEntryPointResponse {
+  bool success = 1;
+}
+
+message EntryPoint {
+  string id = 1;
+  string name = 2;
+  string address = 3; // e.g., ":80", "0.0.0.0:443"
+  enum Type {
+    HTTP = 0;
+    GRPC = 1;
+    TCP = 2;
+    UDP = 3;
+    HTTP2 = 4;
+    HTTP3 = 5;
+  }
+  Type type = 4;
+  enum Protocol {
+    TCP_PROTO = 0;
+    UDP_PROTO = 1;
+  }
+  Protocol protocol = 11;
+  repeated Protocol protocols = 12;
+  TlsConfig tls = 5;
+  int32 read_timeout_ms = 7;
+  int32 write_timeout_ms = 8;
+  int32 max_connections = 9;
+  bool access_log_enabled = 10;
+}

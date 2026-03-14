@@ -1,10 +1,10 @@
-import { Card, Title, Text } from '@mantine/core'
+import { Stack } from '@mantine/core'
+import LiveLogs from '../components/LiveLogs'
 
 export default function LogsPage() {
   return (
-    <Card withBorder>
-      <Title order={4}>Logs</Title>
-      <Text c="dimmed" size="sm">A richer logs view with filtering will appear here.</Text>
-    </Card>
+    <Stack gap="md">
+      <LiveLogs height={500} />
+    </Stack>
   )
 }

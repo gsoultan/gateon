@@ -53,6 +53,7 @@ export type Service = {
   l4_health_check_interval_ms?: number;
   l4_health_check_timeout_ms?: number;
   l4_udp_session_timeout_s?: number;
+  l4_proxy_protocol?: boolean;
 };
 
 export type RouteTLSConfig = {
@@ -159,10 +160,25 @@ export type TransportConfig = {
   idle_conn_timeout_seconds?: number;
 };
 
+export type DatabaseConfig = {
+  driver?: "sqlite" | "postgres" | "mysql" | "mariadb";
+  sqlite_path?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
+  ssl_mode?: string;
+};
+
 export type AuthConfig = {
   enabled?: boolean;
   paseto_secret?: string;
+  /** @deprecated Use database_config or database_url. */
   sqlite_path?: string;
+  /** Fallback connection string (encrypted when GATEON_ENCRYPTION_KEY is set) */
+  database_url?: string;
+  database_config?: DatabaseConfig;
 };
 
 export type User = {

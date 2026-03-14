@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+message ListTLSOptionsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string search = 3;
+}
+
+message ListTLSOptionsResponse {
+  repeated TLSOption tls_options = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateTLSOptionRequest {
+  TLSOption tls_option = 1;
+}
+
+message UpdateTLSOptionResponse {
+  bool success = 1;
+}
+
+message DeleteTLSOptionRequest {
+  string id = 1;
+}
+
+message DeleteTLSOptionResponse {
+  bool success = 1;
+}
+
+message TLSOption {
+  string id = 1;
+  string name = 2;
+  string min_tls_version = 3;  // "TLS1.0", "TLS1.1", "TLS1.2", "TLS1.3"
+  string max_tls_version = 4;
+  repeated string cipher_suites = 5;
+  bool prefer_server_cipher_suites = 6;
+  string client_auth_type = 7;
+  bool sni_strict = 8;
+  repeated string alpn_protocols = 9;
+}

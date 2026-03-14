@@ -9,6 +9,27 @@ import (
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
+func TestRouteHostIsExact(t *testing.T) {
+	tests := []struct {
+		name      string
+		routeHost string
+		want      bool
+	}{
+		{"exact host", "api.example.com", true},
+		{"exact with subdomain", "www.example.com", true},
+		{"wildcard", "*.example.com", false},
+		{"wildcard case", "*.Example.COM", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RouteHostIsExact(tt.routeHost); got != tt.want {
+				t.Errorf("RouteHostIsExact(%q) = %v, want %v", tt.routeHost, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHostMatches(t *testing.T) {
 	tests := []struct {
 		name      string

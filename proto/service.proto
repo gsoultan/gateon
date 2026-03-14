@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+import "common.proto";
+
+message ListServicesRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string search = 3;
+}
+
+message ListServicesResponse {
+  repeated Service services = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateServiceRequest {
+  Service service = 1;
+}
+
+message UpdateServiceResponse {
+  bool success = 1;
+}
+
+message DeleteServiceRequest {
+  string id = 1;
+}
+
+message DeleteServiceResponse {
+  bool success = 1;
+}
+
+message Service {
+  string id = 1;
+  string name = 2;
+  repeated Target weighted_targets = 3;
+  string load_balancer_policy = 4; // "round_robin", "least_conn", "weighted_round_robin"
+  string health_check_path = 5;
+  string backend_type = 6; // "http", "grpc", "graphql", "tcp", "udp"
+  int32 l4_health_check_interval_ms = 7;
+  int32 l4_health_check_timeout_ms = 8;
+  int32 l4_udp_session_timeout_s = 9;
+  bool l4_proxy_protocol = 10;  // Send HAProxy PROXY protocol v1 header (TCP only). Enables backend to see original client IP for SPF etc.
+}

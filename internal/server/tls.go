@@ -65,6 +65,9 @@ type SNIDeps struct {
 }
 
 // SetupSNI configures the TLS config for SNI-based certificate selection.
+// For multi-domain setups, SNI selects the certificate by matching the client's
+// ServerName (host) against route rules. Exact host matches (e.g. api.example.com)
+// are preferred over wildcard matches (e.g. *.example.com). Disabled routes are ignored.
 func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	if tlsConfig == nil {
 		return
@@ -75,56 +78,68 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 		if sniHost == "" {
 			return nil, nil
 		}
-		for _, rt := range deps.RouteStore.List(ctx) {
-			if rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
-				continue
-			}
-			routeHost := router.HostFromRule(rt.Rule)
-			if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
-				continue
-			}
-			var certs []tls.Certificate
-			gc := deps.GlobalStore.Get(ctx)
-			if gc == nil || gc.Tls == nil {
-				continue
-			}
-			for _, certId := range rt.Tls.CertificateIds {
-				for _, c := range gc.Tls.Certificates {
-					if c.Id != certId {
-						continue
-					}
-					cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, "")
-					if err == nil {
-						certs = append(certs, *cert)
-					}
-					break
+		// Strip port from SNI if present (RFC 6066 allows hostname only; some clients may send host:port)
+		if idx := strings.LastIndex(sniHost, ":"); idx > 0 {
+			sniHost = sniHost[:idx]
+		}
+		routes := deps.RouteStore.List(ctx)
+		// First pass: exact host match (e.g. Host(`api.example.com`) for api.example.com)
+		// Second pass: wildcard match (e.g. Host(`*.example.com`) for api.example.com)
+		for _, exact := range []bool{true, false} {
+			for _, rt := range routes {
+				if rt.Disabled || rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
+					continue
 				}
-			}
-			if len(certs) == 0 {
-				continue
-			}
-			newCfg := tlsConfig.Clone()
-			newCfg.Certificates = certs
-			if rt.Tls.OptionId != "" {
-				if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
-					if opt.MinTlsVersion != "" {
-						newCfg.MinVersion = parseTLSVersion(opt.MinTlsVersion)
-					}
-					if opt.MaxTlsVersion != "" {
-						newCfg.MaxVersion = parseTLSVersion(opt.MaxTlsVersion)
-					}
-					if len(opt.CipherSuites) > 0 && newCfg.MinVersion <= tls.VersionTLS12 {
-						newCfg.CipherSuites = parseCipherSuites(opt.CipherSuites)
-					}
-					if opt.PreferServerCipherSuites {
-						newCfg.PreferServerCipherSuites = true
-					}
-					if len(opt.AlpnProtocols) > 0 {
-						newCfg.NextProtos = opt.AlpnProtocols
+				routeHost := router.HostFromRule(rt.Rule)
+				if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
+					continue
+				}
+				if router.RouteHostIsExact(routeHost) != exact {
+					continue
+				}
+				var certs []tls.Certificate
+				gc := deps.GlobalStore.Get(ctx)
+				if gc == nil || gc.Tls == nil {
+					continue
+				}
+				for _, certId := range rt.Tls.CertificateIds {
+					for _, c := range gc.Tls.Certificates {
+						if c.Id != certId {
+							continue
+						}
+						cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, "")
+						if err == nil {
+							certs = append(certs, *cert)
+						}
+						break
 					}
 				}
+				if len(certs) == 0 {
+					continue
+				}
+				newCfg := tlsConfig.Clone()
+				newCfg.Certificates = certs
+				if rt.Tls.OptionId != "" {
+					if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
+						if opt.MinTlsVersion != "" {
+							newCfg.MinVersion = parseTLSVersion(opt.MinTlsVersion)
+						}
+						if opt.MaxTlsVersion != "" {
+							newCfg.MaxVersion = parseTLSVersion(opt.MaxTlsVersion)
+						}
+						if len(opt.CipherSuites) > 0 && newCfg.MinVersion <= tls.VersionTLS12 {
+							newCfg.CipherSuites = parseCipherSuites(opt.CipherSuites)
+						}
+						if opt.PreferServerCipherSuites {
+							newCfg.PreferServerCipherSuites = true
+						}
+						if len(opt.AlpnProtocols) > 0 {
+							newCfg.NextProtos = opt.AlpnProtocols
+						}
+					}
+				}
+				return newCfg, nil
 			}
-			return newCfg, nil
 		}
 		return nil, nil
 	}
@@ -132,15 +147,12 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 
 func parseTLSVersion(v string) uint16 {
 	switch strings.ToUpper(v) {
-	case "TLS10":
-		return tls.VersionTLS10
-	case "TLS11":
-		return tls.VersionTLS11
 	case "TLS12":
 		return tls.VersionTLS12
 	case "TLS13":
 		return tls.VersionTLS13
 	default:
+		// TLS 1.0 and 1.1 are deprecated; treat unknown values as TLS 1.2
 		return tls.VersionTLS12
 	}
 }

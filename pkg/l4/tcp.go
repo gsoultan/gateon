@@ -3,8 +3,10 @@ package l4
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,20 +14,22 @@ import (
 
 // TCPBackendPool manages multiple TCP backends with health checks and load balancing.
 type TCPBackendPool struct {
-	addrs    []string
-	policy   string // "round_robin", "least_conn"
-	alive    []atomic.Bool
-	active   []atomic.Int32
-	next     atomic.Uint64
-	interval time.Duration
-	timeout  time.Duration
-	mu       sync.RWMutex
-	stop     chan struct{}
-	stopOnce sync.Once
+	addrs          []string
+	policy         string // "round_robin", "least_conn"
+	alive          []atomic.Bool
+	active         []atomic.Int32
+	next           atomic.Uint64
+	interval       time.Duration
+	timeout        time.Duration
+	proxyProtocol  bool // send HAProxy PROXY protocol v1 header before forwarding
+	mu             sync.RWMutex
+	stop           chan struct{}
+	stopOnce       sync.Once
 }
 
 // NewTCPBackendPool creates a TCP backend pool with health checks.
-func NewTCPBackendPool(addrs []string, policy string, intervalMs, timeoutMs int) *TCPBackendPool {
+// proxyProtocol: if true, sends HAProxy PROXY protocol v1 header so backend sees original client IP (e.g. for SPF).
+func NewTCPBackendPool(addrs []string, policy string, intervalMs, timeoutMs int, proxyProtocol bool) *TCPBackendPool {
 	if len(addrs) == 0 {
 		return nil
 	}
@@ -40,13 +44,14 @@ func NewTCPBackendPool(addrs []string, policy string, intervalMs, timeoutMs int)
 	}
 
 	p := &TCPBackendPool{
-		addrs:    addrs,
-		policy:   policy,
-		alive:    make([]atomic.Bool, len(addrs)),
-		active:   make([]atomic.Int32, len(addrs)),
-		interval: time.Duration(intervalMs) * time.Millisecond,
-		timeout:  time.Duration(timeoutMs) * time.Millisecond,
-		stop:     make(chan struct{}),
+		addrs:         addrs,
+		policy:        policy,
+		alive:         make([]atomic.Bool, len(addrs)),
+		active:        make([]atomic.Int32, len(addrs)),
+		interval:      time.Duration(intervalMs) * time.Millisecond,
+		timeout:       time.Duration(timeoutMs) * time.Millisecond,
+		proxyProtocol: proxyProtocol,
+		stop:          make(chan struct{}),
 	}
 	for i := range addrs {
 		p.alive[i].Store(true)
@@ -161,6 +166,13 @@ func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
 	}
 	defer backend.Close()
 
+	if p.proxyProtocol {
+		if err := writeProxyHeader(backend, client.RemoteAddr(), backend.RemoteAddr()); err != nil {
+			_ = client.Close()
+			return
+		}
+	}
+
 	done := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(backend, client)
@@ -174,4 +186,40 @@ func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
 		_ = c.CloseWrite()
 	}
 	<-done
+}
+
+// writeProxyHeader sends HAProxy PROXY protocol v1 header so the backend sees the original client IP.
+// Format: "PROXY TCP4 src_ip dst_ip src_port dst_port\r\n" (or TCP6 for IPv6).
+func writeProxyHeader(backend net.Conn, clientAddr, serverAddr net.Addr) error {
+	srcIP, srcPort := parseAddr(clientAddr)
+	dstIP, dstPort := parseAddr(serverAddr)
+	if srcIP == nil || dstIP == nil {
+		_, err := backend.Write([]byte("PROXY UNKNOWN\r\n"))
+		return err
+	}
+	var family string
+	if isIPv6(srcIP) || isIPv6(dstIP) {
+		family = "TCP6"
+	} else {
+		family = "TCP4"
+	}
+	line := fmt.Sprintf("PROXY %s %s %s %s %s\r\n", family, srcIP.String(), dstIP.String(), srcPort, dstPort)
+	_, err := backend.Write([]byte(line))
+	return err
+}
+
+func parseAddr(addr net.Addr) (net.IP, string) {
+	if addr == nil {
+		return nil, "0"
+	}
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return nil, "0"
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip, port
+}
+
+func isIPv6(ip net.IP) bool {
+	return ip != nil && ip.To4() == nil
 }

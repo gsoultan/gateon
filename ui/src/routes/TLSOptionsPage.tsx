@@ -37,8 +37,6 @@ import { usePermissions } from "../hooks/usePermissions";
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 const TLS_VERSIONS = [
-  { label: "TLS 1.0", value: "TLS1.0" },
-  { label: "TLS 1.1", value: "TLS1.1" },
   { label: "TLS 1.2", value: "TLS1.2" },
   { label: "TLS 1.3", value: "TLS1.3" },
 ];

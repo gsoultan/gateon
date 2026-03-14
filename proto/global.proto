@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+import "common.proto";
+
+message GetGlobalConfigRequest {}
+
+message UpdateGlobalConfigRequest {
+  GlobalConfig config = 1;
+}
+
+message UpdateGlobalConfigResponse {
+  bool success = 1;
+}
+
+message GlobalConfig {
+  TlsConfig tls = 1;
+  RedisConfig redis = 2;
+  OtelConfig otel = 3;
+  LogConfig log = 4;
+  AuthConfig auth = 5;
+  TransportConfig transport = 6;
+}
+
+message AuthConfig {
+  bool enabled = 1;
+  string paseto_secret = 2;
+  string sqlite_path = 3;      // Deprecated: use database_config or database_url
+  string database_url = 4;     // Fallback: sqlite:path, postgres://..., mysql://...
+  DatabaseConfig database_config = 5;
+}

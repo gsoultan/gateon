@@ -14,6 +14,8 @@ import (
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
+const flushIntervalImmediate = -1
+
 var bufferPool = &syncBufferPool{
 	pool: sync.Pool{
 		New: func() any {
@@ -442,6 +444,7 @@ func (h *ProxyHandler) getOrCreateProxy(targetURL *url.URL) *httputil.ReversePro
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.Transport = h.transport
 	rp.BufferPool = bufferPool
+	rp.FlushInterval = flushIntervalImmediate // flush immediately for SSE/streaming
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		if st, ok := r.Context().Value(targetStateContextKey).(*targetState); ok && st != nil {
 			atomic.AddUint64(&st.errorCount, 1)
@@ -492,6 +495,12 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Scheme = targetURL.Scheme
 	r.Header.Set("X-Forwarded-Host", r.Host)
 	r.Host = targetURL.Host
+
+	// WebSocket: ReverseProxy strips Upgrade/Connection (hop-by-hop). Use hijack tunnel.
+	if isWebSocketRequest(r) {
+		h.proxyWebSocket(w, r, targetURL, state, start)
+		return
+	}
 
 	// Handle gRPC metadata translation or h2c/h3
 	isGRPC := strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")

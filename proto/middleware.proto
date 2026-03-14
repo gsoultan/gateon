@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+message ListMiddlewaresRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string search = 3;
+}
+
+message ListMiddlewaresResponse {
+  repeated Middleware middlewares = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateMiddlewareRequest {
+  Middleware middleware = 1;
+}
+
+message UpdateMiddlewareResponse {
+  bool success = 1;
+}
+
+message DeleteMiddlewareRequest {
+  string id = 1;
+}
+
+message DeleteMiddlewareResponse {
+  bool success = 1;
+}
+
+// Supported types: ratelimit, inflightreq, buffering, auth, headers, rewrite,
+// addprefix, stripprefix, stripprefixregex, replacepath, replacepathregex,
+// compress, forwardauth, accesslog, metrics, errors, retry, cors, grpcweb,
+// ipfilter, waf, turnstile, geoip, hmac, cache
+message Middleware {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  map<string, string> config = 4;
+}

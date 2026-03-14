@@ -72,5 +72,6 @@ type TLSOptionStore interface {
 type GlobalConfigStore interface {
 	Get(ctx context.Context) *gateonv1.GlobalConfig
 	Update(ctx context.Context, conf *gateonv1.GlobalConfig) error
+	ConfigFileExists() bool
 }
 

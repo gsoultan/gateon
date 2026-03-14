@@ -297,6 +297,174 @@ func TestIntegration_RBAC_ViewerDeniedOnWrite(t *testing.T) {
 	}
 }
 
+func TestIntegration_ProxyWithOAuth2IntrospectionMiddleware(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("backend-ok"))
+	}))
+	defer backend.Close()
+
+	// Mock OAuth 2.0 introspection endpoint (RFC 7662)
+	introServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		token := r.FormValue("token")
+		if token == "" {
+			token = r.PostFormValue("token")
+		}
+		if token == "valid-token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"sub":"user123","scope":"read"}`))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":false}`))
+		}
+	}))
+	defer introServer.Close()
+
+	tmpDir := t.TempDir()
+	s, err := NewServer(
+		WithRouteRegistry(config.NewRouteRegistry(filepath.Join(tmpDir, "routes.json"))),
+		WithServiceRegistry(config.NewServiceRegistry(filepath.Join(tmpDir, "services.json"))),
+		WithEntryPointRegistry(config.NewEntryPointRegistry(filepath.Join(tmpDir, "entrypoints.json"))),
+		WithMiddlewareRegistry(config.NewMiddlewareRegistry(filepath.Join(tmpDir, "middlewares.json"))),
+		WithTLSOptionRegistry(config.NewTLSOptionRegistry(filepath.Join(tmpDir, "tls_options.json"))),
+		WithGlobalRegistry(config.NewGlobalRegistry(filepath.Join(tmpDir, "global.json"))),
+	)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	_ = s.ServiceStore.Update(context.Background(), &gateonv1.Service{
+		Id: "svc", Name: "svc",
+		WeightedTargets: []*gateonv1.Target{{Url: backend.URL, Weight: 1}},
+	})
+	_ = s.MwStore.Update(context.Background(), &gateonv1.Middleware{
+		Id: "oauth2-auth", Name: "oauth2-auth", Type: "auth",
+		Config: map[string]string{
+			"type":               "oauth2",
+			"introspection_url":  introServer.URL,
+			"client_id":          "test-client",
+			"client_secret":      "test-secret",
+		},
+	})
+	_ = s.RouteStore.Update(context.Background(), &gateonv1.Route{
+		Id: "r1", ServiceId: "svc", Rule: "PathPrefix(`/api`)", Type: "http",
+		Middlewares: []string{"oauth2-auth"},
+	})
+
+	apiSvc := api.NewApiService(api.ApiServiceConfig{
+		Routes: s.RouteStore, Services: s.ServiceStore, Globals: s.GlobalStore,
+		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
+	})
+	mux := http.NewServeMux()
+	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
+	wrapped := grpcweb.WrapServer(grpc.NewServer())
+	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.HandleProxyOrLocal(w, r, wrapped, mux)
+	})
+
+	// Valid token -> backend
+	req := httptest.NewRequest("GET", "http://localhost/api/foo", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+	gatewayHandler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("valid token: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "backend-ok" {
+		t.Errorf("valid token: expected backend-ok, got %q", w.Body.String())
+	}
+
+	// Invalid token -> 401
+	req2 := httptest.NewRequest("GET", "http://localhost/api/foo", nil)
+	req2.Header.Set("Authorization", "Bearer invalid-token")
+	w2 := httptest.NewRecorder()
+	gatewayHandler.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("invalid token: expected 401, got %d body=%s", w2.Code, w2.Body.String())
+	}
+
+	// No token -> 401
+	req3 := httptest.NewRequest("GET", "http://localhost/api/foo", nil)
+	w3 := httptest.NewRecorder()
+	gatewayHandler.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusUnauthorized {
+		t.Errorf("no token: expected 401, got %d", w3.Code)
+	}
+}
+
+func TestIntegration_ProxyWithOIDCMiddleware(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("backend-ok"))
+	}))
+	defer backend.Close()
+
+	// Mock OIDC discovery + JWKS (RS256 test key from jwt.io)
+	oidcMux := http.NewServeMux()
+	oidcServer := httptest.NewServer(oidcMux)
+	defer oidcServer.Close()
+	oidcMux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issuer":"` + oidcServer.URL + `","jwks_uri":"` + oidcServer.URL + `/jwks"}`))
+	})
+	oidcMux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[{"kty":"RSA","kid":"test","use":"sig","alg":"RS256","n":"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw","e":"AQAB"}]}`))
+	})
+	tmpDir := t.TempDir()
+	s, err := NewServer(
+		WithRouteRegistry(config.NewRouteRegistry(filepath.Join(tmpDir, "routes.json"))),
+		WithServiceRegistry(config.NewServiceRegistry(filepath.Join(tmpDir, "services.json"))),
+		WithEntryPointRegistry(config.NewEntryPointRegistry(filepath.Join(tmpDir, "entrypoints.json"))),
+		WithMiddlewareRegistry(config.NewMiddlewareRegistry(filepath.Join(tmpDir, "middlewares.json"))),
+		WithTLSOptionRegistry(config.NewTLSOptionRegistry(filepath.Join(tmpDir, "tls_options.json"))),
+		WithGlobalRegistry(config.NewGlobalRegistry(filepath.Join(tmpDir, "global.json"))),
+	)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	_ = s.ServiceStore.Update(context.Background(), &gateonv1.Service{
+		Id: "svc", Name: "svc",
+		WeightedTargets: []*gateonv1.Target{{Url: backend.URL, Weight: 1}},
+	})
+	_ = s.MwStore.Update(context.Background(), &gateonv1.Middleware{
+		Id: "oidc-auth", Name: "oidc-auth", Type: "auth",
+		Config: map[string]string{
+			"type":    "oidc",
+			"issuer":  oidcServer.URL,
+			"audience": "api",
+		},
+	})
+	_ = s.RouteStore.Update(context.Background(), &gateonv1.Route{
+		Id: "r1", ServiceId: "svc", Rule: "PathPrefix(`/api`)", Type: "http",
+		Middlewares: []string{"oidc-auth"},
+	})
+
+	apiSvc := api.NewApiService(api.ApiServiceConfig{
+		Routes: s.RouteStore, Services: s.ServiceStore, Globals: s.GlobalStore,
+		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
+	})
+	mux := http.NewServeMux()
+	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
+	wrapped := grpcweb.WrapServer(grpc.NewServer())
+	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.HandleProxyOrLocal(w, r, wrapped, mux)
+	})
+
+	// Without token -> 401 (proves OIDC middleware is in chain)
+	req := httptest.NewRequest("GET", "http://localhost/api/foo", nil)
+	w := httptest.NewRecorder()
+	gatewayHandler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("no token: expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestIntegration_RBAC_ViewerAllowedOnRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	s, err := NewServer(

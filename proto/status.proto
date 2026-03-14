@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string status = 1;
+  string version = 2;
+  int64 uptime = 3;
+  int64 memory_usage = 4;
+  int32 routes_count = 5;
+  int32 services_count = 6;
+}
