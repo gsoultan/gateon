@@ -111,6 +111,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	defer cancel()
 	shutdownReg.ShutdownAll(shutdownCtx)
 	grpcServer.GracefulStop()
+	if s.RedisClient != nil {
+		if closer, ok := s.RedisClient.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+	}
 	wg.Wait()
 	logger.L.Info().Msg("shutdown complete")
 }

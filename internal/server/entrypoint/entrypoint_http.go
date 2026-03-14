@@ -47,7 +47,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		epHandler = deps.BaseHandler
 	}
 	epHandler = injectEntryPointID(ep.Id, epHandler)
-	chain := []middleware.Middleware{middleware.Metrics("gateon-" + ep.Id)}
+	chain := []middleware.Middleware{middleware.Recovery(), middleware.Metrics("gateon-" + ep.Id)}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+ep.Id))
 	}
