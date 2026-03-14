@@ -34,13 +34,15 @@ import {
   IconLock,
   IconLockOff,
 } from "@tabler/icons-react";
-import { useEntryPoints, apiFetch } from "../hooks/useGateon";
+import { useEntryPoints, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
+import { usePermissions } from "../hooks/usePermissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import { EntryPointForm } from "../components/EntryPointForm";
 import type { EntryPoint } from "../types/gateon";
 
 export default function EntryPointsPage() {
+  const { canWrite } = usePermissions();
   const [opened, { open, close }] = useDisclosure(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -70,10 +72,10 @@ export default function EntryPointsPage() {
         color: "green",
       });
     },
-    onError: (err: Error) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Error",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },
@@ -113,16 +115,18 @@ export default function EntryPointsPage() {
             Configure network entrypoints and listening addresses.
           </Text>
         </div>
-        <Button
-          leftSection={<IconPlus size={18} />}
-          onClick={handleCreate}
-          size="md"
-          radius="md"
-          variant="gradient"
-          gradient={{ from: "blue", to: "cyan" }}
-        >
-          Create EntryPoint
-        </Button>
+        {canWrite && (
+          <Button
+            leftSection={<IconPlus size={18} />}
+            onClick={handleCreate}
+            size="md"
+            radius="md"
+            variant="gradient"
+            gradient={{ from: "blue", to: "cyan" }}
+          >
+            Create EntryPoint
+          </Button>
+        )}
       </Group>
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
@@ -286,36 +290,38 @@ export default function EntryPointsPage() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Group gap="xs">
-                        <Menu
-                          shadow="md"
-                          position="bottom-end"
-                          transitionProps={{ transition: "pop-top-right" }}
-                        >
-                          <Menu.Target>
-                            <ActionIcon variant="subtle" color="gray">
-                              <IconDotsVertical size={16} />
-                            </ActionIcon>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            <Menu.Label>EntryPoint Actions</Menu.Label>
-                            <Menu.Item
-                              leftSection={<IconEdit size={14} />}
-                              onClick={() => handleEdit(ep)}
-                            >
-                              Edit
-                            </Menu.Item>
-                            <Menu.Divider />
-                            <Menu.Item
-                              leftSection={<IconTrash size={14} />}
-                              color="red"
-                              onClick={() => deleteMutation.mutate(ep.id)}
-                            >
-                              Delete
-                            </Menu.Item>
-                          </Menu.Dropdown>
-                        </Menu>
-                      </Group>
+                      {canWrite && (
+                        <Group gap="xs">
+                          <Menu
+                            shadow="md"
+                            position="bottom-end"
+                            transitionProps={{ transition: "pop-top-right" }}
+                          >
+                            <Menu.Target>
+                              <ActionIcon variant="subtle" color="gray">
+                                <IconDotsVertical size={16} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Label>EntryPoint Actions</Menu.Label>
+                              <Menu.Item
+                                leftSection={<IconEdit size={14} />}
+                                onClick={() => handleEdit(ep)}
+                              >
+                                Edit
+                              </Menu.Item>
+                              <Menu.Divider />
+                              <Menu.Item
+                                leftSection={<IconTrash size={14} />}
+                                color="red"
+                                onClick={() => deleteMutation.mutate(ep.id)}
+                              >
+                                Delete
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        </Group>
+                      )}
                     </Table.Td>
                   </Table.Tr>
                 ))}

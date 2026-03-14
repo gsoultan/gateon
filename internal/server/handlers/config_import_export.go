@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/gateon/gateon/internal/auth"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
@@ -18,7 +19,10 @@ type configExport struct {
 
 func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/config/export", func(w http.ResponseWriter, r *http.Request) {
-		routes, _ := d.RouteService.ListPaginated(r.Context(), 0, 10000, "")
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceConfig) {
+			return
+		}
+		routes, _ := d.RouteService.ListPaginated(r.Context(), 0, 10000, "", nil)
 		services, _ := d.ServiceService.ListPaginated(r.Context(), 0, 10000, "")
 		eps, _ := d.EpService.ListPaginated(r.Context(), 0, 10000, "")
 		mws, _ := d.MwService.ListPaginated(r.Context(), 0, 10000, "")
@@ -37,6 +41,9 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 	})
 
 	mux.HandleFunc("POST /v1/config/import", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceConfig) {
+			return
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "failed to read body")

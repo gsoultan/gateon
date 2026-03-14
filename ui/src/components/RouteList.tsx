@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import {
   Card,
   Title,
@@ -21,6 +21,7 @@ import {
 } from "@mantine/core";
 import { useRoutes } from "../hooks/useGateon";
 import { RouteStats } from "./RouteStats";
+import { RouteSparklineCell } from "./RouteSparklineCell";
 import {
   IconSearch,
   IconDotsVertical,
@@ -40,44 +41,36 @@ export default function RouteList({
   onEdit,
   onClone,
   onDelete,
+  onPause,
+  readOnly,
 }: {
   limit?: number;
   onEdit?: (route: Route) => void;
   onClone?: (route: Route) => void;
   onPause?: (route: Route) => void;
   onDelete?: (id: string) => void;
+  readOnly?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState<string | null>("all");
   const [hostFilter, setHostFilter] = useState("");
+  const [pathFilter, setPathFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
   const pageSize = 10;
-
-  const hostFromRule = (rule: string) => {
-    const m = rule.match(/Host\(`([^`]+)`\)/);
-    return m ? m[1].toLowerCase() : "";
-  };
 
   const { data, isLoading } = useRoutes({
     page: page - 1,
     page_size: limit || pageSize,
-    search: search,
+    search: search || undefined,
+    type: typeFilter && typeFilter !== "all" ? typeFilter : undefined,
+    host: hostFilter.trim() || undefined,
+    path: pathFilter.trim() || undefined,
+    status: statusFilter !== "all" ? statusFilter : undefined,
   });
 
-  const allRoutes = data?.routes || [];
-  const routes = useMemo(() => {
-    let list = allRoutes;
-    if (typeFilter && typeFilter !== "all") {
-      list = list.filter((r) => r.type === typeFilter);
-    }
-    if (hostFilter.trim()) {
-      const h = hostFilter.trim().toLowerCase();
-      list = list.filter((r) => hostFromRule(r.rule || "").includes(h) || (r.rule || "").toLowerCase().includes(h));
-    }
-    return list;
-  }, [allRoutes, typeFilter, hostFilter]);
+  const routes = data?.routes || [];
   const totalCount = data?.total_count ?? 0;
-  const filteredCount = routes.length;
 
   if (isLoading)
     return (
@@ -101,13 +94,13 @@ export default function RouteList({
               Active Routes
             </Title>
             <Badge variant="light" color="indigo" size="sm" radius="md">
-              {typeFilter === "all" ? totalCount : `${filteredCount} / ${totalCount}`}
+              {totalCount} route{totalCount !== 1 ? "s" : ""}
             </Badge>
           </Group>
           {!limit && (
-            <Group gap="xs">
+            <Group gap="xs" wrap="wrap">
               <TextInput
-                placeholder="Search by ID, Name, Rule or Service..."
+                placeholder="Search ID, name, rule, service..."
                 leftSection={<IconSearch size={16} />}
                 value={search}
                 onChange={(e) => {
@@ -115,10 +108,11 @@ export default function RouteList({
                   setPage(1);
                 }}
                 size="xs"
-                w={280}
+                miw={200}
+                style={{ flex: 1, minWidth: 180 }}
               />
               <TextInput
-                placeholder="Host filter (e.g. example.com)"
+                placeholder="Host (e.g. api.example.com)"
                 leftSection={<IconWorld size={14} />}
                 value={hostFilter}
                 onChange={(e) => {
@@ -126,7 +120,17 @@ export default function RouteList({
                   setPage(1);
                 }}
                 size="xs"
-                w={180}
+                w={160}
+              />
+              <TextInput
+                placeholder="Path (e.g. /api/v1)"
+                value={pathFilter}
+                onChange={(e) => {
+                  setPathFilter(e.currentTarget.value);
+                  setPage(1);
+                }}
+                size="xs"
+                w={140}
               />
               <Select
                 placeholder="Type"
@@ -142,6 +146,21 @@ export default function RouteList({
                   { value: "http", label: "HTTP" },
                   { value: "grpc", label: "gRPC" },
                   { value: "graphql", label: "GraphQL" },
+                ]}
+              />
+              <Select
+                placeholder="Status"
+                size="xs"
+                w={95}
+                value={statusFilter}
+                onChange={(v) => {
+                  setStatusFilter((v as "all" | "active" | "paused") ?? "all");
+                  setPage(1);
+                }}
+                data={[
+                  { value: "all", label: "All" },
+                  { value: "active", label: "Active" },
+                  { value: "paused", label: "Paused" },
                 ]}
               />
             </Group>
@@ -212,24 +231,40 @@ export default function RouteList({
                 >
                   Pipeline
                 </Table.Th>
-                <Table.Th
-                  w={80}
-                  style={{
-                    fontSize: 11,
-                    textTransform: "uppercase",
-                    letterSpacing: 1,
-                    color: "var(--mantine-color-dimmed)",
-                    fontWeight: 800,
-                  }}
-                >
-                  Actions
-                </Table.Th>
+                {!limit && (
+                  <Table.Th
+                    w={70}
+                    style={{
+                      fontSize: 11,
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                      color: "var(--mantine-color-dimmed)",
+                      fontWeight: 800,
+                    }}
+                  >
+                    Activity
+                  </Table.Th>
+                )}
+                {!readOnly && (
+                  <Table.Th
+                    w={80}
+                    style={{
+                      fontSize: 11,
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                      color: "var(--mantine-color-dimmed)",
+                      fontWeight: 800,
+                    }}
+                  >
+                    Actions
+                  </Table.Th>
+                )}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {routes.length === 0 && (
                 <Table.Tr>
-                  <Table.Td colSpan={6}>
+                  <Table.Td colSpan={limit ? 6 : 7}>
                     <Center py={40}>
                       <Stack align="center" gap="xs">
                         <IconRouteOff
@@ -343,50 +378,56 @@ export default function RouteList({
                       )}
                     </Group>
                   </Table.Td>
-                  <Table.Td>
-                    <Menu
-                      shadow="md"
-                      width={200}
-                      position="bottom-end"
-                      transitionProps={{ transition: "pop-top-right" }}
-                    >
-                      <Menu.Target>
-                        <ActionIcon variant="subtle" color="gray">
-                          <IconDotsVertical size={16} />
-                        </ActionIcon>
-                      </Menu.Target>
-
-                      <Menu.Dropdown>
-                        <Menu.Label>Manage Route</Menu.Label>
-                        <Menu.Item
-                          leftSection={<IconEdit size={14} />}
-                          onClick={() => onEdit?.(route)}
-                        >
-                          Edit
-                        </Menu.Item>
-                        <Menu.Item
-                          leftSection={<IconCopy size={14} />}
-                          onClick={() => onClone?.(route)}
-                        >
-                          Clone
-                        </Menu.Item>
-                        <Menu.Item
-                          leftSection={<IconPlayerPause size={14} />}
-                          onClick={() => onPause?.(route)}
-                        >
-                          {route.disabled ? "Resume" : "Pause"}
-                        </Menu.Item>
-                        <Menu.Divider />
-                        <Menu.Item
-                          leftSection={<IconTrash size={14} />}
-                          color="red"
-                          onClick={() => onDelete?.(route.id)}
-                        >
-                          Delete
-                        </Menu.Item>
-                      </Menu.Dropdown>
-                    </Menu>
-                  </Table.Td>
+                  {!limit && (
+                    <Table.Td>
+                      <RouteSparklineCell routeId={route.id} />
+                    </Table.Td>
+                  )}
+                  {!readOnly && (
+                    <Table.Td>
+                      <Menu
+                        shadow="md"
+                        width={200}
+                        position="bottom-end"
+                        transitionProps={{ transition: "pop-top-right" }}
+                      >
+                        <Menu.Target>
+                          <ActionIcon variant="subtle" color="gray">
+                            <IconDotsVertical size={16} />
+                          </ActionIcon>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                          <Menu.Label>Manage Route</Menu.Label>
+                          <Menu.Item
+                            leftSection={<IconEdit size={14} />}
+                            onClick={() => onEdit?.(route)}
+                          >
+                            Edit
+                          </Menu.Item>
+                          <Menu.Item
+                            leftSection={<IconCopy size={14} />}
+                            onClick={() => onClone?.(route)}
+                          >
+                            Clone
+                          </Menu.Item>
+                          <Menu.Item
+                            leftSection={<IconPlayerPause size={14} />}
+                            onClick={() => onPause?.(route)}
+                          >
+                            {route.disabled ? "Resume" : "Pause"}
+                          </Menu.Item>
+                          <Menu.Divider />
+                          <Menu.Item
+                            leftSection={<IconTrash size={14} />}
+                            color="red"
+                            onClick={() => onDelete?.(route.id)}
+                          >
+                            Delete
+                          </Menu.Item>
+                        </Menu.Dropdown>
+                      </Menu>
+                    </Table.Td>
+                  )}
                 </Table.Tr>
               ))}
             </Table.Tbody>

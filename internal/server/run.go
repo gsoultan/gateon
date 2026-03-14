@@ -41,12 +41,15 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
 	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)
 	epService := domain.NewEntryPointService(s.EpStore)
-	mwService := domain.NewMiddlewareService(s.MwStore, s.RouteStore, proxyInvalidator)
+	mwFactory := middleware.NewFactory(s.RedisClient)
+	mwService := domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{})
 	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
-	wrapped := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(string) bool { return true }))
+	// Internal API only: gRPC-Web for the dashboard. Allow all origins; auth protects the API.
+	// User routes use the grpcweb middleware with per-route allowed_origins config.
+	internalAPI := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(string) bool { return true }))
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, &handlers.Deps{
 		RouteService:       routeService,
@@ -61,7 +64,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, internalAPI, mux)
 	})
 	// Login rate limit: 5 attempts per minute per IP to mitigate brute force.
 	loginLimiter := middleware.NewRateLimiter(rate.Every(time.Minute/5), 1)
@@ -71,7 +74,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		GlobalReg:     s.GlobalStore,
 		Auth:          s.AuthManager,
 		LoginLimiter:  loginLimiter,
-	}, wrapped, mux)
+	}, internalAPI, mux)
 	c := BuildCORS()
 	tlsManager := CreateTLSManager(s.GlobalStore)
 	tlsConfig, err := tlsManager.GetTLSConfig()
@@ -86,7 +89,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
 	var wg syncutil.WaitGroup
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, wrapped, tlsConfig, tlsManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver))
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, tlsManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver))
 	logger.L.Info().Str("port", s.Port).Msg("Gateon API Gateway started")
 
 	wg.Go(func() {

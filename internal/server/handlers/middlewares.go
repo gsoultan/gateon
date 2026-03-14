@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gateon/gateon/internal/auth"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
@@ -56,6 +57,19 @@ var middlewarePresets = []MiddlewarePreset{
 			{Type: "buffering", Name: "Max Body 1MB", Config: map[string]string{"max_request_body_bytes": "1048576"}},
 		},
 	},
+	{
+		ID:          "cloudflare-access",
+		Name:        "Cloudflare Access (Zero Trust)",
+		Description: "Forward auth to Cloudflare Access. Configure your CF Access policy and set address to your application's CF Access auth domain.",
+		Middlewares: []MiddlewarePresetItem{
+			{Type: "forwardauth", Name: "Cloudflare Access", Config: map[string]string{
+				"address":               "https://your-app.cfaccess.com/cdn-cgi/access/get-identity",
+				"auth_response_headers": "Cf-Access-Jwt-Assertion,Cf-Access-Client-Id,Cf-Access-Client-Email",
+				"trust_forward_header":  "true",
+				"forward_body":          "false",
+			}},
+		},
+	},
 }
 
 func registerMiddlewareHandlers(mux *http.ServeMux, d *Deps) {
@@ -70,19 +84,35 @@ func registerMiddlewareHandlers(mux *http.ServeMux, d *Deps) {
 			Middlewares: mws, TotalCount: total, Page: page, PageSize: pageSize,
 		})
 	})
+	mux.HandleFunc("GET /v1/middlewares/{id}/routes", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			WriteHTTPError(w, http.StatusBadRequest, "missing middleware id")
+			return
+		}
+		routes := d.MwService.RoutesUsingMiddleware(r.Context(), id)
+		WriteJSON(w, http.StatusOK, map[string]any{"routes": routes})
+	})
 	mux.HandleFunc("PUT /v1/middlewares", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
+			return
+		}
 		var mw gateonv1.Middleware
 		if err := DecodeRequestBody(r, &mw); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := d.MwService.SaveMiddleware(r.Context(), &mw); err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, "failed to save middleware")
+			// Validation/config errors are client errors
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		WriteProtoResponse(w, http.StatusOK, &mw)
 	})
 	mux.HandleFunc("DELETE /v1/middlewares/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
+			return
+		}
 		id := r.PathValue("id")
 		if id == "" {
 			WriteHTTPError(w, http.StatusBadRequest, "missing middleware id")

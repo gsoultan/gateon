@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/gateon/gateon/internal/auth"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
@@ -15,6 +16,9 @@ func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
 		})
 	})
 	mux.HandleFunc("PUT /v1/services", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceServices) {
+			return
+		}
 		var svc gateonv1.Service
 		if err := DecodeRequestBody(r, &svc); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
@@ -27,6 +31,9 @@ func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
 		WriteProtoResponse(w, http.StatusOK, &svc)
 	})
 	mux.HandleFunc("DELETE /v1/services/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceServices) {
+			return
+		}
 		id := r.PathValue("id")
 		if id == "" {
 			WriteHTTPError(w, http.StatusBadRequest, "missing service id")

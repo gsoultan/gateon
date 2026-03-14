@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gateon/gateon/internal/config"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -17,6 +18,18 @@ func WriteHTTPError(w http.ResponseWriter, statusCode int, message string) {
 		message = http.StatusText(statusCode)
 	}
 	http.Error(w, message, statusCode)
+}
+
+// WriteJSON writes v as JSON with Content-Type application/json.
+func WriteJSON(w http.ResponseWriter, statusCode int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	data, err := json.Marshal(v)
+	if err != nil {
+		WriteHTTPError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	w.WriteHeader(statusCode)
+	_, _ = w.Write(data)
 }
 
 // DecodeRequestBody reads and unmarshals JSON or protobuf from the request body.
@@ -54,4 +67,19 @@ func ParsePagination(r *http.Request) (page, pageSize int32, search string) {
 		}
 	}
 	return page, pageSize, search
+}
+
+// ParseRouteFilters extracts type, host, path, status from query params.
+func ParseRouteFilters(r *http.Request) *config.RouteFilter {
+	q := r.URL.Query()
+	f := &config.RouteFilter{
+		Type:   q.Get("type"),
+		Host:   q.Get("host"),
+		Path:   q.Get("path"),
+		Status: q.Get("status"),
+	}
+	if f.Type == "" && f.Host == "" && f.Path == "" && f.Status == "" {
+		return nil
+	}
+	return f
 }

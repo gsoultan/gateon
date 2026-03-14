@@ -14,7 +14,7 @@ import {
 } from "@mantine/core";
 import { IconPlus, IconTrash, IconCheck, IconInfoCircle } from "@tabler/icons-react";
 import type { Service } from "../types/gateon";
-import { apiFetch } from "../hooks/useGateon";
+import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
@@ -48,10 +48,10 @@ export function ServiceForm({
       });
       onSuccess?.();
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Error Saving Service",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },

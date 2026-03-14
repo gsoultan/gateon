@@ -14,7 +14,7 @@ Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balanc
     - **Live Dashboard Logs**: Real-time log streaming via WebSockets.
     - OpenTelemetry integration for distributed tracing.
   - gRPC server on the same port as HTTP
-  - gRPC routing and grpc-web proxying on the same listener
+  - gRPC routing; add the **grpcweb** middleware to grpc routes for browser (gRPC-Web) support
   - Minimal REST endpoints for UI parity
   - Health and readiness endpoints
   - **Dynamic Routing with Hot-Reload**: Host, Path, PathPrefix, PathRegex, Methods, Headers matchers (Traefik-compatible rules). Routes can be **paused** (disabled) without deletion.
@@ -37,8 +37,13 @@ Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balanc
   - `Errors` (Custom error pages)
   - `Retry`
   - `Headers` (Add/Set/Del for Request and Response)
-  - `IPFilter` (allow/deny by IP or CIDR)
-  - `Cache` (in-memory response cache for GET)
+  - `IPFilter` (allow/deny by IP or CIDR; supports `trust_cloudflare_headers`)
+  - `WAF` (Coraza WAF with OWASP CRS)
+  - `Turnstile` (Cloudflare Turnstile bot verification)
+  - `GeoIP` (allow/deny by country using MaxMind GeoLite2)
+  - `HMAC` (webhook signature verification)
+  - `Cache` (in-memory or Redis response cache for GET)
+  - `gRPC-Web` (required for grpc routes called from browsers; converts gRPC-Web to gRPC)
 
 ## Repository Structure
 ```
@@ -93,7 +98,12 @@ curl -s http://localhost:8080/v1/status | jq
 ```
 
 ## gRPC and gRPC-Web
-The API gateway is wired with a gRPC server and grpc-web wrapper. While Gateon acts as a transparent proxy for your services' gRPC traffic (similar to Traefik), `protoc` is required for developing and maintaining Gateon itself because:
+
+- **Standard gRPC**: Routes with type `grpc` proxy gRPC traffic to backends. Add the route and service; no middleware needed.
+- **gRPC-Web (browser)**: Browsers cannot use raw gRPC. Add the **grpcweb** middleware to grpc routes that will be called from web apps (e.g. via `@improbable-eng/grpc-web` or `grpc-web`). The middleware converts gRPC-Web requests to standard gRPC before proxying. Without it, gRPC-Web requests to a grpc route return `415 Unsupported Media Type`.
+- **Internal API**: Gateon's dashboard uses gRPC-Web to talk to its own API; that path is handled separately and does not use route middlewares.
+
+`protoc` is required for developing and maintaining Gateon itself because:
 
 1.  **Management API**: Gateon's own control plane (routing, status, metrics) is defined using Protocol Buffers (`proto/gateon.proto`).
 2.  **Internal Communication**: The backend uses generated Go code to handle these management requests efficiently.
@@ -129,6 +139,10 @@ Generated files live only in `proto/gateon/v1/`; do not commit root-level `*.pb.
 - `GATEON_ENTRYPOINT_RATE_LIMIT_QPS`: Per-IP requests per second for entrypoints. Use `0` to disable (recommended for high throughput, e.g. 100k req/s).
 - `GATEON_ENTRYPOINT_RATE_LIMIT_BURST`: Burst size when rate limiting is enabled (default 2× QPS).
 - `GATEON_ACCESS_LOG_SAMPLE_RATE`: Access log sampling. `1` = log all; `N` = log 1 in N requests; `0` = no access log. Use `1000`+ for high-throughput to reduce I/O.
+- `GATEON_TRUST_CLOUDFLARE_HEADERS`: Set to `true`, `1`, or `yes` when Gateon is behind Cloudflare; IPFilter and ratelimit will use `CF-Connecting-IP` for client IP.
+- `GATEON_TURNSTILE_SECRET`: Cloudflare Turnstile secret key (fallback when middleware config omits it).
+- `GATEON_GEOIP_DB_PATH`: Path to GeoLite2-Country.mmdb for GeoIP middleware (fallback when config omits db_path).
+- `GATEON_HMAC_SECRET`: HMAC secret for webhook signature verification (fallback when middleware config omits it).
 
 ## UI (React + Vite + Mantine + Tailwind)
 The UI is automatically built and embedded into the Go binary during the build process. When Gateon is running, the dashboard is accessible on the same port as the gateway (default: `http://localhost:8080`).

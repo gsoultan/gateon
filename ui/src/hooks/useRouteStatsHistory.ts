@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useRouteStats } from "./useGateon";
+import { useRouteStats } from "./useRouteStats";
 
 const MAX_POINTS = 12;
 

@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -285,4 +288,148 @@ func TestStripPrefix(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/users", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
+}
+
+func TestIPFilter_AllowDeny(t *testing.T) {
+	mw := IPFilter([]string{"192.168.1.0/24"}, []string{"192.168.1.100"})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "192.168.1.50:12345"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("allowed IP: expected 200, got %d", rr.Code)
+	}
+
+	req.RemoteAddr = "192.168.1.100:12345"
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("denied IP: expected 403, got %d", rr.Code)
+	}
+}
+
+func TestIPFilter_WithXForwardedFor(t *testing.T) {
+	mw := IPFilterWithClientIP([]string{"203.0.113.50"}, nil, func(r *http.Request) string {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
+		addr := r.RemoteAddr
+		if i := strings.LastIndex(addr, ":"); i >= 0 {
+			addr = addr[:i]
+		}
+		return addr
+	})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.1:80"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("XFF allowed IP: expected 200, got %d", rr.Code)
+	}
+}
+
+func TestWAF_PassesNormalRequest(t *testing.T) {
+	// UseCRS=false yields minimal pass-through WAF (avoids CRS file resolution in tests)
+	mw, err := WAF(WAFConfig{UseCRS: false})
+	if err != nil {
+		t.Fatalf("create WAF: %v", err)
+	}
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+
+	req := httptest.NewRequest("GET", "/health", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("normal request: expected 200, got %d", rr.Code)
+	}
+}
+
+func TestTurnstile_MissingTokenReturns400(t *testing.T) {
+	mw := Turnstile(TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("POST", "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("missing token: expected 400, got %d", rr.Code)
+	}
+}
+
+func TestTurnstile_SkipsGet(t *testing.T) {
+	mw := Turnstile(TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("GET skipped: expected 200, got %d", rr.Code)
+	}
+}
+
+func TestGeoIP_RequiresDBPath(t *testing.T) {
+	_, err := GeoIP(GeoIPConfig{})
+	if err == nil {
+		t.Error("expected error when db_path is empty")
+	}
+}
+
+func TestHMAC_ValidSignature(t *testing.T) {
+	secret := "webhook-secret"
+	mw, err := HMAC(HMACConfig{Secret: secret, Header: "X-Signature-256", Prefix: "sha256=", Methods: []string{"POST"}})
+	if err != nil {
+		t.Fatalf("create HMAC: %v", err)
+	}
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+
+	body := []byte(`{"event":"ping"}`)
+	mac := hmacSHA256Hex([]byte(secret), body)
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader(string(body)))
+	req.Header.Set("X-Signature-256", "sha256="+mac)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("valid signature: expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHMAC_InvalidSignature(t *testing.T) {
+	mw, _ := HMAC(HMACConfig{Secret: "secret", Methods: []string{"POST"}})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("POST", "/", strings.NewReader("body"))
+	req.Header.Set("X-Signature-256", "sha256="+strings.Repeat("00", 32))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("invalid signature: expected 401, got %d", rr.Code)
+	}
+}
+
+func hmacSHA256Hex(secret, body []byte) string {
+	h := hmac.New(sha256.New, secret)
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil))
 }

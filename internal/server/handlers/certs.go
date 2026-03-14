@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gateon/gateon/internal/api"
+	"github.com/gateon/gateon/internal/auth"
 	"github.com/gateon/gateon/internal/logger"
 )
 
@@ -23,6 +24,9 @@ func registerCertHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("POST /v1/certs/upload", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceCerts) {
+			return
+		}
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("failed to parse multipart form"))

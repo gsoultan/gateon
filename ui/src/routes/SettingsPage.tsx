@@ -38,21 +38,34 @@ import {
   IconRocket,
   IconDownload,
   IconUpload,
+  IconUsers,
+  IconKey,
+  IconChartDots,
 } from "@tabler/icons-react";
-import { useThemeStore } from "../store/useThemeStore";
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
+import { usePermissions } from "../hooks/usePermissions";
 import { useAuthStore } from "../store/useAuthStore";
+import { useApiConfigStore } from "../store/useApiConfigStore";
 import type { GlobalConfig } from "../types/gateon";
+import { Link } from "@tanstack/react-router";
 import { apiFetch } from "../hooks/useGateon";
 
 export default function SettingsPage() {
+  const { canEditGlobal, canImportConfig, canExportConfig } = usePermissions();
+  const formDisabled = !canEditGlobal;
   const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const { colorScheme: storeScheme, setColorScheme: setStoreScheme } =
-    useThemeStore();
-  const [apiUrl, setApiUrl] = useState(
-    import.meta.env.VITE_API_URL || "http://localhost:8080",
-  );
-  const [refreshInterval, setRefreshInterval] = useState(10);
+  const apiUrl = useApiConfigStore((s) => s.apiUrl);
+  const refreshInterval = useApiConfigStore((s) => s.refreshInterval);
+  const setApiConfig = useApiConfigStore((s) => s.setApiConfig);
+
+  // Local edits for General Settings (committed on Save)
+  const [apiUrlDraft, setApiUrlDraft] = useState(apiUrl);
+  const [refreshIntervalDraft, setRefreshIntervalDraft] = useState(refreshInterval);
+
+  useEffect(() => {
+    setApiUrlDraft(apiUrl);
+    setRefreshIntervalDraft(refreshInterval);
+  }, [apiUrl, refreshInterval]);
 
   // Global config state
   const [config, setConfig] = useState<GlobalConfig>({
@@ -64,13 +77,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
-
-  useEffect(() => {
-    const savedApiUrl = localStorage.getItem("gateon_api_url");
-    if (savedApiUrl) setApiUrl(savedApiUrl);
-    const savedInterval = localStorage.getItem("gateon_refresh_interval");
-    if (savedInterval) setRefreshInterval(parseInt(savedInterval));
-  }, []);
+  const [generalSavedOk, setGeneralSavedOk] = useState(false);
 
   useEffect(() => {
     // Fetch current global config
@@ -88,9 +95,9 @@ export default function SettingsPage() {
   }, [apiUrl]);
 
   const handleSave = () => {
-    localStorage.setItem("gateon_api_url", apiUrl);
-    localStorage.setItem("gateon_refresh_interval", refreshInterval.toString());
-    window.location.reload();
+    setApiConfig(apiUrlDraft, refreshIntervalDraft);
+    setGeneralSavedOk(true);
+    setTimeout(() => setGeneralSavedOk(false), 2000);
   };
 
   const saveGatewayConfig = async () => {
@@ -118,6 +125,7 @@ export default function SettingsPage() {
   const tls = config.tls || { enabled: false };
   const redis = config.redis || { enabled: false };
   const otel = config.otel || { enabled: false };
+  const transport = config.transport || {};
 
   const applyPreset = (preset: "development" | "production" | "high-throughput") => {
     const base = { ...config };
@@ -144,6 +152,11 @@ export default function SettingsPage() {
         tls: tls,
         redis: redis,
         otel: otel,
+        transport: {
+          max_idle_conns: 20000,
+          max_idle_conns_per_host: 2000,
+          idle_conn_timeout_seconds: 90,
+        },
       });
     }
   };
@@ -175,13 +188,13 @@ export default function SettingsPage() {
             </div>
           </Group>
           <Group gap="sm">
-            <Button variant="light" color="gray" size="sm" radius="md" onClick={() => applyPreset("development")}>
+            <Button variant="light" color="gray" size="sm" radius="md" disabled={formDisabled} onClick={() => applyPreset("development")}>
               Development
             </Button>
-            <Button variant="light" color="blue" size="sm" radius="md" onClick={() => applyPreset("production")}>
+            <Button variant="light" color="blue" size="sm" radius="md" disabled={formDisabled} onClick={() => applyPreset("production")}>
               Production
             </Button>
-            <Button variant="light" color="teal" size="sm" radius="md" onClick={() => applyPreset("high-throughput")}>
+            <Button variant="light" color="teal" size="sm" radius="md" disabled={formDisabled} onClick={() => applyPreset("high-throughput")}>
               High-Throughput (100k+ req/s)
             </Button>
           </Group>
@@ -191,7 +204,7 @@ export default function SettingsPage() {
         </Stack>
       </Card>
 
-      <ConfigImportExportCard apiUrl={apiUrl} />
+      <ConfigImportExportCard canImport={canImportConfig} canExport={canExportConfig} />
 
       <Card withBorder padding="xl" radius="lg" shadow="xs">
         <Stack gap="lg">
@@ -216,8 +229,8 @@ export default function SettingsPage() {
               label="Gateway API URL"
               description="The base URL of the Gateon Management API"
               placeholder="http://localhost:8080"
-              value={apiUrl}
-              onChange={(e) => setApiUrl(e.currentTarget.value)}
+              value={apiUrlDraft}
+              onChange={(e) => setApiUrlDraft(e.currentTarget.value)}
               radius="md"
             />
 
@@ -226,15 +239,20 @@ export default function SettingsPage() {
               description="How often to poll the gateway for real-time metrics"
               min={1}
               max={60}
-              value={refreshInterval}
+              value={refreshIntervalDraft}
               onChange={(val) =>
-                setRefreshInterval(typeof val === "number" ? val : 10)
+                setRefreshIntervalDraft(typeof val === "number" ? val : 10)
               }
               radius="md"
             />
           </Stack>
 
-          <Group justify="flex-end" mt="md">
+          <Group justify="flex-end" mt="md" gap="sm">
+            {generalSavedOk && (
+              <Text size="sm" c="green" fw={500}>
+                Saved
+              </Text>
+            )}
             <Button onClick={handleSave} radius="md" px="xl">
               Save Settings
             </Button>
@@ -253,7 +271,7 @@ export default function SettingsPage() {
                 Gateway Configuration
               </Title>
               <Text c="dimmed" size="xs">
-                Manage server-wide settings like TLS, Redis, and telemetry.
+                Manage server-wide settings: TLS, Redis, transport pooling, and telemetry.
               </Text>
             </div>
           </Group>
@@ -264,7 +282,7 @@ export default function SettingsPage() {
             variant="light"
             radius="md"
           >
-            Some settings (TLS, Redis, OTEL) may require a server restart to fully apply.
+            Some settings (TLS, Redis, OTEL) may require a server restart. Transport config applies to new proxy connections.
           </Alert>
 
           <Box>
@@ -285,6 +303,7 @@ export default function SettingsPage() {
                 <Switch
                   label="Enable TLS"
                   checked={!!tls.enabled}
+                  disabled={formDisabled}
                   onChange={(e) =>
                     setConfig({
                       ...config,
@@ -299,6 +318,7 @@ export default function SettingsPage() {
                   <TextInput
                     label="Domains (comma-separated)"
                     placeholder="example.com, www.example.com"
+                    disabled={formDisabled}
                     value={(tls.domains || []).join(", ")}
                     onChange={(e) =>
                       setConfig({
@@ -326,6 +346,7 @@ export default function SettingsPage() {
                   <Switch
                     label="Enable Auto-TLS (ACME)"
                     checked={tls.acme?.enabled || false}
+                    disabled={formDisabled}
                     onChange={(e) =>
                       setConfig({
                         ...config,
@@ -345,6 +366,7 @@ export default function SettingsPage() {
                       <TextInput
                         label="ACME Email"
                         placeholder="admin@example.com"
+                        disabled={formDisabled}
                         value={tls.acme.email || ""}
                         onChange={(e) =>
                           setConfig({
@@ -363,6 +385,7 @@ export default function SettingsPage() {
                       <TextInput
                         label="ACME Server"
                         placeholder="https://acme-v02.api.letsencrypt.org/directory"
+                        disabled={formDisabled}
                         value={tls.acme.ca_server || ""}
                         onChange={(e) =>
                           setConfig({
@@ -380,6 +403,7 @@ export default function SettingsPage() {
                       />
                       <Select
                         label="Challenge Type"
+                        disabled={formDisabled}
                         data={[
                           { label: "HTTP-01", value: "http" },
                           { label: "TLS-ALPN-01", value: "tls-alpn" },
@@ -406,6 +430,7 @@ export default function SettingsPage() {
                   <Group grow>
                     <Select
                       label="Min TLS Version"
+                      disabled={formDisabled}
                       data={["TLS1.0", "TLS1.1", "TLS1.2", "TLS1.3"]}
                       value={tls.min_tls_version || "TLS1.2"}
                       onChange={(val) =>
@@ -418,6 +443,7 @@ export default function SettingsPage() {
                     />
                     <Select
                       label="Max TLS Version"
+                      disabled={formDisabled}
                       data={["TLS1.0", "TLS1.1", "TLS1.2", "TLS1.3"]}
                       value={tls.max_tls_version || ""}
                       placeholder="Default"
@@ -433,6 +459,7 @@ export default function SettingsPage() {
                   </Group>
                   <Select
                     label="Client Authentication"
+                    disabled={formDisabled}
                     data={[
                       { label: "No Client Cert", value: "NoClientCert" },
                       {
@@ -463,6 +490,7 @@ export default function SettingsPage() {
                   />
                   <MultiSelect
                     label="Cipher Suites"
+                    disabled={formDisabled}
                     placeholder="Select cipher suites"
                     data={[
                       "TLS_AES_128_GCM_SHA256",
@@ -500,8 +528,9 @@ export default function SettingsPage() {
             />
             <Stack gap="sm">
               <Switch
-                label="Enable Distributed Cache (Redis)"
+                label="Enable Redis (rate limiting and distributed cache)"
                 checked={redis.enabled || false}
+                disabled={formDisabled}
                 onChange={(e) =>
                   setConfig({
                     ...config,
@@ -514,6 +543,7 @@ export default function SettingsPage() {
                 <TextInput
                   label="Address"
                   placeholder="localhost:6379"
+                  disabled={formDisabled || !redis.enabled}
                   value={redis.addr || ""}
                   onChange={(e) =>
                     setConfig({
@@ -522,11 +552,11 @@ export default function SettingsPage() {
                     })
                   }
                   radius="md"
-                  disabled={!redis.enabled}
                 />
                 <TextInput
                   label="Password"
                   type="password"
+                  disabled={formDisabled || !redis.enabled}
                   value={redis.password || ""}
                   onChange={(e) =>
                     setConfig({
@@ -535,10 +565,83 @@ export default function SettingsPage() {
                     })
                   }
                   radius="md"
-                  disabled={!redis.enabled}
                 />
               </Group>
             </Stack>
+          </Box>
+
+          <Box>
+            <Divider
+              label={
+                <Group gap={4}>
+                  <IconChartDots size={14} />
+                  <Text size="xs" fw={800}>
+                    PERFORMANCE — CONNECTION POOL
+                  </Text>
+                </Group>
+              }
+              labelPosition="left"
+              mb="md"
+            />
+            <Text size="xs" c="dimmed" mb="sm">
+              Tune HTTP transport for high-throughput backends. Zero = use default.
+            </Text>
+            <Group grow>
+              <NumberInput
+                label="Max Idle Conns"
+                description="Total idle connections (default 10000)"
+                disabled={formDisabled}
+                value={transport.max_idle_conns || ""}
+                onChange={(val) =>
+                  setConfig({
+                    ...config,
+                    transport: {
+                      ...transport,
+                      max_idle_conns: val ? Number(val) : 0,
+                    },
+                  })
+                }
+                min={0}
+                placeholder="10000"
+                radius="md"
+              />
+              <NumberInput
+                label="Max Idle Conns Per Host"
+                description="Per backend host (default 1000)"
+                disabled={formDisabled}
+                value={transport.max_idle_conns_per_host || ""}
+                onChange={(val) =>
+                  setConfig({
+                    ...config,
+                    transport: {
+                      ...transport,
+                      max_idle_conns_per_host: val ? Number(val) : 0,
+                    },
+                  })
+                }
+                min={0}
+                placeholder="1000"
+                radius="md"
+              />
+              <NumberInput
+                label="Idle Conn Timeout (seconds)"
+                description="Default 90"
+                disabled={formDisabled}
+                value={transport.idle_conn_timeout_seconds || ""}
+                onChange={(val) =>
+                  setConfig({
+                    ...config,
+                    transport: {
+                      ...transport,
+                      idle_conn_timeout_seconds: val ? Number(val) : 0,
+                    },
+                  })
+                }
+                min={0}
+                placeholder="90"
+                radius="md"
+              />
+            </Group>
           </Box>
 
           <Box>
@@ -555,6 +658,7 @@ export default function SettingsPage() {
               <Switch
                 label="Enable Tracing (OpenTelemetry)"
                 checked={otel.enabled || false}
+                disabled={formDisabled}
                 onChange={(e) =>
                   setConfig({
                     ...config,
@@ -567,6 +671,7 @@ export default function SettingsPage() {
                 <TextInput
                   label="OTLP HTTP Endpoint"
                   placeholder="http://localhost:4318"
+                  disabled={formDisabled || !otel.enabled}
                   value={otel.endpoint || ""}
                   onChange={(e) =>
                     setConfig({
@@ -575,11 +680,11 @@ export default function SettingsPage() {
                     })
                   }
                   radius="md"
-                  disabled={!otel.enabled}
                 />
                 <TextInput
                   label="Service Name"
                   placeholder="gateon-gateway"
+                  disabled={formDisabled || !otel.enabled}
                   value={otel.service_name || ""}
                   onChange={(e) =>
                     setConfig({
@@ -588,7 +693,6 @@ export default function SettingsPage() {
                     })
                   }
                   radius="md"
-                  disabled={!otel.enabled}
                 />
               </Group>
             </Stack>
@@ -607,6 +711,7 @@ export default function SettingsPage() {
             <Group grow align="flex-end">
               <Select
                 label="Log Level"
+                disabled={formDisabled}
                 data={[
                   { label: "Debug", value: "debug" },
                   { label: "Info", value: "info" },
@@ -624,6 +729,7 @@ export default function SettingsPage() {
               />
               <Select
                 label="Log Format"
+                disabled={formDisabled}
                 data={[
                   { label: "Text (Console)", value: "text" },
                   { label: "JSON", value: "json" },
@@ -643,6 +749,7 @@ export default function SettingsPage() {
               <Switch
                 label="Development Mode"
                 checked={config.log?.development || false}
+                disabled={formDisabled}
                 onChange={(e) =>
                   setConfig({
                     ...config,
@@ -657,6 +764,7 @@ export default function SettingsPage() {
               <NumberInput
                 label="Path metrics retention (days)"
                 description="How long to keep aggregated path metrics in storage"
+                disabled={formDisabled}
                 min={1}
                 max={365}
                 value={config.log?.path_stats_retention_days ?? 7}
@@ -688,6 +796,7 @@ export default function SettingsPage() {
               <Switch
                 label="Enable Role-Based Access Control (PASETO)"
                 checked={config?.auth?.enabled || false}
+                disabled={formDisabled}
                 onChange={(e) =>
                   setConfig({
                     ...config,
@@ -704,6 +813,7 @@ export default function SettingsPage() {
                     <TextInput
                       label="PASETO Symmetric Key"
                       placeholder="32 characters minimum"
+                      disabled={formDisabled}
                       value={config?.auth?.paseto_secret || ""}
                       onChange={(e) =>
                         setConfig({
@@ -720,6 +830,7 @@ export default function SettingsPage() {
                     <TextInput
                       label="SQLite Database Path"
                       placeholder="gateon.db"
+                      disabled={formDisabled}
                       value={config?.auth?.sqlite_path || ""}
                       onChange={(e) =>
                         setConfig({
@@ -748,16 +859,18 @@ export default function SettingsPage() {
             </Stack>
           </Box>
 
-          <Group justify="flex-end" mt="md">
-            <Button
-              onClick={saveGatewayConfig}
-              loading={saving}
-              radius="md"
-              px="xl"
-            >
-              Save Gateway Config
-            </Button>
-          </Group>
+          {canEditGlobal && (
+            <Group justify="flex-end" mt="md">
+              <Button
+                onClick={saveGatewayConfig}
+                loading={saving}
+                radius="md"
+                px="xl"
+              >
+                Save Gateway Config
+              </Button>
+            </Group>
+          )}
           {error && (
             <Text c="red" size="sm" fw={600}>
               {error}
@@ -833,6 +946,48 @@ export default function SettingsPage() {
       <Card withBorder padding="xl" radius="lg" shadow="xs">
         <Stack gap="lg">
           <Group gap="md">
+            <Paper p="xs" radius="md" bg="orange.6">
+              <IconShieldLock size={20} color="white" />
+            </Paper>
+            <div>
+              <Title order={4} fw={700}>
+                Access Control (RBAC)
+              </Title>
+              <Text c="dimmed" size="xs">
+                Manage users and API keys for the Gateway control plane.
+              </Text>
+            </div>
+          </Group>
+          <Divider />
+          <Stack gap="sm">
+            <Group>
+              <IconUsers size={18} color="var(--mantine-color-indigo-6)" />
+              <Text size="sm" fw={600}>
+                User Management
+              </Text>
+              <Button
+                component={Link}
+                to="/users"
+                variant="light"
+                size="xs"
+                radius="md"
+              >
+                Go to Users
+              </Button>
+            </Group>
+            <Group>
+              <IconKey size={18} color="var(--mantine-color-dimmed)" />
+              <Text size="sm" c="dimmed">
+                API Keys for programmatic access — Coming soon
+              </Text>
+            </Group>
+          </Stack>
+        </Stack>
+      </Card>
+
+      <Card withBorder padding="xl" radius="lg" shadow="xs">
+        <Stack gap="lg">
+          <Group gap="md">
             <Paper p="xs" radius="md" bg="violet.6">
               <IconPalette size={20} color="white" />
             </Paper>
@@ -853,11 +1008,10 @@ export default function SettingsPage() {
               Theme Mode
             </Text>
             <SegmentedControl
-              value={storeScheme}
-              onChange={(value: any) => {
-                setStoreScheme(value);
-                if (value !== "auto") setColorScheme(value);
-              }}
+              value={colorScheme}
+              onChange={(value: "light" | "dark" | "auto") =>
+                setColorScheme(value)
+              }
               data={[
                 {
                   value: "light",

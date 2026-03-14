@@ -11,14 +11,27 @@ import (
 
 // MiddlewareServiceImpl implements MiddlewareService.
 type MiddlewareServiceImpl struct {
-	store      config.MiddlewareStore
-	routeStore config.RouteStore
-	invalidator ProxyInvalidator
+	store              config.MiddlewareStore
+	routeStore         config.RouteStore
+	invalidator        ProxyInvalidator
+	validator          MiddlewareConfigValidator
+	wafCacheInvalidator WAFCacheInvalidator
 }
 
 // NewMiddlewareService creates a MiddlewareService.
-func NewMiddlewareService(store config.MiddlewareStore, routeStore config.RouteStore, invalidator ProxyInvalidator) MiddlewareService {
-	return &MiddlewareServiceImpl{store: store, routeStore: routeStore, invalidator: invalidator}
+func NewMiddlewareService(store config.MiddlewareStore, routeStore config.RouteStore, invalidator ProxyInvalidator, validator MiddlewareConfigValidator) MiddlewareService {
+	return NewMiddlewareServiceWithOptions(store, routeStore, invalidator, validator, nil)
+}
+
+// NewMiddlewareServiceWithOptions creates a MiddlewareService with optional WAF cache invalidation.
+func NewMiddlewareServiceWithOptions(store config.MiddlewareStore, routeStore config.RouteStore, invalidator ProxyInvalidator, validator MiddlewareConfigValidator, wafCacheInvalidator WAFCacheInvalidator) MiddlewareService {
+	return &MiddlewareServiceImpl{
+		store:               store,
+		routeStore:          routeStore,
+		invalidator:         invalidator,
+		validator:           validator,
+		wafCacheInvalidator: wafCacheInvalidator,
+	}
 }
 
 // ListPaginated returns paginated middlewares.
@@ -28,6 +41,11 @@ func (s *MiddlewareServiceImpl) ListPaginated(ctx context.Context, page, pageSiz
 
 // SaveMiddleware validates, assigns ID if needed, persists, and invalidates affected route proxies.
 func (s *MiddlewareServiceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1.Middleware) error {
+	if s.validator != nil {
+		if err := s.validator.Validate(mw); err != nil {
+			return err
+		}
+	}
 	if mw.Id == "" {
 		mw.Id = uuid.NewString()
 	}
@@ -42,6 +60,9 @@ func (s *MiddlewareServiceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1
 		}
 		return false
 	})
+	if s.wafCacheInvalidator != nil && mw.Type == "waf" {
+		s.wafCacheInvalidator.Invalidate()
+	}
 	return nil
 }
 
@@ -50,6 +71,7 @@ func (s *MiddlewareServiceImpl) DeleteMiddleware(ctx context.Context, id string)
 	if id == "" {
 		return errors.New("missing middleware id")
 	}
+	mw, _ := s.store.Get(ctx, id)
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
@@ -61,5 +83,25 @@ func (s *MiddlewareServiceImpl) DeleteMiddleware(ctx context.Context, id string)
 		}
 		return false
 	})
+	if s.wafCacheInvalidator != nil && mw != nil && mw.Type == "waf" {
+		s.wafCacheInvalidator.Invalidate()
+	}
 	return nil
+}
+
+// RoutesUsingMiddleware returns routes that reference the given middleware ID.
+func (s *MiddlewareServiceImpl) RoutesUsingMiddleware(ctx context.Context, middlewareID string) []*gateonv1.Route {
+	if middlewareID == "" {
+		return nil
+	}
+	var out []*gateonv1.Route
+	for _, rt := range s.routeStore.List(ctx) {
+		for _, mid := range rt.Middlewares {
+			if mid == middlewareID {
+				out = append(out, rt)
+				break
+			}
+		}
+	}
+	return out
 }

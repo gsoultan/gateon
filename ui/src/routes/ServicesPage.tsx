@@ -2,7 +2,8 @@ import { Fragment, useState } from 'react'
 import { Card, Title, Text, Stack, Group, Button, Drawer, Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconPlus, IconServer, IconSearch, IconDotsVertical, IconEdit, IconTrash, IconExternalLink, IconActivity, IconChevronDown, IconChevronRight } from '@tabler/icons-react'
-import { useServices, apiFetch } from '../hooks/useGateon'
+import { useServices, apiFetch, getApiErrorMessage } from '../hooks/useGateon'
+import { usePermissions } from '../hooks/usePermissions'
 import { ServiceForm } from '../components/ServiceForm'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -10,6 +11,7 @@ import { notifications } from '@mantine/notifications'
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 export default function ServicesPage() {
+  const { canWrite } = usePermissions()
   const [opened, { open, close }] = useDisclosure(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -46,10 +48,10 @@ export default function ServicesPage() {
         color: 'green'
       })
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: 'Error',
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: 'red'
       })
     }
@@ -79,7 +81,9 @@ export default function ServicesPage() {
             Define HTTP & gRPC backend targets and load balancing policies.
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={18} />} onClick={handleCreate} size="md" radius="md">Create Service</Button>
+        {canWrite && (
+          <Button leftSection={<IconPlus size={18} />} onClick={handleCreate} size="md" radius="md">Create Service</Button>
+        )}
       </Group>
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
@@ -145,9 +149,11 @@ export default function ServicesPage() {
                           <Text c="dimmed" ta="center" maw={360}>
                             No services yet. Create a service to define HTTP or gRPC backend targets and load balancing.
                           </Text>
-                          <Button variant="light" size="sm" leftSection={<IconPlus size={16} />} onClick={handleCreate}>
-                            Create your first service
-                          </Button>
+                          {canWrite && (
+                            <Button variant="light" size="sm" leftSection={<IconPlus size={16} />} onClick={handleCreate}>
+                              Create your first service
+                            </Button>
+                          )}
                         </Stack>
                       </Center>
                     </Table.Td>
@@ -201,17 +207,19 @@ export default function ServicesPage() {
                           <Text size="xs" c="dimmed">{s.health_check_path || '—'}</Text>
                         </Table.Td>
                         <Table.Td>
-                          <Menu shadow="md" position="bottom-end" transitionProps={{ transition: 'pop-top-right' }}>
-                            <Menu.Target>
-                              <ActionIcon variant="subtle" color="gray"><IconDotsVertical size={16} /></ActionIcon>
-                            </Menu.Target>
-                            <Menu.Dropdown>
-                              <Menu.Label>Actions</Menu.Label>
-                              <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => handleEdit(s)}>Edit</Menu.Item>
-                              <Menu.Divider />
-                              <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => deleteMutation.mutate(s.id)}>Delete</Menu.Item>
-                            </Menu.Dropdown>
-                          </Menu>
+                          {canWrite && (
+                            <Menu shadow="md" position="bottom-end" transitionProps={{ transition: 'pop-top-right' }}>
+                              <Menu.Target>
+                                <ActionIcon variant="subtle" color="gray"><IconDotsVertical size={16} /></ActionIcon>
+                              </Menu.Target>
+                              <Menu.Dropdown>
+                                <Menu.Label>Actions</Menu.Label>
+                                <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => handleEdit(s)}>Edit</Menu.Item>
+                                <Menu.Divider />
+                                <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => deleteMutation.mutate(s.id)}>Delete</Menu.Item>
+                              </Menu.Dropdown>
+                            </Menu>
+                          )}
                         </Table.Td>
                       </Table.Tr>
                       {isExpanded && hasMore && (

@@ -30,7 +30,7 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
             label="Route Type"
             description={
               field.state.value === "grpc"
-                ? "gRPC: Use for gRPC backends. Requires a matching rule."
+                ? "gRPC: Use for gRPC backends. Requires a matching rule. Add the grpcweb middleware if called from browsers."
                 : field.state.value === "graphql"
                   ? "GraphQL: Use for GraphQL API backends (HTTP). Requires a matching rule."
                   : field.state.value === "tcp"

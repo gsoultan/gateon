@@ -33,18 +33,24 @@ import { useDisclosure } from "@mantine/hooks";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { Middleware } from "../types/gateon";
-import { useMiddlewares, apiFetch } from "../hooks/useGateon";
+import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
+import { usePermissions } from "../hooks/usePermissions";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfigEditor";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export default function MiddlewaresPage() {
+  const { canWrite } = usePermissions();
   const queryClient = useQueryClient();
   const [opened, { open, close }] = useDisclosure(false);
+  const [deleteTarget, setDeleteTarget] = useState<Middleware | null>(null);
   const [editingMW, setEditingMW] = useState<Middleware | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  const { data: routesData } = useMiddlewareRoutes(deleteTarget?.id ?? null);
+  const affectedRoutes = routesData?.routes ?? [];
 
   const { data, isLoading } = useMiddlewares({
     page: page - 1,
@@ -72,10 +78,10 @@ export default function MiddlewaresPage() {
       });
       close();
     },
-    onError: (err) => {
+    onError: (err: unknown) => {
       notifications.show({
         title: "Error Saving Middleware",
-        message: err.message,
+        message: getApiErrorMessage(err),
         color: "red",
       });
     },
@@ -94,6 +100,7 @@ export default function MiddlewaresPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["middlewares"] });
+      setDeleteTarget(null);
       notifications.show({
         title: "Middleware Deleted",
         message: "The middleware has been removed.",
@@ -143,13 +150,15 @@ export default function MiddlewaresPage() {
               setPage(1);
             }}
           />
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={startAdd}
-            radius="md"
-          >
-            Add Middleware
-          </Button>
+          {canWrite && (
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={startAdd}
+              radius="md"
+            >
+              Add Middleware
+            </Button>
+          )}
         </Group>
       </Group>
 
@@ -213,34 +222,28 @@ export default function MiddlewaresPage() {
                       </Text>
                     </Table.Td>
                     <Table.Td>
-                      <Group gap="xs" justify="flex-end">
-                        <Tooltip label="Edit">
-                          <ActionIcon
-                            variant="subtle"
-                            color="blue"
-                            onClick={() => startEdit(mw)}
-                          >
-                            <IconPencil size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Remove">
-                          <ActionIcon
-                            variant="subtle"
-                            color="red"
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  "Are you sure you want to delete this middleware?",
-                                )
-                              ) {
-                                deleteMutation.mutate(mw.id);
-                              }
-                            }}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
+                      {canWrite && (
+                        <Group gap="xs" justify="flex-end">
+                          <Tooltip label="Edit">
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              onClick={() => startEdit(mw)}
+                            >
+                              <IconPencil size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Remove">
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              onClick={() => setDeleteTarget(mw)}
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      )}
                     </Table.Td>
                   </Table.Tr>
                 ))
@@ -298,6 +301,10 @@ export default function MiddlewaresPage() {
               { label: "Forward Auth", value: "forwardauth" },
               { label: "CORS", value: "cors" },
               { label: "IP Filter", value: "ipfilter" },
+              { label: "WAF (Coraza)", value: "waf" },
+              { label: "Cloudflare Turnstile", value: "turnstile" },
+              { label: "GeoIP", value: "geoip" },
+              { label: "HMAC Signature", value: "hmac" },
               { label: "Response Cache", value: "cache" },
               { label: "gRPC-Web", value: "grpcweb" },
               { label: "Custom Errors", value: "errors" },
@@ -364,7 +371,7 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "buffering" &&
                     "Keys: max_request_body_bytes (required)"}
                   {editingMW?.type === "auth" &&
-                    "Keys: type (jwt/apikey/basic); jwt: issuer, audience, secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
+                    "Keys: type (jwt/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret; paseto: secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
                   {editingMW?.type === "headers" &&
                     "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, add_response_X, set_response_X, del_request_X, del_response_X"}
                   {editingMW?.type === "rewrite" &&
@@ -382,7 +389,8 @@ export default function MiddlewaresPage() {
                     "Keys: min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes"}
                   {editingMW?.type === "forwardauth" &&
                     "Keys: address (required), auth_response_headers, auth_request_headers, trust_forward_header, forward_body, preserve_request_method, max_body_size, tls_insecure_skip_verify"}
-                  {editingMW?.type === "grpcweb" && "No config needed"}
+                  {editingMW?.type === "grpcweb" &&
+                    "Required for grpc routes called from browsers. No config. Add to route and attach this middleware."}
                   {editingMW?.type === "errors" &&
                     "Keys: status_codes (comma separated), page_404, page_500, etc."}
                   {editingMW?.type === "retry" && "Keys: attempts"}
@@ -396,10 +404,66 @@ export default function MiddlewaresPage() {
             radius="md"
             mt="md"
             loading={mutation.isPending}
-            disabled={!editingMW?.id}
+            disabled={!editingMW?.name}
           >
             Save Middleware
           </Button>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Middleware"
+        radius="lg"
+      >
+        <Stack gap="md">
+          {deleteTarget && (
+            <>
+              <Text size="sm">
+                Delete &quot;{deleteTarget.name || deleteTarget.id}&quot;? This
+                will remove it from all routes that use it.
+              </Text>
+              {affectedRoutes.length > 0 && (
+                <Stack gap="xs">
+                  <Text size="sm" fw={600}>
+                    Used by {affectedRoutes.length} route
+                    {affectedRoutes.length !== 1 ? "s" : ""}:
+                  </Text>
+                  <ScrollArea h={120} type="auto">
+                    {affectedRoutes.map((r) => (
+                      <Code
+                        key={r.id}
+                        size="xs"
+                        variant="light"
+                        display="block"
+                        mb={4}
+                      >
+                        {r.id} — {r.rule}
+                      </Code>
+                    ))}
+                  </ScrollArea>
+                </Stack>
+              )}
+              <Group justify="flex-end" mt="md">
+                <Button
+                  variant="default"
+                  radius="md"
+                  onClick={() => setDeleteTarget(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  color="red"
+                  radius="md"
+                  loading={deleteMutation.isPending}
+                  onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+                >
+                  Delete
+                </Button>
+              </Group>
+            </>
+          )}
         </Stack>
       </Modal>
     </Stack>

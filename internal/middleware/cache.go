@@ -2,30 +2,30 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/gateon/gateon/internal/redis"
 )
 
 // CacheConfig configures the response cache.
 type CacheConfig struct {
-	TTLSeconds int   // Cache TTL in seconds
-	MaxEntries int   // Max cached responses (0 = 1024)
-	MaxBodyKB  int64 // Max response body to cache in KB (0 = 256)
+	TTLSeconds  int          // Cache TTL in seconds
+	MaxEntries  int          // Max cached responses (0 = 1024, memory only)
+	MaxBodyKB   int64        // Max response body to cache in KB (0 = 256)
+	Storage     string       // "memory" or "redis"
+	RedisClient redis.Client // Required when Storage == "redis"
 }
 
-type cacheEntry struct {
-	status   int
-	headers  http.Header
-	body     []byte
-	expireAt time.Time
-}
+const (
+	CacheStorageMemory = "memory"
+	CacheStorageRedis  = "redis"
+)
 
-// Cache returns a middleware that caches GET/HEAD responses in memory.
+// Cache returns a middleware that caches GET/HEAD responses (memory or Redis).
 func Cache(cfg CacheConfig) Middleware {
-	if cfg.MaxEntries <= 0 {
-		cfg.MaxEntries = 1024
-	}
 	if cfg.MaxBodyKB <= 0 {
 		cfg.MaxBodyKB = 256
 	}
@@ -35,12 +35,16 @@ func Cache(cfg CacheConfig) Middleware {
 		ttl = 60 * time.Second
 	}
 
-	store := &cacheStore{
-		entries: make(map[string]*cacheEntry),
-		max:     cfg.MaxEntries,
-		maxBody: maxBody,
+	var backend CacheBackend
+	if cfg.Storage == CacheStorageRedis && cfg.RedisClient != nil {
+		backend = NewRedisCacheBackend(cfg.RedisClient)
 	}
-	var mu sync.Mutex
+	if backend == nil {
+		if cfg.MaxEntries <= 0 {
+			cfg.MaxEntries = 1024
+		}
+		backend = newMemoryCacheBackend(cfg.MaxEntries, maxBody)
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,18 +53,16 @@ func Cache(cfg CacheConfig) Middleware {
 				return
 			}
 			key := r.URL.String()
-			mu.Lock()
-			ent := store.get(key)
-			mu.Unlock()
-			if ent != nil {
-				for k, vv := range ent.headers {
+			status, headers, body, ok := backend.Get(r.Context(), key)
+			if ok {
+				for k, vv := range headers {
 					for _, v := range vv {
 						w.Header().Add(k, v)
 					}
 				}
-				w.WriteHeader(ent.status)
-				if r.Method == http.MethodGet && len(ent.body) > 0 {
-					_, _ = w.Write(ent.body)
+				w.WriteHeader(status)
+				if r.Method == http.MethodGet && len(body) > 0 {
+					_, _ = w.Write(body)
 				}
 				return
 			}
@@ -76,17 +78,54 @@ func Cache(cfg CacheConfig) Middleware {
 			next.ServeHTTP(rec, r)
 
 			if rec.status >= 200 && rec.status < 300 && buf.Len() > 0 && int64(buf.Len()) <= maxBody {
-				mu.Lock()
-				store.set(key, &cacheEntry{
-					status:   rec.status,
-					headers:  rec.header,
-					body:     bytes.Clone(buf.Bytes()),
-					expireAt: time.Now().Add(ttl),
-				})
-				mu.Unlock()
+				backend.Set(r.Context(), key, rec.status, rec.header, bytes.Clone(buf.Bytes()), ttl)
 			}
 		})
 	}
+}
+
+type cacheEntry struct {
+	status   int
+	headers  http.Header
+	body     []byte
+	expireAt time.Time
+}
+
+// memoryCacheBackend implements CacheBackend with in-memory LRU-style storage.
+type memoryCacheBackend struct {
+	store    *cacheStore
+	mu       sync.Mutex
+}
+
+func newMemoryCacheBackend(max int, maxBody int64) *memoryCacheBackend {
+	return &memoryCacheBackend{
+		store: &cacheStore{
+			entries: make(map[string]*cacheEntry),
+			max:     max,
+			maxBody: maxBody,
+		},
+	}
+}
+
+func (m *memoryCacheBackend) Get(ctx context.Context, key string) (int, http.Header, []byte, bool) {
+	m.mu.Lock()
+	ent := m.store.get(key)
+	m.mu.Unlock()
+	if ent == nil {
+		return 0, nil, nil, false
+	}
+	return ent.status, ent.headers, ent.body, true
+}
+
+func (m *memoryCacheBackend) Set(ctx context.Context, key string, status int, headers http.Header, body []byte, ttl time.Duration) {
+	m.mu.Lock()
+	m.store.set(key, &cacheEntry{
+		status:   status,
+		headers:  headers,
+		body:     body,
+		expireAt: time.Now().Add(ttl),
+	})
+	m.mu.Unlock()
 }
 
 type responseRecorder struct {

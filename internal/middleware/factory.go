@@ -1,25 +1,40 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
-	"github.com/redis/go-redis/v9"
+	"github.com/gateon/gateon/internal/redis"
+	"github.com/gateon/gateon/internal/request"
 	xrate "golang.org/x/time/rate"
 )
 
+// wafCache caches Coraza WAF instances by config hash to avoid repeated creation.
+var wafCache sync.Map
+
 // Factory creates a Middleware from a configuration.
 type Factory struct {
-	redisClient *redis.Client
+	redisClient redis.Client
 }
 
-func NewFactory(redisClient *redis.Client) *Factory {
+func NewFactory(redisClient redis.Client) *Factory {
 	return &Factory{redisClient: redisClient}
+}
+
+// Validate checks that the middleware config is valid without creating the middleware.
+// It reuses Create logic for consistency.
+func (f *Factory) Validate(m *gateonv1.Middleware) error {
+	_, err := f.Create(m)
+	return err
 }
 
 func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
@@ -78,6 +93,14 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 		return f.createBuffering(m.Config)
 	case "forwardauth":
 		return f.createForwardAuth(m.Config)
+	case "waf":
+		return f.createWAF(m.Config)
+	case "turnstile":
+		return f.createTurnstile(m.Config)
+	case "geoip":
+		return f.createGeoIP(m.Config)
+	case "hmac":
+		return f.createHMAC(m.Config)
 	default:
 		return nil, fmt.Errorf("unknown middleware type: %s", m.Type)
 	}
@@ -86,7 +109,6 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 func (f *Factory) createRateLimit(cfg map[string]string) (Middleware, error) {
 	rpm, _ := strconv.Atoi(cfg["requests_per_minute"])
 	burst, _ := strconv.Atoi(cfg["burst"])
-	perIp, _ := strconv.ParseBool(cfg["per_ip"])
 	perTenant, _ := strconv.ParseBool(cfg["per_tenant"])
 	storage := cfg["storage"]
 
@@ -104,35 +126,50 @@ func (f *Factory) createRateLimit(cfg map[string]string) (Middleware, error) {
 		limiter = NewRateLimiter(xrate.Limit(rateVal), burst)
 	}
 
+	trust := request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"])
+	keyFunc := PerIPWithTrust(trust)
 	if perTenant {
 		return limiter.Handler(PerTenant), nil
 	}
-	if perIp {
-		return limiter.Handler(PerIP), nil
-	}
-	return limiter.Handler(PerIP), nil
+	return limiter.Handler(keyFunc), nil
 }
 
 func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 	authType := cfg["type"]
 	switch authType {
 	case "jwt":
+		jwksURL := strings.TrimSpace(cfg["jwks_url"])
 		secret := cfg["secret"]
 		if secret == "" {
 			secret = os.Getenv("GATEON_JWT_SECRET")
 		}
-		if secret == "" {
-			return nil, fmt.Errorf("jwt auth requires config secret or GATEON_JWT_SECRET env")
+		if jwksURL == "" && secret == "" {
+			return nil, fmt.Errorf("jwt auth requires jwks_url or secret (or GATEON_JWT_SECRET env)")
 		}
-		validator, err := NewJWTValidator(JWTConfig{
+		jwtCfg := JWTConfig{
 			Issuer:   cfg["issuer"],
 			Audience: cfg["audience"],
+			JWKSURL:  jwksURL,
 			Secret:   []byte(secret),
-		})
+		}
+		validator, err := NewJWTValidator(jwtCfg)
 		if err != nil {
 			return nil, err
 		}
 		return validator.Handler, nil
+	case "paseto":
+		secret := cfg["secret"]
+		if secret == "" {
+			secret = os.Getenv("GATEON_PASETO_SECRET")
+		}
+		if secret == "" {
+			return nil, fmt.Errorf("paseto auth requires config secret or GATEON_PASETO_SECRET env")
+		}
+		verifier, err := NewPasetoVerifier(secret)
+		if err != nil {
+			return nil, err
+		}
+		return PasetoAuth(verifier), nil
 	case "apikey":
 		keys := make(map[string]string)
 		for k, v := range cfg {
@@ -161,7 +198,7 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 		}
 		return BasicAuthUsers(users, cfg["realm"])
 	default:
-		return nil, fmt.Errorf("unknown auth type: %s (use jwt, apikey, or basic)", authType)
+		return nil, fmt.Errorf("unknown auth type: %s (use jwt, paseto, apikey, or basic)", authType)
 	}
 }
 
@@ -279,17 +316,25 @@ func (f *Factory) createIPFilter(cfg map[string]string) (Middleware, error) {
 	}
 	allowList := parseList("allow_list")
 	denyList := parseList("deny_list")
-	return IPFilter(allowList, denyList), nil
+	trust := request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"])
+	clientIP := func(r *http.Request) string { return request.GetClientIP(r, trust) }
+	return IPFilterWithClientIP(allowList, denyList, clientIP), nil
 }
 
 func (f *Factory) createCache(cfg map[string]string) (Middleware, error) {
 	ttl, _ := strconv.Atoi(cfg["ttl_seconds"])
 	maxEntries, _ := strconv.Atoi(cfg["max_entries"])
 	maxBodyKB, _ := strconv.Atoi(cfg["max_body_kb"])
+	storage := cfg["storage"]
+	if storage == "" {
+		storage = CacheStorageMemory
+	}
 	return Cache(CacheConfig{
-		TTLSeconds: ttl,
-		MaxEntries: maxEntries,
-		MaxBodyKB:  int64(maxBodyKB),
+		TTLSeconds:  ttl,
+		MaxEntries:  maxEntries,
+		MaxBodyKB:   int64(maxBodyKB),
+		Storage:     storage,
+		RedisClient: f.redisClient,
 	}), nil
 }
 
@@ -391,6 +436,139 @@ func parseBool(s string, defaultVal bool) bool {
 		return defaultVal
 	}
 	return s == "true" || s == "1" || s == "yes"
+}
+
+func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
+	key := wafConfigKey(cfg)
+	if cached, ok := wafCache.Load(key); ok {
+		return cached.(Middleware), nil
+	}
+	mw, err := WAF(parseWAFConfig(cfg))
+	if err != nil {
+		return nil, err
+	}
+	wafCache.Store(key, mw)
+	return mw, nil
+}
+
+// InvalidateWAFCache clears all cached WAF instances. Call when a WAF middleware is saved or deleted.
+func InvalidateWAFCache() {
+	wafCache.Range(func(key, _ interface{}) bool {
+		wafCache.Delete(key)
+		return true
+	})
+}
+
+// WAFCacheInvalidator implements domain.WAFCacheInvalidator by clearing the WAF cache.
+type WAFCacheInvalidator struct{}
+
+// Invalidate clears all cached WAF instances.
+func (WAFCacheInvalidator) Invalidate() {
+	InvalidateWAFCache()
+}
+
+func wafConfigKey(cfg map[string]string) string {
+	keys := make([]string, 0, len(cfg))
+	for k := range cfg {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(cfg[k])
+		b.WriteByte(';')
+	}
+	h := sha256.Sum256([]byte(b.String()))
+	return "waf:" + hex.EncodeToString(h[:])
+}
+
+func (f *Factory) createGeoIP(cfg map[string]string) (Middleware, error) {
+	parseList := func(key string) []string {
+		val := cfg[key]
+		if val == "" {
+			return nil
+		}
+		var out []string
+		for _, s := range strings.Split(val, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return GeoIP(GeoIPConfig{
+		DBPath:          strings.TrimSpace(cfg["db_path"]),
+		AllowCountries:  parseList("allow_countries"),
+		DenyCountries:   parseList("deny_countries"),
+		TrustCloudflare: request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
+	})
+}
+
+func (f *Factory) createTurnstile(cfg map[string]string) (Middleware, error) {
+	secret := strings.TrimSpace(cfg["secret"])
+	if secret == "" {
+		secret = os.Getenv("GATEON_TURNSTILE_SECRET")
+	}
+	if secret == "" {
+		return nil, fmt.Errorf("turnstile requires secret or GATEON_TURNSTILE_SECRET env")
+	}
+	headerName := cfg["header"]
+	if headerName == "" {
+		headerName = "CF-Turnstile-Response"
+	}
+	methods := cfg["methods"]
+	if methods == "" {
+		methods = "POST,PUT,PATCH,DELETE"
+	}
+	return Turnstile(TurnstileConfig{
+		Secret:       secret,
+		HeaderName:   strings.TrimSpace(headerName),
+		Methods:      strings.Split(methods, ","),
+	}), nil
+}
+
+func (f *Factory) createHMAC(cfg map[string]string) (Middleware, error) {
+	secret := strings.TrimSpace(cfg["secret"])
+	if secret == "" {
+		secret = os.Getenv("GATEON_HMAC_SECRET")
+	}
+	if secret == "" {
+		return nil, fmt.Errorf("hmac requires secret or GATEON_HMAC_SECRET env")
+	}
+	header := cfg["header"]
+	if header == "" {
+		header = "X-Signature-256"
+	}
+	prefix := cfg["prefix"]
+	if prefix == "" {
+		prefix = "sha256="
+	}
+	methods := cfg["methods"]
+	var methodList []string
+	if methods != "" {
+		for _, m := range strings.Split(methods, ",") {
+			m = strings.TrimSpace(strings.ToUpper(m))
+			if m != "" {
+				methodList = append(methodList, m)
+			}
+		}
+	}
+	bodyLimit := int64(1024 * 1024)
+	if v := cfg["body_limit"]; v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			bodyLimit = n
+		}
+	}
+	return HMAC(HMACConfig{
+		Secret:    secret,
+		Header:    header,
+		Prefix:    prefix,
+		Methods:   methodList,
+		BodyLimit: bodyLimit,
+	})
 }
 
 // createBuffering creates a middleware that limits request body size (Traefik-style).

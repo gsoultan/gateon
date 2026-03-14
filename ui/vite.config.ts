@@ -7,13 +7,27 @@ export default defineConfig({
     port: 5173,
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          'mantine-vendor': ['@mantine/core', '@mantine/hooks', '@mantine/notifications'],
-          'tabler-icons': ['@tabler/icons-react'],
-          'react-vendor': ['react', 'react-dom'],
-          'tanstack-vendor': ['@tanstack/react-router', '@tanstack/react-query', '@tanstack/react-form'],
+        codeSplitting: {
+          groups: [
+            {
+              test: /[\\/]node_modules[\\/]@mantine[\\/](core|hooks|notifications)[\\/]/,
+              name: 'mantine-vendor',
+            },
+            {
+              test: /[\\/]node_modules[\\/]@tabler[\\/]icons-react[\\/]/,
+              name: 'tabler-icons',
+            },
+            {
+              test: /[\\/]node_modules[\\/]react(-dom)?[\\/]/,
+              name: 'react-vendor',
+            },
+            {
+              test: /[\\/]node_modules[\\/]@tanstack[\\/](react-router|react-query|react-form)[\\/]/,
+              name: 'tanstack-vendor',
+            },
+          ],
         },
       },
     },

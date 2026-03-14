@@ -17,14 +17,15 @@ import (
 
 // ProxyHandlerBuilder builds a ProxyHandler stepwise (Builder pattern).
 type ProxyHandlerBuilder struct {
-	route          *gateonv1.Route
-	serviceStore   config.ServiceStore
-	lbFactory      LoadBalancerFactory
-	targets        []*gateonv1.Target
-	lb             LoadBalancer
-	healthCheckPath string
-	routeType      string
-	transport      http.RoundTripper
+	route            *gateonv1.Route
+	serviceStore     config.ServiceStore
+	lbFactory        LoadBalancerFactory
+	targets          []*gateonv1.Target
+	lb               LoadBalancer
+	healthCheckPath  string
+	routeType        string
+	transport        http.RoundTripper
+	transportConfig  *TransportConfig
 }
 
 // NewProxyHandlerBuilder creates a builder for the given route.
@@ -38,6 +39,12 @@ func NewProxyHandlerBuilder(rt *gateonv1.Route, serviceStore config.ServiceStore
 	if lbFactory == nil {
 		b.lbFactory = NewDefaultLoadBalancerFactory()
 	}
+	return b
+}
+
+// SetTransportConfig sets connection pooling config for HTTP/1.1 transports.
+func (b *ProxyHandlerBuilder) SetTransportConfig(cfg *TransportConfig) *ProxyHandlerBuilder {
+	b.transportConfig = cfg
 	return b
 }
 
@@ -101,9 +108,13 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 		}
 	default:
 		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.MaxIdleConns = 10000
-		t.MaxIdleConnsPerHost = 1000
-		t.IdleConnTimeout = 90 * time.Second
+		tc := b.transportConfig
+		if tc == nil {
+			tc = &TransportConfig{}
+		}
+		t.MaxIdleConns = tc.maxIdleConns()
+		t.MaxIdleConnsPerHost = tc.maxIdleConnsPerHost()
+		t.IdleConnTimeout = tc.idleConnTimeout()
 		t.ForceAttemptHTTP2 = true
 		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		b.transport = t

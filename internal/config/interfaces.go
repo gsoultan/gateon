@@ -8,9 +8,17 @@ import (
 
 // RouteStore defines the contract for working with route configurations.
 // It is implemented by RouteRegistry.
+// RouteFilter filters routes by type, host, path, and status.
+type RouteFilter struct {
+	Type   string // http, grpc, graphql, tcp, udp
+	Host   string
+	Path   string
+	Status string // active, paused
+}
+
 type RouteStore interface {
 	List(ctx context.Context) []*gateonv1.Route
-	ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Route, int32)
+	ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *RouteFilter) ([]*gateonv1.Route, int32)
 	All(ctx context.Context) map[string]*gateonv1.Route
 	Get(ctx context.Context, id string) (*gateonv1.Route, bool)
 	Update(ctx context.Context, rt *gateonv1.Route) error

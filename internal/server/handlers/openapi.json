@@ -1,0 +1,82 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Gateon Management API",
+    "description": "API for managing routes, services, entrypoints, middlewares, TLS options, and global configuration. Requires authentication (PASETO) when RBAC is enabled.\n\n## RBAC\n\n| Role | Read | Write config (routes, services, etc.) | Write users/global |\n|------|------|----------------------------------------|--------------------|\n| admin | ✓ | ✓ | ✓ |\n| operator | ✓ | ✓ | ✗ |\n| viewer | ✓ | ✗ | ✗ |",
+    "version": "1.0.0"
+  },
+  "servers": [{ "url": "/", "description": "Gateway API" }],
+  "paths": {
+    "/v1/routes": {
+      "get": { "summary": "List routes", "tags": ["routes"], "responses": { "200": { "description": "OK" } } },
+      "put": { "summary": "Create or update route (operator, admin)", "tags": ["routes"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/routes/{id}": {
+      "delete": { "summary": "Delete route (operator, admin)", "tags": ["routes"], "responses": { "204": { "description": "No Content" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/services": {
+      "get": { "summary": "List services", "tags": ["services"], "responses": { "200": { "description": "OK" } } },
+      "put": { "summary": "Create or update service (operator, admin)", "tags": ["services"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/services/{id}": {
+      "delete": { "summary": "Delete service (operator, admin)", "tags": ["services"], "responses": { "204": { "description": "No Content" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/entrypoints": {
+      "get": { "summary": "List entrypoints", "tags": ["entrypoints"], "responses": { "200": { "description": "OK" } } },
+      "put": { "summary": "Create or update entrypoint (operator, admin)", "tags": ["entrypoints"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/entrypoints/{id}": {
+      "delete": { "summary": "Delete entrypoint (operator, admin)", "tags": ["entrypoints"], "responses": { "204": { "description": "No Content" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/middlewares": {
+      "get": { "summary": "List middlewares", "tags": ["middlewares"], "responses": { "200": { "description": "OK" } } },
+      "put": { "summary": "Create or update middleware (operator, admin)", "tags": ["middlewares"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/middlewares/{id}": {
+      "delete": { "summary": "Delete middleware (operator, admin)", "tags": ["middlewares"], "responses": { "204": { "description": "No Content" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/tls-options": {
+      "get": { "summary": "List TLS options", "tags": ["tls"], "responses": { "200": { "description": "OK" } } },
+      "put": { "summary": "Create or update TLS option (operator, admin)", "tags": ["tls"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/tls-options/{id}": {
+      "delete": { "summary": "Delete TLS option (operator, admin)", "tags": ["tls"], "responses": { "204": { "description": "No Content" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/global": {
+      "get": { "summary": "Get global config", "tags": ["config"], "responses": { "200": { "description": "OK" } } },
+      "put": { "summary": "Update global config (admin only)", "tags": ["config"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } },
+      "post": { "summary": "Update global config (admin only)", "tags": ["config"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/users": {
+      "get": { "summary": "List users", "tags": ["users"], "responses": { "200": { "description": "OK" } } },
+      "put": { "summary": "Create or update user (admin only)", "tags": ["users"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/users/{id}": {
+      "delete": { "summary": "Delete user (admin only)", "tags": ["users"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/config/export": {
+      "get": { "summary": "Export config as JSON", "tags": ["config"], "responses": { "200": { "description": "OK" } } }
+    },
+    "/v1/config/import": {
+      "post": { "summary": "Import config (operator, admin)", "tags": ["config"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/certs": {
+      "get": { "summary": "List certificates", "tags": ["certs"], "responses": { "200": { "description": "OK" } } }
+    },
+    "/v1/certs/upload": {
+      "post": { "summary": "Upload certificate (admin only)", "tags": ["certs"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/v1/login": {
+      "post": { "summary": "Login (returns PASETO token)", "tags": ["auth"], "responses": { "200": { "description": "OK" }, "401": { "description": "Invalid credentials" } } }
+    },
+    "/v1/logout": {
+      "post": { "summary": "Logout", "tags": ["auth"], "responses": { "200": { "description": "OK" } } }
+    },
+    "/v1/me": {
+      "get": { "summary": "Current user info", "tags": ["auth"], "responses": { "200": { "description": "OK" }, "401": { "description": "Not authenticated" } } }
+    },
+    "/v1/status": {
+      "get": { "summary": "Gateway status", "tags": ["status"], "responses": { "200": { "description": "OK" } } }
+    }
+  }
+}

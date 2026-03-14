@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/gateon/gateon/internal/auth"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
@@ -15,6 +16,9 @@ func registerTLSOptionHandlers(mux *http.ServeMux, d *Deps) {
 		})
 	})
 	mux.HandleFunc("PUT /v1/tls-options", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceTLSOptions) {
+			return
+		}
 		var opt gateonv1.TLSOption
 		if err := DecodeRequestBody(r, &opt); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
@@ -27,6 +31,9 @@ func registerTLSOptionHandlers(mux *http.ServeMux, d *Deps) {
 		WriteProtoResponse(w, http.StatusOK, &opt)
 	})
 	mux.HandleFunc("DELETE /v1/tls-options/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceTLSOptions) {
+			return
+		}
 		id := r.PathValue("id")
 		if id == "" {
 			WriteHTTPError(w, http.StatusBadRequest, "missing tls option id")

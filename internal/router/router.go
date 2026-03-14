@@ -9,8 +9,8 @@ import (
 
 	"github.com/gateon/gateon/internal/config"
 	"github.com/gateon/gateon/internal/middleware"
+	"github.com/gateon/gateon/internal/redis"
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
-	"github.com/redis/go-redis/v9"
 	"sync"
 )
 
@@ -226,8 +226,25 @@ func extractValue(s, prefix, suffix string) string {
 	return s[start : start+end]
 }
 
+// RouteHasMiddlewareType returns true if the route has any middleware of the given type.
+func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore config.MiddlewareStore, mwType string) bool {
+	if mwStore == nil || mwType == "" {
+		return false
+	}
+	for _, mid := range rt.Middlewares {
+		mid = strings.TrimSpace(mid)
+		if mid == "" {
+			continue
+		}
+		if mwConf, ok := mwStore.Get(ctx, mid); ok && mwConf != nil && strings.EqualFold(mwConf.Type, mwType) {
+			return true
+		}
+	}
+	return false
+}
+
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
-func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient *redis.Client, mwStore config.MiddlewareStore) http.Handler {
+func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore) http.Handler {
 	var chain []middleware.Middleware
 	mwFactory := middleware.NewFactory(redisClient)
 
