@@ -231,14 +231,19 @@ func (m *Manager) HTTPChallengeHandler(fallback http.Handler) http.Handler {
 }
 
 // InitFromEnv initializes TLS config from environment variables.
+// MinVersion defaults to TLS1.2 when unset (TLS 1.0/1.1 are insecure).
 func InitFromEnv() Config {
 	enabled := os.Getenv("GATEON_TLS_ENABLED") == "true"
+	minVer := os.Getenv("GATEON_TLS_MIN_VERSION")
+	if minVer == "" {
+		minVer = "TLS1.2"
+	}
 	cfg := Config{
 		Enabled:        enabled,
 		Email:          os.Getenv("GATEON_TLS_EMAIL"),
 		Domains:        splitAndTrim(os.Getenv("GATEON_TLS_DOMAINS")),
 		CacheDir:       os.Getenv("GATEON_TLS_CACHE_DIR"),
-		MinVersion:     os.Getenv("GATEON_TLS_MIN_VERSION"),
+		MinVersion:     minVer,
 		MaxVersion:     os.Getenv("GATEON_TLS_MAX_VERSION"),
 		ClientAuthType: os.Getenv("GATEON_TLS_CLIENT_AUTH_TYPE"),
 		CipherSuites:   splitAndTrim(os.Getenv("GATEON_TLS_CIPHER_SUITES")),

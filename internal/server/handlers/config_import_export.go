@@ -10,6 +10,9 @@ import (
 	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 )
 
+// MaxConfigImportBodySize limits config import/validate request body to prevent large-body DoS.
+const MaxConfigImportBodySize = 5 * 1024 * 1024 // 5MB
+
 type configExport struct {
 	Routes      []*gateonv1.Route      `json:"routes"`
 	Services    []*gateonv1.Service    `json:"services"`
@@ -44,9 +47,13 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceConfig) {
 			return
 		}
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, MaxConfigImportBodySize+1))
 		if err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "failed to read body")
+			return
+		}
+		if len(body) > MaxConfigImportBodySize {
+			WriteHTTPError(w, http.StatusRequestEntityTooLarge, "config import body exceeds 5MB limit")
 			return
 		}
 		var exp configExport
@@ -59,9 +66,13 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 	})
 
 	mux.HandleFunc("POST /v1/config/validate", func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, MaxConfigImportBodySize+1))
 		if err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "failed to read body")
+			return
+		}
+		if len(body) > MaxConfigImportBodySize {
+			writeValidateResponse(w, false, []string{}, "config validate body exceeds 5MB limit")
 			return
 		}
 		var exp configExport

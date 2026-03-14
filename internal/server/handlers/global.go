@@ -47,7 +47,7 @@ func registerGlobalHandlers(mux *http.ServeMux, apiService *api.ApiService, d *D
 		}
 		w.Header().Set("Content-Type", "application/json")
 		var conf gateonv1.GlobalConfig
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBodySize))
 		if err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "failed to read body")
 			return

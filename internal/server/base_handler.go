@@ -37,20 +37,21 @@ func CreateBaseHandler(
 			return
 		}
 
-		internal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		internalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/metrics" || r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 				handler.ServeHTTP(w, r)
 				return
 			}
 			uiHandler.ServeHTTP(w, r)
 		})
+		// Limit concurrent requests to internal API (dashboard, /v1/*, /metrics) to prevent DoS.
+		internal := middleware.MaxConnections(500)(internalHandler)
 
 		gc := deps.GlobalReg.Get(r.Context())
 		if !needsAuth(gc, deps) {
 			internal.ServeHTTP(w, r)
 			return
 		}
-
 		if !isAPIMetricsPath(r.URL.Path) {
 			internal.ServeHTTP(w, r)
 			return
@@ -63,11 +64,7 @@ func CreateBaseHandler(
 			internal.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/v1/logs" && r.Header.Get("Authorization") == "" {
-			if auth := r.URL.Query().Get("auth"); auth != "" {
-				r.Header.Set("Authorization", "Bearer "+auth)
-			}
-		}
+		// Require Authorization header for /v1/logs; do not accept auth token in URL (logs may expose it).
 		middleware.PasetoAuth(deps.Auth)(internal).ServeHTTP(w, r)
 	})
 }
