@@ -32,9 +32,13 @@ func WriteJSON(w http.ResponseWriter, statusCode int, v any) {
 	_, _ = w.Write(data)
 }
 
+// MaxRequestBodySize is the default limit for DecodeRequestBody (1MB) to prevent large-body DoS.
+const MaxRequestBodySize = 1024 * 1024
+
 // DecodeRequestBody reads and unmarshals JSON or protobuf from the request body.
+// Body size is limited to MaxRequestBodySize (1MB) to prevent DoS.
 func DecodeRequestBody(r *http.Request, dst any) error {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBodySize))
 	if err != nil {
 		return fmt.Errorf("read request body: %w", err)
 	}
