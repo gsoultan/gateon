@@ -3,7 +3,7 @@ package config
 import (
 	"context"
 
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // ConfigVisitor visits config entities for export, validation, or audit.

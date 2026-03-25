@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/telemetry"
 	"github.com/gorilla/websocket"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}

@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 func TestRoundRobinLB(t *testing.T) {

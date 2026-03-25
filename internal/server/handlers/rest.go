@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/gateon/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/api"
 )
 
 // RegisterRESTHandlers registers all REST handlers on mux (routes, services, entrypoints, etc.).

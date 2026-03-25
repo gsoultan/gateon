@@ -9,14 +9,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gateon/gateon/internal/api"
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/domain"
-	"github.com/gateon/gateon/internal/middleware"
-	"github.com/gateon/gateon/internal/server/handlers"
-	"github.com/gateon/gateon/pkg/l4"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/server/handlers"
+	"github.com/gsoultan/gateon/pkg/l4"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"google.golang.org/grpc"
 )
@@ -344,10 +344,10 @@ func TestIntegration_ProxyWithOAuth2IntrospectionMiddleware(t *testing.T) {
 	_ = s.MwStore.Update(context.Background(), &gateonv1.Middleware{
 		Id: "oauth2-auth", Name: "oauth2-auth", Type: "auth",
 		Config: map[string]string{
-			"type":               "oauth2",
-			"introspection_url":  introServer.URL,
-			"client_id":          "test-client",
-			"client_secret":      "test-secret",
+			"type":              "oauth2",
+			"introspection_url": introServer.URL,
+			"client_id":         "test-client",
+			"client_secret":     "test-secret",
 		},
 	})
 	_ = s.RouteStore.Update(context.Background(), &gateonv1.Route{
@@ -435,8 +435,8 @@ func TestIntegration_ProxyWithOIDCMiddleware(t *testing.T) {
 	_ = s.MwStore.Update(context.Background(), &gateonv1.Middleware{
 		Id: "oidc-auth", Name: "oidc-auth", Type: "auth",
 		Config: map[string]string{
-			"type":    "oidc",
-			"issuer":  oidcServer.URL,
+			"type":     "oidc",
+			"issuer":   oidcServer.URL,
 			"audience": "api",
 		},
 	})

@@ -4,9 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/redis"
 )
 
 // Server is the main application container (Dependency Injection).

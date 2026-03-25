@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/domain"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/domain"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // l4Invalidator invalidates L4 resolver cache for routes.

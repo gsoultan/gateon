@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gateon/gateon/internal/middleware"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/middleware"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // peekedConn wraps a connection and returns buffered data first.

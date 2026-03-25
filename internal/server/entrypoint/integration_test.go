@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gateon/gateon/internal/middleware"
-	gtls "github.com/gateon/gateon/internal/tls"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/middleware"
+	gtls "github.com/gsoultan/gateon/internal/tls"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // mockDeps provides minimal deps for inspection integration test.
@@ -43,10 +43,10 @@ func (m *mockCORS) Handler(h http.Handler) http.Handler { return h }
 
 type mockGRPCWeb struct{}
 
-func (m *mockGRPCWeb) IsGrpcWebRequest(r *http.Request) bool              { return false }
-func (m *mockGRPCWeb) IsAcceptableGrpcCorsRequest(r *http.Request) bool   { return false }
-func (m *mockGRPCWeb) IsGrpcWebSocketRequest(r *http.Request) bool        { return false }
-func (m *mockGRPCWeb) ServeHTTP(w http.ResponseWriter, r *http.Request)   {}
+func (m *mockGRPCWeb) IsGrpcWebRequest(r *http.Request) bool            { return false }
+func (m *mockGRPCWeb) IsAcceptableGrpcCorsRequest(r *http.Request) bool { return false }
+func (m *mockGRPCWeb) IsGrpcWebSocketRequest(r *http.Request) bool      { return false }
+func (m *mockGRPCWeb) ServeHTTP(w http.ResponseWriter, r *http.Request) {}
 
 // TestIntegration_TCPInspection verifies connection-time inspection routes
 // HTTP traffic to HTTP handler and non-HTTP to L4.

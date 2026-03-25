@@ -11,21 +11,21 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 
-	"github.com/gateon/gateon/internal/config"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/config"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // ProxyHandlerBuilder builds a ProxyHandler stepwise (Builder pattern).
 type ProxyHandlerBuilder struct {
-	route            *gateonv1.Route
-	serviceStore     config.ServiceStore
-	lbFactory        LoadBalancerFactory
-	targets          []*gateonv1.Target
-	lb               LoadBalancer
-	healthCheckPath  string
-	routeType        string
-	transport        http.RoundTripper
-	transportConfig  *TransportConfig
+	route           *gateonv1.Route
+	serviceStore    config.ServiceStore
+	lbFactory       LoadBalancerFactory
+	targets         []*gateonv1.Target
+	lb              LoadBalancer
+	healthCheckPath string
+	routeType       string
+	transport       http.RoundTripper
+	transportConfig *TransportConfig
 }
 
 // NewProxyHandlerBuilder creates a builder for the given route.
@@ -92,7 +92,7 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 		}
 	case useH2C:
 		b.transport = &http2.Transport{
-			AllowHTTP: true,
+			AllowHTTP:       true,
 			ReadIdleTimeout: 30 * time.Second,
 			PingTimeout:     15 * time.Second,
 			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
@@ -102,9 +102,9 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 		}
 	case useH2:
 		b.transport = &http2.Transport{
-			TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
-			ReadIdleTimeout:  30 * time.Second,
-			PingTimeout:      15 * time.Second,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			ReadIdleTimeout: 30 * time.Second,
+			PingTimeout:     15 * time.Second,
 		}
 	default:
 		t := http.DefaultTransport.(*http.Transport).Clone()

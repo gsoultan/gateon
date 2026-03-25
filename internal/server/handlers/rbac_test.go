@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/middleware"
 )
 
 func TestRequirePermission(t *testing.T) {

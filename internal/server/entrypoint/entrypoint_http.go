@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/middleware"
-	"github.com/gateon/gateon/internal/syncutil"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/syncutil"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 )

@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	redigo "github.com/redis/go-redis/v9"
 )
 

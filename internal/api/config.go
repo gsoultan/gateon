@@ -1,8 +1,8 @@
 package api
 
 import (
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 )
 
 // ApiServiceConfig holds dependencies for ApiService (Factory pattern).

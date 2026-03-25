@@ -3,9 +3,9 @@ package handlers
 import (
 	"time"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/domain"
-	"github.com/gateon/gateon/pkg/proxy"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/pkg/proxy"
 )
 
 // RouteStatsProvider returns target stats for a route. Nil if route not found.

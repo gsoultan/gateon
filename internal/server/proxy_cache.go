@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/redis"
-	"github.com/gateon/gateon/internal/router"
-	"github.com/gateon/gateon/pkg/proxy"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/router"
+	"github.com/gsoultan/gateon/pkg/proxy"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // ProxyCache caches route proxy handlers and manages their lifecycle.

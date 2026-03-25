@@ -5,9 +5,9 @@ import (
 	"crypto/tls"
 	"strings"
 
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/router"
-	gtls "github.com/gateon/gateon/internal/tls"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/router"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 )
 
 // CreateTLSManager builds the TLS manager from global config.

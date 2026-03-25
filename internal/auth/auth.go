@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gateon/gateon/internal/db"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/db"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/o1egl/paseto/v2"
 	"golang.org/x/crypto/bcrypt"
 )

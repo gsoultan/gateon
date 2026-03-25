@@ -1,4 +1,4 @@
-module github.com/gateon/gateon
+module github.com/gsoultan/gateon
 
 go 1.26
 

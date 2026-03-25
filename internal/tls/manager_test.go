@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gateon/gateon/internal/testutil"
+	"github.com/gsoultan/gateon/internal/testutil"
 )
 
 func TestManager_GetTLSConfig_CAChain(t *testing.T) {

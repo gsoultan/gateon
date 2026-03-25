@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 func TestValidateConfigExport(t *testing.T) {

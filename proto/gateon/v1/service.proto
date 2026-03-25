@@ -4,7 +4,7 @@ package gateon.v1;
 
 option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
 
-import "common.proto";
+import "gateon/v1/common.proto";
 
 message ListServicesRequest {
   int32 page = 1;

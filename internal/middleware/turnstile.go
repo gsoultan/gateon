@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 const turnstileVerifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
@@ -86,7 +86,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			defer resp.Body.Close()
 
 			var result struct {
-				Success  bool     `json:"success"`
+				Success    bool     `json:"success"`
 				ErrorCodes []string `json:"error-codes,omitempty"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

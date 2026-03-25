@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gateon/gateon/internal/router"
-	"github.com/gateon/gateon/internal/server/entrypoint"
-	"github.com/gateon/gateon/pkg/proxy"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/router"
+	"github.com/gsoultan/gateon/internal/server/entrypoint"
+	"github.com/gsoultan/gateon/pkg/proxy"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 

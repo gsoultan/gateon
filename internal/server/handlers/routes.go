@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/pkg/proxy"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/pkg/proxy"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 func registerRouteHandlers(mux *http.ServeMux, d *Deps) {

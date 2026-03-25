@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gateon/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/redis"
 )
 
 // CacheConfig configures the response cache.
@@ -93,8 +93,8 @@ type cacheEntry struct {
 
 // memoryCacheBackend implements CacheBackend with in-memory LRU-style storage.
 type memoryCacheBackend struct {
-	store    *cacheStore
-	mu       sync.Mutex
+	store *cacheStore
+	mu    sync.Mutex
 }
 
 func newMemoryCacheBackend(max int, maxBody int64) *memoryCacheBackend {

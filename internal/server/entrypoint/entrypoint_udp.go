@@ -3,8 +3,8 @@ package entrypoint
 import (
 	"context"
 
-	"github.com/gateon/gateon/internal/syncutil"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/syncutil"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 type udpRunner struct{}

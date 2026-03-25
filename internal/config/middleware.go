@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gateon/gateon/internal/logger"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/logger"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"gopkg.in/yaml.v3"
 )
 

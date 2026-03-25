@@ -6,10 +6,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/db"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/db"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 type ApiService struct {

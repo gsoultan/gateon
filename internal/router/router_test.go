@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/gateon/gateon/internal/middleware"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/middleware"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 func TestRouteHostIsExact(t *testing.T) {
