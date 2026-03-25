@@ -38,6 +38,7 @@ tls_options.json
 .DS_Store
 internal/ui/dist
 ui/bun.lock
+ui/.bun-cache
 ui/package-lock.json
 gateon.exe
 gateon_test.exe

@@ -1,0 +1,3 @@
+[install.cache]
+# Keep cache local to the project to avoid polluting the global ~/.bun store
+dir = ".bun-cache"
