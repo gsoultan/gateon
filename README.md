@@ -160,24 +160,24 @@ The UI is automatically built and embedded into the Go binary during the build p
 
 ### Development
 Requirements:
-- Node.js 18+ (or Bun)
+- [Bun](https://bun.sh)
 
 Install and run:
 ```
 cd ui
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 ### Manual Build
 If you need to manually build the UI:
 ```
 cd ui
-npm run build
+bun run build
 ```
 The build artifacts in `ui/dist` are synced to `internal/ui/dist` for embedding (run `go run ./scripts/sync_assets.go` from repo root, or use `go run ./cmd/gateon --build-ui` to build and sync before starting).
 
-Configure the API base URL for the UI via environment (only needed for `npm run dev`):
+Configure the API base URL for the UI via environment (only needed for `bun run dev`):
 - Create `.env` in `ui/` with: `VITE_API_URL=http://localhost:8080`
 
 ## Comparison with Other Gateways

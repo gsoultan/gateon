@@ -1,5 +1,5 @@
-//go:generate npm install --prefix ../../ui
-//go:generate npm run build --prefix ../../ui
+//go:generate bun install --cwd ../../ui
+//go:generate sh -c "cd ../../ui && bun run build"
 //go:generate go run ../../scripts/sync_assets.go
 package ui
 
