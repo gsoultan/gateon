@@ -19,6 +19,11 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Install buf and proto plugins
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -27,6 +32,11 @@ jobs:
 
       - name: Generate proto
         run: buf generate
+
+      - name: Build UI
+        run: |
+          cd ui && npm ci && npm run build && cd ..
+          go run ./scripts/sync_assets.go
 
       - name: Tidy
         run: go mod tidy
