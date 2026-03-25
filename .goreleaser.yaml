@@ -2,10 +2,6 @@ version: 2
 
 project_name: gateon
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - id: gateon
     main: ./cmd/gateon
