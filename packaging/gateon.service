@@ -17,6 +17,10 @@ WorkingDirectory=/etc/gateon
 # Environment=PORT=8080
 # Environment=GLOBAL_CONFIG_FILE=/etc/gateon/global.json
 
+# State directory (auto-created at /var/lib/gateon with correct permissions)
+StateDirectory=gateon
+ConfigurationDirectory=gateon
+
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
