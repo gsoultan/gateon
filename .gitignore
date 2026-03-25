@@ -1,4 +1,3 @@
-go.sum
 ui/node_modules
 ui/dist
 ui/.env
@@ -9,7 +8,7 @@ ui/.env.production.local
 ui/.env.development
 ui/.env.test
 ui/.env.production
-gateon
+/gateon
 gateon.db
 gateon.db-shm
 gateon.db-wal
