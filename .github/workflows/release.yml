@@ -39,7 +39,8 @@ jobs:
 
       - name: Build UI
         run: |
-          cd ui && npm ci && npm run build && cd ..
+          npm ci --prefix ui
+          npm run build --prefix ui
           go run ./scripts/sync_assets.go
 
       - name: Tidy modules
