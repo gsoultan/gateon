@@ -3,7 +3,7 @@ package logger
 import (
 	"net/http"
 
-	"github.com/gateon/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // SecurityEvent logs a security-relevant event for audit and monitoring.

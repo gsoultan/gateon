@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gateon/gateon/internal/db"
-	"github.com/gateon/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 // Persistent store for path metrics with retention control.

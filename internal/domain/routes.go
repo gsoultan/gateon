@@ -5,14 +5,14 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/gateon/gateon/internal/config"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/config"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // RouteServiceImpl implements RouteService.
 type RouteServiceImpl struct {
-	store     config.RouteStore
+	store       config.RouteStore
 	invalidator ProxyInvalidator
 }
 

@@ -4,21 +4,21 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/middleware"
-	"github.com/gateon/gateon/internal/router"
-	"github.com/gateon/gateon/internal/server/entrypoint"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/router"
+	"github.com/gsoultan/gateon/internal/server/entrypoint"
 )
 
 // BaseHandlerDeps holds narrow dependencies for CreateBaseHandler (Interface Segregation).
 // Auth may be nil when auth is disabled.
 type BaseHandlerDeps struct {
-	ProxyHandler  http.Handler
-	RouteStore    config.RouteStore
-	GlobalReg     config.GlobalConfigStore
-	Auth          auth.Service
-	LoginLimiter  middleware.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
+	ProxyHandler http.Handler
+	RouteStore   config.RouteStore
+	GlobalReg    config.GlobalConfigStore
+	Auth         auth.Service
+	LoginLimiter middleware.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
 }
 
 // CreateBaseHandler builds the main HTTP handler that routes to proxy or local API/UI.

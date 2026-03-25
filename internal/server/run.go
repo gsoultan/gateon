@@ -5,15 +5,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gateon/gateon/internal/api"
-	"github.com/gateon/gateon/internal/domain"
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/middleware"
-	"github.com/gateon/gateon/internal/server/entrypoint"
-	"github.com/gateon/gateon/internal/server/handlers"
-	"github.com/gateon/gateon/internal/syncutil"
-	"github.com/gateon/gateon/pkg/l4"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/server/entrypoint"
+	"github.com/gsoultan/gateon/internal/server/handlers"
+	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/pkg/l4"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
@@ -69,11 +69,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// Login rate limit: 5 attempts per minute per IP to mitigate brute force.
 	loginLimiter := middleware.NewRateLimiter(rate.Every(time.Minute/5), 1)
 	baseHandler := CreateBaseHandler(uiHandler, BaseHandlerDeps{
-		ProxyHandler:  proxyHandler,
-		RouteStore:    s.RouteStore,
-		GlobalReg:     s.GlobalStore,
-		Auth:          s.AuthManager,
-		LoginLimiter:  loginLimiter,
+		ProxyHandler: proxyHandler,
+		RouteStore:   s.RouteStore,
+		GlobalReg:    s.GlobalStore,
+		Auth:         s.AuthManager,
+		LoginLimiter: loginLimiter,
 	}, internalAPI, mux)
 	c := BuildCORS()
 	tlsManager := CreateTLSManager(s.GlobalStore)

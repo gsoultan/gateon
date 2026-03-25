@@ -2,12 +2,19 @@ version: 2
 
 project_name: gateon
 
+before:
+  hooks:
+    - go mod download
+
 builds:
   - id: gateon
     main: ./cmd/gateon
     binary: gateon
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
     goos:
       - linux
       - darwin
@@ -26,6 +33,8 @@ archives:
         formats:
           - zip
     files:
+      - LICENSE
+      - README.md
       - packaging/gateon-service.xml
     wrap_in_directory: true
 
@@ -38,7 +47,7 @@ nfpms:
       - rpm
     description: Gateon - API Gateway and Reverse Proxy
     vendor: Gateon
-    homepage: https://github.com/gateon/gateon
+    homepage: https://github.com/gsoultan/gateon
     contents:
       - src: packaging/gateon.service
         dst: /lib/systemd/system/gateon.service
@@ -50,6 +59,9 @@ nfpms:
       postinstall: scripts/postinstall.sh
       postremove: scripts/postremove.sh
 
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
 checksum:
   name_template: checksums.txt
 
@@ -60,3 +72,5 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+      - "^chore:"
+      - "^ci:"

@@ -121,33 +121,23 @@ curl -s http://localhost:8080/v1/status | jq
 - **gRPC-Web (browser)**: Browsers cannot use raw gRPC. Add the **grpcweb** middleware to grpc routes that will be called from web apps (e.g. via `@improbable-eng/grpc-web` or `grpc-web`). The middleware converts gRPC-Web requests to standard gRPC before proxying. Without it, gRPC-Web requests to a grpc route return `415 Unsupported Media Type`.
 - **Internal API**: Gateon's dashboard uses gRPC-Web to talk to its own API; that path is handled separately and does not use route middlewares.
 
-`protoc` is required for developing and maintaining Gateon itself because:
-
-1.  **Management API**: Gateon's own control plane (routing, status, metrics) is defined using Protocol Buffers (domain proto files in `proto/`, with `api.proto` defining the service).
-2.  **Internal Communication**: The backend uses generated Go code to handle these management requests efficiently.
-3.  **Extensibility**: If you want to extend Gateon with custom gRPC services or modify the management API, you will need to re-generate the Go bindings.
+[buf](https://buf.build) is used to generate Go code from the Protocol Buffer definitions in `proto/gateon/v1/`. Proto files are split by domain (route, service, auth, etc.); `api.proto` defines the `ApiService`.
 
 ### Installation and Generation
 
-1) Install protobuf toolchain (example):
+1) Install the toolchain:
 ```bash
-# protoc with Go plugins
-# (Use your preferred package manager to install protoc)
-# Go plugins:
+# buf CLI — https://buf.build/docs/installation
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 ```
 
-2) Generate Go code (output goes to `proto/gateon/v1/` per `go_package`):
+2) Regenerate Go bindings (output goes to `proto/gateon/v1/`):
 ```bash
-protoc -I proto \
-  --go_out=. --go_opt=module=github.com/gateon/gateon \
-  --go-grpc_out=. --go-grpc_opt=module=github.com/gateon/gateon \
-  proto/common.proto proto/route.proto proto/service.proto proto/entrypoint.proto \
-  proto/middleware.proto proto/tls.proto proto/global.proto proto/auth.proto \
-  proto/status.proto proto/api.proto
+buf generate
+# or via Make:
+make proto
 ```
-Proto files are split by domain (route, service, auth, etc.); `api.proto` defines the ApiService.
 
 3) Services are fully implemented and registered in `internal/server` and wired from `cmd/gateon`.
 

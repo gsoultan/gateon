@@ -3,7 +3,7 @@ package config
 import (
 	"context"
 
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // RouteStore defines the contract for working with route configurations.
@@ -74,4 +74,3 @@ type GlobalConfigStore interface {
 	Update(ctx context.Context, conf *gateonv1.GlobalConfig) error
 	ConfigFileExists() bool
 }
-

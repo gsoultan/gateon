@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
-	"github.com/gateon/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/redis"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Factory creates a Middleware from a configuration.

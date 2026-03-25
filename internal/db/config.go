@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // AuthDatabaseURL returns the database URL from AuthConfig.

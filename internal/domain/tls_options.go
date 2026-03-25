@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gateon/gateon/internal/config"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/config"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // TLSOptionServiceImpl implements TLSOptionService.

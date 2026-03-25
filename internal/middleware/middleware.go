@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	"github.com/gateon/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 type ContextKey string

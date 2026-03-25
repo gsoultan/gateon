@@ -3,7 +3,7 @@ package proxy
 import (
 	"strings"
 
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // LoadBalancerFactory creates a LoadBalancer for the given policy and targets.

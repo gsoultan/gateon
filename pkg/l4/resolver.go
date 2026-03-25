@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gateon/gateon/internal/config"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/config"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Resolver resolves L4 backends from Route → Service. Supports caching and invalidation.
@@ -270,4 +270,3 @@ func (r *Resolver) InvalidateForService(serviceID string) {
 		}
 	}
 }
-

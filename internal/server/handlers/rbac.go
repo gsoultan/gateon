@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 )
 
 // RequirePermission checks that the request has a valid user with permission for the action on resource.

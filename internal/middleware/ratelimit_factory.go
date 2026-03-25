@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"github.com/gateon/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/request"
 	xrate "golang.org/x/time/rate"
 )
 

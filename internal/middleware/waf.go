@@ -6,12 +6,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/corazawaf/coraza/v3"
-	"github.com/corazawaf/coraza/v3/types"
-	txhttp "github.com/corazawaf/coraza/v3/http"
 	"github.com/corazawaf/coraza-coreruleset"
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/request"
+	"github.com/corazawaf/coraza/v3"
+	txhttp "github.com/corazawaf/coraza/v3/http"
+	"github.com/corazawaf/coraza/v3/types"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // WAFConfig configures the WAF middleware.

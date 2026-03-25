@@ -8,11 +8,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/middleware"
-	"github.com/gateon/gateon/internal/telemetry"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/telemetry"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // decodeGlobalConfig decodes body as protobuf JSON first, then plain JSON.
@@ -62,7 +62,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if conf.Log != nil && conf.Log.PathStatsRetentionDays > 0 {
 			telemetry.ConfigureRetention(int(conf.Log.PathStatsRetentionDays))
 		}
-		_ = json.NewEncoder(w).Encode(struct{ Success bool `json:"success,omitzero"` }{Success: true})
+		_ = json.NewEncoder(w).Encode(struct {
+			Success bool `json:"success,omitzero"`
+		}{Success: true})
 	}
 	mux.HandleFunc("POST /v1/global", handleUpdateGlobal)
 	mux.HandleFunc("PUT /v1/global", handleUpdateGlobal)

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gateon/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config"
 	"google.golang.org/protobuf/proto"
 )
 

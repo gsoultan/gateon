@@ -6,8 +6,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/gateon/gateon/internal/auth"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/auth"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // MaxConfigImportBodySize limits config import/validate request body to prevent large-body DoS.

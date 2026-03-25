@@ -11,7 +11,7 @@ import (
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/gateon/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/httputil"
 )
 
 type contextKey string
@@ -51,20 +51,20 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 // Handler returns a middleware that validates JWT tokens. Supports Authorization
 // Bearer, query param token, and query param access_token (for WebSocket clients).
 func (v *JWTValidator) Handler(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			tokenString := bearerToken(r)
-			if tokenString == "" {
-				tokenString = r.URL.Query().Get("token")
-			}
-			if tokenString == "" {
-				tokenString = r.URL.Query().Get("access_token")
-			}
-			if tokenString == "" {
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header or token query param required", "")
-				return
-			}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenString := bearerToken(r)
+		if tokenString == "" {
+			tokenString = r.URL.Query().Get("token")
+		}
+		if tokenString == "" {
+			tokenString = r.URL.Query().Get("access_token")
+		}
+		if tokenString == "" {
+			httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header or token query param required", "")
+			return
+		}
 
-			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 			if v.kf != nil {
 				return v.kf.Keyfunc(token)
 			}
@@ -136,9 +136,9 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 
 // APIKeyValidator validates API keys from header or query (for WebSocket clients).
 type APIKeyValidator struct {
-	Keys        map[string]string // Key -> TenantID mapping
-	HeaderName  string            // e.g. "X-API-Key"
-	QueryParam  string            // e.g. "api_key" for ?api_key=xxx (optional)
+	Keys       map[string]string // Key -> TenantID mapping
+	HeaderName string            // e.g. "X-API-Key"
+	QueryParam string            // e.g. "api_key" for ?api_key=xxx (optional)
 }
 
 // NewAPIKeyValidator creates a new APIKeyValidator. headerName defaults to "X-API-Key".

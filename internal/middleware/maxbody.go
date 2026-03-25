@@ -5,7 +5,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/gateon/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )

@@ -11,12 +11,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gateon/gateon/internal/config"
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/middleware"
-	"github.com/gateon/gateon/internal/syncutil"
-	gtls "github.com/gateon/gateon/internal/tls"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/syncutil"
+	gtls "github.com/gsoultan/gateon/internal/tls"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // GATEON_ENTRYPOINT_RATE_LIMIT_QPS: per-IP requests per second (0 = disabled).

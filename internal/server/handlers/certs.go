@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gateon/gateon/internal/auth"
-	"github.com/gateon/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {

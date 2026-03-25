@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/gateon/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 func (f *Factory) createIPFilter(cfg map[string]string) (Middleware, error) {

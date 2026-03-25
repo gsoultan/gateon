@@ -3,7 +3,7 @@ package middleware
 import (
 	"strings"
 
-	"github.com/gateon/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 func (f *Factory) createGeoIP(cfg map[string]string) (Middleware, error) {

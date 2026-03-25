@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gateon/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/rs/cors"
 )
 
@@ -50,4 +50,3 @@ func BuildCORS() *cors.Cors {
 		AllowCredentials: allowCreds,
 	})
 }
-

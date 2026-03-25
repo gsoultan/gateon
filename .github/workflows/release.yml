@@ -23,14 +23,27 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      - name: Configure git for private modules
-        run: git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install buf and proto plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          go install github.com/bufbuild/buf/cmd/buf@latest
+
+      - name: Generate proto
+        run: buf generate
+
+      - name: Build UI
+        run: |
+          cd ui && npm ci && npm run build && cd ..
+          go run ./scripts/sync_assets.go
 
       - name: Tidy modules
         run: go mod tidy
-        env:
-          GOPRIVATE: github.com/gateon
-          GONOSUMDB: github.com/gateon/*
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -40,5 +53,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GOPRIVATE: github.com/gateon
-          GONOSUMDB: github.com/gateon/*

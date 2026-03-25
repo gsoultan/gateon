@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gateon/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/httputil"
 )
 
 // OAuth2IntrospectionConfig configures OAuth 2.0 token introspection (RFC 7662).

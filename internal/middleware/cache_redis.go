@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gateon/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/redis"
 	redigo "github.com/redis/go-redis/v9"
 )
 
@@ -26,9 +26,9 @@ func NewRedisCacheBackend(client redis.Client) CacheBackend {
 }
 
 type cachedPayload struct {
-	Status  int               `json:"s"`
+	Status  int                 `json:"s"`
 	Headers map[string][]string `json:"h"`
-	BodyB64 string            `json:"b"`
+	BodyB64 string              `json:"b"`
 }
 
 func (r *redisCacheBackend) Get(ctx context.Context, key string) (status int, headers http.Header, body []byte, ok bool) {

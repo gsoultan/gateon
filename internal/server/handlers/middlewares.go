@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/gateon/gateon/internal/auth"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/auth"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // MiddlewarePreset defines a predefined bundle of middlewares.
@@ -34,7 +34,7 @@ var middlewarePresets = []MiddlewarePreset{
 			{Type: "headers", Name: "Security Headers", Config: map[string]string{
 				"set_response_X-Content-Type-Options": "nosniff", "set_response_X-Frame-Options": "DENY",
 				"set_response_Referrer-Policy": "strict-origin-when-cross-origin",
-				"sts_seconds": "31536000", "sts_include_subdomains": "true", "sts_preload": "true",
+				"sts_seconds":                  "31536000", "sts_include_subdomains": "true", "sts_preload": "true",
 			}},
 		},
 	},

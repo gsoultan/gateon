@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gateon/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 const defaultForwardAuthTimeout = 10 * time.Second
@@ -165,4 +165,3 @@ func scheme(r *http.Request) string {
 	}
 	return "http"
 }
-

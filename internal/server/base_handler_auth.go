@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gateon/gateon/internal/httputil"
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/middleware"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // needsAuth returns true when global config has auth enabled and auth service is available.

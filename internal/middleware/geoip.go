@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/oschwald/geoip2-golang"
 )
 

@@ -1,7 +1,7 @@
 package domain
 
 import (
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // ProxyInvalidator notifies observers when route proxies must be invalidated.

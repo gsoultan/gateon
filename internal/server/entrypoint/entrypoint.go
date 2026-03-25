@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/gateon/gateon/internal/logger"
-	"github.com/gateon/gateon/internal/syncutil"
-	gtls "github.com/gateon/gateon/internal/tls"
-	"github.com/gateon/gateon/pkg/l4"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/syncutil"
+	gtls "github.com/gsoultan/gateon/internal/tls"
+	"github.com/gsoultan/gateon/pkg/l4"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // CORSProvider provides CORS middleware wrapping (e.g. *cors.Cors).

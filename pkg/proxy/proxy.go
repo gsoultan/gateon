@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gateon/gateon/internal/config"
-	gateonv1 "github.com/gateon/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/internal/config"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 const flushIntervalImmediate = -1
@@ -42,8 +42,8 @@ func (p *syncBufferPool) Put(b []byte) {
 
 // CircuitState represents circuit breaker state for a target.
 const (
-	CircuitClosed   = "CLOSED"   // healthy, accepting traffic
-	CircuitOpen     = "OPEN"     // failing, not accepting traffic
+	CircuitClosed   = "CLOSED"    // healthy, accepting traffic
+	CircuitOpen     = "OPEN"      // failing, not accepting traffic
 	CircuitHalfOpen = "HALF-OPEN" // testing recovery
 )
 
