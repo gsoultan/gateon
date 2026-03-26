@@ -94,7 +94,7 @@ export default function MiddlewaresPage() {
         },
       );
       if (!res.ok) throw new Error(await res.text());
-      return res.json();
+      return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["middlewares"] });
@@ -103,6 +103,13 @@ export default function MiddlewaresPage() {
         title: "Middleware Deleted",
         message: "The middleware has been removed.",
         color: "blue",
+      });
+    },
+    onError: (err: unknown) => {
+      notifications.show({
+        title: "Error Deleting Middleware",
+        message: getApiErrorMessage(err),
+        color: "red",
       });
     },
   });

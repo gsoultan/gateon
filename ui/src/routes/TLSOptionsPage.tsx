@@ -109,7 +109,7 @@ export default function TLSOptionsPage() {
         },
       );
       if (!res.ok) throw new Error(await res.text());
-      return res.json();
+      return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tlsoptions"] });
@@ -117,6 +117,13 @@ export default function TLSOptionsPage() {
         title: "TLS Option Deleted",
         message: "The TLS option has been removed.",
         color: "blue",
+      });
+    },
+    onError: (err: unknown) => {
+      notifications.show({
+        title: "Error Deleting TLS Option",
+        message: getApiErrorMessage(err),
+        color: "red",
       });
     },
   });
@@ -315,6 +322,7 @@ export default function TLSOptionsPage() {
           <TextInput
             label="Friendly Name"
             placeholder="Modern Security Policy"
+            required
             value={editingOption?.name || ""}
             onChange={(e) =>
               editingOption &&
@@ -412,7 +420,7 @@ export default function TLSOptionsPage() {
             radius="md"
             mt="md"
             loading={mutation.isPending}
-            disabled={!editingOption?.id}
+            disabled={!editingOption?.name}
           >
             Save TLS Option
           </Button>

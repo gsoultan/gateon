@@ -66,23 +66,45 @@ func (s *MiddlewareServiceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1
 	return nil
 }
 
-// DeleteMiddleware removes the middleware and invalidates affected route proxies.
+// DeleteMiddleware removes the middleware, removes its references from routes, and invalidates affected route proxies.
 func (s *MiddlewareServiceImpl) DeleteMiddleware(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("missing middleware id")
 	}
 	mw, _ := s.store.Get(ctx, id)
+
+	// 1. Find all routes using this middleware and remove it from them
+	routes := s.routeStore.List(ctx)
+	var affectedRouteIDs []string
+	for _, rt := range routes {
+		found := false
+		newMws := make([]string, 0, len(rt.Middlewares))
+		for _, mid := range rt.Middlewares {
+			if mid == id {
+				found = true
+				continue
+			}
+			newMws = append(newMws, mid)
+		}
+		if found {
+			affectedRouteIDs = append(affectedRouteIDs, rt.Id)
+			rt.Middlewares = newMws
+			if err := s.routeStore.Update(ctx, rt); err != nil {
+				// We log and continue, as failing here might leave things in inconsistent state
+			}
+		}
+	}
+
+	// 2. Delete the middleware itself
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
-	s.invalidator.InvalidateRoutes(func(rt *gateonv1.Route) bool {
-		for _, mid := range rt.Middlewares {
-			if mid == id {
-				return true
-			}
-		}
-		return false
-	})
+
+	// 3. Invalidate affected routes
+	for _, rid := range affectedRouteIDs {
+		s.invalidator.InvalidateRoute(rid)
+	}
+
 	if s.wafCacheInvalidator != nil && mw != nil && mw.Type == "waf" {
 		s.wafCacheInvalidator.Invalidate()
 	}

@@ -38,7 +38,7 @@ export default function RoutesPage() {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(await res.text());
-      return res.json();
+      return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });

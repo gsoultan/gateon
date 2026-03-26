@@ -36,7 +36,7 @@ export default function ServicesPage() {
     mutationFn: async (id: string) => {
       const res = await apiFetch(`/v1/services/${encodeURIComponent(id)}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await res.text())
-      return res.json()
+      return true
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['services'] })

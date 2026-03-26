@@ -30,7 +30,7 @@ func handlerDeps(s *Server) *handlers.Deps {
 		ServiceService: domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator),
 		EpService:      domain.NewEntryPointService(s.EpStore),
 		MwService:      domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}),
-		TLSOptService:  domain.NewTLSOptionService(s.TLSOptStore),
+		TLSOptService:  domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator),
 		AuthManager:    s.AuthManager,
 		Version:        s.Version,
 		StartTime:      s.StartTime(),

@@ -43,7 +43,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	epService := domain.NewEntryPointService(s.EpStore)
 	mwFactory := middleware.NewFactory(s.RedisClient)
 	mwService := domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{})
-	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore)
+	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
