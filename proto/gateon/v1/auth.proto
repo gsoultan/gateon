@@ -60,6 +60,15 @@ message DeleteUserResponse {
   bool success = 1;
 }
 
+message ChangePasswordRequest {
+  string id = 1;
+  string password = 2;
+}
+
+message ChangePasswordResponse {
+  bool success = 1;
+}
+
 message User {
   string id = 1;
   string username = 2;

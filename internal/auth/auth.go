@@ -40,14 +40,32 @@ type Service interface {
 	ListUsers(page, pageSize int32, search string) ([]*gateonv1.User, int32, error)
 	UpsertUser(u *gateonv1.User) error
 	DeleteUser(id string) error
+	ChangePassword(id, password string) error
 	UpdateSymmetricKey(key string)
 }
 
 type Claims struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	paseto.JSONToken
+	ID         string    `json:"id"`
+	Username   string    `json:"username"`
+	Role       string    `json:"role"`
+	Audience   string    `json:"aud,omitzero"`
+	Issuer     string    `json:"iss,omitzero"`
+	Jti        string    `json:"jti,omitzero"`
+	Subject    string    `json:"sub,omitzero"`
+	Expiration time.Time `json:"exp,omitzero"`
+	IssuedAt   time.Time `json:"iat,omitzero"`
+	NotBefore  time.Time `json:"nbf,omitzero"`
+}
+
+func (c *Claims) Validate() error {
+	now := time.Now()
+	if !c.Expiration.IsZero() && now.After(c.Expiration) {
+		return errors.New("token expired")
+	}
+	if !c.NotBefore.IsZero() && now.Before(c.NotBefore) {
+		return errors.New("token not yet valid")
+	}
+	return nil
 }
 
 // NewManager creates an auth manager using the given database URL.
@@ -112,14 +130,12 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 	exp := now.Add(24 * time.Hour)
 
 	claims := Claims{
-		ID:       user.Id,
-		Username: user.Username,
-		Role:     user.Role,
-		JSONToken: paseto.JSONToken{
-			IssuedAt:   now,
-			Expiration: exp,
-			NotBefore:  now,
-		},
+		ID:         user.Id,
+		Username:   user.Username,
+		Role:       user.Role,
+		IssuedAt:   now,
+		Expiration: exp,
+		NotBefore:  now,
 	}
 
 	token, err := m.paseto.Encrypt(m.symmetricKey, claims, nil)
@@ -219,6 +235,16 @@ func (m *Manager) upsertMySQL(id, username, password, role string) error {
 		return err
 	}
 	_, err := m.db.Exec(QueryInsertUserMySQLNoPassword, id, username, "", role)
+	return err
+}
+
+func (m *Manager) ChangePassword(id, password string) error {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	q := m.dialect.Rebind(QueryUpdatePassword)
+	_, err = m.db.Exec(q, string(hashed), id)
 	return err
 }
 

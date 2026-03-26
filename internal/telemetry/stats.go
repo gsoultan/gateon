@@ -3,6 +3,7 @@ package telemetry
 import (
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,8 +34,17 @@ type pathStatsInternal struct {
 	latencySum   uint64 // Store as nanoseconds for atomic update
 }
 
+// isInternalAPIPath returns true for gateway-internal paths that should not appear in path metrics.
+func isInternalAPIPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz"
+}
+
 // RecordPathRequest records a request for a host and path.
+// Internal API paths (/v1/*, /metrics, /healthz, /readyz) are excluded from path metrics.
 func RecordPathRequest(host, path string, latencySeconds float64) {
+	if isInternalAPIPath(path) {
+		return
+	}
 	// Normalize host by stripping port if present
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h

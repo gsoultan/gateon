@@ -621,6 +621,102 @@ func (x *DeleteUserResponse) GetSuccess() bool {
 	return false
 }
 
+type ChangePasswordRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChangePasswordRequest) Reset() {
+	*x = ChangePasswordRequest{}
+	mi := &file_gateon_v1_auth_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangePasswordRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangePasswordRequest) ProtoMessage() {}
+
+func (x *ChangePasswordRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gateon_v1_auth_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangePasswordRequest.ProtoReflect.Descriptor instead.
+func (*ChangePasswordRequest) Descriptor() ([]byte, []int) {
+	return file_gateon_v1_auth_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ChangePasswordRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ChangePasswordRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+type ChangePasswordResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChangePasswordResponse) Reset() {
+	*x = ChangePasswordResponse{}
+	mi := &file_gateon_v1_auth_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangePasswordResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangePasswordResponse) ProtoMessage() {}
+
+func (x *ChangePasswordResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gateon_v1_auth_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangePasswordResponse.ProtoReflect.Descriptor instead.
+func (*ChangePasswordResponse) Descriptor() ([]byte, []int) {
+	return file_gateon_v1_auth_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ChangePasswordResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
 type User struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -633,7 +729,7 @@ type User struct {
 
 func (x *User) Reset() {
 	*x = User{}
-	mi := &file_gateon_v1_auth_proto_msgTypes[12]
+	mi := &file_gateon_v1_auth_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -645,7 +741,7 @@ func (x *User) String() string {
 func (*User) ProtoMessage() {}
 
 func (x *User) ProtoReflect() protoreflect.Message {
-	mi := &file_gateon_v1_auth_proto_msgTypes[12]
+	mi := &file_gateon_v1_auth_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -658,7 +754,7 @@ func (x *User) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use User.ProtoReflect.Descriptor instead.
 func (*User) Descriptor() ([]byte, []int) {
-	return file_gateon_v1_auth_proto_rawDescGZIP(), []int{12}
+	return file_gateon_v1_auth_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *User) GetId() string {
@@ -727,6 +823,11 @@ const file_gateon_v1_auth_proto_rawDesc = "" +
 	"\x11DeleteUserRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\".\n" +
 	"\x12DeleteUserResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"C\n" +
+	"\x15ChangePasswordRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"2\n" +
+	"\x16ChangePasswordResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"b\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
@@ -746,7 +847,7 @@ func file_gateon_v1_auth_proto_rawDescGZIP() []byte {
 	return file_gateon_v1_auth_proto_rawDescData
 }
 
-var file_gateon_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_gateon_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_gateon_v1_auth_proto_goTypes = []any{
 	(*LoginRequest)(nil),            // 0: gateon.v1.LoginRequest
 	(*IsSetupRequiredRequest)(nil),  // 1: gateon.v1.IsSetupRequiredRequest
@@ -760,12 +861,14 @@ var file_gateon_v1_auth_proto_goTypes = []any{
 	(*UpdateUserResponse)(nil),      // 9: gateon.v1.UpdateUserResponse
 	(*DeleteUserRequest)(nil),       // 10: gateon.v1.DeleteUserRequest
 	(*DeleteUserResponse)(nil),      // 11: gateon.v1.DeleteUserResponse
-	(*User)(nil),                    // 12: gateon.v1.User
+	(*ChangePasswordRequest)(nil),   // 12: gateon.v1.ChangePasswordRequest
+	(*ChangePasswordResponse)(nil),  // 13: gateon.v1.ChangePasswordResponse
+	(*User)(nil),                    // 14: gateon.v1.User
 }
 var file_gateon_v1_auth_proto_depIdxs = []int32{
-	12, // 0: gateon.v1.LoginResponse.user:type_name -> gateon.v1.User
-	12, // 1: gateon.v1.ListUsersResponse.users:type_name -> gateon.v1.User
-	12, // 2: gateon.v1.UpdateUserRequest.user:type_name -> gateon.v1.User
+	14, // 0: gateon.v1.LoginResponse.user:type_name -> gateon.v1.User
+	14, // 1: gateon.v1.ListUsersResponse.users:type_name -> gateon.v1.User
+	14, // 2: gateon.v1.UpdateUserRequest.user:type_name -> gateon.v1.User
 	3,  // [3:3] is the sub-list for method output_type
 	3,  // [3:3] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
@@ -784,7 +887,7 @@ func file_gateon_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gateon_v1_auth_proto_rawDesc), len(file_gateon_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

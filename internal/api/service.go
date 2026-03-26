@@ -287,18 +287,29 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 			}
 		}
 
-		var err error
-		s.Auth, err = auth.NewManager(databaseURL, req.PasetoSecret)
+		mgr, err := auth.NewManager(databaseURL, req.PasetoSecret)
 		if err != nil {
 			return &gateonv1.SetupResponse{Success: false, Error: "failed to initialize auth manager: " + err.Error()}, nil
 		}
+		s.Auth = mgr
 	}
 
 	// 1. Create/Update Admin User
+	// Reuse the existing user's ID when the username already exists so that
+	// ON CONFLICT(id) correctly updates the row instead of failing on the
+	// UNIQUE constraint for username.
 	admin := &gateonv1.User{
 		Username: req.AdminUsername,
 		Password: req.AdminPassword,
 		Role:     auth.RoleAdmin,
+	}
+	if existing, _, _ := s.Auth.ListUsers(0, 1000, admin.Username); len(existing) > 0 {
+		for _, u := range existing {
+			if u.Username == admin.Username {
+				admin.Id = u.Id
+				break
+			}
+		}
 	}
 	if err := s.Auth.UpsertUser(admin); err != nil {
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to create admin: " + err.Error()}, nil
@@ -356,4 +367,14 @@ func (s *ApiService) DeleteUser(_ context.Context, req *gateonv1.DeleteUserReque
 		return &gateonv1.DeleteUserResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteUserResponse{Success: true}, nil
+}
+
+func (s *ApiService) ChangePassword(_ context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {
+	if s.Auth == nil || req.Id == "" || req.Password == "" {
+		return &gateonv1.ChangePasswordResponse{Success: false}, nil
+	}
+	if err := s.Auth.ChangePassword(req.Id, req.Password); err != nil {
+		return &gateonv1.ChangePasswordResponse{Success: false}, err
+	}
+	return &gateonv1.ChangePasswordResponse{Success: true}, nil
 }

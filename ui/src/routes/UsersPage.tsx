@@ -23,6 +23,7 @@ import {
   IconUserPlus,
   IconTrash,
   IconEdit,
+  IconKey,
   IconShieldLock,
   IconUsers,
   IconSearch,
@@ -30,8 +31,6 @@ import {
 import { useUsers, apiFetch } from "../hooks/useGateon";
 import type { User } from "../types/gateon";
 import { useAuthStore } from "../store/useAuthStore";
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -43,7 +42,9 @@ export default function UsersPage() {
     search: search,
   });
   const [opened, { open, close }] = useDisclosure(false);
+  const [pwOpened, { open: pwOpen, close: pwClose }] = useDisclosure(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [targetUser, setTargetUser] = useState<User | null>(null);
   const currentUser = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
 
@@ -68,6 +69,12 @@ export default function UsersPage() {
       role: user.role,
     });
     open();
+  };
+
+  const handleChangePassword = (user: User) => {
+    setTargetUser(user);
+    passwordForm.reset();
+    pwOpen();
   };
 
   const handleCreate = () => {
@@ -114,6 +121,39 @@ export default function UsersPage() {
     }
   };
 
+  const passwordForm = useForm({
+    initialValues: {
+      password: "",
+      confirmPassword: "",
+    },
+    validate: {
+      password: (value) => (value.length < 6 ? "Password must be at least 6 characters" : null),
+      confirmPassword: (value, values) => (value !== values.password ? "Passwords do not match" : null),
+    },
+  });
+
+  const handlePasswordSubmit = async (values: typeof passwordForm.values) => {
+    if (!targetUser) return;
+    try {
+      const res = await apiFetch("/v1/users/password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: targetUser.id,
+          password: values.password,
+        }),
+      });
+
+      if (res.ok) {
+        pwClose();
+      }
+    } catch (err) {
+      console.error("Failed to change password", err);
+    }
+  };
+
   const totalCount = data?.total_count || 0;
   const users = data?.users || [];
 
@@ -148,6 +188,16 @@ export default function UsersPage() {
       </Table.Td>
       <Table.Td>
         <Group gap={0} justify="flex-end">
+          <Tooltip label="Change password">
+            <ActionIcon
+              variant="subtle"
+              color="blue"
+              onClick={() => handleChangePassword(user)}
+              disabled={currentUser?.role !== "admin" && currentUser?.id !== user.id}
+            >
+              <IconKey size={16} />
+            </ActionIcon>
+          </Tooltip>
           <Tooltip label="Edit user">
             <ActionIcon
               variant="subtle"
@@ -274,12 +324,14 @@ export default function UsersPage() {
               required
               {...form.getInputProps("username")}
             />
-            <PasswordInput
-              label={editingUser ? "New Password (optional)" : "Password"}
-              placeholder="Enter password"
-              required={!editingUser}
-              {...form.getInputProps("password")}
-            />
+            {!editingUser && (
+              <PasswordInput
+                label="Password"
+                placeholder="Enter password"
+                required
+                {...form.getInputProps("password")}
+              />
+            )}
             <Select
               label="Role"
               placeholder="Select role"
@@ -293,6 +345,40 @@ export default function UsersPage() {
             />
             <Button type="submit" mt="md" fullWidth>
               {editingUser ? "Update User" : "Create User"}
+            </Button>
+          </Stack>
+        </form>
+      </Modal>
+
+      <Modal
+        opened={pwOpened}
+        onClose={pwClose}
+        title={
+          <Group gap="xs">
+            <IconKey size={20} />
+            <Text fw={700}>
+              Change Password for {targetUser?.username}
+            </Text>
+          </Group>
+        }
+        radius="md"
+      >
+        <form onSubmit={passwordForm.onSubmit(handlePasswordSubmit)}>
+          <Stack gap="md">
+            <PasswordInput
+              label="New Password"
+              placeholder="Enter new password"
+              required
+              {...passwordForm.getInputProps("password")}
+            />
+            <PasswordInput
+              label="Confirm New Password"
+              placeholder="Confirm new password"
+              required
+              {...passwordForm.getInputProps("confirmPassword")}
+            />
+            <Button type="submit" mt="md" fullWidth color="blue">
+              Change Password
             </Button>
           </Stack>
         </form>
