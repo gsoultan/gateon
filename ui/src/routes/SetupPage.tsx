@@ -289,6 +289,7 @@ export default function SetupPage() {
                           required
                           size="md"
                           leftSection={<IconLock size={rem(18)} stroke={1.5} />}
+                          rightSectionWidth={68}
                           {...form.getInputProps("admin_password")}
                           rightSection={
                             <Group gap={0}>
@@ -347,6 +348,7 @@ export default function SetupPage() {
                       required
                       size="md"
                       ff="monospace"
+                      rightSectionWidth={68}
                       {...form.getInputProps("paseto_secret")}
                       rightSection={
                         <Group gap={0}>

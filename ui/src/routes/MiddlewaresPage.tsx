@@ -37,8 +37,6 @@ import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } fro
 import { usePermissions } from "../hooks/usePermissions";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfigEditor";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
-
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
   const queryClient = useQueryClient();

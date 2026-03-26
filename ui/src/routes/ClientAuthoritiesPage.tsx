@@ -6,8 +6,6 @@ import type { GlobalConfig, ClientAuthority } from '../types/gateon'
 import { apiFetch } from '../hooks/useGateon'
 import { usePermissions } from '../hooks/usePermissions'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
-
 export default function ClientAuthoritiesPage() {
   const { canUploadCerts } = usePermissions()
   const [config, setConfig] = useState<GlobalConfig>({

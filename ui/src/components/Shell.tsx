@@ -18,7 +18,7 @@ import {
   useMantineColorScheme,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Link, Outlet, useLocation } from "@tanstack/react-router";
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useGateonStatus } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
 import { GlobalHealthBar } from "./GlobalHealthBar";
@@ -54,6 +54,7 @@ export function Shell() {
   const { data: status, refetch, isFetching } = useGateonStatus();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const logout = useAuthStore((state) => state.logout);
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const { isViewer } = usePermissions();
 
@@ -264,7 +265,7 @@ export function Shell() {
                   variant="light"
                   color="red"
                   size="md"
-                  onClick={() => logout()}
+                  onClick={() => { logout(); void navigate({ to: "/login" }); }}
                 >
                   <IconPower size={18} />
                 </ActionIcon>

@@ -26,7 +26,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/etc/gateon /var/lib/gateon
+ReadWritePaths=/etc/gateon
 
 [Install]
 WantedBy=multi-user.target

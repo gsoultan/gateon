@@ -27,5 +27,6 @@ const (
 	QueryInsertUserMySQLNoPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE username=VALUES(username), role=VALUES(role)`
 
-	QueryDeleteUser = "DELETE FROM users WHERE id = ?"
+	QueryDeleteUser     = "DELETE FROM users WHERE id = ?"
+	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"
 )

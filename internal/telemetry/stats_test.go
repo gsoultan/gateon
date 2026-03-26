@@ -35,3 +35,48 @@ func TestPathStats(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordPathRequest_ExcludesInternalAPIPaths(t *testing.T) {
+	pathStatsMap = make(map[string]*pathStatsInternal)
+
+	internalPaths := []string{
+		"/v1/login",
+		"/v1/routes",
+		"/v1/setup",
+		"/metrics",
+		"/healthz",
+		"/readyz",
+	}
+	for _, path := range internalPaths {
+		RecordPathRequest("example.com", path, 0.1)
+	}
+
+	stats := GetPathStats()
+	if len(stats) != 0 {
+		t.Errorf("expected 0 stats for internal paths, got %d", len(stats))
+	}
+}
+
+func TestIsInternalAPIPath(t *testing.T) {
+	cases := []struct {
+		path     string
+		internal bool
+	}{
+		{"/v1/login", true},
+		{"/v1/routes", true},
+		{"/v1/", true},
+		{"/metrics", true},
+		{"/healthz", true},
+		{"/readyz", true},
+		{"/api/users", false},
+		{"/", false},
+		{"/app", false},
+		{"/v1", false}, // exact "/v1" without trailing slash is not internal
+	}
+	for _, tc := range cases {
+		got := isInternalAPIPath(tc.path)
+		if got != tc.internal {
+			t.Errorf("isInternalAPIPath(%q) = %v, want %v", tc.path, got, tc.internal)
+		}
+	}
+}

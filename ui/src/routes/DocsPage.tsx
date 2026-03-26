@@ -11,12 +11,16 @@ import {
   ThemeIcon,
   Anchor,
 } from "@mantine/core";
-import { IconMail } from "@tabler/icons-react";
+import { IconMail, IconBook2, IconSettings } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
+import readmeContent from "../../docs/README.md?raw";
 import emailBackendSetup from "../../docs/email-backend-setup.md?raw";
+import servicesContent from "../../docs/services.md?raw";
 
 const docs = [
-  { id: "email-backend", label: "Email Backend (SMTP, IMAP, POP3)", content: emailBackendSetup },
+  { id: "intro", label: "Introduction", icon: IconBook2, content: readmeContent },
+  { id: "email-backend", label: "Email Backend (SMTP, IMAP, POP3)", icon: IconMail, content: emailBackendSetup },
+  { id: "running-service", label: "Running as a Service", icon: IconSettings, content: servicesContent },
 ];
 
 export default function DocsPage() {
@@ -29,13 +33,16 @@ export default function DocsPage() {
         </Text>
       </div>
 
-      <Tabs defaultValue="email-backend">
+      <Tabs defaultValue="intro">
         <Tabs.List>
-          {docs.map((d) => (
-            <Tabs.Tab key={d.id} value={d.id} leftSection={<IconMail size={16} />}>
-              {d.label}
-            </Tabs.Tab>
-          ))}
+          {docs.map((d) => {
+            const Icon = d.icon;
+            return (
+              <Tabs.Tab key={d.id} value={d.id} leftSection={<Icon size={16} />}>
+                {d.label}
+              </Tabs.Tab>
+            );
+          })}
         </Tabs.List>
 
         {docs.map((d) => (
@@ -73,6 +80,16 @@ export default function DocsPage() {
                             •
                           </ThemeIcon>
                         }
+                        mb="sm"
+                      >
+                        {children}
+                      </List>
+                    ),
+                    ol: ({ children }) => (
+                      <List
+                        type="ordered"
+                        size="sm"
+                        spacing="xs"
                         mb="sm"
                       >
                         {children}

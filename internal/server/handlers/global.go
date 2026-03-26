@@ -199,6 +199,39 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("POST /v1/users/password", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var req gateonv1.ChangePasswordRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if req.Id == "" || req.Password == "" {
+			writeJSONError(w, http.StatusBadRequest, "id and password are required")
+			return
+		}
+
+		// Allow if admin OR if changing own password
+		claimsVal := r.Context().Value(middleware.UserContextKey)
+		if claimsVal != nil {
+			if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
+				isAdmin := auth.Allowed(claims.Role, auth.ActionWrite, auth.ResourceUsers)
+				isSelf := claims.ID == req.Id
+				if !isAdmin && !isSelf {
+					writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+					return
+				}
+			}
+		}
+
+		resp, err := svc.ChangePassword(r.Context(), &req)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("DELETE /v1/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
 			return

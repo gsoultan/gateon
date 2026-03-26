@@ -60,7 +60,9 @@ func WithGlobalRegistry(r *config.GlobalRegistry) ServerOption {
 // WithAuthManager sets the auth manager (may be nil if auth disabled).
 func WithAuthManager(a *auth.Manager) ServerOption {
 	return func(s *Server) error {
-		s.AuthManager = a
+		if a != nil {
+			s.AuthManager = a
+		}
 		return nil
 	}
 }

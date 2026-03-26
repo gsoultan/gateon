@@ -34,8 +34,6 @@ import type { TLSOption } from "../types/gateon";
 import { useTLSOptions, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
-
 const TLS_VERSIONS = [
   { label: "TLS 1.2", value: "TLS1.2" },
   { label: "TLS 1.3", value: "TLS1.3" },
