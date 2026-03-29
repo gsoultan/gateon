@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/pkg/proxy"
@@ -23,25 +24,28 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 	isGRPC := (r.ProtoMajor == 2 || r.ProtoMajor == 3) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 	isGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsAcceptableGrpcCorsRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
 
-	if rt := router.SelectRoute(r, s.RouteStore.List(r.Context())); rt != nil {
-		if rt.Tls != nil && r.TLS == nil {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte("HTTPS required"))
-			return
-		}
-		if ((isGRPC || isGRPCWeb) && strings.EqualFold(rt.Type, "grpc")) || (!isGRPC && !isGRPCWeb) {
-			if isGRPCWeb && strings.EqualFold(rt.Type, "grpc") && !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {
-				w.WriteHeader(http.StatusUnsupportedMediaType)
-				_, _ = w.Write([]byte("gRPC-Web requires the grpcweb middleware on this route"))
+	epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
+	if epID != "management" {
+		if rt := router.SelectRoute(r, s.RouteStore.List(r.Context())); rt != nil {
+			if rt.Tls != nil && r.TLS == nil {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte("HTTPS required"))
 				return
 			}
-			h := s.GetOrCreateProxy(rt)
-			if h == nil {
-				w.WriteHeader(http.StatusBadGateway)
+			if ((isGRPC || isGRPCWeb) && strings.EqualFold(rt.Type, "grpc")) || (!isGRPC && !isGRPCWeb) {
+				if isGRPCWeb && strings.EqualFold(rt.Type, "grpc") && !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {
+					w.WriteHeader(http.StatusUnsupportedMediaType)
+					_, _ = w.Write([]byte("gRPC-Web requires the grpcweb middleware on this route"))
+					return
+				}
+				h := s.GetOrCreateProxy(rt)
+				if h == nil {
+					w.WriteHeader(http.StatusBadGateway)
+					return
+				}
+				h.ServeHTTP(w, r)
 				return
 			}
-			h.ServeHTTP(w, r)
-			return
 		}
 	}
 	if isGRPC || isGRPCWeb {

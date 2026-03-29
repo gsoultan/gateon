@@ -3,12 +3,14 @@ package entrypoint
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -55,12 +57,6 @@ func StartServers(
 	l4Resolver L4Resolver,
 ) {
 	limiter := entrypointRateLimiter()
-	entryPoints := epStore.List(context.Background())
-	if len(entryPoints) == 0 {
-		entryPoints = append(entryPoints, &gateonv1.EntryPoint{
-			Id: "default", Name: "Default", Address: ":" + port, Type: gateonv1.EntryPoint_HTTP,
-		})
-	}
 	deps := &Deps{
 		Port:             port,
 		BaseHandler:      baseHandler,
@@ -72,6 +68,11 @@ func StartServers(
 		ShutdownRegistry: shutdownReg,
 		L4Resolver:       l4Resolver,
 	}
+
+	// ALWAYS start a dedicated management listener
+	startSecureManagementServer(port, deps, wg)
+
+	entryPoints := epStore.List(context.Background())
 	for _, ep := range entryPoints {
 		epCopy := ep
 		runner := runnerFor(epCopy.Type)
@@ -82,6 +83,44 @@ func StartServers(
 			runner.Run(context.Background(), epCopy, deps, wg)
 		})
 	}
+}
+
+func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) {
+	bind := os.Getenv("GATEON_MANAGEMENT_BIND")
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	addr := bind + ":" + port
+
+	// IP Whitelisting for management entrypoint
+	allowedIPsStr := os.Getenv("GATEON_MANAGEMENT_ALLOWED_IPS")
+	allowedIPs := []string{"127.0.0.1", "::1"}
+	if allowedIPsStr != "" {
+		allowedIPs = strings.Split(allowedIPsStr, ",")
+	}
+
+	handler := middleware.Chain(
+		middleware.Recovery(),
+		middleware.IPFilter(allowedIPs, nil),
+		middleware.MaxConnections(500),
+	)(injectEntryPointID("management", deps.BaseHandler))
+
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	if deps.ShutdownRegistry != nil {
+		deps.ShutdownRegistry.Register(server.Shutdown)
+	}
+
+	logger.L.Info().Str("addr", addr).Msg("Secure Management Entrypoint started")
+	wg.Go(func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.L.Error().Err(err).Msg("Management server failed")
+		}
+	})
 }
 
 func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {

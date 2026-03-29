@@ -32,9 +32,14 @@ func CreateBaseHandler(
 	_ = grpcWeb // reserved for future gRPC-web routing in base handler
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rt := router.SelectRoute(r, deps.RouteStore.List(r.Context())); rt != nil {
-			handler.ServeHTTP(w, r)
-			return
+		epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
+
+		// On the management entrypoint, we do NOT serve user-defined proxy routes.
+		if epID != "management" {
+			if rt := router.SelectRoute(r, deps.RouteStore.List(r.Context())); rt != nil {
+				handler.ServeHTTP(w, r)
+				return
+			}
 		}
 
 		internalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,23 +53,31 @@ func CreateBaseHandler(
 		internal := middleware.MaxConnections(500)(internalHandler)
 
 		gc := deps.GlobalReg.Get(r.Context())
-		if !needsAuth(gc, deps) {
-			internal.ServeHTTP(w, r)
+		// Management entrypoint ALWAYS requires auth checks for API paths,
+		// even if auth is disabled globally for the gateway's proxy traffic.
+		if needsAuth(gc, deps) || epID == "management" {
+			if !isAPIMetricsPath(r.URL.Path) {
+				internal.ServeHTTP(w, r)
+				return
+			}
+			if isLoginPath(r.URL.Path) {
+				handleLoginWithRateLimit(w, r, internal, deps)
+				return
+			}
+			if isPublicAuthPath(r.URL.Path) {
+				internal.ServeHTTP(w, r)
+				return
+			}
+			if deps.Auth == nil {
+				// No auth service available yet (e.g. first run)
+				internal.ServeHTTP(w, r)
+				return
+			}
+			// Require Authorization header; do not accept auth token in URL.
+			middleware.PasetoAuth(deps.Auth)(internal).ServeHTTP(w, r)
 			return
 		}
-		if !isAPIMetricsPath(r.URL.Path) {
-			internal.ServeHTTP(w, r)
-			return
-		}
-		if isLoginPath(r.URL.Path) {
-			handleLoginWithRateLimit(w, r, internal, deps)
-			return
-		}
-		if isPublicAuthPath(r.URL.Path) {
-			internal.ServeHTTP(w, r)
-			return
-		}
-		// Require Authorization header for /v1/logs; do not accept auth token in URL (logs may expose it).
-		middleware.PasetoAuth(deps.Auth)(internal).ServeHTTP(w, r)
+
+		internal.ServeHTTP(w, r)
 	})
 }
