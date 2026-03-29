@@ -206,7 +206,8 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 ## Roadmap
 
 ### Implemented
-- **Redis-backed Rate Limiting** – Distributed rate limiting with Redis (see Features).
+- [Redis-backed Rate Limiting](doc/rate-limiting.md) – Distributed rate limiting with Redis (see Features).
+- **AI Optimization** – Best practices for guidelines, scenarios, and plans for AI agents ([docs/ai-optimization.md](docs/ai-optimization.md)).
 - **Automatic TLS (Let's Encrypt)** – Backend support via ACME/autocert in `internal/tls`; configurable via TLS config (Email + Domains).
 - **Metrics export (Prometheus/OpenTelemetry)** – Prometheus `/metrics` and OpenTelemetry tracing (see Features).
 - **Dashboard (Live logs)** – Live log streaming via WebSockets; further enhancements below.

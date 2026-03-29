@@ -10,8 +10,8 @@ import {
   Paper,
   Divider,
   SegmentedControl,
+  Grid,
 } from "@mantine/core";
-import { stringify as yamlStringify } from "yaml";
 import type { Route } from "../types/gateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
@@ -31,7 +31,7 @@ import {
   IconShieldLock,
   IconRoute,
 } from "@tabler/icons-react";
-import { RoutingConfig, UpstreamConfig, PipelineConfig } from "./route-form";
+import { RoutingConfig, UpstreamConfig, PipelineConfig, RoutePreview } from "./route-form";
 
 export default function RouteForm({
   onSuccess,
@@ -42,7 +42,6 @@ export default function RouteForm({
 }) {
   const queryClient = useQueryClient();
   const [active, setActive] = useState(0);
-  const [previewFormat, setPreviewFormat] = useState<"json" | "yaml">("json");
 
   // Data for form selections
   const { data: epData } = useEntryPoints();
@@ -179,156 +178,146 @@ export default function RouteForm({
         form.handleSubmit();
       }}
     >
-      <Stack gap="lg">
-        <Paper withBorder p="xl" radius="lg" shadow="xs">
-          <Stack gap="xl">
-            <Stepper
-              active={active}
-              onStepClick={setActive}
-              allowNextStepsSelect={false}
-              size="sm"
-            >
-              <Stepper.Step
-                label="Basics"
-                description="ID, Type, Rule"
-                icon={<IconRoute size={18} />}
-              >
-                <RoutingConfig form={form} entryPointOptions={epOptions} />
-              </Stepper.Step>
+      <Grid gutter="xl">
+        <Grid.Col span={{ base: 12, lg: 7 }}>
+          <Stack gap="lg">
+            <Paper withBorder p="xl" radius="lg" shadow="xs">
+              <Stack gap="xl">
+                <Stepper
+                  active={active}
+                  onStepClick={setActive}
+                  allowNextStepsSelect={false}
+                  size="sm"
+                >
+                  <Stepper.Step
+                    label="Basics"
+                    description="ID, Type, Rule"
+                    icon={<IconRoute size={18} />}
+                  >
+                    <RoutingConfig form={form} entryPointOptions={epOptions} />
+                  </Stepper.Step>
 
-              <Stepper.Step
-                label="Upstream"
-                description="Targets & Load Balancing"
-                icon={<IconServer size={18} />}
-              >
-                <UpstreamConfig form={form} serviceOptions={serviceOptions} />
-              </Stepper.Step>
+                  <Stepper.Step
+                    label="Upstream"
+                    description="Targets & Load Balancing"
+                    icon={<IconServer size={18} />}
+                  >
+                    <UpstreamConfig form={form} serviceOptions={serviceOptions} />
+                  </Stepper.Step>
 
-              <Stepper.Step
-                label="Security"
-                description="Middlewares & TLS"
-                icon={<IconShieldLock size={18} />}
-              >
-                <PipelineConfig
-                  form={form}
-                  middlewareOptions={mwOptions}
-                  tlsOptOptions={tlsOptOptions}
-                  certOptions={certOptions}
-                />
-              </Stepper.Step>
+                  <Stepper.Step
+                    label="Security"
+                    description="Middlewares & TLS"
+                    icon={<IconShieldLock size={18} />}
+                  >
+                    <PipelineConfig
+                      form={form}
+                      middlewareOptions={mwOptions}
+                      tlsOptOptions={tlsOptOptions}
+                      certOptions={certOptions}
+                    />
+                  </Stepper.Step>
 
-              <Stepper.Completed>
-                <Stack gap="md" mt="xl" align="center" py="xl">
-                  <Paper p="md" radius="100%" bg="green.1" c="green.6">
-                    <IconCheck size={40} />
-                  </Paper>
-                  <Text size="lg" fw={800}>
-                    Configuration Ready
-                  </Text>
-                  <Text size="sm" c="dimmed" ta="center">
-                    Review the JSON preview below.
-                  </Text>
-                  <form.Subscribe
-                    selector={(state) => [
-                      state.values.name,
-                      state.values.rule,
-                      state.values.service_id,
-                    ]}
-                    children={([name, rule, service_id]) => {
-                      const type = form.state.values.type;
-                      const isL4 = type === "tcp" || type === "udp";
-                      const ruleOk = isL4 ? true : !!rule;
-                      return (
-                      <Button
-                        type="submit"
-                        size="md"
-                        radius="md"
-                        loading={mutation.isPending}
-                        disabled={!name || !ruleOk || !service_id}
-                        w={200}
-                      >
-                        Save Route
-                      </Button>
-                      );
-                    }}
-                  />
-                </Stack>
-              </Stepper.Completed>
-            </Stepper>
+                  <Stepper.Step
+                    label="Review"
+                    description="Confirm & Save"
+                    icon={<IconCheck size={18} />}
+                  >
+                    <Stack gap="md" mt="xl" align="center" py="xl">
+                      <Paper p="md" radius="100%" bg="green.1" c="green.6">
+                        <IconCheck size={40} />
+                      </Paper>
+                      <Text size="lg" fw={800}>
+                        Configuration Ready
+                      </Text>
+                      <Text size="sm" c="dimmed" ta="center">
+                        Review the configuration preview on the right and save.
+                      </Text>
+                      <form.Subscribe
+                        selector={(state) => [
+                          state.values.name,
+                          state.values.rule,
+                          state.values.service_id,
+                        ]}
+                        children={([name, rule, service_id]) => {
+                          const type = form.state.values.type;
+                          const isL4 = type === "tcp" || type === "udp";
+                          const ruleOk = isL4 ? true : !!rule;
+                          return (
+                          <Button
+                            type="submit"
+                            size="md"
+                            radius="md"
+                            loading={mutation.isPending}
+                            disabled={!name || !ruleOk || !service_id}
+                            w={200}
+                          >
+                            Save Route
+                          </Button>
+                          );
+                        }}
+                      />
+                    </Stack>
+                  </Stepper.Step>
+                </Stepper>
 
-            <Group justify="flex-end" mt="xl">
-              {active !== 0 && active <= 3 && (
-                <Button variant="subtle" color="gray" onClick={prevStep}>
-                  Back
-                </Button>
-              )}
-              {active < 3 && (
-                <form.Subscribe
-                  selector={(state) => [
-                    state.values.name,
-                    state.values.rule,
-                    state.values.service_id,
-                    state.values.type,
-                  ]}
-                  children={([name, rule, service_id, type]) => {
-                    const isL4 = type === "tcp" || type === "udp";
-                    const ruleOk = isL4 ? true : !!rule;
-                    return (
-                    <Button
-                      onClick={nextStep}
-                      radius="md"
-                      px="xl"
-                      disabled={
-                        (active === 0 && (!name || !ruleOk || !type)) ||
-                        (active === 1 && !service_id)
-                      }
-                    >
-                      Next Step
+                <Group justify="flex-end" mt="xl">
+                  {active !== 0 && (
+                    <Button variant="subtle" color="gray" onClick={prevStep}>
+                      Back
                     </Button>
-                    );
-                  }}
-                />
-              )}
-            </Group>
+                  )}
+                  {active < 3 && (
+                    <form.Subscribe
+                      selector={(state) => [
+                        state.values.name,
+                        state.values.rule,
+                        state.values.service_id,
+                        state.values.type,
+                      ]}
+                      children={([name, rule, service_id, type]) => {
+                        const isL4 = type === "tcp" || type === "udp";
+                        const ruleOk = isL4 ? true : !!rule;
+                        return (
+                        <Button
+                          onClick={nextStep}
+                          radius="md"
+                          px="xl"
+                          disabled={
+                            (active === 0 && (!name || !ruleOk || !type)) ||
+                            (active === 1 && !service_id)
+                          }
+                        >
+                          Next Step
+                        </Button>
+                        );
+                      }}
+                    />
+                  )}
+                </Group>
+              </Stack>
+            </Paper>
           </Stack>
-        </Paper>
+        </Grid.Col>
 
-        <Stack gap="xs">
-          <Group justify="space-between">
-            <Text fw={800} size="xs" c="dimmed">
-              Configuration Preview
-            </Text>
-            <SegmentedControl
-              size="xs"
-              value={previewFormat}
-              onChange={(v) => setPreviewFormat(v as "json" | "yaml")}
-              data={[
-                { value: "json", label: "JSON" },
-                { value: "yaml", label: "YAML" },
-              ]}
-            />
-          </Group>
+        <Grid.Col span={{ base: 12, lg: 5 }}>
           <Paper
             withBorder
-            p="md"
-            bg="var(--mantine-color-black)"
+            p="xl"
             radius="lg"
+            shadow="xs"
+            h="100%"
+            style={{ position: "sticky", top: "1rem" }}
           >
-            <ScrollArea h={220} offsetScrollbars>
-              <form.Subscribe
-                selector={(state) => state.values}
-                children={(values) => (
-                  <Code block bg="transparent" c="indigo.3" style={{ fontSize: 12 }}>
-                    {previewFormat === "yaml"
-                      ? yamlStringify(values, { indent: 2 })
-                      : JSON.stringify(values, null, 2)}
-                  </Code>
-                )}
-              />
-            </ScrollArea>
+            <form.Subscribe
+              selector={(state) => state.values}
+              children={(values) => (
+                <RoutePreview values={values} height="calc(100vh - 400px)" />
+              )}
+            />
           </Paper>
-        </Stack>
-      </Stack>
+        </Grid.Col>
+      </Grid>
     </form>
   );
 }
