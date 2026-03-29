@@ -9,6 +9,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -93,6 +94,23 @@ func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest
 		RoutesCount:   int32(routesCount),
 		ServicesCount: int32(servicesCount),
 	}, nil
+}
+
+func (s *ApiService) ListTraces(_ context.Context, req *gateonv1.ListTracesRequest) (*gateonv1.ListTracesResponse, error) {
+	traces := telemetry.GetTraces(int(req.Limit))
+	res := make([]*gateonv1.Trace, 0, len(traces))
+	for _, t := range traces {
+		res = append(res, &gateonv1.Trace{
+			Id:            t.ID,
+			OperationName: t.OperationName,
+			ServiceName:   t.ServiceName,
+			DurationMs:    t.DurationMs,
+			Timestamp:     t.Timestamp.Format(time.RFC3339),
+			Status:        t.Status,
+			Path:          t.Path,
+		})
+	}
+	return &gateonv1.ListTracesResponse{Traces: res}, nil
 }
 
 func (s *ApiService) ListRoutes(ctx context.Context, _ *gateonv1.ListRoutesRequest) (*gateonv1.ListRoutesResponse, error) {

@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ApiService_GetStatus_FullMethodName          = "/gateon.v1.ApiService/GetStatus"
+	ApiService_ListTraces_FullMethodName         = "/gateon.v1.ApiService/ListTraces"
 	ApiService_ListRoutes_FullMethodName         = "/gateon.v1.ApiService/ListRoutes"
 	ApiService_UpdateRoute_FullMethodName        = "/gateon.v1.ApiService/UpdateRoute"
 	ApiService_DeleteRoute_FullMethodName        = "/gateon.v1.ApiService/DeleteRoute"
@@ -50,6 +51,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ApiServiceClient interface {
 	GetStatus(ctx context.Context, in *GetStatusRequest, opts ...grpc.CallOption) (*GetStatusResponse, error)
+	ListTraces(ctx context.Context, in *ListTracesRequest, opts ...grpc.CallOption) (*ListTracesResponse, error)
 	ListRoutes(ctx context.Context, in *ListRoutesRequest, opts ...grpc.CallOption) (*ListRoutesResponse, error)
 	UpdateRoute(ctx context.Context, in *UpdateRouteRequest, opts ...grpc.CallOption) (*UpdateRouteResponse, error)
 	DeleteRoute(ctx context.Context, in *DeleteRouteRequest, opts ...grpc.CallOption) (*DeleteRouteResponse, error)
@@ -87,6 +89,16 @@ func (c *apiServiceClient) GetStatus(ctx context.Context, in *GetStatusRequest, 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetStatusResponse)
 	err := c.cc.Invoke(ctx, ApiService_GetStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *apiServiceClient) ListTraces(ctx context.Context, in *ListTracesRequest, opts ...grpc.CallOption) (*ListTracesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTracesResponse)
+	err := c.cc.Invoke(ctx, ApiService_ListTraces_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +340,7 @@ func (c *apiServiceClient) DeleteUser(ctx context.Context, in *DeleteUserRequest
 // for forward compatibility.
 type ApiServiceServer interface {
 	GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error)
+	ListTraces(context.Context, *ListTracesRequest) (*ListTracesResponse, error)
 	ListRoutes(context.Context, *ListRoutesRequest) (*ListRoutesResponse, error)
 	UpdateRoute(context.Context, *UpdateRouteRequest) (*UpdateRouteResponse, error)
 	DeleteRoute(context.Context, *DeleteRouteRequest) (*DeleteRouteResponse, error)
@@ -363,6 +376,9 @@ type UnimplementedApiServiceServer struct{}
 
 func (UnimplementedApiServiceServer) GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetStatus not implemented")
+}
+func (UnimplementedApiServiceServer) ListTraces(context.Context, *ListTracesRequest) (*ListTracesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTraces not implemented")
 }
 func (UnimplementedApiServiceServer) ListRoutes(context.Context, *ListRoutesRequest) (*ListRoutesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListRoutes not implemented")
@@ -468,6 +484,24 @@ func _ApiService_GetStatus_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ApiServiceServer).GetStatus(ctx, req.(*GetStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ApiService_ListTraces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTracesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ApiServiceServer).ListTraces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ApiService_ListTraces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ApiServiceServer).ListTraces(ctx, req.(*ListTracesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -896,6 +930,10 @@ var ApiService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetStatus",
 			Handler:    _ApiService_GetStatus_Handler,
+		},
+		{
+			MethodName: "ListTraces",
+			Handler:    _ApiService_ListTraces_Handler,
 		},
 		{
 			MethodName: "ListRoutes",

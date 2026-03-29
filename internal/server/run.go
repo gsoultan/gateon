@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/domain"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -52,9 +53,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	mwService := domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{})
 	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator)
 	canaryService := domain.NewCanaryService(serviceService)
+	aiService := ai.NewAIService(s.GlobalStore, s.RouteStore, s.ServiceStore)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
+	gateonv1.RegisterAIServiceServer(grpcServer, aiService)
 	// Internal API only: gRPC-Web for the dashboard. Allow all origins; auth protects the API.
 	// User routes use the grpcweb middleware with per-route allowed_origins config.
 	internalAPI := grpcweb.WrapServer(grpcServer, grpcweb.WithOriginFunc(func(string) bool { return true }))

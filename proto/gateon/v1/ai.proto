@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
+
+// AIInsight represents a single optimization suggestion or analysis result.
+message AIInsight {
+  string title = 1;
+  string description = 2;
+  string severity = 3; // "info", "warning", "critical"
+  string category = 4; // "security", "performance", "availability"
+  string recommendation = 5;
+}
+
+message AnalyzeConfigRequest {
+  // Optional: focus analysis on a specific area.
+  string focus = 1;
+}
+
+message AnalyzeConfigResponse {
+  repeated AIInsight insights = 1;
+  string summary = 2;
+}
+
+message ChatWithAIRequest {
+  string message = 1;
+  repeated string context_files = 2;
+}
+
+message ChatWithAIResponse {
+  string reply = 1;
+}
+
+service AIService {
+  rpc AnalyzeConfig(AnalyzeConfigRequest) returns (AnalyzeConfigResponse);
+  rpc ChatWithAI(ChatWithAIRequest) returns (ChatWithAIResponse);
+}

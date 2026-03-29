@@ -540,7 +540,7 @@ const file_gateon_v1_route_proto_rawDesc = "" +
 	"\x0eRouteTLSConfig\x12'\n" +
 	"\x0fcertificate_ids\x18\x01 \x03(\tR\x0ecertificateIds\x12\x1b\n" +
 	"\toption_id\x18\x02 \x01(\tR\boptionId\x12!\n" +
-	"\facme_enabled\x18\x03 \x01(\bR\vacmeEnabledB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\facme_enabled\x18\x03 \x01(\bR\vacmeEnabledB5Z3github.com/gsoultan/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_route_proto_rawDescOnce sync.Once

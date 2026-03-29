@@ -30,4 +30,6 @@ export { useRouteStats } from "./useRouteStats";
 export { useRoutes } from "./useRoutes";
 export { useServices } from "./useServices";
 export { useTLSOptions } from "./useTLSOptions";
+export { useTraces } from "./useTraces";
+export type { Trace } from "./useTraces";
 export { useUsers } from "./useUsers";

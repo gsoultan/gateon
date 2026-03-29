@@ -622,7 +622,7 @@ const file_gateon_v1_service_proto_rawDesc = "" +
 	"\x11l4_proxy_protocol\x18\n" +
 	" \x01(\bR\x0fl4ProxyProtocol\x12#\n" +
 	"\rdiscovery_url\x18\v \x01(\tR\fdiscoveryUrl\x12F\n" +
-	"\x11tls_client_config\x18\f \x01(\v2\x1a.gateon.v1.TlsClientConfigR\x0ftlsClientConfigB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\x11tls_client_config\x18\f \x01(\v2\x1a.gateon.v1.TlsClientConfigR\x0ftlsClientConfigB5Z3github.com/gsoultan/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_service_proto_rawDescOnce sync.Once

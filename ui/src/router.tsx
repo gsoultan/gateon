@@ -14,6 +14,7 @@ import { useAuthStore } from "./store/useAuthStore";
 import { apiFetch, restoreSessionFromCookie } from "./hooks/useGateon";
 
 const Dashboard = lazy(() => import("./routes/Dashboard"));
+const AIInsightsPage = lazy(() => import("./routes/AIInsightsPage"));
 const RoutesPage = lazy(() => import("./routes/RoutesPage"));
 const ServicesPage = lazy(() => import("./routes/ServicesPage"));
 const LogsPage = lazy(() => import("./routes/LogsPage"));
@@ -30,6 +31,7 @@ const DocsPage = lazy(() => import("./routes/DocsPage"));
 const LoginPage = lazy(() => import("./routes/LoginPage"));
 const SetupPage = lazy(() => import("./routes/SetupPage"));
 const TopologyPage = lazy(() => import("./routes/TopologyPage"));
+const TracesPage = lazy(() => import("./routes/TracesPage"));
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -96,6 +98,12 @@ const indexRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/",
   component: () => <Dashboard />,
+});
+
+const aiInsightsRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/ai-insights",
+  component: () => <AIInsightsPage />,
 });
 
 const routesRoute = createRoute({
@@ -182,11 +190,18 @@ const topologyRoute = createRoute({
   component: () => <TopologyPage />,
 });
 
+const tracesRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/traces",
+  component: () => <TracesPage />,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
   authenticatedRoute.addChildren([
     indexRoute,
+    aiInsightsRoute,
     routesRoute,
     servicesRoute,
     logsRoute,
@@ -201,6 +216,7 @@ const routeTree = rootRoute.addChildren([
     settingsRoute,
     usersRoute,
     topologyRoute,
+    tracesRoute,
   ]),
 ]);
 

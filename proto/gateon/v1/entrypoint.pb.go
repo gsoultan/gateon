@@ -600,7 +600,7 @@ const file_gateon_v1_entrypoint_proto_rawDesc = "" +
 	"\x05HTTP3\x10\x05\"(\n" +
 	"\bProtocol\x12\r\n" +
 	"\tTCP_PROTO\x10\x00\x12\r\n" +
-	"\tUDP_PROTO\x10\x01B3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\tUDP_PROTO\x10\x01B5Z3github.com/gsoultan/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_entrypoint_proto_rawDescOnce sync.Once

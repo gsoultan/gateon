@@ -31,7 +31,7 @@ func CreateBaseHandler(
 	handler := deps.ProxyHandler
 	_ = grpcWeb // reserved for future gRPC-web routing in base handler
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return middleware.RequestID()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
 
 		// On the management entrypoint, we do NOT serve user-defined proxy routes.
@@ -79,5 +79,5 @@ func CreateBaseHandler(
 		}
 
 		internal.ServeHTTP(w, r)
-	})
+	}))
 }

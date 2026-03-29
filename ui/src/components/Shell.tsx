@@ -45,6 +45,9 @@ import {
   IconDeviceDesktop,
   IconCircuitSwitchClosed,
   IconBook2,
+  IconNetwork,
+  IconTimeline,
+  IconBrain,
 } from "@tabler/icons-react";
 
 export function Shell() {
@@ -64,7 +67,9 @@ export function Shell() {
 
   const coreLinks = [
     { label: "Dashboard", to: "/", icon: IconDashboard },
+    { label: "AI Insights", to: "/ai-insights", icon: IconBrain },
     { label: "Topology", to: "/topology", icon: IconNetwork },
+    { label: "Traces", to: "/traces", icon: IconTimeline },
     { label: "Routes", to: "/routes", icon: IconRoute },
     { label: "Services", to: "/services", icon: IconServer },
     { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
