@@ -775,6 +775,90 @@ func (x *LogConfig) GetPathStatsRetentionDays() int32 {
 	return 0
 }
 
+type TlsClientConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	CertFile      string                 `protobuf:"bytes,2,opt,name=cert_file,json=certFile,proto3" json:"cert_file,omitempty"`
+	KeyFile       string                 `protobuf:"bytes,3,opt,name=key_file,json=keyFile,proto3" json:"key_file,omitempty"`
+	CaFile        string                 `protobuf:"bytes,4,opt,name=ca_file,json=caFile,proto3" json:"ca_file,omitempty"`
+	SkipVerify    bool                   `protobuf:"varint,5,opt,name=skip_verify,json=skipVerify,proto3" json:"skip_verify,omitempty"`
+	ServerName    string                 `protobuf:"bytes,6,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TlsClientConfig) Reset() {
+	*x = TlsClientConfig{}
+	mi := &file_gateon_v1_common_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TlsClientConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TlsClientConfig) ProtoMessage() {}
+
+func (x *TlsClientConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_gateon_v1_common_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TlsClientConfig.ProtoReflect.Descriptor instead.
+func (*TlsClientConfig) Descriptor() ([]byte, []int) {
+	return file_gateon_v1_common_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TlsClientConfig) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *TlsClientConfig) GetCertFile() string {
+	if x != nil {
+		return x.CertFile
+	}
+	return ""
+}
+
+func (x *TlsClientConfig) GetKeyFile() string {
+	if x != nil {
+		return x.KeyFile
+	}
+	return ""
+}
+
+func (x *TlsClientConfig) GetCaFile() string {
+	if x != nil {
+		return x.CaFile
+	}
+	return ""
+}
+
+func (x *TlsClientConfig) GetSkipVerify() bool {
+	if x != nil {
+		return x.SkipVerify
+	}
+	return false
+}
+
+func (x *TlsClientConfig) GetServerName() string {
+	if x != nil {
+		return x.ServerName
+	}
+	return ""
+}
+
 var File_gateon_v1_common_proto protoreflect.FileDescriptor
 
 const file_gateon_v1_common_proto_rawDesc = "" +
@@ -846,7 +930,16 @@ const file_gateon_v1_common_proto_rawDesc = "" +
 	"\x05level\x18\x01 \x01(\tR\x05level\x12 \n" +
 	"\vdevelopment\x18\x02 \x01(\bR\vdevelopment\x12\x16\n" +
 	"\x06format\x18\x03 \x01(\tR\x06format\x129\n" +
-	"\x19path_stats_retention_days\x18\x04 \x01(\x05R\x16pathStatsRetentionDaysB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\x19path_stats_retention_days\x18\x04 \x01(\x05R\x16pathStatsRetentionDays\"\xbe\x01\n" +
+	"\x0fTlsClientConfig\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1b\n" +
+	"\tcert_file\x18\x02 \x01(\tR\bcertFile\x12\x19\n" +
+	"\bkey_file\x18\x03 \x01(\tR\akeyFile\x12\x17\n" +
+	"\aca_file\x18\x04 \x01(\tR\x06caFile\x12\x1f\n" +
+	"\vskip_verify\x18\x05 \x01(\bR\n" +
+	"skipVerify\x12\x1f\n" +
+	"\vserver_name\x18\x06 \x01(\tR\n" +
+	"serverNameB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_common_proto_rawDescOnce sync.Once
@@ -860,7 +953,7 @@ func file_gateon_v1_common_proto_rawDescGZIP() []byte {
 	return file_gateon_v1_common_proto_rawDescData
 }
 
-var file_gateon_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_gateon_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_gateon_v1_common_proto_goTypes = []any{
 	(*Target)(nil),          // 0: gateon.v1.Target
 	(*TlsConfig)(nil),       // 1: gateon.v1.TlsConfig
@@ -872,13 +965,14 @@ var file_gateon_v1_common_proto_goTypes = []any{
 	(*RedisConfig)(nil),     // 7: gateon.v1.RedisConfig
 	(*OtelConfig)(nil),      // 8: gateon.v1.OtelConfig
 	(*LogConfig)(nil),       // 9: gateon.v1.LogConfig
-	nil,                     // 10: gateon.v1.AcmeConfig.DnsConfigEntry
+	(*TlsClientConfig)(nil), // 10: gateon.v1.TlsClientConfig
+	nil,                     // 11: gateon.v1.AcmeConfig.DnsConfigEntry
 }
 var file_gateon_v1_common_proto_depIdxs = []int32{
 	3,  // 0: gateon.v1.TlsConfig.certificates:type_name -> gateon.v1.Certificate
 	4,  // 1: gateon.v1.TlsConfig.client_authorities:type_name -> gateon.v1.ClientAuthority
 	2,  // 2: gateon.v1.TlsConfig.acme:type_name -> gateon.v1.AcmeConfig
-	10, // 3: gateon.v1.AcmeConfig.dns_config:type_name -> gateon.v1.AcmeConfig.DnsConfigEntry
+	11, // 3: gateon.v1.AcmeConfig.dns_config:type_name -> gateon.v1.AcmeConfig.DnsConfigEntry
 	4,  // [4:4] is the sub-list for method output_type
 	4,  // [4:4] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
@@ -897,7 +991,7 @@ func file_gateon_v1_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gateon_v1_common_proto_rawDesc), len(file_gateon_v1_common_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

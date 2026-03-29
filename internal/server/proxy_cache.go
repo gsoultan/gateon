@@ -79,7 +79,7 @@ func (c *ProxyCache) GetOrCreate(rt *gateonv1.Route) http.Handler {
 	transportCfg := transportConfigFromGlobal(c.globalStore.Get(context.Background()))
 	pHandler := proxy.NewProxyHandlerWithOpts(rt, c.serviceStore, nil, transportCfg)
 	c.proxyHandlers[rt.Id] = pHandler
-	h = router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore)
+	h = router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore)
 	c.proxies[rt.Id] = h
 	return h
 }

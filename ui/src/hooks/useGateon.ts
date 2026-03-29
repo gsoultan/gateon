@@ -13,6 +13,8 @@ export { useAggStatsHistory } from "./useAggStatsHistory";
 export type { AggStats } from "./useAggStats";
 
 export { useCertificates } from "./useCertificates";
+export { useCircuitBreakerEvents } from "./useCircuitBreakerEvents";
+export type { CircuitBreakerEvent } from "./useCircuitBreakerEvents";
 export { useEntryPoints } from "./useEntryPoints";
 export { useGateonConfig } from "./useGateonConfig";
 export { useGateonStatus } from "./useGateonStatus";

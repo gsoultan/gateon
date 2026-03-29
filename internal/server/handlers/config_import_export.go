@@ -20,6 +20,44 @@ type configExport struct {
 	Middlewares []*gateonv1.Middleware `json:"middlewares"`
 }
 
+type configDiff struct {
+	Created configExport `json:"created"`
+	Updated configExport `json:"updated"`
+}
+
+func calculateConfigDiff(ctx context.Context, d *Deps, exp *configExport) configDiff {
+	var diff configDiff
+	for _, rt := range exp.Routes {
+		if _, ok := d.RouteService.GetRoute(ctx, rt.Id); ok {
+			diff.Updated.Routes = append(diff.Updated.Routes, rt)
+		} else {
+			diff.Created.Routes = append(diff.Created.Routes, rt)
+		}
+	}
+	for _, svc := range exp.Services {
+		if _, ok := d.ServiceService.GetService(ctx, svc.Id); ok {
+			diff.Updated.Services = append(diff.Updated.Services, svc)
+		} else {
+			diff.Created.Services = append(diff.Created.Services, svc)
+		}
+	}
+	for _, ep := range exp.EntryPoints {
+		if _, ok := d.EpService.GetEntryPoint(ctx, ep.Id); ok {
+			diff.Updated.EntryPoints = append(diff.Updated.EntryPoints, ep)
+		} else {
+			diff.Created.EntryPoints = append(diff.Created.EntryPoints, ep)
+		}
+	}
+	for _, mw := range exp.Middlewares {
+		if _, ok := d.MwService.GetMiddleware(ctx, mw.Id); ok {
+			diff.Updated.Middlewares = append(diff.Updated.Middlewares, mw)
+		} else {
+			diff.Created.Middlewares = append(diff.Created.Middlewares, mw)
+		}
+	}
+	return diff
+}
+
 func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/config/export", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceConfig) {
@@ -61,6 +99,15 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 			return
 		}
+
+		dryRun := r.URL.Query().Get("dry_run") == "true"
+		if dryRun {
+			diff := calculateConfigDiff(r.Context(), d, &exp)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "dry_run": true, "diff": diff})
+			return
+		}
+
 		errs := runConfigImport(r.Context(), d, &exp)
 		writeImportResponse(w, &exp, errs)
 	})

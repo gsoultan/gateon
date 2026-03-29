@@ -223,7 +223,11 @@ export default function MiddlewaresPage() {
                         truncate="end"
                         style={{ maxWidth: 300 }}
                       >
-                        {JSON.stringify(mw.config)}
+                        {mw.type === "wasm"
+                          ? mw.wasm_blob
+                            ? `WASM Module (${Math.round((mw.wasm_blob.length * 0.75) / 1024)} KB)`
+                            : "No module uploaded"
+                          : JSON.stringify(mw.config)}
                       </Text>
                     </Table.Td>
                     <Table.Td>
@@ -310,7 +314,9 @@ export default function MiddlewaresPage() {
               { label: "Cloudflare Turnstile", value: "turnstile" },
               { label: "GeoIP", value: "geoip" },
               { label: "HMAC Signature", value: "hmac" },
+              { label: "WebAssembly (WASM)", value: "wasm" },
               { label: "Response Cache", value: "cache" },
+              { label: "Body Transformation", value: "transform" },
               { label: "gRPC-Web", value: "grpcweb" },
               { label: "Custom Errors", value: "errors" },
               { label: "Retry", value: "retry" },
@@ -342,6 +348,10 @@ export default function MiddlewaresPage() {
                   config={editingMW?.config || {}}
                   onChange={(config) =>
                     editingMW && setEditingMW({ ...editingMW, config })
+                  }
+                  wasmBlob={editingMW?.wasm_blob}
+                  onWasmBlobChange={(blob) =>
+                    editingMW && setEditingMW({ ...editingMW, wasm_blob: blob })
                   }
                 />
               </Card>

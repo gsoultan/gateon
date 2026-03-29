@@ -26,6 +26,11 @@ func (s *RouteServiceImpl) ListPaginated(ctx context.Context, page, pageSize int
 	return s.store.ListPaginated(ctx, page, pageSize, search, filter)
 }
 
+// GetRoute returns a single route by ID.
+func (s *RouteServiceImpl) GetRoute(ctx context.Context, id string) (*gateonv1.Route, bool) {
+	return s.store.Get(ctx, id)
+}
+
 // SaveRoute validates, assigns ID if needed, persists, and invalidates proxy.
 func (s *RouteServiceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 	if rt.ServiceId == "" {

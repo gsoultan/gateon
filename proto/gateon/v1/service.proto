@@ -35,6 +35,18 @@ message DeleteServiceResponse {
   bool success = 1;
 }
 
+message StartCanaryRequest {
+  string service_id = 1;
+  repeated Target target_weights = 2;
+  int32 duration_minutes = 3;
+  int32 steps = 4;
+}
+
+message StartCanaryResponse {
+  bool success = 1;
+  string task_id = 2;
+}
+
 message Service {
   string id = 1;
   string name = 2;
@@ -46,4 +58,6 @@ message Service {
   int32 l4_health_check_timeout_ms = 8;
   int32 l4_udp_session_timeout_s = 9;
   bool l4_proxy_protocol = 10;  // Send HAProxy PROXY protocol v1 header (TCP only). Enables backend to see original client IP for SPF etc.
+  string discovery_url = 11; // e.g. "dns:service.local", "consul:service-name"
+  TlsClientConfig tls_client_config = 12;
 }

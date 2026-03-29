@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/discovery"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -134,6 +136,13 @@ func (lb *RoundRobinLB) SetAlive(url string, alive bool) {
 	defer lb.mu.Unlock()
 	for _, t := range lb.targets {
 		if t.url == url {
+			if t.alive != alive {
+				state := telemetry.CircuitClosed
+				if !alive {
+					state = telemetry.CircuitOpen
+				}
+				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
+			}
 			t.alive = alive
 			return
 		}
@@ -207,6 +216,13 @@ func (lb *LeastConnLB) SetAlive(url string, alive bool) {
 	defer lb.mu.Unlock()
 	for _, t := range lb.targets {
 		if t.url == url {
+			if t.alive != alive {
+				state := telemetry.CircuitClosed
+				if !alive {
+					state = telemetry.CircuitOpen
+				}
+				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
+			}
 			t.alive = alive
 			return
 		}
@@ -294,6 +310,13 @@ func (lb *WeightedRoundRobinLB) SetAlive(url string, alive bool) {
 	defer lb.mu.Unlock()
 	for _, t := range lb.targets {
 		if t.url == url {
+			if t.alive != alive {
+				state := telemetry.CircuitClosed
+				if !alive {
+					state = telemetry.CircuitOpen
+				}
+				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
+			}
 			t.alive = alive
 			return
 		}
@@ -340,6 +363,8 @@ type ProxyHandler struct {
 	lb              LoadBalancer
 	routeType       string
 	healthCheckPath string
+	discoveryURL    string
+	stopDiscovery   chan struct{}
 	stopHealthCheck chan struct{}
 	closeOnce       sync.Once
 	transport       http.RoundTripper
@@ -377,7 +402,9 @@ func (h *ProxyHandler) runHealthCheck(urls []string) {
 	for {
 		select {
 		case <-ticker.C:
-			for _, u := range urls {
+			currentStats := h.lb.GetStats()
+			for _, s := range currentStats {
+				u := s.URL
 				uForHealth := u
 				if strings.HasPrefix(u, "h2c://") {
 					uForHealth = "http://" + strings.TrimPrefix(u, "h2c://")
@@ -398,8 +425,33 @@ func (h *ProxyHandler) runHealthCheck(urls []string) {
 	}
 }
 
+func (h *ProxyHandler) runDiscovery() {
+	if h.discoveryURL == "" {
+		return
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	resolver := discovery.NewResolver()
+
+	for {
+		select {
+		case <-ticker.C:
+			targets, err := resolver.Resolve(context.Background(), h.discoveryURL)
+			if err == nil && len(targets) > 0 {
+				h.lb.UpdateWeightedTargets(targets)
+			}
+		case <-h.stopDiscovery:
+			return
+		}
+	}
+}
+
 func (h *ProxyHandler) Close() {
 	h.closeOnce.Do(func() {
+		if h.stopDiscovery != nil {
+			close(h.stopDiscovery)
+		}
 		close(h.stopHealthCheck)
 		if c, ok := h.transport.(interface{ Close() error }); ok {
 			_ = c.Close()

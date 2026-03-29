@@ -11,11 +11,22 @@ import (
 var wafCache sync.Map
 
 func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
-	key := wafConfigKey(cfg)
+	globalDirectives := ""
+	if f.globalStore != nil {
+		global := f.globalStore.Get(nil)
+		if global != nil && global.Waf != nil && global.Waf.Enabled {
+			globalDirectives = global.Waf.CustomDirectives
+		}
+	}
+
+	key := wafConfigKey(cfg) + ":" + globalDirectives
 	if cached, ok := wafCache.Load(key); ok {
 		return cached.(Middleware), nil
 	}
-	mw, err := WAF(parseWAFConfig(cfg))
+	wafCfg := parseWAFConfig(cfg)
+	wafCfg.GlobalDirectives = globalDirectives
+
+	mw, err := WAF(wafCfg)
 	if err != nil {
 		return nil, err
 	}

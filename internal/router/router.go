@@ -7,11 +7,12 @@ import (
 	"regexp"
 	"strings"
 
+	"sync"
+
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"sync"
 )
 
 var (
@@ -250,9 +251,9 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 }
 
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
-func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore) http.Handler {
+func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore) http.Handler {
 	var chain []middleware.Middleware
-	mwFactory := middleware.NewFactory(redisClient)
+	mwFactory := middleware.NewFactory(redisClient, globalStore)
 
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	chain = append(chain, middleware.Recovery(), middleware.AccessLog(rt.Id), middleware.Metrics(rt.Id))

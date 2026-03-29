@@ -12,6 +12,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/gsoultan/gateon/internal/config"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -22,10 +23,12 @@ type ProxyHandlerBuilder struct {
 	lbFactory       LoadBalancerFactory
 	targets         []*gateonv1.Target
 	lb              LoadBalancer
+	discoveryURL    string
 	healthCheckPath string
 	routeType       string
 	transport       http.RoundTripper
 	transportConfig *TransportConfig
+	tlsClientConfig *gateonv1.TlsClientConfig
 }
 
 // NewProxyHandlerBuilder creates a builder for the given route.
@@ -61,7 +64,9 @@ func (b *ProxyHandlerBuilder) resolveService() {
 		return
 	}
 	b.targets = svc.WeightedTargets
+	b.discoveryURL = svc.DiscoveryUrl
 	b.healthCheckPath = svc.HealthCheckPath
+	b.tlsClientConfig = svc.TlsClientConfig
 	policy := svc.LoadBalancerPolicy
 	if policy == "" {
 		policy = "round_robin"
@@ -85,10 +90,12 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 			useH3 = true
 		}
 	}
+	tlsCfg, _ := gtls.CreateTLSClientConfig(b.tlsClientConfig)
+
 	switch {
 	case useH3:
 		b.transport = &http3.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: tlsCfg,
 		}
 	case useH2C:
 		b.transport = &http2.Transport{
@@ -102,7 +109,7 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 		}
 	case useH2:
 		b.transport = &http2.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: tlsCfg,
 			ReadIdleTimeout: 30 * time.Second,
 			PingTimeout:     15 * time.Second,
 		}
@@ -116,7 +123,7 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 		t.MaxIdleConnsPerHost = tc.maxIdleConnsPerHost()
 		t.IdleConnTimeout = tc.idleConnTimeout()
 		t.ForceAttemptHTTP2 = true
-		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		t.TLSClientConfig = tlsCfg
 		b.transport = t
 	}
 }
@@ -133,10 +140,15 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		lb:              b.lb,
 		routeType:       b.routeType,
 		healthCheckPath: b.healthCheckPath,
+		discoveryURL:    b.discoveryURL,
+		stopDiscovery:   make(chan struct{}),
 		stopHealthCheck: make(chan struct{}),
 		transport:       b.transport,
 	}
-	if h.healthCheckPath != "" && len(b.targets) > 0 {
+	if h.discoveryURL != "" {
+		go h.runDiscovery()
+	}
+	if h.healthCheckPath != "" && (len(b.targets) > 0 || b.discoveryURL != "") {
 		urls := make([]string, len(b.targets))
 		for i, t := range b.targets {
 			urls[i] = t.Url

@@ -445,6 +445,7 @@ type RouteTLSConfig struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	CertificateIds []string               `protobuf:"bytes,1,rep,name=certificate_ids,json=certificateIds,proto3" json:"certificate_ids,omitempty"`
 	OptionId       string                 `protobuf:"bytes,2,opt,name=option_id,json=optionId,proto3" json:"option_id,omitempty"`
+	AcmeEnabled    bool                   `protobuf:"varint,3,opt,name=acme_enabled,json=acmeEnabled,proto3" json:"acme_enabled,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -493,6 +494,13 @@ func (x *RouteTLSConfig) GetOptionId() string {
 	return ""
 }
 
+func (x *RouteTLSConfig) GetAcmeEnabled() bool {
+	if x != nil {
+		return x.AcmeEnabled
+	}
+	return false
+}
+
 var File_gateon_v1_route_proto protoreflect.FileDescriptor
 
 const file_gateon_v1_route_proto_rawDesc = "" +
@@ -528,10 +536,11 @@ const file_gateon_v1_route_proto_rawDesc = "" +
 	"service_id\x18\b \x01(\tR\tserviceId\x12+\n" +
 	"\x03tls\x18\t \x01(\v2\x19.gateon.v1.RouteTLSConfigR\x03tls\x12\x1a\n" +
 	"\bdisabled\x18\n" +
-	" \x01(\bR\bdisabled\"V\n" +
+	" \x01(\bR\bdisabled\"y\n" +
 	"\x0eRouteTLSConfig\x12'\n" +
 	"\x0fcertificate_ids\x18\x01 \x03(\tR\x0ecertificateIds\x12\x1b\n" +
-	"\toption_id\x18\x02 \x01(\tR\boptionIdB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\toption_id\x18\x02 \x01(\tR\boptionId\x12!\n" +
+	"\facme_enabled\x18\x03 \x01(\bR\vacmeEnabledB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_route_proto_rawDescOnce sync.Once

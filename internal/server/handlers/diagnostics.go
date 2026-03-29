@@ -67,6 +67,10 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(telemetry.GetLimitStats())
 	})
+	mux.HandleFunc("GET /v1/diag/circuit-breaker/events", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(telemetry.GetCircuitBreakerEvents())
+	})
 	mux.HandleFunc("GET /v1/diag/agg-stats", func(w http.ResponseWriter, r *http.Request) {
 		if d.RouteStatsProvider == nil {
 			w.Header().Set("Content-Type", "application/json")

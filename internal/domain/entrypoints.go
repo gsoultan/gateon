@@ -25,6 +25,10 @@ func (s *EntryPointServiceImpl) ListPaginated(ctx context.Context, page, pageSiz
 	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
+func (s *EntryPointServiceImpl) GetEntryPoint(ctx context.Context, id string) (*gateonv1.EntryPoint, bool) {
+	return s.store.Get(ctx, id)
+}
+
 // SaveEntryPoint validates, assigns ID if needed, infers type, and persists.
 func (s *EntryPointServiceImpl) SaveEntryPoint(ctx context.Context, ep *gateonv1.EntryPoint) error {
 	if ep.Address == "" {

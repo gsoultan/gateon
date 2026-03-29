@@ -206,15 +206,29 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 ## Roadmap
 
 ### Implemented
+- [WAF (Web Application Firewall)](doc/waf.md) – OWASP CRS protection.
+- [WASM Middleware](doc/wasm.md) – Extensible WASM-based traffic manipulation.
 - [Redis-backed Rate Limiting](doc/rate-limiting.md) – Distributed rate limiting with Redis (see Features).
+- **Comprehensive Auth** – JWT, JWKS, PASETO, Forward Auth, and API Keys.
+- **Security Integrations** – Cloudflare Turnstile, MaxMind GeoIP, HMAC Signatures.
+- **Traffic Management** – Caching (Redis/Local), Compression (Gzip/Brotli), Resilience (Retry, Circuit Breaker).
+- **High Availability (HA)** – Active-Passive failover (VRRP-like) with VIP management.
+- **Anomaly Detection** – AI-powered traffic pattern analysis via Prometheus.
+- **eBPF Offloading** – Kernel-level XDP rate limiting and TC filtering.
+- **Canary Deployment Wizard** – Automated gradual traffic shifting for services.
+- **FIPS 140-2 Compliance** – BoringCrypto support for regulated environments.
+- **Kubernetes Gateway API Controller** – Native support for `Gateway` and `HTTPRoute` resources.
+- **Mutual TLS (mTLS)** – End-to-end security with client certificates for backend targets.
+- **Config Sync & Discovery** – Multi-cluster synchronization (Redis) and mDNS/Eureka support.
+- **External Secrets Management** – Resolution of `$vault:` and `$env:` variables at runtime.
+- **Observability & AI** – Topology map, AI-powered log assistant, and `gateon top` CLI TUI.
 - **AI Optimization** – Best practices for guidelines, scenarios, and plans for AI agents ([docs/ai-optimization.md](docs/ai-optimization.md)).
 - **Automatic TLS (Let's Encrypt)** – Backend support via ACME/autocert in `internal/tls`; configurable via TLS config (Email + Domains).
 - **Metrics export (Prometheus/OpenTelemetry)** – Prometheus `/metrics` and OpenTelemetry tracing (see Features).
-- **Dashboard (Live logs)** – Live log streaming via WebSockets; further enhancements below.
+- **Dashboard (Live logs)** – Live log streaming via WebSockets.
 
-### Next (see [.junie/Strategic UI_UX Plan for Enterprise-Grade Gateon.md](.junie/Strategic%20UI_UX%20Plan%20for%20Enterprise-Grade%20Gateon.md))
-- Sidebar navigation and Shell layout (Dashboard, Routes, Certificates, Logs, Settings).
-- Global health bar and service overview cards.
-- Enterprise route management: search/filter, paginated table, wizard-based route creation, config preview.
-- Observability: sparklines per route, log filtering, Circuit Breaker dashboard.
-- Dark/light mode, lazy loading, RBAC placeholder.
+### Next (Enterprise & Scalability)
+- **Active-Active HA**: Gossip-based state synchronization for distributed clusters.
+- **Service Mesh Integration**: Istio/Linkerd sidecar support.
+- **Advanced WAF Rule Builder**: Visual UI for creating custom Coraza rules.
+- **Global Load Balancing (GSLB)**: DNS-based traffic steering across geographical regions.

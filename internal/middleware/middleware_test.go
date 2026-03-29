@@ -441,3 +441,31 @@ func hmacSHA256Hex(secret, body []byte) string {
 	h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+func TestWasm_EmptyBlob(t *testing.T) {
+	_, err := Wasm(t.Context(), nil)
+	if err == nil {
+		t.Error("expected error for empty wasm blob")
+	}
+}
+
+func TestWasm_MinimalValid(t *testing.T) {
+	// Minimal WASM module header: \x00asm\x01\x00\x00\x00
+	minimalWasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	mw, err := Wasm(t.Context(), minimalWasm)
+	if err != nil {
+		t.Fatalf("failed to create wasm middleware: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+}

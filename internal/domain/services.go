@@ -26,6 +26,10 @@ func (s *ServiceServiceImpl) ListPaginated(ctx context.Context, page, pageSize i
 	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
+func (s *ServiceServiceImpl) GetService(ctx context.Context, id string) (*gateonv1.Service, bool) {
+	return s.store.Get(ctx, id)
+}
+
 // SaveService validates, assigns ID if needed, persists, and invalidates affected route proxies.
 func (s *ServiceServiceImpl) SaveService(ctx context.Context, svc *gateonv1.Service) error {
 	if svc.Id == "" {

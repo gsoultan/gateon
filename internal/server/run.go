@@ -36,14 +36,22 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Auth:        s.AuthManager,
 	})
 
+	var wg syncutil.WaitGroup
 	l4Resolver := l4.NewResolver(s.RouteStore, s.ServiceStore)
 	proxyInvalidator := NewServerProxyInvalidator(s, l4Resolver, s.RouteStore)
+	if s.RedisClient != nil {
+		proxyInvalidator = NewDistributedProxyInvalidator(proxyInvalidator, s.RedisClient)
+		wg.Go(func() {
+			StartInvalidationListener(ctx, proxyInvalidator, s.RedisClient)
+		})
+	}
 	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
 	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)
 	epService := domain.NewEntryPointService(s.EpStore)
-	mwFactory := middleware.NewFactory(s.RedisClient)
+	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore)
 	mwService := domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{})
 	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator)
+	canaryService := domain.NewCanaryService(serviceService)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
@@ -57,6 +65,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		EpService:          epService,
 		MwService:          mwService,
 		TLSOptService:      tlsOptService,
+		CanaryService:      canaryService,
 		AuthManager:        s.AuthManager,
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
@@ -76,7 +85,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		LoginLimiter: loginLimiter,
 	}, internalAPI, mux)
 	c := BuildCORS()
-	tlsManager := CreateTLSManager(s.GlobalStore)
+	tlsManager := CreateTLSManager(s)
 	tlsConfig, err := tlsManager.GetTLSConfig()
 	if err != nil {
 		logger.L.Fatal().Err(err).Msg("failed to initialize tls")
@@ -88,7 +97,6 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
-	var wg syncutil.WaitGroup
 	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, tlsManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver))
 	logger.L.Info().Str("port", s.Port).Msg("Gateon API Gateway started")
 

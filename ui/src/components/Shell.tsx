@@ -64,6 +64,7 @@ export function Shell() {
 
   const coreLinks = [
     { label: "Dashboard", to: "/", icon: IconDashboard },
+    { label: "Topology", to: "/topology", icon: IconNetwork },
     { label: "Routes", to: "/routes", icon: IconRoute },
     { label: "Services", to: "/services", icon: IconServer },
     { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },

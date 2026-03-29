@@ -20,8 +20,9 @@ import {
   IconAlertTriangle,
   IconCircleCheck,
   IconLoader2,
+  IconHistory,
 } from "@tabler/icons-react";
-import { useRoutes, useAggStats } from "../hooks/useGateon";
+import { useRoutes, useAggStats, useCircuitBreakerEvents } from "../hooks/useGateon";
 import { CircuitRow, type CircuitState } from "../components/CircuitRow";
 
 const PAGE_SIZE = 15;
@@ -33,6 +34,7 @@ export default function CircuitBreakerPage() {
     page_size: PAGE_SIZE,
   });
   const { data: aggStats } = useAggStats();
+  const { data: events } = useCircuitBreakerEvents();
   const [stateFilter, setStateFilter] = useState<CircuitState>("all");
 
   const routes = data?.routes ?? [];
@@ -213,6 +215,57 @@ export default function CircuitBreakerPage() {
               </Box>
             )}
           </>
+        )}
+      </Card>
+
+      <Title order={3} fw={800} mt="xl" style={{ letterSpacing: -0.5 }}>
+        <Group gap="xs">
+          <IconHistory size={24} />
+          Event Timeline
+        </Group>
+      </Title>
+
+      <Card shadow="xs" padding="lg" radius="lg" withBorder>
+        {!events || events.length === 0 ? (
+          <Center py={40}>
+            <Text c="dimmed">No circuit breaker events recorded yet.</Text>
+          </Center>
+        ) : (
+          <Table verticalSpacing="sm">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Time</Table.Th>
+                <Table.Th>Target</Table.Th>
+                <Table.Th>New State</Table.Th>
+                <Table.Th>Reason</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {events.slice().reverse().map((e, i) => (
+                <Table.Tr key={i}>
+                  <Table.Td>
+                    <Text size="xs" c="dimmed">
+                      {new Date(e.timestamp).toLocaleString()}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" fw={500}>{e.target}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge
+                      size="sm"
+                      color={e.state === "CLOSED" ? "green" : e.state === "OPEN" ? "red" : "yellow"}
+                    >
+                      {e.state}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="dimmed">{e.reason}</Text>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
         )}
       </Card>
     </Stack>

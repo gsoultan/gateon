@@ -325,6 +325,126 @@ func (x *DeleteServiceResponse) GetSuccess() bool {
 	return false
 }
 
+type StartCanaryRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ServiceId       string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
+	TargetWeights   []*Target              `protobuf:"bytes,2,rep,name=target_weights,json=targetWeights,proto3" json:"target_weights,omitempty"`
+	DurationMinutes int32                  `protobuf:"varint,3,opt,name=duration_minutes,json=durationMinutes,proto3" json:"duration_minutes,omitempty"`
+	Steps           int32                  `protobuf:"varint,4,opt,name=steps,proto3" json:"steps,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *StartCanaryRequest) Reset() {
+	*x = StartCanaryRequest{}
+	mi := &file_gateon_v1_service_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartCanaryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartCanaryRequest) ProtoMessage() {}
+
+func (x *StartCanaryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gateon_v1_service_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartCanaryRequest.ProtoReflect.Descriptor instead.
+func (*StartCanaryRequest) Descriptor() ([]byte, []int) {
+	return file_gateon_v1_service_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *StartCanaryRequest) GetServiceId() string {
+	if x != nil {
+		return x.ServiceId
+	}
+	return ""
+}
+
+func (x *StartCanaryRequest) GetTargetWeights() []*Target {
+	if x != nil {
+		return x.TargetWeights
+	}
+	return nil
+}
+
+func (x *StartCanaryRequest) GetDurationMinutes() int32 {
+	if x != nil {
+		return x.DurationMinutes
+	}
+	return 0
+}
+
+func (x *StartCanaryRequest) GetSteps() int32 {
+	if x != nil {
+		return x.Steps
+	}
+	return 0
+}
+
+type StartCanaryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartCanaryResponse) Reset() {
+	*x = StartCanaryResponse{}
+	mi := &file_gateon_v1_service_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartCanaryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartCanaryResponse) ProtoMessage() {}
+
+func (x *StartCanaryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gateon_v1_service_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartCanaryResponse.ProtoReflect.Descriptor instead.
+func (*StartCanaryResponse) Descriptor() ([]byte, []int) {
+	return file_gateon_v1_service_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *StartCanaryResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *StartCanaryResponse) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
 type Service struct {
 	state                   protoimpl.MessageState `protogen:"open.v1"`
 	Id                      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -337,13 +457,15 @@ type Service struct {
 	L4HealthCheckTimeoutMs  int32                  `protobuf:"varint,8,opt,name=l4_health_check_timeout_ms,json=l4HealthCheckTimeoutMs,proto3" json:"l4_health_check_timeout_ms,omitempty"`
 	L4UdpSessionTimeoutS    int32                  `protobuf:"varint,9,opt,name=l4_udp_session_timeout_s,json=l4UdpSessionTimeoutS,proto3" json:"l4_udp_session_timeout_s,omitempty"`
 	L4ProxyProtocol         bool                   `protobuf:"varint,10,opt,name=l4_proxy_protocol,json=l4ProxyProtocol,proto3" json:"l4_proxy_protocol,omitempty"` // Send HAProxy PROXY protocol v1 header (TCP only). Enables backend to see original client IP for SPF etc.
+	DiscoveryUrl            string                 `protobuf:"bytes,11,opt,name=discovery_url,json=discoveryUrl,proto3" json:"discovery_url,omitempty"`             // e.g. "dns:service.local", "consul:service-name"
+	TlsClientConfig         *TlsClientConfig       `protobuf:"bytes,12,opt,name=tls_client_config,json=tlsClientConfig,proto3" json:"tls_client_config,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
 
 func (x *Service) Reset() {
 	*x = Service{}
-	mi := &file_gateon_v1_service_proto_msgTypes[6]
+	mi := &file_gateon_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -355,7 +477,7 @@ func (x *Service) String() string {
 func (*Service) ProtoMessage() {}
 
 func (x *Service) ProtoReflect() protoreflect.Message {
-	mi := &file_gateon_v1_service_proto_msgTypes[6]
+	mi := &file_gateon_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -368,7 +490,7 @@ func (x *Service) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Service.ProtoReflect.Descriptor instead.
 func (*Service) Descriptor() ([]byte, []int) {
-	return file_gateon_v1_service_proto_rawDescGZIP(), []int{6}
+	return file_gateon_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Service) GetId() string {
@@ -441,6 +563,20 @@ func (x *Service) GetL4ProxyProtocol() bool {
 	return false
 }
 
+func (x *Service) GetDiscoveryUrl() string {
+	if x != nil {
+		return x.DiscoveryUrl
+	}
+	return ""
+}
+
+func (x *Service) GetTlsClientConfig() *TlsClientConfig {
+	if x != nil {
+		return x.TlsClientConfig
+	}
+	return nil
+}
+
 var File_gateon_v1_service_proto protoreflect.FileDescriptor
 
 const file_gateon_v1_service_proto_rawDesc = "" +
@@ -463,7 +599,16 @@ const file_gateon_v1_service_proto_rawDesc = "" +
 	"\x14DeleteServiceRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"1\n" +
 	"\x15DeleteServiceResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xca\x03\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xae\x01\n" +
+	"\x12StartCanaryRequest\x12\x1d\n" +
+	"\n" +
+	"service_id\x18\x01 \x01(\tR\tserviceId\x128\n" +
+	"\x0etarget_weights\x18\x02 \x03(\v2\x11.gateon.v1.TargetR\rtargetWeights\x12)\n" +
+	"\x10duration_minutes\x18\x03 \x01(\x05R\x0fdurationMinutes\x12\x14\n" +
+	"\x05steps\x18\x04 \x01(\x05R\x05steps\"H\n" +
+	"\x13StartCanaryResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"\xb7\x04\n" +
 	"\aService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12<\n" +
@@ -475,7 +620,9 @@ const file_gateon_v1_service_proto_rawDesc = "" +
 	"\x1al4_health_check_timeout_ms\x18\b \x01(\x05R\x16l4HealthCheckTimeoutMs\x126\n" +
 	"\x18l4_udp_session_timeout_s\x18\t \x01(\x05R\x14l4UdpSessionTimeoutS\x12*\n" +
 	"\x11l4_proxy_protocol\x18\n" +
-	" \x01(\bR\x0fl4ProxyProtocolB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	" \x01(\bR\x0fl4ProxyProtocol\x12#\n" +
+	"\rdiscovery_url\x18\v \x01(\tR\fdiscoveryUrl\x12F\n" +
+	"\x11tls_client_config\x18\f \x01(\v2\x1a.gateon.v1.TlsClientConfigR\x0ftlsClientConfigB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_service_proto_rawDescOnce sync.Once
@@ -489,7 +636,7 @@ func file_gateon_v1_service_proto_rawDescGZIP() []byte {
 	return file_gateon_v1_service_proto_rawDescData
 }
 
-var file_gateon_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_gateon_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_gateon_v1_service_proto_goTypes = []any{
 	(*ListServicesRequest)(nil),   // 0: gateon.v1.ListServicesRequest
 	(*ListServicesResponse)(nil),  // 1: gateon.v1.ListServicesResponse
@@ -497,18 +644,23 @@ var file_gateon_v1_service_proto_goTypes = []any{
 	(*UpdateServiceResponse)(nil), // 3: gateon.v1.UpdateServiceResponse
 	(*DeleteServiceRequest)(nil),  // 4: gateon.v1.DeleteServiceRequest
 	(*DeleteServiceResponse)(nil), // 5: gateon.v1.DeleteServiceResponse
-	(*Service)(nil),               // 6: gateon.v1.Service
-	(*Target)(nil),                // 7: gateon.v1.Target
+	(*StartCanaryRequest)(nil),    // 6: gateon.v1.StartCanaryRequest
+	(*StartCanaryResponse)(nil),   // 7: gateon.v1.StartCanaryResponse
+	(*Service)(nil),               // 8: gateon.v1.Service
+	(*Target)(nil),                // 9: gateon.v1.Target
+	(*TlsClientConfig)(nil),       // 10: gateon.v1.TlsClientConfig
 }
 var file_gateon_v1_service_proto_depIdxs = []int32{
-	6, // 0: gateon.v1.ListServicesResponse.services:type_name -> gateon.v1.Service
-	6, // 1: gateon.v1.UpdateServiceRequest.service:type_name -> gateon.v1.Service
-	7, // 2: gateon.v1.Service.weighted_targets:type_name -> gateon.v1.Target
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	8,  // 0: gateon.v1.ListServicesResponse.services:type_name -> gateon.v1.Service
+	8,  // 1: gateon.v1.UpdateServiceRequest.service:type_name -> gateon.v1.Service
+	9,  // 2: gateon.v1.StartCanaryRequest.target_weights:type_name -> gateon.v1.Target
+	9,  // 3: gateon.v1.Service.weighted_targets:type_name -> gateon.v1.Target
+	10, // 4: gateon.v1.Service.tls_client_config:type_name -> gateon.v1.TlsClientConfig
+	5,  // [5:5] is the sub-list for method output_type
+	5,  // [5:5] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_gateon_v1_service_proto_init() }
@@ -523,7 +675,7 @@ func file_gateon_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gateon_v1_service_proto_rawDesc), len(file_gateon_v1_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
