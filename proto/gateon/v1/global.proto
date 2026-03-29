@@ -23,6 +23,40 @@ message GlobalConfig {
   LogConfig log = 4;
   AuthConfig auth = 5;
   TransportConfig transport = 6;
+  WafConfig waf = 7;
+  HaConfig ha = 8;
+  AnomalyDetectionConfig anomaly_detection = 9;
+  EbpfConfig ebpf = 10;
+}
+
+message WafConfig {
+  bool enabled = 1;
+  bool use_crs = 2;
+  int32 paranoia_level = 3;
+  string custom_directives = 4;
+}
+
+message HaConfig {
+  bool enabled = 1;
+  string interface = 2;
+  int32 virtual_router_id = 3;
+  int32 priority = 4;
+  repeated string virtual_ips = 5;
+  int32 advert_int = 6;
+  string auth_pass = 7;
+}
+
+message AnomalyDetectionConfig {
+  bool enabled = 1;
+  string prometheus_url = 2;
+  int32 check_interval_seconds = 3;
+  double sensitivity = 4;
+}
+
+message EbpfConfig {
+  bool enabled = 1;
+  bool xdp_rate_limit = 2;
+  bool tc_filtering = 3;
 }
 
 message AuthConfig {

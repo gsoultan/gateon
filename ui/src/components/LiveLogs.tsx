@@ -12,6 +12,7 @@ import {
   ScrollArea,
   Badge,
   Box,
+  Button,
 } from "@mantine/core";
 import {
   IconPlayerPause,
@@ -19,9 +20,12 @@ import {
   IconTrash,
   IconSearch,
   IconTerminal,
+  IconRobot,
 } from "@tabler/icons-react";
 import { useAuthStore } from "../store/useAuthStore";
 import { useApiConfigStore } from "../store/useApiConfigStore";
+import { useDisclosure } from "@mantine/hooks";
+import { LogAIAnalyst } from "./LogAIAnalyst";
 
 interface LiveLogsProps {
   height?: number;
@@ -36,6 +40,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const [statusFilter, setStatusFilter] = useState("");
   const [clientIpFilter, setClientIpFilter] = useState("");
   const apiUrl = useApiConfigStore((s) => s.apiUrl);
+  const [aiOpened, { open: openAI, close: closeAI }] = useDisclosure(false);
 
   useEffect(() => {
     const base = apiUrl.replace(/\/$/, "");
@@ -218,6 +223,16 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
               w={110}
               title="Filter by client IP (ip, remote_addr)"
             />
+            <Button
+              size="compact-xs"
+              variant="light"
+              leftSection={<IconRobot size={14} />}
+              onClick={openAI}
+              disabled={logs.length === 0}
+              mt={2}
+            >
+              AI Insight
+            </Button>
             <Tooltip label={paused ? "Resume" : "Pause"}>
               <ActionIcon
                 variant="light"
@@ -284,6 +299,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
           </ScrollArea>
         </Paper>
       </Stack>
+      <LogAIAnalyst logs={logs} opened={aiOpened} onClose={closeAI} />
     </Card>
   );
 }

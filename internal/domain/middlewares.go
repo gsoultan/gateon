@@ -39,6 +39,10 @@ func (s *MiddlewareServiceImpl) ListPaginated(ctx context.Context, page, pageSiz
 	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
+func (s *MiddlewareServiceImpl) GetMiddleware(ctx context.Context, id string) (*gateonv1.Middleware, bool) {
+	return s.store.Get(ctx, id)
+}
+
 // SaveMiddleware validates, assigns ID if needed, persists, and invalidates affected route proxies.
 func (s *MiddlewareServiceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1.Middleware) error {
 	if s.validator != nil {

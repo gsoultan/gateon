@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -11,50 +12,90 @@ import (
 )
 
 // CreateTLSManager builds the TLS manager from global config.
-func CreateTLSManager(globalStore config.GlobalConfigStore) *gtls.Manager {
-	tlsManager := gtls.NewManager(gtls.InitFromEnv())
-	gc := globalStore.Get(context.Background())
-	if gc == nil || gc.Tls == nil || !gc.Tls.Enabled {
-		return tlsManager
-	}
+func CreateTLSManager(s *Server) *gtls.Manager {
+	gc := s.GlobalStore.Get(context.Background())
 	cfg := gtls.InitFromEnv()
-	cfg.Enabled = true
-	if gc.Tls.Email != "" {
-		cfg.Email = gc.Tls.Email
-	}
-	if len(gc.Tls.Domains) > 0 {
-		cfg.Domains = gc.Tls.Domains
-	}
-	if gc.Tls.MinTlsVersion != "" {
-		cfg.MinVersion = gc.Tls.MinTlsVersion
-	}
-	if gc.Tls.MaxTlsVersion != "" {
-		cfg.MaxVersion = gc.Tls.MaxTlsVersion
-	}
-	if gc.Tls.ClientAuthType != "" {
-		cfg.ClientAuthType = gc.Tls.ClientAuthType
-	}
-	if len(gc.Tls.CipherSuites) > 0 {
-		cfg.CipherSuites = gc.Tls.CipherSuites
-	}
-	if gc.Tls.Acme != nil && gc.Tls.Acme.Enabled && gc.Tls.Acme.Email != "" {
-		cfg.Email = gc.Tls.Acme.Email
-	}
-	if len(gc.Tls.Certificates) > 0 {
-		for _, c := range gc.Tls.Certificates {
-			cfg.Certificates = append(cfg.Certificates, gtls.CertificateConfig{
-				ID: c.Id, Name: c.Name, CertFile: c.CertFile, KeyFile: c.KeyFile,
-			})
+
+	if gc != nil && gc.Tls != nil && gc.Tls.Enabled {
+		cfg.Enabled = true
+		if gc.Tls.Email != "" {
+			cfg.Email = gc.Tls.Email
+		}
+		if len(gc.Tls.Domains) > 0 {
+			cfg.Domains = gc.Tls.Domains
+		}
+		if gc.Tls.MinTlsVersion != "" {
+			cfg.MinVersion = gc.Tls.MinTlsVersion
+		}
+		if gc.Tls.MaxTlsVersion != "" {
+			cfg.MaxVersion = gc.Tls.MaxTlsVersion
+		}
+		if gc.Tls.ClientAuthType != "" {
+			cfg.ClientAuthType = gc.Tls.ClientAuthType
+		}
+		if len(gc.Tls.CipherSuites) > 0 {
+			cfg.CipherSuites = gc.Tls.CipherSuites
+		}
+		if gc.Tls.Acme != nil && gc.Tls.Acme.Enabled {
+			cfg.Acme = gtls.AcmeConfig{
+				Enabled:  true,
+				Email:    gc.Tls.Acme.Email,
+				CAServer: gc.Tls.Acme.CaServer,
+			}
+			if cfg.Acme.Email == "" {
+				cfg.Acme.Email = gc.Tls.Email
+			}
+		}
+		if len(gc.Tls.Certificates) > 0 {
+			for _, c := range gc.Tls.Certificates {
+				cfg.Certificates = append(cfg.Certificates, gtls.CertificateConfig{
+					ID: c.Id, Name: c.Name, CertFile: c.CertFile, KeyFile: c.KeyFile,
+				})
+			}
+		}
+		if len(gc.Tls.ClientAuthorities) > 0 {
+			for _, ca := range gc.Tls.ClientAuthorities {
+				cfg.ClientAuthorities = append(cfg.ClientAuthorities, gtls.ClientAuthorityConfig{
+					ID: ca.Id, Name: ca.Name, CaFile: ca.CaFile,
+				})
+			}
 		}
 	}
-	if len(gc.Tls.ClientAuthorities) > 0 {
-		for _, ca := range gc.Tls.ClientAuthorities {
-			cfg.ClientAuthorities = append(cfg.ClientAuthorities, gtls.ClientAuthorityConfig{
-				ID: ca.Id, Name: ca.Name, CaFile: ca.CaFile,
-			})
+
+	m := gtls.NewManager(cfg)
+
+	// Set dynamic host policy for ACME
+	m.SetHostPolicy(func(ctx context.Context, host string) error {
+		// Check global whitelist first
+		for _, d := range cfg.Domains {
+			if host == d {
+				return nil
+			}
 		}
+		// Check routes for ACME enablement
+		routes := s.RouteStore.List(ctx)
+		for _, rt := range routes {
+			if rt.Disabled || rt.Tls == nil || !rt.Tls.AcmeEnabled {
+				continue
+			}
+			routeHost := router.HostFromRule(rt.Rule)
+			if routeHost != "" && router.HostMatches(routeHost, host) {
+				return nil
+			}
+		}
+		return fmt.Errorf("host %q not authorized for ACME", host)
+	})
+
+	// Set persistent cache
+	if s.RedisClient != nil {
+		m.SetCache(gtls.NewRedisCache(s.RedisClient, "gateon:acme:"))
+	} else if gc != nil && gc.Auth != nil {
+		// Try to use the same DB as auth for ACME cache if it's SQL
+		// This is a bit complex to get the *sql.DB here, but we can try.
+		// For now, default to DirCache (implemented in gtls.Manager)
 	}
-	return gtls.NewManager(cfg)
+
+	return m
 }
 
 // SNIDeps holds narrow dependencies for SetupSNI (Interface Segregation).

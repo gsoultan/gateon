@@ -1,16 +1,18 @@
 import { Fragment, useState } from 'react'
 import { Card, Title, Text, Stack, Group, Button, Drawer, Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconPlus, IconServer, IconSearch, IconDotsVertical, IconEdit, IconTrash, IconExternalLink, IconActivity, IconChevronDown, IconChevronRight } from '@tabler/icons-react'
+import { IconPlus, IconServer, IconSearch, IconDotsVertical, IconEdit, IconTrash, IconExternalLink, IconActivity, IconChevronDown, IconChevronRight, IconRocket } from '@tabler/icons-react'
 import { useServices, apiFetch, getApiErrorMessage } from '../hooks/useGateon'
 import { usePermissions } from '../hooks/usePermissions'
 import { ServiceForm } from '../components/ServiceForm'
+import { CanaryWizard } from '../components/CanaryWizard'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 
 export default function ServicesPage() {
   const { canWrite } = usePermissions()
   const [opened, { open, close }] = useDisclosure(false)
+  const [canaryOpened, { open: openCanary, close: closeCanary }] = useDisclosure(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -56,10 +58,16 @@ export default function ServicesPage() {
   })
 
   const [editingService, setEditingService] = useState<any>(null)
+  const [canaryService, setCanaryService] = useState<any>(null)
 
   const handleEdit = (service: any) => {
     setEditingService(service)
     open()
+  }
+
+  const handleCanary = (service: any) => {
+    setCanaryService(service)
+    openCanary()
   }
 
   const handleCreate = () => {
@@ -213,6 +221,7 @@ export default function ServicesPage() {
                               <Menu.Dropdown>
                                 <Menu.Label>Actions</Menu.Label>
                                 <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => handleEdit(s)}>Edit</Menu.Item>
+                                <Menu.Item leftSection={<IconRocket size={14} />} color="blue" onClick={() => handleCanary(s)}>Canary Deployment</Menu.Item>
                                 <Menu.Divider />
                                 <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => deleteMutation.mutate(s.id)}>Delete</Menu.Item>
                               </Menu.Dropdown>
@@ -273,6 +282,22 @@ export default function ServicesPage() {
           onSuccess={close} 
           initialData={editingService}
         />
+      </Drawer>
+
+      <Drawer
+        opened={canaryOpened}
+        onClose={closeCanary}
+        title={<Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>Canary Deployment Wizard</Text>}
+        position="right"
+        size="md"
+        padding="xl"
+      >
+        {canaryService && (
+          <CanaryWizard 
+            service={canaryService} 
+            onSuccess={closeCanary}
+          />
+        )}
       </Drawer>
     </Stack>
   )

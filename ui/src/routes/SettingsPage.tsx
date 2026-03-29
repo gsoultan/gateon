@@ -32,6 +32,9 @@ import {
   IconKey,
   IconChartDots,
   IconRefresh,
+  IconServer,
+  IconActivity,
+  IconCpu,
 } from "@tabler/icons-react";
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
 import { GeneralSettingsCard } from "../components/settings/GeneralSettingsCard";
@@ -1150,6 +1153,274 @@ export default function SettingsPage() {
               </Text>
             </Group>
           </Stack>
+        </Stack>
+      </Card>
+
+      <Card withBorder shadow="sm" radius="md">
+        <Stack gap="md">
+          <Group justify="space-between">
+            <Group gap="xs">
+              <IconShieldLock color="var(--mantine-color-blue-filled)" />
+              <Title order={3}>Global WAF Settings</Title>
+            </Group>
+            <Switch
+              label="Enable Global Rules"
+              checked={config.waf?.enabled || false}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  waf: {
+                    ...(config.waf || {
+                      use_crs: true,
+                      paranoia_level: 1,
+                    }),
+                    enabled: e.currentTarget.checked,
+                  },
+                })
+              }
+              disabled={formDisabled}
+            />
+          </Group>
+          <Text size="sm" c="dimmed">
+            Configure global Web Application Firewall rules that apply to all
+            routes using the WAF middleware.
+          </Text>
+
+          {config.waf?.enabled && (
+            <Stack gap="sm">
+              <Group grow>
+                <Switch
+                  label="Use OWASP Core Rule Set (CRS)"
+                  checked={config.waf.use_crs}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      waf: {
+                        ...config.waf!,
+                        use_crs: e.currentTarget.checked,
+                      },
+                    })
+                  }
+                  disabled={formDisabled}
+                />
+                <Select
+                  label="Paranoia Level"
+                  data={[
+                    { value: "1", label: "1 - Standard" },
+                    { value: "2", label: "2 - High" },
+                    { value: "3", label: "3 - Extreme" },
+                    { value: "4", label: "4 - Insane" },
+                  ]}
+                  value={config.waf.paranoia_level.toString()}
+                  onChange={(v) =>
+                    setConfig({
+                      ...config,
+                      waf: {
+                        ...config.waf!,
+                        paranoia_level: parseInt(v || "1"),
+                      },
+                    })
+                  }
+                  disabled={formDisabled || !config.waf.use_crs}
+                />
+              </Group>
+              <TextInput
+                label="Custom Global Directives"
+                description="Coraza/ModSecurity compatible directives applied globally."
+                placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
+                value={config.waf.custom_directives || ""}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    waf: {
+                      ...config.waf!,
+                      custom_directives: e.currentTarget.value,
+                    },
+                  })
+                }
+                disabled={formDisabled}
+              />
+            </Stack>
+          )}
+        </Stack>
+      </Card>
+
+      <Card withBorder shadow="sm" radius="md">
+        <Stack gap="md">
+          <Group justify="space-between">
+            <Group gap="xs">
+              <IconServer color="var(--mantine-color-teal-filled)" />
+              <Title order={3}>High Availability (VRRP)</Title>
+            </Group>
+            <Switch
+              label="Enable HA"
+              checked={config.ha?.enabled || false}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  ha: {
+                    ...(config.ha || {
+                      priority: 100,
+                      virtual_router_id: 51,
+                      advert_int: 1,
+                    }),
+                    enabled: e.currentTarget.checked,
+                  },
+                })
+              }
+              disabled={formDisabled}
+            />
+          </Group>
+          <Text size="sm" c="dimmed">
+            Configure Active-Passive failover using VRRP-like protocol. Requires VIP management permissions.
+          </Text>
+
+          {config.ha?.enabled && (
+            <Stack gap="sm">
+              <TextInput
+                label="Network Interface"
+                placeholder="eth0"
+                value={config.ha.interface || ""}
+                onChange={(e) => setConfig({...config, ha: {...config.ha!, interface: e.currentTarget.value}})}
+                disabled={formDisabled}
+              />
+              <Group grow>
+                <NumberInput
+                  label="Virtual Router ID"
+                  min={1}
+                  max={255}
+                  value={config.ha.virtual_router_id}
+                  onChange={(v) => setConfig({...config, ha: {...config.ha!, virtual_router_id: Number(v)}})}
+                  disabled={formDisabled}
+                />
+                <NumberInput
+                  label="Priority"
+                  min={1}
+                  max={255}
+                  value={config.ha.priority}
+                  onChange={(v) => setConfig({...config, ha: {...config.ha!, priority: Number(v)}})}
+                  disabled={formDisabled}
+                />
+              </Group>
+              <TextInput
+                label="Virtual IPs (comma-separated)"
+                placeholder="192.168.1.100/24"
+                value={(config.ha.virtual_ips || []).join(", ")}
+                onChange={(e) => setConfig({...config, ha: {...config.ha!, virtual_ips: e.currentTarget.value.split(",").map(s => s.trim()).filter(Boolean)}})}
+                disabled={formDisabled}
+              />
+            </Stack>
+          )}
+        </Stack>
+      </Card>
+
+      <Card withBorder shadow="sm" radius="md">
+        <Stack gap="md">
+          <Group justify="space-between">
+            <Group gap="xs">
+              <IconActivity color="var(--mantine-color-orange-filled)" />
+              <Title order={3}>Anomaly Detection</Title>
+            </Group>
+            <Switch
+              label="Enable AI Detection"
+              checked={config.anomaly_detection?.enabled || false}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  anomaly_detection: {
+                    ...(config.anomaly_detection || {
+                      prometheus_url: "http://localhost:9090",
+                      check_interval_seconds: 60,
+                      sensitivity: 0.5,
+                    }),
+                    enabled: e.currentTarget.checked,
+                  },
+                })
+              }
+              disabled={formDisabled}
+            />
+          </Group>
+          <Text size="sm" c="dimmed">
+            Monitor traffic patterns via Prometheus and detect anomalies in real-time.
+          </Text>
+
+          {config.anomaly_detection?.enabled && (
+            <Stack gap="sm">
+              <TextInput
+                label="Prometheus URL"
+                placeholder="http://prometheus:9090"
+                value={config.anomaly_detection.prometheus_url || ""}
+                onChange={(e) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, prometheus_url: e.currentTarget.value}})}
+                disabled={formDisabled}
+              />
+              <Group grow>
+                <NumberInput
+                  label="Check Interval (s)"
+                  min={10}
+                  value={config.anomaly_detection.check_interval_seconds}
+                  onChange={(v) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, check_interval_seconds: Number(v)}})}
+                  disabled={formDisabled}
+                />
+                <NumberInput
+                  label="Sensitivity"
+                  decimalScale={2}
+                  step={0.1}
+                  min={0}
+                  max={1}
+                  value={config.anomaly_detection.sensitivity}
+                  onChange={(v) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, sensitivity: Number(v)}})}
+                  disabled={formDisabled}
+                />
+              </Group>
+            </Stack>
+          )}
+        </Stack>
+      </Card>
+
+      <Card withBorder shadow="sm" radius="md">
+        <Stack gap="md">
+          <Group justify="space-between">
+            <Group gap="xs">
+              <IconCpu color="var(--mantine-color-grape-filled)" />
+              <Title order={3}>eBPF Offloading</Title>
+            </Group>
+            <Switch
+              label="Enable eBPF"
+              checked={config.ebpf?.enabled || false}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  ebpf: {
+                    ...(config.ebpf || {}),
+                    enabled: e.currentTarget.checked,
+                  },
+                })
+              }
+              disabled={formDisabled}
+            />
+          </Group>
+          <Text size="sm" c="dimmed">
+            Offload traffic processing to the Linux kernel for maximum performance.
+          </Text>
+
+          {config.ebpf?.enabled && (
+            <Stack gap="sm">
+              <Switch
+                label="XDP Rate Limiting"
+                description="Drop packets at the network driver level"
+                checked={config.ebpf.xdp_rate_limit || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdp_rate_limit: e.currentTarget.checked}})}
+                disabled={formDisabled}
+              />
+              <Switch
+                label="TC Filtering"
+                description="Kernel-level traffic classification and filtering"
+                checked={config.ebpf.tc_filtering || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, tc_filtering: e.currentTarget.checked}})}
+                disabled={formDisabled}
+              />
+            </Stack>
+          )}
         </Stack>
       </Card>
 

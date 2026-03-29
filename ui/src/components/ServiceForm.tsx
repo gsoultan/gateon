@@ -79,6 +79,15 @@ export function ServiceForm({
       l4_health_check_timeout_ms: 3000,
       l4_udp_session_timeout_s: 60,
       l4_proxy_protocol: false,
+      discovery_url: "",
+      tls_client_config: {
+        enabled: false,
+        cert_file: "",
+        key_file: "",
+        ca_file: "",
+        skip_verify: true,
+        server_name: "",
+      },
     },
     onSubmit: async ({ value }) => {
       const bt = value.backend_type || "http";
@@ -166,6 +175,15 @@ export function ServiceForm({
         initialData.l4_udp_session_timeout_s ?? 60,
       );
       form.setFieldValue("l4_proxy_protocol", initialData.l4_proxy_protocol ?? false);
+      form.setFieldValue("discovery_url", initialData.discovery_url || "");
+      form.setFieldValue("tls_client_config", initialData.tls_client_config || {
+        enabled: false,
+        cert_file: "",
+        key_file: "",
+        ca_file: "",
+        skip_verify: true,
+        server_name: "",
+      });
     }
   }, [initialData, form]);
 
@@ -259,6 +277,122 @@ export function ServiceForm({
             />
           )}
         />
+
+        <form.Field
+          name="discovery_url"
+          children={(field) => (
+            <TextInput
+              label="Service Discovery URL"
+              description="e.g. dns:my-service.local, consul:auth-svc, etcd:/services/api"
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+              placeholder="dns:..."
+              size="md"
+              radius="md"
+            />
+          )}
+        />
+
+        <Paper withBorder p="md" radius="md">
+          <Stack gap="md">
+            <Group justify="space-between" align="center">
+              <div>
+                <Group gap="xs">
+                  <Text fw={600} size="sm">
+                    Backend TLS (mTLS)
+                  </Text>
+                  <Tooltip label="Configure client certificates for authenticating to backend targets">
+                    <IconInfoCircle size={14} color="gray" />
+                  </Tooltip>
+                </Group>
+                <Text size="xs" c="dimmed" mt={2}>
+                  Secure communication with backend services using client certificates.
+                </Text>
+              </div>
+              <form.Field
+                name="tls_client_config.enabled"
+                children={(field) => (
+                  <Switch
+                    checked={field.state.value}
+                    onChange={(e) => field.handleChange(e.currentTarget.checked)}
+                    size="sm"
+                  />
+                )}
+              />
+            </Group>
+
+            <form.Subscribe
+              selector={(s) => s.values.tls_client_config?.enabled}
+              children={(enabled) =>
+                enabled && (
+                  <Stack gap="sm">
+                    <form.Field
+                      name="tls_client_config.cert_file"
+                      children={(field) => (
+                        <TextInput
+                          label="Client Certificate Path"
+                          placeholder="/path/to/client.crt"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          size="xs"
+                        />
+                      )}
+                    />
+                    <form.Field
+                      name="tls_client_config.key_file"
+                      children={(field) => (
+                        <TextInput
+                          label="Client Private Key Path"
+                          placeholder="/path/to/client.key"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          size="xs"
+                        />
+                      )}
+                    />
+                    <form.Field
+                      name="tls_client_config.ca_file"
+                      children={(field) => (
+                        <TextInput
+                          label="CA Certificate Path"
+                          placeholder="/path/to/ca.crt"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          size="xs"
+                        />
+                      )}
+                    />
+                    <Group grow>
+                      <form.Field
+                        name="tls_client_config.server_name"
+                        children={(field) => (
+                          <TextInput
+                            label="Server Name (SNI Override)"
+                            placeholder="backend.example.com"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            size="xs"
+                          />
+                        )}
+                      />
+                      <form.Field
+                        name="tls_client_config.skip_verify"
+                        children={(field) => (
+                          <Switch
+                            label="Insecure Skip Verify"
+                            checked={field.state.value}
+                            onChange={(e) => field.handleChange(e.currentTarget.checked)}
+                            mt="xl"
+                          />
+                        )}
+                      />
+                    </Group>
+                  </Stack>
+                )
+              }
+            />
+          </Stack>
+        </Paper>
 
         <Paper withBorder p="md" radius="md">
           <Stack gap="md">

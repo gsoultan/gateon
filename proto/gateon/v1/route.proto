@@ -49,4 +49,5 @@ message Route {
 message RouteTLSConfig {
   repeated string certificate_ids = 1;
   string option_id = 2;
+  bool acme_enabled = 3;
 }

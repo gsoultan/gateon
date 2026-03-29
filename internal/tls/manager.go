@@ -1,6 +1,7 @@
 package tls
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -18,6 +20,8 @@ type TLSManager interface {
 	GetTLSConfig() (*tls.Config, error)
 	LoadCertificate(certFile, keyFile, caFile string) (*tls.Certificate, *x509.CertPool, error)
 	HTTPChallengeHandler(fallback http.Handler) http.Handler
+	SetHostPolicy(policy func(ctx context.Context, host string) error)
+	SetCache(cache autocert.Cache)
 }
 
 // Config holds TLS configuration.
@@ -32,6 +36,16 @@ type Config struct {
 	CipherSuites      []string
 	Certificates      []CertificateConfig
 	ClientAuthorities []ClientAuthorityConfig
+	Acme              AcmeConfig
+	Cache             autocert.Cache
+	HostPolicy        func(ctx context.Context, host string) error
+}
+
+type AcmeConfig struct {
+	Enabled       bool
+	Email         string
+	CAServer      string
+	ChallengeType string // "http", "tls-alpn"
 }
 
 type CertificateConfig struct {
@@ -59,6 +73,14 @@ func NewManager(cfg Config) *Manager {
 		cfg.CacheDir = "certs"
 	}
 	return &Manager{config: cfg}
+}
+
+func (m *Manager) SetHostPolicy(policy func(ctx context.Context, host string) error) {
+	m.config.HostPolicy = policy
+}
+
+func (m *Manager) SetCache(cache autocert.Cache) {
+	m.config.Cache = cache
 }
 
 func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certificate, *x509.CertPool, error) {
@@ -121,19 +143,49 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 		tlsConfig = &tls.Config{
 			Certificates: certs,
 		}
-	} else if m.config.Email != "" && len(m.config.Domains) > 0 {
+	}
+
+	if m.config.Acme.Enabled {
 		// Case 2: ACME (Let's Encrypt)
-		if err := os.MkdirAll(m.config.CacheDir, 0700); err != nil {
-			return nil, fmt.Errorf("failed to create cert cache dir: %w", err)
+		var cache autocert.Cache
+		if m.config.Cache != nil {
+			cache = m.config.Cache
+		} else {
+			if err := os.MkdirAll(m.config.CacheDir, 0700); err != nil {
+				return nil, fmt.Errorf("failed to create cert cache dir: %w", err)
+			}
+			cache = autocert.DirCache(m.config.CacheDir)
+		}
+
+		hp := m.config.HostPolicy
+		if hp == nil && len(m.config.Domains) > 0 {
+			hp = func(_ context.Context, host string) error {
+				for _, d := range m.config.Domains {
+					if host == d {
+						return nil
+					}
+				}
+				return fmt.Errorf("host %q not in whitelist", host)
+			}
 		}
 
 		certManager := autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(m.config.Domains...),
-			Email:      m.config.Email,
-			Cache:      autocert.DirCache(m.config.CacheDir),
+			HostPolicy: autocert.HostPolicy(hp),
+			Email:      m.config.Acme.Email,
+			Cache:      cache,
 		}
-		tlsConfig = certManager.TLSConfig()
+		if m.config.Acme.CAServer != "" {
+			certManager.Client = &acme.Client{DirectoryURL: m.config.Acme.CAServer}
+		}
+
+		acmeTLSConfig := certManager.TLSConfig()
+		if tlsConfig == nil {
+			tlsConfig = acmeTLSConfig
+		} else {
+			// Combine manual certs with ACME
+			tlsConfig.GetCertificate = acmeTLSConfig.GetCertificate
+		}
 	}
 
 	if tlsConfig == nil {
@@ -213,15 +265,37 @@ func parseCipherSuites(suites []string) []uint16 {
 // HTTPChallengeHandler returns a handler for ACME HTTP-01 challenges.
 // This is typically needed if the server is listening on port 80.
 func (m *Manager) HTTPChallengeHandler(fallback http.Handler) http.Handler {
-	if !m.config.Enabled || m.config.Email == "" || len(m.config.Domains) == 0 {
+	if !m.config.Enabled || !m.config.Acme.Enabled {
 		return fallback
+	}
+
+	var cache autocert.Cache
+	if m.config.Cache != nil {
+		cache = m.config.Cache
+	} else {
+		cache = autocert.DirCache(m.config.CacheDir)
+	}
+
+	hp := m.config.HostPolicy
+	if hp == nil && len(m.config.Domains) > 0 {
+		hp = func(_ context.Context, host string) error {
+			for _, d := range m.config.Domains {
+				if host == d {
+					return nil
+				}
+			}
+			return fmt.Errorf("host %q not in whitelist", host)
+		}
 	}
 
 	certManager := autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
-		HostPolicy: autocert.HostWhitelist(m.config.Domains...),
-		Email:      m.config.Email,
-		Cache:      autocert.DirCache(m.config.CacheDir),
+		HostPolicy: autocert.HostPolicy(hp),
+		Email:      m.config.Acme.Email,
+		Cache:      cache,
+	}
+	if m.config.Acme.CAServer != "" {
+		certManager.Client = &acme.Client{DirectoryURL: m.config.Acme.CAServer}
 	}
 
 	return certManager.HTTPHandler(fallback)

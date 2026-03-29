@@ -13,12 +13,19 @@ import (
 	"github.com/gsoultan/gateon/cmd/gateon/inits"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/ha"
 	"github.com/gsoultan/gateon/internal/install"
+	"github.com/gsoultan/gateon/internal/k8s"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/tui"
 	"github.com/gsoultan/gateon/internal/ui"
 	"github.com/redis/go-redis/v9"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 )
 
 func main() {
@@ -37,6 +44,16 @@ func main() {
 		case "uninstall":
 			if err := install.Uninstall(); err != nil {
 				fmt.Fprintf(os.Stderr, "uninstall: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "top":
+			apiURL := "http://localhost:" + getPort()
+			if len(os.Args) >= 3 {
+				apiURL = os.Args[2]
+			}
+			if err := tui.RunTop(context.Background(), apiURL); err != nil {
+				fmt.Fprintf(os.Stderr, "top: %v\n", err)
 				os.Exit(1)
 			}
 			return
@@ -67,6 +84,25 @@ func main() {
 
 	initTelemetry(globalReg)
 
+	if gc := globalReg.Get(context.Background()); gc != nil {
+		if gc.Ha != nil && gc.Ha.Enabled {
+			haManager := ha.NewHAManager(gc.Ha)
+			go haManager.Start(context.Background()) // It will stop when ctx is cancelled in Run
+		}
+		if gc.AnomalyDetection != nil && gc.AnomalyDetection.Enabled {
+			ad, err := telemetry.NewAnomalyDetector(gc.AnomalyDetection)
+			if err != nil {
+				logger.L.Error().Err(err).Msg("failed to init anomaly detector")
+			} else {
+				go ad.Start(context.Background())
+			}
+		}
+		if gc.Ebpf != nil && gc.Ebpf.Enabled {
+			ebpfManager := ebpf.NewEbpfManager(gc.Ebpf)
+			go ebpfManager.Start(context.Background())
+		}
+	}
+
 	port := getPort()
 	s, err := server.NewServer(
 		server.WithGlobalRegistry(globalReg),
@@ -87,9 +123,14 @@ func main() {
 		logger.L.Info().Str("addr", redisAddr).Msg("redis client initialized")
 	}
 
-	uiHandler := getUIHandler(*uiPath)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		startK8sController(ctx, s)
+	}
+
+	uiHandler := getUIHandler(*uiPath)
 	server.Run(ctx, s, uiHandler)
 }
 
@@ -130,6 +171,27 @@ func initTelemetry(globalReg *config.GlobalRegistry) {
 			logger.L.Error().Err(err).Str("database_url", databaseURL).Msg("failed to init path stats store")
 		}
 	}
+}
+
+func startK8sController(ctx context.Context, s *server.Server) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		logger.L.Error().Err(err).Msg("failed to get k8s in-cluster config")
+		return
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		logger.L.Error().Err(err).Msg("failed to create k8s clientset")
+		return
+	}
+	gwClient, err := gatewayclient.NewForConfig(config)
+	if err != nil {
+		logger.L.Error().Err(err).Msg("failed to create gateway clientset")
+		return
+	}
+	ctrl := k8s.NewController(clientset, gwClient, s.RouteStore, s.ServiceStore)
+	go ctrl.Run(ctx.Done())
+	logger.L.Info().Msg("Kubernetes Controller (Ingress + Gateway API) started")
 }
 
 func getPort() string {

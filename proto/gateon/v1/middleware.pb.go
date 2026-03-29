@@ -335,6 +335,7 @@ type Middleware struct {
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
 	Config        map[string]string      `protobuf:"bytes,4,rep,name=config,proto3" json:"config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	WasmBlob      []byte                 `protobuf:"bytes,5,opt,name=wasm_blob,json=wasmBlob,proto3" json:"wasm_blob,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -397,6 +398,13 @@ func (x *Middleware) GetConfig() map[string]string {
 	return nil
 }
 
+func (x *Middleware) GetWasmBlob() []byte {
+	if x != nil {
+		return x.WasmBlob
+	}
+	return nil
+}
+
 var File_gateon_v1_middleware_proto protoreflect.FileDescriptor
 
 const file_gateon_v1_middleware_proto_rawDesc = "" +
@@ -421,13 +429,14 @@ const file_gateon_v1_middleware_proto_rawDesc = "" +
 	"\x17DeleteMiddlewareRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"4\n" +
 	"\x18DeleteMiddlewareResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xba\x01\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xd7\x01\n" +
 	"\n" +
 	"Middleware\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x129\n" +
-	"\x06config\x18\x04 \x03(\v2!.gateon.v1.Middleware.ConfigEntryR\x06config\x1a9\n" +
+	"\x06config\x18\x04 \x03(\v2!.gateon.v1.Middleware.ConfigEntryR\x06config\x12\x1b\n" +
+	"\twasm_blob\x18\x05 \x01(\fR\bwasmBlob\x1a9\n" +
 	"\vConfigEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"

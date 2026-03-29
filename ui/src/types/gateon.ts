@@ -43,6 +43,15 @@ export type Target = {
   protocol?: string;
 };
 
+export type TlsClientConfig = {
+  enabled: boolean;
+  cert_file?: string;
+  key_file?: string;
+  ca_file?: string;
+  skip_verify?: boolean;
+  server_name?: string;
+};
+
 export type Service = {
   id: string;
   name: string;
@@ -54,6 +63,8 @@ export type Service = {
   l4_health_check_timeout_ms?: number;
   l4_udp_session_timeout_s?: number;
   l4_proxy_protocol?: boolean;
+  discovery_url?: string;
+  tls_client_config?: TlsClientConfig;
 };
 
 export type RouteTLSConfig = {
@@ -213,6 +224,37 @@ export type Middleware = {
   name: string;
   type: string;
   config: Record<string, string>;
+  wasm_blob?: string; // base64 encoded
+};
+
+export type WafConfig = {
+  enabled: boolean;
+  use_crs: boolean;
+  paranoia_level: number;
+  custom_directives?: string;
+};
+
+export type HaConfig = {
+  enabled?: boolean;
+  interface?: string;
+  virtual_router_id?: number;
+  priority?: number;
+  virtual_ips?: string[];
+  advert_int?: number;
+  auth_pass?: string;
+};
+
+export type AnomalyDetectionConfig = {
+  enabled?: boolean;
+  prometheus_url?: string;
+  check_interval_seconds?: number;
+  sensitivity?: number;
+};
+
+export type EbpfConfig = {
+  enabled?: boolean;
+  xdp_rate_limit?: boolean;
+  tc_filtering?: boolean;
 };
 
 export type GlobalConfig = {
@@ -222,6 +264,10 @@ export type GlobalConfig = {
   log?: LogConfig;
   auth?: AuthConfig;
   transport?: TransportConfig;
+  waf?: WafConfig;
+  ha?: HaConfig;
+  anomaly_detection?: AnomalyDetectionConfig;
+  ebpf?: EbpfConfig;
 };
 
 export enum EntryPointType {

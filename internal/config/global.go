@@ -23,12 +23,16 @@ type GlobalRegistry struct {
 func NewGlobalRegistry(path string) *GlobalRegistry {
 	reg := &GlobalRegistry{
 		config: &gateonv1.GlobalConfig{
-			Tls:       &gateonv1.TlsConfig{},
-			Redis:     &gateonv1.RedisConfig{},
-			Otel:      &gateonv1.OtelConfig{},
-			Log:       &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
-			Auth:      &gateonv1.AuthConfig{},
-			Transport: &gateonv1.TransportConfig{},
+			Tls:              &gateonv1.TlsConfig{},
+			Redis:            &gateonv1.RedisConfig{},
+			Otel:             &gateonv1.OtelConfig{},
+			Log:              &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
+			Auth:             &gateonv1.AuthConfig{},
+			Transport:        &gateonv1.TransportConfig{},
+			Waf:              &gateonv1.WafConfig{Enabled: false, UseCrs: true, ParanoiaLevel: 1},
+			Ha:               &gateonv1.HaConfig{},
+			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{Sensitivity: 0.5, CheckIntervalSeconds: 60},
+			Ebpf:             &gateonv1.EbpfConfig{},
 		},
 		path: path,
 	}
@@ -87,10 +91,10 @@ func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
 	if c == nil || c.Auth == nil {
 		return
 	}
-	c.Auth.PasetoSecret = DecryptIfEncrypted(c.Auth.PasetoSecret)
-	c.Auth.DatabaseUrl = DecryptIfEncrypted(c.Auth.DatabaseUrl)
+	c.Auth.PasetoSecret = ResolveSecret(c.Auth.PasetoSecret)
+	c.Auth.DatabaseUrl = ResolveSecret(c.Auth.DatabaseUrl)
 	if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
-		c.Auth.DatabaseConfig.Password = DecryptIfEncrypted(c.Auth.DatabaseConfig.Password)
+		c.Auth.DatabaseConfig.Password = ResolveSecret(c.Auth.DatabaseConfig.Password)
 	}
 }
 

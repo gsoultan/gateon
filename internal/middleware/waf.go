@@ -16,11 +16,12 @@ import (
 
 // WAFConfig configures the WAF middleware.
 type WAFConfig struct {
-	UseCRS          bool   // Use OWASP CRS (default true)
-	ParanoiaLevel   int    // CRS paranoia level 1-4 (default 1)
-	DirectivesFile  string // Optional path to custom directives file
-	TrustCloudflare bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
-	AuditOnly       bool   // If true, log matches but do not block (SecRuleEngine DetectionOnly)
+	UseCRS           bool   // Use OWASP CRS (default true)
+	ParanoiaLevel    int    // CRS paranoia level 1-4 (default 1)
+	DirectivesFile   string // Optional path to custom directives file
+	TrustCloudflare  bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
+	AuditOnly        bool   // If true, log matches but do not block (SecRuleEngine DetectionOnly)
+	GlobalDirectives string // Combined global rules from GlobalConfig
 }
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
@@ -49,6 +50,10 @@ Include @owasp_crs/rules/*.conf
 			WithRootFS(coreruleset.FS)
 	}
 
+	if cfg.GlobalDirectives != "" {
+		wafConfig = wafConfig.WithDirectives(cfg.GlobalDirectives)
+	}
+
 	if cfg.DirectivesFile != "" {
 		wafConfig = wafConfig.WithDirectivesFromFile(cfg.DirectivesFile)
 	} else if !cfg.UseCRS {
@@ -68,9 +73,14 @@ Include @owasp_crs/rules/*.conf
 		return nil, fmt.Errorf("create WAF: %w", err)
 	}
 
-	_ = cfg.TrustCloudflare // Reserved for future REMOTE_ADDR override when Coraza supports custom client IP
 	return func(next http.Handler) http.Handler {
-		return txhttp.WrapHandler(waf, next)
+		wafHandler := txhttp.WrapHandler(waf, next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if cfg.TrustCloudflare {
+				r.RemoteAddr = request.GetClientIP(r, true)
+			}
+			wafHandler.ServeHTTP(w, r)
+		})
 	}, nil
 }
 

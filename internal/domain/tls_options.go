@@ -26,6 +26,10 @@ func (s *TLSOptionServiceImpl) ListPaginated(ctx context.Context, page, pageSize
 	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
+func (s *TLSOptionServiceImpl) GetTLSOption(ctx context.Context, id string) (*gateonv1.TLSOption, bool) {
+	return s.store.Get(ctx, id)
+}
+
 // SaveTLSOption validates, assigns ID if needed, and persists.
 func (s *TLSOptionServiceImpl) SaveTLSOption(ctx context.Context, opt *gateonv1.TLSOption) error {
 	if opt.Id == "" {

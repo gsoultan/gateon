@@ -8,8 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"strings"
+
+	"github.com/hashicorp/vault/api"
 )
 
 const encPrefix = "enc:"
@@ -18,6 +22,112 @@ var (
 	ErrEncryptionKeyMissing = errors.New("GATEON_ENCRYPTION_KEY not set")
 	ErrDecryptFailed        = errors.New("decryption failed")
 )
+
+// SecretResolver is an interface that can resolve secrets at runtime.
+type SecretResolver interface {
+	Resolve(s string) (string, error)
+}
+
+// EnvSecretResolver resolves secrets from environment variables.
+type EnvSecretResolver struct{}
+
+func (r *EnvSecretResolver) Resolve(s string) (string, error) {
+	if strings.HasPrefix(s, "$env:") {
+		return os.Getenv(s[5:]), nil
+	}
+	return s, nil
+}
+
+// VaultSecretResolver resolves secrets from HashiCorp Vault.
+type VaultSecretResolver struct {
+	client *api.Client
+}
+
+func NewVaultSecretResolver() (*VaultSecretResolver, error) {
+	config := api.DefaultConfig()
+	client, err := api.NewClient(config)
+	if err != nil {
+		return nil, err
+	}
+	return &VaultSecretResolver{client: client}, nil
+}
+
+func (r *VaultSecretResolver) Resolve(s string) (string, error) {
+	if !strings.HasPrefix(s, "$vault:") {
+		return s, nil
+	}
+	path := s[7:]
+	// Expected format: secret/data/mysecret#key
+	parts := strings.SplitN(path, "#", 2)
+	secretPath := parts[0]
+	key := "data"
+	if len(parts) > 1 {
+		key = parts[1]
+	}
+
+	secret, err := r.client.Logical().Read(secretPath)
+	if err != nil {
+		return "", err
+	}
+	if secret == nil || secret.Data == nil {
+		return "", errors.New("secret not found")
+	}
+
+	// Vault KV v2 wraps data in a "data" field
+	data, ok := secret.Data["data"].(map[string]any)
+	if ok {
+		if val, ok := data[key].(string); ok {
+			return val, nil
+		}
+	}
+
+	// Try direct access for KV v1 or specific fields
+	if val, ok := secret.Data[key].(string); ok {
+		return val, nil
+	}
+
+	return "", fmt.Errorf("key %s not found in secret %s", key, secretPath)
+}
+
+// ChainSecretResolver resolves secrets by trying multiple resolvers.
+type ChainSecretResolver struct {
+	resolvers []SecretResolver
+}
+
+func (r *ChainSecretResolver) Resolve(s string) (string, error) {
+	for _, res := range r.resolvers {
+		resolved, err := res.Resolve(s)
+		if err == nil && resolved != s {
+			return resolved, nil
+		}
+	}
+	return s, nil
+}
+
+// DefaultResolver is the default secret resolver.
+var DefaultResolver SecretResolver = &ChainSecretResolver{
+	resolvers: []SecretResolver{
+		&EnvSecretResolver{},
+		func() SecretResolver {
+			v, _ := NewVaultSecretResolver()
+			if v != nil {
+				return v
+			}
+			return &EnvSecretResolver{} // Fallback
+		}(),
+	},
+}
+
+// ResolveSecret resolves s using DecryptIfEncrypted and the DefaultResolver.
+func ResolveSecret(s string) string {
+	s = DecryptIfEncrypted(s)
+	if DefaultResolver != nil {
+		if resolved, err := DefaultResolver.Resolve(s); err == nil {
+			return resolved
+		}
+	}
+	return s
+}
 
 // encryptionKey returns the 32-byte key derived from GATEON_ENCRYPTION_KEY.
 // Returns nil if the env var is not set or too short.

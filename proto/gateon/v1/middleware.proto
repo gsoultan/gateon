@@ -42,4 +42,5 @@ message Middleware {
   string name = 2;
   string type = 3;
   map<string, string> config = 4;
+  bytes wasm_blob = 5;
 }

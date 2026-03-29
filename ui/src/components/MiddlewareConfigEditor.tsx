@@ -6,21 +6,48 @@ import {
   Select,
   Group,
   Text,
+  FileInput,
 } from "@mantine/core";
+import {
+  IconCheck,
+  IconCode,
+} from "@tabler/icons-react";
 import {
   KeyValueList,
   RatelimitConfigEditor,
   AuthConfigEditor,
   HeadersConfigEditor,
+  WAFConfigEditor,
+  TurnstileConfigEditor,
+  GeoIPConfigEditor,
+  HMACConfigEditor,
+  CacheConfigEditor,
+  BufferingConfigEditor,
+  InFlightReqConfigEditor,
+  RewriteConfigEditor,
+  CORSConfigEditor,
+  PrefixConfigEditor,
+  StripPrefixConfigEditor,
+  StripPrefixRegexConfigEditor,
+  ReplacePathConfigEditor,
+  ReplacePathRegexConfigEditor,
 } from "./middleware-config";
 
 interface MiddlewareConfigEditorProps {
   type: string;
   config: Record<string, string>;
   onChange: (config: Record<string, string>) => void;
+  wasmBlob?: string;
+  onWasmBlobChange?: (blob: string) => void;
 }
 
-export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareConfigEditorProps) {
+export function MiddlewareConfigEditor({
+  type,
+  config,
+  onChange,
+  wasmBlob,
+  onWasmBlobChange,
+}: MiddlewareConfigEditorProps) {
   const updateConfig = (key: string, value: string) => {
     onChange({ ...config, [key]: value });
   };
@@ -30,44 +57,10 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
       return <RatelimitConfigEditor config={config} onChange={onChange} />;
 
     case "inflightreq":
-      return (
-        <Stack gap="md">
-          <NumberInput
-            label="Max Concurrent Requests (amount)"
-            description="Max in-flight requests per source. Returns 429 when exceeded."
-            value={parseInt(config.amount) || 0}
-            onChange={(val) => updateConfig("amount", val?.toString() || "0")}
-            min={1}
-          />
-          <Switch
-            label="Per IP Address"
-            description="Limit per client IP. If false, limits per request host."
-            checked={config.per_ip !== "false"}
-            onChange={(e) =>
-              updateConfig(
-                "per_ip",
-                e.currentTarget.checked ? "true" : "false"
-              )
-            }
-          />
-        </Stack>
-      );
+      return <InFlightReqConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "buffering":
-      return (
-        <NumberInput
-          label="Max Request Body (bytes)"
-          description="Rejects requests exceeding this size with 413."
-          value={parseInt(config.max_request_body_bytes) || 0}
-          onChange={(val) =>
-            updateConfig(
-              "max_request_body_bytes",
-              val?.toString() || "0"
-            )
-          }
-          min={1}
-        />
-      );
+      return <BufferingConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "auth":
       return <AuthConfigEditor config={config} onChange={onChange} />;
@@ -76,160 +69,25 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
       return <HeadersConfigEditor config={config} onChange={onChange} />;
 
     case "rewrite":
-      return (
-        <Stack gap="md">
-          <TextInput
-            label="Path"
-            placeholder="/new-path"
-            value={config.path || ""}
-            onChange={(e) => updateConfig("path", e.currentTarget.value)}
-          />
-          <Group grow>
-            <TextInput
-              label="Regex Pattern"
-              placeholder="/old/(.*)"
-              value={config.pattern || ""}
-              onChange={(e) => updateConfig("pattern", e.currentTarget.value)}
-            />
-            <TextInput
-              label="Replacement"
-              placeholder="/new/$1"
-              value={config.replacement || ""}
-              onChange={(e) =>
-                updateConfig("replacement", e.currentTarget.value)
-              }
-            />
-          </Group>
-          <KeyValueList
-            config={config}
-            onChange={onChange}
-            title="Add Query Parameters"
-            prefix="query_"
-            placeholderKey="param"
-            placeholderValue="value"
-          />
-        </Stack>
-      );
+      return <RewriteConfigEditor config={config} updateConfig={updateConfig} onChange={onChange} />;
 
     case "addprefix":
-      return (
-        <TextInput
-          label="Prefix"
-          placeholder="/api"
-          value={config.prefix || ""}
-          onChange={(e) => updateConfig("prefix", e.currentTarget.value)}
-        />
-      );
+      return <PrefixConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "stripprefix":
-      return (
-        <TextInput
-          label="Prefixes (comma separated)"
-          placeholder="/api,/v1"
-          value={config.prefixes || ""}
-          onChange={(e) => updateConfig("prefixes", e.currentTarget.value)}
-        />
-      );
+      return <StripPrefixConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "stripprefixregex":
-      return (
-        <TextInput
-          label="Regex"
-          placeholder="^/api/[^/]+/"
-          value={config.regex || ""}
-          onChange={(e) => updateConfig("regex", e.currentTarget.value)}
-        />
-      );
+      return <StripPrefixRegexConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "replacepath":
-      return (
-        <TextInput
-          label="Path"
-          placeholder="/new-path"
-          value={config.path || ""}
-          onChange={(e) => updateConfig("path", e.currentTarget.value)}
-        />
-      );
+      return <ReplacePathConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "replacepathregex":
-      return (
-        <Group grow>
-          <TextInput
-            label="Pattern"
-            placeholder="^/api/(.*)"
-            value={config.pattern || ""}
-            onChange={(e) => updateConfig("pattern", e.currentTarget.value)}
-          />
-          <TextInput
-            label="Replacement"
-            placeholder="/$1"
-            value={config.replacement || ""}
-            onChange={(e) => updateConfig("replacement", e.currentTarget.value)}
-          />
-        </Group>
-      );
+      return <ReplacePathRegexConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "cors":
-      return (
-        <Stack gap="md">
-          <TextInput
-            label="Allowed Origins"
-            placeholder="*, https://example.com"
-            value={config.allowed_origins || ""}
-            onChange={(e) =>
-              updateConfig("allowed_origins", e.currentTarget.value)
-            }
-            description="Comma separated list of origins"
-          />
-          <TextInput
-            label="Allowed Methods"
-            placeholder="GET, POST, PUT, DELETE, OPTIONS"
-            value={config.allowed_methods || ""}
-            onChange={(e) =>
-              updateConfig("allowed_methods", e.currentTarget.value)
-            }
-            description="Comma separated list of HTTP methods"
-          />
-          <TextInput
-            label="Allowed Headers"
-            placeholder="Content-Type, Authorization"
-            value={config.allowed_headers || ""}
-            onChange={(e) =>
-              updateConfig("allowed_headers", e.currentTarget.value)
-            }
-            description="Comma separated list of headers"
-          />
-          <TextInput
-            label="Exposed Headers"
-            placeholder="X-Custom-Header"
-            value={config.exposed_headers || ""}
-            onChange={(e) =>
-              updateConfig("exposed_headers", e.currentTarget.value)
-            }
-            description="Comma separated list of headers exposed to the client"
-          />
-          <Group grow>
-            <NumberInput
-              label="Max Age"
-              value={parseInt(config.max_age) || 0}
-              onChange={(val) => updateConfig("max_age", val.toString())}
-              min={0}
-              description="Seconds to cache preflight request"
-            />
-            <Switch
-              label="Allow Credentials"
-              checked={config.allow_credentials === "true"}
-              onChange={(e) =>
-                updateConfig(
-                  "allow_credentials",
-                  e.currentTarget.checked ? "true" : "false",
-                )
-              }
-              mt={25}
-            />
-          </Group>
-        </Stack>
-      );
+      return <CORSConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "retry":
       return (
@@ -473,210 +331,106 @@ export function MiddlewareConfigEditor({ type, config, onChange }: MiddlewareCon
       );
 
     case "waf":
-      return (
-        <Stack gap="md">
-          <Switch
-            label="Use OWASP CRS"
-            description="Enable OWASP Core Rule Set (recommended)"
-            checked={config.use_crs !== "false"}
-            onChange={(e) =>
-              updateConfig(
-                "use_crs",
-                e.currentTarget.checked ? "true" : "false",
-              )
-            }
-          />
-          <NumberInput
-            label="Paranoia Level"
-            description="CRS paranoia 1-4. Higher = stricter, more false positives. Default: 1"
-            value={parseInt(config.paranoia_level) || 1}
-            onChange={(val) =>
-              updateConfig(
-                "paranoia_level",
-                (val ?? 1).toString(),
-              )
-            }
-            min={1}
-            max={4}
-          />
-          <TextInput
-            label="Custom Directives File"
-            description="Optional path to custom SecLang rules (advanced)"
-            placeholder="/etc/gateon/waf.conf"
-            value={config.directives_file || ""}
-            onChange={(e) =>
-              updateConfig("directives_file", e.currentTarget.value)
-            }
-          />
-          <Switch
-            label="Trust Cloudflare Headers"
-            description="Use CF-Connecting-IP for WAF REMOTE_ADDR"
-            checked={config.trust_cloudflare_headers === "true"}
-            onChange={(e) =>
-              updateConfig(
-                "trust_cloudflare_headers",
-                e.currentTarget.checked ? "true" : "false",
-              )
-            }
-          />
-          <Switch
-            label="Audit Only"
-            description="Log matched rules but do not block requests (SecRuleEngine DetectionOnly)"
-            checked={config.audit_only === "true"}
-            onChange={(e) =>
-              updateConfig(
-                "audit_only",
-                e.currentTarget.checked ? "true" : "false",
-              )
-            }
-          />
-        </Stack>
-      );
+      return <WAFConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "turnstile":
-      return (
-        <Stack gap="md">
-          <TextInput
-            label="Secret Key"
-            description="Cloudflare Turnstile secret. Or set GATEON_TURNSTILE_SECRET env"
-            placeholder="0x4AAAAAAA..."
-            type="password"
-            value={config.secret || ""}
-            onChange={(e) => updateConfig("secret", e.currentTarget.value)}
-          />
-          <TextInput
-            label="Token Header"
-            description="Header containing the token. Default: CF-Turnstile-Response"
-            placeholder="CF-Turnstile-Response"
-            value={config.header || ""}
-            onChange={(e) => updateConfig("header", e.currentTarget.value)}
-          />
-          <TextInput
-            label="Methods to Verify"
-            description="Comma-separated HTTP methods. Default: POST,PUT,PATCH,DELETE"
-            placeholder="POST, PUT, PATCH, DELETE"
-            value={config.methods || ""}
-            onChange={(e) => updateConfig("methods", e.currentTarget.value)}
-          />
-        </Stack>
-      );
+      return <TurnstileConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "geoip":
-      return (
-        <Stack gap="md">
-          <TextInput
-            label="GeoIP Database Path"
-            description="Path to GeoLite2-Country.mmdb. Or set GATEON_GEOIP_DB_PATH env"
-            placeholder="/etc/gateon/GeoLite2-Country.mmdb"
-            value={config.db_path || ""}
-            onChange={(e) => updateConfig("db_path", e.currentTarget.value)}
-          />
-          <TextInput
-            label="Allow Countries"
-            description="Comma-separated ISO 3166-1 alpha-2 codes (e.g. US,GB,DE). Empty = allow all except deny list."
-            placeholder="US, GB, DE, FR"
-            value={config.allow_countries || ""}
-            onChange={(e) => updateConfig("allow_countries", e.currentTarget.value)}
-          />
-          <TextInput
-            label="Deny Countries"
-            description="Comma-separated ISO codes. Takes precedence over allow list."
-            placeholder="CN, RU"
-            value={config.deny_countries || ""}
-            onChange={(e) => updateConfig("deny_countries", e.currentTarget.value)}
-          />
-          <Switch
-            label="Trust Cloudflare Headers"
-            description="Use CF-Connecting-IP for client IP"
-            checked={config.trust_cloudflare_headers === "true"}
-            onChange={(e) =>
-              updateConfig(
-                "trust_cloudflare_headers",
-                e.currentTarget.checked ? "true" : "false",
-              )
-            }
-          />
-        </Stack>
-      );
+      return <GeoIPConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "hmac":
+      return <HMACConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "cache":
+      return <CacheConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "transform":
       return (
         <Stack gap="md">
           <TextInput
-            label="Secret"
-            description="HMAC secret for signature verification. Or GATEON_HMAC_SECRET env"
-            type="password"
-            placeholder="webhook-secret"
-            value={config.secret || ""}
-            onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+            label="Content-Type Filter (Optional)"
+            placeholder="application/json"
+            value={config.content_type || ""}
+            onChange={(e) => updateConfig("content_type", e.currentTarget.value)}
+            description="Only transform bodies with this content type (substring match)"
           />
-          <TextInput
-            label="Signature Header"
-            description="Header containing the HMAC. Default: X-Signature-256"
-            placeholder="X-Signature-256"
-            value={config.header || ""}
-            onChange={(e) => updateConfig("header", e.currentTarget.value)}
-          />
-          <TextInput
-            label="Signature Prefix"
-            description="Prefix to strip from header value (e.g. sha256= for GitHub)"
-            placeholder="sha256="
-            value={config.prefix || ""}
-            onChange={(e) => updateConfig("prefix", e.currentTarget.value)}
-          />
-          <TextInput
-            label="Methods to Verify"
-            description="Comma-separated. Empty = verify all methods"
-            placeholder="POST, PUT"
-            value={config.methods || ""}
-            onChange={(e) => updateConfig("methods", e.currentTarget.value)}
-          />
-          <NumberInput
-            label="Body Limit (bytes)"
-            description="Max body size to read for HMAC. Default: 1MB"
-            value={parseInt(config.body_limit) || 1048576}
-            onChange={(val) =>
-              updateConfig("body_limit", (val ?? 1048576).toString())
-            }
-            min={1024}
-          />
+          <Group grow>
+            <TextInput
+              label="Request Search"
+              placeholder="foo"
+              value={config.request_search || ""}
+              onChange={(e) =>
+                updateConfig("request_search", e.currentTarget.value)
+              }
+            />
+            <TextInput
+              label="Request Replace"
+              placeholder="bar"
+              value={config.request_replace || ""}
+              onChange={(e) =>
+                updateConfig("request_replace", e.currentTarget.value)
+              }
+            />
+          </Group>
+          <Group grow>
+            <TextInput
+              label="Response Search"
+              placeholder="apple"
+              value={config.response_search || ""}
+              onChange={(e) =>
+                updateConfig("response_search", e.currentTarget.value)
+              }
+            />
+            <TextInput
+              label="Response Replace"
+              placeholder="orange"
+              value={config.response_replace || ""}
+              onChange={(e) =>
+                updateConfig("response_replace", e.currentTarget.value)
+              }
+            />
+          </Group>
         </Stack>
       );
 
-    case "cache":
+    case "wasm":
       return (
         <Stack gap="md">
-          <Select
-            label="Storage"
-            data={[
-              { label: "Memory (Local)", value: "memory" },
-              { label: "Redis (Distributed)", value: "redis" },
-            ]}
-            value={config.storage || "memory"}
-            onChange={(val) => updateConfig("storage", val || "memory")}
-            description="Redis requires Redis enabled in Settings. Use for multi-instance deployments."
+          <Text size="sm">
+            WASM Middleware allows you to run custom logic in a sandboxed WebAssembly environment.
+            The module should export a `handle()` function that interacts with the HTTP request.
+          </Text>
+          <FileInput
+            label="WASM Module Binary"
+            description="Upload your .wasm module"
+            placeholder="Select .wasm file"
+            accept=".wasm"
+            leftSection={<IconCode size={14} />}
+            onChange={async (file) => {
+              if (file && onWasmBlobChange) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                  const arr = new Uint8Array(e.target?.result as ArrayBuffer);
+                  // Convert to base64 string
+                  let binary = "";
+                  for (let i = 0; i < arr.byteLength; i++) {
+                    binary += String.fromCharCode(arr[i]);
+                  }
+                  onWasmBlobChange(window.btoa(binary));
+                };
+                reader.readAsArrayBuffer(file);
+              }
+            }}
           />
-          <NumberInput
-            label="TTL (seconds)"
-            value={parseInt(config.ttl_seconds) || 60}
-            onChange={(val) => updateConfig("ttl_seconds", (val ?? 60).toString())}
-            min={1}
-            description="How long to cache GET responses"
-          />
-          <NumberInput
-            label="Max Entries"
-            value={parseInt(config.max_entries) || 1024}
-            onChange={(val) => updateConfig("max_entries", (val ?? 1024).toString())}
-            min={1}
-            description="Memory only; Redis has no local limit"
-          />
-          <NumberInput
-            label="Max Body (KB)"
-            value={parseInt(config.max_body_kb) || 256}
-            onChange={(val) => updateConfig("max_body_kb", (val ?? 256).toString())}
-            min={1}
-            description="Skip caching responses larger than this"
-          />
+          {wasmBlob && (
+            <Group gap="xs">
+              <IconCheck size={14} color="green" />
+              <Text size="xs" c="green">
+                Module uploaded ({Math.round((wasmBlob.length * 0.75) / 1024)} KB)
+              </Text>
+            </Group>
+          )}
         </Stack>
       );
 

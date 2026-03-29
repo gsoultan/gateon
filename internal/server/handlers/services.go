@@ -30,6 +30,22 @@ func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
 		}
 		WriteProtoResponse(w, http.StatusOK, &svc)
 	})
+	mux.HandleFunc("POST /v1/services/canary", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceServices) {
+			return
+		}
+		var req gateonv1.StartCanaryRequest
+		if err := DecodeRequestBody(r, &req); err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		taskID, err := d.CanaryService.StartCanary(r.Context(), &req)
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, "failed to start canary deployment")
+			return
+		}
+		WriteProtoResponse(w, http.StatusOK, &gateonv1.StartCanaryResponse{Success: true, TaskId: taskID})
+	})
 	mux.HandleFunc("DELETE /v1/services/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceServices) {
 			return

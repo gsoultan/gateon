@@ -18,6 +18,7 @@ type Deps struct {
 	EpService          domain.EntryPointService
 	MwService          domain.MiddlewareService
 	TLSOptService      domain.TLSOptionService
+	CanaryService      domain.CanaryService
 	AuthManager        auth.Service
 	Version            string
 	StartTime          time.Time

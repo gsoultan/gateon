@@ -29,6 +29,7 @@ const CircuitBreakerPage = lazy(() => import("./routes/CircuitBreakerPage"));
 const DocsPage = lazy(() => import("./routes/DocsPage"));
 const LoginPage = lazy(() => import("./routes/LoginPage"));
 const SetupPage = lazy(() => import("./routes/SetupPage"));
+const TopologyPage = lazy(() => import("./routes/TopologyPage"));
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -175,6 +176,12 @@ const docsRoute = createRoute({
   component: () => <DocsPage />,
 });
 
+const topologyRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/topology",
+  component: () => <TopologyPage />,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
@@ -193,6 +200,7 @@ const routeTree = rootRoute.addChildren([
     tlsOptionsRoute,
     settingsRoute,
     usersRoute,
+    topologyRoute,
   ]),
 ]);
 
