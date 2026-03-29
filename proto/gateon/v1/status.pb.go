@@ -153,7 +153,7 @@ const file_gateon_v1_status_proto_rawDesc = "" +
 	"\x06uptime\x18\x03 \x01(\x03R\x06uptime\x12!\n" +
 	"\fmemory_usage\x18\x04 \x01(\x03R\vmemoryUsage\x12!\n" +
 	"\froutes_count\x18\x05 \x01(\x05R\vroutesCount\x12%\n" +
-	"\x0eservices_count\x18\x06 \x01(\x05R\rservicesCountB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\x0eservices_count\x18\x06 \x01(\x05R\rservicesCountB5Z3github.com/gsoultan/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_status_proto_rawDescOnce sync.Once

@@ -2,8 +2,10 @@ package discovery
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -31,6 +33,7 @@ func NewResolver() *Resolver {
 			"etcd":   &EtcdProvider{},
 			"mdns":   &MDNSProvider{},
 			"eureka": &EurekaProvider{},
+			"zk":     &ZookeeperProvider{},
 		},
 	}
 }
@@ -185,7 +188,79 @@ func (p *MDNSProvider) Resolve(ctx context.Context, target string) ([]*gateonv1.
 type EurekaProvider struct{}
 
 func (p *EurekaProvider) Resolve(ctx context.Context, target string) ([]*gateonv1.Target, error) {
-	// Eureka discovery logic would go here.
-	// Typically involves: GET /eureka/v2/apps/{target}
-	return nil, fmt.Errorf("eureka provider not yet fully implemented")
+	// target format: http://eureka-server:8761/eureka/v2/apps/{appId}
+	// or just {appId} if default eureka is used.
+	url := target
+	if !strings.HasPrefix(target, "http") {
+		// Default to localhost eureka
+		url = fmt.Sprintf("http://localhost:8761/eureka/v2/apps/%s", target)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("eureka returned status: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Application struct {
+			Instance []struct {
+				IPAddr string `json:"ipAddr"`
+				Port   struct {
+					Value int `json:"$"`
+				} `json:"port"`
+				SecurePort struct {
+					Value int `json:"$"`
+				} `json:"securePort"`
+				Status string `json:"status"`
+			} `json:"instance"`
+		} `json:"application"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	var targets []*gateonv1.Target
+	for _, inst := range result.Application.Instance {
+		if inst.Status != "UP" {
+			continue
+		}
+		port := inst.Port.Value
+		scheme := "http"
+		if port == 0 && inst.SecurePort.Value != 0 {
+			port = inst.SecurePort.Value
+			scheme = "https"
+		}
+		targets = append(targets, &gateonv1.Target{
+			Url:      fmt.Sprintf("%s://%s:%d", scheme, inst.IPAddr, port),
+			Weight:   1,
+			Protocol: scheme,
+		})
+	}
+
+	return targets, nil
+}
+
+// ZookeeperProvider resolves targets using Apache Zookeeper.
+type ZookeeperProvider struct{}
+
+func (p *ZookeeperProvider) Resolve(ctx context.Context, target string) ([]*gateonv1.Target, error) {
+	// For production readiness without external deps in this environment,
+	// we use a simplified approach or suggest the 'zk' package.
+	// In a real scenario, we'd use github.com/go-zookeeper/zk
+	return nil, fmt.Errorf("zookeeper provider requires github.com/go-zookeeper/zk dependency")
 }

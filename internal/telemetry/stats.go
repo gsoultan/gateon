@@ -78,6 +78,11 @@ func RecordPathRequest(host, path string, latencySeconds float64) {
 	recordToStore(host, path, latencySeconds, time.Now())
 }
 
+// RecordTrace records a trace for an operation.
+func RecordTrace(id, operationName, serviceName string, durationMs int64, timestamp time.Time, status, path string) {
+	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path)
+}
+
 // GetPathStats returns a list of aggregated path statistics.
 func GetPathStats() []PathStats {
 	// If persistent store is enabled, prefer querying it using current retention window

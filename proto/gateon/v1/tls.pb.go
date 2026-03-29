@@ -468,7 +468,7 @@ const file_gateon_v1_tls_proto_rawDesc = "" +
 	"\x10client_auth_type\x18\a \x01(\tR\x0eclientAuthType\x12\x1d\n" +
 	"\n" +
 	"sni_strict\x18\b \x01(\bR\tsniStrict\x12%\n" +
-	"\x0ealpn_protocols\x18\t \x03(\tR\ralpnProtocolsB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\x0ealpn_protocols\x18\t \x03(\tR\ralpnProtocolsB5Z3github.com/gsoultan/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_tls_proto_rawDescOnce sync.Once

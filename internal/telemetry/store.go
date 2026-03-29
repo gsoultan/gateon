@@ -31,10 +31,21 @@ type increment struct {
 	atTime time.Time
 }
 
+type traceRecord struct {
+	ID            string
+	OperationName string
+	ServiceName   string
+	DurationMs    int64
+	Timestamp     time.Time
+	Status        string
+	Path          string
+}
+
 type pathStatsStore struct {
 	db            *sql.DB
 	dialect       db.Dialect
 	inCh          chan increment
+	traceInCh     chan traceRecord
 	stopCh        chan struct{}
 	stopped       atomic.Bool
 	wg            sync.WaitGroup
@@ -67,16 +78,17 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 
 	st := &pathStatsStore{
-		db:      database,
-		dialect: dialect,
-		inCh:    make(chan increment, 4096),
-		stopCh:  make(chan struct{}),
+		db:        database,
+		dialect:   dialect,
+		inCh:      make(chan increment, 4096),
+		traceInCh: make(chan traceRecord, 4096),
+		stopCh:    make(chan struct{}),
 	}
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
 
-	if err := st.migrate(); err != nil {
+	if err := db.Migrate(database, dialect); err != nil {
 		_ = database.Close()
-		return err
+		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
 	st.wg.Add(1)
@@ -84,15 +96,6 @@ func initStore(databaseURL string, retentionDays int) error {
 
 	store = st
 	return nil
-}
-
-func (s *pathStatsStore) migrate() error {
-	query := QueryCreatePathStatsDefault
-	if s.dialect.Driver == db.DriverSQLite {
-		query = QueryCreatePathStatsSQLite
-	}
-	_, err := s.db.Exec(query)
-	return err
 }
 
 func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
@@ -111,37 +114,52 @@ func (s *pathStatsStore) loop() {
 	defer pruneTicker.Stop()
 
 	batch := make([]increment, 0, 1024)
+	traceBatch := make([]traceRecord, 0, 1024)
+
 	flush := func() {
-		if len(batch) == 0 {
-			return
-		}
-		tx, err := s.db.Begin()
-		if err != nil {
-			logger.Default().Error().Err(err).Msg("path stats: begin transaction failed")
-			batch = batch[:0]
-			return
-		}
-		defer func() {
-			_ = tx.Rollback()
-		}()
-		stmt, err := s.upsertStmt(tx)
-		if err != nil {
-			batch = batch[:0]
-			return
-		}
-		defer stmt.Close()
-		for _, inc := range batch {
-			day := inc.atTime.UTC().Format("2006-01-02")
-			if _, err := stmt.Exec(day, inc.host, inc.path, 1, inc.latS); err != nil {
-				logger.Default().Error().Err(err).Msg("path stats: upsert failed")
-				batch = batch[:0]
-				return
+		if len(batch) > 0 {
+			tx, err := s.db.Begin()
+			if err != nil {
+				logger.Default().Error().Err(err).Msg("path stats: begin transaction failed")
+			} else {
+				stmt, err := s.upsertStmt(tx)
+				if err == nil {
+					for _, inc := range batch {
+						day := inc.atTime.UTC().Format("2006-01-02")
+						if _, err := stmt.Exec(day, inc.host, inc.path, 1, inc.latS); err != nil {
+							logger.Default().Error().Err(err).Msg("path stats: upsert failed")
+						}
+					}
+					stmt.Close()
+					_ = tx.Commit()
+				} else {
+					_ = tx.Rollback()
+				}
 			}
+			batch = batch[:0]
 		}
-		if err := tx.Commit(); err != nil {
-			logger.Default().Error().Err(err).Msg("path stats: commit failed")
+
+		if len(traceBatch) > 0 {
+			tx, err := s.db.Begin()
+			if err != nil {
+				logger.Default().Error().Err(err).Msg("traces: begin transaction failed")
+			} else {
+				query := s.dialect.Rebind("INSERT INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path) VALUES (?, ?, ?, ?, ?, ?, ?)")
+				stmt, err := tx.Prepare(query)
+				if err == nil {
+					for _, tr := range traceBatch {
+						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path); err != nil {
+							logger.Default().Error().Err(err).Msg("traces: insert failed")
+						}
+					}
+					stmt.Close()
+					_ = tx.Commit()
+				} else {
+					_ = tx.Rollback()
+				}
+			}
+			traceBatch = traceBatch[:0]
 		}
-		batch = batch[:0]
 	}
 
 	for {
@@ -149,6 +167,11 @@ func (s *pathStatsStore) loop() {
 		case inc := <-s.inCh:
 			batch = append(batch, inc)
 			if len(batch) >= cap(batch) {
+				flush()
+			}
+		case tr := <-s.traceInCh:
+			traceBatch = append(traceBatch, tr)
+			if len(traceBatch) >= cap(traceBatch) {
 				flush()
 			}
 		case <-flushTicker.C:
@@ -171,6 +194,12 @@ func (s *pathStatsStore) prune() {
 	q := s.dialect.Rebind(QueryPrunePathStats)
 	if _, err := s.db.Exec(q, cutoff); err != nil {
 		logger.Default().Error().Err(err).Msg("path stats: prune failed")
+	}
+
+	cutoffTime := time.Now().AddDate(0, 0, -days)
+	qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
+	if _, err := s.db.Exec(qTraces, cutoffTime); err != nil {
+		logger.Default().Error().Err(err).Msg("traces: prune failed")
 	}
 }
 
@@ -216,6 +245,53 @@ func recordToStore(host, path string, latencySeconds float64, at time.Time) {
 	default:
 		// drop on backpressure to protect the request path
 	}
+}
+
+// recordTraceToStore attempts to enqueue a trace record.
+func recordTraceToStore(id, operationName, serviceName string, durationMs int64, timestamp time.Time, status, path string) {
+	if store == nil {
+		return
+	}
+	select {
+	case store.traceInCh <- traceRecord{
+		ID:            id,
+		OperationName: operationName,
+		ServiceName:   serviceName,
+		DurationMs:    durationMs,
+		Timestamp:     timestamp,
+		Status:        status,
+		Path:          path,
+	}:
+	default:
+		// drop on backpressure
+	}
+}
+
+// GetTraces returns the last N traces from the store.
+func GetTraces(limit int) []traceRecord {
+	if store == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path FROM traces ORDER BY timestamp DESC LIMIT ?")
+	rows, err := store.db.Query(query, limit)
+	if err != nil {
+		logger.Default().Error().Err(err).Msg("traces: query failed")
+		return nil
+	}
+	defer rows.Close()
+	res := make([]traceRecord, 0, limit)
+	for rows.Next() {
+		var tr traceRecord
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path); err != nil {
+			logger.Default().Error().Err(err).Msg("traces: scan failed")
+			continue
+		}
+		res = append(res, tr)
+	}
+	return res
 }
 
 // GetPathStatsWindow returns aggregated stats from storage for the last `days` days.

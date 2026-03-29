@@ -119,6 +119,21 @@ func Metrics(routeID string) Middleware {
 
 			duration := time.Since(start)
 			telemetry.RecordPathRequest(r.Host, r.URL.Path, duration.Seconds())
+
+			status := "success"
+			if sw.Status >= 400 {
+				status = "error"
+			}
+			telemetry.RecordTrace(
+				request.GetID(r),
+				r.Method+" "+r.URL.Path,
+				routeID,
+				duration.Milliseconds(),
+				start,
+				status,
+				r.Host+r.URL.Path,
+			)
+
 			httpRequestsTotal.WithLabelValues(routeID, r.Method, getStatusString(sw.Status)).Inc()
 			httpDuration.WithLabelValues(routeID, r.Method).Observe(duration.Seconds())
 		})
@@ -183,4 +198,19 @@ func IPFilter(allowList, denyList []string) Middleware {
 
 func lastIndex(s, sep string) int {
 	return strings.LastIndex(s, sep)
+}
+
+// RequestID returns a middleware that adds a unique ID to each request.
+func RequestID() Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			id := r.Header.Get("X-Request-ID")
+			if id == "" {
+				id = request.GenerateID()
+			}
+			w.Header().Set("X-Request-ID", id)
+			r = r.WithContext(request.WithID(r.Context(), id))
+			next.ServeHTTP(w, r)
+		})
+	}
 }

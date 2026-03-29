@@ -939,7 +939,7 @@ const file_gateon_v1_common_proto_rawDesc = "" +
 	"\vskip_verify\x18\x05 \x01(\bR\n" +
 	"skipVerify\x12\x1f\n" +
 	"\vserver_name\x18\x06 \x01(\tR\n" +
-	"serverNameB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"serverNameB5Z3github.com/gsoultan/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_common_proto_rawDescOnce sync.Once

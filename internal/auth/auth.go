@@ -77,6 +77,11 @@ func NewManager(databaseURL, symmetricKey string) (*Manager, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	if err := db.Migrate(database, dialect); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("failed to migrate database: %w", err)
+	}
+
 	m := &Manager{
 		db:           database,
 		dialect:      dialect,
@@ -84,19 +89,7 @@ func NewManager(databaseURL, symmetricKey string) (*Manager, error) {
 		symmetricKey: []byte(symmetricKey),
 	}
 
-	if err := m.bootstrap(); err != nil {
-		_ = database.Close()
-		return nil, err
-	}
-
 	return m, nil
-}
-
-func (m *Manager) bootstrap() error {
-	if _, err := m.db.Exec(QueryCreateUsersTable); err != nil {
-		return fmt.Errorf("failed to create users table: %w", err)
-	}
-	return nil
 }
 
 func (m *Manager) IsSetupDone() bool {

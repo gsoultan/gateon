@@ -157,6 +157,7 @@ type GlobalConfig struct {
 	Ha               *HaConfig               `protobuf:"bytes,8,opt,name=ha,proto3" json:"ha,omitempty"`
 	AnomalyDetection *AnomalyDetectionConfig `protobuf:"bytes,9,opt,name=anomaly_detection,json=anomalyDetection,proto3" json:"anomaly_detection,omitempty"`
 	Ebpf             *EbpfConfig             `protobuf:"bytes,10,opt,name=ebpf,proto3" json:"ebpf,omitempty"`
+	Ai               *AIConfig               `protobuf:"bytes,11,opt,name=ai,proto3" json:"ai,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -261,6 +262,89 @@ func (x *GlobalConfig) GetEbpf() *EbpfConfig {
 	return nil
 }
 
+func (x *GlobalConfig) GetAi() *AIConfig {
+	if x != nil {
+		return x.Ai
+	}
+	return nil
+}
+
+type AIConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"` // "openai", "anthropic"
+	ApiKey        string                 `protobuf:"bytes,3,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
+	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	BaseUrl       string                 `protobuf:"bytes,5,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AIConfig) Reset() {
+	*x = AIConfig{}
+	mi := &file_gateon_v1_global_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AIConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AIConfig) ProtoMessage() {}
+
+func (x *AIConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_gateon_v1_global_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AIConfig.ProtoReflect.Descriptor instead.
+func (*AIConfig) Descriptor() ([]byte, []int) {
+	return file_gateon_v1_global_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AIConfig) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *AIConfig) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *AIConfig) GetApiKey() string {
+	if x != nil {
+		return x.ApiKey
+	}
+	return ""
+}
+
+func (x *AIConfig) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *AIConfig) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
 type WafConfig struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Enabled          bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
@@ -273,7 +357,7 @@ type WafConfig struct {
 
 func (x *WafConfig) Reset() {
 	*x = WafConfig{}
-	mi := &file_gateon_v1_global_proto_msgTypes[4]
+	mi := &file_gateon_v1_global_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -285,7 +369,7 @@ func (x *WafConfig) String() string {
 func (*WafConfig) ProtoMessage() {}
 
 func (x *WafConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_gateon_v1_global_proto_msgTypes[4]
+	mi := &file_gateon_v1_global_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -298,7 +382,7 @@ func (x *WafConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WafConfig.ProtoReflect.Descriptor instead.
 func (*WafConfig) Descriptor() ([]byte, []int) {
-	return file_gateon_v1_global_proto_rawDescGZIP(), []int{4}
+	return file_gateon_v1_global_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WafConfig) GetEnabled() bool {
@@ -344,7 +428,7 @@ type HaConfig struct {
 
 func (x *HaConfig) Reset() {
 	*x = HaConfig{}
-	mi := &file_gateon_v1_global_proto_msgTypes[5]
+	mi := &file_gateon_v1_global_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -356,7 +440,7 @@ func (x *HaConfig) String() string {
 func (*HaConfig) ProtoMessage() {}
 
 func (x *HaConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_gateon_v1_global_proto_msgTypes[5]
+	mi := &file_gateon_v1_global_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -369,7 +453,7 @@ func (x *HaConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HaConfig.ProtoReflect.Descriptor instead.
 func (*HaConfig) Descriptor() ([]byte, []int) {
-	return file_gateon_v1_global_proto_rawDescGZIP(), []int{5}
+	return file_gateon_v1_global_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HaConfig) GetEnabled() bool {
@@ -433,7 +517,7 @@ type AnomalyDetectionConfig struct {
 
 func (x *AnomalyDetectionConfig) Reset() {
 	*x = AnomalyDetectionConfig{}
-	mi := &file_gateon_v1_global_proto_msgTypes[6]
+	mi := &file_gateon_v1_global_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -445,7 +529,7 @@ func (x *AnomalyDetectionConfig) String() string {
 func (*AnomalyDetectionConfig) ProtoMessage() {}
 
 func (x *AnomalyDetectionConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_gateon_v1_global_proto_msgTypes[6]
+	mi := &file_gateon_v1_global_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -458,7 +542,7 @@ func (x *AnomalyDetectionConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnomalyDetectionConfig.ProtoReflect.Descriptor instead.
 func (*AnomalyDetectionConfig) Descriptor() ([]byte, []int) {
-	return file_gateon_v1_global_proto_rawDescGZIP(), []int{6}
+	return file_gateon_v1_global_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AnomalyDetectionConfig) GetEnabled() bool {
@@ -494,13 +578,14 @@ type EbpfConfig struct {
 	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	XdpRateLimit  bool                   `protobuf:"varint,2,opt,name=xdp_rate_limit,json=xdpRateLimit,proto3" json:"xdp_rate_limit,omitempty"`
 	TcFiltering   bool                   `protobuf:"varint,3,opt,name=tc_filtering,json=tcFiltering,proto3" json:"tc_filtering,omitempty"`
+	Interface     string                 `protobuf:"bytes,4,opt,name=interface,proto3" json:"interface,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EbpfConfig) Reset() {
 	*x = EbpfConfig{}
-	mi := &file_gateon_v1_global_proto_msgTypes[7]
+	mi := &file_gateon_v1_global_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -512,7 +597,7 @@ func (x *EbpfConfig) String() string {
 func (*EbpfConfig) ProtoMessage() {}
 
 func (x *EbpfConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_gateon_v1_global_proto_msgTypes[7]
+	mi := &file_gateon_v1_global_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -525,7 +610,7 @@ func (x *EbpfConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EbpfConfig.ProtoReflect.Descriptor instead.
 func (*EbpfConfig) Descriptor() ([]byte, []int) {
-	return file_gateon_v1_global_proto_rawDescGZIP(), []int{7}
+	return file_gateon_v1_global_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *EbpfConfig) GetEnabled() bool {
@@ -549,6 +634,13 @@ func (x *EbpfConfig) GetTcFiltering() bool {
 	return false
 }
 
+func (x *EbpfConfig) GetInterface() string {
+	if x != nil {
+		return x.Interface
+	}
+	return ""
+}
+
 type AuthConfig struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Enabled        bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
@@ -562,7 +654,7 @@ type AuthConfig struct {
 
 func (x *AuthConfig) Reset() {
 	*x = AuthConfig{}
-	mi := &file_gateon_v1_global_proto_msgTypes[8]
+	mi := &file_gateon_v1_global_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -574,7 +666,7 @@ func (x *AuthConfig) String() string {
 func (*AuthConfig) ProtoMessage() {}
 
 func (x *AuthConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_gateon_v1_global_proto_msgTypes[8]
+	mi := &file_gateon_v1_global_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -587,7 +679,7 @@ func (x *AuthConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthConfig.ProtoReflect.Descriptor instead.
 func (*AuthConfig) Descriptor() ([]byte, []int) {
-	return file_gateon_v1_global_proto_rawDescGZIP(), []int{8}
+	return file_gateon_v1_global_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AuthConfig) GetEnabled() bool {
@@ -634,7 +726,7 @@ const file_gateon_v1_global_proto_rawDesc = "" +
 	"\x19UpdateGlobalConfigRequest\x12/\n" +
 	"\x06config\x18\x01 \x01(\v2\x17.gateon.v1.GlobalConfigR\x06config\"6\n" +
 	"\x1aUpdateGlobalConfigResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xe4\x03\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x89\x04\n" +
 	"\fGlobalConfig\x12&\n" +
 	"\x03tls\x18\x01 \x01(\v2\x14.gateon.v1.TlsConfigR\x03tls\x12,\n" +
 	"\x05redis\x18\x02 \x01(\v2\x16.gateon.v1.RedisConfigR\x05redis\x12)\n" +
@@ -646,7 +738,14 @@ const file_gateon_v1_global_proto_rawDesc = "" +
 	"\x02ha\x18\b \x01(\v2\x13.gateon.v1.HaConfigR\x02ha\x12N\n" +
 	"\x11anomaly_detection\x18\t \x01(\v2!.gateon.v1.AnomalyDetectionConfigR\x10anomalyDetection\x12)\n" +
 	"\x04ebpf\x18\n" +
-	" \x01(\v2\x15.gateon.v1.EbpfConfigR\x04ebpf\"\x92\x01\n" +
+	" \x01(\v2\x15.gateon.v1.EbpfConfigR\x04ebpf\x12#\n" +
+	"\x02ai\x18\v \x01(\v2\x13.gateon.v1.AIConfigR\x02ai\"\x8a\x01\n" +
+	"\bAIConfig\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1a\n" +
+	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x17\n" +
+	"\aapi_key\x18\x03 \x01(\tR\x06apiKey\x12\x14\n" +
+	"\x05model\x18\x04 \x01(\tR\x05model\x12\x19\n" +
+	"\bbase_url\x18\x05 \x01(\tR\abaseUrl\"\x92\x01\n" +
 	"\tWafConfig\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x17\n" +
 	"\ause_crs\x18\x02 \x01(\bR\x06useCrs\x12%\n" +
@@ -666,12 +765,13 @@ const file_gateon_v1_global_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12%\n" +
 	"\x0eprometheus_url\x18\x02 \x01(\tR\rprometheusUrl\x124\n" +
 	"\x16check_interval_seconds\x18\x03 \x01(\x05R\x14checkIntervalSeconds\x12 \n" +
-	"\vsensitivity\x18\x04 \x01(\x01R\vsensitivity\"o\n" +
+	"\vsensitivity\x18\x04 \x01(\x01R\vsensitivity\"\x8d\x01\n" +
 	"\n" +
 	"EbpfConfig\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12$\n" +
 	"\x0exdp_rate_limit\x18\x02 \x01(\bR\fxdpRateLimit\x12!\n" +
-	"\ftc_filtering\x18\x03 \x01(\bR\vtcFiltering\"\xd3\x01\n" +
+	"\ftc_filtering\x18\x03 \x01(\bR\vtcFiltering\x12\x1c\n" +
+	"\tinterface\x18\x04 \x01(\tR\tinterface\"\xd3\x01\n" +
 	"\n" +
 	"AuthConfig\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12#\n" +
@@ -679,7 +779,7 @@ const file_gateon_v1_global_proto_rawDesc = "" +
 	"\vsqlite_path\x18\x03 \x01(\tR\n" +
 	"sqlitePath\x12!\n" +
 	"\fdatabase_url\x18\x04 \x01(\tR\vdatabaseUrl\x12B\n" +
-	"\x0fdatabase_config\x18\x05 \x01(\v2\x19.gateon.v1.DatabaseConfigR\x0edatabaseConfigB3Z1github.com/gateon/gateon/proto/gateon/v1;gateonv1b\x06proto3"
+	"\x0fdatabase_config\x18\x05 \x01(\v2\x19.gateon.v1.DatabaseConfigR\x0edatabaseConfigB5Z3github.com/gsoultan/gateon/proto/gateon/v1;gateonv1b\x06proto3"
 
 var (
 	file_gateon_v1_global_proto_rawDescOnce sync.Once
@@ -693,42 +793,44 @@ func file_gateon_v1_global_proto_rawDescGZIP() []byte {
 	return file_gateon_v1_global_proto_rawDescData
 }
 
-var file_gateon_v1_global_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_gateon_v1_global_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_gateon_v1_global_proto_goTypes = []any{
 	(*GetGlobalConfigRequest)(nil),     // 0: gateon.v1.GetGlobalConfigRequest
 	(*UpdateGlobalConfigRequest)(nil),  // 1: gateon.v1.UpdateGlobalConfigRequest
 	(*UpdateGlobalConfigResponse)(nil), // 2: gateon.v1.UpdateGlobalConfigResponse
 	(*GlobalConfig)(nil),               // 3: gateon.v1.GlobalConfig
-	(*WafConfig)(nil),                  // 4: gateon.v1.WafConfig
-	(*HaConfig)(nil),                   // 5: gateon.v1.HaConfig
-	(*AnomalyDetectionConfig)(nil),     // 6: gateon.v1.AnomalyDetectionConfig
-	(*EbpfConfig)(nil),                 // 7: gateon.v1.EbpfConfig
-	(*AuthConfig)(nil),                 // 8: gateon.v1.AuthConfig
-	(*TlsConfig)(nil),                  // 9: gateon.v1.TlsConfig
-	(*RedisConfig)(nil),                // 10: gateon.v1.RedisConfig
-	(*OtelConfig)(nil),                 // 11: gateon.v1.OtelConfig
-	(*LogConfig)(nil),                  // 12: gateon.v1.LogConfig
-	(*TransportConfig)(nil),            // 13: gateon.v1.TransportConfig
-	(*DatabaseConfig)(nil),             // 14: gateon.v1.DatabaseConfig
+	(*AIConfig)(nil),                   // 4: gateon.v1.AIConfig
+	(*WafConfig)(nil),                  // 5: gateon.v1.WafConfig
+	(*HaConfig)(nil),                   // 6: gateon.v1.HaConfig
+	(*AnomalyDetectionConfig)(nil),     // 7: gateon.v1.AnomalyDetectionConfig
+	(*EbpfConfig)(nil),                 // 8: gateon.v1.EbpfConfig
+	(*AuthConfig)(nil),                 // 9: gateon.v1.AuthConfig
+	(*TlsConfig)(nil),                  // 10: gateon.v1.TlsConfig
+	(*RedisConfig)(nil),                // 11: gateon.v1.RedisConfig
+	(*OtelConfig)(nil),                 // 12: gateon.v1.OtelConfig
+	(*LogConfig)(nil),                  // 13: gateon.v1.LogConfig
+	(*TransportConfig)(nil),            // 14: gateon.v1.TransportConfig
+	(*DatabaseConfig)(nil),             // 15: gateon.v1.DatabaseConfig
 }
 var file_gateon_v1_global_proto_depIdxs = []int32{
 	3,  // 0: gateon.v1.UpdateGlobalConfigRequest.config:type_name -> gateon.v1.GlobalConfig
-	9,  // 1: gateon.v1.GlobalConfig.tls:type_name -> gateon.v1.TlsConfig
-	10, // 2: gateon.v1.GlobalConfig.redis:type_name -> gateon.v1.RedisConfig
-	11, // 3: gateon.v1.GlobalConfig.otel:type_name -> gateon.v1.OtelConfig
-	12, // 4: gateon.v1.GlobalConfig.log:type_name -> gateon.v1.LogConfig
-	8,  // 5: gateon.v1.GlobalConfig.auth:type_name -> gateon.v1.AuthConfig
-	13, // 6: gateon.v1.GlobalConfig.transport:type_name -> gateon.v1.TransportConfig
-	4,  // 7: gateon.v1.GlobalConfig.waf:type_name -> gateon.v1.WafConfig
-	5,  // 8: gateon.v1.GlobalConfig.ha:type_name -> gateon.v1.HaConfig
-	6,  // 9: gateon.v1.GlobalConfig.anomaly_detection:type_name -> gateon.v1.AnomalyDetectionConfig
-	7,  // 10: gateon.v1.GlobalConfig.ebpf:type_name -> gateon.v1.EbpfConfig
-	14, // 11: gateon.v1.AuthConfig.database_config:type_name -> gateon.v1.DatabaseConfig
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	10, // 1: gateon.v1.GlobalConfig.tls:type_name -> gateon.v1.TlsConfig
+	11, // 2: gateon.v1.GlobalConfig.redis:type_name -> gateon.v1.RedisConfig
+	12, // 3: gateon.v1.GlobalConfig.otel:type_name -> gateon.v1.OtelConfig
+	13, // 4: gateon.v1.GlobalConfig.log:type_name -> gateon.v1.LogConfig
+	9,  // 5: gateon.v1.GlobalConfig.auth:type_name -> gateon.v1.AuthConfig
+	14, // 6: gateon.v1.GlobalConfig.transport:type_name -> gateon.v1.TransportConfig
+	5,  // 7: gateon.v1.GlobalConfig.waf:type_name -> gateon.v1.WafConfig
+	6,  // 8: gateon.v1.GlobalConfig.ha:type_name -> gateon.v1.HaConfig
+	7,  // 9: gateon.v1.GlobalConfig.anomaly_detection:type_name -> gateon.v1.AnomalyDetectionConfig
+	8,  // 10: gateon.v1.GlobalConfig.ebpf:type_name -> gateon.v1.EbpfConfig
+	4,  // 11: gateon.v1.GlobalConfig.ai:type_name -> gateon.v1.AIConfig
+	15, // 12: gateon.v1.AuthConfig.database_config:type_name -> gateon.v1.DatabaseConfig
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_gateon_v1_global_proto_init() }
@@ -743,7 +845,7 @@ func file_gateon_v1_global_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gateon_v1_global_proto_rawDesc), len(file_gateon_v1_global_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

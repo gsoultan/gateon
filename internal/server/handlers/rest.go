@@ -18,4 +18,5 @@ func RegisterRESTHandlers(mux *http.ServeMux, apiService *api.ApiService, d *Dep
 	registerGlobalHandlers(mux, apiService, d)
 	registerCertHandlers(mux, apiService)
 	registerDiagnosticHandlers(mux, d)
+	registerTracesHandlers(mux, apiService)
 }

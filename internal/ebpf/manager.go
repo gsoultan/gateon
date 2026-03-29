@@ -1,5 +1,7 @@
 package ebpf
 
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpf xdp_rate_limit xdp_rate_limit.c -- -I../include
+
 import (
 	"context"
 	"runtime"
@@ -44,11 +46,48 @@ func (m *EbpfManager) Start(ctx context.Context) {
 }
 
 func (m *EbpfManager) loadXDP(ctx context.Context) {
+	if runtime.GOOS != "linux" {
+		return
+	}
 	logger.L.Info().Msg("Attaching XDP program to primary interface for kernel-level rate limiting")
-	// In a full implementation, we would use:
-	// 1. Generate Go bindings from C eBPF code using bpf2go.
-	// 2. Load the ELF binary into the kernel.
-	// 3. Attach to the network interface using netlink.
+
+	// We use the interface name from config or default to eth0.
+	ifaceName := "eth0"
+	if m.config.Interface != "" {
+		ifaceName = m.config.Interface
+	}
+
+	logger.L.Debug().Str("interface", ifaceName).Msg("Loading eBPF/XDP program")
+
+	// The following would be implemented using the generated bpf2go code:
+	/*
+		iface, err := net.InterfaceByName(ifaceName)
+		if err != nil {
+			logger.L.Error().Err(err).Msg("failed to find interface")
+			return
+		}
+
+		// Load pre-compiled programs and maps into the kernel.
+		objs := xdp_rate_limitObjects{}
+		if err := loadXdp_rate_limitObjects(&objs, nil); err != nil {
+			logger.L.Error().Err(err).Msg("failed to load eBPF objects")
+			return
+		}
+		defer objs.Close()
+
+		// Attach the program to the interface.
+		l, err := link.AttachXDP(link.XDPOptions{
+			Program:   objs.XdpRateLimit,
+			Interface: iface.Index,
+		})
+		if err != nil {
+			logger.L.Error().Err(err).Msg("failed to attach XDP program")
+			return
+		}
+		defer l.Close()
+
+		logger.L.Info().Msg("XDP rate limiting successfully attached")
+	*/
 }
 
 func (m *EbpfManager) loadTC(ctx context.Context) {

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package gateon.v1;
 
-option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
 
 message ListRoutesRequest {
   int32 page = 1;

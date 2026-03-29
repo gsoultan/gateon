@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package gateon.v1;
 
-option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
 
 import "gateon/v1/status.proto";
 import "gateon/v1/route.proto";
@@ -12,9 +12,11 @@ import "gateon/v1/entrypoint.proto";
 import "gateon/v1/middleware.proto";
 import "gateon/v1/tls.proto";
 import "gateon/v1/auth.proto";
+import "gateon/v1/trace.proto";
 
 service ApiService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc ListTraces(ListTracesRequest) returns (ListTracesResponse);
   rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse);
   rpc UpdateRoute(UpdateRouteRequest) returns (UpdateRouteResponse);
   rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);

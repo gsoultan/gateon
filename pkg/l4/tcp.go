@@ -14,17 +14,17 @@ import (
 
 // TCPBackendPool manages multiple TCP backends with health checks and load balancing.
 type TCPBackendPool struct {
-	addrs          []string
-	policy         string // "round_robin", "least_conn"
-	alive          []atomic.Bool
-	active         []atomic.Int32
-	next           atomic.Uint64
-	interval       time.Duration
-	timeout        time.Duration
-	proxyProtocol  bool // send HAProxy PROXY protocol v1 header before forwarding
-	mu             sync.RWMutex
-	stop           chan struct{}
-	stopOnce       sync.Once
+	addrs         []string
+	policy        string // "round_robin", "least_conn"
+	alive         []atomic.Bool
+	active        []atomic.Int32
+	next          atomic.Uint64
+	interval      time.Duration
+	timeout       time.Duration
+	proxyProtocol bool // send HAProxy PROXY protocol v1 header before forwarding
+	mu            sync.RWMutex
+	stop          chan struct{}
+	stopOnce      sync.Once
 }
 
 // NewTCPBackendPool creates a TCP backend pool with health checks.
@@ -175,13 +175,18 @@ func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
 
 	done := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(backend, client)
+		// Attempt Splice for Zero-Copy on Linux, fallback to io.Copy
+		if _, err := SpliceCopy(backend, client); err != nil {
+			_, _ = io.Copy(backend, client)
+		}
 		if c, ok := backend.(interface{ CloseWrite() error }); ok {
 			_ = c.CloseWrite()
 		}
 		close(done)
 	}()
-	_, _ = io.Copy(client, backend)
+	if _, err := SpliceCopy(client, backend); err != nil {
+		_, _ = io.Copy(client, backend)
+	}
 	if c, ok := client.(interface{ CloseWrite() error }); ok {
 		_ = c.CloseWrite()
 	}

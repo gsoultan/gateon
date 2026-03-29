@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package gateon.v1;
 
-option go_package = "github.com/gateon/gateon/proto/gateon/v1;gateonv1";
+option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
 
 import "gateon/v1/common.proto";
 
@@ -27,6 +27,15 @@ message GlobalConfig {
   HaConfig ha = 8;
   AnomalyDetectionConfig anomaly_detection = 9;
   EbpfConfig ebpf = 10;
+  AIConfig ai = 11;
+}
+
+message AIConfig {
+  bool enabled = 1;
+  string provider = 2; // "openai", "anthropic"
+  string api_key = 3;
+  string model = 4;
+  string base_url = 5;
 }
 
 message WafConfig {
@@ -57,6 +66,7 @@ message EbpfConfig {
   bool enabled = 1;
   bool xdp_rate_limit = 2;
   bool tc_filtering = 3;
+  string interface = 4;
 }
 
 message AuthConfig {
