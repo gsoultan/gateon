@@ -3,7 +3,7 @@ import { Stack, Text, NumberInput, Button, Group, Table, Badge, Title, Paper, Al
 import { IconInfoCircle, IconRocket, IconCheck } from '@tabler/icons-react'
 import { apiFetch, getApiErrorMessage } from '../hooks/useGateon'
 import { notifications } from '@mantine/notifications'
-import { Service, Target } from '../types/gateon'
+import type { Service, Target } from '../types/gateon'
 
 interface CanaryWizardProps {
   service: Service
