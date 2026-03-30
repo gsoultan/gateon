@@ -42,3 +42,4 @@ ui/.bun-cache
 ui/package-lock.json
 gateon.exe
 gateon_test.exe
+go.sum
