@@ -72,6 +72,10 @@ func NewManager(cfg Config) *Manager {
 	if cfg.CacheDir == "" {
 		cfg.CacheDir = "certs"
 	}
+	// Backward compatibility: sync top-level Email to AcmeConfig if not set
+	if cfg.Acme.Email == "" {
+		cfg.Acme.Email = cfg.Email
+	}
 	return &Manager{config: cfg}
 }
 
@@ -318,6 +322,22 @@ func InitFromEnv() Config {
 		MaxVersion:     os.Getenv("GATEON_TLS_MAX_VERSION"),
 		ClientAuthType: os.Getenv("GATEON_TLS_CLIENT_AUTH_TYPE"),
 		CipherSuites:   splitAndTrim(os.Getenv("GATEON_TLS_CIPHER_SUITES")),
+	}
+
+	// Acme specific environment variables
+	cfg.Acme.Enabled = os.Getenv("GATEON_ACME_ENABLED") == "true"
+	cfg.Acme.Email = os.Getenv("GATEON_ACME_EMAIL")
+	cfg.Acme.CAServer = os.Getenv("GATEON_ACME_CA_SERVER")
+	cfg.Acme.ChallengeType = os.Getenv("GATEON_ACME_CHALLENGE_TYPE")
+
+	// Backward compatibility: use top-level Email if Acme.Email is not set
+	if cfg.Acme.Email == "" {
+		cfg.Acme.Email = cfg.Email
+	}
+
+	// Auto-enable ACME if an email is provided and it wasn't explicitly disabled
+	if !cfg.Acme.Enabled && os.Getenv("GATEON_ACME_ENABLED") == "" && cfg.Acme.Email != "" {
+		cfg.Acme.Enabled = true
 	}
 
 	// Support for multiple certificates from env (e.g., GATEON_TLS_CERTS="cert1.pem,key1.pem;cert2.pem,key2.pem")
