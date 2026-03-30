@@ -48,8 +48,11 @@ func TestManager_GetTLSConfig_CAChain(t *testing.T) {
 
 func TestManager_HTTPChallengeHandler(t *testing.T) {
 	cfg := Config{
-		Enabled:  true,
-		Email:    "test@example.com",
+		Enabled: true,
+		Acme: AcmeConfig{
+			Enabled: true,
+			Email:   "test@example.com",
+		},
 		Domains:  []string{"example.com"},
 		CacheDir: t.TempDir(),
 	}
@@ -76,5 +79,33 @@ func TestManager_HTTPChallengeHandler(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code == http.StatusOK && w.Body.String() == "fallback" {
 		t.Errorf("expected ACME handler to intercept request")
+	}
+}
+
+func TestInitFromEnv(t *testing.T) {
+	t.Setenv("GATEON_TLS_ENABLED", "true")
+	t.Setenv("GATEON_TLS_EMAIL", "test@example.com")
+	t.Setenv("GATEON_TLS_DOMAINS", "example.com")
+
+	cfg := InitFromEnv()
+
+	if !cfg.Enabled {
+		t.Error("expected TLS enabled")
+	}
+	if cfg.Email != "test@example.com" {
+		t.Errorf("expected email test@example.com, got %q", cfg.Email)
+	}
+	if !cfg.Acme.Enabled {
+		t.Error("expected ACME enabled via legacy email field")
+	}
+	if cfg.Acme.Email != "test@example.com" {
+		t.Errorf("expected ACME email test@example.com, got %q", cfg.Acme.Email)
+	}
+
+	// Test explicit ACME disable
+	t.Setenv("GATEON_ACME_ENABLED", "false")
+	cfg = InitFromEnv()
+	if cfg.Acme.Enabled {
+		t.Error("expected ACME disabled via explicit GATEON_ACME_ENABLED=false")
 	}
 }
