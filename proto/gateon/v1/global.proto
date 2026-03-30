@@ -28,6 +28,13 @@ message GlobalConfig {
   AnomalyDetectionConfig anomaly_detection = 9;
   EbpfConfig ebpf = 10;
   AIConfig ai = 11;
+  ManagementConfig management = 12;
+}
+
+message ManagementConfig {
+  string bind = 1;
+  string port = 2;
+  repeated string allowed_ips = 3;
 }
 
 message AIConfig {

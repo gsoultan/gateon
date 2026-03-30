@@ -100,6 +100,7 @@ type Deps struct {
 	Limiter          RateLimiter
 	ShutdownRegistry *ShutdownRegistry
 	L4Resolver       L4Resolver
+	ManagementConfig *gateonv1.ManagementConfig
 }
 
 // RateLimiter provides per-key rate limiting middleware.
