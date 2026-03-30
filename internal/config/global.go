@@ -33,6 +33,10 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 			Ha:               &gateonv1.HaConfig{},
 			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{Sensitivity: 0.5, CheckIntervalSeconds: 60},
 			Ebpf:             &gateonv1.EbpfConfig{},
+			Management: &gateonv1.ManagementConfig{
+				Bind:       "0.0.0.0",
+				AllowedIps: []string{"0.0.0.0/0", "::/0"},
+			},
 		},
 		path: path,
 	}

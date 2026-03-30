@@ -55,6 +55,7 @@ func StartServers(
 	wg *syncutil.WaitGroup,
 	shutdownReg *ShutdownRegistry,
 	l4Resolver L4Resolver,
+	mgmtConfig *gateonv1.ManagementConfig,
 ) {
 	limiter := entrypointRateLimiter()
 	deps := &Deps{
@@ -67,6 +68,7 @@ func StartServers(
 		Limiter:          limiter,
 		ShutdownRegistry: shutdownReg,
 		L4Resolver:       l4Resolver,
+		ManagementConfig: mgmtConfig,
 	}
 
 	// ALWAYS start a dedicated management listener
@@ -86,16 +88,30 @@ func StartServers(
 }
 
 func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) {
-	bind := os.Getenv("GATEON_MANAGEMENT_BIND")
-	if bind == "" {
-		bind = "127.0.0.1"
+	bind := "127.0.0.1"
+	if deps.ManagementConfig != nil && deps.ManagementConfig.Bind != "" {
+		bind = deps.ManagementConfig.Bind
 	}
-	addr := bind + ":" + port
+	if envBind := os.Getenv("GATEON_MANAGEMENT_BIND"); envBind != "" {
+		bind = envBind
+	}
+
+	mgmtPort := port
+	if deps.ManagementConfig != nil && deps.ManagementConfig.Port != "" {
+		mgmtPort = deps.ManagementConfig.Port
+	}
+	if envPort := os.Getenv("GATEON_MANAGEMENT_PORT"); envPort != "" {
+		mgmtPort = envPort
+	}
+
+	addr := bind + ":" + mgmtPort
 
 	// IP Whitelisting for management entrypoint
-	allowedIPsStr := os.Getenv("GATEON_MANAGEMENT_ALLOWED_IPS")
 	allowedIPs := []string{"127.0.0.1", "::1"}
-	if allowedIPsStr != "" {
+	if deps.ManagementConfig != nil && len(deps.ManagementConfig.AllowedIps) > 0 {
+		allowedIPs = deps.ManagementConfig.AllowedIps
+	}
+	if allowedIPsStr := os.Getenv("GATEON_MANAGEMENT_ALLOWED_IPS"); allowedIPsStr != "" {
 		allowedIPs = strings.Split(allowedIPsStr, ",")
 	}
 

@@ -100,7 +100,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, tlsManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver))
+	var mgmtConfig *gateonv1.ManagementConfig
+	if gc := s.GlobalStore.Get(ctx); gc != nil {
+		mgmtConfig = gc.Management
+	}
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, tlsManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig)
 	logger.L.Info().Str("port", s.Port).Msg("Gateon API Gateway started")
 
 	wg.Go(func() {
