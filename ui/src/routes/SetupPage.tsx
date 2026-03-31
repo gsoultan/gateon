@@ -40,7 +40,7 @@ import { notifications } from "@mantine/notifications";
 import { useClipboard } from "@mantine/hooks";
 import { generateRandomString } from "../utils/random";
 
-const WIZARD_STEPS = 3; // Admin Account, Security, Review & Confirm
+const WIZARD_STEPS = 4; // Admin Account, Security, Management, Review & Confirm
 
 export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
@@ -80,12 +80,18 @@ export default function SetupPage() {
       form.validateField("admin_password").hasError === false &&
       form.validateField("confirm_password").hasError === false;
     const securityValid = form.validateField("paseto_secret").hasError === false;
+    const managementValid = form.validateField("management_bind").hasError === false &&
+      form.validateField("management_port").hasError === false;
 
     if (wizardStep === 0 && !adminValid) {
       form.validate();
       return;
     }
     if (wizardStep === 1 && !securityValid) {
+      form.validate();
+      return;
+    }
+    if (wizardStep === 2 && !managementValid) {
       form.validate();
       return;
     }
@@ -104,12 +110,16 @@ export default function SetupPage() {
       admin_password: "",
       confirm_password: "",
       paseto_secret: "",
+      management_bind: "0.0.0.0",
+      management_port: "8080",
     },
     validate: {
       admin_username: (value) => (value.length < 3 ? "Username too short" : null),
       admin_password: (val) => (val.length < 8 ? "Password must be at least 8 characters" : null),
       confirm_password: (val, values) => (val !== values.admin_password ? "Passwords do not match" : null),
       paseto_secret: (val) => (val.length < 32 ? "Secret should be at least 32 characters" : null),
+      management_bind: (val) => (!val ? "Bind address is required" : null),
+      management_port: (val) => (!val ? "Port is required" : null),
     },
   });
 
@@ -125,6 +135,8 @@ export default function SetupPage() {
         admin_username: values.admin_username,
         admin_password: values.admin_password,
         paseto_secret: values.paseto_secret,
+        management_bind: values.management_bind,
+        management_port: values.management_port,
       });
 
       if (res.success) {
@@ -379,6 +391,43 @@ export default function SetupPage() {
                     </Stack>
                   </Stepper.Step>
 
+                  <Stepper.Step label="Management" description="API Access">
+                    <Stack gap="lg" mt="md">
+                      <Box>
+                        <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                          Management Entrypoint
+                        </Text>
+                        <Alert color="orange" icon={<IconAlertCircle size={rem(18)} />} mb="md">
+                          <Text size="sm" fw={500}>
+                            Be careful when changing these values. 
+                          </Text>
+                          <Text size="xs" mt={4}>
+                            If you set an IP that you cannot reach, you will be locked out of the dashboard.
+                            Use <Code>0.0.0.0</Code> to allow access from any IP (recommended for initial remote setup).
+                            <Text fw={700} span> Note: Changes take effect after system restart.</Text>
+                          </Text>
+                        </Alert>
+                        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                          <TextInput
+                            label="IP Bind"
+                            placeholder="0.0.0.0"
+                            required
+                            size="md"
+                            leftSection={<IconServer size={rem(18)} stroke={1.5} />}
+                            {...form.getInputProps("management_bind")}
+                          />
+                          <TextInput
+                            label="Port"
+                            placeholder="8080"
+                            required
+                            size="md"
+                            {...form.getInputProps("management_port")}
+                          />
+                        </SimpleGrid>
+                      </Box>
+                    </Stack>
+                  </Stepper.Step>
+
                   <Stepper.Step label="Confirm" description="Review & complete">
                     <Stack gap="lg" mt="md">
                       <Text size="sm" c="dimmed">
@@ -393,6 +442,10 @@ export default function SetupPage() {
                           <Group gap="xs">
                             <Text size="xs" fw={600} c="dimmed">PASETO Secret:</Text>
                             <Code>•••••••• ({form.values.paseto_secret.length} chars)</Code>
+                          </Group>
+                          <Group gap="xs">
+                            <Text size="xs" fw={600} c="dimmed">Management API:</Text>
+                            <Code>{form.values.management_bind}:{form.values.management_port}</Code>
                           </Group>
                         </Stack>
                       </Paper>

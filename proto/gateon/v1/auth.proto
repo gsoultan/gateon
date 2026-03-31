@@ -19,6 +19,8 @@ message SetupRequest {
   string admin_username = 1;
   string admin_password = 2;
   string paseto_secret = 3;
+  string management_bind = 4;
+  string management_port = 5;
 }
 
 message SetupResponse {

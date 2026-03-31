@@ -34,6 +34,14 @@ You can configure the management entrypoint using the following environment vari
 
 If you are using Cloudflare Tunnel to access your dashboard (e.g., at `gateon.example.com`):
 
-1. Keep `GATEON_MANAGEMENT_BIND` at its default (`127.0.0.1`).
-2. Point your Cloudflare Tunnel configuration to `http://localhost:8080`.
-3. This ensures your dashboard is never exposed directly to the internet, but remains accessible through your secure Zero Trust tunnel.
+1. Keep `GATEON_MANAGEMENT_BIND` at its default (`127.0.0.1`) if the tunnel is on the same machine. If the tunnel is on a different machine, use `0.0.0.0` or the tunnel's IP.
+2. Point your Cloudflare Tunnel configuration to `http://<gateon-ip>:8080`.
+3. Set `GATEON_TRUST_CLOUDFLARE_HEADERS=true` to ensure Gateon correctly identifies the client IP through the tunnel.
+4. Update `GATEON_MANAGEMENT_ALLOWED_IPS` to include the IP of the Cloudflare Tunnel or set it to `0.0.0.0/0` (not recommended for production unless additional tunnel-level security is active).
+
+## Common Issues: 502 Bad Gateway
+
+If you encounter a **502 Bad Gateway** when accessing the dashboard via Cloudflare:
+- **IP Mismatch**: The management entrypoint filters IPs by default. Check `GATEON_MANAGEMENT_ALLOWED_IPS`.
+- **Bind Address**: Ensure `GATEON_MANAGEMENT_BIND` allows connections from the tunnel's IP.
+- **Header Trust**: If `GATEON_TRUST_CLOUDFLARE_HEADERS` is not `true`, Gateon might see the tunnel's internal IP instead of your client IP, triggering the `IPFilter` block.

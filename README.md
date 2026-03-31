@@ -155,8 +155,10 @@ make proto
 - `GATEON_GEOIP_DB_PATH`: Path to GeoLite2-Country.mmdb for GeoIP middleware (fallback when config omits db_path).
 - `GATEON_HMAC_SECRET`: HMAC secret for webhook signature verification (fallback when middleware config omits it).
 - `GATEON_ENCRYPTION_KEY`: Optional. When set (min 16 chars), `database_url`, `paseto_secret`, and database password are encrypted in global.json.
-- `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server (default `127.0.0.1`).
-- `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated list of allowed IPs for management access (default `127.0.0.1,::1`).
+- `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server (default `127.0.0.1`). Use `0.0.0.0` for remote access (e.g. via Cloudflare Tunnel on another machine).
+- `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated list of allowed IPs for management access (default `127.0.0.1,::1`). Use `0.0.0.0/0` with caution for initial setup via tunnel.
+
+> **Note on Cloudflare Tunnels**: If you experience a `502 Bad Gateway` when accessing Gateon via a Cloudflare Tunnel, ensure `GATEON_TRUST_CLOUDFLARE_HEADERS=true` is set and `GATEON_MANAGEMENT_ALLOWED_IPS` includes your tunnel's IP (or use `0.0.0.0/0` to troubleshoot). See [doc/management-entrypoint.md](doc/management-entrypoint.md) for details.
 
 ## UI (React + Vite + Mantine + Tailwind)
 The UI is automatically built and embedded into the Go binary during the build process. When Gateon is running, the dashboard is accessible on the same port as the gateway (default: `http://localhost:8080`).

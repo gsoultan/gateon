@@ -212,6 +212,8 @@ export type SetupRequest = {
   admin_username: string;
   admin_password: string;
   paseto_secret: string;
+  management_bind: string;
+  management_port: string;
 };
 
 export type SetupResponse = {

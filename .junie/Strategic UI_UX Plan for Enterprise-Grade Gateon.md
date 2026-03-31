@@ -30,8 +30,13 @@ Enterprise users need to know why things are failing, not just that they are.
 - Dark/Light Mode: Full support for system-preferred color schemes via Mantine.
 - Lazy Loading Everything: Ensuring that route-level components and heavy charting libraries are only loaded when needed to keep the initial dashboard light.
 
-### 5. Implementation Roadmap (Immediate Steps)
-1. Refactor `App.tsx`: Introduce `@tanstack/react-router` and a `Shell` component with a sidebar.
-2. Modularize `RouteForm`: Break the 200-line form into logical sub-components (`UpstreamConfig`, `SecurityConfig`, etc.).
-3. DataTable Implementation: Replace `RouteList` cards with a searchable table.
-4. Polish `LiveLogs`: Add "Pause" and "Clear" functionality with basic text filtering.
+### 5. Implementation Roadmap (Status)
+1. Refactor `App.tsx`: Introduced `@tanstack/react-router` and a `Shell` component with a sidebar. ✓
+2. Modularize `RouteForm`: Broke the 200-line form into logical sub-components. ✓
+3. DataTable Implementation: Replaced `RouteList` cards with a searchable table. ✓
+4. Polish `LiveLogs`: Added "Pause", "Clear", and "AI Insight" functionality. ✓
+5. Modularize Middleware Management: Moved complex middleware configurations into standalone components. ✓
+6. WASM Integration: Supported binary upload and real-time validation of WASM modules. ✓
+7. Traffic Topology: Added a visual topology map for traffic flow. ✓
+8. Dry-Run Import: Added a preview diff for configuration imports. ✓
+9. Global Settings: Centralized management for WAF and other global policies. ✓

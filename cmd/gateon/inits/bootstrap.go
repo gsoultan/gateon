@@ -25,7 +25,7 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 				gc.Auth = &gateonv1.AuthConfig{}
 			}
 			if gc.Auth.PasetoSecret == "" {
-				gc.Auth.PasetoSecret = "YELLOW SUBMARINE, BLACK WIZARDRY"
+				gc.Auth.PasetoSecret = config.GenerateRandomSecret(32)
 			}
 			if !hasAuthDatabase(gc.Auth) {
 				setDefaultSqliteConfig(gc.Auth)
@@ -39,7 +39,7 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 			setDefaultSqliteConfig(gc.Auth)
 		}
 		if gc.Auth.PasetoSecret == "" {
-			gc.Auth.PasetoSecret = "YELLOW SUBMARINE, BLACK WIZARDRY"
+			gc.Auth.PasetoSecret = config.GenerateRandomSecret(32)
 		}
 		databaseURL := db.AuthDatabaseURL(gc.Auth)
 		if databaseURL != "" {
