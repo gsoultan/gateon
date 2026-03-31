@@ -286,10 +286,7 @@ func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupReq
 		}
 	}
 
-	// Default secret from global.json
-	const defaultSecret = "YELLOW SUBMARINE, BLACK WIZARDRY"
-
-	required := !setupDone || pasetoSecret == defaultSecret || pasetoSecret == ""
+	required := !setupDone || pasetoSecret == ""
 
 	return &gateonv1.IsSetupRequiredResponse{Required: required}, nil
 }
@@ -333,13 +330,23 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to create admin: " + err.Error()}, nil
 	}
 
-	// 2. Update Global Config (Paseto Secret)
+	// 2. Update Global Config (Paseto Secret and Management Settings)
 	conf := s.Globals.Get(ctx)
 	if conf.Auth == nil {
 		conf.Auth = &gateonv1.AuthConfig{}
 	}
 	conf.Auth.PasetoSecret = req.PasetoSecret
 	conf.Auth.Enabled = true
+
+	if conf.Management == nil {
+		conf.Management = &gateonv1.ManagementConfig{}
+	}
+	if req.ManagementBind != "" {
+		conf.Management.Bind = req.ManagementBind
+	}
+	if req.ManagementPort != "" {
+		conf.Management.Port = req.ManagementPort
+	}
 
 	if err := s.Globals.Update(ctx, conf); err != nil {
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to update config: " + err.Error()}, nil

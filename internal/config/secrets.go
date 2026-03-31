@@ -129,6 +129,16 @@ func ResolveSecret(s string) string {
 	return s
 }
 
+// GenerateRandomSecret generates a random hex string of the specified length in characters.
+// For example, GenerateRandomSecret(32) returns a 32-character hex string.
+func GenerateRandomSecret(length int) string {
+	b := make([]byte, length/2)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
+
 // encryptionKey returns the 32-byte key derived from GATEON_ENCRYPTION_KEY.
 // Returns nil if the env var is not set or too short.
 func encryptionKey() []byte {
