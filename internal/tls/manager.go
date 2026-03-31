@@ -199,6 +199,7 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 	// Apply extra configurations
 	tlsConfig.MinVersion = parseTLSVersion(m.config.MinVersion, tls.VersionTLS12)
 	tlsConfig.MaxVersion = parseTLSVersion(m.config.MaxVersion, 0)
+	tlsConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	if m.config.ClientAuthType != "" {
 		tlsConfig.ClientAuth = parseClientAuthType(m.config.ClientAuthType)

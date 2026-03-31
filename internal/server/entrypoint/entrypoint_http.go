@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -32,20 +31,6 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	}
 	hasTCP, hasUDP := protocols(ep)
 	var epHandler http.Handler = deps.BaseHandler
-	switch ep.Type {
-	case gateonv1.EntryPoint_HTTP, gateonv1.EntryPoint_HTTP2, gateonv1.EntryPoint_GRPC:
-		epHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			isGRPC := (r.ProtoMajor == 2 || r.ProtoMajor == 3) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
-			isGRPCWeb := deps.Wrapped.IsGrpcWebRequest(r) || deps.Wrapped.IsAcceptableGrpcCorsRequest(r) || deps.Wrapped.IsGrpcWebSocketRequest(r)
-			if (ep.Type == gateonv1.EntryPoint_HTTP2 || ep.Type == gateonv1.EntryPoint_GRPC) && (isGRPC || isGRPCWeb) {
-				deps.Wrapped.ServeHTTP(w, r)
-				return
-			}
-			deps.BaseHandler.ServeHTTP(w, r)
-		})
-	case gateonv1.EntryPoint_HTTP3:
-		epHandler = deps.BaseHandler
-	}
 	epHandler = injectEntryPointID(ep.Id, epHandler)
 	chain := []middleware.Middleware{middleware.Recovery(), middleware.Metrics("gateon-" + ep.Id)}
 	if ep.AccessLogEnabled {
