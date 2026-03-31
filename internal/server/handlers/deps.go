@@ -6,6 +6,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/domain"
 	"github.com/gsoultan/gateon/pkg/proxy"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // RouteStatsProvider returns target stats for a route. Nil if route not found.
@@ -23,4 +24,5 @@ type Deps struct {
 	Version            string
 	StartTime          time.Time
 	RouteStatsProvider RouteStatsProvider
+	AIService          gateonv1.AIServiceServer
 }

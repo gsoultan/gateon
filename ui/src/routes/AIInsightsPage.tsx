@@ -48,10 +48,15 @@ const AIInsightsPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch<AIAnalysisResponse>('/AnalyzeConfig', {
+      const res = await apiFetch('/AnalyzeConfig', {
         method: 'POST',
-        body: JSON.stringify({}),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ focus: 'security' }),
       });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      const response = await res.json();
       setData(response);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch AI insights');
@@ -135,7 +140,7 @@ const AIInsightsPage: React.FC = () => {
           <Title order={4} mt="md">Recommendations</Title>
           
           <Timeline active={-1} bulletSize={32} lineWidth={2}>
-            {data.insights.map((insight, index) => (
+            {data.insights?.map((insight, index) => (
               <Timeline.Item 
                 key={index} 
                 bullet={getCategoryIcon(insight.category)}

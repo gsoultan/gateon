@@ -73,6 +73,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
+		AIService:          aiService,
 	})
 
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

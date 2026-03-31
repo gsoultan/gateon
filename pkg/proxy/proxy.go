@@ -546,6 +546,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Host = targetURL.Host
 	r.URL.Scheme = targetURL.Scheme
 	r.Header.Set("X-Forwarded-Host", r.Host)
+	if r.TLS != nil {
+		r.Header.Set("X-Forwarded-Proto", "https")
+	} else {
+		r.Header.Set("X-Forwarded-Proto", "http")
+	}
 	r.Host = targetURL.Host
 
 	// WebSocket: ReverseProxy strips Upgrade/Connection (hop-by-hop). Use hijack tunnel.
@@ -555,13 +560,24 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle gRPC metadata translation or h2c/h3
-	isGRPC := strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+	isGRPC := strings.HasPrefix(contentType, "application/grpc")
 	if isH3 {
 		r.ProtoMajor = 3
 		r.ProtoMinor = 0
+		r.Proto = "HTTP/3.0"
 	} else if isGRPC || isH2C {
 		r.ProtoMajor = 2
 		r.ProtoMinor = 0
+		r.Proto = "HTTP/2.0"
+		if isGRPC {
+			// gRPC requires trailers and no content-length
+			r.Header.Del("Content-Length")
+			r.ContentLength = -1
+			if r.Header.Get("TE") == "" {
+				r.Header.Set("TE", "trailers")
+			}
+		}
 	}
 
 	srw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
