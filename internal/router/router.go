@@ -10,8 +10,10 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -269,7 +271,19 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 			if mwConf, ok := mwStore.Get(context.Background(), mid); ok {
 				mw, err := mwFactory.Create(mwConf)
 				if err == nil {
-					chain = append(chain, mw)
+					mID := mid
+					wrapped := func(next http.Handler) http.Handler {
+						h := mw(next)
+						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							logger.L.Info().
+								Str("flow_step", "middleware_start").
+								Str("request_id", request.GetID(r)).
+								Str("middleware_id", mID).
+								Msg("Executing middleware")
+							h.ServeHTTP(w, r)
+						})
+					}
+					chain = append(chain, wrapped)
 				}
 			}
 		}
