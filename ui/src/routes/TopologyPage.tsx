@@ -19,7 +19,7 @@ import {
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../hooks/useGateon";
-import type { Route, Service, EntryPoint } from "../types/gateon";
+import { type Route, type Service, type EntryPoint, EntryPointType } from "../types/gateon";
 
 export default function TopologyPage() {
   const { data: routes, isLoading: loadingRoutes } = useQuery<Route[]>({
@@ -76,12 +76,25 @@ export default function TopologyPage() {
                     <Text fw={700}>{ep.name || ep.id}</Text>
                     <Text size="xs" c="dimmed">{ep.address}</Text>
                   </div>
-                  <Badge variant="outline" size="sm">{ep.type}</Badge>
+                  <Badge variant="outline" size="sm">{EntryPointType[ep.type] || ep.type}</Badge>
                 </Group>
 
                 <Stack gap="sm" pl={40}>
                   {routes
-                    ?.filter((r) => r.type === ep.type.toLowerCase() || (ep.type === "HTTP" && r.type === "http"))
+                    ?.filter((r) => {
+                      const epIdMatch = r.entrypoints?.includes(ep.id);
+                      const allEntries = !r.entrypoints || r.entrypoints.length === 0;
+
+                      if (ep.type === EntryPointType.TCP || ep.type === EntryPointType.UDP) {
+                        const typeMatch =
+                          (ep.type === EntryPointType.TCP && r.type === "tcp") ||
+                          (ep.type === EntryPointType.UDP && r.type === "udp");
+                        return epIdMatch && typeMatch;
+                      }
+
+                      const isWebCompatible = ["http", "grpc", "graphql"].includes(r.type);
+                      return (epIdMatch || allEntries) && isWebCompatible;
+                    })
                     .map((r) => (
                       <Group key={r.id} align="flex-start" wrap="nowrap">
                         <IconArrowRight size={16} color="gray" style={{ marginTop: 8 }} />
