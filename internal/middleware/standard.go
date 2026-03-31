@@ -196,6 +196,29 @@ func IPFilter(allowList, denyList []string) Middleware {
 	})
 }
 
+// HostFilter returns a middleware that filters requests by Host header.
+// If host is empty, it allows all hosts.
+func HostFilter(host string) Middleware {
+	if host == "" {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Strip port if present for comparison
+			h := r.Host
+			if sh, _, err := net.SplitHostPort(h); err == nil {
+				h = sh
+			}
+
+			if !strings.EqualFold(h, host) {
+				http.Error(w, "Forbidden: Invalid Host", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func lastIndex(s, sep string) int {
 	return strings.LastIndex(s, sep)
 }

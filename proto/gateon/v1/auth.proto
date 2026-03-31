@@ -15,12 +15,20 @@ message IsSetupRequiredResponse {
   bool required = 1;
 }
 
+// SetupRequest is the initial configuration request to initialize the Gateon server.
 message SetupRequest {
+  // AdminUsername is the username for the first administrator account.
   string admin_username = 1;
+  // AdminPassword is the password for the first administrator account.
   string admin_password = 2;
+  // PasetoSecret is the 32-character secret key for signing PASETO tokens.
   string paseto_secret = 3;
+  // ManagementBind is the initial bind address for the management API.
   string management_bind = 4;
+  // ManagementPort is the initial port for the management API.
   string management_port = 5;
+  reserved 6;
+  reserved "management_host";
 }
 
 message SetupResponse {

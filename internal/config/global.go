@@ -35,6 +35,7 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 			Ebpf:             &gateonv1.EbpfConfig{},
 			Management: &gateonv1.ManagementConfig{
 				Bind:       "0.0.0.0",
+				Port:       "8080",
 				AllowedIps: []string{"0.0.0.0/0", "::/0"},
 			},
 		},

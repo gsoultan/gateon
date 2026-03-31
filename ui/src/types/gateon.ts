@@ -270,6 +270,13 @@ export type GlobalConfig = {
   ha?: HaConfig;
   anomaly_detection?: AnomalyDetectionConfig;
   ebpf?: EbpfConfig;
+  management?: ManagementConfig;
+};
+
+export type ManagementConfig = {
+  bind?: string;
+  port?: string;
+  allowed_ips?: string[];
 };
 
 export enum EntryPointType {

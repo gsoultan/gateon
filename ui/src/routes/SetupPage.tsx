@@ -409,8 +409,8 @@ export default function SetupPage() {
                         </Alert>
                         <SimpleGrid cols={{ base: 1, sm: 2 }}>
                           <TextInput
-                            label="IP Bind"
-                            placeholder="0.0.0.0"
+                            label="Bind Address"
+                            placeholder="0.0.0.0 or admin.example.com"
                             required
                             size="md"
                             leftSection={<IconServer size={rem(18)} stroke={1.5} />}

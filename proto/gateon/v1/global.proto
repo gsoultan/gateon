@@ -31,10 +31,18 @@ message GlobalConfig {
   ManagementConfig management = 12;
 }
 
+// ManagementConfig holds the configuration for the Gateon management server.
 message ManagementConfig {
+  // Bind specifies the address to listen on. It can be an IP (e.g., "0.0.0.0") 
+  // or a hostname (e.g., "admin.example.com").
+  // If a hostname is provided, it is also used for host-based filtering.
   string bind = 1;
+  // Port specifies the TCP port to listen on.
   string port = 2;
+  // AllowedIps is a whitelist of client IPs or CIDRs allowed to access the management API.
   repeated string allowed_ips = 3;
+  reserved 4;
+  reserved "host";
 }
 
 message AIConfig {
