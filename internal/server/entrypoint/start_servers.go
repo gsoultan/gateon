@@ -104,7 +104,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		mgmtPort = envPort
 	}
 
-	addr := bind + ":" + mgmtPort
+	addr := net.JoinHostPort(bind, mgmtPort)
 
 	// IP Whitelisting for management entrypoint
 	allowedIPs := []string{"127.0.0.1", "::1"}
@@ -115,8 +115,17 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		allowedIPs = strings.Split(allowedIPsStr, ",")
 	}
 
+	mgmtHost := ""
+	if bind != "0.0.0.0" && bind != "::" && net.ParseIP(bind) == nil {
+		mgmtHost = bind
+	}
+	if envHost := os.Getenv("GATEON_MANAGEMENT_HOST"); envHost != "" {
+		mgmtHost = envHost
+	}
+
 	handler := middleware.Chain(
 		middleware.Recovery(),
+		middleware.HostFilter(mgmtHost),
 		middleware.IPFilter(allowedIPs, nil),
 		middleware.MaxConnections(500),
 	)(injectEntryPointID("management", deps.BaseHandler))

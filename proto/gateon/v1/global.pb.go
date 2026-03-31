@@ -277,11 +277,17 @@ func (x *GlobalConfig) GetManagement() *ManagementConfig {
 	return nil
 }
 
+// ManagementConfig holds the configuration for the Gateon management server.
 type ManagementConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Bind          string                 `protobuf:"bytes,1,opt,name=bind,proto3" json:"bind,omitempty"`
-	Port          string                 `protobuf:"bytes,2,opt,name=port,proto3" json:"port,omitempty"`
-	AllowedIps    []string               `protobuf:"bytes,3,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Bind specifies the address to listen on. It can be an IP (e.g., "0.0.0.0")
+	// or a hostname (e.g., "admin.example.com").
+	// If a hostname is provided, it is also used for host-based filtering.
+	Bind string `protobuf:"bytes,1,opt,name=bind,proto3" json:"bind,omitempty"`
+	// Port specifies the TCP port to listen on.
+	Port string `protobuf:"bytes,2,opt,name=port,proto3" json:"port,omitempty"`
+	// AllowedIps is a whitelist of client IPs or CIDRs allowed to access the management API.
+	AllowedIps    []string `protobuf:"bytes,3,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -810,12 +816,12 @@ const file_gateon_v1_global_proto_rawDesc = "" +
 	"\x02ai\x18\v \x01(\v2\x13.gateon.v1.AIConfigR\x02ai\x12;\n" +
 	"\n" +
 	"management\x18\f \x01(\v2\x1b.gateon.v1.ManagementConfigR\n" +
-	"management\"[\n" +
+	"management\"g\n" +
 	"\x10ManagementConfig\x12\x12\n" +
 	"\x04bind\x18\x01 \x01(\tR\x04bind\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\tR\x04port\x12\x1f\n" +
 	"\vallowed_ips\x18\x03 \x03(\tR\n" +
-	"allowedIps\"\x8a\x01\n" +
+	"allowedIpsJ\x04\b\x04\x10\x05R\x04host\"\x8a\x01\n" +
 	"\bAIConfig\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x17\n" +

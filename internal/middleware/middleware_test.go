@@ -436,6 +436,37 @@ func TestHMAC_InvalidSignature(t *testing.T) {
 	}
 }
 
+func TestHostFilter(t *testing.T) {
+	mw := HostFilter("admin.example.com")
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tests := []struct {
+		name       string
+		host       string
+		expectCode int
+	}{
+		{"Match", "admin.example.com", http.StatusOK},
+		{"Match with Port", "admin.example.com:8080", http.StatusOK},
+		{"Mismatch", "other.example.com", http.StatusForbidden},
+		{"Mismatch with Port", "other.example.com:8080", http.StatusForbidden},
+		{"Case Insensitive", "ADMIN.EXAMPLE.COM", http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = tt.host
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			if rr.Code != tt.expectCode {
+				t.Errorf("%s: expected %d, got %d", tt.name, tt.expectCode, rr.Code)
+			}
+		})
+	}
+}
+
 func hmacSHA256Hex(secret, body []byte) string {
 	h := hmac.New(sha256.New, secret)
 	h.Write(body)

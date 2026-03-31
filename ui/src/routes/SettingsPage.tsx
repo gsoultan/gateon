@@ -82,6 +82,7 @@ export default function SettingsPage() {
     redis: { enabled: false },
     otel: { enabled: false },
     log: { level: "info", development: true, format: "text" },
+    management: { bind: "0.0.0.0", port: "8080", allowed_ips: ["0.0.0.0/0", "::/0"], host: "" },
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -629,6 +630,87 @@ export default function SettingsPage() {
                   radius="md"
                 />
               </Group>
+            </Stack>
+          </Box>
+
+          <Box>
+            <Divider
+              label={
+                <Group gap={4}>
+                  <IconServer size={14} />
+                  <Text size="xs" fw={800}>
+                    MANAGEMENT API
+                  </Text>
+                </Group>
+              }
+              labelPosition="left"
+              mb="md"
+            />
+            <Text size="xs" c="dimmed" mb="sm">
+              Configure where Gateon's Management API and Dashboard are served.
+            </Text>
+            <Stack gap="sm">
+              <Group grow>
+                <TextInput
+                  label="Bind Address"
+                  placeholder="0.0.0.0"
+                  disabled={formDisabled}
+                  value={config.management?.bind || ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      management: { ...(config.management || {}), bind: e.currentTarget.value },
+                    })
+                  }
+                  radius="md"
+                />
+                <TextInput
+                  label="Port"
+                  placeholder="8080"
+                  disabled={formDisabled}
+                  value={config.management?.port || ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      management: { ...(config.management || {}), port: e.currentTarget.value },
+                    })
+                  }
+                  radius="md"
+                />
+              </Group>
+              <TextInput
+                label="Management Domain / Host"
+                placeholder="admin.example.com"
+                description="If set, the management interface will only be accessible via this domain."
+                disabled={formDisabled}
+                value={config.management?.host || ""}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    management: { ...(config.management || {}), host: e.currentTarget.value },
+                  })
+                }
+                radius="md"
+              />
+              <TextInput
+                label="Allowed IPs (comma-separated CIDRs)"
+                placeholder="0.0.0.0/0, ::/0"
+                disabled={formDisabled}
+                value={(config.management?.allowed_ips || []).join(", ")}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    management: {
+                      ...(config.management || {}),
+                      allowed_ips: e.currentTarget.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    },
+                  })
+                }
+                radius="md"
+              />
             </Stack>
           </Box>
 

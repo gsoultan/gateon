@@ -153,13 +153,19 @@ func (x *IsSetupRequiredResponse) GetRequired() bool {
 	return false
 }
 
+// SetupRequest is the initial configuration request to initialize the Gateon server.
 type SetupRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	AdminUsername  string                 `protobuf:"bytes,1,opt,name=admin_username,json=adminUsername,proto3" json:"admin_username,omitempty"`
-	AdminPassword  string                 `protobuf:"bytes,2,opt,name=admin_password,json=adminPassword,proto3" json:"admin_password,omitempty"`
-	PasetoSecret   string                 `protobuf:"bytes,3,opt,name=paseto_secret,json=pasetoSecret,proto3" json:"paseto_secret,omitempty"`
-	ManagementBind string                 `protobuf:"bytes,4,opt,name=management_bind,json=managementBind,proto3" json:"management_bind,omitempty"`
-	ManagementPort string                 `protobuf:"bytes,5,opt,name=management_port,json=managementPort,proto3" json:"management_port,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// AdminUsername is the username for the first administrator account.
+	AdminUsername string `protobuf:"bytes,1,opt,name=admin_username,json=adminUsername,proto3" json:"admin_username,omitempty"`
+	// AdminPassword is the password for the first administrator account.
+	AdminPassword string `protobuf:"bytes,2,opt,name=admin_password,json=adminPassword,proto3" json:"admin_password,omitempty"`
+	// PasetoSecret is the 32-character secret key for signing PASETO tokens.
+	PasetoSecret string `protobuf:"bytes,3,opt,name=paseto_secret,json=pasetoSecret,proto3" json:"paseto_secret,omitempty"`
+	// ManagementBind is the initial bind address for the management API.
+	ManagementBind string `protobuf:"bytes,4,opt,name=management_bind,json=managementBind,proto3" json:"management_bind,omitempty"`
+	// ManagementPort is the initial port for the management API.
+	ManagementPort string `protobuf:"bytes,5,opt,name=management_port,json=managementPort,proto3" json:"management_port,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -811,13 +817,13 @@ const file_gateon_v1_auth_proto_rawDesc = "" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x18\n" +
 	"\x16IsSetupRequiredRequest\"5\n" +
 	"\x17IsSetupRequiredResponse\x12\x1a\n" +
-	"\brequired\x18\x01 \x01(\bR\brequired\"\xd3\x01\n" +
+	"\brequired\x18\x01 \x01(\bR\brequired\"\xea\x01\n" +
 	"\fSetupRequest\x12%\n" +
 	"\x0eadmin_username\x18\x01 \x01(\tR\radminUsername\x12%\n" +
 	"\x0eadmin_password\x18\x02 \x01(\tR\radminPassword\x12#\n" +
 	"\rpaseto_secret\x18\x03 \x01(\tR\fpasetoSecret\x12'\n" +
 	"\x0fmanagement_bind\x18\x04 \x01(\tR\x0emanagementBind\x12'\n" +
-	"\x0fmanagement_port\x18\x05 \x01(\tR\x0emanagementPort\"?\n" +
+	"\x0fmanagement_port\x18\x05 \x01(\tR\x0emanagementPortJ\x04\b\x06\x10\aR\x0fmanagement_host\"?\n" +
 	"\rSetupResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"J\n" +
