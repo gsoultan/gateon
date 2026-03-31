@@ -86,8 +86,13 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 		}
 		deps.BaseHandler.ServeHTTP(w, r)
 	})
-	epHandler = injectEntryPointID(ep.Id, epHandler)
-	chain := []middleware.Middleware{middleware.Metrics("gateon-" + ep.Id)}
+	isMgmt := IsManagementAddress(ep.Address, deps)
+	epHandler = injectEntryPointID(ep.Id, isMgmt, epHandler)
+	chain := []middleware.Middleware{
+		middleware.RequestID(),
+		middleware.Recovery(),
+		middleware.Metrics("gateon-" + ep.Id),
+	}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+ep.Id))
 	}

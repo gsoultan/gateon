@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/pkg/proxy"
@@ -24,9 +26,15 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 	isGRPC := (r.ProtoMajor == 2 || r.ProtoMajor == 3) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 	isGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsAcceptableGrpcCorsRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
 
-	epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
-	if epID != "management" {
+	isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
+	if !isMgmt {
 		if rt := router.SelectRoute(r, s.RouteStore.List(r.Context())); rt != nil {
+			logger.L.Info().
+				Str("flow_step", "route_match").
+				Str("request_id", request.GetID(r)).
+				Str("route_id", rt.Id).
+				Str("rule", rt.Rule).
+				Msg("Route matched")
 			if rt.Tls != nil && r.TLS == nil {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("HTTPS required"))

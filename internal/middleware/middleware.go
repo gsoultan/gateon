@@ -11,6 +11,7 @@ type ContextKey string
 
 const (
 	EntryPointIDContextKey ContextKey = "entrypoint_id"
+	IsManagementContextKey ContextKey = "is_management"
 )
 
 // Middleware defines a function that wraps an http.Handler.

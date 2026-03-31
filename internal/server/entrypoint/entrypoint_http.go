@@ -5,10 +5,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
@@ -31,8 +33,13 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	}
 	hasTCP, hasUDP := protocols(ep)
 	var epHandler http.Handler = deps.BaseHandler
-	epHandler = injectEntryPointID(ep.Id, epHandler)
-	chain := []middleware.Middleware{middleware.Recovery(), middleware.Metrics("gateon-" + ep.Id)}
+	isMgmt := IsManagementAddress(ep.Address, deps)
+	epHandler = injectEntryPointID(ep.Id, isMgmt, epHandler)
+	chain := []middleware.Middleware{
+		middleware.RequestID(), // Added for global correlation
+		middleware.Recovery(),
+		middleware.Metrics("gateon-" + ep.Id),
+	}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+ep.Id))
 	}
@@ -113,12 +120,28 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 	}
 }
 
-func injectEntryPointID(epID string, next http.Handler) http.Handler {
+func injectEntryPointID(epID string, isMgmt bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, middleware.EntryPointIDContextKey, epID)
+		ctx = context.WithValue(ctx, middleware.IsManagementContextKey, isMgmt)
+
+		// Log arrival for proxy traffic only
+		if !isMgmt && !isInternalPath(r.URL.Path) {
+			logger.L.Info().
+				Str("flow_step", "entrypoint_arrival").
+				Str("request_id", request.GetID(r)).
+				Str("entrypoint", epID).
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Msg("Proxy request received")
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func isInternalPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz"
 }
 
 func protocols(ep *gateonv1.EntryPoint) (hasTCP, hasUDP bool) {

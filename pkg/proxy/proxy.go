@@ -14,6 +14,8 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/discovery"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -519,6 +521,12 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no targets available for service", http.StatusBadGateway)
 		return
 	}
+
+	logger.L.Info().
+		Str("flow_step", "service_dispatch").
+		Str("request_id", request.GetID(r)).
+		Str("target", state.url).
+		Msg("Forwarding to service target")
 
 	atomic.AddInt32(&state.activeConn, 1)
 	defer atomic.AddInt32(&state.activeConn, -1)

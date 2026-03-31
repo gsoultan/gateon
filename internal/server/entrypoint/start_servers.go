@@ -124,11 +124,12 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	}
 
 	handler := middleware.Chain(
+		middleware.RequestID(), // Added
 		middleware.Recovery(),
 		middleware.HostFilter(mgmtHost),
 		middleware.IPFilter(allowedIPs, nil),
 		middleware.MaxConnections(500),
-	)(injectEntryPointID("management", deps.BaseHandler))
+	)(injectEntryPointID("management", true, deps.BaseHandler))
 
 	server := &http.Server{
 		Addr:              addr,
@@ -294,4 +295,40 @@ func handleUDPProxyL4(conn *net.UDPConn, proxy UDPProxy) {
 		copy(packet, buf[:n])
 		proxy.HandlePacket(conn, addr, packet)
 	}
+}
+
+func IsManagementAddress(addr string, deps *Deps) bool {
+	mgmtAddr := GetManagementAddr(deps.Port, deps.ManagementConfig)
+	return normalizeAddr(addr) == normalizeAddr(mgmtAddr)
+}
+
+func GetManagementAddr(defaultPort string, config *gateonv1.ManagementConfig) string {
+	bind := "127.0.0.1"
+	if config != nil && config.Bind != "" {
+		bind = config.Bind
+	}
+	if envBind := os.Getenv("GATEON_MANAGEMENT_BIND"); envBind != "" {
+		bind = envBind
+	}
+
+	mgmtPort := defaultPort
+	if config != nil && config.Port != "" {
+		mgmtPort = config.Port
+	}
+	if envPort := os.Getenv("GATEON_MANAGEMENT_PORT"); envPort != "" {
+		mgmtPort = envPort
+	}
+
+	return net.JoinHostPort(bind, mgmtPort)
+}
+
+func normalizeAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "*"
+	}
+	return net.JoinHostPort(host, port)
 }
