@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/httputil"
@@ -38,21 +39,62 @@ func (NoopRateLimiter) Handler(_ func(*http.Request) string) func(http.Handler) 
 	}
 }
 
-// LocalRateLimiter implements a flexible local rate limiter.
+// rateLimiterEntry holds a rate limiter and its last access time for TTL eviction.
+type rateLimiterEntry struct {
+	limiter    *rate.Limiter
+	lastAccess atomic.Int64 // unix seconds
+}
+
+const rateLimiterEvictInterval = 60 * time.Second
+const rateLimiterEntryTTL = 5 * time.Minute
+
+// LocalRateLimiter implements a flexible local rate limiter with automatic TTL eviction.
 type LocalRateLimiter struct {
-	limiters map[string]*rate.Limiter
-	mu       sync.RWMutex
-	rate     rate.Limit
-	burst    int
+	limiters  map[string]*rateLimiterEntry
+	mu        sync.RWMutex
+	rate      rate.Limit
+	burst     int
+	stopEvict chan struct{}
 }
 
 // NewRateLimiter creates a new LocalRateLimiter with rate (requests per second) and burst.
+// Stale entries are evicted automatically after rateLimiterEntryTTL of inactivity.
 func NewRateLimiter(r rate.Limit, b int) *LocalRateLimiter {
-	return &LocalRateLimiter{
-		limiters: make(map[string]*rate.Limiter),
-		rate:     r,
-		burst:    b,
+	rl := &LocalRateLimiter{
+		limiters:  make(map[string]*rateLimiterEntry),
+		rate:      r,
+		burst:     b,
+		stopEvict: make(chan struct{}),
 	}
+	go rl.evictLoop()
+	return rl
+}
+
+// evictLoop periodically removes stale rate limiter entries to prevent unbounded map growth.
+func (rl *LocalRateLimiter) evictLoop() {
+	ticker := time.NewTicker(rateLimiterEvictInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now().Unix()
+			ttl := int64(rateLimiterEntryTTL.Seconds())
+			rl.mu.Lock()
+			for k, e := range rl.limiters {
+				if now-e.lastAccess.Load() > ttl {
+					delete(rl.limiters, k)
+				}
+			}
+			rl.mu.Unlock()
+		case <-rl.stopEvict:
+			return
+		}
+	}
+}
+
+// Close stops the background eviction goroutine.
+func (rl *LocalRateLimiter) Close() {
+	close(rl.stopEvict)
 }
 
 // NewQPSRateLimiter creates a LocalRateLimiter for the given requests per second and burst.
@@ -68,25 +110,28 @@ func NewQPSRateLimiter(requestsPerSec, burst int) *LocalRateLimiter {
 }
 
 func (rl *LocalRateLimiter) getLimiter(key string) *rate.Limiter {
+	now := time.Now().Unix()
 	rl.mu.RLock()
-	limiter, exists := rl.limiters[key]
+	entry, exists := rl.limiters[key]
 	rl.mu.RUnlock()
 
 	if exists {
-		return limiter
+		entry.lastAccess.Store(now)
+		return entry.limiter
 	}
 
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	// Double-check after acquiring write lock
-	limiter, exists = rl.limiters[key]
+	entry, exists = rl.limiters[key]
 	if !exists {
-		limiter = rate.NewLimiter(rl.rate, rl.burst)
-		rl.limiters[key] = limiter
+		entry = &rateLimiterEntry{limiter: rate.NewLimiter(rl.rate, rl.burst)}
+		rl.limiters[key] = entry
 	}
+	entry.lastAccess.Store(now)
 
-	return limiter
+	return entry.limiter
 }
 
 // Handler returns a middleware that limits requests based on a key (IP or Tenant).

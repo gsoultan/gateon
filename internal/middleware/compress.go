@@ -20,12 +20,20 @@ var gzipWriterPool = sync.Pool{
 	},
 }
 
+var compressBodyPool = sync.Pool{
+	New: func() any {
+		// Pre-allocate 4KB; will grow as needed up to maxBytes
+		b := make([]byte, 0, 4096)
+		return &b
+	},
+}
+
 // CompressConfig configures the compress middleware (Traefik-style).
 type CompressConfig struct {
-	MinResponseBodyBytes   int      // Minimum body size to compress; 0 = use default 1024
-	ExcludedContentTypes   []string // Content-Types to never compress
-	IncludedContentTypes   []string // If non-empty, only compress these; mutually exclusive with Excluded
-	MaxBufferBytes         int      // Max response size to buffer; 0 = default 10MB
+	MinResponseBodyBytes int      // Minimum body size to compress; 0 = use default 1024
+	ExcludedContentTypes []string // Content-Types to never compress
+	IncludedContentTypes []string // If non-empty, only compress these; mutually exclusive with Excluded
+	MaxBufferBytes       int      // Max response size to buffer; 0 = default 10MB
 }
 
 // Compress returns a middleware that compresses responses using gzip (no config).
@@ -59,26 +67,32 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 				return
 			}
 
-			rec := &compressRecorder{ResponseWriter: w, status: 200, maxBytes: maxBuf}
+			bodyBuf := compressBodyPool.Get().(*[]byte)
+			*bodyBuf = (*bodyBuf)[:0]
+			rec := &compressRecorder{ResponseWriter: w, status: 200, maxBytes: maxBuf, body: *bodyBuf}
 			next.ServeHTTP(rec, r)
 
 			// Already compressed or error - pass through
 			if rec.Header().Get("Content-Encoding") != "" || rec.status >= 300 {
 				rec.flushRaw(false)
+				rec.returnBody()
 				return
 			}
 
 			contentType := strings.ToLower(strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0]))
 			if excluded[contentType] {
 				rec.flushRaw(false)
+				rec.returnBody()
 				return
 			}
 			if len(included) > 0 && !included[contentType] {
 				rec.flushRaw(false)
+				rec.returnBody()
 				return
 			}
 			if len(rec.body) < minBytes {
 				rec.flushRaw(false)
+				rec.returnBody()
 				return
 			}
 
@@ -95,6 +109,7 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 			_, _ = gz.Write(rec.body)
 			gz.Close()
 			gzipWriterPool.Put(gz)
+			rec.returnBody()
 		})
 	}
 }
@@ -168,4 +183,13 @@ func (r *compressRecorder) flushRaw(streaming bool) {
 	}
 	r.ResponseWriter.WriteHeader(r.status)
 	_, _ = r.ResponseWriter.Write(r.body)
+}
+
+// returnBody returns the body buffer to the pool for reuse.
+func (r *compressRecorder) returnBody() {
+	if r.body != nil {
+		b := r.body
+		compressBodyPool.Put(&b)
+		r.body = nil
+	}
 }
