@@ -60,4 +60,11 @@ message Service {
   bool l4_proxy_protocol = 10;  // Send HAProxy PROXY protocol v1 header (TCP only). Enables backend to see original client IP for SPF etc.
   string discovery_url = 11; // e.g. "dns:service.local", "consul:service-name"
   TlsClientConfig tls_client_config = 12;
+  // health_check_port overrides the target port for health checks.
+  // When set, health checks hit this port instead of the target's port.
+  // Use case: gRPC service on port 3000 with HTTP health endpoint on port 3001.
+  int32 health_check_port = 13;
+  // health_check_protocol overrides the scheme for health checks (e.g. "http", "https").
+  // When empty, the target's scheme is used.
+  string health_check_protocol = 14;
 }

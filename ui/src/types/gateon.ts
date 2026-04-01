@@ -65,6 +65,10 @@ export type Service = {
   l4_proxy_protocol?: boolean;
   discovery_url?: string;
   tls_client_config?: TlsClientConfig;
+  /** Overrides the target port for health checks (e.g. HTTP health on port 3001 while gRPC runs on 3000). */
+  health_check_port?: number;
+  /** Overrides the scheme for health checks (e.g. "http", "https"). */
+  health_check_protocol?: string;
 };
 
 export type RouteTLSConfig = {

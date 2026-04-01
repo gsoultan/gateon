@@ -75,6 +75,8 @@ export function ServiceForm({
       weighted_targets: [{ url: "", weight: 1, protocol: "http" }],
       load_balancer_policy: "round_robin",
       health_check_path: "",
+      health_check_port: 0,
+      health_check_protocol: "",
       l4_health_check_interval_ms: 10000,
       l4_health_check_timeout_ms: 3000,
       l4_udp_session_timeout_s: 60,
@@ -162,6 +164,8 @@ export function ServiceForm({
         initialData.load_balancer_policy || "round_robin",
       );
       form.setFieldValue("health_check_path", initialData.health_check_path || "");
+      form.setFieldValue("health_check_port", initialData.health_check_port ?? 0);
+      form.setFieldValue("health_check_protocol", initialData.health_check_protocol || "");
       form.setFieldValue(
         "l4_health_check_interval_ms",
         initialData.l4_health_check_interval_ms ?? 10000,
@@ -654,23 +658,60 @@ export function ServiceForm({
           selector={(s) => s.values.backend_type}
           children={(backendType) =>
             backendType !== "tcp" && backendType !== "udp" ? (
-              <form.Field
-                name="health_check_path"
-                children={(field) => (
-                  <Tooltip label="HTTP only. Leave empty for gRPC or when health checks are disabled.">
-                    <div>
+              <>
+                <form.Field
+                  name="health_check_path"
+                  children={(field) => (
+                    <Tooltip label="HTTP only. Leave empty for gRPC or when health checks are disabled.">
+                      <div>
+                        <TextInput
+                          label="Health Check Path"
+                          description="Optional HTTP path for health probes (e.g. /healthz)"
+                          placeholder="/healthz or leave empty"
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                        />
+                      </div>
+                    </Tooltip>
+                  )}
+                />
+                <Group grow>
+                  <form.Field
+                    name="health_check_port"
+                    children={(field) => (
                       <TextInput
-                        label="Health Check Path"
-                        description="Optional HTTP path for health probes (e.g. /healthz)"
-                        placeholder="/healthz or leave empty"
-                        value={field.state.value}
+                        label="Health Check Port"
+                        description="Override port for health probes (0 = use target port)"
+                        type="number"
+                        placeholder="0"
+                        value={field.state.value ?? 0}
                         onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
+                        onChange={(e) => field.handleChange(Number(e.target.value) || 0)}
+                        size="md"
                       />
-                    </div>
-                  </Tooltip>
-                )}
-              />
+                    )}
+                  />
+                  <form.Field
+                    name="health_check_protocol"
+                    children={(field) => (
+                      <Select
+                        label="Health Check Protocol"
+                        description="Override scheme for health probes (empty = use target scheme)"
+                        data={[
+                          { value: "", label: "Default (target scheme)" },
+                          { value: "http", label: "HTTP" },
+                          { value: "https", label: "HTTPS" },
+                        ]}
+                        value={field.state.value ?? ""}
+                        onBlur={field.handleBlur}
+                        onChange={(v) => field.handleChange(v ?? "")}
+                        size="md"
+                      />
+                    )}
+                  />
+                </Group>
+              </>
             ) : null
           }
         />

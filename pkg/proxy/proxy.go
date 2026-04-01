@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -383,15 +384,17 @@ const targetStateContextKey contextKey = 0
 
 // ProxyHandler handles the proxying of requests to backend services.
 type ProxyHandler struct {
-	lb              LoadBalancer
-	routeType       string
-	healthCheckPath string
-	discoveryURL    string
-	stopDiscovery   chan struct{}
-	stopHealthCheck chan struct{}
-	closeOnce       sync.Once
-	transport       http.RoundTripper
-	proxyPool       sync.Map // map[targetURL string]*httputil.ReverseProxy
+	lb                  LoadBalancer
+	routeType           string
+	healthCheckPath     string
+	healthCheckPort     int32
+	healthCheckProtocol string
+	discoveryURL        string
+	stopDiscovery       chan struct{}
+	stopHealthCheck     chan struct{}
+	closeOnce           sync.Once
+	transport           http.RoundTripper
+	proxyPool           sync.Map // map[targetURL string]*httputil.ReverseProxy
 }
 
 // NewProxyHandler creates a ProxyHandler from route and ServiceStore (DIP).
@@ -428,14 +431,8 @@ func (h *ProxyHandler) runHealthCheck(urls []string) {
 			currentStats := h.lb.GetStats()
 			for _, s := range currentStats {
 				u := s.URL
-				uForHealth := u
-				if strings.HasPrefix(u, "h2c://") {
-					uForHealth = "http://" + strings.TrimPrefix(u, "h2c://")
-				} else if strings.HasPrefix(u, "h2://") || strings.HasPrefix(u, "h3://") {
-					uForHealth = "https://" + strings.TrimPrefix(strings.TrimPrefix(u, "h2://"), "h3://")
-				}
-				fullURL := strings.TrimSuffix(uForHealth, "/") + h.healthCheckPath
-				resp, err := client.Get(fullURL)
+				healthURL := h.buildHealthCheckURL(u)
+				resp, err := client.Get(healthURL)
 				alive := err == nil && resp != nil && resp.StatusCode < 500
 				h.lb.SetAlive(u, alive)
 				if resp != nil {
@@ -446,6 +443,35 @@ func (h *ProxyHandler) runHealthCheck(urls []string) {
 			return
 		}
 	}
+}
+
+// buildHealthCheckURL constructs the health check URL for a given target URL.
+// It applies health_check_port and health_check_protocol overrides when configured,
+// enabling scenarios like gRPC on port 3000 with HTTP health checks on port 3001.
+func (h *ProxyHandler) buildHealthCheckURL(targetURL string) string {
+	uForHealth := targetURL
+	if strings.HasPrefix(targetURL, "h2c://") {
+		uForHealth = "http://" + strings.TrimPrefix(targetURL, "h2c://")
+	} else if strings.HasPrefix(targetURL, "h2://") || strings.HasPrefix(targetURL, "h3://") {
+		uForHealth = "https://" + strings.TrimPrefix(strings.TrimPrefix(targetURL, "h2://"), "h3://")
+	}
+
+	parsed, err := url.Parse(uForHealth)
+	if err != nil {
+		return strings.TrimSuffix(uForHealth, "/") + h.healthCheckPath
+	}
+
+	if h.healthCheckProtocol != "" {
+		parsed.Scheme = h.healthCheckProtocol
+	}
+
+	if h.healthCheckPort > 0 {
+		host := parsed.Hostname()
+		parsed.Host = net.JoinHostPort(host, fmt.Sprintf("%d", h.healthCheckPort))
+	}
+
+	parsed.Path = h.healthCheckPath
+	return parsed.String()
 }
 
 func (h *ProxyHandler) runDiscovery() {
