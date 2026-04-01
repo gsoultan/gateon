@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -26,7 +25,6 @@ func registerTracesHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		WriteProtoResponse(w, http.StatusOK, resp)
 	})
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import {
   Card,
   Group,
@@ -35,6 +35,8 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const [logs, setLogs] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const [search, setSearch] = useState("");
   const [routeFilter, setRouteFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -46,13 +48,15 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     const base = apiUrl.replace(/\/$/, "");
     const baseUrl = base.replace(/^http/, "ws");
     const token = useAuthStore.getState().token;
-    const wsUrl = `${baseUrl}/v1/logs` + (token ? `?auth=${token}` : "");
+    // Skip sending __cookie__ sentinel as query param; browser sends the HttpOnly cookie automatically.
+    const authParam = token && token !== "__cookie__" ? `?auth=${token}` : "";
+    const wsUrl = `${baseUrl}/v1/logs${authParam}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => setConnected(true);
     ws.onclose = () => setConnected(false);
     ws.onmessage = (event) => {
-      if (!paused) {
+      if (!pausedRef.current) {
         setLogs((prev) => {
           const newLogs = [event.data, ...prev];
           return newLogs.slice(0, 100);
@@ -61,7 +65,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     };
 
     return () => ws.close();
-  }, [paused, apiUrl]);
+  }, [apiUrl]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
@@ -101,15 +105,15 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const formatLog = (log: string) => {
     try {
       const parsed = JSON.parse(log);
-      const time = parsed.ts
-        ? new Date(parsed.ts * 1000).toLocaleTimeString()
+      const time = parsed.time
+        ? new Date(parsed.time).toLocaleTimeString()
         : "";
       const level = parsed.level ? parsed.level.toUpperCase() : "INFO";
-      const msg = parsed.msg || "";
+      const msg = parsed.message || "";
       const rest = { ...parsed };
-      delete rest.ts;
+      delete rest.time;
       delete rest.level;
-      delete rest.msg;
+      delete rest.message;
 
       return (
         <Group gap="xs" align="flex-start" wrap="nowrap">

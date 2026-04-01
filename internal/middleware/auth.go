@@ -205,9 +205,9 @@ func ClearSessionCookie(w http.ResponseWriter, isTLS bool) {
 	w.Header().Add("Set-Cookie", v)
 }
 
-// extractToken returns the token from Cookie (gateon_session), Authorization Bearer,
+// ExtractToken returns the token from Cookie (gateon_session), Authorization Bearer,
 // or query params (token, access_token) for WebSocket clients that cannot set headers.
-func extractToken(r *http.Request) string {
+func ExtractToken(r *http.Request) string {
 	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		return c.Value
 	}
@@ -240,7 +240,7 @@ func bearerToken(r *http.Request) string {
 func PasetoAuth(verifier TokenVerifier) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token := extractToken(r)
+			token := ExtractToken(r)
 			if token == "" {
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Authorization header, session cookie, or token/access_token query required", "")
 				return
