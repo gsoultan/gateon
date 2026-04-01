@@ -51,7 +51,7 @@ func CreateTLSManager(s *Server) *gtls.Manager {
 		if len(gc.Tls.Certificates) > 0 {
 			for _, c := range gc.Tls.Certificates {
 				cfg.Certificates = append(cfg.Certificates, gtls.CertificateConfig{
-					ID: c.Id, Name: c.Name, CertFile: c.CertFile, KeyFile: c.KeyFile,
+					ID: c.Id, Name: c.Name, CertFile: c.CertFile, KeyFile: c.KeyFile, CaFile: c.CaFile,
 				})
 			}
 		}
@@ -159,7 +159,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 						if c.Id != certId {
 							continue
 						}
-						cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, "")
+						cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
 						if err == nil {
 							certs = append(certs, *cert)
 						}
