@@ -140,24 +140,57 @@ func Metrics(routeID string) Middleware {
 	}
 }
 
+// parsedIPRule holds a pre-parsed IP filter rule (exact IP or CIDR) to avoid per-request parsing.
+type parsedIPRule struct {
+	exact string     // non-empty for exact match
+	cidr  *net.IPNet // non-nil for CIDR match
+}
+
+func parseIPRules(rules []string) []parsedIPRule {
+	parsed := make([]parsedIPRule, len(rules))
+	for i, r := range rules {
+		if _, ipnet, err := net.ParseCIDR(r); err == nil {
+			parsed[i] = parsedIPRule{cidr: ipnet}
+		} else {
+			parsed[i] = parsedIPRule{exact: r}
+		}
+	}
+	return parsed
+}
+
+func matchParsedIP(clientIP string, rule parsedIPRule) bool {
+	if rule.exact != "" {
+		return clientIP == rule.exact
+	}
+	if rule.cidr != nil {
+		ip := net.ParseIP(clientIP)
+		return ip != nil && rule.cidr.Contains(ip)
+	}
+	return false
+}
+
 // IPFilterWithClientIP returns a middleware that filters requests by IP address using the given clientIP resolver.
+// CIDRs are pre-parsed at construction time to avoid per-request overhead.
 func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Request) string) Middleware {
+	parsedDeny := parseIPRules(denyList)
+	parsedAllow := parseIPRules(allowList)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			remoteAddr := clientIP(r)
 
 			// Deny list takes precedence
-			for _, ip := range denyList {
-				if matchIP(remoteAddr, ip) {
+			for _, rule := range parsedDeny {
+				if matchParsedIP(remoteAddr, rule) {
 					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
 				}
 			}
 
-			if len(allowList) > 0 {
+			if len(parsedAllow) > 0 {
 				found := false
-				for _, ip := range allowList {
-					if matchIP(remoteAddr, ip) {
+				for _, rule := range parsedAllow {
+					if matchParsedIP(remoteAddr, rule) {
 						found = true
 						break
 					}
@@ -171,21 +204,6 @@ func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Requ
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-func matchIP(clientIP, target string) bool {
-	if clientIP == target {
-		return true
-	}
-	// Check CIDR
-	if _, ipnet, err := net.ParseCIDR(target); err == nil {
-		ip := net.ParseIP(clientIP)
-		if ip == nil {
-			return false
-		}
-		return ipnet.Contains(ip)
-	}
-	return false
 }
 
 // IPFilter returns a middleware that filters requests by IP address, using X-Forwarded-For and RemoteAddr.

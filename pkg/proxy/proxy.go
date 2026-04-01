@@ -64,6 +64,8 @@ type LoadBalancer interface {
 
 type targetState struct {
 	url          string
+	parsedURL    *url.URL // pre-parsed to avoid per-request url.Parse
+	cacheKey     string   // pre-computed proxy cache key (scheme://host/path)
 	weight       int32
 	alive        bool
 	requestCount uint64
@@ -89,10 +91,27 @@ type RoundRobinLB struct {
 	mu      sync.RWMutex
 }
 
+func newTargetState(rawURL string, weight int32) *targetState {
+	ts := &targetState{url: rawURL, alive: true, weight: weight}
+	if parsed, err := url.Parse(rawURL); err == nil {
+		// Normalize scheme for proxy cache key
+		normalized := *parsed
+		switch normalized.Scheme {
+		case "h2c":
+			normalized.Scheme = "http"
+		case "h2", "h3":
+			normalized.Scheme = "https"
+		}
+		ts.parsedURL = &normalized
+		ts.cacheKey = normalized.Scheme + "://" + normalized.Host + normalized.Path
+	}
+	return ts
+}
+
 func NewRoundRobinLB(urls []string) *RoundRobinLB {
 	lb := &RoundRobinLB{targets: make([]*targetState, len(urls))}
 	for i, u := range urls {
-		lb.targets[i] = &targetState{url: u, alive: true, weight: 1}
+		lb.targets[i] = newTargetState(u, 1)
 	}
 	return lb
 }
@@ -131,7 +150,7 @@ func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	defer lb.mu.Unlock()
 	lb.targets = make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = &targetState{url: t.Url, alive: true, weight: t.Weight}
+		lb.targets[i] = newTargetState(t.Url, t.Weight)
 	}
 }
 
@@ -172,7 +191,7 @@ type LeastConnLB struct {
 func NewLeastConnLB(urls []string) *LeastConnLB {
 	lb := &LeastConnLB{targets: make([]*targetState, len(urls))}
 	for i, u := range urls {
-		lb.targets[i] = &targetState{url: u, alive: true, weight: 1}
+		lb.targets[i] = newTargetState(u, 1)
 	}
 	return lb
 }
@@ -211,7 +230,7 @@ func (lb *LeastConnLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	defer lb.mu.Unlock()
 	lb.targets = make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = &targetState{url: t.Url, alive: true, weight: t.Weight}
+		lb.targets[i] = newTargetState(t.Url, t.Weight)
 	}
 }
 
@@ -253,7 +272,7 @@ type WeightedRoundRobinLB struct {
 func NewWeightedRoundRobinLB(targets []*gateonv1.Target) *WeightedRoundRobinLB {
 	lb := &WeightedRoundRobinLB{targets: make([]*targetState, len(targets))}
 	for i, t := range targets {
-		lb.targets[i] = &targetState{url: t.Url, alive: true, weight: t.Weight}
+		lb.targets[i] = newTargetState(t.Url, t.Weight)
 	}
 	return lb
 }
@@ -305,7 +324,7 @@ func (lb *WeightedRoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target
 	defer lb.mu.Unlock()
 	lb.targets = make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = &targetState{url: t.Url, alive: true, weight: t.Weight}
+		lb.targets[i] = newTargetState(t.Url, t.Weight)
 	}
 }
 
@@ -486,9 +505,9 @@ func (h *ProxyHandler) activeConnCount() int32 {
 
 // getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.
 // Reusing proxies avoids per-request allocations at high throughput (100k+ req/s).
-func (h *ProxyHandler) getOrCreateProxy(targetURL *url.URL) *httputil.ReverseProxy {
-	key := targetURL.String()
-	if v, ok := h.proxyPool.Load(key); ok {
+// The cacheKey is pre-computed in targetState to avoid per-request string allocation.
+func (h *ProxyHandler) getOrCreateProxy(cacheKey string, targetURL *url.URL) *httputil.ReverseProxy {
+	if v, ok := h.proxyPool.Load(cacheKey); ok {
 		return v.(*httputil.ReverseProxy)
 	}
 	// Clone target to avoid mutation affecting the cache key
@@ -507,10 +526,16 @@ func (h *ProxyHandler) getOrCreateProxy(targetURL *url.URL) *httputil.ReversePro
 		}
 		w.WriteHeader(http.StatusBadGateway)
 	}
-	if v, loaded := h.proxyPool.LoadOrStore(key, rp); loaded {
+	if v, loaded := h.proxyPool.LoadOrStore(cacheKey, rp); loaded {
 		return v.(*httputil.ReverseProxy)
 	}
 	return rp
+}
+
+var statusResponseWriterPool = sync.Pool{
+	New: func() any {
+		return &statusResponseWriter{status: http.StatusOK}
+	},
 }
 
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -522,7 +547,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.L.Info().
+	logger.L.Debug().
 		Str("flow_step", "service_dispatch").
 		Str("request_id", request.GetID(r)).
 		Str("target", state.url).
@@ -531,26 +556,22 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt32(&state.activeConn, 1)
 	defer atomic.AddInt32(&state.activeConn, -1)
 
-	targetURL, err := url.Parse(state.url)
-	if err != nil {
+	// Use pre-parsed URL from targetState to avoid per-request url.Parse allocation
+	targetURL := state.parsedURL
+	if targetURL == nil {
 		http.Error(w, "invalid target URL", http.StatusInternalServerError)
 		return
 	}
 
-	isH2 := targetURL.Scheme == "h2"
-	isH2C := targetURL.Scheme == "h2c"
-	isH3 := targetURL.Scheme == "h3"
-	if isH2C {
-		targetURL.Scheme = "http"
-	} else if isH3 || isH2 {
-		targetURL.Scheme = "https"
-	}
+	origScheme := state.url
+	isH2C := strings.HasPrefix(origScheme, "h2c://")
+	isH3 := strings.HasPrefix(origScheme, "h3://")
 
 	// Pass state via context for shared ErrorHandler
 	ctx := context.WithValue(r.Context(), targetStateContextKey, state)
 	r = r.WithContext(ctx)
 
-	proxy := h.getOrCreateProxy(targetURL)
+	proxy := h.getOrCreateProxy(state.cacheKey, targetURL)
 
 	// Update request headers for proxying
 	r.URL.Host = targetURL.Host
@@ -570,8 +591,8 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle gRPC metadata translation or h2c/h3
-	contentType := strings.ToLower(r.Header.Get("Content-Type"))
-	isGRPC := strings.HasPrefix(contentType, "application/grpc")
+	contentType := r.Header.Get("Content-Type")
+	isGRPC := len(contentType) >= 16 && strings.EqualFold(contentType[:16], "application/grpc")
 	if isH3 {
 		r.ProtoMajor = 3
 		r.ProtoMinor = 0
@@ -590,7 +611,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	srw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
+	srw := statusResponseWriterPool.Get().(*statusResponseWriter)
+	srw.ResponseWriter = w
+	srw.status = http.StatusOK
+
 	proxy.ServeHTTP(srw, r)
 
 	duration := time.Since(start)
@@ -599,6 +623,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if srw.status >= 500 {
 		atomic.AddUint64(&state.errorCount, 1)
 	}
+
+	srw.ResponseWriter = nil
+	statusResponseWriterPool.Put(srw)
 }
 
 func (h *ProxyHandler) GetStats() []TargetStats {
