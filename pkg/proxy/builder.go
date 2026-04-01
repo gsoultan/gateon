@@ -18,17 +18,19 @@ import (
 
 // ProxyHandlerBuilder builds a ProxyHandler stepwise (Builder pattern).
 type ProxyHandlerBuilder struct {
-	route           *gateonv1.Route
-	serviceStore    config.ServiceStore
-	lbFactory       LoadBalancerFactory
-	targets         []*gateonv1.Target
-	lb              LoadBalancer
-	discoveryURL    string
-	healthCheckPath string
-	routeType       string
-	transport       http.RoundTripper
-	transportConfig *TransportConfig
-	tlsClientConfig *gateonv1.TlsClientConfig
+	route               *gateonv1.Route
+	serviceStore        config.ServiceStore
+	lbFactory           LoadBalancerFactory
+	targets             []*gateonv1.Target
+	lb                  LoadBalancer
+	discoveryURL        string
+	healthCheckPath     string
+	healthCheckPort     int32
+	healthCheckProtocol string
+	routeType           string
+	transport           http.RoundTripper
+	transportConfig     *TransportConfig
+	tlsClientConfig     *gateonv1.TlsClientConfig
 }
 
 // NewProxyHandlerBuilder creates a builder for the given route.
@@ -66,6 +68,8 @@ func (b *ProxyHandlerBuilder) resolveService() {
 	b.targets = svc.WeightedTargets
 	b.discoveryURL = svc.DiscoveryUrl
 	b.healthCheckPath = svc.HealthCheckPath
+	b.healthCheckPort = svc.HealthCheckPort
+	b.healthCheckProtocol = svc.HealthCheckProtocol
 	b.tlsClientConfig = svc.TlsClientConfig
 	policy := svc.LoadBalancerPolicy
 	if policy == "" {
@@ -137,13 +141,15 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		b.buildTransport()
 	}
 	h := &ProxyHandler{
-		lb:              b.lb,
-		routeType:       b.routeType,
-		healthCheckPath: b.healthCheckPath,
-		discoveryURL:    b.discoveryURL,
-		stopDiscovery:   make(chan struct{}),
-		stopHealthCheck: make(chan struct{}),
-		transport:       b.transport,
+		lb:                  b.lb,
+		routeType:           b.routeType,
+		healthCheckPath:     b.healthCheckPath,
+		healthCheckPort:     b.healthCheckPort,
+		healthCheckProtocol: b.healthCheckProtocol,
+		discoveryURL:        b.discoveryURL,
+		stopDiscovery:       make(chan struct{}),
+		stopHealthCheck:     make(chan struct{}),
+		transport:           b.transport,
 	}
 	if h.discoveryURL != "" {
 		go h.runDiscovery()
