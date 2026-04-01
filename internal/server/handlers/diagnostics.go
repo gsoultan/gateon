@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -18,11 +18,10 @@ var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return
 
 func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
+		// Accept token from ?auth= query param, Authorization header, or session cookie.
 		token := r.URL.Query().Get("auth")
 		if token == "" {
-			if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-				token = strings.TrimPrefix(h, "Bearer ")
-			}
+			token = middleware.ExtractToken(r)
 		}
 		if token == "" || d.AuthManager == nil {
 			w.WriteHeader(http.StatusUnauthorized)

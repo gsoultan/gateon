@@ -15,6 +15,7 @@ import {
   Code,
   TextInput,
   Button,
+  Pagination,
 } from "@mantine/core";
 import {
   IconSearch,
@@ -24,12 +25,45 @@ import {
   IconCircleCheck,
   IconCircleX,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useState, useMemo, useTransition } from "react";
 
 import { useTraces } from "../hooks/useGateon";
 
+const PAGE_SIZE = 20;
+
 export default function TracesPage() {
   const { data: traces = [], isLoading, refetch } = useTraces();
+  const [search, setSearch] = useState("");
+  const [deferredSearch, setDeferredSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [isPending, startTransition] = useTransition();
+
+  const handleSearchChange = (val: string) => {
+    setSearch(val);
+    setPage(1);
+    startTransition(() => {
+      setDeferredSearch(val);
+    });
+  };
+
+  const filteredTraces = useMemo(() => {
+    if (!deferredSearch) return traces;
+    const lower = deferredSearch.toLowerCase();
+    return traces.filter(
+      (t) =>
+        t.id.toLowerCase().includes(lower) ||
+        t.operation_name.toLowerCase().includes(lower) ||
+        t.service_name.toLowerCase().includes(lower) ||
+        t.path.toLowerCase().includes(lower) ||
+        t.status.toLowerCase().includes(lower),
+    );
+  }, [traces, deferredSearch]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTraces.length / PAGE_SIZE));
+  const paginatedTraces = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredTraces.slice(start, start + PAGE_SIZE);
+  }, [filteredTraces, page]);
 
   return (
     <Stack gap="lg">
@@ -42,8 +76,8 @@ export default function TracesPage() {
           </Text>
         </Stack>
         <Group>
-          <Button 
-            leftSection={<IconRefresh size={16} />} 
+          <Button
+            leftSection={<IconRefresh size={16} />}
             variant="light"
             loading={isLoading}
             onClick={() => refetch()}
@@ -64,12 +98,15 @@ export default function TracesPage() {
             <TextInput
               placeholder="Search traces by ID, service, or path..."
               leftSection={<IconSearch size={16} />}
+              value={search}
+              onChange={(e) => handleSearchChange(e.currentTarget.value)}
               style={{ flex: 1 }}
+              rightSection={isPending ? <Text size="xs">...</Text> : null}
             />
           </Group>
 
           <ScrollArea>
-            <Table highlightOnHover verticalSpacing="sm">
+            <Table highlightOnHover verticalSpacing="sm" style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>ID</Table.Th>
@@ -82,7 +119,7 @@ export default function TracesPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {traces.map((trace) => (
+                {paginatedTraces.map((trace) => (
                   <Table.Tr key={trace.id}>
                     <Table.Td>
                       <Code color="blue.1" c="blue.8">
@@ -113,7 +150,7 @@ export default function TracesPage() {
                     </Table.Td>
                   </Table.Tr>
                 ))}
-                {traces.length === 0 && !isLoading && (
+                {filteredTraces.length === 0 && !isLoading && (
                   <Table.Tr>
                     <Table.Td colSpan={7} style={{ textAlign: "center" }}>
                       <Text c="dimmed">No traces found.</Text>
@@ -123,6 +160,15 @@ export default function TracesPage() {
               </Table.Tbody>
             </Table>
           </ScrollArea>
+
+          {filteredTraces.length > PAGE_SIZE && (
+            <Group justify="space-between" align="center" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+              <Text size="xs" c="dimmed">
+                Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, filteredTraces.length)} of {filteredTraces.length}
+              </Text>
+              <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
+            </Group>
+          )}
         </Stack>
       </Card>
 
@@ -131,8 +177,8 @@ export default function TracesPage() {
           <IconTimeline size={48} stroke={1.5} color="var(--mantine-color-blue-6)" />
           <Title order={3}>Live Trace Visualization</Title>
           <Text c="dimmed" ta="center" style={{ maxWidth: 500 }}>
-            Gateon is currently exporting telemetry via OpenTelemetry Protocol (OTLP). 
-            For full visualization of spans and child relationships, we recommend 
+            Gateon is currently exporting telemetry via OpenTelemetry Protocol (OTLP).
+            For full visualization of spans and child relationships, we recommend
             integrating with a dedicated store like Jaeger or Honeycomb.
           </Text>
           <Box mt="md">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Title,
   Text,
@@ -12,8 +12,6 @@ import {
   ThemeIcon,
   Timeline,
   Divider,
-  ActionIcon,
-  Tooltip,
 } from '@mantine/core';
 import {
   IconBrain,
@@ -58,8 +56,9 @@ const AIInsightsPage: React.FC = () => {
       }
       const response = await res.json();
       setData(response);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch AI insights');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch AI insights';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -88,17 +87,17 @@ const AIInsightsPage: React.FC = () => {
   };
 
   return (
-    <Stack spacing="lg">
-      <Group position="apart">
+    <Stack gap="lg">
+      <Group justify="space-between">
         <div>
           <Title order={2}>AI Insights & Optimization</Title>
-          <Text color="dimmed" size="sm">
+          <Text c="dimmed" size="sm">
             LLM-powered analysis of your gateway configuration for security, performance, and best practices.
           </Text>
         </div>
-        <Button 
-          leftIcon={<IconRefresh size={16} />} 
-          variant="light" 
+        <Button
+          leftSection={<IconRefresh size={16} />}
+          variant="light"
           onClick={fetchInsights}
           loading={loading}
         >
@@ -107,7 +106,7 @@ const AIInsightsPage: React.FC = () => {
       </Group>
 
       {loading && !data && (
-        <Group position="center" py="xl">
+        <Group justify="center" py="xl">
           <Stack align="center">
             <Loader size="lg" />
             <Text>Gateon AI is analyzing your configuration...</Text>
@@ -124,12 +123,12 @@ const AIInsightsPage: React.FC = () => {
       {data && (
         <>
           <Card withBorder shadow="sm" padding="lg" radius="md">
-            <Group noWrap align="flex-start">
+            <Group wrap="nowrap" align="flex-start">
               <ThemeIcon size={40} radius="md" variant="light" color="blue">
                 <IconBrain size={24} />
               </ThemeIcon>
               <div>
-                <Text weight={700} size="lg">Executive Summary</Text>
+                <Text fw={700} size="lg">Executive Summary</Text>
                 <Text size="sm" mt={4}>
                   {data.summary}
                 </Text>
@@ -138,15 +137,15 @@ const AIInsightsPage: React.FC = () => {
           </Card>
 
           <Title order={4} mt="md">Recommendations</Title>
-          
+
           <Timeline active={-1} bulletSize={32} lineWidth={2}>
             {data.insights?.map((insight, index) => (
-              <Timeline.Item 
-                key={index} 
+              <Timeline.Item
+                key={index}
                 bullet={getCategoryIcon(insight.category)}
                 title={
-                  <Group spacing="xs">
-                    <Text weight={600}>{insight.title}</Text>
+                  <Group gap="xs">
+                    <Text fw={600}>{insight.title}</Text>
                     <Badge color={getSeverityColor(insight.severity)} variant="filled" size="xs">
                       {insight.severity}
                     </Badge>
@@ -157,13 +156,13 @@ const AIInsightsPage: React.FC = () => {
                 }
               >
                 <Card withBorder mt="xs" padding="sm" radius="md">
-                  <Stack spacing="xs">
+                  <Stack gap="xs">
                     <Text size="sm">{insight.description}</Text>
                     <Divider variant="dashed" />
-                    <Group spacing="xs" noWrap align="flex-start">
+                    <Group gap="xs" wrap="nowrap" align="flex-start">
                       <IconCheck size={16} color="var(--mantine-color-green-6)" style={{ marginTop: 2 }} />
                       <div>
-                        <Text size="xs" weight={700} color="green">Recommendation:</Text>
+                        <Text size="xs" fw={700} c="green">Recommendation:</Text>
                         <Text size="sm">{insight.recommendation}</Text>
                       </div>
                     </Group>
@@ -176,7 +175,7 @@ const AIInsightsPage: React.FC = () => {
       )}
 
       {!loading && !data && !error && (
-        <Text align="center" color="dimmed" py="xl">
+        <Text ta="center" c="dimmed" py="xl">
           No analysis data available. Click "Re-analyze" to start.
         </Text>
       )}
