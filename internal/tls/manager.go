@@ -218,6 +218,11 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 		}
 	}
 
+	// Safety guard: if strict mTLS is required, ensure at least one Client CA is configured.
+	if tlsConfig.ClientAuth == tls.RequireAndVerifyClientCert && tlsConfig.ClientCAs == nil {
+		return nil, fmt.Errorf("client_auth_type RequireAndVerifyClientCert requires at least one client_authority CA file")
+	}
+
 	if len(m.config.CipherSuites) > 0 {
 		tlsConfig.CipherSuites = parseCipherSuites(m.config.CipherSuites)
 	}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center } from '@mantine/core'
+import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Select } from '@mantine/core'
 import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconTrash, IconLockCheck } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import type { GlobalConfig, ClientAuthority } from '../types/gateon'
@@ -120,7 +120,7 @@ export default function ClientAuthoritiesPage() {
   }
 
   const startAdd = () => {
-    setEditingCA({ id: crypto.randomUUID(), name: '', ca_file: '' })
+    setEditingCA({ id: crypto.randomUUID(), name: '', ca_file: '', client_auth_type: 'NoClientCert' })
     open()
   }
 
@@ -164,13 +164,14 @@ export default function ClientAuthoritiesPage() {
               <Table.Tr>
                 <Table.Th>Name</Table.Th>
                 <Table.Th>CA File Path</Table.Th>
+                <Table.Th>Client Auth Type</Table.Th>
                 <Table.Th style={{ width: 100 }}>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {cas.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={3}>
+                  <Table.Td colSpan={4}>
                     <Center py="xl">
                       <Text c="dimmed">No client authorities configured</Text>
                     </Center>
@@ -187,6 +188,9 @@ export default function ClientAuthoritiesPage() {
                     </Table.Td>
                     <Table.Td>
                       <Text size="sm" ff="monospace" c="dimmed">{ca.ca_file}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm">{ca.client_auth_type || 'NoClientCert'}</Text>
                     </Table.Td>
                     <Table.Td>
                       {canUploadCerts && (
@@ -255,6 +259,21 @@ export default function ClientAuthoritiesPage() {
                 )}
               </FileButton>
             }
+          />
+          <Select
+            label="Client Auth Type"
+            placeholder="Select client auth requirement"
+            data={[
+              { value: 'NoClientCert', label: 'NoClientCert (default)' },
+              { value: 'RequestClientCert', label: 'RequestClientCert' },
+              { value: 'RequireAnyClientCert', label: 'RequireAnyClientCert' },
+              { value: 'VerifyClientCertIfGiven', label: 'VerifyClientCertIfGiven' },
+              { value: 'RequireAndVerifyClientCert', label: 'RequireAndVerifyClientCert (mTLS)' },
+            ]}
+            value={editingCA?.client_auth_type || 'NoClientCert'}
+            onChange={(val) => editingCA && setEditingCA({ ...editingCA, client_auth_type: val || 'NoClientCert' })}
+            radius="md"
+            description="Per-CA preference; actual enforcement occurs via TLS Options or global TLS client_auth_type."
           />
           <Button onClick={handleSaveCA} radius="md" mt="md">Save Authority</Button>
         </Stack>

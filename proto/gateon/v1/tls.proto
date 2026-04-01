@@ -43,4 +43,11 @@ message TLSOption {
   string client_auth_type = 7;
   bool sni_strict = 8;
   repeated string alpn_protocols = 9;
+  // client_authority_ids binds one or more Client Authorities (CA bundles)
+  // to this TLS Option. When set together with a verifying client_auth_type
+  // (e.g. "RequireAndVerifyClientCert" or "VerifyClientCertIfGiven"), the
+  // server will validate the peer certificate (e.g. Cloudflare Authenticated
+  // Origin Pulls) against the selected CA pool(s).
+  // Note: IDs must reference entries in Global TLS -> Client Authorities.
+  repeated string client_authority_ids = 10;
 }
