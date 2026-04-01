@@ -43,3 +43,4 @@ ui/package-lock.json
 gateon.exe
 gateon_test.exe
 go.sum
+proto/gateon/v1/*.go
