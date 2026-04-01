@@ -214,6 +214,9 @@ export type SetupRequest = {
   paseto_secret: string;
   management_bind: string;
   management_port: string;
+  // Optional for first-run wizard database selection
+  database_url?: string;
+  database_config?: DatabaseConfig;
 };
 
 export type SetupResponse = {

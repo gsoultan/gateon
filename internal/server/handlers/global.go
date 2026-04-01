@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -124,13 +125,97 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
+	// Test DB connection endpoint for first-run wizard
+	type testDBReq struct {
+		DatabaseUrl    string                   `json:"database_url"`
+		DatabaseConfig *gateonv1.DatabaseConfig `json:"database_config"`
+	}
+	mux.HandleFunc("POST /v1/setup/test-db", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body testDBReq
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		dsn := body.DatabaseUrl
+		if dsn == "" {
+			dsn = db.BuildURLFromConfig(body.DatabaseConfig)
+		}
+		if dsn == "" {
+			writeJSONError(w, http.StatusBadRequest, "missing database configuration")
+			return
+		}
+		conn, _, err := db.Open(dsn)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "connection failed: "+err.Error())
+			return
+		}
+		_ = conn.Close()
+		_ = json.NewEncoder(w).Encode(struct {
+			Success bool `json:"success"`
+		}{Success: true})
+	})
 	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		var req gateonv1.SetupRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Accept extended payload including database settings for first-run wizard
+		type setupBody struct {
+			AdminUsername  string                   `json:"admin_username"`
+			AdminPassword  string                   `json:"admin_password"`
+			PasetoSecret   string                   `json:"paseto_secret"`
+			ManagementBind string                   `json:"management_bind"`
+			ManagementPort string                   `json:"management_port"`
+			DatabaseUrl    string                   `json:"database_url"`
+			DatabaseConfig *gateonv1.DatabaseConfig `json:"database_config"`
+		}
+		var body setupBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
 			return
+		}
+
+		// If DB settings are provided, validate connection and persist to globals before setup
+		if body.DatabaseUrl != "" || body.DatabaseConfig != nil {
+			dsn := body.DatabaseUrl
+			if dsn == "" {
+				dsn = db.BuildURLFromConfig(body.DatabaseConfig)
+			}
+			if dsn == "" {
+				writeJSONError(w, http.StatusBadRequest, "invalid database configuration")
+				return
+			}
+			conn, _, err := db.Open(dsn)
+			if err != nil {
+				writeJSONError(w, http.StatusBadRequest, "failed to connect to database: "+err.Error())
+				return
+			}
+			_ = conn.Close()
+			// Persist selected DB into global config
+			gc := svc.GetGlobals().Get(r.Context())
+			if gc.Auth == nil {
+				gc.Auth = &gateonv1.AuthConfig{}
+			}
+			if body.DatabaseUrl != "" {
+				gc.Auth.DatabaseUrl = body.DatabaseUrl
+				gc.Auth.DatabaseConfig = nil
+				gc.Auth.SqlitePath = ""
+			} else {
+				gc.Auth.DatabaseConfig = body.DatabaseConfig
+				gc.Auth.DatabaseUrl = ""
+				gc.Auth.SqlitePath = ""
+			}
+			if err := svc.GetGlobals().Update(r.Context(), gc); err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "failed to persist database settings")
+				return
+			}
+		}
+
+		req := gateonv1.SetupRequest{
+			AdminUsername:  body.AdminUsername,
+			AdminPassword:  body.AdminPassword,
+			PasetoSecret:   body.PasetoSecret,
+			ManagementBind: body.ManagementBind,
+			ManagementPort: body.ManagementPort,
 		}
 		resp, err := svc.Setup(r.Context(), &req)
 		if err != nil {
