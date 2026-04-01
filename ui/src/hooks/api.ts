@@ -1,6 +1,6 @@
 import { useAuthStore } from "../store/useAuthStore";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
-import type { SetupRequest, SetupResponse } from "../types/gateon";
+import type { SetupRequest, SetupResponse, DatabaseConfig } from "../types/gateon";
 
 export type PaginationParams = {
   page?: number;
@@ -91,4 +91,18 @@ export async function setupGateon(req: SetupRequest): Promise<SetupResponse> {
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+export async function testDbConnection(payload: {
+  database_url?: string;
+  database_config?: DatabaseConfig;
+}): Promise<boolean> {
+  const res = await apiFetch("/v1/setup/test-db", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  return !!data?.success;
 }

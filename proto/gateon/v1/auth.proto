@@ -4,6 +4,8 @@ package gateon.v1;
 
 option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
 
+import "gateon/v1/common.proto";
+
 message LoginRequest {
   string username = 1;
   string password = 2;
@@ -29,6 +31,16 @@ message SetupRequest {
   string management_port = 5;
   reserved 6;
   reserved "management_host";
+
+  // DatabaseUrl is an optional connection string for the management/auth database.
+  // If provided, it overrides DatabaseConfig.
+  // Supported: plain sqlite path (e.g. "gateon.db"),
+  //            sqlite://path/to.db, postgres://..., mysql://...
+  string database_url = 7;
+
+  // DatabaseConfig is an optional structured database configuration.
+  // When DatabaseUrl is empty, this config is used to construct the DSN.
+  DatabaseConfig database_config = 8;
 }
 
 message SetupResponse {

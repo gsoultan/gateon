@@ -5,6 +5,7 @@ export {
   getApiErrorMessage,
   restoreSessionFromCookie,
   setupGateon,
+  testDbConnection,
 } from "./api";
 export type { PaginationParams, RouteListParams } from "./api";
 

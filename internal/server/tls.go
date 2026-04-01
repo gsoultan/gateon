@@ -138,6 +138,15 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 				if router.RouteHostIsExact(routeHost) != exact {
 					continue
 				}
+				// If the route references a TLS option with SNI strict, do not allow wildcard matches
+				if rt.Tls.OptionId != "" {
+					if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
+						if opt.SniStrict && !exact {
+							continue
+						}
+					}
+				}
+
 				var certs []tls.Certificate
 				gc := deps.GlobalStore.Get(ctx)
 				if gc == nil || gc.Tls == nil {
@@ -177,6 +186,9 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 						if len(opt.AlpnProtocols) > 0 {
 							newCfg.NextProtos = opt.AlpnProtocols
 						}
+						if opt.ClientAuthType != "" {
+							newCfg.ClientAuth = parseClientAuthType(opt.ClientAuthType)
+						}
 					}
 				}
 				return newCfg, nil
@@ -187,13 +199,21 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 }
 
 func parseTLSVersion(v string) uint16 {
-	switch strings.ToUpper(v) {
+	vv := strings.ToUpper(strings.TrimSpace(v))
+	// Normalize variants: "TLS1.2", "TLS_1_2", "TLS12" → TLS12
+	vv = strings.ReplaceAll(vv, "_", "")
+	vv = strings.ReplaceAll(vv, ".", "")
+	switch vv {
+	case "TLS10":
+		return tls.VersionTLS10
+	case "TLS11":
+		return tls.VersionTLS11
 	case "TLS12":
 		return tls.VersionTLS12
 	case "TLS13":
 		return tls.VersionTLS13
 	default:
-		// TLS 1.0 and 1.1 are deprecated; treat unknown values as TLS 1.2
+		// Unknown → be safe and default to TLS 1.2
 		return tls.VersionTLS12
 	}
 }
@@ -209,4 +229,21 @@ func parseCipherSuites(suites []string) []uint16 {
 		}
 	}
 	return ids
+}
+
+func parseClientAuthType(v string) tls.ClientAuthType {
+	switch strings.TrimSpace(v) {
+	case "NoClientCert":
+		return tls.NoClientCert
+	case "RequestClientCert":
+		return tls.RequestClientCert
+	case "RequireAnyClientCert":
+		return tls.RequireAnyClientCert
+	case "VerifyClientCertIfGiven":
+		return tls.VerifyClientCertIfGiven
+	case "RequireAndVerifyClientCert":
+		return tls.RequireAndVerifyClientCert
+	default:
+		return tls.NoClientCert
+	}
 }

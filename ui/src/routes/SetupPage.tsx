@@ -18,6 +18,8 @@ import {
   Badge,
   Stepper,
   Code,
+  Select,
+  Checkbox,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useNavigate } from "@tanstack/react-router";
@@ -35,12 +37,12 @@ import {
   IconInfoCircle,
   IconCopy,
 } from "@tabler/icons-react";
-import { setupGateon } from "../hooks/useGateon";
+import { setupGateon, testDbConnection } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
 import { useClipboard } from "@mantine/hooks";
 import { generateRandomString } from "../utils/random";
 
-const WIZARD_STEPS = 4; // Admin Account, Security, Management, Review & Confirm
+const WIZARD_STEPS = 5; // Admin, Security, Database, Management, Review
 
 export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export default function SetupPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const nextStep = () => {
+  const nextStep = async () => {
     const adminValid = form.validateField("admin_username").hasError === false &&
       form.validateField("admin_password").hasError === false &&
       form.validateField("confirm_password").hasError === false;
@@ -91,7 +93,54 @@ export default function SetupPage() {
       form.validate();
       return;
     }
-    if (wizardStep === 2 && !managementValid) {
+    if (wizardStep === 2) {
+      // Database step: test connection before proceeding
+      try {
+        const useUrl = form.values.database_use_url;
+        const driver = form.values.database_driver;
+        const payload: any = {};
+        if (useUrl) {
+          if (!form.values.database_url) {
+            setError("Please provide a database connection string (URL)");
+            return;
+          }
+          payload.database_url = form.values.database_url;
+        } else {
+          if (driver === "sqlite") {
+            if (!form.values.sqlite_path) {
+              setError("Please provide a path for the SQLite database file");
+              return;
+            }
+            payload.database_config = {
+              driver: "sqlite",
+              sqlite_path: form.values.sqlite_path,
+            };
+          } else {
+            if (!form.values.db_host || !form.values.db_port || !form.values.db_name) {
+              setError("Please fill host, port and database");
+              return;
+            }
+            payload.database_config = {
+              driver,
+              host: form.values.db_host,
+              port: Number(form.values.db_port) || 0,
+              user: form.values.db_user,
+              password: form.values.db_password,
+              database: form.values.db_name,
+              ssl_mode: driver === "postgres" ? form.values.db_ssl_mode || "disable" : "",
+            };
+          }
+        }
+        setLoading(true);
+        await testDbConnection(payload);
+      } catch (e: any) {
+        setLoading(false);
+        setError(e?.message ? String(e.message) : "Database connection failed");
+        return;
+      }
+      setLoading(false);
+    }
+    if (wizardStep === 3 && !managementValid) {
       form.validate();
       return;
     }
@@ -112,6 +161,17 @@ export default function SetupPage() {
       paseto_secret: "",
       management_bind: "0.0.0.0",
       management_port: "8080",
+      // Database fields
+      database_driver: "sqlite",
+      database_use_url: false,
+      database_url: "",
+      sqlite_path: "gateon.db",
+      db_host: "127.0.0.1",
+      db_port: "",
+      db_user: "",
+      db_password: "",
+      db_name: "gateon",
+      db_ssl_mode: "disable",
     },
     validate: {
       admin_username: (value) => (value.length < 3 ? "Username too short" : null),
@@ -131,13 +191,34 @@ export default function SetupPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await setupGateon({
+      const payload: any = {
         admin_username: values.admin_username,
         admin_password: values.admin_password,
         paseto_secret: values.paseto_secret,
         management_bind: values.management_bind,
         management_port: values.management_port,
-      });
+      };
+      if (values.database_use_url) {
+        payload.database_url = values.database_url;
+      } else {
+        if (values.database_driver === "sqlite") {
+          payload.database_config = {
+            driver: "sqlite",
+            sqlite_path: values.sqlite_path,
+          };
+        } else {
+          payload.database_config = {
+            driver: values.database_driver,
+            host: values.db_host,
+            port: Number(values.db_port) || 0,
+            user: values.db_user,
+            password: values.db_password,
+            database: values.db_name,
+            ssl_mode: values.database_driver === "postgres" ? values.db_ssl_mode || "disable" : "",
+          };
+        }
+      }
+      const res = await setupGateon(payload);
 
       if (res.success) {
         notifications.show({
@@ -391,6 +472,110 @@ export default function SetupPage() {
                     </Stack>
                   </Stepper.Step>
 
+                  <Stepper.Step label="Database" description="Management store">
+                    <Stack gap="lg" mt="md">
+                      <Box>
+                        <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                          Database Selection
+                        </Text>
+                        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                          <Select
+                            label="Driver"
+                            data={[
+                              { value: "sqlite", label: "SQLite" },
+                              { value: "postgres", label: "PostgreSQL" },
+                              { value: "mysql", label: "MySQL" },
+                              { value: "mariadb", label: "MariaDB" },
+                            ]}
+                            {...form.getInputProps("database_driver")}
+                          />
+                          <Checkbox
+                            mt={28}
+                            label="Use connection string (URL)"
+                            {...form.getInputProps("database_use_url", { type: 'checkbox' })}
+                          />
+                        </SimpleGrid>
+
+                        {form.values.database_use_url ? (
+                          <TextInput
+                            mt="md"
+                            label="Connection string"
+                            placeholder="e.g. postgres://user:pass@host:5432/db?sslmode=disable"
+                            {...form.getInputProps("database_url")}
+                          />
+                        ) : form.values.database_driver === 'sqlite' ? (
+                          <TextInput
+                            mt="md"
+                            label="SQLite file path"
+                            placeholder="gateon.db"
+                            {...form.getInputProps("sqlite_path")}
+                          />
+                        ) : (
+                          <>
+                            <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
+                              <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("db_host")} />
+                              <TextInput label="Port" placeholder={form.values.database_driver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("db_port")} />
+                              <TextInput label="User" placeholder="gateon" {...form.getInputProps("db_user")} />
+                              <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("db_password")} />
+                              <TextInput label="Database" placeholder="gateon" {...form.getInputProps("db_name")} />
+                              {form.values.database_driver === 'postgres' && (
+                                <Select
+                                  label="SSL mode"
+                                  data={[
+                                    { value: 'disable', label: 'disable' },
+                                    { value: 'require', label: 'require' },
+                                    { value: 'verify-ca', label: 'verify-ca' },
+                                    { value: 'verify-full', label: 'verify-full' },
+                                  ]}
+                                  {...form.getInputProps("db_ssl_mode")}
+                                />
+                              )}
+                            </SimpleGrid>
+                          </>
+                        )}
+
+                        <Group mt="md">
+                          <Button
+                            variant="light"
+                            loading={loading}
+                            onClick={async () => {
+                              try {
+                                const useUrl = form.values.database_use_url;
+                                const driver = form.values.database_driver;
+                                const payload: any = {};
+                                if (useUrl) {
+                                  payload.database_url = form.values.database_url;
+                                } else if (driver === 'sqlite') {
+                                  payload.database_config = { driver: 'sqlite', sqlite_path: form.values.sqlite_path };
+                                } else {
+                                  payload.database_config = {
+                                    driver,
+                                    host: form.values.db_host,
+                                    port: Number(form.values.db_port) || 0,
+                                    user: form.values.db_user,
+                                    password: form.values.db_password,
+                                    database: form.values.db_name,
+                                    ssl_mode: driver === 'postgres' ? form.values.db_ssl_mode || 'disable' : '',
+                                  };
+                                }
+                                setLoading(true);
+                                await testDbConnection(payload);
+                                notifications.show({ title: 'Database OK', message: 'Connection successful', color: 'green', icon: <IconCheck size={18} /> });
+                                setError(null);
+                              } catch (e: any) {
+                                setError(e?.message ? String(e.message) : 'Database connection failed');
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                          >
+                            Test Connection
+                          </Button>
+                        </Group>
+                      </Box>
+                    </Stack>
+                  </Stepper.Step>
+
                   <Stepper.Step label="Management" description="API Access">
                     <Stack gap="lg" mt="md">
                       <Box>
@@ -442,6 +627,16 @@ export default function SetupPage() {
                           <Group gap="xs">
                             <Text size="xs" fw={600} c="dimmed">PASETO Secret:</Text>
                             <Code>•••••••• ({form.values.paseto_secret.length} chars)</Code>
+                          </Group>
+                          <Group gap="xs">
+                            <Text size="xs" fw={600} c="dimmed">Database:</Text>
+                            {form.values.database_use_url ? (
+                              <Code>{form.values.database_url || '—'}</Code>
+                            ) : form.values.database_driver === 'sqlite' ? (
+                              <Code>sqlite:{form.values.sqlite_path}</Code>
+                            ) : (
+                              <Code>{`${form.values.database_driver}://${form.values.db_user ? form.values.db_user + '@' : ''}${form.values.db_host}:${form.values.db_port}/${form.values.db_name}`}</Code>
+                            )}
                           </Group>
                           <Group gap="xs">
                             <Text size="xs" fw={600} c="dimmed">Management API:</Text>
