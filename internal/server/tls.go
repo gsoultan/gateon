@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -188,6 +190,32 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 						}
 						if opt.ClientAuthType != "" {
 							newCfg.ClientAuth = parseClientAuthType(opt.ClientAuthType)
+						}
+						// Bind Client Authorities to tls.Config when present on TLS Option
+						if len(opt.ClientAuthorityIds) > 0 {
+							// Build a CertPool from referenced Client Authorities in Global TLS config
+							if gc := deps.GlobalStore.Get(ctx); gc != nil && gc.Tls != nil {
+								var pool *x509.CertPool
+								for _, wantID := range opt.ClientAuthorityIds {
+									for _, ca := range gc.Tls.ClientAuthorities {
+										if ca.Id != wantID {
+											continue
+										}
+										if pool == nil {
+											pool = x509.NewCertPool()
+										}
+										// Read PEM file and append certs; errors ignored here to avoid handshake crash
+										// The manager-level validation will surface issues via API/logs.
+										if pemBytes, err := os.ReadFile(ca.CaFile); err == nil {
+											pool.AppendCertsFromPEM(pemBytes)
+										}
+										break
+									}
+								}
+								if pool != nil {
+									newCfg.ClientCAs = pool
+								}
+							}
 						}
 					}
 				}

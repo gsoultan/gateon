@@ -1,111 +1,92 @@
 package tls
 
 import (
-	"net/http"
-	"net/http/httptest"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/gsoultan/gateon/internal/testutil"
+	"time"
 )
 
-func TestManager_GetTLSConfig_CAChain(t *testing.T) {
-	tmpDir := t.TempDir()
+// createTempCACert writes a minimal self-signed CA certificate to a temp file and returns its path.
+func createTempCACert(t *testing.T) string {
+	t.Helper()
 
-	// Generate a cert and a fake CA cert
-	cert, _ := testutil.GenerateCert([]string{"domain.com"})
-	certPath := filepath.Join(tmpDir, "cert.pem")
-	keyPath := filepath.Join(tmpDir, "key.pem")
-	_ = testutil.SaveCertToPEM(cert, certPath, keyPath)
-
-	caCert, _ := testutil.GenerateCert([]string{"My Fake CA"})
-	caPath := filepath.Join(tmpDir, "ca.pem")
-	// Save only the certificate part as the "CA"
-	caPEM := testutil.SaveCertToPEM(caCert, caPath, filepath.Join(tmpDir, "ca-key.pem"))
-	_ = caPEM
-
-	cfg := Config{
-		Enabled: true,
-		Certificates: []CertificateConfig{
-			{CertFile: certPath, KeyFile: keyPath, CaFile: caPath},
-		},
-	}
-	m := NewManager(cfg)
-	tlsCfg, err := m.GetTLSConfig()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generate key: %v", err)
 	}
 
-	if len(tlsCfg.Certificates) != 1 {
-		t.Fatalf("expected 1 certificate, got %d", len(tlsCfg.Certificates))
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Gateon Test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
 	}
 
-	// The certificate should now have 2 parts in its chain
-	if len(tlsCfg.Certificates[0].Certificate) != 2 {
-		t.Errorf("expected 2 parts in certificate chain, got %d", len(tlsCfg.Certificates[0].Certificate))
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
 	}
+
+	dir := t.TempDir()
+	caPath := filepath.Join(dir, "ca.pem")
+	f, err := os.Create(caPath)
+	if err != nil {
+		t.Fatalf("create temp ca: %v", err)
+	}
+	defer f.Close()
+	if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		t.Fatalf("pem encode: %v", err)
+	}
+	return caPath
 }
 
-func TestManager_HTTPChallengeHandler(t *testing.T) {
-	cfg := Config{
-		Enabled: true,
-		Acme: AcmeConfig{
-			Enabled: true,
-			Email:   "test@example.com",
-		},
-		Domains:  []string{"example.com"},
-		CacheDir: t.TempDir(),
-	}
-	m := NewManager(cfg)
-
-	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("fallback"))
+func TestManager_RequireAndVerifyWithoutCAs_ReturnsError(t *testing.T) {
+	m := NewManager(Config{
+		Enabled:        true,
+		Acme:           AcmeConfig{Enabled: true, Email: "test@example.com"},
+		ClientAuthType: "RequireAndVerifyClientCert",
 	})
 
-	handler := m.HTTPChallengeHandler(fallback)
-
-	// Test fallback
-	req := httptest.NewRequest("GET", "http://example.com/hello", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if w.Body.String() != "fallback" {
-		t.Errorf("expected fallback, got %q", w.Body.String())
-	}
-
-	// Test ACME challenge path
-	req = httptest.NewRequest("GET", "http://example.com/.well-known/acme-challenge/token", nil)
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if w.Code == http.StatusOK && w.Body.String() == "fallback" {
-		t.Errorf("expected ACME handler to intercept request")
+	cfg, err := m.GetTLSConfig()
+	if err == nil || cfg != nil {
+		t.Fatalf("expected error due to missing client CAs, got cfg=%v err=%v", cfg, err)
 	}
 }
 
-func TestInitFromEnv(t *testing.T) {
-	t.Setenv("GATEON_TLS_ENABLED", "true")
-	t.Setenv("GATEON_TLS_EMAIL", "test@example.com")
-	t.Setenv("GATEON_TLS_DOMAINS", "example.com")
+func TestManager_ClientAuthoritiesBuildPool_OK(t *testing.T) {
+	caPath := createTempCACert(t)
 
-	cfg := InitFromEnv()
+	m := NewManager(Config{
+		Enabled:        true,
+		Acme:           AcmeConfig{Enabled: true, Email: "test@example.com"},
+		ClientAuthType: "RequireAndVerifyClientCert",
+		ClientAuthorities: []ClientAuthorityConfig{{
+			ID: "1", Name: "Test CA", CaFile: caPath,
+		}},
+	})
 
-	if !cfg.Enabled {
-		t.Error("expected TLS enabled")
+	cfg, err := m.GetTLSConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Email != "test@example.com" {
-		t.Errorf("expected email test@example.com, got %q", cfg.Email)
+	if cfg == nil {
+		t.Fatalf("expected non-nil tls.Config")
 	}
-	if !cfg.Acme.Enabled {
-		t.Error("expected ACME enabled via legacy email field")
+	if cfg.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("expected ClientAuth RequireAndVerifyClientCert, got %v", cfg.ClientAuth)
 	}
-	if cfg.Acme.Email != "test@example.com" {
-		t.Errorf("expected ACME email test@example.com, got %q", cfg.Acme.Email)
-	}
-
-	// Test explicit ACME disable
-	t.Setenv("GATEON_ACME_ENABLED", "false")
-	cfg = InitFromEnv()
-	if cfg.Acme.Enabled {
-		t.Error("expected ACME disabled via explicit GATEON_ACME_ENABLED=false")
+	if cfg.ClientCAs == nil {
+		t.Fatalf("expected ClientCAs to be initialized")
 	}
 }

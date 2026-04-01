@@ -82,6 +82,7 @@ export type TLSOption = {
   client_auth_type?: string;
   sni_strict?: boolean;
   alpn_protocols?: string[];
+  client_authority_ids?: string[];
 };
 
 export type Route = {
@@ -120,6 +121,8 @@ export type ClientAuthority = {
   id: string;
   name: string;
   ca_file: string;
+  /** Optional per-CA preferred client auth mode; UI hint, may be enforced by server config */
+  client_auth_type?: string;
 };
 
 export type AcmeConfig = {
