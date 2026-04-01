@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -94,6 +96,16 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	if err != nil {
 		logger.L.Fatal().Err(err).Msg("failed to initialize tls")
 	}
+	// When global TLS is not explicitly enabled but at least one entrypoint
+	// has TLS turned on, create a minimal TLS config so that SNI can
+	// dynamically serve per-route certificates.
+	if tlsConfig == nil && anyEntrypointTLS(s.EpStore) {
+		tlsConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			NextProtos: []string{"h2", "http/1.1"},
+		}
+		logger.L.Info().Msg("created base TLS config for entrypoint-level TLS (global TLS not enabled)")
+	}
 	SetupSNI(tlsConfig, tlsManager, SNIDeps{
 		RouteStore:  s.RouteStore,
 		GlobalStore: s.GlobalStore,
@@ -134,4 +146,14 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 	wg.Wait()
 	logger.L.Info().Msg("shutdown complete")
+}
+
+// anyEntrypointTLS returns true if at least one entrypoint has TLS enabled.
+func anyEntrypointTLS(epStore config.EntryPointStore) bool {
+	for _, ep := range epStore.List(context.Background()) {
+		if ep.Tls != nil && ep.Tls.Enabled {
+			return true
+		}
+	}
+	return false
 }
