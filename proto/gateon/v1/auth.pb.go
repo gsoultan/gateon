@@ -166,6 +166,14 @@ type SetupRequest struct {
 	ManagementBind string `protobuf:"bytes,4,opt,name=management_bind,json=managementBind,proto3" json:"management_bind,omitempty"`
 	// ManagementPort is the initial port for the management API.
 	ManagementPort string `protobuf:"bytes,5,opt,name=management_port,json=managementPort,proto3" json:"management_port,omitempty"`
+	// DatabaseUrl is an optional connection string for the management/auth database.
+	// If provided, it overrides DatabaseConfig.
+	// Supported: plain sqlite path (e.g. "gateon.db"),
+	//            sqlite://path/to.db, postgres://..., mysql://...
+	DatabaseUrl string `protobuf:"bytes,7,opt,name=database_url,json=databaseUrl,proto3" json:"database_url,omitempty"`
+	// DatabaseConfig is an optional structured database configuration.
+	// When DatabaseUrl is empty, this config is used to construct the DSN.
+	DatabaseConfig *DatabaseConfig `protobuf:"bytes,8,opt,name=database_config,json=databaseConfig,proto3" json:"database_config,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -233,6 +241,20 @@ func (x *SetupRequest) GetManagementPort() string {
 		return x.ManagementPort
 	}
 	return ""
+}
+
+func (x *SetupRequest) GetDatabaseUrl() string {
+	if x != nil {
+		return x.DatabaseUrl
+	}
+	return ""
+}
+
+func (x *SetupRequest) GetDatabaseConfig() *DatabaseConfig {
+	if x != nil {
+		return x.DatabaseConfig
+	}
+	return nil
 }
 
 type SetupResponse struct {
@@ -811,19 +833,21 @@ var File_gateon_v1_auth_proto protoreflect.FileDescriptor
 
 const file_gateon_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x14gateon/v1/auth.proto\x12\tgateon.v1\"F\n" +
+	"\x14gateon/v1/auth.proto\x12\tgateon.v1\x1a\x16gateon/v1/common.proto\"F\n" +
 	"\fLoginRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x18\n" +
 	"\x16IsSetupRequiredRequest\"5\n" +
 	"\x17IsSetupRequiredResponse\x12\x1a\n" +
-	"\brequired\x18\x01 \x01(\bR\brequired\"\xea\x01\n" +
+	"\brequired\x18\x01 \x01(\bR\brequired\"\xd1\x02\n" +
 	"\fSetupRequest\x12%\n" +
 	"\x0eadmin_username\x18\x01 \x01(\tR\radminUsername\x12%\n" +
 	"\x0eadmin_password\x18\x02 \x01(\tR\radminPassword\x12#\n" +
 	"\rpaseto_secret\x18\x03 \x01(\tR\fpasetoSecret\x12'\n" +
 	"\x0fmanagement_bind\x18\x04 \x01(\tR\x0emanagementBind\x12'\n" +
-	"\x0fmanagement_port\x18\x05 \x01(\tR\x0emanagementPortJ\x04\b\x06\x10\aR\x0fmanagement_host\"?\n" +
+	"\x0fmanagement_port\x18\x05 \x01(\tR\x0emanagementPort\x12!\n" +
+	"\fdatabase_url\x18\a \x01(\tR\vdatabaseUrl\x12B\n" +
+	"\x0fdatabase_config\x18\b \x01(\v2\x19.gateon.v1.DatabaseConfigR\x0edatabaseConfigJ\x04\b\x06\x10\aR\x0fmanagement_host\"?\n" +
 	"\rSetupResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"J\n" +
@@ -888,16 +912,18 @@ var file_gateon_v1_auth_proto_goTypes = []any{
 	(*ChangePasswordRequest)(nil),   // 12: gateon.v1.ChangePasswordRequest
 	(*ChangePasswordResponse)(nil),  // 13: gateon.v1.ChangePasswordResponse
 	(*User)(nil),                    // 14: gateon.v1.User
+	(*DatabaseConfig)(nil),          // 15: gateon.v1.DatabaseConfig
 }
 var file_gateon_v1_auth_proto_depIdxs = []int32{
-	14, // 0: gateon.v1.LoginResponse.user:type_name -> gateon.v1.User
-	14, // 1: gateon.v1.ListUsersResponse.users:type_name -> gateon.v1.User
-	14, // 2: gateon.v1.UpdateUserRequest.user:type_name -> gateon.v1.User
-	3,  // [3:3] is the sub-list for method output_type
-	3,  // [3:3] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	15, // 0: gateon.v1.SetupRequest.database_config:type_name -> gateon.v1.DatabaseConfig
+	14, // 1: gateon.v1.LoginResponse.user:type_name -> gateon.v1.User
+	14, // 2: gateon.v1.ListUsersResponse.users:type_name -> gateon.v1.User
+	14, // 3: gateon.v1.UpdateUserRequest.user:type_name -> gateon.v1.User
+	4,  // [4:4] is the sub-list for method output_type
+	4,  // [4:4] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_gateon_v1_auth_proto_init() }
@@ -905,6 +931,7 @@ func file_gateon_v1_auth_proto_init() {
 	if File_gateon_v1_auth_proto != nil {
 		return
 	}
+	file_gateon_v1_common_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

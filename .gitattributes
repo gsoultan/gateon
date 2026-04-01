@@ -1,0 +1,4 @@
+# Normalize line endings for source and generated code to ensure deterministic CI
+*.proto text eol=lf
+*.pb.go text eol=lf
+*.go text eol=lf
