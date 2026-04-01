@@ -103,6 +103,19 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 		if !clientCAs.AppendCertsFromPEM(caData) {
 			return nil, nil, fmt.Errorf("failed to parse CA certificate")
 		}
+		// Append intermediate/CA certificates to the served chain so that
+		// SNI-selected certificates include the full chain automatically.
+		data := caData
+		for {
+			var block *pem.Block
+			block, data = pem.Decode(data)
+			if block == nil {
+				break
+			}
+			if block.Type == "CERTIFICATE" {
+				cert.Certificate = append(cert.Certificate, block.Bytes)
+			}
+		}
 	}
 
 	return &cert, clientCAs, nil

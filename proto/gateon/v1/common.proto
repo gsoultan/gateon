@@ -39,6 +39,9 @@ message Certificate {
   string name = 2;
   string cert_file = 3;
   string key_file = 4;
+  // Optional CA/intermediate certificate file appended to the served chain
+  // during SNI selection so users don't need to pre-bundle a full-chain cert.
+  string ca_file = 5;
 }
 
 message ClientAuthority {

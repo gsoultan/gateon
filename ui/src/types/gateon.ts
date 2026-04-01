@@ -114,6 +114,8 @@ export type Certificate = {
   name: string;
   cert_file: string;
   key_file: string;
+  /** Optional CA/intermediate certificate file appended to the served chain during SNI selection. */
+  ca_file?: string;
   host?: string;
 };
 

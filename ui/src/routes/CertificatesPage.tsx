@@ -54,7 +54,7 @@ export default function CertificatesPage() {
     }
   }
 
-  const handleUpload = async (field: 'cert_file' | 'key_file', file: File | null) => {
+  const handleUpload = async (field: 'cert_file' | 'key_file' | 'ca_file', file: File | null) => {
     if (!file) return
     
     setUploading(prev => ({ ...prev, [field]: true }))
@@ -120,7 +120,7 @@ export default function CertificatesPage() {
   }
 
   const startAdd = () => {
-    setEditingCert({ id: crypto.randomUUID(), name: '', cert_file: '', key_file: '' })
+    setEditingCert({ id: crypto.randomUUID(), name: '', cert_file: '', key_file: '', ca_file: '' })
     open()
   }
 
@@ -165,13 +165,14 @@ export default function CertificatesPage() {
                 <Table.Th>Name</Table.Th>
                 <Table.Th>Certificate File</Table.Th>
                 <Table.Th>Key File</Table.Th>
+                <Table.Th>CA File</Table.Th>
                 <Table.Th style={{ width: 100 }}>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {certificates.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={4}>
+                  <Table.Td colSpan={5}>
                     <Center py="xl">
                       <Text c="dimmed">No certificates configured</Text>
                     </Center>
@@ -191,6 +192,9 @@ export default function CertificatesPage() {
                     </Table.Td>
                     <Table.Td>
                       <Text size="sm" ff="monospace" c="dimmed">{cert.key_file}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" ff="monospace" c="dimmed">{cert.ca_file || '—'}</Text>
                     </Table.Td>
                     <Table.Td>
                       {canUploadCerts && (
@@ -272,6 +276,26 @@ export default function CertificatesPage() {
                 {(props) => (
                   <Tooltip label="Upload Private Key">
                     <ActionIcon {...props} variant="subtle" loading={uploading['key_file']}>
+                      <IconUpload size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </FileButton>
+            }
+          />
+          <TextInput 
+            label="CA / Intermediate File (optional)" 
+            description="Intermediates are appended to the served chain during SNI, so you don't need to pre-bundle a full-chain cert."
+            placeholder="certs/cloudflare-origin-ecc-ca.pem"
+            value={editingCert?.ca_file || ''} 
+            onChange={(e) => editingCert && setEditingCert({ ...editingCert, ca_file: e.currentTarget.value })} 
+            radius="md" 
+            leftSection={<IconShieldLock size={16} />}
+            rightSection={
+              <FileButton onChange={(f) => handleUpload('ca_file', f)} accept=".pem,.crt,.cer">
+                {(props) => (
+                  <Tooltip label="Upload CA Certificate">
+                    <ActionIcon {...props} variant="subtle" loading={uploading['ca_file']}>
                       <IconUpload size={16} />
                     </ActionIcon>
                   </Tooltip>
