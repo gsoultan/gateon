@@ -19,6 +19,7 @@ import {
   Switch,
   Select,
   Pagination,
+  Divider,
 } from "@mantine/core";
 import {
   IconPlus,
@@ -31,7 +32,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { TLSOption } from "../types/gateon";
-import { useTLSOptions, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
+import { useTLSOptions, apiFetch, getApiErrorMessage, useClientAuthorities } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
 
 const TLS_VERSIONS = [
@@ -70,6 +71,7 @@ export default function TLSOptionsPage() {
     page_size: pageSize,
     search: search,
   });
+  const { data: caList } = useClientAuthorities();
 
   const mutation = useMutation({
     mutationFn: async (opt: TLSOption) => {
@@ -199,19 +201,20 @@ export default function TLSOptionsPage() {
                 <Table.Th>Versions</Table.Th>
                 <Table.Th>Cipher Suites</Table.Th>
                 <Table.Th>Strict SNI</Table.Th>
+                <Table.Th>Client Auth</Table.Th>
                 <Table.Th style={{ width: 100 }}>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {isLoading ? (
                 <Table.Tr>
-                  <Table.Td colSpan={5} align="center">
+                  <Table.Td colSpan={6} align="center">
                     <Text py="xl">Loading...</Text>
                   </Table.Td>
                 </Table.Tr>
               ) : tlsOptions.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={5} align="center">
+                  <Table.Td colSpan={6} align="center">
                     <Stack align="center" py="xl" gap="xs">
                       <IconShieldLock size={40} color="gray" />
                       <Text c="dimmed">No TLS options configured</Text>
@@ -260,6 +263,18 @@ export default function TLSOptionsPage() {
                       >
                         {opt.sni_strict ? "Yes" : "No"}
                       </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap={4}>
+                        <Badge size="xs" variant="light" color={opt.client_auth_type ? "blue" : "gray"}>
+                          {opt.client_auth_type || "No client auth"}
+                        </Badge>
+                        <Text size="xs" c="dimmed">
+                          {opt.client_authority_ids && opt.client_authority_ids.length > 0
+                            ? `CAs: ${opt.client_authority_ids.length}`
+                            : "CAs: 0"}
+                        </Text>
+                      </Stack>
                     </Table.Td>
                     <Table.Td>
                       {canWrite && (
@@ -412,6 +427,45 @@ export default function TLSOptionsPage() {
                   sni_strict: e.currentTarget.checked,
                 })
               }
+            />
+          </Group>
+
+          <Divider label="Client Certificate Authentication" labelPosition="left"/>
+          <Group grow>
+            <Select
+              label="Client Auth Type"
+              description="Choose how the server validates peer certificates. For Cloudflare Authenticated Origin Pulls, select 'RequireAndVerifyClientCert'."
+              placeholder="Select client auth policy"
+              data={[
+                { label: "None (no client cert)", value: "" },
+                { label: "Verify if presented", value: "VerifyClientCertIfGiven" },
+                { label: "Require and verify", value: "RequireAndVerifyClientCert" },
+              ]}
+              value={editingOption?.client_auth_type || ""}
+              onChange={(val) =>
+                editingOption &&
+                setEditingOption({
+                  ...editingOption,
+                  client_auth_type: val || "",
+                  // If client auth disabled, also clear CA selection to avoid confusion
+                  client_authority_ids: (val && val !== "") ? (editingOption.client_authority_ids || []) : [],
+                })
+              }
+              clearable
+            />
+            <MultiSelect
+              label="Client Authorities (CA bundles)"
+              description="Select one or more CA bundles to trust for client certificates (e.g., Cloudflare Origin Pull CA)."
+              placeholder={caList && caList.length > 0 ? "Select client authorities" : "No client authorities found. Add them in Global TLS → Client Authorities"}
+              data={(caList || []).map((c) => ({ value: c.id, label: `${c.name} (${c.id})` }))}
+              value={editingOption?.client_authority_ids || []}
+              onChange={(val) =>
+                editingOption &&
+                setEditingOption({ ...editingOption, client_authority_ids: val })
+              }
+              searchable
+              clearable
+              disabled={!editingOption?.client_auth_type || editingOption?.client_auth_type === ""}
             />
           </Group>
 
