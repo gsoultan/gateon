@@ -71,6 +71,13 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+
+			// Capture original values before proxying mutates the request.
+			origHost := r.Host
+			origMethod := r.Method
+			origPath := r.URL.Path
+			remoteAddr := r.RemoteAddr
+
 			sw := &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
 
 			next.ServeHTTP(sw, r)
@@ -78,10 +85,10 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 			if sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0) {
 				duration := time.Since(start)
 				logger.L.Info().
-					Str("host", r.Host).
-					Str("method", r.Method).
-					Str("path", r.URL.Path).
-					Str("remote_addr", r.RemoteAddr).
+					Str("host", origHost).
+					Str("method", origMethod).
+					Str("path", origPath).
+					Str("remote_addr", remoteAddr).
 					Int("status", sw.Status).
 					Dur("latency", duration).
 					Str("route_id", routeID).
@@ -109,6 +116,12 @@ func Metrics(routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+
+			// Capture original host and path before proxying mutates r.Host/r.URL.
+			origHost := r.Host
+			origPath := r.URL.Path
+			method := r.Method
+
 			sw, ok := w.(*StatusResponseWriter)
 			if !ok {
 				sw = &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
@@ -118,7 +131,7 @@ func Metrics(routeID string) Middleware {
 			next.ServeHTTP(sw, r)
 
 			duration := time.Since(start)
-			telemetry.RecordPathRequest(r.Host, r.URL.Path, duration.Seconds())
+			telemetry.RecordPathRequest(origHost, origPath, duration.Seconds())
 
 			status := "success"
 			if sw.Status >= 400 {
@@ -126,16 +139,16 @@ func Metrics(routeID string) Middleware {
 			}
 			telemetry.RecordTrace(
 				request.GetID(r),
-				r.Method+" "+r.URL.Path,
+				method+" "+origPath,
 				routeID,
 				duration.Milliseconds(),
 				start,
 				status,
-				r.Host+r.URL.Path,
+				origHost+origPath,
 			)
 
-			httpRequestsTotal.WithLabelValues(routeID, r.Method, getStatusString(sw.Status)).Inc()
-			httpDuration.WithLabelValues(routeID, r.Method).Observe(duration.Seconds())
+			httpRequestsTotal.WithLabelValues(routeID, method, getStatusString(sw.Status)).Inc()
+			httpDuration.WithLabelValues(routeID, method).Observe(duration.Seconds())
 		})
 	}
 }
