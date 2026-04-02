@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-zookeeper/zk"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/hashicorp/consul/api"
 	"go.etcd.io/etcd/client/v3"
@@ -259,8 +260,43 @@ func (p *EurekaProvider) Resolve(ctx context.Context, target string) ([]*gateonv
 type ZookeeperProvider struct{}
 
 func (p *ZookeeperProvider) Resolve(ctx context.Context, target string) ([]*gateonv1.Target, error) {
-	// For production readiness without external deps in this environment,
-	// we use a simplified approach or suggest the 'zk' package.
-	// In a real scenario, we'd use github.com/go-zookeeper/zk
-	return nil, fmt.Errorf("zookeeper provider requires github.com/go-zookeeper/zk dependency")
+	// target format: server1:2181,server2:2181/path/to/service
+	parts := strings.SplitN(target, "/", 2)
+	servers := strings.Split(parts[0], ",")
+	path := "/"
+	if len(parts) > 1 {
+		path = "/" + parts[1]
+	}
+
+	conn, _, err := zk.Connect(servers, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	children, _, err := conn.Children(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var targets []*gateonv1.Target
+	for _, child := range children {
+		childPath := path
+		if !strings.HasSuffix(childPath, "/") {
+			childPath += "/"
+		}
+		childPath += child
+
+		data, _, err := conn.Get(childPath)
+		if err != nil {
+			continue
+		}
+		// Assume data is URL or JSON
+		targets = append(targets, &gateonv1.Target{
+			Url:      string(data),
+			Weight:   1,
+			Protocol: "http",
+		})
+	}
+	return targets, nil
 }
