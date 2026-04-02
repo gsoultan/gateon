@@ -35,3 +35,4 @@ export { useClientAuthorities } from "./useClientAuthorities";
 export { useTraces } from "./useTraces";
 export type { Trace } from "./useTraces";
 export { useUsers } from "./useUsers";
+export { useMetricsSnapshot } from "./useMetricsSnapshot";

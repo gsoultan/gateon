@@ -12,6 +12,7 @@ import (
 	"github.com/corazawaf/coraza/v3/types"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // WAFConfig configures the WAF middleware.
@@ -62,10 +63,12 @@ Include @owasp_crs/rules/*.conf
 	}
 
 	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
+		ruleID := strconv.Itoa(mr.Rule().ID())
 		logger.L.Warn().
-			Str("rule_id", strconv.Itoa(mr.Rule().ID())).
+			Str("rule_id", ruleID).
 			Str("message", mr.ErrorLog()).
 			Msg("WAF matched rule")
+		telemetry.MiddlewareWAFBlockedTotal.WithLabelValues("", ruleID).Inc()
 	})
 
 	waf, err := coraza.NewWAF(wafConfig)

@@ -215,6 +215,32 @@ export default function Dashboard() {
               radius="lg"
               withBorder
               component={Link}
+              to="/metrics"
+              style={{
+                textDecoration: "none",
+                transition: "background-color 150ms ease",
+              }}
+            >
+              <Group justify="space-between">
+                <div>
+                  <Text size="sm" fw={600}>
+                    Metrics Dashboard
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    Golden signals, latency percentiles, and middleware metrics
+                  </Text>
+                </div>
+                <Text size="xs" c="teal" fw={600}>
+                  Open →
+                </Text>
+              </Group>
+            </Card>
+            <Card
+              shadow="xs"
+              padding="lg"
+              radius="lg"
+              withBorder
+              component={Link}
               to="/routes"
               style={{
                 textDecoration: "none",

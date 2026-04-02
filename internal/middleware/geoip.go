@@ -9,6 +9,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/oschwald/geoip2-golang"
 )
 
@@ -71,6 +72,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 			_, allowed := allowSet[country]
 
 			if denied {
+				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues("", country).Inc()
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.Debug().
 					Str("ip", clientIP).
@@ -80,6 +82,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 			}
 
 			if len(allowSet) > 0 && !allowed {
+				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues("", country).Inc()
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.Debug().
 					Str("ip", clientIP).

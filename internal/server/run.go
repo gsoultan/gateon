@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
@@ -118,6 +119,15 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		mgmtConfig = gc.Management
 	}
 	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, tlsManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig)
+	// Initialize metrics subsystem
+	telemetry.InitStartTime()
+	metricsStop := make(chan struct{})
+	telemetry.StartSystemMetricsCollector(metricsStop)
+
+	// Start TLS certificate expiry monitoring
+	certInfos := collectCertInfos(ctx, s)
+	telemetry.StartTLSCertMonitor(certInfos, metricsStop)
+
 	logger.L.Info().Str("port", s.Port).Msg("Gateon API Gateway started")
 
 	wg.Go(func() {
@@ -144,8 +154,38 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 			_ = closer.Close()
 		}
 	}
+	close(metricsStop)
 	wg.Wait()
 	logger.L.Info().Msg("shutdown complete")
+}
+
+// collectCertInfos gathers TLS certificate info from global TLS config for expiry monitoring.
+func collectCertInfos(ctx context.Context, s *Server) []telemetry.CertInfo {
+	var certs []telemetry.CertInfo
+	seen := make(map[string]bool)
+
+	gc := s.GlobalStore.Get(ctx)
+	if gc == nil || gc.Tls == nil {
+		return certs
+	}
+
+	for _, c := range gc.Tls.Certificates {
+		if c.CertFile == "" || c.KeyFile == "" {
+			continue
+		}
+		key := c.CertFile + ":" + c.KeyFile
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		certs = append(certs, telemetry.CertInfo{
+			CertName: c.Name,
+			CertFile: c.CertFile,
+			KeyFile:  c.KeyFile,
+		})
+	}
+
+	return certs
 }
 
 // anyEntrypointTLS returns true if at least one entrypoint has TLS enabled.

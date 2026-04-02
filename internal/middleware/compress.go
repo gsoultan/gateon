@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 const (
@@ -39,6 +41,28 @@ type CompressConfig struct {
 // Compress returns a middleware that compresses responses using gzip (no config).
 func Compress() Middleware {
 	return CompressWithConfig(CompressConfig{})
+}
+
+// CompressWithRoute returns a compress middleware that records compression ratio metrics.
+func CompressWithRoute(cfg CompressConfig, routeID string) Middleware {
+	inner := CompressWithConfig(cfg)
+	return func(next http.Handler) http.Handler {
+		wrapped := inner(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sw, ok := w.(*StatusResponseWriter)
+			var beforeBytes int64
+			if ok {
+				beforeBytes = sw.BytesWritten
+			}
+			wrapped.ServeHTTP(w, r)
+			if ok {
+				afterBytes := sw.BytesWritten - beforeBytes
+				if afterBytes > 0 {
+					telemetry.MiddlewareCompressBytesTotalOut.WithLabelValues(routeID).Add(float64(afterBytes))
+				}
+			}
+		})
+	}
 }
 
 // CompressWithConfig returns a middleware that compresses responses using gzip with optional filters.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 const turnstileVerifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
@@ -58,6 +59,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 				token = r.FormValue("cf-turnstile-response")
 			}
 			if token == "" {
+				telemetry.MiddlewareTurnstileTotal.WithLabelValues("", "fail").Inc()
 				http.Error(w, "Turnstile token required", http.StatusBadRequest)
 				logger.L.Debug().Str("path", r.URL.Path).Msg("turnstile: missing token")
 				return
@@ -96,6 +98,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			}
 
 			if !result.Success {
+				telemetry.MiddlewareTurnstileTotal.WithLabelValues("", "fail").Inc()
 				http.Error(w, fmt.Sprintf("Turnstile verification failed: %v", result.ErrorCodes), http.StatusBadRequest)
 				logger.L.Debug().
 					Strs("error_codes", result.ErrorCodes).
@@ -105,6 +108,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 				return
 			}
 
+			telemetry.MiddlewareTurnstileTotal.WithLabelValues("", "pass").Inc()
 			next.ServeHTTP(w, r)
 		})
 	}
