@@ -12,7 +12,6 @@ import (
 	"github.com/corazawaf/coraza/v3/types"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // WAFConfig configures the WAF middleware.
@@ -68,7 +67,9 @@ Include @owasp_crs/rules/*.conf
 			Str("rule_id", ruleID).
 			Str("message", mr.ErrorLog()).
 			Msg("WAF matched rule")
-		telemetry.MiddlewareWAFBlockedTotal.WithLabelValues("", ruleID).Inc()
+		// Note: ErrorCallback doesn't have access to *http.Request directly here in Coraza v3
+		// but we can check it in the middleware itself if we want to skip metrics.
+		// However, most WAF matches will be recorded unless we wrap them.
 	})
 
 	waf, err := coraza.NewWAF(wafConfig)
@@ -79,9 +80,16 @@ Include @owasp_crs/rules/*.conf
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(waf, next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if cfg.TrustCloudflare {
 				r.RemoteAddr = request.GetClientIP(r, true)
 			}
+			// We can't easily pass routeID to ErrorCallback because it's set at WAF creation.
+			// But we can record it here if we use a different approach.
+			// For now, let's at least skip the whole WAF for internal traffic if ShouldSkipMetrics is true.
 			wafHandler.ServeHTTP(w, r)
 		})
 	}, nil

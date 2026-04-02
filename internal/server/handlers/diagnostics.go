@@ -116,15 +116,31 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 		for _, p := range pathStats {
 			pathTotalReqs += p.RequestCount
 		}
+
+		// Calculate total requests: prefer route stats if available, otherwise use path stats
+		finalTotalReqs := totalReqs
+		if finalTotalReqs < pathTotalReqs {
+			finalTotalReqs = pathTotalReqs
+		}
+
+		// Get system metrics from latest snapshot
+		var cpuUsage, memUsage float64
+		if snap, err := telemetry.CollectMetricsSnapshot(); err == nil {
+			cpuUsage = snap.System.CPUUsage
+			memUsage = snap.System.MemoryUsage
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"total_requests":     pathTotalReqs,
+			"total_requests":     finalTotalReqs,
 			"total_errors":       totalErrs,
 			"active_connections": activeConn,
 			"open_circuits":      openCircuits,
 			"half_open_circuits": halfOpenCircuits,
 			"healthy_targets":    healthyTargets,
 			"total_targets":      totalTargets,
+			"cpu_usage":          cpuUsage,
+			"memory_usage":       memUsage,
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/path-stats", func(w http.ResponseWriter, r *http.Request) {

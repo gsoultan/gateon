@@ -31,8 +31,10 @@ func MaxConnections(max int) Middleware {
 				defer func() { <-sem }()
 				next.ServeHTTP(w, r)
 			default:
-				inflightRejectedTotal.WithLabelValues("max_connections").Inc()
-				telemetry.IncInflightRejected("max_connections")
+				if !ShouldSkipMetrics(r) {
+					inflightRejectedTotal.WithLabelValues("max_connections").Inc()
+					telemetry.IncInflightRejected("max_connections")
+				}
 				w.Header().Set("Retry-After", "60")
 				httputil.WriteJSONError(w, http.StatusServiceUnavailable, "too many connections", "")
 			}
@@ -59,8 +61,10 @@ func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) Middleware
 				defer m.release(key, b)
 				next.ServeHTTP(w, r)
 			default:
-				inflightRejectedTotal.WithLabelValues("max_connections_per_ip").Inc()
-				telemetry.IncInflightRejected("max_connections_per_ip")
+				if !ShouldSkipMetrics(r) {
+					inflightRejectedTotal.WithLabelValues("max_connections_per_ip").Inc()
+					telemetry.IncInflightRejected("max_connections_per_ip")
+				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many connections from this IP", "")
 			}

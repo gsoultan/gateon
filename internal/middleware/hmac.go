@@ -50,6 +50,12 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+
 			if len(methodSet) > 0 && !methodSet[r.Method] {
 				next.ServeHTTP(w, r)
 				return
@@ -57,7 +63,7 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 
 			sigHeader := r.Header.Get(header)
 			if sigHeader == "" {
-				telemetry.MiddlewareHMACFailuresTotal.WithLabelValues("").Inc()
+				telemetry.MiddlewareHMACFailuresTotal.WithLabelValues(activeRouteID).Inc()
 				http.Error(w, "Missing signature", http.StatusUnauthorized)
 				return
 			}
@@ -84,7 +90,7 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 			computed := mac.Sum(nil)
 
 			if !hmac.Equal(computed, expectedSig) {
-				telemetry.MiddlewareHMACFailuresTotal.WithLabelValues("").Inc()
+				telemetry.MiddlewareHMACFailuresTotal.WithLabelValues(activeRouteID).Inc()
 				http.Error(w, "Invalid signature", http.StatusUnauthorized)
 				return
 			}

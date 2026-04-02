@@ -96,15 +96,24 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		_, servicesCount := d.ServiceService.ListPaginated(r.Context(), 0, 0, "")
 		_, epsCount := d.EpService.ListPaginated(r.Context(), 0, 0, "")
 		_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
+
+		var cpuUsage, memUsage float64
+		if snap, err := telemetry.CollectMetricsSnapshot(); err == nil {
+			cpuUsage = snap.System.CPUUsage
+			memUsage = snap.System.MemoryUsage
+		}
+
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":             "running",
-			"version":            d.Version,
-			"uptime":             time.Since(d.StartTime).Seconds(),
-			"memory_usage":       m.Alloc,
-			"routes_count":       routesCount,
-			"services_count":     servicesCount,
-			"entry_points_count": epsCount,
-			"middlewares_count":  mwsCount,
+			"status":               "running",
+			"version":              d.Version,
+			"uptime":               time.Since(d.StartTime).Seconds(),
+			"memory_usage":         m.Alloc,
+			"cpu_usage":            cpuUsage,
+			"memory_usage_percent": memUsage,
+			"routes_count":         routesCount,
+			"services_count":       servicesCount,
+			"entry_points_count":   epsCount,
+			"middlewares_count":    mwsCount,
 		})
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

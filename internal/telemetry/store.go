@@ -295,9 +295,10 @@ func GetTraces(limit int) []traceRecord {
 }
 
 // GetPathStatsWindow returns aggregated stats from storage for the last `days` days.
+// Falls back to in-memory stats on DB errors to ensure metrics are always available.
 func GetPathStatsWindow(days int) []PathStats {
 	if store == nil {
-		return GetPathStats()
+		return getInMemoryPathStats()
 	}
 	if days <= 0 {
 		days = int(store.retentionDays.Load())
@@ -306,7 +307,8 @@ func GetPathStatsWindow(days int) []PathStats {
 	q := store.dialect.Rebind(QueryGetPathStatsWin)
 	rows, err := store.db.Query(q, cutoff)
 	if err != nil {
-		return nil
+		logger.Default().Error().Err(err).Msg("path stats: DB query failed, falling back to in-memory stats")
+		return getInMemoryPathStats()
 	}
 	defer rows.Close()
 	res := make([]PathStats, 0, 256)

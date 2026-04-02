@@ -52,8 +52,10 @@ func MaxBodySize(max int64) Middleware {
 			}
 			next.ServeHTTP(w, r)
 			if sw.Status == http.StatusRequestEntityTooLarge {
-				bufferingRejectedTotal.WithLabelValues("max_request_body_bytes").Inc()
-				telemetry.IncBufferingRejected()
+				if !ShouldSkipMetrics(r) {
+					bufferingRejectedTotal.WithLabelValues("max_request_body_bytes").Inc()
+					telemetry.IncBufferingRejected()
+				}
 			}
 		})
 	}

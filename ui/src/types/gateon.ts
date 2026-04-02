@@ -107,6 +107,8 @@ export type StatusResponse = {
   version: string;
   uptime: number;
   memory_usage: number;
+  cpu_usage: number;
+  memory_usage_percent: number;
   routes_count: number;
   services_count: number;
   entry_points_count: number;

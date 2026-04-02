@@ -53,6 +53,12 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 // Bearer, query param token, and query param access_token (for WebSocket clients).
 func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ShouldSkipMetrics(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		activeRouteID := GetRouteID(r)
+
 		tokenString := bearerToken(r)
 		if tokenString == "" {
 			tokenString = r.URL.Query().Get("token")
@@ -61,7 +67,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 			tokenString = r.URL.Query().Get("access_token")
 		}
 		if tokenString == "" {
-			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "jwt").Inc()
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header or token query param required", "")
 			return
 		}
@@ -78,7 +84,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 		})
 
 		if err != nil {
-			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "jwt").Inc()
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
 			if errors.Is(err, jwt.ErrTokenExpired) {
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "token expired", "")
 				return
@@ -88,7 +94,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 		}
 
 		if !token.Valid {
-			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "jwt").Inc()
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid token", "")
 			return
 		}
@@ -163,19 +169,25 @@ func NewAPIKeyValidator(keys map[string]string, headerName, queryParam string) *
 // Handler returns a middleware that validates API keys.
 func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ShouldSkipMetrics(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		activeRouteID := GetRouteID(r)
+
 		apiKey := r.Header.Get(v.HeaderName)
 		if apiKey == "" && v.QueryParam != "" {
 			apiKey = r.URL.Query().Get(v.QueryParam)
 		}
 		if apiKey == "" {
-			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "api_key").Inc()
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "api_key").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "API key missing (header or query)", "")
 			return
 		}
 
 		tenantID, ok := v.Keys[apiKey]
 		if !ok {
-			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "api_key").Inc()
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "api_key").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid API key", "")
 			return
 		}
@@ -246,16 +258,22 @@ func bearerToken(r *http.Request) string {
 func PasetoAuth(verifier TokenVerifier) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+
 			token := ExtractToken(r)
 			if token == "" {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "paseto").Inc()
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Authorization header, session cookie, or token/access_token query required", "")
 				return
 			}
 
 			claims, err := verifier.VerifyToken(token)
 			if err != nil {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "paseto").Inc()
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Invalid or expired token", "")
 				return
 			}
@@ -279,8 +297,15 @@ func BasicAuthWithRealm(username, password, realm string) Middleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+
 			u, p, ok := r.BasicAuth()
 			if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(password)) != 1 {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Unauthorized", "")
 				return
@@ -316,14 +341,22 @@ func BasicAuthUsers(users string, realm string) (Middleware, error) {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+
 			u, p, ok := r.BasicAuth()
 			if !ok {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Unauthorized", "")
 				return
 			}
 			expected, found := pairs[u]
 			if !found || subtle.ConstantTimeCompare([]byte(p), []byte(expected)) != 1 {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Unauthorized", "")
 				return

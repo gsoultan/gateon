@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"runtime/debug"
+	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
 )
@@ -11,8 +12,43 @@ type ContextKey string
 
 const (
 	EntryPointIDContextKey ContextKey = "entrypoint_id"
+	RouteIDContextKey      ContextKey = "route_id"
 	IsManagementContextKey ContextKey = "is_management"
 )
+
+// GetRouteID returns the route ID from the request context, or empty if not set.
+func GetRouteID(r *http.Request) string {
+	if val, ok := r.Context().Value(RouteIDContextKey).(string); ok {
+		return val
+	}
+	return ""
+}
+
+// IsInternalPath returns true if the given path belongs to Gateon's internal API,
+// monitoring, or health-check system.
+func IsInternalPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz"
+}
+
+// ShouldSkipMetrics determines if Prometheus metrics recording should be skipped
+// for a given request. It skips metrics for the management entrypoint and internal
+// paths, unless it's a dedicated proxy route (non-gateon prefix).
+func ShouldSkipMetrics(r *http.Request) bool {
+	isMgmt, _ := r.Context().Value(IsManagementContextKey).(bool)
+	if isMgmt {
+		return true
+	}
+
+	routeID := GetRouteID(r)
+
+	// For infrastructure-level metrics (entrypoints starting with "gateon-"),
+	// skip recording for any internal paths to isolate proxy metrics.
+	if strings.HasPrefix(routeID, "gateon-") && IsInternalPath(r.URL.Path) {
+		return true
+	}
+
+	return false
+}
 
 // Middleware defines a function that wraps an http.Handler.
 type Middleware func(http.Handler) http.Handler

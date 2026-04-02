@@ -83,17 +83,8 @@ func RecordTrace(id, operationName, serviceName string, durationMs int64, timest
 	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path)
 }
 
-// GetPathStats returns a list of aggregated path statistics.
-func GetPathStats() []PathStats {
-	// If persistent store is enabled, prefer querying it using current retention window
-	if IsStoreEnabled() {
-		days := CurrentRetentionDays()
-		if days <= 0 {
-			days = 1
-		}
-		return GetPathStatsWindow(days)
-	}
-
+// getInMemoryPathStats returns aggregated path statistics from the in-memory map.
+func getInMemoryPathStats() []PathStats {
 	pathStatsMu.RLock()
 	defer pathStatsMu.RUnlock()
 
@@ -117,6 +108,23 @@ func GetPathStats() []PathStats {
 		})
 	}
 	return result
+}
+
+// GetPathStats returns a list of aggregated path statistics.
+// When the persistent store is enabled, it queries the DB first and falls back
+// to in-memory stats when the DB returns no results (e.g. unflushed data,
+// query errors, or remote DB connectivity issues).
+func GetPathStats() []PathStats {
+	if IsStoreEnabled() {
+		days := CurrentRetentionDays()
+		if days <= 0 {
+			days = 1
+		}
+		if dbStats := GetPathStatsWindow(days); len(dbStats) > 0 {
+			return dbStats
+		}
+	}
+	return getInMemoryPathStats()
 }
 
 // evictPathStatsLocked removes about 25% of keys from pathStatsMap.

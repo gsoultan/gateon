@@ -49,6 +49,12 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+
 			if !methodSet[r.Method] {
 				next.ServeHTTP(w, r)
 				return
@@ -59,7 +65,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 				token = r.FormValue("cf-turnstile-response")
 			}
 			if token == "" {
-				telemetry.MiddlewareTurnstileTotal.WithLabelValues("", "fail").Inc()
+				telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
 				http.Error(w, "Turnstile token required", http.StatusBadRequest)
 				logger.L.Debug().Str("path", r.URL.Path).Msg("turnstile: missing token")
 				return
@@ -98,7 +104,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			}
 
 			if !result.Success {
-				telemetry.MiddlewareTurnstileTotal.WithLabelValues("", "fail").Inc()
+				telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
 				http.Error(w, fmt.Sprintf("Turnstile verification failed: %v", result.ErrorCodes), http.StatusBadRequest)
 				logger.L.Debug().
 					Strs("error_codes", result.ErrorCodes).
@@ -108,7 +114,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 				return
 			}
 
-			telemetry.MiddlewareTurnstileTotal.WithLabelValues("", "pass").Inc()
+			telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "pass").Inc()
 			next.ServeHTTP(w, r)
 		})
 	}

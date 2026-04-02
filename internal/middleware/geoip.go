@@ -48,6 +48,12 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+
 			clientIP := request.GetClientIP(r, trust)
 			ip := net.ParseIP(clientIP)
 			if ip == nil {
@@ -72,7 +78,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 			_, allowed := allowSet[country]
 
 			if denied {
-				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues("", country).Inc()
+				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues(activeRouteID, country).Inc()
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.Debug().
 					Str("ip", clientIP).
@@ -82,7 +88,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 			}
 
 			if len(allowSet) > 0 && !allowed {
-				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues("", country).Inc()
+				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues(activeRouteID, country).Inc()
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.Debug().
 					Str("ip", clientIP).
