@@ -140,6 +140,16 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 		stats := telemetry.GetPathStats()
 		_ = json.NewEncoder(w).Encode(stats)
 	})
+	mux.HandleFunc("GET /v1/diag/metrics", func(w http.ResponseWriter, r *http.Request) {
+		snap, err := telemetry.CollectMetricsSnapshot()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(snap)
+	})
 	mux.HandleFunc("POST /v1/diag/test-target", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Target string `json:"target"`

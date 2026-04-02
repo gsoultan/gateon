@@ -438,6 +438,13 @@ func (h *ProxyHandler) runHealthCheck(urls []string) {
 				if resp != nil {
 					resp.Body.Close()
 				}
+				// Update Prometheus target health gauge
+				healthVal := 0.0
+				if alive {
+					healthVal = 1.0
+				}
+				telemetry.TargetHealth.WithLabelValues("", u).Set(healthVal)
+				telemetry.ActiveConnections.WithLabelValues(u).Set(float64(s.ActiveConn))
 			}
 		case <-h.stopHealthCheck:
 			return
@@ -580,7 +587,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Msg("Forwarding to service target")
 
 	atomic.AddInt32(&state.activeConn, 1)
-	defer atomic.AddInt32(&state.activeConn, -1)
+	telemetry.ActiveConnections.WithLabelValues(state.url).Inc()
+	defer func() {
+		atomic.AddInt32(&state.activeConn, -1)
+		telemetry.ActiveConnections.WithLabelValues(state.url).Dec()
+	}()
 
 	// Use pre-parsed URL from targetState to avoid per-request url.Parse allocation
 	targetURL := state.parsedURL

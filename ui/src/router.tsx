@@ -32,6 +32,7 @@ const LoginPage = lazy(() => import("./routes/LoginPage"));
 const SetupPage = lazy(() => import("./routes/SetupPage"));
 const TopologyPage = lazy(() => import("./routes/TopologyPage"));
 const TracesPage = lazy(() => import("./routes/TracesPage"));
+const MetricsPage = lazy(() => import("./routes/MetricsPage"));
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -196,6 +197,12 @@ const tracesRoute = createRoute({
   component: () => <TracesPage />,
 });
 
+const metricsRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/metrics",
+  component: () => <MetricsPage />,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
@@ -217,6 +224,7 @@ const routeTree = rootRoute.addChildren([
     usersRoute,
     topologyRoute,
     tracesRoute,
+    metricsRoute,
   ]),
 ]);
 

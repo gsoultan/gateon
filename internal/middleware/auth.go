@@ -12,6 +12,7 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 type contextKey string
@@ -60,6 +61,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 			tokenString = r.URL.Query().Get("access_token")
 		}
 		if tokenString == "" {
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "jwt").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header or token query param required", "")
 			return
 		}
@@ -76,6 +78,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 		})
 
 		if err != nil {
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "jwt").Inc()
 			if errors.Is(err, jwt.ErrTokenExpired) {
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "token expired", "")
 				return
@@ -85,6 +88,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 		}
 
 		if !token.Valid {
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "jwt").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid token", "")
 			return
 		}
@@ -164,12 +168,14 @@ func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 			apiKey = r.URL.Query().Get(v.QueryParam)
 		}
 		if apiKey == "" {
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "api_key").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "API key missing (header or query)", "")
 			return
 		}
 
 		tenantID, ok := v.Keys[apiKey]
 		if !ok {
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "api_key").Inc()
 			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid API key", "")
 			return
 		}
@@ -242,12 +248,14 @@ func PasetoAuth(verifier TokenVerifier) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := ExtractToken(r)
 			if token == "" {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "paseto").Inc()
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Authorization header, session cookie, or token/access_token query required", "")
 				return
 			}
 
 			claims, err := verifier.VerifyToken(token)
 			if err != nil {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues("", "paseto").Inc()
 				httputil.WriteJSONError(w, http.StatusUnauthorized, "Invalid or expired token", "")
 				return
 			}

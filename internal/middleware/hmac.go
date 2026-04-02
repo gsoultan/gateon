@@ -8,15 +8,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // HMACConfig configures the HMAC request signing verification middleware.
 type HMACConfig struct {
-	Secret   string   // HMAC secret (required)
-	Header   string   // Header containing signature, e.g. X-Signature-256 or X-Hub-Signature-256
-	Prefix   string   // Optional prefix to strip, e.g. "sha256=" (GitHub style)
-	Methods  []string // HTTP methods to verify; empty = all
-	BodyLimit int64   // Max body size to read (default 1MB); 0 = 1MB
+	Secret    string   // HMAC secret (required)
+	Header    string   // Header containing signature, e.g. X-Signature-256 or X-Hub-Signature-256
+	Prefix    string   // Optional prefix to strip, e.g. "sha256=" (GitHub style)
+	Methods   []string // HTTP methods to verify; empty = all
+	BodyLimit int64    // Max body size to read (default 1MB); 0 = 1MB
 }
 
 // HMAC returns a middleware that verifies HMAC-SHA256 signatures on request bodies.
@@ -55,6 +57,7 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 
 			sigHeader := r.Header.Get(header)
 			if sigHeader == "" {
+				telemetry.MiddlewareHMACFailuresTotal.WithLabelValues("").Inc()
 				http.Error(w, "Missing signature", http.StatusUnauthorized)
 				return
 			}
@@ -81,6 +84,7 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 			computed := mac.Sum(nil)
 
 			if !hmac.Equal(computed, expectedSig) {
+				telemetry.MiddlewareHMACFailuresTotal.WithLabelValues("").Inc()
 				http.Error(w, "Invalid signature", http.StatusUnauthorized)
 				return
 			}

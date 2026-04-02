@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // CacheConfig configures the response cache.
@@ -25,7 +26,13 @@ const (
 )
 
 // Cache returns a middleware that caches GET/HEAD responses (memory or Redis).
+// The routeID parameter is used for Prometheus cache hit/miss metrics.
 func Cache(cfg CacheConfig) Middleware {
+	return CacheWithRoute(cfg, "")
+}
+
+// CacheWithRoute returns a cache middleware that records metrics with the given route ID.
+func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 	if cfg.MaxBodyKB <= 0 {
 		cfg.MaxBodyKB = 256
 	}
@@ -55,6 +62,7 @@ func Cache(cfg CacheConfig) Middleware {
 			key := r.URL.String()
 			status, headers, body, ok := backend.Get(r.Context(), key)
 			if ok {
+				telemetry.MiddlewareCacheHitsTotal.WithLabelValues(routeID).Inc()
 				for k, vv := range headers {
 					for _, v := range vv {
 						w.Header().Add(k, v)
@@ -66,6 +74,7 @@ func Cache(cfg CacheConfig) Middleware {
 				}
 				return
 			}
+			telemetry.MiddlewareCacheMissesTotal.WithLabelValues(routeID).Inc()
 
 			buf := &bytes.Buffer{}
 			rec := &responseRecorder{

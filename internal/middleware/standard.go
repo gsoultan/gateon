@@ -12,8 +12,6 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var statusCodes = make(map[int]string)
@@ -31,28 +29,41 @@ func getStatusString(code int) string {
 	return strconv.Itoa(code)
 }
 
-var (
-	httpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "gateon_http_requests_total",
-		Help: "Total number of HTTP requests",
-	}, []string{"route_id", "method", "status"})
-
-	httpDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "gateon_http_duration_seconds",
-		Help:    "Latency of HTTP requests",
-		Buckets: prometheus.DefBuckets,
-	}, []string{"route_id", "method"})
-)
-
-// StatusResponseWriter wraps http.ResponseWriter to capture status code.
+// StatusResponseWriter wraps http.ResponseWriter to capture status code, bytes written, and TTFB.
 type StatusResponseWriter struct {
 	http.ResponseWriter
-	Status int
+	Status       int
+	BytesWritten int64
+	ttfbRecorded bool
+	firstByte    time.Time
+	start        time.Time
 }
 
 func (w *StatusResponseWriter) WriteHeader(code int) {
+	if !w.ttfbRecorded {
+		w.firstByte = time.Now()
+		w.ttfbRecorded = true
+	}
 	w.Status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *StatusResponseWriter) Write(b []byte) (int, error) {
+	if !w.ttfbRecorded {
+		w.firstByte = time.Now()
+		w.ttfbRecorded = true
+	}
+	n, err := w.ResponseWriter.Write(b)
+	w.BytesWritten += int64(n)
+	return n, err
+}
+
+// TTFB returns the time-to-first-byte duration. Returns zero if no bytes were written.
+func (w *StatusResponseWriter) TTFB() time.Duration {
+	if !w.ttfbRecorded {
+		return 0
+	}
+	return w.firstByte.Sub(w.start)
 }
 
 // AccessLog returns a middleware that logs request details.
@@ -111,20 +122,36 @@ func accessLogSampleRate() uint32 {
 	return uint32(n)
 }
 
-// Metrics returns a middleware that records prometheus metrics.
+// Metrics returns a middleware that records comprehensive Prometheus metrics
+// including request counts, latency histograms, status code breakdown,
+// body size tracking, TTFB, and in-flight request gauges.
 func Metrics(routeID string) Middleware {
+	return MetricsWithService(routeID, "")
+}
+
+// MetricsWithService returns a metrics middleware that also records the service label.
+func MetricsWithService(routeID, serviceID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+
+			// Track in-flight requests
+			telemetry.RequestsInFlight.WithLabelValues(routeID).Inc()
+			defer telemetry.RequestsInFlight.WithLabelValues(routeID).Dec()
 
 			// Capture original host and path before proxying mutates r.Host/r.URL.
 			origHost := r.Host
 			origPath := r.URL.Path
 			method := r.Method
 
+			// Track request body size
+			if r.ContentLength > 0 {
+				telemetry.RequestBytesTotal.WithLabelValues(routeID, "in").Add(float64(r.ContentLength))
+			}
+
 			sw, ok := w.(*StatusResponseWriter)
 			if !ok {
-				sw = &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
+				sw = &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK, start: start}
 				w = sw
 			}
 
@@ -147,8 +174,21 @@ func Metrics(routeID string) Middleware {
 				origHost+origPath,
 			)
 
-			httpRequestsTotal.WithLabelValues(routeID, method, getStatusString(sw.Status)).Inc()
-			httpDuration.WithLabelValues(routeID, method).Observe(duration.Seconds())
+			statusStr := getStatusString(sw.Status)
+
+			// Rich Prometheus metrics
+			telemetry.RequestsTotal.WithLabelValues(routeID, serviceID, method, statusStr).Inc()
+			telemetry.RequestDurationSeconds.WithLabelValues(routeID, serviceID, method).Observe(duration.Seconds())
+
+			// Track response body size
+			if sw.BytesWritten > 0 {
+				telemetry.RequestBytesTotal.WithLabelValues(routeID, "out").Add(float64(sw.BytesWritten))
+			}
+
+			// Track TTFB
+			if ttfb := sw.TTFB(); ttfb > 0 {
+				telemetry.TTFBSeconds.WithLabelValues(routeID).Observe(ttfb.Seconds())
+			}
 		})
 	}
 }
