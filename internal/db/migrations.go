@@ -79,4 +79,51 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(5, "add_index_to_traces_timestamp", func(db *sql.DB, dialect Dialect) error {
+		query := `CREATE INDEX IF NOT EXISTS idx_traces_timestamp ON traces(timestamp);`
+		_, err := db.Exec(query)
+		return err
+	})
+
+	Register(6, "create_acme_certs_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `CREATE TABLE IF NOT EXISTS acme_certs (
+				key TEXT PRIMARY KEY,
+				data BYTEA NOT NULL,
+				updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+			)`
+		case DriverMySQL:
+			query = `CREATE TABLE IF NOT EXISTS acme_certs (
+				` + "`key`" + ` VARCHAR(255) PRIMARY KEY,
+				data LONGBLOB NOT NULL,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+			)`
+		default: // sqlite
+			query = `CREATE TABLE IF NOT EXISTS acme_certs (
+				key TEXT PRIMARY KEY,
+				data BLOB NOT NULL,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`
+		}
+		_, err := db.Exec(query)
+		return err
+	})
+
+	Register(7, "add_missing_indexes", func(db *sql.DB, dialect Dialect) error {
+		indexes := []string{
+			`CREATE INDEX IF NOT EXISTS idx_traces_service_name ON traces(service_name);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(status);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_path ON traces(path);`,
+			`CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);`,
+		}
+		for _, q := range indexes {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

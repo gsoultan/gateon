@@ -138,11 +138,18 @@ func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
 func buildGoldenSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
 	gs := GoldenSignals{}
 
-	gs.RequestsTotal = sumCounter(idx, "gateon_requests_total", nil)
+	isEP := func(m *dto.Metric) bool {
+		return strings.HasPrefix(labelValue(m, "route"), "gateon-")
+	}
+
+	gs.RequestsTotal = sumCounter(idx, "gateon_requests_total", isEP)
 
 	// Errors = 5xx status codes
 	if fam, ok := idx["gateon_requests_total"]; ok {
 		for _, m := range fam.GetMetric() {
+			if !isEP(m) {
+				continue
+			}
 			sc := labelValue(m, "status_code")
 			if strings.HasPrefix(sc, "5") {
 				gs.ErrorsTotal += m.GetCounter().GetValue()
@@ -158,6 +165,9 @@ func buildGoldenSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
 		var totalSum float64
 		var totalCount uint64
 		for _, m := range fam.GetMetric() {
+			if !isEP(m) {
+				continue
+			}
 			h := m.GetHistogram()
 			totalSum += h.GetSampleSum()
 			totalCount += h.GetSampleCount()
@@ -165,16 +175,19 @@ func buildGoldenSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
 		if totalCount > 0 {
 			gs.AvgLatencyMs = (totalSum / float64(totalCount)) * 1000
 		}
-		gs.P50LatencyMs = estimatePercentile(fam, 0.50) * 1000
-		gs.P95LatencyMs = estimatePercentile(fam, 0.95) * 1000
-		gs.P99LatencyMs = estimatePercentile(fam, 0.99) * 1000
+		gs.P50LatencyMs = estimatePercentile(fam, 0.50, isEP) * 1000
+		gs.P95LatencyMs = estimatePercentile(fam, 0.95, isEP) * 1000
+		gs.P99LatencyMs = estimatePercentile(fam, 0.99, isEP) * 1000
 	}
 
-	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight")
-	gs.ActiveConnTotal = sumGauge(idx, "gateon_active_connections")
+	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", isEP)
+	gs.ActiveConnTotal = sumGauge(idx, "gateon_active_connections", nil) // Not route-specific
 
 	if fam, ok := idx["gateon_request_bytes_total"]; ok {
 		for _, m := range fam.GetMetric() {
+			if !isEP(m) {
+				continue
+			}
 			dir := labelValue(m, "direction")
 			switch dir {
 			case "in":
@@ -194,7 +207,7 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 	if fam, ok := idx["gateon_requests_total"]; ok {
 		for _, m := range fam.GetMetric() {
 			route := labelValue(m, "route")
-			if route == "" {
+			if route == "" || strings.HasPrefix(route, "gateon-") {
 				continue
 			}
 			rm := getOrCreateRoute(routeMap, route)
@@ -214,7 +227,7 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 	if fam, ok := idx["gateon_requests_in_flight"]; ok {
 		for _, m := range fam.GetMetric() {
 			route := labelValue(m, "route")
-			if route == "" {
+			if route == "" || strings.HasPrefix(route, "gateon-") {
 				continue
 			}
 			rm := getOrCreateRoute(routeMap, route)
@@ -225,7 +238,7 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 	if fam, ok := idx["gateon_request_bytes_total"]; ok {
 		for _, m := range fam.GetMetric() {
 			route := labelValue(m, "route")
-			if route == "" {
+			if route == "" || strings.HasPrefix(route, "gateon-") {
 				continue
 			}
 			rm := getOrCreateRoute(routeMap, route)
@@ -242,7 +255,7 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 	if fam, ok := idx["gateon_request_duration_seconds"]; ok {
 		for _, m := range fam.GetMetric() {
 			route := labelValue(m, "route")
-			if route == "" {
+			if route == "" || strings.HasPrefix(route, "gateon-") {
 				continue
 			}
 			rm := getOrCreateRoute(routeMap, route)
@@ -423,13 +436,16 @@ func sumCounter(idx map[string]*dto.MetricFamily, name string, filter func(*dto.
 	return total
 }
 
-func sumGauge(idx map[string]*dto.MetricFamily, name string) float64 {
+func sumGauge(idx map[string]*dto.MetricFamily, name string, filter func(*dto.Metric) bool) float64 {
 	fam, ok := idx[name]
 	if !ok {
 		return 0
 	}
 	var total float64
 	for _, m := range fam.GetMetric() {
+		if filter != nil && !filter(m) {
+			continue
+		}
 		total += m.GetGauge().GetValue()
 	}
 	return total
@@ -470,9 +486,12 @@ func collectLabeledCounts(idx map[string]*dto.MetricFamily, name, labelName stri
 }
 
 // estimatePercentile estimates a percentile from a histogram using linear interpolation.
-func estimatePercentile(fam *dto.MetricFamily, q float64) float64 {
+func estimatePercentile(fam *dto.MetricFamily, q float64, filter func(*dto.Metric) bool) float64 {
 	var totalCount uint64
 	for _, m := range fam.GetMetric() {
+		if filter != nil && !filter(m) {
+			continue
+		}
 		totalCount += m.GetHistogram().GetSampleCount()
 	}
 	if totalCount == 0 {
@@ -486,6 +505,9 @@ func estimatePercentile(fam *dto.MetricFamily, q float64) float64 {
 	}
 	bucketMap := make(map[float64]uint64)
 	for _, m := range fam.GetMetric() {
+		if filter != nil && !filter(m) {
+			continue
+		}
 		for _, b := range m.GetHistogram().GetBucket() {
 			bucketMap[b.GetUpperBound()] += b.GetCumulativeCount()
 		}

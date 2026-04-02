@@ -9,6 +9,16 @@ import (
 
 func TestCollectMetricsSnapshot(t *testing.T) {
 	// Seed some metrics so the snapshot has data to collect.
+	// gateon- prefix is for Golden Signals (entrypoints).
+	RequestsTotal.WithLabelValues("gateon-test", "test-svc", "GET", "200").Add(100)
+	RequestsTotal.WithLabelValues("gateon-test", "test-svc", "GET", "500").Add(5)
+	RequestBytesTotal.WithLabelValues("gateon-test", "in").Add(1024)
+	RequestBytesTotal.WithLabelValues("gateon-test", "out").Add(4096)
+	RequestsInFlight.WithLabelValues("gateon-test").Set(3)
+	RequestDurationSeconds.WithLabelValues("gateon-test", "test-svc", "GET").Observe(0.05)
+	RequestDurationSeconds.WithLabelValues("gateon-test", "test-svc", "GET").Observe(0.15)
+
+	// Non-prefixed for Route Metrics.
 	RequestsTotal.WithLabelValues("test-route", "test-svc", "GET", "200").Add(100)
 	RequestsTotal.WithLabelValues("test-route", "test-svc", "GET", "500").Add(5)
 	RequestDurationSeconds.WithLabelValues("test-route", "test-svc", "GET").Observe(0.05)
@@ -125,12 +135,12 @@ func TestEstimatePercentile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p50 := estimatePercentile(families, 0.50)
+	p50 := estimatePercentile(families, 0.50, nil)
 	if p50 <= 0 {
 		t.Errorf("expected p50 > 0, got %f", p50)
 	}
 
-	p99 := estimatePercentile(families, 0.99)
+	p99 := estimatePercentile(families, 0.99, nil)
 	if p99 <= p50 {
 		t.Errorf("expected p99 (%f) > p50 (%f)", p99, p50)
 	}

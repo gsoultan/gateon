@@ -196,7 +196,8 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
     const edges: Edge[] = [];
 
     // 1. Add Entrypoints
-    entrypoints.forEach((ep) => {
+    (entrypoints || []).forEach((ep) => {
+      if (!ep) return;
       nodes.push({
         id: `ep-${ep.id}`,
         type: "entrypoint",
@@ -210,21 +211,24 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
     });
 
     // 2. Add Routes and link to Entrypoints
-    routes.forEach((r) => {
+    (routes || []).forEach((r) => {
+      if (!r) return;
+
       nodes.push({
         id: `route-${r.id}`,
         type: "route",
         data: {
           label: r.name || r.id,
           sublabel: r.rule,
-          badge: r.type.toUpperCase(),
+          badge: (r.type || "").toUpperCase(),
         },
         position: { x: 0, y: 0 },
       });
 
       // Link entrypoints to routes
-      const relevantEps = entrypoints.filter((ep) => {
-        const epIdMatch = r.entrypoints?.includes(ep.id);
+      const relevantEps = (entrypoints || []).filter((ep) => {
+        if (!ep) return false;
+        const epIdMatch = r.entrypoints?.includes?.(ep.id);
         const allEntries = !r.entrypoints || r.entrypoints.length === 0;
 
         if (ep.type === EntryPointType.TCP || ep.type === EntryPointType.UDP) {
@@ -234,7 +238,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
           return epIdMatch && typeMatch;
         }
 
-        const isWebCompatible = ["http", "grpc", "graphql"].includes(r.type);
+        const isWebCompatible = ["http", "grpc", "graphql"].includes(r.type || "");
         return (epIdMatch || allEntries) && isWebCompatible;
       });
 
@@ -250,9 +254,9 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
 
       // 3. Add Middlewares for this route
       let lastMiddlewareId = `route-${r.id}`;
-      if (r.middlewares && r.middlewares.length > 0) {
+      if (Array.isArray(r.middlewares) && r.middlewares.length > 0) {
         r.middlewares.forEach((mwId, idx) => {
-          const mw = middlewares.find((m) => m.id === mwId);
+          const mw = (middlewares || []).find((m) => m?.id === mwId);
           if (mw) {
             const nodeId = `route-${r.id}-mw-${mwId}-${idx}`;
             nodes.push({
@@ -278,7 +282,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
       }
 
       // 4. Link to Service
-      const svc = services.find((s) => s.id === r.service_id);
+      const svc = (services || []).find((s) => s?.id === r.service_id);
       if (svc) {
         const svcNodeId = `svc-${svc.id}`;
         // Ensure service node is only added once
@@ -303,13 +307,15 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
         });
 
         // 5. Add targets for service
-        svc.weighted_targets?.forEach((target, tIdx) => {
+        if (Array.isArray(svc.weighted_targets)) {
+          svc.weighted_targets.forEach((target, tIdx) => {
+            if (!target) return;
             const targetNodeId = `svc-${svc.id}-t-${tIdx}`;
             nodes.push({
                 id: targetNodeId,
                 type: "target",
                 data: {
-                    label: target.target,
+                    label: target.target || (target as any).url, // handle potential target/url mismatch
                     sublabel: `Weight: ${target.weight}`,
                 },
                 position: { x: 0, y: 0 },
@@ -322,7 +328,8 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
                 animated: true,
                 style: { stroke: "#1098ad" },
             });
-        });
+          });
+        }
       }
     });
 

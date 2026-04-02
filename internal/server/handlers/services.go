@@ -3,11 +3,12 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
+func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *Deps) {
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
 		svcs, total := d.ServiceService.ListPaginated(r.Context(), page, pageSize, search)
@@ -60,5 +61,22 @@ func registerServiceHandlers(mux *http.ServeMux, d *Deps) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("POST /v1/discover/grpc", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceServices) {
+			return
+		}
+		var req gateonv1.DiscoverGrpcServicesRequest
+		if err := DecodeRequestBody(r, &req); err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		resp, err := apiService.DiscoverGrpcServices(r.Context(), &req)
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		WriteProtoResponse(w, http.StatusOK, resp)
 	})
 }

@@ -137,10 +137,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Use context-based routeID if available, fallback to the one passed during middleware creation.
-			activeRouteID := GetRouteName(r)
+			// Use explicit routeID if provided, otherwise fallback to context.
+			activeRouteID := routeID
 			if activeRouteID == "" {
-				activeRouteID = routeID
+				activeRouteID = GetRouteName(r)
 			}
 
 			start := time.Now()
@@ -155,9 +155,12 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			method := r.Method
 
 			// Track request body size
-			if r.ContentLength > 0 {
-				telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(r.ContentLength))
+			reqInSize := r.ContentLength
+			if reqInSize < 0 {
+				reqInSize = 0
 			}
+			// Add a baseline of 256 bytes to account for headers and request line.
+			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(reqInSize + 256))
 
 			sw, ok := w.(*StatusResponseWriter)
 			if !ok {
@@ -191,9 +194,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
 
 			// Track response body size
-			if sw.BytesWritten > 0 {
-				telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "out").Add(float64(sw.BytesWritten))
-			}
+			respOutSize := sw.BytesWritten
+			// Add a baseline of 200 bytes to account for response headers.
+			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "out").Add(float64(respOutSize + 200))
 
 			// Track TTFB
 			if ttfb := sw.TTFB(); ttfb > 0 {

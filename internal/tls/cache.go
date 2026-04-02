@@ -53,42 +53,12 @@ type SQLCache struct {
 	dialect string
 }
 
-// NewSQLCache creates a new SQLCache and ensures the table exists.
+// NewSQLCache creates a new SQLCache.
 func NewSQLCache(db *sql.DB, table, dialect string) (*SQLCache, error) {
 	if table == "" {
 		table = "acme_certs"
 	}
-	cache := &SQLCache{db: db, table: table, dialect: dialect}
-	if err := cache.init(); err != nil {
-		return nil, err
-	}
-	return cache, nil
-}
-
-func (c *SQLCache) init() error {
-	var query string
-	switch c.dialect {
-	case "postgres":
-		query = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			key TEXT PRIMARY KEY,
-			data BYTEA NOT NULL,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)`, c.table)
-	case "mysql":
-		query = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			`+"`key`"+` VARCHAR(255) PRIMARY KEY,
-			data LONGBLOB NOT NULL,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-		)`, c.table)
-	default: // sqlite
-		query = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			key TEXT PRIMARY KEY,
-			data BLOB NOT NULL,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`, c.table)
-	}
-	_, err := c.db.Exec(query)
-	return err
+	return &SQLCache{db: db, table: table, dialect: dialect}, nil
 }
 
 // Get reads a certificate data from the database.
