@@ -12,9 +12,14 @@ builds:
     binary: gateon
     env:
       - CGO_ENABLED=0
+      - GOGC=off
+    flags:
+      - -trimpath
+      - -pgo=auto
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux
       - darwin
@@ -22,6 +27,9 @@ builds:
     goarch:
       - amd64
       - arm64
+
+gomod:
+  proxy: true
 
 archives:
   - id: default
