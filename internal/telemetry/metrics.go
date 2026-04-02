@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // --- Counters ---
@@ -31,6 +34,12 @@ var MiddlewareRateLimitRejectedTotal = promauto.NewCounterVec(prometheus.Counter
 	Help: "Total requests rejected by rate limiter.",
 }, []string{"route", "limiter_type"})
 
+// MiddlewareRateLimitRemainingQuota tracks remaining rate limit quota.
+var MiddlewareRateLimitRemainingQuota = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "gateon_middleware_ratelimit_remaining_quota",
+	Help: "Remaining rate limit quota.",
+}, []string{"route"})
+
 // MiddlewareWAFBlockedTotal counts requests blocked by WAF.
 var MiddlewareWAFBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_waf_blocked_total",
@@ -47,6 +56,12 @@ var MiddlewareCacheHitsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 var MiddlewareCacheMissesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_cache_misses_total",
 	Help: "Total cache misses.",
+}, []string{"route"})
+
+// MiddlewareCacheEvictionTotal counts cache evictions.
+var MiddlewareCacheEvictionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_cache_eviction_total",
+	Help: "Total cache evictions.",
 }, []string{"route"})
 
 // MiddlewareAuthFailuresTotal counts authentication/authorization failures.
@@ -183,6 +198,18 @@ var UptimeSeconds = promauto.NewGauge(prometheus.GaugeOpts{
 	Help: "Gateway uptime in seconds.",
 })
 
+// OpenFileDescriptors tracks current open file descriptors.
+var OpenFileDescriptors = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "gateon_open_file_descriptors",
+	Help: "Current number of open file descriptors.",
+})
+
+// SQLiteWALSize tracks the size of the SQLite WAL file.
+var SQLiteWALSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "gateon_sqlite_wal_size",
+	Help: "Current size of the SQLite WAL file in bytes.",
+}, []string{"database"})
+
 var (
 	startTime     time.Time
 	startTimeOnce sync.Once
@@ -223,6 +250,8 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 		Help: "Current system memory usage percentage.",
 	})
 
+	proc, _ := process.NewProcess(int32(os.Getpid()))
+
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
@@ -246,6 +275,21 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 				if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
 					cpuUsage.Set(c[0])
 				}
+
+				// Process-specific metrics
+				if proc != nil {
+					if n, err := proc.NumFDs(); err == nil {
+						OpenFileDescriptors.Set(float64(n))
+					}
+				}
+
+				// SQLite WAL metrics
+				_ = filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+					if err == nil && !info.IsDir() && filepath.Ext(path) == ".db-wal" {
+						SQLiteWALSize.WithLabelValues(filepath.Base(path)).Set(float64(info.Size()))
+					}
+					return nil
+				})
 			case <-stop:
 				return
 			}

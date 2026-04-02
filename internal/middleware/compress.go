@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/andybalholm/brotli"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -19,6 +20,12 @@ const (
 var gzipWriterPool = sync.Pool{
 	New: func() any {
 		return gzip.NewWriter(io.Discard)
+	},
+}
+
+var brotliWriterPool = sync.Pool{
+	New: func() any {
+		return brotli.NewWriter(io.Discard)
 	},
 }
 
@@ -93,7 +100,12 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+
+			acceptEncoding := r.Header.Get("Accept-Encoding")
+			isGzip := strings.Contains(acceptEncoding, "gzip")
+			isBrotli := strings.Contains(acceptEncoding, "br")
+
+			if !isGzip && !isBrotli {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -138,14 +150,31 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 					w.Header().Add(k, vv)
 				}
 			}
-			w.Header().Set("Content-Encoding", "gzip")
+
+			encoding := ""
+			if isBrotli {
+				encoding = "br"
+			} else if isGzip {
+				encoding = "gzip"
+			}
+
+			w.Header().Set("Content-Encoding", encoding)
 			w.Header().Del("Content-Length")
 			w.WriteHeader(rec.status)
-			gz := gzipWriterPool.Get().(*gzip.Writer)
-			gz.Reset(w)
-			_, _ = gz.Write(rec.body)
-			gz.Close()
-			gzipWriterPool.Put(gz)
+
+			if encoding == "br" {
+				bw := brotliWriterPool.Get().(*brotli.Writer)
+				bw.Reset(w)
+				_, _ = bw.Write(rec.body)
+				bw.Close()
+				brotliWriterPool.Put(bw)
+			} else if encoding == "gzip" {
+				gz := gzipWriterPool.Get().(*gzip.Writer)
+				gz.Reset(w)
+				_, _ = gz.Write(rec.body)
+				gz.Close()
+				gzipWriterPool.Put(gz)
+			}
 			rec.returnBody()
 		})
 	}

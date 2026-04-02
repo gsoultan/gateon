@@ -18,11 +18,11 @@ import (
 	"github.com/gsoultan/gateon/internal/install"
 	"github.com/gsoultan/gateon/internal/k8s"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/tui"
 	"github.com/gsoultan/gateon/internal/ui"
-	"github.com/redis/go-redis/v9"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
@@ -119,7 +119,7 @@ func main() {
 		logger.L.Fatal().Err(err).Msg("failed to create server")
 	}
 	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
-		s.RedisClient = redis.NewClient(&redis.Options{Addr: redisAddr})
+		s.RedisClient = redis.NewClient(redisAddr)
 		logger.L.Info().Str("addr", redisAddr).Msg("redis client initialized")
 	}
 

@@ -213,7 +213,7 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 - [Redis-backed Rate Limiting](doc/rate-limiting.md) – Distributed rate limiting with Redis (see Features).
 - **Comprehensive Auth** – JWT, JWKS, PASETO, Forward Auth, and API Keys.
 - **Security Integrations** – Cloudflare Turnstile, MaxMind GeoIP, HMAC Signatures.
-- **Traffic Management** – Caching (Redis/Local), Compression (Gzip/Brotli), Resilience (Retry, Circuit Breaker).
+- **Traffic Management** – Caching (Redis/Local/Cluster), Compression (Gzip/Brotli), Resilience (Retry, Circuit Breaker).
 - **High Availability (HA)** – Active-Passive failover (VRRP-like) with VIP management.
 - **Anomaly Detection** – AI-powered traffic pattern analysis via Prometheus.
 - **eBPF Offloading** – Kernel-level XDP rate limiting and TC filtering.
@@ -221,8 +221,8 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 - **FIPS 140-2 Compliance** – BoringCrypto support for regulated environments.
 - **Kubernetes Gateway API Controller** – Native support for `Gateway` and `HTTPRoute` resources.
 - **Mutual TLS (mTLS)** – End-to-end security with client certificates for backend targets.
-- **Config Sync & Discovery** – Multi-cluster synchronization (Redis) and mDNS/Eureka support.
-- **External Secrets Management** – Resolution of `$vault:` and `$env:` variables at runtime.
+- **Config Sync & Discovery** – Multi-cluster synchronization (Redis) and mDNS/Eureka/Zookeeper support.
+- **External Secrets Management** – Resolution of `$vault:`, `$env:`, and `$aws-sm:` variables at runtime.
 - **Observability & AI** – Topology map, AI-powered log assistant, and `gateon top` CLI TUI.
 - **AI Optimization** – Best practices for guidelines, scenarios, and plans for AI agents ([docs/ai-optimization.md](docs/ai-optimization.md)).
 - **Automatic TLS (Let's Encrypt)** – Backend support via ACME/autocert in `internal/tls`; configurable via TLS config (Email + Domains).

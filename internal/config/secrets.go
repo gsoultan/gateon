@@ -1,18 +1,23 @@
 package config
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/hashicorp/vault/api"
 )
 
@@ -89,6 +94,59 @@ func (r *VaultSecretResolver) Resolve(s string) (string, error) {
 	return "", fmt.Errorf("key %s not found in secret %s", key, secretPath)
 }
 
+// AWSSecretResolver resolves secrets from AWS Secrets Manager.
+type AWSSecretResolver struct {
+	client *secretsmanager.Client
+}
+
+func NewAWSSecretResolver() (*AWSSecretResolver, error) {
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &AWSSecretResolver{client: secretsmanager.NewFromConfig(cfg)}, nil
+}
+
+func (r *AWSSecretResolver) Resolve(s string) (string, error) {
+	if !strings.HasPrefix(s, "$aws-sm:") {
+		return s, nil
+	}
+	secretID := s[8:]
+	// Format: secret-name#key
+	parts := strings.SplitN(secretID, "#", 2)
+	name := parts[0]
+	key := ""
+	if len(parts) > 1 {
+		key = parts[1]
+	}
+
+	result, err := r.client.GetSecretValue(context.Background(), &secretsmanager.GetSecretValueInput{
+		SecretId: aws.String(name),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if result.SecretString == nil {
+		return "", errors.New("secret value is not a string")
+	}
+
+	if key == "" {
+		return *result.SecretString, nil
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal([]byte(*result.SecretString), &data); err != nil {
+		return "", fmt.Errorf("failed to unmarshal secret JSON: %w", err)
+	}
+
+	if val, ok := data[key].(string); ok {
+		return val, nil
+	}
+
+	return "", fmt.Errorf("key %s not found in AWS secret %s", key, name)
+}
+
 // ChainSecretResolver resolves secrets by trying multiple resolvers.
 type ChainSecretResolver struct {
 	resolvers []SecretResolver
@@ -113,7 +171,14 @@ var DefaultResolver SecretResolver = &ChainSecretResolver{
 			if v != nil {
 				return v
 			}
-			return &EnvSecretResolver{} // Fallback
+			return nil
+		}(),
+		func() SecretResolver {
+			a, _ := NewAWSSecretResolver()
+			if a != nil {
+				return a
+			}
+			return nil
 		}(),
 	},
 }
