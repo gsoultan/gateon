@@ -53,7 +53,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 
 			if !methodSet[r.Method] {
 				next.ServeHTTP(w, r)

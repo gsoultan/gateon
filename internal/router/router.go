@@ -2,6 +2,7 @@
 package router
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"regexp"
@@ -258,7 +259,8 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	mwFactory := middleware.NewFactory(redisClient, globalStore)
 
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
-	chain = append(chain, middleware.Recovery(), middleware.AccessLog(rt.Id), middleware.Metrics(rt.Id))
+	routeLabel := cmp.Or(rt.Name, rt.Id)
+	chain = append(chain, middleware.Recovery(), middleware.AccessLog(routeLabel), middleware.Metrics(routeLabel))
 
 	// Resolve and append user-defined middlewares from the registry
 	for _, mid := range rt.Middlewares {
@@ -275,7 +277,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 					wrapped := func(next http.Handler) http.Handler {
 						h := mw(next)
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							ctx := context.WithValue(r.Context(), middleware.RouteIDContextKey, rt.Id)
+							ctx := context.WithValue(r.Context(), middleware.RouteNameContextKey, routeLabel)
 							logger.L.Info().
 								Str("flow_step", "middleware_start").
 								Str("request_id", request.GetID(r)).

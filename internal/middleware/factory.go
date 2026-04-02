@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strconv"
@@ -54,9 +55,9 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 	case "replacepathregex":
 		return ReplacePathRegex(cfg["pattern"], cfg["replacement"])
 	case "accesslog":
-		return AccessLog(cfg["route_id"]), nil
+		return AccessLog(cmp.Or(cfg["route"], cfg["route_id"])), nil
 	case "metrics":
-		return Metrics(cfg["route_id"]), nil
+		return Metrics(cmp.Or(cfg["route"], cfg["route_id"])), nil
 	case "compress":
 		return f.createCompress(cfg)
 	case "errors":

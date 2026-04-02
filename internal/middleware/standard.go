@@ -89,7 +89,7 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 			origPath := r.URL.Path
 			remoteAddr := r.RemoteAddr
 
-			sw := &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
+			sw := &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK, start: start}
 
 			next.ServeHTTP(sw, r)
 
@@ -102,7 +102,7 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 					Str("remote_addr", remoteAddr).
 					Int("status", sw.Status).
 					Dur("latency", duration).
-					Str("route_id", routeID).
+					Str("route", routeID).
 					Msg("access log")
 			}
 		})
@@ -138,7 +138,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				return
 			}
 			// Use context-based routeID if available, fallback to the one passed during middleware creation.
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 			if activeRouteID == "" {
 				activeRouteID = routeID
 			}
@@ -178,7 +178,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				request.GetID(r),
 				method+" "+origPath,
 				activeRouteID,
-				duration.Milliseconds(),
+				float64(duration.Nanoseconds())/1e6,
 				start,
 				status,
 				origHost+origPath,

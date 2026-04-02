@@ -1,6 +1,7 @@
 package entrypoint
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -32,15 +33,16 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	}
 	hasTCP, hasUDP := protocols(ep)
 	var epHandler http.Handler = deps.BaseHandler
+	epLabel := cmp.Or(ep.Name, ep.Id)
 	isMgmt := IsManagementAddress(ep.Address, deps)
-	epHandler = injectEntryPointID(ep.Id, isMgmt, epHandler)
+	epHandler = injectEntryPointID(ep.Id, epLabel, isMgmt, epHandler)
 	chain := []middleware.Middleware{
 		middleware.RequestID(), // Added for global correlation
 		middleware.Recovery(),
-		middleware.Metrics("gateon-" + ep.Id),
+		middleware.Metrics("gateon-" + epLabel),
 	}
 	if ep.AccessLogEnabled {
-		chain = append(chain, middleware.AccessLog("gateon-"+ep.Id))
+		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
 	}
 	finalEPHandler := middleware.Chain(chain...)(deps.CORS.Handler(deps.Limiter.Handler(middleware.PerIP)(epHandler)))
 	var epTLSConfig *tls.Config
@@ -119,11 +121,11 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 	}
 }
 
-func injectEntryPointID(epID string, isMgmt bool, next http.Handler) http.Handler {
+func injectEntryPointID(epID, epLabel string, isMgmt bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, middleware.EntryPointIDContextKey, epID)
-		ctx = context.WithValue(ctx, middleware.RouteIDContextKey, "gateon-"+epID)
+		ctx = context.WithValue(ctx, middleware.RouteNameContextKey, "gateon-"+epLabel)
 		ctx = context.WithValue(ctx, middleware.IsManagementContextKey, isMgmt)
 
 		// Log arrival for proxy traffic only

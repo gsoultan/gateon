@@ -137,7 +137,12 @@ export default function TracesPage() {
                         {trace.path}
                       </Text>
                     </Table.Td>
-                    <Table.Td>{trace.duration_ms}ms</Table.Td>
+                    <Table.Td>
+                      {trace.duration_ms < 1
+                        ? trace.duration_ms.toFixed(3)
+                        : trace.duration_ms.toFixed(2)}
+                      ms
+                    </Table.Td>
                     <Table.Td>
                       {trace.status === "success" ? (
                         <IconCircleCheck color="green" size={20} />

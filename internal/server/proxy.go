@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"net/http"
 	"strings"
 
@@ -32,7 +33,7 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 			logger.L.Info().
 				Str("flow_step", "route_match").
 				Str("request_id", request.GetID(r)).
-				Str("route_id", rt.Id).
+				Str("route", cmp.Or(rt.Name, rt.Id)).
 				Str("rule", rt.Rule).
 				Msg("Route matched")
 			if rt.Tls != nil && r.TLS == nil {

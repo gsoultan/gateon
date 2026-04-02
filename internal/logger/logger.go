@@ -32,18 +32,25 @@ func Default() Logger {
 type LogBroadcast struct {
 	mu          sync.Mutex
 	subscribers map[chan string]struct{}
+	history     []string
+	maxHistory  int
 }
 
 var Broadcaster = &LogBroadcast{
 	subscribers: make(map[chan string]struct{}),
+	history:     make([]string, 0, 100),
+	maxHistory:  100,
 }
 
-func (lb *LogBroadcast) Subscribe() chan string {
+func (lb *LogBroadcast) Subscribe() (chan string, []string) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 	ch := make(chan string, 100)
 	lb.subscribers[ch] = struct{}{}
-	return ch
+	// Return a copy of the history
+	hist := make([]string, len(lb.history))
+	copy(hist, lb.history)
+	return ch, hist
 }
 
 func (lb *LogBroadcast) Unsubscribe(ch chan string) {
@@ -57,6 +64,15 @@ func (lb *LogBroadcast) Write(p []byte) (n int, err error) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 	msg := string(p)
+
+	// Add to history (newest first for UI, but let's keep it chronologically in buffer)
+	// UI does `[event.data, ...prev]` so newest is at start.
+	// Let's store newest at end of buffer.
+	lb.history = append(lb.history, msg)
+	if len(lb.history) > lb.maxHistory {
+		lb.history = lb.history[1:]
+	}
+
 	for ch := range lb.subscribers {
 		select {
 		case ch <- msg:

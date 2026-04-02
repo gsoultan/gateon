@@ -145,7 +145,7 @@ func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 			}
 
 			if err := c.routeStore.Update(ctx, route); err != nil {
-				logger.L.Error().Err(err).Str("route_id", routeID).Msg("failed to sync k8s route")
+				logger.L.Error().Err(err).Str("route", route.Name).Msg("failed to sync k8s route")
 			}
 		}
 	}

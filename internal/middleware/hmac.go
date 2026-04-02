@@ -54,7 +54,7 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 
 			if len(methodSet) > 0 && !methodSet[r.Method] {
 				next.ServeHTTP(w, r)

@@ -52,7 +52,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 
 			clientIP := request.GetClientIP(r, trust)
 			ip := net.ParseIP(clientIP)
