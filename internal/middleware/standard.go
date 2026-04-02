@@ -133,11 +133,21 @@ func Metrics(routeID string) Middleware {
 func MetricsWithService(routeID, serviceID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Use context-based routeID if available, fallback to the one passed during middleware creation.
+			activeRouteID := GetRouteID(r)
+			if activeRouteID == "" {
+				activeRouteID = routeID
+			}
+
 			start := time.Now()
 
 			// Track in-flight requests
-			telemetry.RequestsInFlight.WithLabelValues(routeID).Inc()
-			defer telemetry.RequestsInFlight.WithLabelValues(routeID).Dec()
+			telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Inc()
+			defer telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Dec()
 
 			// Capture original host and path before proxying mutates r.Host/r.URL.
 			origHost := r.Host
@@ -146,7 +156,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 			// Track request body size
 			if r.ContentLength > 0 {
-				telemetry.RequestBytesTotal.WithLabelValues(routeID, "in").Add(float64(r.ContentLength))
+				telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(r.ContentLength))
 			}
 
 			sw, ok := w.(*StatusResponseWriter)
@@ -167,7 +177,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RecordTrace(
 				request.GetID(r),
 				method+" "+origPath,
-				routeID,
+				activeRouteID,
 				duration.Milliseconds(),
 				start,
 				status,
@@ -177,17 +187,17 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			statusStr := getStatusString(sw.Status)
 
 			// Rich Prometheus metrics
-			telemetry.RequestsTotal.WithLabelValues(routeID, serviceID, method, statusStr).Inc()
-			telemetry.RequestDurationSeconds.WithLabelValues(routeID, serviceID, method).Observe(duration.Seconds())
+			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, method, statusStr).Inc()
+			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
 
 			// Track response body size
 			if sw.BytesWritten > 0 {
-				telemetry.RequestBytesTotal.WithLabelValues(routeID, "out").Add(float64(sw.BytesWritten))
+				telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "out").Add(float64(sw.BytesWritten))
 			}
 
 			// Track TTFB
 			if ttfb := sw.TTFB(); ttfb > 0 {
-				telemetry.TTFBSeconds.WithLabelValues(routeID).Observe(ttfb.Seconds())
+				telemetry.TTFBSeconds.WithLabelValues(activeRouteID).Observe(ttfb.Seconds())
 			}
 		})
 	}

@@ -10,6 +10,8 @@ export type AggStats = {
   half_open_circuits: number;
   healthy_targets: number;
   total_targets: number;
+  cpu_usage: number;
+  memory_usage: number;
 };
 
 export function useAggStats() {

@@ -8,7 +8,8 @@ export default function StatusCard() {
   const stats = [
     { label: 'Version', value: statusData?.version || 'N/A', icon: IconVersions, color: 'blue' },
     { label: 'System Uptime', value: statusData?.uptime ? formatUptime(statusData.uptime) : '0s', icon: IconClock, color: 'teal' },
-    { label: 'Memory Usage', value: statusData?.memory_usage ? formatBytes(statusData.memory_usage) : '0 B', icon: IconActivity, color: 'orange' },
+    { label: 'CPU Usage', value: statusData?.cpu_usage !== undefined ? `${statusData.cpu_usage.toFixed(1)}%` : '0%', icon: IconActivity, color: 'blue' },
+    { label: 'Memory Usage', value: statusData?.memory_usage_percent !== undefined ? `${statusData.memory_usage_percent.toFixed(1)}%` : '0%', icon: IconActivity, color: 'orange' },
   ]
 
   const counts = [

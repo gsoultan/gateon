@@ -55,6 +55,15 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+			if activeRouteID == "" {
+				activeRouteID = routeID
+			}
+
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				next.ServeHTTP(w, r)
 				return
@@ -62,7 +71,7 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 			key := r.URL.String()
 			status, headers, body, ok := backend.Get(r.Context(), key)
 			if ok {
-				telemetry.MiddlewareCacheHitsTotal.WithLabelValues(routeID).Inc()
+				telemetry.MiddlewareCacheHitsTotal.WithLabelValues(activeRouteID).Inc()
 				for k, vv := range headers {
 					for _, v := range vv {
 						w.Header().Add(k, v)
@@ -74,7 +83,7 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 				}
 				return
 			}
-			telemetry.MiddlewareCacheMissesTotal.WithLabelValues(routeID).Inc()
+			telemetry.MiddlewareCacheMissesTotal.WithLabelValues(activeRouteID).Inc()
 
 			buf := &bytes.Buffer{}
 			rec := &responseRecorder{

@@ -49,6 +49,15 @@ func CompressWithRoute(cfg CompressConfig, routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		wrapped := inner(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			activeRouteID := GetRouteID(r)
+			if activeRouteID == "" {
+				activeRouteID = routeID
+			}
+
 			sw, ok := w.(*StatusResponseWriter)
 			var beforeBytes int64
 			if ok {
@@ -58,7 +67,7 @@ func CompressWithRoute(cfg CompressConfig, routeID string) Middleware {
 			if ok {
 				afterBytes := sw.BytesWritten - beforeBytes
 				if afterBytes > 0 {
-					telemetry.MiddlewareCompressBytesTotalOut.WithLabelValues(routeID).Add(float64(afterBytes))
+					telemetry.MiddlewareCompressBytesTotalOut.WithLabelValues(activeRouteID).Add(float64(afterBytes))
 				}
 			}
 		})
@@ -80,6 +89,10 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 				next.ServeHTTP(w, r)
 				return

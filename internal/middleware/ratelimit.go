@@ -146,9 +146,12 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 
 			limiter := rl.getLimiter(key)
 			if !limiter.Allow() {
-				rateLimitRejectedTotal.WithLabelValues("local").Inc()
-				telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues("", "local").Inc()
-				telemetry.IncRateLimitRejected("local")
+				if !ShouldSkipMetrics(r) {
+					routeID := GetRouteID(r)
+					rateLimitRejectedTotal.WithLabelValues("local").Inc()
+					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "local").Inc()
+					telemetry.IncRateLimitRejected("local")
+				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests", "")
 				return
@@ -214,9 +217,12 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			}
 
 			if int(count.Val()) > rl.rate+rl.burst {
-				rateLimitRejectedTotal.WithLabelValues("redis").Inc()
-				telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues("", "redis").Inc()
-				telemetry.IncRateLimitRejected("redis")
+				if !ShouldSkipMetrics(r) {
+					routeID := GetRouteID(r)
+					rateLimitRejectedTotal.WithLabelValues("redis").Inc()
+					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "redis").Inc()
+					telemetry.IncRateLimitRejected("redis")
+				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests (distributed)", "")
 				return

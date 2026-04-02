@@ -275,12 +275,13 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 					wrapped := func(next http.Handler) http.Handler {
 						h := mw(next)
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							ctx := context.WithValue(r.Context(), middleware.RouteIDContextKey, rt.Id)
 							logger.L.Info().
 								Str("flow_step", "middleware_start").
 								Str("request_id", request.GetID(r)).
 								Str("middleware_id", mID).
 								Msg("Executing middleware")
-							h.ServeHTTP(w, r)
+							h.ServeHTTP(w, r.WithContext(ctx))
 						})
 					}
 					chain = append(chain, wrapped)

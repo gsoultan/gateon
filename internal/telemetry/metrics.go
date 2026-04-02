@@ -7,6 +7,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 // --- Counters ---
@@ -212,6 +214,14 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 		Name: "gateon_memory_sys_bytes",
 		Help: "Total memory obtained from the OS in bytes.",
 	})
+	cpuUsage := promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gateon_cpu_usage_percent",
+		Help: "Current system CPU usage percentage.",
+	})
+	memoryUsage := promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gateon_memory_usage_percent",
+		Help: "Current system memory usage percentage.",
+	})
 
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
@@ -228,6 +238,14 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 				memoryAlloc.Set(float64(m.Alloc))
 				memoryTotalAlloc.Set(float64(m.TotalAlloc))
 				memorySys.Set(float64(m.Sys))
+
+				// System-wide metrics
+				if v, err := mem.VirtualMemory(); err == nil {
+					memoryUsage.Set(v.UsedPercent)
+				}
+				if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
+					cpuUsage.Set(c[0])
+				}
 			case <-stop:
 				return
 			}

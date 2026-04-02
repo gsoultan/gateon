@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -124,10 +123,11 @@ func injectEntryPointID(epID string, isMgmt bool, next http.Handler) http.Handle
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, middleware.EntryPointIDContextKey, epID)
+		ctx = context.WithValue(ctx, middleware.RouteIDContextKey, "gateon-"+epID)
 		ctx = context.WithValue(ctx, middleware.IsManagementContextKey, isMgmt)
 
 		// Log arrival for proxy traffic only
-		if !isMgmt && !isInternalPath(r.URL.Path) {
+		if !isMgmt && !middleware.IsInternalPath(r.URL.Path) {
 			logger.L.Info().
 				Str("flow_step", "entrypoint_arrival").
 				Str("request_id", request.GetID(r)).
@@ -138,10 +138,6 @@ func injectEntryPointID(epID string, isMgmt bool, next http.Handler) http.Handle
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func isInternalPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz"
 }
 
 func protocols(ep *gateonv1.EntryPoint) (hasTCP, hasUDP bool) {

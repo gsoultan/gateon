@@ -108,6 +108,8 @@ type SystemMetrics struct {
 	MemoryAllocBytes float64 `json:"memory_alloc_bytes"`
 	MemoryTotalBytes float64 `json:"memory_total_alloc_bytes"`
 	MemorySysBytes   float64 `json:"memory_sys_bytes"`
+	CPUUsage         float64 `json:"cpu_usage_percent"`
+	MemoryUsage      float64 `json:"memory_usage_percent"`
 }
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
@@ -378,6 +380,8 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 		MemoryAllocBytes: gaugeValue(idx, "gateon_memory_alloc_bytes"),
 		MemoryTotalBytes: gaugeValue(idx, "gateon_memory_total_alloc_bytes"),
 		MemorySysBytes:   gaugeValue(idx, "gateon_memory_sys_bytes"),
+		CPUUsage:         gaugeValue(idx, "gateon_cpu_usage_percent"),
+		MemoryUsage:      gaugeValue(idx, "gateon_memory_usage_percent"),
 	}
 }
 
