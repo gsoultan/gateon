@@ -35,7 +35,7 @@ type traceRecord struct {
 	ID            string
 	OperationName string
 	ServiceName   string
-	DurationMs    int64
+	DurationMs    float64
 	Timestamp     time.Time
 	Status        string
 	Path          string
@@ -248,7 +248,7 @@ func recordToStore(host, path string, latencySeconds float64, at time.Time) {
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName string, durationMs int64, timestamp time.Time, status, path string) {
+func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path string) {
 	if store == nil {
 		return
 	}

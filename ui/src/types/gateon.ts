@@ -69,7 +69,15 @@ export type Service = {
   health_check_port?: number;
   /** Overrides the scheme for health checks (e.g. "http", "https"). */
   health_check_protocol?: string;
+  /** Determines whether to use HTTP or gRPC standard health check. */
+  health_check_type?: HealthCheckType;
 };
+
+export enum HealthCheckType {
+  HEALTH_CHECK_TYPE_UNSPECIFIED = 0,
+  HEALTH_CHECK_TYPE_HTTP = 1,
+  HEALTH_CHECK_TYPE_GRPC = 2,
+}
 
 export type RouteTLSConfig = {
   certificate_ids: string[];

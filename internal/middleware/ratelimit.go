@@ -147,7 +147,7 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			limiter := rl.getLimiter(key)
 			if !limiter.Allow() {
 				if !ShouldSkipMetrics(r) {
-					routeID := GetRouteID(r)
+					routeID := GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("local").Inc()
 					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "local").Inc()
 					telemetry.IncRateLimitRejected("local")
@@ -218,7 +218,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 
 			if int(count.Val()) > rl.rate+rl.burst {
 				if !ShouldSkipMetrics(r) {
-					routeID := GetRouteID(r)
+					routeID := GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("redis").Inc()
 					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "redis").Inc()
 					telemetry.IncRateLimitRejected("redis")

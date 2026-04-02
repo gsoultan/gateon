@@ -67,4 +67,12 @@ message Service {
   // health_check_protocol overrides the scheme for health checks (e.g. "http", "https").
   // When empty, the target's scheme is used.
   string health_check_protocol = 14;
+  // health_check_type determines whether to use HTTP or gRPC standard health check.
+  HealthCheckType health_check_type = 15;
+}
+
+enum HealthCheckType {
+  HEALTH_CHECK_TYPE_UNSPECIFIED = 0;
+  HEALTH_CHECK_TYPE_HTTP = 1;
+  HEALTH_CHECK_TYPE_GRPC = 2;
 }

@@ -79,7 +79,7 @@ func RecordPathRequest(host, path string, latencySeconds float64) {
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName string, durationMs int64, timestamp time.Time, status, path string) {
+func RecordTrace(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path string) {
 	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path)
 }
 

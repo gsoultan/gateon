@@ -1,6 +1,7 @@
 package entrypoint
 
 import (
+	"cmp"
 	"io"
 	"net"
 	"net/http"
@@ -87,14 +88,15 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 		deps.BaseHandler.ServeHTTP(w, r)
 	})
 	isMgmt := IsManagementAddress(ep.Address, deps)
-	epHandler = injectEntryPointID(ep.Id, isMgmt, epHandler)
+	epLabel := cmp.Or(ep.Name, ep.Id)
+	epHandler = injectEntryPointID(ep.Id, epLabel, isMgmt, epHandler)
 	chain := []middleware.Middleware{
 		middleware.RequestID(),
 		middleware.Recovery(),
-		middleware.Metrics("gateon-" + ep.Id),
+		middleware.Metrics("gateon-" + epLabel),
 	}
 	if ep.AccessLogEnabled {
-		chain = append(chain, middleware.AccessLog("gateon-"+ep.Id))
+		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
 	}
 	return middleware.Chain(chain...)(deps.CORS.Handler(deps.Limiter.Handler(middleware.PerIP)(epHandler)))
 }

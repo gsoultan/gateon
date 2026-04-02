@@ -10,6 +10,8 @@ import {
   Controls,
   ConnectionLineType,
   MarkerType,
+  ReactFlowProvider,
+  useReactFlow,
 } from "@xyflow/react";
 import type { Edge, Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -23,6 +25,8 @@ import {
   useMantineTheme,
   useMantineColorScheme,
   Box,
+  Center,
+  Button,
 } from "@mantine/core";
 import {
   IconNetwork,
@@ -30,6 +34,7 @@ import {
   IconShield,
   IconServer,
   IconDatabase,
+  IconAlertCircle,
 } from "@tabler/icons-react";
 import dagre from "dagre";
 import {
@@ -44,10 +49,9 @@ const nodeWidth = 220;
 const nodeHeight = 80;
 
 const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = "LR") => {
+  const isHorizontal = direction === "LR";
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-
-  const isHorizontal = direction === "LR";
   dagreGraph.setGraph({ rankdir: direction });
 
   nodes.forEach((node) => {
@@ -60,20 +64,24 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = "LR") => 
 
   dagre.layout(dagreGraph);
 
-  nodes.forEach((node) => {
+  const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
-    node.targetPosition = isHorizontal ? Position.Left : Position.Top;
-    node.sourcePosition = isHorizontal ? Position.Right : Position.Bottom;
+    if (!nodeWithPosition) return node;
 
-    node.position = {
-      x: nodeWithPosition.x - nodeWidth / 2,
-      y: nodeWithPosition.y - nodeHeight / 2,
+    return {
+      ...node,
+      targetPosition: isHorizontal ? Position.Left : Position.Top,
+      sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
+      position: {
+        x: nodeWithPosition.x - nodeWidth / 2,
+        y: nodeWithPosition.y - nodeHeight / 2,
+      },
+      width: nodeWidth,
+      height: nodeHeight,
     };
-
-    return node;
   });
 
-  return { nodes, edges };
+  return { nodes: layoutedNodes, edges };
 };
 
 const CustomNode = ({ data, type }: any) => {
@@ -170,12 +178,19 @@ interface TopologyGraphProps {
   services: Service[];
 }
 
-export const TopologyGraph: React.FC<TopologyGraphProps> = ({
+export const TopologyGraph: React.FC<TopologyGraphProps> = (props) => (
+  <ReactFlowProvider>
+    <TopologyGraphInner {...props} />
+  </ReactFlowProvider>
+);
+
+const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
   entrypoints,
   routes,
   middlewares,
   services,
 }) => {
+  const { fitView } = useReactFlow();
   const { initialNodes, initialEdges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
@@ -321,7 +336,25 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   React.useEffect(() => {
     setNodes(initialNodes);
     setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
+    // Request fitView on next tick to ensure nodes are rendered
+    setTimeout(() => fitView({ duration: 400 }), 50);
+  }, [initialNodes, initialEdges, setNodes, setEdges, fitView]);
+
+  if (nodes.length === 0) {
+    return (
+      <Box h="calc(100vh - 250px)" style={{ border: "1px solid var(--mantine-color-gray-3)", borderRadius: "var(--mantine-radius-md)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Stack align="center" gap="sm">
+          <ThemeIcon size="xl" radius="md" color="gray" variant="light">
+            <IconAlertCircle size={30} />
+          </ThemeIcon>
+          <Text fw={500} c="dimmed">No traffic topology data available</Text>
+          <Text size="sm" c="dimmed" ta="center" maw={400}>
+            Configure entrypoints and routes to see how traffic flows through your Gateon instance.
+          </Text>
+        </Stack>
+      </Box>
+    );
+  }
 
   return (
     <Box h="calc(100vh - 250px)" style={{ border: "1px solid var(--mantine-color-gray-3)", borderRadius: "var(--mantine-radius-md)", overflow: "hidden" }}>

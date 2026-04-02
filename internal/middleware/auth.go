@@ -57,7 +57,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		activeRouteID := GetRouteID(r)
+		activeRouteID := GetRouteName(r)
 
 		tokenString := bearerToken(r)
 		if tokenString == "" {
@@ -173,7 +173,7 @@ func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		activeRouteID := GetRouteID(r)
+		activeRouteID := GetRouteName(r)
 
 		apiKey := r.Header.Get(v.HeaderName)
 		if apiKey == "" && v.QueryParam != "" {
@@ -262,7 +262,7 @@ func PasetoAuth(verifier TokenVerifier) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 
 			token := ExtractToken(r)
 			if token == "" {
@@ -301,7 +301,7 @@ func BasicAuthWithRealm(username, password, realm string) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 
 			u, p, ok := r.BasicAuth()
 			if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(password)) != 1 {
@@ -345,7 +345,7 @@ func BasicAuthUsers(users string, realm string) (Middleware, error) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 
 			u, p, ok := r.BasicAuth()
 			if !ok {

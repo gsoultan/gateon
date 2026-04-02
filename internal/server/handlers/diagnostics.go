@@ -36,8 +36,16 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 			return
 		}
 		defer conn.Close()
-		logCh := logger.Broadcaster.Subscribe()
+		logCh, history := logger.Broadcaster.Subscribe()
 		defer logger.Broadcaster.Unsubscribe(logCh)
+
+		// Send history first
+		for _, msg := range history {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+				return
+			}
+		}
+
 		for {
 			select {
 			case msg, ok := <-logCh:

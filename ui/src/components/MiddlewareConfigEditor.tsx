@@ -127,10 +127,10 @@ export function MiddlewareConfigEditor({
     case "metrics":
       return (
         <TextInput
-          label="Route ID Override (Optional)"
-          placeholder="custom-id"
-          value={config.route_id || ""}
-          onChange={(e) => updateConfig("route_id", e.currentTarget.value)}
+          label="Route Name Override (Optional)"
+          placeholder="custom-name"
+          value={config.route || config.route_id || ""}
+          onChange={(e) => updateConfig("route", e.currentTarget.value)}
         />
       );
 

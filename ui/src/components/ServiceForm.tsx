@@ -14,7 +14,7 @@ import {
   Switch,
 } from "@mantine/core";
 import { IconPlus, IconTrash, IconCheck, IconInfoCircle } from "@tabler/icons-react";
-import type { Service } from "../types/gateon";
+import { HealthCheckType, type Service } from "../types/gateon";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
@@ -77,6 +77,7 @@ export function ServiceForm({
       health_check_path: "",
       health_check_port: 0,
       health_check_protocol: "",
+      health_check_type: HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED,
       l4_health_check_interval_ms: 10000,
       l4_health_check_timeout_ms: 3000,
       l4_udp_session_timeout_s: 60,
@@ -166,6 +167,7 @@ export function ServiceForm({
       form.setFieldValue("health_check_path", initialData.health_check_path || "");
       form.setFieldValue("health_check_port", initialData.health_check_port ?? 0);
       form.setFieldValue("health_check_protocol", initialData.health_check_protocol || "");
+      form.setFieldValue("health_check_type", initialData.health_check_type ?? HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED);
       form.setFieldValue(
         "l4_health_check_interval_ms",
         initialData.l4_health_check_interval_ms ?? 10000,
@@ -655,26 +657,54 @@ export function ServiceForm({
         />
 
         <form.Subscribe
-          selector={(s) => s.values.backend_type}
-          children={(backendType) =>
+          selector={(s) => [s.values.backend_type, s.values.health_check_type] as const}
+          children={([backendType, healthCheckType]) =>
             backendType !== "tcp" && backendType !== "udp" ? (
               <>
                 <form.Field
-                  name="health_check_path"
+                  name="health_check_type"
                   children={(field) => (
-                    <Tooltip label="HTTP only. Leave empty for gRPC or when health checks are disabled.">
-                      <div>
-                        <TextInput
-                          label="Health Check Path"
-                          description="Optional HTTP path for health probes (e.g. /healthz)"
-                          placeholder="/healthz or leave empty"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(e) => field.handleChange(e.target.value)}
-                        />
-                      </div>
-                    </Tooltip>
+                    <Select
+                      label="Health Check Type"
+                      description="Choose standard HTTP or gRPC health checking"
+                      data={[
+                        { value: HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED.toString(), label: "Auto (Detect from protocol)" },
+                        { value: HealthCheckType.HEALTH_CHECK_TYPE_HTTP.toString(), label: "HTTP" },
+                        { value: HealthCheckType.HEALTH_CHECK_TYPE_GRPC.toString(), label: "gRPC" },
+                      ]}
+                      value={field.state.value?.toString()}
+                      onBlur={field.handleBlur}
+                      onChange={(v) => field.handleChange(Number(v) as HealthCheckType)}
+                      size="md"
+                    />
                   )}
+                />
+                <form.Field
+                  name="health_check_path"
+                  children={(field) => {
+                    // Determine actual type if unspecified
+                    let effectiveType = healthCheckType;
+                    if (effectiveType === HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED) {
+                      const bt = form.state.values.backend_type || "http";
+                      effectiveType = bt === "grpc" ? HealthCheckType.HEALTH_CHECK_TYPE_GRPC : HealthCheckType.HEALTH_CHECK_TYPE_HTTP;
+                    }
+
+                    const isGRPC = effectiveType === HealthCheckType.HEALTH_CHECK_TYPE_GRPC;
+                    return (
+                      <Tooltip label={isGRPC ? "Optional gRPC service name. Leave empty for the server's default health check." : "HTTP only. Leave empty to disable health checks for this service."}>
+                        <div>
+                          <TextInput
+                            label={isGRPC ? "gRPC Service Name" : "Health Check Path"}
+                            description={isGRPC ? "Optional service name to check" : "Optional HTTP path for health probes (e.g. /healthz)"}
+                            placeholder={isGRPC ? "Leave empty for server health" : "/healthz or leave empty"}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                          />
+                        </div>
+                      </Tooltip>
+                    );
+                  }}
                 />
                 <Group grow>
                   <form.Field
@@ -682,7 +712,7 @@ export function ServiceForm({
                     children={(field) => (
                       <TextInput
                         label="Health Check Port"
-                        description="Override port for health probes (0 = use target port)"
+                        description="Override port (0 = use target port)"
                         type="number"
                         placeholder="0"
                         value={field.state.value ?? 0}
@@ -697,7 +727,8 @@ export function ServiceForm({
                     children={(field) => (
                       <Select
                         label="Health Check Protocol"
-                        description="Override scheme for health probes (empty = use target scheme)"
+                        description="Override scheme (empty = use target scheme)"
+                        disabled={healthCheckType === HealthCheckType.HEALTH_CHECK_TYPE_GRPC}
                         data={[
                           { value: "", label: "Default (target scheme)" },
                           { value: "http", label: "HTTP" },

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"net"
@@ -27,8 +28,11 @@ type ProxyHandlerBuilder struct {
 	healthCheckPath     string
 	healthCheckPort     int32
 	healthCheckProtocol string
+	healthCheckType     gateonv1.HealthCheckType
 	routeType           string
 	transport           http.RoundTripper
+	healthCheckClient   *http.Client
+	tlsConfig           *tls.Config
 	transportConfig     *TransportConfig
 	tlsClientConfig     *gateonv1.TlsClientConfig
 }
@@ -70,6 +74,7 @@ func (b *ProxyHandlerBuilder) resolveService() {
 	b.healthCheckPath = svc.HealthCheckPath
 	b.healthCheckPort = svc.HealthCheckPort
 	b.healthCheckProtocol = svc.HealthCheckProtocol
+	b.healthCheckType = svc.HealthCheckType
 	b.tlsClientConfig = svc.TlsClientConfig
 	policy := svc.LoadBalancerPolicy
 	if policy == "" {
@@ -95,6 +100,15 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 		}
 	}
 	tlsCfg, _ := gtls.CreateTLSClientConfig(b.tlsClientConfig)
+	b.tlsConfig = tlsCfg
+
+	// Create health check client with a transport that supports H1/H2
+	tHealth := http.DefaultTransport.(*http.Transport).Clone()
+	tHealth.TLSClientConfig = tlsCfg
+	b.healthCheckClient = &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: tHealth,
+	}
 
 	switch {
 	case useH3:
@@ -140,21 +154,52 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 	if b.transport == nil {
 		b.buildTransport()
 	}
+
+	// Default health check type based on protocol if unspecified
+	if b.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_UNSPECIFIED {
+		for _, t := range b.targets {
+			lowerURL := strings.ToLower(t.Url)
+			if strings.HasPrefix(lowerURL, "h2://") || strings.HasPrefix(lowerURL, "h2c://") {
+				b.healthCheckType = gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_GRPC
+				break
+			}
+		}
+		// If still unspecified, default to HTTP
+		if b.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_UNSPECIFIED {
+			b.healthCheckType = gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_HTTP
+		}
+	}
+
 	h := &ProxyHandler{
 		lb:                  b.lb,
 		routeType:           b.routeType,
 		healthCheckPath:     b.healthCheckPath,
 		healthCheckPort:     b.healthCheckPort,
 		healthCheckProtocol: b.healthCheckProtocol,
+		healthCheckType:     b.healthCheckType,
 		discoveryURL:        b.discoveryURL,
+		routeName:           cmp.Or(b.route.Name, b.route.Id),
 		stopDiscovery:       make(chan struct{}),
 		stopHealthCheck:     make(chan struct{}),
 		transport:           b.transport,
+		healthCheckClient:   b.healthCheckClient,
+		tlsConfig:           b.tlsConfig,
 	}
 	if h.discoveryURL != "" {
 		go h.runDiscovery()
 	}
-	if h.healthCheckPath != "" && (len(b.targets) > 0 || b.discoveryURL != "") {
+
+	// Health check is enabled if:
+	// 1. Type is HTTP and path is set
+	// 2. Type is gRPC (path is optional service name)
+	enableHC := false
+	if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_HTTP && h.healthCheckPath != "" {
+		enableHC = true
+	} else if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_GRPC {
+		enableHC = true
+	}
+
+	if enableHC && (len(b.targets) > 0 || b.discoveryURL != "") {
 		urls := make([]string, len(b.targets))
 		for i, t := range b.targets {
 			urls[i] = t.Url

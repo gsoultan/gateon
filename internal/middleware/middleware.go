@@ -12,13 +12,13 @@ type ContextKey string
 
 const (
 	EntryPointIDContextKey ContextKey = "entrypoint_id"
-	RouteIDContextKey      ContextKey = "route_id"
+	RouteNameContextKey    ContextKey = "route_name"
 	IsManagementContextKey ContextKey = "is_management"
 )
 
-// GetRouteID returns the route ID from the request context, or empty if not set.
-func GetRouteID(r *http.Request) string {
-	if val, ok := r.Context().Value(RouteIDContextKey).(string); ok {
+// GetRouteName returns the route ID from the request context, or empty if not set.
+func GetRouteName(r *http.Request) string {
+	if val, ok := r.Context().Value(RouteNameContextKey).(string); ok {
 		return val
 	}
 	return ""
@@ -39,7 +39,7 @@ func ShouldSkipMetrics(r *http.Request) bool {
 		return true
 	}
 
-	routeID := GetRouteID(r)
+	routeID := GetRouteName(r)
 
 	// For infrastructure-level metrics (entrypoints starting with "gateon-"),
 	// skip recording for any internal paths to isolate proxy metrics.

@@ -60,7 +60,7 @@ func CompressWithRoute(cfg CompressConfig, routeID string) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteID(r)
+			activeRouteID := GetRouteName(r)
 			if activeRouteID == "" {
 				activeRouteID = routeID
 			}

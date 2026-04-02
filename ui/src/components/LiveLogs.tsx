@@ -75,7 +75,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
       if (routeFilter || statusFilter || clientIpFilter) {
         try {
           const parsed = JSON.parse(log) as Record<string, unknown>;
-          if (routeFilter && (parsed.route_id as string)?.toLowerCase().indexOf(routeFilter.toLowerCase()) === -1) return false;
+          if (routeFilter && (parsed.route as string || parsed.route_id as string)?.toLowerCase().indexOf(routeFilter.toLowerCase()) === -1) return false;
           if (statusFilter) {
             const s = String(parsed.status ?? "");
             if (s !== statusFilter && !s.startsWith(statusFilter)) return false;
@@ -204,12 +204,12 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
               title="Filter by any text"
             />
             <TextInput
-              placeholder="Route ID"
+              placeholder="Route"
               size="xs"
               value={routeFilter}
               onChange={(e) => setRouteFilter(e.currentTarget.value)}
               w={120}
-              title="Filter by route_id"
+              title="Filter by route"
             />
             <TextInput
               placeholder="Status (e.g. 200, 5xx)"
