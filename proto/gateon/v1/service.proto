@@ -35,6 +35,15 @@ message DeleteServiceResponse {
   bool success = 1;
 }
 
+message DiscoverGrpcServicesRequest {
+  string url = 1;
+  TlsClientConfig tls_config = 2;
+}
+
+message DiscoverGrpcServicesResponse {
+  repeated string services = 1;
+}
+
 message StartCanaryRequest {
   string service_id = 1;
   repeated Target target_weights = 2;

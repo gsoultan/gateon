@@ -2,15 +2,6 @@ package auth
 
 // SQL queries for user management. Dialect.Rebind replaces ? with $N (Postgres) as needed.
 const (
-	QueryCreateUsersTable = `
-	CREATE TABLE IF NOT EXISTS users (
-		id VARCHAR(255) PRIMARY KEY,
-		username VARCHAR(255) UNIQUE NOT NULL,
-		password TEXT NOT NULL,
-		role VARCHAR(50) NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);`
-
 	QueryCountUsers           = "SELECT COUNT(*) FROM users"
 	QueryUserByUsername       = "SELECT id, username, password, role FROM users WHERE username = ?"
 	QueryCountUsersSearch     = "SELECT COUNT(*) FROM users WHERE username LIKE ?"

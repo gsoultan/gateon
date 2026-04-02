@@ -20,8 +20,8 @@ import (
 // Supports SQLite, PostgreSQL, MySQL, and MariaDB.
 
 var (
-	store     *pathStatsStore
-	storeOnce sync.Once
+	store   *pathStatsStore
+	storeMu sync.Mutex
 )
 
 type increment struct {
@@ -50,6 +50,7 @@ type pathStatsStore struct {
 	stopped       atomic.Bool
 	wg            sync.WaitGroup
 	retentionDays atomic.Int32
+	pruning       atomic.Bool
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -57,11 +58,12 @@ type pathStatsStore struct {
 // Plain path (e.g. "gateon.db") is treated as SQLite.
 // It is safe to call multiple times; only the first call takes effect.
 func InitPathStatsStore(databaseURL string, retentionDays int) error {
-	var initErr error
-	storeOnce.Do(func() {
-		initErr = initStore(databaseURL, retentionDays)
-	})
-	return initErr
+	storeMu.Lock()
+	defer storeMu.Unlock()
+	if store != nil {
+		return nil
+	}
+	return initStore(databaseURL, retentionDays)
 }
 
 func initStore(databaseURL string, retentionDays int) error {
@@ -106,6 +108,14 @@ func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 	return tx.Prepare(q)
 }
 
+func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
+	if s.dialect.Driver == db.DriverMySQL {
+		return tx.Prepare(QueryInsertTraceMySQL)
+	}
+	q := s.dialect.Rebind(QueryInsertTraceConflict)
+	return tx.Prepare(q)
+}
+
 func (s *pathStatsStore) loop() {
 	defer s.wg.Done()
 	flushTicker := time.NewTicker(1 * time.Second)
@@ -144,8 +154,7 @@ func (s *pathStatsStore) loop() {
 			if err != nil {
 				logger.Default().Error().Err(err).Msg("traces: begin transaction failed")
 			} else {
-				query := s.dialect.Rebind("INSERT INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path) VALUES (?, ?, ?, ?, ?, ?, ?)")
-				stmt, err := tx.Prepare(query)
+				stmt, err := s.traceInsertStmt(tx)
 				if err == nil {
 					for _, tr := range traceBatch {
 						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path); err != nil {
@@ -177,7 +186,7 @@ func (s *pathStatsStore) loop() {
 		case <-flushTicker.C:
 			flush()
 		case <-pruneTicker.C:
-			s.prune()
+			go s.prune()
 		case <-s.stopCh:
 			flush()
 			return
@@ -186,40 +195,53 @@ func (s *pathStatsStore) loop() {
 }
 
 func (s *pathStatsStore) prune() {
+	if s.pruning.Swap(true) {
+		return
+	}
+	defer s.pruning.Store(false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	days := int(s.retentionDays.Load())
 	if days <= 0 {
 		return
 	}
 	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
 	q := s.dialect.Rebind(QueryPrunePathStats)
-	if _, err := s.db.Exec(q, cutoff); err != nil {
+	if _, err := s.db.ExecContext(ctx, q, cutoff); err != nil {
 		logger.Default().Error().Err(err).Msg("path stats: prune failed")
 	}
 
 	cutoffTime := time.Now().AddDate(0, 0, -days)
 	qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
-	if _, err := s.db.Exec(qTraces, cutoffTime); err != nil {
+	if _, err := s.db.ExecContext(ctx, qTraces, cutoffTime); err != nil {
 		logger.Default().Error().Err(err).Msg("traces: prune failed")
 	}
 }
 
 // ClosePathStatsStore stops background processing and closes the database.
 func ClosePathStatsStore(ctx context.Context) error {
+	storeMu.Lock()
+	defer storeMu.Unlock()
 	if store == nil {
 		return nil
 	}
-	if !store.stopped.Swap(true) {
-		close(store.stopCh)
+	s := store
+	store = nil
+
+	if !s.stopped.Swap(true) {
+		close(s.stopCh)
 		c := make(chan struct{})
 		go func() {
-			store.wg.Wait()
+			s.wg.Wait()
 			close(c)
 		}()
 		select {
 		case <-c:
 		case <-ctx.Done():
 		}
-		return store.db.Close()
+		return s.db.Close()
 	}
 	return nil
 }

@@ -12,8 +12,10 @@ import {
   Alert,
   Tooltip,
   Switch,
+  Autocomplete,
+  Loader,
 } from "@mantine/core";
-import { IconPlus, IconTrash, IconCheck, IconInfoCircle } from "@tabler/icons-react";
+import { IconPlus, IconTrash, IconCheck, IconInfoCircle, IconRefresh } from "@tabler/icons-react";
 import { HealthCheckType, type Service } from "../types/gateon";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -52,6 +54,28 @@ export function ServiceForm({
     onError: (err: unknown) => {
       notifications.show({
         title: "Error Saving Service",
+        message: getApiErrorMessage(err),
+        color: "red",
+      });
+    },
+  });
+
+  const discoverMutation = useMutation({
+    mutationFn: async (args: { url: string; tls_config?: any }) => {
+      const res = await apiFetch("/v1/discover/grpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(args),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to discover gRPC services");
+      }
+      return res.json() as Promise<{ services: string[] }>;
+    },
+    onError: (err: unknown) => {
+      notifications.show({
+        title: "Discovery Failed",
         message: getApiErrorMessage(err),
         color: "red",
       });
@@ -690,17 +714,66 @@ export function ServiceForm({
                     }
 
                     const isGRPC = effectiveType === HealthCheckType.HEALTH_CHECK_TYPE_GRPC;
+                    const targets = form.state.values.weighted_targets;
+                    const firstTarget = targets && targets.length > 0 ? targets[0] : null;
+
+                    const handleDiscover = () => {
+                      if (!firstTarget || !firstTarget.url) {
+                        notifications.show({
+                          title: "No Target URL",
+                          message: "Please enter a target URL first",
+                          color: "yellow",
+                        });
+                        return;
+                      }
+
+                      // Construct the full URL with scheme
+                      let url = firstTarget.url;
+                      if (!url.includes("://")) {
+                        const scheme = firstTarget.protocol || (backendType === "grpc" ? "h2c" : "http");
+                        url = `${scheme}://${url}`;
+                      }
+
+                      discoverMutation.mutate({
+                        url,
+                        tls_config: form.state.values.tls_client_config,
+                      });
+                    };
+
                     return (
                       <Tooltip label={isGRPC ? "Optional gRPC service name. Leave empty for the server's default health check." : "HTTP only. Leave empty to disable health checks for this service."}>
                         <div>
-                          <TextInput
-                            label={isGRPC ? "gRPC Service Name" : "Health Check Path"}
-                            description={isGRPC ? "Optional service name to check" : "Optional HTTP path for health probes (e.g. /healthz)"}
-                            placeholder={isGRPC ? "Leave empty for server health" : "/healthz or leave empty"}
-                            value={field.state.value}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                          />
+                          {isGRPC ? (
+                            <Autocomplete
+                              label="gRPC Service Name"
+                              description="Optional service name to check"
+                              placeholder="e.g. gateon.v1.ApiService or leave empty"
+                              data={discoverMutation.data?.services || []}
+                              value={field.state.value}
+                              onBlur={field.handleBlur}
+                              onChange={(val) => field.handleChange(val)}
+                              rightSection={
+                                discoverMutation.isPending ? (
+                                  <Loader size="xs" />
+                                ) : (
+                                  <Tooltip label="Discover services from target (requires gRPC reflection)">
+                                    <ActionIcon variant="subtle" onClick={handleDiscover} disabled={!firstTarget?.url}>
+                                      <IconRefresh size={16} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                )
+                              }
+                            />
+                          ) : (
+                            <TextInput
+                              label="Health Check Path"
+                              description="Optional HTTP path for health probes (e.g. /healthz)"
+                              placeholder="/healthz or leave empty"
+                              value={field.state.value}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                            />
+                          )}
                         </div>
                       </Tooltip>
                     );

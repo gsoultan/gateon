@@ -14,36 +14,60 @@ export default function TopologyPage() {
   const { data: routes, isLoading: loadingRoutes } = useQuery<Route[]>({
     queryKey: ["routes", "all"],
     queryFn: async () => {
-      const res = await apiFetch("/v1/routes?page_size=1000");
-      const data = await res.json();
-      return data.routes || [];
+      try {
+        const res = await apiFetch("/v1/routes?page_size=1000");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data?.routes || [];
+      } catch (e) {
+        console.error("Failed to fetch routes:", e);
+        return [];
+      }
     },
   });
 
   const { data: services, isLoading: loadingServices } = useQuery<Service[]>({
     queryKey: ["services", "all"],
     queryFn: async () => {
-      const res = await apiFetch("/v1/services?page_size=1000");
-      const data = await res.json();
-      return data.services || [];
+      try {
+        const res = await apiFetch("/v1/services?page_size=1000");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data?.services || [];
+      } catch (e) {
+        console.error("Failed to fetch services:", e);
+        return [];
+      }
     },
   });
 
   const { data: entrypoints, isLoading: loadingEps } = useQuery<EntryPoint[]>({
     queryKey: ["entrypoints", "all"],
     queryFn: async () => {
-      const res = await apiFetch("/v1/entrypoints?page_size=1000");
-      const data = await res.json();
-      return data.entry_points || [];
+      try {
+        const res = await apiFetch("/v1/entrypoints?page_size=1000");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data?.entry_points || [];
+      } catch (e) {
+        console.error("Failed to fetch entrypoints:", e);
+        return [];
+      }
     },
   });
 
   const { data: middlewares, isLoading: loadingMws } = useQuery<Middleware[]>({
     queryKey: ["middlewares", "all"],
     queryFn: async () => {
-      const res = await apiFetch("/v1/middlewares?page_size=1000");
-      const data = await res.json();
-      return data.middlewares || [];
+      try {
+        const res = await apiFetch("/v1/middlewares?page_size=1000");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data?.middlewares || [];
+      } catch (e) {
+        console.error("Failed to fetch middlewares:", e);
+        return [];
+      }
     },
   });
 

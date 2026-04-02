@@ -3,13 +3,21 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
+	"strings"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -165,6 +173,80 @@ func (s *ApiService) DeleteService(ctx context.Context, req *gateonv1.DeleteServ
 		return &gateonv1.DeleteServiceResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteServiceResponse{Success: true}, nil
+}
+
+func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.DiscoverGrpcServicesRequest) (*gateonv1.DiscoverGrpcServicesResponse, error) {
+	if req.Url == "" {
+		return nil, errors.New("url is required")
+	}
+
+	host := req.Url
+	useTLS := false
+	if strings.HasPrefix(req.Url, "h2c://") {
+		host = strings.TrimPrefix(req.Url, "h2c://")
+	} else if strings.HasPrefix(req.Url, "h2://") {
+		host = strings.TrimPrefix(req.Url, "h2://")
+		useTLS = true
+	} else if strings.HasPrefix(req.Url, "h3://") {
+		host = strings.TrimPrefix(req.Url, "h3://")
+		useTLS = true
+	}
+
+	var opts []grpc.DialOption
+	if useTLS {
+		tlsCfg, err := gtls.CreateTLSClientConfig(req.TlsConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create tls config: %w", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(dialCtx, host, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to %s: %w", host, err)
+	}
+	defer conn.Close()
+
+	client := grpc_reflection_v1alpha.NewServerReflectionClient(conn)
+	stream, err := client.ServerReflectionInfo(dialCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create reflection stream: %w", err)
+	}
+
+	if err := stream.Send(&grpc_reflection_v1alpha.ServerReflectionRequest{
+		MessageRequest: &grpc_reflection_v1alpha.ServerReflectionRequest_ListServices{
+			ListServices: "*",
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("failed to send reflection request: %w", err)
+	}
+
+	resp, err := stream.Recv()
+	if err != nil {
+		return nil, fmt.Errorf("failed to receive reflection response: %w", err)
+	}
+
+	listResp := resp.GetListServicesResponse()
+	if listResp == nil {
+		return nil, errors.New("no services found")
+	}
+
+	var services []string
+	for _, svc := range listResp.Service {
+		// Filter out standard reflection and health check services if desired
+		if svc.Name != "grpc.reflection.v1alpha.ServerReflection" &&
+			svc.Name != "grpc.reflection.v1.ServerReflection" &&
+			svc.Name != "grpc.health.v1.Health" {
+			services = append(services, svc.Name)
+		}
+	}
+
+	return &gateonv1.DiscoverGrpcServicesResponse{Services: services}, nil
 }
 
 func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalConfigRequest) (*gateonv1.GlobalConfig, error) {

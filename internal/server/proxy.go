@@ -2,6 +2,7 @@ package server
 
 import (
 	"cmp"
+	"context"
 	"net/http"
 	"strings"
 
@@ -52,6 +53,9 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 					w.WriteHeader(http.StatusBadGateway)
 					return
 				}
+				// Pass the correctly identified route label into the context.
+				routeLabel := cmp.Or(rt.Name, rt.Id)
+				r = r.WithContext(context.WithValue(r.Context(), middleware.RouteNameContextKey, routeLabel))
 				h.ServeHTTP(w, r)
 				return
 			}

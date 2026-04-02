@@ -24,6 +24,7 @@ service ApiService {
   rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
   rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
   rpc DeleteService(DeleteServiceRequest) returns (DeleteServiceResponse);
+  rpc DiscoverGrpcServices(DiscoverGrpcServicesRequest) returns (DiscoverGrpcServicesResponse);
 
   rpc GetGlobalConfig(GetGlobalConfigRequest) returns (GlobalConfig);
   rpc UpdateGlobalConfig(UpdateGlobalConfigRequest) returns (UpdateGlobalConfigResponse);
