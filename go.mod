@@ -13,14 +13,14 @@ require (
 	github.com/hashicorp/consul/api v1.33.7
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/improbable-eng/grpc-web v0.15.0
-	github.com/lib/pq v1.12.1
+	github.com/lib/pq v1.12.2
 	github.com/o1egl/paseto/v2 v2.1.1
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.66.1
 	github.com/quic-go/quic-go v0.59.0
-	github.com/redis/go-redis/v9 v9.17.3
+	github.com/redis/go-redis/v9 v9.18.0
 	github.com/rs/cors v1.11.1
 	github.com/rs/zerolog v1.35.0
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -145,6 +145,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.40.0 // indirect
 	go.opentelemetry.io/otel/trace v1.40.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
