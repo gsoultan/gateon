@@ -1,5 +1,5 @@
 //go:generate bun install --cwd ../../ui
-//go:generate sh -c "cd ../../ui && bun run build"
+//go:generate bun run --cwd ../../ui build
 //go:generate go run ../../scripts/sync_assets.go
 package ui
 
