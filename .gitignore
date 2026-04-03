@@ -37,6 +37,7 @@ tls_options.json
 .vscode
 .DS_Store
 internal/ui/dist
+.junie
 ui/bun.lock
 ui/.bun-cache
 ui/package-lock.json
