@@ -28,8 +28,8 @@ builds:
       - amd64
       - arm64
 
-gomod:
-  proxy: true
+# gomod:
+#   proxy: true
 
 archives:
   - id: default
