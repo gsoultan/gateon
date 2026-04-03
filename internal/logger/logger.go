@@ -1,7 +1,9 @@
 package logger
 
 import (
+	"bytes"
 	"io"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -80,6 +82,24 @@ func (lb *LogBroadcast) Write(p []byte) (n int, err error) {
 		}
 	}
 	return len(p), nil
+}
+
+// FilteredHandshakeWriter wraps an io.Writer and filters out TLS handshake EOF errors.
+// These are common from probes or clients that disconnect abruptly during handshake.
+type FilteredHandshakeWriter struct {
+	Out io.Writer
+}
+
+func (w *FilteredHandshakeWriter) Write(p []byte) (n int, err error) {
+	if bytes.Contains(p, []byte("http: TLS handshake error")) && bytes.Contains(p, []byte("EOF")) {
+		return len(p), nil
+	}
+	return w.Out.Write(p)
+}
+
+// NewFilteredHandshakeLogger returns a log.Logger that filters out TLS handshake EOF errors.
+func NewFilteredHandshakeLogger(out io.Writer) *log.Logger {
+	return log.New(&FilteredHandshakeWriter{Out: out}, "", 0)
 }
 
 func Init(prod bool) error {

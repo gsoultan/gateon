@@ -134,6 +134,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
+		ErrorLog:          logger.NewFilteredHandshakeLogger(logger.L),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
