@@ -42,14 +42,15 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const [statusFilter, setStatusFilter] = useState("");
   const [clientIpFilter, setClientIpFilter] = useState("");
   const apiUrl = useApiConfigStore((s) => s.apiUrl);
+  const token = useAuthStore((s) => s.token);
   const [aiOpened, { open: openAI, close: closeAI }] = useDisclosure(false);
 
   useEffect(() => {
     const base = apiUrl.replace(/\/$/, "");
-    const baseUrl = base.replace(/^http/, "ws");
-    const token = useAuthStore.getState().token;
+    const baseUrl = base.startsWith("http") ? base.replace(/^http/, "ws") : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${base}`;
+    
     // Skip sending __cookie__ sentinel as query param; browser sends the HttpOnly cookie automatically.
-    const authParam = token && token !== "__cookie__" ? `?auth=${token}` : "";
+    const authParam = token && token !== "__cookie__" ? `?auth=${encodeURIComponent(token)}` : "";
     const wsUrl = `${baseUrl}/v1/logs${authParam}`;
     const ws = new WebSocket(wsUrl);
 
@@ -65,7 +66,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     };
 
     return () => ws.close();
-  }, [apiUrl]);
+  }, [apiUrl, token]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {

@@ -228,8 +228,8 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
       // Link entrypoints to routes
       const relevantEps = (entrypoints || []).filter((ep) => {
         if (!ep) return false;
-        const epIdMatch = r.entrypoints?.includes?.(ep.id);
-        const allEntries = !r.entrypoints || r.entrypoints.length === 0;
+        const epIdMatch = Array.isArray(r.entrypoints) && r.entrypoints.includes(ep.id);
+        const allEntries = !Array.isArray(r.entrypoints) || r.entrypoints.length === 0;
 
         if (ep.type === EntryPointType.TCP || ep.type === EntryPointType.UDP) {
           const typeMatch =
