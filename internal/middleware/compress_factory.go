@@ -10,6 +10,7 @@ func (f *Factory) createCompress(cfg map[string]string) (Middleware, error) {
 		ExcludedContentTypes: parseListStrict(cfg["excluded_content_types"]),
 		IncludedContentTypes: parseListStrict(cfg["included_content_types"]),
 		MaxBufferBytes:       parsePositiveInt(cfg["max_buffer_bytes"], 10*1024*1024),
+		Algorithm:            strings.TrimSpace(cfg["algorithm"]),
 	}
 	return CompressWithConfig(compressCfg), nil
 }

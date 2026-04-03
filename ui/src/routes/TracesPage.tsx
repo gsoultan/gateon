@@ -14,6 +14,7 @@ import {
   ScrollArea,
   Code,
   TextInput,
+  Select,
   Button,
   Pagination,
 } from "@mantine/core";
@@ -35,8 +36,21 @@ export default function TracesPage() {
   const { data: traces = [], isLoading, refetch } = useTraces();
   const [search, setSearch] = useState("");
   const [deferredSearch, setDeferredSearch] = useState("");
+  const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [isPending, startTransition] = useTransition();
+
+  const routeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          traces
+            .map((trace) => trace.path)
+            .filter((path): path is string => Boolean(path)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [traces],
+  );
 
   const handleSearchChange = (val: string) => {
     setSearch(val);
@@ -47,17 +61,20 @@ export default function TracesPage() {
   };
 
   const filteredTraces = useMemo(() => {
-    if (!deferredSearch) return traces;
-    const lower = deferredSearch.toLowerCase();
-    return traces.filter(
-      (t) =>
+    return traces.filter((t) => {
+      if (routeFilter && t.path !== routeFilter) return false;
+      if (!deferredSearch) return true;
+
+      const lower = deferredSearch.toLowerCase();
+      return (
         t.id.toLowerCase().includes(lower) ||
         t.operation_name.toLowerCase().includes(lower) ||
         t.service_name.toLowerCase().includes(lower) ||
         t.path.toLowerCase().includes(lower) ||
-        t.status.toLowerCase().includes(lower),
-    );
-  }, [traces, deferredSearch]);
+        t.status.toLowerCase().includes(lower)
+      );
+    });
+  }, [traces, deferredSearch, routeFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredTraces.length / PAGE_SIZE));
   const paginatedTraces = useMemo(() => {
@@ -103,6 +120,29 @@ export default function TracesPage() {
               style={{ flex: 1 }}
               rightSection={isPending ? <Text size="xs">...</Text> : null}
             />
+            <Select
+              placeholder="Route"
+              data={routeOptions}
+              value={routeFilter}
+              onChange={(value) => {
+                setRouteFilter(value);
+                setPage(1);
+              }}
+              searchable
+              clearable
+              w={260}
+            />
+            <Button
+              variant="subtle"
+              size="xs"
+              disabled={!search && !routeFilter}
+              onClick={() => {
+                handleSearchChange("");
+                setRouteFilter(null);
+              }}
+            >
+              Clear filters
+            </Button>
           </Group>
 
           <ScrollArea>

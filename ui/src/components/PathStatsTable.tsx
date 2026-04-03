@@ -11,6 +11,8 @@ import {
   Skeleton,
   Box,
   TextInput,
+  Select,
+  Button,
   Pagination,
 } from "@mantine/core";
 import { IconActivity, IconSearch } from "@tabler/icons-react";
@@ -21,18 +23,32 @@ export function PathStatsTable() {
   const { data, isLoading } = usePathStats();
   const [hostFilter, setHostFilter] = useState("");
   const [deferredFilter, setDeferredFilter] = useState("");
+  const [pathFilter, setPathFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [isPending, startTransition] = useTransition();
 
+  const pathOptions = useMemo(
+    () =>
+      Array.from(
+        new Set((data ?? []).map((stat) => stat.path).filter(Boolean)),
+      ).sort((a, b) => a.localeCompare(b)),
+    [data],
+  );
+
   const filteredData = useMemo(() => {
     if (!data) return [];
-    if (!deferredFilter) return data;
+
     const lowerFilter = deferredFilter.toLowerCase();
-    return data.filter((stat) =>
-      stat.host.toLowerCase().includes(lowerFilter) ||
-      stat.path.toLowerCase().includes(lowerFilter)
-    );
-  }, [data, deferredFilter]);
+    return data.filter((stat) => {
+      if (pathFilter && stat.path !== pathFilter) return false;
+      if (!deferredFilter) return true;
+
+      return (
+        stat.host.toLowerCase().includes(lowerFilter) ||
+        stat.path.toLowerCase().includes(lowerFilter)
+      );
+    });
+  }, [data, deferredFilter, pathFilter]);
 
   const paginatedData = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
@@ -81,7 +97,7 @@ export function PathStatsTable() {
             </Badge>
           </Group>
           <TextInput
-            placeholder="Filter by host or path..."
+            placeholder="Search host or path text..."
             leftSection={<IconSearch size={16} />}
             value={hostFilter}
             onChange={(e) => handleFilterChange(e.currentTarget.value)}
@@ -89,6 +105,30 @@ export function PathStatsTable() {
             w={250}
             rightSection={isPending ? <Text size="xs">...</Text> : null}
           />
+          <Select
+            placeholder="Route path"
+            data={pathOptions}
+            value={pathFilter}
+            onChange={(value) => {
+              setPathFilter(value);
+              setPage(1);
+            }}
+            searchable
+            clearable
+            size="xs"
+            w={220}
+          />
+          <Button
+            variant="subtle"
+            size="xs"
+            disabled={!hostFilter && !pathFilter}
+            onClick={() => {
+              handleFilterChange("");
+              setPathFilter(null);
+            }}
+          >
+            Clear filters
+          </Button>
         </Group>
 
         <Box style={{ overflowX: "auto" }}>
