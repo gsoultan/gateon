@@ -109,6 +109,15 @@ func TestAPIKeyValidator(t *testing.T) {
 	}
 }
 
+func TestExtractToken_QueryAuth(t *testing.T) {
+	req := httptest.NewRequest("GET", "/v1/logs?auth=test-token", nil)
+
+	got := ExtractToken(req)
+	if got != "test-token" {
+		t.Errorf("expected token from auth query, got %q", got)
+	}
+}
+
 func TestBasicAuth(t *testing.T) {
 	mw := BasicAuth("admin", "secret")
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
