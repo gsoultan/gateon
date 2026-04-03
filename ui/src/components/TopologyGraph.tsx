@@ -191,7 +191,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
   services,
 }) => {
   const { fitView } = useReactFlow();
-  const { initialNodes, initialEdges } = useMemo(() => {
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
 
