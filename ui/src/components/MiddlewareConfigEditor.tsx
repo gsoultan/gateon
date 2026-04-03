@@ -137,6 +137,18 @@ export function MiddlewareConfigEditor({
     case "compress":
       return (
         <Stack gap="md">
+          <Select
+            label="Compression Algorithm"
+            description="Choose how responses are compressed. Auto prefers Brotli when supported."
+            data={[
+              { value: "auto", label: "Auto (prefer Brotli, fallback Gzip)" },
+              { value: "gzip", label: "Gzip" },
+              { value: "br", label: "Brotli" },
+            ]}
+            value={config.algorithm || "auto"}
+            onChange={(val) => updateConfig("algorithm", val || "auto")}
+            allowDeselect={false}
+          />
           <NumberInput
             label="Min Response Body (bytes)"
             description="Only compress responses larger than this. Default: 1024"

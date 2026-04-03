@@ -43,9 +43,10 @@ type CompressConfig struct {
 	ExcludedContentTypes []string // Content-Types to never compress
 	IncludedContentTypes []string // If non-empty, only compress these; mutually exclusive with Excluded
 	MaxBufferBytes       int      // Max response size to buffer; 0 = default 10MB
+	Algorithm            string   // Compression algorithm: auto (default), gzip, br
 }
 
-// Compress returns a middleware that compresses responses using gzip (no config).
+// Compress returns a middleware that compresses responses (auto selects br/gzip).
 func Compress() Middleware {
 	return CompressWithConfig(CompressConfig{})
 }
@@ -81,7 +82,7 @@ func CompressWithRoute(cfg CompressConfig, routeID string) Middleware {
 	}
 }
 
-// CompressWithConfig returns a middleware that compresses responses using gzip with optional filters.
+// CompressWithConfig returns a middleware that compresses responses with optional filters.
 func CompressWithConfig(cfg CompressConfig) Middleware {
 	minBytes := cfg.MinResponseBodyBytes
 	if minBytes <= 0 {
@@ -91,6 +92,7 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 	if maxBuf <= 0 {
 		maxBuf = defaultMaxBufferBytes
 	}
+	algorithm := normalizeCompressionAlgorithm(cfg.Algorithm)
 	excluded := parseContentTypes(cfg.ExcludedContentTypes)
 	included := parseContentTypes(cfg.IncludedContentTypes)
 
@@ -102,10 +104,8 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 			}
 
 			acceptEncoding := r.Header.Get("Accept-Encoding")
-			isGzip := strings.Contains(acceptEncoding, "gzip")
-			isBrotli := strings.Contains(acceptEncoding, "br")
-
-			if !isGzip && !isBrotli {
+			encoding := selectCompressionEncoding(acceptEncoding, algorithm)
+			if encoding == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -151,13 +151,6 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 				}
 			}
 
-			encoding := ""
-			if isBrotli {
-				encoding = "br"
-			} else if isGzip {
-				encoding = "gzip"
-			}
-
 			w.Header().Set("Content-Encoding", encoding)
 			w.Header().Del("Content-Length")
 			w.WriteHeader(rec.status)
@@ -189,6 +182,44 @@ func parseContentTypes(ct []string) map[string]bool {
 		}
 	}
 	return m
+}
+
+func normalizeCompressionAlgorithm(algorithm string) string {
+	switch strings.ToLower(strings.TrimSpace(algorithm)) {
+	case "", "auto":
+		return "auto"
+	case "gzip":
+		return "gzip"
+	case "br", "brotli":
+		return "br"
+	default:
+		return "auto"
+	}
+}
+
+func selectCompressionEncoding(acceptEncoding string, algorithm string) string {
+	isGzip := strings.Contains(acceptEncoding, "gzip")
+	isBrotli := strings.Contains(acceptEncoding, "br")
+
+	switch algorithm {
+	case "gzip":
+		if isGzip {
+			return "gzip"
+		}
+	case "br":
+		if isBrotli {
+			return "br"
+		}
+	default:
+		if isBrotli {
+			return "br"
+		}
+		if isGzip {
+			return "gzip"
+		}
+	}
+
+	return ""
 }
 
 type compressRecorder struct {

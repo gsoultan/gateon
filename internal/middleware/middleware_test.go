@@ -235,6 +235,48 @@ func TestCompress(t *testing.T) {
 	}
 }
 
+func TestCompress_AlgorithmBrotli(t *testing.T) {
+	mw := CompressWithConfig(CompressConfig{Algorithm: "br"})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":"` + strings.Repeat("x", 1200) + `"}`))
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip, br")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+	if enc := rr.Header().Get("Content-Encoding"); enc != "br" {
+		t.Errorf("expected Content-Encoding: br, got %q", enc)
+	}
+}
+
+func TestCompress_AlgorithmGzipSkipsWhenUnavailable(t *testing.T) {
+	mw := CompressWithConfig(CompressConfig{Algorithm: "gzip"})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":"` + strings.Repeat("x", 1200) + `"}`))
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Accept-Encoding", "br")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+	if enc := rr.Header().Get("Content-Encoding"); enc != "" {
+		t.Errorf("expected no Content-Encoding when configured algorithm is unavailable, got %q", enc)
+	}
+}
+
 func TestAddPrefix(t *testing.T) {
 	mw := AddPrefix("/api")
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

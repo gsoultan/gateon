@@ -8,6 +8,7 @@ import {
   ActionIcon,
   Tooltip,
   TextInput,
+  Select,
   Paper,
   ScrollArea,
   Badge,
@@ -38,7 +39,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
   const [search, setSearch] = useState("");
-  const [routeFilter, setRouteFilter] = useState("");
+  const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [clientIpFilter, setClientIpFilter] = useState("");
   const apiUrl = useApiConfigStore((s) => s.apiUrl);
@@ -68,6 +69,25 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     return () => ws.close();
   }, [apiUrl, token]);
 
+  const routeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          logs
+            .map((log) => {
+              try {
+                const parsed = JSON.parse(log) as Record<string, unknown>;
+                return String(parsed.route ?? parsed.route_id ?? "").trim();
+              } catch {
+                return "";
+              }
+            })
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [logs],
+  );
+
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
       if (search) {
@@ -76,7 +96,10 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
       if (routeFilter || statusFilter || clientIpFilter) {
         try {
           const parsed = JSON.parse(log) as Record<string, unknown>;
-          if (routeFilter && (parsed.route as string || parsed.route_id as string)?.toLowerCase().indexOf(routeFilter.toLowerCase()) === -1) return false;
+          if (routeFilter) {
+            const route = String(parsed.route ?? parsed.route_id ?? "").trim();
+            if (route !== routeFilter) return false;
+          }
           if (statusFilter) {
             const s = String(parsed.status ?? "");
             if (s !== statusFilter && !s.startsWith(statusFilter)) return false;
@@ -204,12 +227,15 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
               w={140}
               title="Filter by any text"
             />
-            <TextInput
+            <Select
               placeholder="Route"
               size="xs"
+              data={routeOptions}
               value={routeFilter}
-              onChange={(e) => setRouteFilter(e.currentTarget.value)}
-              w={120}
+              onChange={setRouteFilter}
+              searchable
+              clearable
+              w={180}
               title="Filter by route"
             />
             <TextInput

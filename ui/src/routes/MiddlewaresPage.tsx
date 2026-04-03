@@ -401,7 +401,9 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "cors" &&
                     "Keys: allowed_origins, allowed_methods, allowed_headers, exposed_headers, allow_credentials (true/false), max_age"}
                   {editingMW?.type === "compress" &&
-                    "Keys: min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes"}
+                    "Keys: algorithm (auto/gzip/br), min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes"}
+                  {editingMW?.type === "geoip" &&
+                    "Keys: db_path (required), header (default X-Forwarded-For), allow_countries, deny_countries, block_status_code"}
                   {editingMW?.type === "forwardauth" &&
                     "Keys: address (required), auth_response_headers, auth_request_headers, trust_forward_header, forward_body, preserve_request_method, max_body_size, tls_insecure_skip_verify"}
                   {editingMW?.type === "grpcweb" &&

@@ -15,6 +15,8 @@ import {
   RingProgress,
   Divider,
   Alert,
+  Select,
+  Button,
 } from "@mantine/core";
 import {
   IconActivity,
@@ -39,6 +41,7 @@ import {
   IconTransferIn,
 } from "@tabler/icons-react";
 import { useMetricsSnapshot } from "../hooks/useMetricsSnapshot";
+import { useMemo, useState } from "react";
 import type {
   GoldenSignals,
   RouteMetric,
@@ -266,7 +269,32 @@ function LatencyPercentilesCard({ gs }: { gs: GoldenSignals }) {
 }
 
 function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
-  const sorted = [...(routes ?? [])].sort((a, b) => b.requests - a.requests);
+  const [routeFilter, setRouteFilter] = useState<string | null>(null);
+
+  const sorted = useMemo(
+    () => [...(routes ?? [])].sort((a, b) => b.requests - a.requests),
+    [routes],
+  );
+
+  const routeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          sorted
+            .map((route) => route.route)
+            .filter((route): route is string => Boolean(route)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [sorted],
+  );
+
+  const filteredRoutes = useMemo(
+    () =>
+      routeFilter
+        ? sorted.filter((route) => route.route === routeFilter)
+        : sorted,
+    [sorted, routeFilter],
+  );
 
   return (
     <Card shadow="sm" padding="lg" radius="lg" withBorder>
@@ -281,103 +309,133 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
           {sorted.length} routes
         </Badge>
       </Group>
+
       {sorted.length === 0 ? (
         <Text c="dimmed" size="sm" ta="center" py="xl">
           No route metrics available yet. Metrics appear after traffic is
           processed.
         </Text>
       ) : (
-        <Table.ScrollContainer minWidth={700}>
-          <Table striped highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Route</Table.Th>
-                <Table.Th>Service</Table.Th>
-                <Table.Th style={{ textAlign: "right" }}>Requests</Table.Th>
-                <Table.Th style={{ textAlign: "right" }}>Errors</Table.Th>
-                <Table.Th style={{ textAlign: "right" }}>Error Rate</Table.Th>
-                <Table.Th style={{ textAlign: "right" }}>Avg Latency</Table.Th>
-                <Table.Th style={{ textAlign: "right" }}>In-Flight</Table.Th>
-                <Table.Th>Status Codes</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {sorted.map((r) => (
-                <Table.Tr key={r.route}>
-                  <Table.Td>
-                    <Text size="sm" fw={600} lineClamp={1}>
-                      {r.route}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm" c="dimmed" lineClamp={1}>
-                      {r.service || "—"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td style={{ textAlign: "right" }}>
-                    <Text size="sm" fw={600}>
-                      {formatNumber(r.requests)}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td style={{ textAlign: "right" }}>
-                    <Text
-                      size="sm"
-                      fw={600}
-                      c={r.errors > 0 ? "red" : "dimmed"}
-                    >
-                      {formatNumber(r.errors)}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td style={{ textAlign: "right" }}>
-                    <Badge
-                      size="sm"
-                      variant="light"
-                      color={errorRateColor(r.error_rate)}
-                    >
-                      {r.error_rate.toFixed(1)}%
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td style={{ textAlign: "right" }}>
-                    <Text size="sm" c={latencyColor(r.avg_latency_ms)}>
-                      {formatLatency(r.avg_latency_ms)}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td style={{ textAlign: "right" }}>
-                    <Text size="sm">{r.in_flight}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Group gap={4} wrap="wrap">
-                      {Object.entries(r.status_codes)
-                        .sort(([a], [b]) => a.localeCompare(b))
-                        .map(([code, count]) => (
-                          <Tooltip
-                            key={code}
-                            label={`${code}: ${formatNumber(count)} requests`}
-                          >
-                            <Badge
-                              size="xs"
-                              variant="light"
-                              color={
-                                code.startsWith("2")
-                                  ? "green"
-                                  : code.startsWith("3")
-                                    ? "blue"
-                                    : code.startsWith("4")
-                                      ? "yellow"
-                                      : "red"
-                              }
-                            >
-                              {code}: {formatNumber(count)}
-                            </Badge>
-                          </Tooltip>
-                        ))}
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-end" wrap="wrap">
+            <Select
+              label="Route"
+              placeholder="Filter by route"
+              data={routeOptions}
+              value={routeFilter}
+              onChange={setRouteFilter}
+              searchable
+              clearable
+              w={320}
+            />
+            <Button
+              variant="subtle"
+              size="xs"
+              disabled={!routeFilter}
+              onClick={() => setRouteFilter(null)}
+            >
+              Clear filter
+            </Button>
+          </Group>
+
+          {filteredRoutes.length === 0 ? (
+            <Text c="dimmed" size="sm" ta="center" py="xl">
+              No metrics found for the selected route.
+            </Text>
+          ) : (
+            <Table.ScrollContainer minWidth={700}>
+              <Table striped highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Route</Table.Th>
+                    <Table.Th>Service</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Requests</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Errors</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Error Rate</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Avg Latency</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>In-Flight</Table.Th>
+                    <Table.Th>Status Codes</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {filteredRoutes.map((r) => (
+                    <Table.Tr key={r.route}>
+                      <Table.Td>
+                        <Text size="sm" fw={600} lineClamp={1}>
+                          {r.route}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" c="dimmed" lineClamp={1}>
+                          {r.service || "—"}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Text size="sm" fw={600}>
+                          {formatNumber(r.requests)}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Text
+                          size="sm"
+                          fw={600}
+                          c={r.errors > 0 ? "red" : "dimmed"}
+                        >
+                          {formatNumber(r.errors)}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Badge
+                          size="sm"
+                          variant="light"
+                          color={errorRateColor(r.error_rate)}
+                        >
+                          {r.error_rate.toFixed(1)}%
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Text size="sm" c={latencyColor(r.avg_latency_ms)}>
+                          {formatLatency(r.avg_latency_ms)}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Text size="sm">{r.in_flight}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4} wrap="wrap">
+                          {Object.entries(r.status_codes)
+                            .sort(([a], [b]) => a.localeCompare(b))
+                            .map(([code, count]) => (
+                              <Tooltip
+                                key={code}
+                                label={`${code}: ${formatNumber(count)} requests`}
+                              >
+                                <Badge
+                                  size="xs"
+                                  variant="light"
+                                  color={
+                                    code.startsWith("2")
+                                      ? "green"
+                                      : code.startsWith("3")
+                                        ? "blue"
+                                        : code.startsWith("4")
+                                          ? "yellow"
+                                          : "red"
+                                  }
+                                >
+                                  {code}: {formatNumber(count)}
+                                </Badge>
+                              </Tooltip>
+                            ))}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          )}
+        </Stack>
       )}
     </Card>
   );
