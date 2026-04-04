@@ -225,6 +225,7 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 - **External Secrets Management** – Resolution of `$vault:`, `$env:`, and `$aws-sm:` variables at runtime.
 - **Observability & AI** – Topology map, AI-powered log assistant, and `gateon top` CLI TUI.
 - **AI Optimization** – Best practices for guidelines, scenarios, and plans for AI agents ([docs/ai-optimization.md](docs/ai-optimization.md)).
+- **Backend Transport Rollout Guide** – Operations guide for protocol-aware targets, health-check modes, PROXY protocol, dynamic backend mTLS, migration, canary, and rollback ([docs/backend-transport-rollout.md](docs/backend-transport-rollout.md)).
 - **Automatic TLS (Let's Encrypt)** – Backend support via ACME/autocert in `internal/tls`; configurable via TLS config (Email + Domains).
 - **Metrics export (Prometheus/OpenTelemetry)** – Prometheus `/metrics` and OpenTelemetry tracing (see Features).
 - **Dashboard (Live logs)** – Live log streaming via WebSockets.

@@ -16,7 +16,7 @@ import {
   Loader,
 } from "@mantine/core";
 import { IconPlus, IconTrash, IconCheck, IconInfoCircle, IconRefresh } from "@tabler/icons-react";
-import { HealthCheckType, type Service } from "../types/gateon";
+import { HealthCheckType, ProxyProtocolVersion, type Service } from "../types/gateon";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
@@ -96,7 +96,13 @@ export function ServiceForm({
       id: "",
       name: "",
       backend_type: "http",
-      weighted_targets: [{ url: "", weight: 1, protocol: "http" }],
+      weighted_targets: [{
+        url: "",
+        weight: 1,
+        protocol: "http",
+        proxy_protocol_enabled: false,
+        proxy_protocol_version: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+      }],
       load_balancer_policy: "round_robin",
       health_check_path: "",
       health_check_port: 0,
@@ -139,7 +145,14 @@ export function ServiceForm({
             isGRPC
               ? t.protocol || "h2c"
               : t.protocol || (scheme === "https" ? "https" : "http");
-          return { ...t, url: `${scheme}://${hostPart}`, protocol };
+          return {
+            ...t,
+            url: `${scheme}://${hostPart}`,
+            protocol,
+            proxy_protocol_enabled: t.proxy_protocol_enabled ?? false,
+            proxy_protocol_version:
+              t.proxy_protocol_version ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+          };
         });
       if (targets.length === 0) {
         notifications.show({
@@ -165,7 +178,14 @@ export function ServiceForm({
               const bt = initialData.backend_type || "http";
               if (bt === "tcp" || bt === "udp") {
                 const u = (t.url || "").replace(/^(https?|h2c?|tcp|udp):\/\//, "");
-                return { ...t, url: u, protocol: undefined };
+                return {
+                  ...t,
+                  url: u,
+                  protocol: undefined,
+                  proxy_protocol_enabled: t.proxy_protocol_enabled ?? false,
+                  proxy_protocol_version:
+                    t.proxy_protocol_version ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+                };
               }
               const inferred =
                 bt === "grpc"
@@ -180,9 +200,21 @@ export function ServiceForm({
                     ? "https"
                     : "http";
               const p = t.protocol || inferred;
-              return { ...t, protocol: p };
+              return {
+                ...t,
+                protocol: p,
+                proxy_protocol_enabled: t.proxy_protocol_enabled ?? false,
+                proxy_protocol_version:
+                  t.proxy_protocol_version ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+              };
             })
-          : [{ url: "", weight: 1, protocol: "http" }],
+          : [{
+              url: "",
+              weight: 1,
+              protocol: "http",
+              proxy_protocol_enabled: false,
+              proxy_protocol_version: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+            }],
       );
       form.setFieldValue(
         "load_balancer_policy",
@@ -445,6 +477,8 @@ export function ServiceForm({
                     url: "",
                     weight: 1,
                     protocol: bt === "tcp" || bt === "udp" ? undefined : bt === "grpc" ? "h2c" : "http",
+                    proxy_protocol_enabled: false,
+                    proxy_protocol_version: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
                   });
                 }}
               >
@@ -695,6 +729,8 @@ export function ServiceForm({
                         { value: HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED.toString(), label: "Auto (Detect from protocol)" },
                         { value: HealthCheckType.HEALTH_CHECK_TYPE_HTTP.toString(), label: "HTTP" },
                         { value: HealthCheckType.HEALTH_CHECK_TYPE_GRPC.toString(), label: "gRPC" },
+                        { value: HealthCheckType.HEALTH_CHECK_TYPE_TCP.toString(), label: "TCP" },
+                        { value: HealthCheckType.HEALTH_CHECK_TYPE_CUSTOM.toString(), label: "Custom" },
                       ]}
                       value={field.state.value?.toString()}
                       onBlur={field.handleBlur}

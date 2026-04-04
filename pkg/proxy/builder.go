@@ -4,15 +4,12 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
-	"net"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
-
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -30,7 +27,7 @@ type ProxyHandlerBuilder struct {
 	healthCheckProtocol string
 	healthCheckType     gateonv1.HealthCheckType
 	routeType           string
-	transport           http.RoundTripper
+	transportFactory    *backendTransportFactory
 	healthCheckClient   *http.Client
 	tlsConfig           *tls.Config
 	transportConfig     *TransportConfig
@@ -84,65 +81,21 @@ func (b *ProxyHandlerBuilder) resolveService() {
 }
 
 func (b *ProxyHandlerBuilder) buildTransport() {
-	useH2 := false
-	useH2C := false
-	useH3 := false
-	for _, t := range b.targets {
-		lowerURL := strings.ToLower(t.Url)
-		if strings.HasPrefix(lowerURL, "h2c://") {
-			useH2C = true
-		}
-		if strings.HasPrefix(lowerURL, "h2://") {
-			useH2 = true
-		}
-		if strings.HasPrefix(lowerURL, "h3://") {
-			useH3 = true
-		}
+	tlsCfg, err := gtls.CreateTLSClientConfig(b.tlsClientConfig)
+	if err != nil {
+		logger.L.Warn().Err(err).Msg("failed to create tls client config; using insecure fallback")
+		tlsCfg = &tls.Config{InsecureSkipVerify: true}
 	}
-	tlsCfg, _ := gtls.CreateTLSClientConfig(b.tlsClientConfig)
 	b.tlsConfig = tlsCfg
+	selector, err := newTLSClientIdentitySelector(b.tlsClientConfig)
+	if err != nil {
+		logger.L.Warn().Err(err).Msg("failed to load one or more dynamic tls client identities")
+	}
+	b.transportFactory = newBackendTransportFactory(tlsCfg, b.transportConfig, selector)
 
-	// Create health check client with a transport that supports H1/H2
-	tHealth := http.DefaultTransport.(*http.Transport).Clone()
-	tHealth.TLSClientConfig = tlsCfg
 	b.healthCheckClient = &http.Client{
 		Timeout:   5 * time.Second,
-		Transport: tHealth,
-	}
-
-	switch {
-	case useH3:
-		b.transport = &http3.Transport{
-			TLSClientConfig: tlsCfg,
-		}
-	case useH2C:
-		b.transport = &http2.Transport{
-			AllowHTTP:       true,
-			ReadIdleTimeout: 30 * time.Second,
-			PingTimeout:     15 * time.Second,
-			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, network, addr)
-			},
-		}
-	case useH2:
-		b.transport = &http2.Transport{
-			TLSClientConfig: tlsCfg,
-			ReadIdleTimeout: 30 * time.Second,
-			PingTimeout:     15 * time.Second,
-		}
-	default:
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		tc := b.transportConfig
-		if tc == nil {
-			tc = &TransportConfig{}
-		}
-		t.MaxIdleConns = tc.maxIdleConns()
-		t.MaxIdleConnsPerHost = tc.maxIdleConnsPerHost()
-		t.IdleConnTimeout = tc.idleConnTimeout()
-		t.ForceAttemptHTTP2 = true
-		t.TLSClientConfig = tlsCfg
-		b.transport = t
+		Transport: b.transportFactory.HealthCheckTransport(),
 	}
 }
 
@@ -151,17 +104,24 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 	if b.lb == nil {
 		b.resolveService()
 	}
-	if b.transport == nil {
+	if b.transportFactory == nil {
 		b.buildTransport()
 	}
 
 	// Default health check type based on protocol if unspecified
 	if b.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_UNSPECIFIED {
+		if strings.EqualFold(b.routeType, "tcp") {
+			b.healthCheckType = gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_TCP
+		}
 		for _, t := range b.targets {
 			lowerURL := strings.ToLower(t.Url)
 			if strings.HasPrefix(lowerURL, "h2://") || strings.HasPrefix(lowerURL, "h2c://") {
 				b.healthCheckType = gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_GRPC
 				break
+			}
+			if b.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_UNSPECIFIED &&
+				(strings.HasPrefix(lowerURL, "tcp://") || !strings.Contains(lowerURL, "://")) {
+				b.healthCheckType = gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_TCP
 			}
 		}
 		// If still unspecified, default to HTTP
@@ -181,7 +141,8 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		routeName:           cmp.Or(b.route.Name, b.route.Id),
 		stopDiscovery:       make(chan struct{}),
 		stopHealthCheck:     make(chan struct{}),
-		transport:           b.transport,
+		transport:           &targetAwareRoundTripper{factory: b.transportFactory},
+		transportFactory:    b.transportFactory,
 		healthCheckClient:   b.healthCheckClient,
 		tlsConfig:           b.tlsConfig,
 	}
@@ -197,14 +158,14 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		enableHC = true
 	} else if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_GRPC {
 		enableHC = true
+	} else if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_TCP {
+		enableHC = true
+	} else if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_CUSTOM {
+		enableHC = h.healthCheckPath != "" || h.healthCheckProtocol != ""
 	}
 
 	if enableHC && (len(b.targets) > 0 || b.discoveryURL != "") {
-		urls := make([]string, len(b.targets))
-		for i, t := range b.targets {
-			urls[i] = t.Url
-		}
-		go h.runHealthCheck(urls)
+		go h.runHealthCheck()
 	}
 	return h
 }

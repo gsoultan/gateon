@@ -8,6 +8,14 @@ message Target {
   string url = 1;      // HTTP/gRPC: "http://host:port". L4: "host:port"
   int32 weight = 2;    // For weighted load balancing
   string protocol = 3; // HTTP/gRPC: "http", "https", "h2", "h2c". L4: unused
+  bool proxy_protocol_enabled = 4; // When true, emit PROXY header to backend before request bytes.
+  ProxyProtocolVersion proxy_protocol_version = 5;
+}
+
+enum ProxyProtocolVersion {
+  PROXY_PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROXY_PROTOCOL_VERSION_V1 = 1;
+  PROXY_PROTOCOL_VERSION_V2 = 2;
 }
 
 message TlsConfig {
@@ -96,4 +104,21 @@ message TlsClientConfig {
   string ca_file = 4;
   bool skip_verify = 5;
   string server_name = 6;
+  TlsClientCertSelectionStrategy cert_selection_strategy = 7;
+  repeated TlsClientIdentity cert_identities = 8;
+}
+
+enum TlsClientCertSelectionStrategy {
+  TLS_CLIENT_CERT_SELECTION_STRATEGY_STATIC = 0;
+  TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HOST = 1;
+  TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER = 2;
+}
+
+message TlsClientIdentity {
+  string id = 1;
+  string cert_file = 2;
+  string key_file = 3;
+  repeated string match_hosts = 4;
+  string match_header = 5;
+  string match_header_value = 6;
 }
