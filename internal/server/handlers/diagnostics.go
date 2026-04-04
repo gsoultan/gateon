@@ -16,18 +16,24 @@ import (
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
+func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier) bool {
+	if r.Context().Value(middleware.UserContextKey) != nil {
+		return true
+	}
+	if verifier == nil {
+		return true
+	}
+	token := middleware.ExtractToken(r)
+	if token == "" {
+		return false
+	}
+	_, err := verifier.VerifyToken(token)
+	return err == nil
+}
+
 func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
-		// Accept token from ?auth= query param, Authorization header, or session cookie.
-		token := r.URL.Query().Get("auth")
-		if token == "" {
-			token = middleware.ExtractToken(r)
-		}
-		if token == "" || d.AuthManager == nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		if _, err := d.AuthManager.VerifyToken(token); err != nil {
+		if !isLogsRequestAuthorized(r, d.AuthManager) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
