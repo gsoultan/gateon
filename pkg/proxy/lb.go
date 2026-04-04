@@ -26,15 +26,19 @@ type LoadBalancer interface {
 }
 
 type targetState struct {
-	url          string
-	parsedURL    *url.URL // pre-parsed to avoid per-request url.Parse
-	cacheKey     string   // pre-computed proxy cache key (scheme://host/path)
-	weight       int32
-	alive        bool
-	requestCount uint64
-	errorCount   uint64
-	latencySumMs uint64
-	activeConn   int32
+	url                  string
+	parsedURL            *url.URL // pre-parsed to avoid per-request url.Parse
+	cacheKey             string   // pre-computed proxy cache key (scheme://host/path)
+	transportScheme      string
+	transportKey         string
+	proxyProtocolEnabled bool
+	proxyProtocolVersion gateonv1.ProxyProtocolVersion
+	weight               int32
+	alive                bool
+	requestCount         uint64
+	errorCount           uint64
+	latencySumMs         uint64
+	activeConn           int32
 }
 
 type TargetStats struct {
@@ -55,8 +59,19 @@ type RoundRobinLB struct {
 }
 
 func newTargetState(rawURL string, weight int32) *targetState {
-	ts := &targetState{url: rawURL, alive: true, weight: weight}
+	return newTargetStateWithProxy(rawURL, weight, false, gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_UNSPECIFIED)
+}
+
+func newTargetStateWithProxy(rawURL string, weight int32, proxyEnabled bool, proxyVersion gateonv1.ProxyProtocolVersion) *targetState {
+	ts := &targetState{
+		url:                  rawURL,
+		alive:                true,
+		weight:               weight,
+		proxyProtocolEnabled: proxyEnabled,
+		proxyProtocolVersion: proxyVersion,
+	}
 	if parsed, err := url.Parse(rawURL); err == nil {
+		ts.transportScheme = parsed.Scheme
 		// Normalize scheme for proxy cache key
 		normalized := *parsed
 		switch normalized.Scheme {
@@ -67,8 +82,19 @@ func newTargetState(rawURL string, weight int32) *targetState {
 		}
 		ts.parsedURL = &normalized
 		ts.cacheKey = normalized.Scheme + "://" + normalized.Host + normalized.Path
+		ts.transportKey = normalized.Scheme + "|" + ts.transportScheme + "|" + rawURL
+		if ts.proxyProtocolEnabled {
+			ts.transportKey += "|pp:" + ts.proxyProtocolVersion.String()
+		}
 	}
 	return ts
+}
+
+func newTargetStateFromTarget(target *gateonv1.Target) *targetState {
+	if target == nil {
+		return newTargetState("", 1)
+	}
+	return newTargetStateWithProxy(target.Url, target.Weight, target.ProxyProtocolEnabled, target.ProxyProtocolVersion)
 }
 
 func NewRoundRobinLB(urls []string) *RoundRobinLB {
@@ -113,7 +139,7 @@ func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	defer lb.mu.Unlock()
 	lb.targets = make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = newTargetState(t.Url, t.Weight)
+		lb.targets[i] = newTargetStateFromTarget(t)
 	}
 }
 
@@ -193,7 +219,7 @@ func (lb *LeastConnLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	defer lb.mu.Unlock()
 	lb.targets = make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = newTargetState(t.Url, t.Weight)
+		lb.targets[i] = newTargetStateFromTarget(t)
 	}
 }
 
@@ -287,7 +313,7 @@ func (lb *WeightedRoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target
 	defer lb.mu.Unlock()
 	lb.targets = make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = newTargetState(t.Url, t.Weight)
+		lb.targets[i] = newTargetStateFromTarget(t)
 	}
 }
 

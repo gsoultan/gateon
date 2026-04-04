@@ -11,6 +11,7 @@ export type { PaginationParams, RouteListParams } from "./api";
 
 export { useAggStats } from "./useAggStats";
 export { useAggStatsHistory } from "./useAggStatsHistory";
+export type { RequestDeltaSample } from "./useAggStatsHistory";
 export type { AggStats } from "./useAggStats";
 
 export { useCertificates } from "./useCertificates";

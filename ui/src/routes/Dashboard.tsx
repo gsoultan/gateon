@@ -1,5 +1,6 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useMemo, useState } from "react";
 import {
+  Button,
   Card,
   Loader,
   Stack,
@@ -11,7 +12,10 @@ import {
   Paper,
   Skeleton,
   Box,
+  Select,
+  TextInput,
 } from "@mantine/core";
+import { BarChart, LineChart } from "@mantine/charts";
 import {
   IconActivity,
   IconAlertCircle,
@@ -19,8 +23,17 @@ import {
   IconTransferIn,
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { useGateonStatus, useAggStatsHistory, useRequestsPerSecond } from "../hooks/useGateon";
+import {
+  useAggStatsHistory,
+  useGateonStatus,
+  usePathStats,
+  useRequestsPerSecond,
+  useRoutes,
+  useServices,
+} from "../hooks/useGateon";
+import type { RequestDeltaSample } from "../hooks/useGateon";
 import { Sparkline } from "../components/Sparkline";
+import type { PathStats, Route, Service } from "../types/gateon";
 
 const StatusCard = lazy(() => import("../components/StatusCard"));
 const ServiceOverviewCards = lazy(() =>
@@ -41,6 +54,44 @@ const ROUTE_LIST_FALLBACK = (
     <Loader />
   </Card>
 );
+const TOP_GROUP_LIMIT = 6;
+const DEFAULT_PORT_LABEL = "default";
+const OTHER_GROUP_LABEL = "Other";
+const UNMATCHED_SERVICE_LABEL = "Unmatched";
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+const TRAFFIC_FILTER_MODE_OPTIONS = [
+  { value: "all", label: "All data" },
+  { value: "date", label: "Specific date" },
+  { value: "range", label: "Date range" },
+];
+
+const TRAFFIC_RANGE_PRESET_OPTIONS = [
+  { value: "last24h", label: "Last 24 hours" },
+  { value: "last7d", label: "Last 7 days" },
+  { value: "last30d", label: "Last 30 days" },
+  { value: "custom", label: "Custom range" },
+];
+
+type GroupedTrafficDatum = {
+  group: string;
+  requests: number;
+};
+
+type HourlyTrafficDatum = {
+  hourStartTs: number;
+  hour: string;
+  requests: number;
+};
+
+type TrafficFilterMode = "all" | "date" | "range";
+type TrafficRangePreset = "last24h" | "last7d" | "last30d" | "custom";
+
+type TrafficRangeBounds = {
+  startTs: number;
+  endTs: number;
+};
 
 function formatCompact(num: number): string {
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
@@ -48,10 +99,315 @@ function formatCompact(num: number): string {
   return num.toLocaleString();
 }
 
+export function buildRequestTrendData(requestRateHistory: number[]) {
+  return requestRateHistory.map((requests, index) => ({
+    sample: `${index + 1}`,
+    requests,
+  }));
+}
+
+function parseDateInputToStartTs(value: string): number | null {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00`);
+  const ts = parsed.getTime();
+  if (Number.isNaN(ts)) return null;
+  return ts;
+}
+
+function formatHourLabel(ts: number): string {
+  const date = new Date(ts);
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  const hour = `${date.getHours()}`.padStart(2, "0");
+  return `${month}/${day} ${hour}:00`;
+}
+
+export function resolveTrafficRangeBounds(
+  mode: TrafficFilterMode,
+  dateValue: string,
+  rangePreset: TrafficRangePreset,
+  customRangeStart: string,
+  customRangeEnd: string,
+  nowTs = Date.now(),
+): TrafficRangeBounds | null {
+  if (mode === "all") {
+    return null;
+  }
+
+  if (mode === "date") {
+    const startTs = parseDateInputToStartTs(dateValue);
+    if (startTs === null) return null;
+    return { startTs, endTs: startTs + DAY_MS };
+  }
+
+  if (rangePreset !== "custom") {
+    const durationMs =
+      rangePreset === "last24h" ? DAY_MS : rangePreset === "last7d" ? 7 * DAY_MS : 30 * DAY_MS;
+    return {
+      startTs: nowTs - durationMs,
+      endTs: nowTs,
+    };
+  }
+
+  const customStartTs = parseDateInputToStartTs(customRangeStart);
+  const customEndTs = parseDateInputToStartTs(customRangeEnd);
+
+  if (customStartTs === null && customEndTs === null) {
+    return null;
+  }
+
+  const startTs = customStartTs ?? 0;
+  const endTs = customEndTs !== null ? customEndTs + DAY_MS : nowTs;
+
+  if (endTs <= startTs) {
+    return null;
+  }
+
+  return { startTs, endTs };
+}
+
+export function filterTrafficSamplesByRange(
+  samples: RequestDeltaSample[],
+  range: TrafficRangeBounds | null,
+): RequestDeltaSample[] {
+  if (range === null) return samples;
+  return samples.filter((sample) => sample.ts >= range.startTs && sample.ts < range.endTs);
+}
+
+export function buildHourlyTrafficData(samples: RequestDeltaSample[]): HourlyTrafficDatum[] {
+  const grouped = new Map<number, number>();
+
+  for (const sample of samples) {
+    const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
+    grouped.set(hourStartTs, (grouped.get(hourStartTs) ?? 0) + sample.requests);
+  }
+
+  return Array.from(grouped.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([hourStartTs, requests]) => ({
+      hourStartTs,
+      hour: formatHourLabel(hourStartTs),
+      requests,
+    }));
+}
+
+function toTopGroupedData(
+  counters: Map<string, number>,
+  limit = TOP_GROUP_LIMIT,
+): GroupedTrafficDatum[] {
+  const grouped = Array.from(counters.entries())
+    .filter(([, requests]) => requests > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (grouped.length <= limit) {
+    return grouped.map(([group, requests]) => ({ group, requests }));
+  }
+
+  const visible = grouped.slice(0, Math.max(1, limit - 1));
+  const otherRequests = grouped
+    .slice(Math.max(1, limit - 1))
+    .reduce((sum, [, requests]) => sum + requests, 0);
+
+  return [
+    ...visible.map(([group, requests]) => ({ group, requests })),
+    { group: OTHER_GROUP_LABEL, requests: otherRequests },
+  ];
+}
+
+export function extractPortLabel(host: string): string {
+  const trimmed = host.trim();
+  if (!trimmed) return DEFAULT_PORT_LABEL;
+
+  const ipv6PortMatch = trimmed.match(/^\[[^\]]+\]:(\d+)$/);
+  if (ipv6PortMatch) return ipv6PortMatch[1];
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`);
+    if (parsed.port) return parsed.port;
+  } catch {
+    // Best effort fallback handled below.
+  }
+
+  const trailingPortMatch = trimmed.match(/:(\d+)$/);
+  if (trailingPortMatch) return trailingPortMatch[1];
+  return DEFAULT_PORT_LABEL;
+}
+
+export function buildTrafficByPathData(pathStats: PathStats[]): GroupedTrafficDatum[] {
+  const grouped = new Map<string, number>();
+  for (const stat of pathStats) {
+    const path = stat.path || "/";
+    grouped.set(path, (grouped.get(path) ?? 0) + stat.request_count);
+  }
+  return toTopGroupedData(grouped);
+}
+
+export function buildTrafficByPortData(pathStats: PathStats[]): GroupedTrafficDatum[] {
+  const grouped = new Map<string, number>();
+  for (const stat of pathStats) {
+    const port = extractPortLabel(stat.host);
+    grouped.set(port, (grouped.get(port) ?? 0) + stat.request_count);
+  }
+  return toTopGroupedData(grouped);
+}
+
+type RouteMatcher = {
+  serviceId: string;
+  hosts: string[];
+  exactPaths: string[];
+  pathPrefixes: string[];
+};
+
+function buildRouteMatchers(routes: Route[]): RouteMatcher[] {
+  return routes.map((route) => ({
+    serviceId: route.service_id,
+    hosts: Array.from(route.rule.matchAll(/Host\(`([^`]*)`\)/g), (m) => m[1]),
+    exactPaths: Array.from(route.rule.matchAll(/Path\(`([^`]*)`\)/g), (m) => m[1]),
+    pathPrefixes: Array.from(route.rule.matchAll(/PathPrefix\(`([^`]*)`\)/g), (m) => m[1]),
+  }));
+}
+
+function scoreRouteMatch(stat: PathStats, matcher: RouteMatcher): number {
+  if (matcher.hosts.length > 0 && !matcher.hosts.includes(stat.host)) {
+    return -1;
+  }
+
+  let pathScore = 0;
+  for (const exactPath of matcher.exactPaths) {
+    if (stat.path === exactPath) {
+      pathScore = Math.max(pathScore, 10_000 + exactPath.length);
+    }
+  }
+  for (const prefix of matcher.pathPrefixes) {
+    if (stat.path.startsWith(prefix)) {
+      pathScore = Math.max(pathScore, prefix.length);
+    }
+  }
+
+  if (matcher.exactPaths.length === 0 && matcher.pathPrefixes.length === 0) {
+    pathScore = 1;
+  }
+
+  if (pathScore <= 0) return -1;
+  return pathScore + (matcher.hosts.length > 0 ? 1_000 : 0);
+}
+
+function resolveServiceLabel(
+  stat: PathStats,
+  routeMatchers: RouteMatcher[],
+  serviceNameById: Map<string, string>,
+): string {
+  let bestScore = -1;
+  let bestServiceId: string | null = null;
+
+  for (const matcher of routeMatchers) {
+    const score = scoreRouteMatch(stat, matcher);
+    if (score > bestScore) {
+      bestScore = score;
+      bestServiceId = matcher.serviceId;
+    }
+  }
+
+  if (!bestServiceId) return UNMATCHED_SERVICE_LABEL;
+  return serviceNameById.get(bestServiceId) ?? bestServiceId;
+}
+
+export function buildTrafficByServiceData(
+  pathStats: PathStats[],
+  routes: Route[],
+  services: Service[],
+): GroupedTrafficDatum[] {
+  const routeMatchers = buildRouteMatchers(routes);
+  const serviceNameById = new Map(services.map((service) => [service.id, service.name]));
+  const grouped = new Map<string, number>();
+
+  for (const stat of pathStats) {
+    const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
+    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.request_count);
+  }
+
+  return toTopGroupedData(grouped);
+}
+
 export default function Dashboard() {
   const { data: status } = useGateonStatus();
-  const { data: agg, requestRateHistory, isLoading: aggLoading } = useAggStatsHistory();
+  const {
+    data: agg,
+    requestRateHistory,
+    requestDeltaHistory,
+    isLoading: aggLoading,
+  } = useAggStatsHistory();
+  const { data: pathStats, isLoading: pathStatsLoading } = usePathStats();
+  const { data: routesResponse, isLoading: routesLoading } = useRoutes();
+  const { data: servicesResponse, isLoading: servicesLoading } = useServices();
   const reqPerSec = useRequestsPerSecond();
+  const [trafficFilterMode, setTrafficFilterMode] = useState<TrafficFilterMode>("all");
+  const [trafficDate, setTrafficDate] = useState("");
+  const [trafficRangePreset, setTrafficRangePreset] = useState<TrafficRangePreset>("last24h");
+  const [trafficRangeStart, setTrafficRangeStart] = useState("");
+  const [trafficRangeEnd, setTrafficRangeEnd] = useState("");
+
+  const trafficRangeBounds = useMemo(
+    () =>
+      resolveTrafficRangeBounds(
+        trafficFilterMode,
+        trafficDate,
+        trafficRangePreset,
+        trafficRangeStart,
+        trafficRangeEnd,
+      ),
+    [trafficDate, trafficFilterMode, trafficRangeEnd, trafficRangePreset, trafficRangeStart],
+  );
+
+  const filteredTrafficSamples = useMemo(
+    () => filterTrafficSamplesByRange(requestDeltaHistory, trafficRangeBounds),
+    [requestDeltaHistory, trafficRangeBounds],
+  );
+
+  const hourlyTrafficData = useMemo(
+    () => buildHourlyTrafficData(filteredTrafficSamples),
+    [filteredTrafficSamples],
+  );
+
+  const trafficWindowLabel = useMemo(() => {
+    if (trafficRangeBounds === null) {
+      return `All captured samples (${requestDeltaHistory.length})`;
+    }
+    const startLabel = new Date(trafficRangeBounds.startTs).toLocaleDateString();
+    const endLabel = new Date(Math.max(trafficRangeBounds.startTs, trafficRangeBounds.endTs - 1))
+      .toLocaleDateString();
+    return `${startLabel} → ${endLabel}`;
+  }, [requestDeltaHistory.length, trafficRangeBounds]);
+
+  const groupedTrafficLoading = pathStatsLoading || routesLoading || servicesLoading;
+
+  const trafficByServiceData = buildTrafficByServiceData(
+    pathStats ?? [],
+    routesResponse?.routes ?? [],
+    servicesResponse?.services ?? [],
+  );
+  const trafficByPortData = buildTrafficByPortData(pathStats ?? []);
+  const trafficByPathData = buildTrafficByPathData(pathStats ?? []);
+
+  const groupedTrafficCharts = [
+    {
+      title: "By Service",
+      description: "Requests mapped to service routes",
+      color: "teal.6",
+      data: trafficByServiceData,
+    },
+    {
+      title: "By Port",
+      description: "Requests grouped by host port",
+      color: "orange.6",
+      data: trafficByPortData,
+    },
+    {
+      title: "By Path",
+      description: "Most requested route paths",
+      color: "grape.6",
+      data: trafficByPathData,
+    },
+  ];
 
   const totalRequests = agg?.total_requests ?? 0;
   const totalErrors = agg?.total_errors ?? 0;
@@ -93,6 +449,14 @@ export default function Dashboard() {
       description: "Current throughput (rolling)",
     },
   ];
+
+  const resetTrafficFilters = () => {
+    setTrafficFilterMode("all");
+    setTrafficDate("");
+    setTrafficRangePreset("last24h");
+    setTrafficRangeStart("");
+    setTrafficRangeEnd("");
+  };
 
   return (
     <Stack gap="xl">
@@ -191,6 +555,160 @@ export default function Dashboard() {
               </Paper>
             ))}
           </SimpleGrid>
+        )}
+      </Card>
+
+      <Card
+        shadow="sm"
+        padding="lg"
+        radius="lg"
+        withBorder
+        style={{
+          background: "var(--mantine-color-body)",
+          borderColor: "var(--mantine-color-default-border)",
+        }}
+      >
+        <Group justify="space-between" mb="md" wrap="wrap">
+          <Title order={5} fw={700} c="dimmed" style={{ letterSpacing: 1 }}>
+            TRAFFIC BREAKDOWN
+          </Title>
+          <Text size="xs" c="dimmed" fw={600}>
+            Top {TOP_GROUP_LIMIT - 1} groups + other bucket
+          </Text>
+        </Group>
+
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+          {groupedTrafficCharts.map((chart) => (
+            <Paper key={chart.title} p="md" radius="md" withBorder>
+              <Text size="sm" fw={700}>
+                {chart.title}
+              </Text>
+              <Text size="xs" c="dimmed" mb="sm">
+                {chart.description}
+              </Text>
+
+              {groupedTrafficLoading && chart.data.length === 0 ? (
+                <Skeleton h={180} radius="md" />
+              ) : chart.data.length > 0 ? (
+                <BarChart
+                  h={180}
+                  data={chart.data}
+                  dataKey="group"
+                  withLegend={false}
+                  gridAxis="y"
+                  tickLine="none"
+                  series={[{ name: "requests", color: chart.color }]}
+                  valueFormatter={(value) => `${Math.round(value)} req`}
+                />
+              ) : (
+                <Text size="sm" c="dimmed">
+                  Waiting for traffic samples.
+                </Text>
+              )}
+            </Paper>
+          ))}
+        </SimpleGrid>
+      </Card>
+
+      <Card
+        shadow="sm"
+        padding="lg"
+        radius="lg"
+        withBorder
+        style={{
+          background: "var(--mantine-color-body)",
+          borderColor: "var(--mantine-color-default-border)",
+        }}
+      >
+        <Group justify="space-between" mb="md" wrap="wrap">
+          <Title order={5} fw={700} c="dimmed" style={{ letterSpacing: 1 }}>
+            TRAFFIC BY HOUR
+          </Title>
+          <Text size="xs" c="dimmed" fw={600}>
+            {trafficWindowLabel}
+          </Text>
+        </Group>
+
+        <Group mb="md" gap="sm" align="end" wrap="wrap">
+          <Select
+            label="Filter"
+            size="xs"
+            w={150}
+            data={TRAFFIC_FILTER_MODE_OPTIONS}
+            value={trafficFilterMode}
+            onChange={(value) => setTrafficFilterMode((value as TrafficFilterMode) ?? "all")}
+          />
+
+          {trafficFilterMode === "date" && (
+            <TextInput
+              label="Date"
+              type="date"
+              size="xs"
+              w={170}
+              value={trafficDate}
+              onChange={(event) => setTrafficDate(event.currentTarget.value)}
+            />
+          )}
+
+          {trafficFilterMode === "range" && (
+            <>
+              <Select
+                label="Range"
+                size="xs"
+                w={180}
+                data={TRAFFIC_RANGE_PRESET_OPTIONS}
+                value={trafficRangePreset}
+                onChange={(value) =>
+                  setTrafficRangePreset((value as TrafficRangePreset) ?? "last24h")
+                }
+              />
+              {trafficRangePreset === "custom" && (
+                <>
+                  <TextInput
+                    label="Start"
+                    type="date"
+                    size="xs"
+                    w={170}
+                    value={trafficRangeStart}
+                    onChange={(event) => setTrafficRangeStart(event.currentTarget.value)}
+                  />
+                  <TextInput
+                    label="End"
+                    type="date"
+                    size="xs"
+                    w={170}
+                    value={trafficRangeEnd}
+                    onChange={(event) => setTrafficRangeEnd(event.currentTarget.value)}
+                  />
+                </>
+              )}
+            </>
+          )}
+
+          <Button size="xs" variant="subtle" onClick={resetTrafficFilters}>
+            Reset
+          </Button>
+        </Group>
+
+        {aggLoading && requestRateHistory.length === 0 ? (
+          <Skeleton h={240} radius="md" />
+        ) : hourlyTrafficData.length > 0 ? (
+          <BarChart
+            h={240}
+            data={hourlyTrafficData}
+            dataKey="hour"
+            withLegend={false}
+            gridAxis="xy"
+            tickLine="none"
+            series={[{ name: "requests", color: "indigo.6" }]}
+            valueFormatter={(value) => `${Math.round(value)} req`}
+          />
+        ) : (
+          <Paper p="md" radius="md" withBorder>
+            <Text size="sm" c="dimmed">
+              No traffic data for the selected date filter.
+            </Text>
+          </Paper>
         )}
       </Card>
 

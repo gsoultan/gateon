@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Notifications } from '@mantine/notifications'
 import App from './App'
 import '@mantine/core/styles.css'
+import '@mantine/charts/styles.css'
 import '@mantine/notifications/styles.css'
 import './styles.css'
 

@@ -41,6 +41,29 @@ export type Target = {
   weight: number;
   /** For HTTP: "http" | "https"; for gRPC: "h2" | "h2c" */
   protocol?: string;
+  proxy_protocol_enabled?: boolean;
+  proxy_protocol_version?: ProxyProtocolVersion;
+};
+
+export enum ProxyProtocolVersion {
+  PROXY_PROTOCOL_VERSION_UNSPECIFIED = 0,
+  PROXY_PROTOCOL_VERSION_V1 = 1,
+  PROXY_PROTOCOL_VERSION_V2 = 2,
+}
+
+export enum TlsClientCertSelectionStrategy {
+  TLS_CLIENT_CERT_SELECTION_STRATEGY_STATIC = 0,
+  TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HOST = 1,
+  TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER = 2,
+}
+
+export type TlsClientIdentity = {
+  id?: string;
+  cert_file?: string;
+  key_file?: string;
+  match_hosts?: string[];
+  match_header?: string;
+  match_header_value?: string;
 };
 
 export type TlsClientConfig = {
@@ -50,6 +73,8 @@ export type TlsClientConfig = {
   ca_file?: string;
   skip_verify?: boolean;
   server_name?: string;
+  cert_selection_strategy?: TlsClientCertSelectionStrategy;
+  cert_identities?: TlsClientIdentity[];
 };
 
 export type Service = {
@@ -77,6 +102,8 @@ export enum HealthCheckType {
   HEALTH_CHECK_TYPE_UNSPECIFIED = 0,
   HEALTH_CHECK_TYPE_HTTP = 1,
   HEALTH_CHECK_TYPE_GRPC = 2,
+  HEALTH_CHECK_TYPE_TCP = 3,
+  HEALTH_CHECK_TYPE_CUSTOM = 4,
 }
 
 export type RouteTLSConfig = {
