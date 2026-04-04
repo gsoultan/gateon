@@ -15,10 +15,12 @@ import { IconMail, IconBook2, IconSettings } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import readmeContent from "../../docs/README.md?raw";
 import emailBackendSetup from "../../docs/email-backend-setup.md?raw";
+import proxyProtocolContent from "../../docs/proxy-protocol.md?raw";
 import servicesContent from "../../docs/services.md?raw";
 
 const docs = [
   { id: "intro", label: "Introduction", icon: IconBook2, content: readmeContent },
+  { id: "proxy-protocol", label: "Proxy Protocol", icon: IconBook2, content: proxyProtocolContent },
   { id: "email-backend", label: "Email Backend (SMTP, IMAP, POP3)", icon: IconMail, content: emailBackendSetup },
   { id: "running-service", label: "Running as a Service", icon: IconSettings, content: servicesContent },
 ];
