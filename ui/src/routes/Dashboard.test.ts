@@ -62,6 +62,28 @@ describe("hourly traffic helpers", () => {
     expect(hourly[1].hourStartTs - hourly[0].hourStartTs).toBe(hourMs);
   });
 
+  test("buildHourlyTrafficData pads missing hours when range is provided", () => {
+    const hourMs = 60 * 60 * 1000;
+    const baseTs = Date.UTC(2026, 3, 4, 10, 0, 0);
+    const range = {
+      startTs: baseTs,
+      endTs: baseTs + 3 * hourMs,
+    };
+    const samples: RequestDeltaSample[] = [
+      { ts: baseTs + hourMs + 5 * 60 * 1000, requests: 5 },
+    ];
+
+    const hourly = buildHourlyTrafficData(samples, range);
+
+    expect(hourly).toHaveLength(3);
+    expect(hourly[0].requests).toBe(0);
+    expect(hourly[0].hourStartTs).toBe(baseTs);
+    expect(hourly[1].requests).toBe(5);
+    expect(hourly[1].hourStartTs).toBe(baseTs + hourMs);
+    expect(hourly[2].requests).toBe(0);
+    expect(hourly[2].hourStartTs).toBe(baseTs + 2 * hourMs);
+  });
+
   test("builds preset range bounds from current time", () => {
     const nowTs = Date.UTC(2026, 3, 4, 12, 0, 0);
     const bounds = resolveTrafficRangeBounds("range", "", "last24h", "", "", nowTs);
