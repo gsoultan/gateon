@@ -18,6 +18,7 @@ type PathStats struct {
 	Host         string  `json:"host"`
 	Path         string  `json:"path"`
 	RequestCount uint64  `json:"request_count"`
+	BytesTotal   uint64  `json:"bytes_total"`
 	LatencySum   float64 `json:"latency_sum_seconds"`
 	AvgLatency   float64 `json:"avg_latency_seconds"`
 }
@@ -31,6 +32,7 @@ type pathStatsInternal struct {
 	host         string
 	path         string
 	requestCount uint64
+	bytesTotal   uint64
 	latencySum   uint64 // Store as nanoseconds for atomic update
 }
 
@@ -41,7 +43,7 @@ func isInternalAPIPath(path string) bool {
 
 // RecordPathRequest records a request for a host and path.
 // Internal API paths (/v1/*, /metrics, /healthz, /readyz) are excluded from path metrics.
-func RecordPathRequest(host, path string, latencySeconds float64) {
+func RecordPathRequest(host, path string, latencySeconds float64, bytesTotal uint64) {
 	if isInternalAPIPath(path) {
 		return
 	}
@@ -72,10 +74,11 @@ func RecordPathRequest(host, path string, latencySeconds float64) {
 	}
 
 	atomic.AddUint64(&s.requestCount, 1)
+	atomic.AddUint64(&s.bytesTotal, bytesTotal)
 	atomic.AddUint64(&s.latencySum, uint64(latencySeconds*1e9))
 
 	// Also persist to durable store if enabled (non-blocking)
-	recordToStore(host, path, latencySeconds, time.Now())
+	recordToStore(host, path, latencySeconds, bytesTotal, time.Now())
 }
 
 // RecordTrace records a trace for an operation.
@@ -91,6 +94,7 @@ func getInMemoryPathStats() []PathStats {
 	result := make([]PathStats, 0, len(pathStatsMap))
 	for _, s := range pathStatsMap {
 		count := atomic.LoadUint64(&s.requestCount)
+		bytes := atomic.LoadUint64(&s.bytesTotal)
 		sumNS := atomic.LoadUint64(&s.latencySum)
 		sumS := float64(sumNS) / 1e9
 
@@ -103,6 +107,7 @@ func getInMemoryPathStats() []PathStats {
 			Host:         s.host,
 			Path:         s.path,
 			RequestCount: count,
+			BytesTotal:   bytes,
 			LatencySum:   sumS,
 			AvgLatency:   math.Round(avg*1000) / 1000, // Round to 3 decimal places
 		})

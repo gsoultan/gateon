@@ -21,6 +21,7 @@ export type PathStats = {
   host: string;
   path: string;
   request_count: number;
+  bytes_total: number;
   latency_sum_seconds: number;
   avg_latency_seconds: number;
 };

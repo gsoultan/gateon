@@ -90,7 +90,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"total_requests": 0, "requests_per_second": 0, "total_errors": 0,
 				"active_connections": 0, "open_circuits": 0, "half_open_circuits": 0,
-				"healthy_targets": 0, "total_targets": 0,
+				"healthy_targets": 0, "total_targets": 0, "total_bandwidth_bytes": 0,
 			})
 			return
 		}
@@ -127,8 +127,10 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 		}
 		pathStats := telemetry.GetPathStats()
 		var pathTotalReqs uint64
+		var pathTotalBandwidth uint64
 		for _, p := range pathStats {
 			pathTotalReqs += p.RequestCount
+			pathTotalBandwidth += p.BytesTotal
 		}
 
 		// Calculate total requests: prefer route stats if available, otherwise use path stats
@@ -146,15 +148,16 @@ func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"total_requests":     finalTotalReqs,
-			"total_errors":       totalErrs,
-			"active_connections": activeConn,
-			"open_circuits":      openCircuits,
-			"half_open_circuits": halfOpenCircuits,
-			"healthy_targets":    healthyTargets,
-			"total_targets":      totalTargets,
-			"cpu_usage":          cpuUsage,
-			"memory_usage":       memUsage,
+			"total_requests":        finalTotalReqs,
+			"total_bandwidth_bytes": pathTotalBandwidth,
+			"total_errors":          totalErrs,
+			"active_connections":    activeConn,
+			"open_circuits":         openCircuits,
+			"half_open_circuits":    halfOpenCircuits,
+			"healthy_targets":       healthyTargets,
+			"total_targets":         totalTargets,
+			"cpu_usage":             cpuUsage,
+			"memory_usage":          memUsage,
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/path-stats", func(w http.ResponseWriter, r *http.Request) {

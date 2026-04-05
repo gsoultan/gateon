@@ -8,9 +8,9 @@ func TestPathStats(t *testing.T) {
 	// Reset stats for test
 	pathStatsMap = make(map[string]*pathStatsInternal)
 
-	RecordPathRequest("example.com", "/api", 0.1)
-	RecordPathRequest("example.com", "/api", 0.2)
-	RecordPathRequest("other.com", "/", 0.5)
+	RecordPathRequest("example.com", "/api", 0.1, 100)
+	RecordPathRequest("example.com", "/api", 0.2, 150)
+	RecordPathRequest("other.com", "/", 0.5, 300)
 
 	stats := GetPathStats()
 	if len(stats) != 2 {
@@ -22,12 +22,18 @@ func TestPathStats(t *testing.T) {
 			if s.RequestCount != 2 {
 				t.Errorf("expected 2 requests for example.com/api, got %d", s.RequestCount)
 			}
+			if s.BytesTotal != 250 {
+				t.Errorf("expected 250 bytes total for example.com/api, got %d", s.BytesTotal)
+			}
 			if s.AvgLatency != 0.15 {
 				t.Errorf("expected 0.15 avg latency for example.com/api, got %f", s.AvgLatency)
 			}
 		} else if s.Host == "other.com" && s.Path == "/" {
 			if s.RequestCount != 1 {
 				t.Errorf("expected 1 request for other.com/, got %d", s.RequestCount)
+			}
+			if s.BytesTotal != 300 {
+				t.Errorf("expected 300 bytes total for other.com/, got %d", s.BytesTotal)
 			}
 			if s.AvgLatency != 0.5 {
 				t.Errorf("expected 0.5 avg latency for other.com/, got %f", s.AvgLatency)
@@ -48,7 +54,7 @@ func TestRecordPathRequest_ExcludesInternalAPIPaths(t *testing.T) {
 		"/readyz",
 	}
 	for _, path := range internalPaths {
-		RecordPathRequest("example.com", path, 0.1)
+		RecordPathRequest("example.com", path, 0.1, 100)
 	}
 
 	stats := GetPathStats()

@@ -4,6 +4,7 @@ import { useApiConfigStore } from "../store/useApiConfigStore";
 
 export type AggStats = {
   total_requests: number;
+  total_bandwidth_bytes: number;
   total_errors: number;
   active_connections: number;
   open_circuits: number;

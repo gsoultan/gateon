@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"strings"
 )
 
 func init() {
@@ -26,6 +27,7 @@ func init() {
 				path TEXT NOT NULL,
 				req_count INTEGER NOT NULL DEFAULT 0,
 				latency_sum_s REAL NOT NULL DEFAULT 0,
+				bytes_total INTEGER NOT NULL DEFAULT 0,
 				updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY(day, host, path)
 			);`
@@ -36,6 +38,7 @@ func init() {
 				path TEXT NOT NULL,
 				req_count BIGINT NOT NULL DEFAULT 0,
 				latency_sum_s DOUBLE PRECISION NOT NULL DEFAULT 0,
+				bytes_total BIGINT NOT NULL DEFAULT 0,
 				updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY(day, host, path)
 			);`
@@ -123,6 +126,26 @@ func init() {
 			if _, err := db.Exec(q); err != nil {
 				return err
 			}
+		}
+		return nil
+	})
+
+	Register(8, "add_path_stats_bytes_total", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE path_stats ADD COLUMN IF NOT EXISTS bytes_total BIGINT NOT NULL DEFAULT 0;`
+		case DriverMySQL:
+			query = `ALTER TABLE path_stats ADD COLUMN IF NOT EXISTS bytes_total BIGINT NOT NULL DEFAULT 0;`
+		default:
+			query = `ALTER TABLE path_stats ADD COLUMN bytes_total INTEGER NOT NULL DEFAULT 0;`
+		}
+
+		if _, err := db.Exec(query); err != nil {
+			if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
 		}
 		return nil
 	})

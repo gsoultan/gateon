@@ -3,6 +3,10 @@ import type { RequestDeltaSample } from "../hooks/useGateon";
 import type { PathStats, Route, Service } from "../types/gateon";
 
 import {
+  buildBandwidthByRouterData,
+  buildBandwidthByServiceData,
+  buildBandwidthSummaries,
+  buildHourlyBandwidthData,
   buildHourlyTrafficData,
   buildRequestTrendData,
   buildTrafficByPathData,
@@ -116,6 +120,7 @@ describe("traffic grouping builders", () => {
         host: "api.example.com:8080",
         path: "/v1/users",
         request_count: 30,
+        bytes_total: 3000,
         latency_sum_seconds: 3,
         avg_latency_seconds: 0.1,
       },
@@ -123,6 +128,7 @@ describe("traffic grouping builders", () => {
         host: "edge.example.com:8080",
         path: "/v1/orders",
         request_count: 20,
+        bytes_total: 2000,
         latency_sum_seconds: 4,
         avg_latency_seconds: 0.2,
       },
@@ -130,6 +136,7 @@ describe("traffic grouping builders", () => {
         host: "gateway.example.com",
         path: "/health",
         request_count: 10,
+        bytes_total: 1000,
         latency_sum_seconds: 1,
         avg_latency_seconds: 0.1,
       },
@@ -143,13 +150,13 @@ describe("traffic grouping builders", () => {
 
   test("aggregates top paths and collapses remaining into Other", () => {
     const pathStats: PathStats[] = [
-      { host: "a", path: "/p1", request_count: 70, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
-      { host: "a", path: "/p2", request_count: 60, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
-      { host: "a", path: "/p3", request_count: 50, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
-      { host: "a", path: "/p4", request_count: 40, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
-      { host: "a", path: "/p5", request_count: 30, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
-      { host: "a", path: "/p6", request_count: 20, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
-      { host: "a", path: "/p7", request_count: 10, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
+      { host: "a", path: "/p1", request_count: 70, bytes_total: 7000, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
+      { host: "a", path: "/p2", request_count: 60, bytes_total: 6000, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
+      { host: "a", path: "/p3", request_count: 50, bytes_total: 5000, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
+      { host: "a", path: "/p4", request_count: 40, bytes_total: 4000, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
+      { host: "a", path: "/p5", request_count: 30, bytes_total: 3000, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
+      { host: "a", path: "/p6", request_count: 20, bytes_total: 2000, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
+      { host: "a", path: "/p7", request_count: 10, bytes_total: 1000, latency_sum_seconds: 1, avg_latency_seconds: 0.1 },
     ];
 
     expect(buildTrafficByPathData(pathStats)).toEqual([
@@ -168,6 +175,7 @@ describe("traffic grouping builders", () => {
         host: "api.local",
         path: "/v1/users",
         request_count: 30,
+        bytes_total: 3000,
         latency_sum_seconds: 6,
         avg_latency_seconds: 0.2,
       },
@@ -175,6 +183,7 @@ describe("traffic grouping builders", () => {
         host: "api.local",
         path: "/v1/orders",
         request_count: 20,
+        bytes_total: 2000,
         latency_sum_seconds: 4,
         avg_latency_seconds: 0.2,
       },
@@ -182,6 +191,7 @@ describe("traffic grouping builders", () => {
         host: "other.local",
         path: "/health",
         request_count: 10,
+        bytes_total: 1000,
         latency_sum_seconds: 1,
         avg_latency_seconds: 0.1,
       },
@@ -189,6 +199,7 @@ describe("traffic grouping builders", () => {
         host: "other.local",
         path: "/unknown",
         request_count: 5,
+        bytes_total: 500,
         latency_sum_seconds: 1,
         avg_latency_seconds: 0.2,
       },
@@ -238,6 +249,120 @@ describe("traffic grouping builders", () => {
       { group: "Users Service", requests: 50 },
       { group: "Health Service", requests: 10 },
       { group: "Unmatched", requests: 5 },
+    ]);
+  });
+});
+
+describe("bandwidth helpers", () => {
+  test("aggregates total/router/service hourly bandwidth", () => {
+    const hourMs = 60 * 60 * 1000;
+    const baseTs = Date.UTC(2026, 3, 4, 10, 15, 0);
+    const samples = [
+      {
+        ts: baseTs,
+        totalBytes: 1000,
+        routerBytes: { users: 700, health: 300 },
+        serviceBytes: { users: 800, health: 200 },
+      },
+      {
+        ts: baseTs + 20 * 60 * 1000,
+        totalBytes: 500,
+        routerBytes: { users: 500 },
+        serviceBytes: { users: 500 },
+      },
+      {
+        ts: baseTs + hourMs,
+        totalBytes: 200,
+        routerBytes: { health: 200 },
+        serviceBytes: { health: 200 },
+      },
+    ];
+
+    const hourly = buildHourlyBandwidthData(samples);
+    expect(hourly).toHaveLength(2);
+    expect(hourly[0]).toMatchObject({
+      totalBytes: 1500,
+      routerBytes: 1200,
+      serviceBytes: 1300,
+    });
+    expect(hourly[1]).toMatchObject({
+      totalBytes: 200,
+      routerBytes: 200,
+      serviceBytes: 200,
+    });
+  });
+
+  test("builds max/min/avg summaries from hourly bandwidth", () => {
+    const summaries = buildBandwidthSummaries([
+      { hourStartTs: 1, hour: "h1", totalBytes: 100, routerBytes: 60, serviceBytes: 80 },
+      { hourStartTs: 2, hour: "h2", totalBytes: 300, routerBytes: 90, serviceBytes: 120 },
+    ]);
+
+    expect(summaries).toEqual([
+      { label: "Total", max: 300, min: 100, avg: 200, color: "indigo" },
+      { label: "Router", max: 90, min: 60, avg: 75, color: "orange" },
+      { label: "Service", max: 120, min: 80, avg: 100, color: "teal" },
+    ]);
+  });
+
+  test("maps cumulative bandwidth to router and service groups", () => {
+    const pathStats: PathStats[] = [
+      {
+        host: "api.local",
+        path: "/v1/users",
+        request_count: 30,
+        bytes_total: 3000,
+        latency_sum_seconds: 6,
+        avg_latency_seconds: 0.2,
+      },
+      {
+        host: "api.local",
+        path: "/v1/orders",
+        request_count: 20,
+        bytes_total: 2000,
+        latency_sum_seconds: 4,
+        avg_latency_seconds: 0.2,
+      },
+      {
+        host: "other.local",
+        path: "/unknown",
+        request_count: 5,
+        bytes_total: 500,
+        latency_sum_seconds: 1,
+        avg_latency_seconds: 0.2,
+      },
+    ];
+
+    const routes: Route[] = [
+      {
+        id: "route-users",
+        name: "users",
+        type: "http",
+        entrypoints: ["web"],
+        rule: "Host(`api.local`) && PathPrefix(`/v1`)",
+        priority: 100,
+        middlewares: [],
+        service_id: "svc-users",
+      },
+    ];
+
+    const services: Service[] = [
+      {
+        id: "svc-users",
+        name: "Users Service",
+        weighted_targets: [],
+        load_balancer_policy: "round_robin",
+        health_check_path: "/health",
+      },
+    ];
+
+    expect(buildBandwidthByRouterData(pathStats, routes)).toEqual([
+      { group: "users", requests: 5000 },
+      { group: "Unmatched", requests: 500 },
+    ]);
+    expect(buildBandwidthByServiceData(pathStats, routes, services)).toEqual([
+      { group: "Users Service", requests: 5000 },
+      { group: "Unmatched", requests: 500 },
     ]);
   });
 });
