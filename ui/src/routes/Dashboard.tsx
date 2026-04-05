@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -58,6 +58,7 @@ const TOP_GROUP_LIMIT = 6;
 const DEFAULT_PORT_LABEL = "default";
 const OTHER_GROUP_LABEL = "Other";
 const UNMATCHED_SERVICE_LABEL = "Unmatched";
+const UNMATCHED_ROUTER_LABEL = "Unmatched";
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -85,6 +86,29 @@ type HourlyTrafficDatum = {
   requests: number;
 };
 
+type BandwidthDeltaSample = {
+  ts: number;
+  totalBytes: number;
+  routerBytes: Record<string, number>;
+  serviceBytes: Record<string, number>;
+};
+
+type HourlyBandwidthDatum = {
+  hourStartTs: number;
+  hour: string;
+  totalBytes: number;
+  routerBytes: number;
+  serviceBytes: number;
+};
+
+type BandwidthSummaryDatum = {
+  label: string;
+  max: number;
+  min: number;
+  avg: number;
+  color: string;
+};
+
 type TrafficFilterMode = "all" | "date" | "range";
 type TrafficRangePreset = "last24h" | "last7d" | "last30d" | "custom";
 
@@ -97,6 +121,13 @@ function formatCompact(num: number): string {
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
   return num.toLocaleString();
+}
+
+export function formatBytes(num: number): string {
+  if (num >= 1024 * 1024 * 1024) return `${(num / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (num >= 1024 * 1024) return `${(num / (1024 * 1024)).toFixed(1)} MB`;
+  if (num >= 1024) return `${(num / 1024).toFixed(1)} KB`;
+  return `${Math.round(num)} B`;
 }
 
 export function buildRequestTrendData(requestRateHistory: number[]) {
@@ -251,6 +282,7 @@ export function buildTrafficByPortData(pathStats: PathStats[]): GroupedTrafficDa
 }
 
 type RouteMatcher = {
+  routeLabel: string;
   serviceId: string;
   hosts: string[];
   exactPaths: string[];
@@ -259,6 +291,7 @@ type RouteMatcher = {
 
 function buildRouteMatchers(routes: Route[]): RouteMatcher[] {
   return routes.map((route) => ({
+    routeLabel: route.name?.trim() || route.id,
     serviceId: route.service_id,
     hosts: Array.from(route.rule.matchAll(/Host\(`([^`]*)`\)/g), (m) => m[1]),
     exactPaths: Array.from(route.rule.matchAll(/Path\(`([^`]*)`\)/g), (m) => m[1]),
@@ -311,6 +344,21 @@ function resolveServiceLabel(
   return serviceNameById.get(bestServiceId) ?? bestServiceId;
 }
 
+function resolveRouterLabel(stat: PathStats, routeMatchers: RouteMatcher[]): string {
+  let bestScore = -1;
+  let bestRouteLabel: string | null = null;
+
+  for (const matcher of routeMatchers) {
+    const score = scoreRouteMatch(stat, matcher);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRouteLabel = matcher.routeLabel;
+    }
+  }
+
+  return bestRouteLabel ?? UNMATCHED_ROUTER_LABEL;
+}
+
 export function buildTrafficByServiceData(
   pathStats: PathStats[],
   routes: Route[],
@@ -323,6 +371,92 @@ export function buildTrafficByServiceData(
   for (const stat of pathStats) {
     const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
     grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.request_count);
+  }
+
+  return toTopGroupedData(grouped);
+}
+
+export function buildHourlyBandwidthData(samples: BandwidthDeltaSample[]): HourlyBandwidthDatum[] {
+  const grouped = new Map<number, { totalBytes: number; routerBytes: number; serviceBytes: number }>();
+
+  for (const sample of samples) {
+    const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
+    const existing = grouped.get(hourStartTs) ?? {
+      totalBytes: 0,
+      routerBytes: 0,
+      serviceBytes: 0,
+    };
+    const routerPeak = Object.values(sample.routerBytes).reduce((peak, value) => Math.max(peak, value), 0);
+    const servicePeak = Object.values(sample.serviceBytes).reduce((peak, value) => Math.max(peak, value), 0);
+    grouped.set(hourStartTs, {
+      totalBytes: existing.totalBytes + sample.totalBytes,
+      routerBytes: existing.routerBytes + routerPeak,
+      serviceBytes: existing.serviceBytes + servicePeak,
+    });
+  }
+
+  return Array.from(grouped.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([hourStartTs, values]) => ({
+      hourStartTs,
+      hour: formatHourLabel(hourStartTs),
+      totalBytes: values.totalBytes,
+      routerBytes: values.routerBytes,
+      serviceBytes: values.serviceBytes,
+    }));
+}
+
+export function buildBandwidthSummaries(hourly: HourlyBandwidthDatum[]): BandwidthSummaryDatum[] {
+  const toSummary = (
+    label: string,
+    color: string,
+    selector: (row: HourlyBandwidthDatum) => number,
+  ): BandwidthSummaryDatum => {
+    if (hourly.length === 0) {
+      return { label, max: 0, min: 0, avg: 0, color };
+    }
+    const values = hourly.map(selector);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return {
+      label,
+      max: Math.max(...values),
+      min: Math.min(...values),
+      avg: total / values.length,
+      color,
+    };
+  };
+
+  return [
+    toSummary("Total", "indigo", (row) => row.totalBytes),
+    toSummary("Router", "orange", (row) => row.routerBytes),
+    toSummary("Service", "teal", (row) => row.serviceBytes),
+  ];
+}
+
+export function buildBandwidthByRouterData(pathStats: PathStats[], routes: Route[]): GroupedTrafficDatum[] {
+  const routeMatchers = buildRouteMatchers(routes);
+  const grouped = new Map<string, number>();
+
+  for (const stat of pathStats) {
+    const routerLabel = resolveRouterLabel(stat, routeMatchers);
+    grouped.set(routerLabel, (grouped.get(routerLabel) ?? 0) + stat.bytes_total);
+  }
+
+  return toTopGroupedData(grouped);
+}
+
+export function buildBandwidthByServiceData(
+  pathStats: PathStats[],
+  routes: Route[],
+  services: Service[],
+): GroupedTrafficDatum[] {
+  const routeMatchers = buildRouteMatchers(routes);
+  const serviceNameById = new Map(services.map((service) => [service.id, service.name]));
+  const grouped = new Map<string, number>();
+
+  for (const stat of pathStats) {
+    const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
+    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.bytes_total);
   }
 
   return toTopGroupedData(grouped);
@@ -345,6 +479,8 @@ export default function Dashboard() {
   const [trafficRangePreset, setTrafficRangePreset] = useState<TrafficRangePreset>("last24h");
   const [trafficRangeStart, setTrafficRangeStart] = useState("");
   const [trafficRangeEnd, setTrafficRangeEnd] = useState("");
+  const previousPathStatsRef = useRef<Map<string, number> | null>(null);
+  const [bandwidthDeltaHistory, setBandwidthDeltaHistory] = useState<BandwidthDeltaSample[]>([]);
 
   const trafficRangeBounds = useMemo(
     () =>
@@ -358,14 +494,83 @@ export default function Dashboard() {
     [trafficDate, trafficFilterMode, trafficRangeEnd, trafficRangePreset, trafficRangeStart],
   );
 
+  useEffect(() => {
+    if (!pathStats || pathStats.length === 0) {
+      return;
+    }
+
+    const routeMatchers = buildRouteMatchers(routesResponse?.routes ?? []);
+    const serviceNameById = new Map(
+      (servicesResponse?.services ?? []).map((service) => [service.id, service.name]),
+    );
+
+    const currentTotals = new Map<string, number>();
+    for (const stat of pathStats) {
+      currentTotals.set(`${stat.host}:${stat.path}`, stat.bytes_total);
+    }
+
+    const previousTotals = previousPathStatsRef.current;
+    previousPathStatsRef.current = currentTotals;
+
+    if (previousTotals === null) {
+      return;
+    }
+
+    let totalBytes = 0;
+    const routerBytes = new Map<string, number>();
+    const serviceBytes = new Map<string, number>();
+
+    for (const stat of pathStats) {
+      const key = `${stat.host}:${stat.path}`;
+      const prevBytes = previousTotals.get(key) ?? 0;
+      const deltaBytes = Math.max(0, stat.bytes_total - prevBytes);
+      if (deltaBytes <= 0) {
+        continue;
+      }
+
+      totalBytes += deltaBytes;
+      const routerLabel = resolveRouterLabel(stat, routeMatchers);
+      const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
+      routerBytes.set(routerLabel, (routerBytes.get(routerLabel) ?? 0) + deltaBytes);
+      serviceBytes.set(serviceLabel, (serviceBytes.get(serviceLabel) ?? 0) + deltaBytes);
+    }
+
+    if (totalBytes <= 0) {
+      return;
+    }
+
+    const sample: BandwidthDeltaSample = {
+      ts: Date.now(),
+      totalBytes,
+      routerBytes: Object.fromEntries(routerBytes),
+      serviceBytes: Object.fromEntries(serviceBytes),
+    };
+    setBandwidthDeltaHistory((prev) => [...prev, sample].slice(-720));
+  }, [pathStats, routesResponse?.routes, servicesResponse?.services]);
+
   const filteredTrafficSamples = useMemo(
     () => filterTrafficSamplesByRange(requestDeltaHistory, trafficRangeBounds),
     [requestDeltaHistory, trafficRangeBounds],
   );
 
+  const filteredBandwidthSamples = useMemo(
+    () => filterTrafficSamplesByRange(bandwidthDeltaHistory, trafficRangeBounds),
+    [bandwidthDeltaHistory, trafficRangeBounds],
+  );
+
   const hourlyTrafficData = useMemo(
     () => buildHourlyTrafficData(filteredTrafficSamples),
     [filteredTrafficSamples],
+  );
+
+  const hourlyBandwidthData = useMemo(
+    () => buildHourlyBandwidthData(filteredBandwidthSamples),
+    [filteredBandwidthSamples],
+  );
+
+  const bandwidthSummaries = useMemo(
+    () => buildBandwidthSummaries(hourlyBandwidthData),
+    [hourlyBandwidthData],
   );
 
   const trafficWindowLabel = useMemo(() => {
@@ -379,12 +584,19 @@ export default function Dashboard() {
   }, [requestDeltaHistory.length, trafficRangeBounds]);
 
   const groupedTrafficLoading = pathStatsLoading || routesLoading || servicesLoading;
+  const groupedBandwidthLoading = groupedTrafficLoading;
 
   const trafficByServiceData = buildTrafficByServiceData(
     pathStats ?? [],
     routesResponse?.routes ?? [],
     servicesResponse?.services ?? [],
   );
+  const bandwidthByServiceData = buildBandwidthByServiceData(
+    pathStats ?? [],
+    routesResponse?.routes ?? [],
+    servicesResponse?.services ?? [],
+  );
+  const bandwidthByRouterData = buildBandwidthByRouterData(pathStats ?? [], routesResponse?.routes ?? []);
   const trafficByPortData = buildTrafficByPortData(pathStats ?? []);
   const trafficByPathData = buildTrafficByPathData(pathStats ?? []);
 
@@ -409,7 +621,23 @@ export default function Dashboard() {
     },
   ];
 
+  const groupedBandwidthCharts = [
+    {
+      title: "By Service",
+      description: "Bandwidth mapped to service routes",
+      color: "teal.6",
+      data: bandwidthByServiceData,
+    },
+    {
+      title: "By Router",
+      description: "Bandwidth mapped to router rules",
+      color: "orange.6",
+      data: bandwidthByRouterData,
+    },
+  ];
+
   const totalRequests = agg?.total_requests ?? 0;
+  const totalBandwidthBytes = agg?.total_bandwidth_bytes ?? 0;
   const totalErrors = agg?.total_errors ?? 0;
   const errorRate =
     totalRequests > 0 ? ((totalErrors / totalRequests) * 100).toFixed(2) : "0.00";
@@ -421,6 +649,13 @@ export default function Dashboard() {
       icon: IconTransferIn,
       color: "indigo" as const,
       description: "Cumulative requests since startup",
+    },
+    {
+      label: "Total Bandwidth",
+      value: formatBytes(totalBandwidthBytes),
+      icon: IconTransferIn,
+      color: "blue" as const,
+      description: "Cumulative ingress + egress bytes",
     },
     {
       label: "Total Errors",
@@ -502,13 +737,13 @@ export default function Dashboard() {
           )}
         </Group>
         {aggLoading ? (
-          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
-            {[1, 2, 3, 4].map((i) => (
+          <SimpleGrid cols={{ base: 2, sm: 5 }} spacing="md">
+            {[1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} h={80} radius="md" />
             ))}
           </SimpleGrid>
         ) : (
-          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
+          <SimpleGrid cols={{ base: 2, sm: 5 }} spacing="md">
             {trafficMetrics.map((m) => (
               <Paper
                 key={m.label}
@@ -622,6 +857,58 @@ export default function Dashboard() {
       >
         <Group justify="space-between" mb="md" wrap="wrap">
           <Title order={5} fw={700} c="dimmed" style={{ letterSpacing: 1 }}>
+            BANDWIDTH BREAKDOWN
+          </Title>
+          <Text size="xs" c="dimmed" fw={600}>
+            Top {TOP_GROUP_LIMIT - 1} groups + other bucket
+          </Text>
+        </Group>
+
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          {groupedBandwidthCharts.map((chart) => (
+            <Paper key={chart.title} p="md" radius="md" withBorder>
+              <Text size="sm" fw={700}>
+                {chart.title}
+              </Text>
+              <Text size="xs" c="dimmed" mb="sm">
+                {chart.description}
+              </Text>
+
+              {groupedBandwidthLoading && chart.data.length === 0 ? (
+                <Skeleton h={180} radius="md" />
+              ) : chart.data.length > 0 ? (
+                <BarChart
+                  h={180}
+                  data={chart.data}
+                  dataKey="group"
+                  withLegend={false}
+                  gridAxis="y"
+                  tickLine="none"
+                  series={[{ name: "requests", color: chart.color }]}
+                  valueFormatter={(value) => formatBytes(value)}
+                />
+              ) : (
+                <Text size="sm" c="dimmed">
+                  Waiting for bandwidth samples.
+                </Text>
+              )}
+            </Paper>
+          ))}
+        </SimpleGrid>
+      </Card>
+
+      <Card
+        shadow="sm"
+        padding="lg"
+        radius="lg"
+        withBorder
+        style={{
+          background: "var(--mantine-color-body)",
+          borderColor: "var(--mantine-color-default-border)",
+        }}
+      >
+        <Group justify="space-between" mb="md" wrap="wrap">
+          <Title order={5} fw={700} c="dimmed" style={{ letterSpacing: 1 }}>
             TRAFFIC BY HOUR
           </Title>
           <Text size="xs" c="dimmed" fw={600}>
@@ -710,6 +997,59 @@ export default function Dashboard() {
             </Text>
           </Paper>
         )}
+
+        <Stack mt="lg" gap="md">
+          <Group justify="space-between" wrap="wrap">
+            <Text size="sm" fw={700}>
+              BANDWIDTH BY HOUR
+            </Text>
+            <Text size="xs" c="dimmed">
+              Total, router, and service hourly bandwidth
+            </Text>
+          </Group>
+
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+            {bandwidthSummaries.map((summary) => (
+              <Paper key={summary.label} p="sm" radius="md" withBorder>
+                <Text size="xs" fw={700} c="dimmed" style={{ letterSpacing: 0.5 }}>
+                  {summary.label}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Max: <Text span fw={600}>{formatBytes(summary.max)}</Text>
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Min: <Text span fw={600}>{formatBytes(summary.min)}</Text>
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Avg: <Text span fw={600}>{formatBytes(summary.avg)}</Text>
+                </Text>
+              </Paper>
+            ))}
+          </SimpleGrid>
+
+          {hourlyBandwidthData.length > 0 ? (
+            <LineChart
+              h={260}
+              data={hourlyBandwidthData}
+              dataKey="hour"
+              withLegend
+              gridAxis="xy"
+              tickLine="none"
+              series={[
+                { name: "totalBytes", color: "indigo.6", label: "Total" },
+                { name: "routerBytes", color: "orange.6", label: "Router" },
+                { name: "serviceBytes", color: "teal.6", label: "Service" },
+              ]}
+              valueFormatter={(value) => formatBytes(value)}
+            />
+          ) : (
+            <Paper p="md" radius="md" withBorder>
+              <Text size="sm" c="dimmed">
+                No bandwidth data for the selected date filter.
+              </Text>
+            </Paper>
+          )}
+        </Stack>
       </Card>
 
       <Suspense fallback={<Card withBorder h={120}><Loader /></Card>}>

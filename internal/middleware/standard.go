@@ -170,8 +170,14 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 			next.ServeHTTP(sw, r)
 
+			respOutSize := sw.BytesWritten
+			if respOutSize < 0 {
+				respOutSize = 0
+			}
+			totalBandwidthBytes := uint64(reqInSize+256) + uint64(respOutSize+200)
+
 			duration := time.Since(start)
-			telemetry.RecordPathRequest(origHost, origPath, duration.Seconds())
+			telemetry.RecordPathRequest(origHost, origPath, duration.Seconds(), totalBandwidthBytes)
 
 			status := "success"
 			if sw.Status >= 400 {
@@ -194,7 +200,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
 
 			// Track response body size
-			respOutSize := sw.BytesWritten
 			// Add a baseline of 200 bytes to account for response headers.
 			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "out").Add(float64(respOutSize + 200))
 

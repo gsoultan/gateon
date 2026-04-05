@@ -25,10 +25,11 @@ var (
 )
 
 type increment struct {
-	host   string
-	path   string
-	latS   float64
-	atTime time.Time
+	host       string
+	path       string
+	latS       float64
+	bytesTotal uint64
+	atTime     time.Time
 }
 
 type traceRecord struct {
@@ -136,7 +137,7 @@ func (s *pathStatsStore) loop() {
 				if err == nil {
 					for _, inc := range batch {
 						day := inc.atTime.UTC().Format("2006-01-02")
-						if _, err := stmt.Exec(day, inc.host, inc.path, 1, inc.latS); err != nil {
+						if _, err := stmt.Exec(day, inc.host, inc.path, 1, inc.latS, inc.bytesTotal); err != nil {
 							logger.Default().Error().Err(err).Msg("path stats: upsert failed")
 						}
 					}
@@ -258,12 +259,12 @@ func ConfigureRetention(days int) {
 }
 
 // recordToStore attempts to enqueue an increment; if the store is not initialized or channel is full, it drops silently to avoid impacting the hot path.
-func recordToStore(host, path string, latencySeconds float64, at time.Time) {
+func recordToStore(host, path string, latencySeconds float64, bytesTotal uint64, at time.Time) {
 	if store == nil {
 		return
 	}
 	select {
-	case store.inCh <- increment{host: host, path: path, latS: latencySeconds, atTime: at}:
+	case store.inCh <- increment{host: host, path: path, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at}:
 	default:
 		// drop on backpressure to protect the request path
 	}
@@ -338,7 +339,8 @@ func GetPathStatsWindow(days int) []PathStats {
 		var host, p string
 		var rc int64
 		var lsum float64
-		if err := rows.Scan(&host, &p, &rc, &lsum); err != nil {
+		var bsum int64
+		if err := rows.Scan(&host, &p, &rc, &lsum, &bsum); err != nil {
 			logger.Default().Error().Err(err).Msg("path stats: scan row failed")
 			continue
 		}
@@ -350,6 +352,7 @@ func GetPathStatsWindow(days int) []PathStats {
 			Host:         host,
 			Path:         p,
 			RequestCount: uint64(rc),
+			BytesTotal:   uint64(max(bsum, 0)),
 			LatencySum:   lsum,
 			AvgLatency:   float64(int(avg*1000+0.5)) / 1000.0,
 		})
