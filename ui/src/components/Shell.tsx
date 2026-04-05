@@ -163,9 +163,13 @@ export function Shell() {
               )}
             </ActionIcon>
             <Group gap="xs">
-              <IconActivity
-                size={22}
-                color="var(--mantine-color-indigo-filled)"
+              <Box
+                component="img"
+                src="/gateon-logo.svg"
+                alt="Gateon logo"
+                w={28}
+                h={28}
+                style={{ display: "block", flexShrink: 0 }}
               />
               <Title order={4} fw={800} style={{ letterSpacing: -0.5 }}>
                 GATEON

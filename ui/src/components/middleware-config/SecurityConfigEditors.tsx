@@ -1,4 +1,16 @@
-import { Stack, TextInput, Switch, NumberInput } from "@mantine/core";
+import {
+  Stack,
+  TextInput,
+  Switch,
+  NumberInput,
+  Group,
+  Text,
+  Button,
+  FileButton,
+} from "@mantine/core";
+import { useState } from "react";
+
+import { apiFetch } from "../../hooks/useGateon";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -84,6 +96,42 @@ export function TurnstileConfigEditor({ config, updateConfig }: EditorProps) {
 }
 
 export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+
+  const handleUpload = async (file: File | null) => {
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+    setUploadSuccess(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await apiFetch("/v1/geoip/upload", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      const data = (await res.json()) as { path?: string };
+      if (!data.path) {
+        throw new Error("upload response missing path");
+      }
+
+      updateConfig("db_path", data.path);
+      setUploadSuccess(`Uploaded successfully: ${data.path}`);
+    } catch (err: any) {
+      setUploadError(err?.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <Stack gap="md">
       <TextInput
@@ -93,6 +141,28 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
         value={config.db_path || ""}
         onChange={(e) => updateConfig("db_path", e.currentTarget.value)}
       />
+      <Group gap="xs" align="end">
+        <FileButton accept=".mmdb" onChange={handleUpload}>
+          {(props) => (
+            <Button {...props} loading={uploading} variant="light">
+              Upload GeoLite DB
+            </Button>
+          )}
+        </FileButton>
+      </Group>
+      <Text size="xs" c="dimmed">
+        Select a `.mmdb` file to upload it and auto-fill the database path.
+      </Text>
+      {uploadError && (
+        <Text size="sm" c="red">
+          {uploadError}
+        </Text>
+      )}
+      {uploadSuccess && (
+        <Text size="sm" c="green">
+          {uploadSuccess}
+        </Text>
+      )}
       <TextInput
         label="Allow Countries"
         description="Comma-separated ISO 3166-1 alpha-2 codes (e.g. US,GB,DE). Empty = allow all except deny list."
