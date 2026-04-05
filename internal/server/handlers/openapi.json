@@ -66,6 +66,9 @@
     "/v1/certs/upload": {
       "post": { "summary": "Upload certificate (admin only)", "tags": ["certs"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
     },
+    "/v1/geoip/upload": {
+      "post": { "summary": "Upload GeoIP database (.mmdb) (operator, admin)", "tags": ["middlewares"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
+    },
     "/v1/login": {
       "post": { "summary": "Login (returns PASETO token)", "tags": ["auth"], "responses": { "200": { "description": "OK" }, "401": { "description": "Invalid credentials" } } }
     },
