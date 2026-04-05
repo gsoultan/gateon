@@ -121,7 +121,7 @@ export default function TracesPage() {
               rightSection={isPending ? <Text size="xs">...</Text> : null}
             />
             <Select
-              placeholder="Route"
+              placeholder="Route path"
               data={routeOptions}
               value={routeFilter}
               onChange={(value) => {
@@ -130,7 +130,14 @@ export default function TracesPage() {
               }}
               searchable
               clearable
-              w={260}
+              w={{ base: "100%", sm: 350 }}
+              renderOption={({ option }) => (
+                <Tooltip label={option.value} position="right" withArrow openDelay={400}>
+                  <Text size="xs" truncate="end" style={{ maxWidth: '100%' }}>
+                    {option.value}
+                  </Text>
+                </Tooltip>
+              )}
             />
             <Button
               variant="subtle"

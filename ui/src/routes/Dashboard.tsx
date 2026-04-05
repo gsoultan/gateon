@@ -205,12 +205,31 @@ export function filterTrafficSamplesByRange(
   return samples.filter((sample) => sample.ts >= range.startTs && sample.ts < range.endTs);
 }
 
-export function buildHourlyTrafficData(samples: RequestDeltaSample[]): HourlyTrafficDatum[] {
+export function buildHourlyTrafficData(
+  samples: RequestDeltaSample[],
+  range: TrafficRangeBounds | null = null,
+): HourlyTrafficDatum[] {
   const grouped = new Map<number, number>();
 
   for (const sample of samples) {
     const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
     grouped.set(hourStartTs, (grouped.get(hourStartTs) ?? 0) + sample.requests);
+  }
+
+  if (range) {
+    const result: HourlyTrafficDatum[] = [];
+    let currentTs = Math.floor(range.startTs / HOUR_MS) * HOUR_MS;
+    const endTs = range.endTs;
+
+    while (currentTs < endTs) {
+      result.push({
+        hourStartTs: currentTs,
+        hour: formatHourLabel(currentTs),
+        requests: grouped.get(currentTs) ?? 0,
+      });
+      currentTs += HOUR_MS;
+    }
+    return result;
   }
 
   return Array.from(grouped.entries())
@@ -376,7 +395,10 @@ export function buildTrafficByServiceData(
   return toTopGroupedData(grouped);
 }
 
-export function buildHourlyBandwidthData(samples: BandwidthDeltaSample[]): HourlyBandwidthDatum[] {
+export function buildHourlyBandwidthData(
+  samples: BandwidthDeltaSample[],
+  range: TrafficRangeBounds | null = null,
+): HourlyBandwidthDatum[] {
   const grouped = new Map<number, { totalBytes: number; routerBytes: number; serviceBytes: number }>();
 
   for (const sample of samples) {
@@ -393,6 +415,29 @@ export function buildHourlyBandwidthData(samples: BandwidthDeltaSample[]): Hourl
       routerBytes: existing.routerBytes + routerPeak,
       serviceBytes: existing.serviceBytes + servicePeak,
     });
+  }
+
+  if (range) {
+    const result: HourlyBandwidthDatum[] = [];
+    let currentTs = Math.floor(range.startTs / HOUR_MS) * HOUR_MS;
+    const endTs = range.endTs;
+
+    while (currentTs < endTs) {
+      const values = grouped.get(currentTs) ?? {
+        totalBytes: 0,
+        routerBytes: 0,
+        serviceBytes: 0,
+      };
+      result.push({
+        hourStartTs: currentTs,
+        hour: formatHourLabel(currentTs),
+        totalBytes: values.totalBytes,
+        routerBytes: values.routerBytes,
+        serviceBytes: values.serviceBytes,
+      });
+      currentTs += HOUR_MS;
+    }
+    return result;
   }
 
   return Array.from(grouped.entries())
@@ -474,7 +519,7 @@ export default function Dashboard() {
   const { data: routesResponse, isLoading: routesLoading } = useRoutes();
   const { data: servicesResponse, isLoading: servicesLoading } = useServices();
   const reqPerSec = useRequestsPerSecond();
-  const [trafficFilterMode, setTrafficFilterMode] = useState<TrafficFilterMode>("all");
+  const [trafficFilterMode, setTrafficFilterMode] = useState<TrafficFilterMode>("range");
   const [trafficDate, setTrafficDate] = useState("");
   const [trafficRangePreset, setTrafficRangePreset] = useState<TrafficRangePreset>("last24h");
   const [trafficRangeStart, setTrafficRangeStart] = useState("");
@@ -559,13 +604,13 @@ export default function Dashboard() {
   );
 
   const hourlyTrafficData = useMemo(
-    () => buildHourlyTrafficData(filteredTrafficSamples),
-    [filteredTrafficSamples],
+    () => buildHourlyTrafficData(filteredTrafficSamples, trafficRangeBounds),
+    [filteredTrafficSamples, trafficRangeBounds],
   );
 
   const hourlyBandwidthData = useMemo(
-    () => buildHourlyBandwidthData(filteredBandwidthSamples),
-    [filteredBandwidthSamples],
+    () => buildHourlyBandwidthData(filteredBandwidthSamples, trafficRangeBounds),
+    [filteredBandwidthSamples, trafficRangeBounds],
   );
 
   const bandwidthSummaries = useMemo(
@@ -909,7 +954,7 @@ export default function Dashboard() {
       >
         <Group justify="space-between" mb="md" wrap="wrap">
           <Title order={5} fw={700} c="dimmed" style={{ letterSpacing: 1 }}>
-            TRAFFIC BY HOUR
+            TRAFFIC PER HOUR
           </Title>
           <Text size="xs" c="dimmed" fw={600}>
             {trafficWindowLabel}
@@ -1001,7 +1046,7 @@ export default function Dashboard() {
         <Stack mt="lg" gap="md">
           <Group justify="space-between" wrap="wrap">
             <Text size="sm" fw={700}>
-              BANDWIDTH BY HOUR
+              BANDWIDTH PER HOUR
             </Text>
             <Text size="xs" c="dimmed">
               Total, router, and service hourly bandwidth

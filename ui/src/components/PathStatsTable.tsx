@@ -14,6 +14,7 @@ import {
   Select,
   Button,
   Pagination,
+  Tooltip,
 } from "@mantine/core";
 import { IconActivity, IconSearch } from "@tabler/icons-react";
 
@@ -116,7 +117,14 @@ export function PathStatsTable() {
             searchable
             clearable
             size="xs"
-            w={220}
+            w={{ base: "100%", sm: 350 }}
+            renderOption={({ option }) => (
+              <Tooltip label={option.value} position="right" withArrow openDelay={400}>
+                <Text size="xs" truncate="end" style={{ maxWidth: '100%' }}>
+                  {option.value}
+                </Text>
+              </Tooltip>
+            )}
           />
           <Button
             variant="subtle"
