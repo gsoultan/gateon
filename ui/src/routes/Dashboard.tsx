@@ -536,7 +536,14 @@ export default function Dashboard() {
         trafficRangeStart,
         trafficRangeEnd,
       ),
-    [trafficDate, trafficFilterMode, trafficRangeEnd, trafficRangePreset, trafficRangeStart],
+    [
+      trafficDate,
+      trafficFilterMode,
+      trafficRangeEnd,
+      trafficRangePreset,
+      trafficRangeStart,
+      requestDeltaHistory,
+    ],
   );
 
   useEffect(() => {
@@ -590,7 +597,7 @@ export default function Dashboard() {
       routerBytes: Object.fromEntries(routerBytes),
       serviceBytes: Object.fromEntries(serviceBytes),
     };
-    setBandwidthDeltaHistory((prev) => [...prev, sample].slice(-720));
+    setBandwidthDeltaHistory((prev) => [...prev, sample].slice(-100000));
   }, [pathStats, routesResponse?.routes, servicesResponse?.services]);
 
   const filteredTrafficSamples = useMemo(
