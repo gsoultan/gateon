@@ -7,7 +7,7 @@ Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balanc
   - Modern HTTP reverse proxy with path/host routing
   - Built-in load balancer (**Round Robin** and **Least Connections**) with active health checks per route
   - **Circuit Breaker**: Automatic failure detection and target isolation (Closed, Open, Half-Open states)
-  - **WebSocket Support**: Full-duplex proxying for modern real-time applications
+  - **WebSocket and SSE Support**: Full-duplex proxying and real-time streaming for modern applications (see [doc/websockets-sse.md](doc/websockets-sse.md))
   - **Cloud-native Observability**:
     - **Prometheus Metrics** (requests total, latency duration) via `/metrics` endpoint.
     - **Structured JSON Access Logging** for all traffic.

@@ -3,7 +3,7 @@ import { useAggStats } from "./useAggStats";
 
 const HISTORY_LEN = 24;
 const HISTORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-const MAX_HISTORY_SAMPLES = 10_000;
+const MAX_HISTORY_SAMPLES = 100_000;
 
 export type RequestDeltaSample = {
   ts: number;
