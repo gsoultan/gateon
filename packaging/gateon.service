@@ -11,13 +11,13 @@ Restart=on-failure
 RestartSec=5s
 
 # Config: place global.json, routes.json, etc. in /etc/gateon
-WorkingDirectory=/etc/gateon
+WorkingDirectory=/var/lib/gateon
+Environment=GLOBAL_CONFIG_FILE=/etc/gateon/global.json
 
 # Override with: systemctl edit gateon
 # Environment=PORT=8080
-# Environment=GLOBAL_CONFIG_FILE=/etc/gateon/global.json
 
-# State directory (auto-created at /var/lib/gateon with correct permissions)
+# State and config directories (auto-created with correct permissions)
 StateDirectory=gateon
 ConfigurationDirectory=gateon
 
@@ -26,7 +26,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/etc/gateon
+ReadWritePaths=-/etc/gateon -/var/lib/gateon
 
 [Install]
 WantedBy=multi-user.target

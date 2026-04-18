@@ -58,6 +58,7 @@ func runCmd(cmd *exec.Cmd) error {
 const (
 	systemdUnitPath = "/lib/systemd/system/gateon.service"
 	configDir       = "/etc/gateon"
+	stateDir        = "/var/lib/gateon"
 )
 
 const systemdUnitTemplate = `[Unit]
@@ -72,11 +73,18 @@ ExecStart=%s
 Restart=on-failure
 RestartSec=5s
 WorkingDirectory=%s
+Environment=GLOBAL_CONFIG_FILE=%s/global.json
+
+# State and config directories
+StateDirectory=gateon
+ConfigurationDirectory=gateon
+
+# Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=%s /var/lib/gateon
+ReadWritePaths=-%s -%s
 
 [Install]
 WantedBy=multi-user.target
@@ -87,13 +95,17 @@ func installLinux(binPath string) error {
 		return fmt.Errorf("run as root (sudo) to install: sudo gateon install")
 	}
 
-	content := fmt.Sprintf(systemdUnitTemplate, binPath, configDir, configDir)
+	content := fmt.Sprintf(systemdUnitTemplate, binPath, stateDir, configDir, configDir, stateDir)
 	if err := os.WriteFile(systemdUnitPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
 
 	if err := os.MkdirAll(configDir, 0o755); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create config dir %s: %w", configDir, err)
+	}
+
+	if err := os.MkdirAll(stateDir, 0o700); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create state dir %s: %w", stateDir, err)
 	}
 
 	if err := runCmd(exec.Command("systemctl", "daemon-reload")); err != nil {
@@ -106,7 +118,9 @@ func installLinux(binPath string) error {
 		return err
 	}
 
-	fmt.Printf("Gateon installed as systemd service. Config dir: %s\n", configDir)
+	fmt.Printf("Gateon installed as systemd service.\n")
+	fmt.Printf("  Config dir: %s\n", configDir)
+	fmt.Printf("  State dir:  %s\n", stateDir)
 	fmt.Printf("  status: systemctl status gateon\n")
 	fmt.Printf("  logs:   journalctl -u gateon -f\n")
 	return nil

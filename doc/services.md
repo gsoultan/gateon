@@ -56,7 +56,7 @@ sudo systemctl enable gateon   # start on boot
    ```
 
 3. Copy the binary to `/usr/bin/gateon` (or adjust the unit).
-4. Create `/etc/gateon`, put your config files there.
+4. Create `/etc/gateon` and `/var/lib/gateon`, then put your config files in `/etc/gateon`.
 5. `sudo systemctl start gateon && sudo systemctl enable gateon`
 
 ## Windows
