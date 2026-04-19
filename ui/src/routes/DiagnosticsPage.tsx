@@ -2,16 +2,16 @@ import React, { useEffect, useState } from "react";
 import { getDiagnostics } from "../hooks/api";
 import type { GetDiagnosticsResponse } from "../types/gateon";
 import { 
-  Activity, 
-  AlertTriangle, 
-  CheckCircle, 
-  Globe, 
-  Shield, 
-  Server, 
-  RefreshCcw,
-  Clock,
-  ExternalLink
-} from "lucide-react";
+  IconActivity, 
+  IconAlertTriangle, 
+  IconCircleCheck, 
+  IconGlobe, 
+  IconShield, 
+  IconServer, 
+  IconRefresh,
+  IconClock,
+  IconExternalLink
+} from "@tabler/icons-react";
 
 const DiagnosticsPage: React.FC = () => {
   const [data, setData] = useState<GetDiagnosticsResponse | null>(null);
@@ -40,7 +40,7 @@ const DiagnosticsPage: React.FC = () => {
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCcw className="w-8 h-8 animate-spin text-blue-500" />
+        <IconRefresh className="w-8 h-8 animate-spin text-blue-500" />
       </div>
     );
   }
@@ -49,7 +49,7 @@ const DiagnosticsPage: React.FC = () => {
     return (
       <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
         <h3 className="text-lg font-bold flex items-center">
-          <AlertTriangle className="mr-2" /> Error
+          <IconAlertTriangle className="mr-2" /> Error
         </h3>
         <p>{error}</p>
         <button 
@@ -73,7 +73,7 @@ const DiagnosticsPage: React.FC = () => {
           onClick={fetchData}
           className="flex items-center px-4 py-2 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 transition"
         >
-          <RefreshCcw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          <IconRefresh className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </button>
       </div>
@@ -82,7 +82,7 @@ const DiagnosticsPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
           <div className="flex items-center text-slate-500 text-sm font-medium mb-3">
-            <Globe className="w-4 h-4 mr-2 text-blue-500" />
+            <IconGlobe className="w-4 h-4 mr-2 text-blue-500" />
             Public IP Address
           </div>
           <div className="text-2xl font-mono font-bold text-slate-800">
@@ -95,18 +95,18 @@ const DiagnosticsPage: React.FC = () => {
 
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
           <div className="flex items-center text-slate-500 text-sm font-medium mb-3">
-            <Shield className="w-4 h-4 mr-2 text-orange-500" />
+            <IconShield className="w-4 h-4 mr-2 text-orange-500" />
             Cloudflare Reachability
           </div>
           <div className="flex items-center">
             {data?.system.cloudflare_reachable ? (
               <>
-                <CheckCircle className="w-6 h-6 text-emerald-500 mr-2" />
+                <IconCircleCheck className="w-6 h-6 text-emerald-500 mr-2" />
                 <span className="text-2xl font-bold text-slate-800">Reachable</span>
               </>
             ) : (
               <>
-                <AlertTriangle className="w-6 h-6 text-red-500 mr-2" />
+                <IconAlertTriangle className="w-6 h-6 text-red-500 mr-2" />
                 <span className="text-2xl font-bold text-slate-800">Unreachable</span>
               </>
             )}
@@ -118,7 +118,7 @@ const DiagnosticsPage: React.FC = () => {
 
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
           <div className="flex items-center text-slate-500 text-sm font-medium mb-3">
-            <Activity className="w-4 h-4 mr-2 text-purple-500" />
+            <IconActivity className="w-4 h-4 mr-2 text-purple-500" />
             Recent TLS Errors
           </div>
           <div className="text-2xl font-bold text-slate-800">
@@ -133,7 +133,7 @@ const DiagnosticsPage: React.FC = () => {
       {/* Troubleshooting Tips for 521 */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-5">
         <h3 className="text-blue-800 font-bold flex items-center mb-2">
-          <AlertTriangle className="w-5 h-5 mr-2" /> Troubleshooting Cloudflare 521
+          <IconAlertTriangle className="w-5 h-5 mr-2" /> Troubleshooting Cloudflare 521
         </h3>
         <ul className="text-sm text-blue-700 space-y-1 list-disc ml-5">
           <li>Verify your firewall allows incoming traffic from <a href="https://www.cloudflare.com/ips/" target="_blank" rel="noreferrer" className="underline font-medium">Cloudflare IP ranges</a>.</li>
@@ -147,7 +147,7 @@ const DiagnosticsPage: React.FC = () => {
         {/* Entrypoints List */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
-            <Server className="w-5 h-5 mr-2 text-slate-500" />
+            <IconServer className="w-5 h-5 mr-2 text-slate-500" />
             <h2 className="font-bold text-slate-700">Entrypoint Status</h2>
           </div>
           <div className="overflow-x-auto">
@@ -190,13 +190,13 @@ const DiagnosticsPage: React.FC = () => {
         {/* Recent TLS Errors */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center">
-            <Shield className="w-5 h-5 mr-2 text-slate-500" />
+            <IconShield className="w-5 h-5 mr-2 text-slate-500" />
             <h2 className="font-bold text-slate-700">Recent TLS Handshake Errors</h2>
           </div>
           <div className="p-0">
             {data?.recent_tls_errors.length === 0 ? (
               <div className="p-10 text-center text-slate-400">
-                <CheckCircle className="w-10 h-10 mx-auto mb-2 text-emerald-200" />
+                <IconCircleCheck className="w-10 h-10 mx-auto mb-2 text-emerald-200" />
                 No recent TLS errors detected.
               </div>
             ) : (
@@ -206,7 +206,7 @@ const DiagnosticsPage: React.FC = () => {
                     <li key={i} className="p-4 hover:bg-slate-50 transition">
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-xs font-bold text-slate-400 flex items-center font-mono">
-                          <Clock className="w-3 h-3 mr-1" />
+                          <IconClock className="w-3 h-3 mr-1" />
                           {new Date(err.timestamp).toLocaleTimeString()}
                         </span>
                         <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-bold">
