@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"golang.org/x/crypto/acme"
@@ -20,6 +21,11 @@ import (
 type TLSManager interface {
 	GetTLSConfig() (*tls.Config, error)
 	LoadCertificate(certFile, keyFile, caFile string) (*tls.Certificate, *x509.CertPool, error)
+	LoadCA(caFile string) (*x509.CertPool, error)
+	LoadCAData(caFile string) ([]byte, error)
+	Certificates() []CertificateConfig
+	ClearCache()
+	UpdateConfig(cfg Config)
 	HTTPChallengeHandler(fallback http.Handler) http.Handler
 	SetHostPolicy(policy func(ctx context.Context, host string) error)
 	SetCache(cache autocert.Cache)
@@ -66,6 +72,10 @@ type ClientAuthorityConfig struct {
 // Manager handles TLS certificates and ACME.
 type Manager struct {
 	config Config
+	mu     sync.RWMutex
+	cache  map[string]*tls.Certificate
+	pools  map[string]*x509.CertPool
+	caData map[string][]byte
 }
 
 // NewManager creates a new TLS Manager.
@@ -77,12 +87,33 @@ func NewManager(cfg Config) *Manager {
 	if cfg.Acme.Email == "" {
 		cfg.Acme.Email = cfg.Email
 	}
-	return &Manager{config: cfg}
+	return &Manager{
+		config: cfg,
+		cache:  make(map[string]*tls.Certificate),
+		pools:  make(map[string]*x509.CertPool),
+		caData: make(map[string][]byte),
+	}
 }
 
 // Certificates returns the certificates managed by this Manager.
 func (m *Manager) Certificates() []CertificateConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.config.Certificates
+}
+
+func (m *Manager) ClearCache() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cache = make(map[string]*tls.Certificate)
+	m.pools = make(map[string]*x509.CertPool)
+	m.caData = make(map[string][]byte)
+}
+
+func (m *Manager) UpdateConfig(cfg Config) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config = cfg
 }
 
 func (m *Manager) SetHostPolicy(policy func(ctx context.Context, host string) error) {
@@ -97,6 +128,15 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 	certFile = config.ResolvePath(certFile)
 	keyFile = config.ResolvePath(keyFile)
 	caFile = config.ResolvePath(caFile)
+
+	cacheKey := certFile + "|" + keyFile + "|" + caFile
+	m.mu.RLock()
+	if cert, ok := m.cache[cacheKey]; ok {
+		pool := m.pools[cacheKey]
+		m.mu.RUnlock()
+		return cert, pool, nil
+	}
+	m.mu.RUnlock()
 
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
@@ -128,7 +168,66 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 		}
 	}
 
+	m.mu.Lock()
+	m.cache[cacheKey] = &cert
+	m.pools[cacheKey] = clientCAs
+	m.mu.Unlock()
+
 	return &cert, clientCAs, nil
+}
+
+func (m *Manager) LoadCAData(caFile string) ([]byte, error) {
+	if caFile == "" {
+		return nil, nil
+	}
+	caFile = config.ResolvePath(caFile)
+
+	m.mu.RLock()
+	if data, ok := m.caData[caFile]; ok {
+		m.mu.RUnlock()
+		return data, nil
+	}
+	m.mu.RUnlock()
+
+	caData, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CA file: %w", err)
+	}
+
+	m.mu.Lock()
+	m.caData[caFile] = caData
+	m.mu.Unlock()
+
+	return caData, nil
+}
+
+func (m *Manager) LoadCA(caFile string) (*x509.CertPool, error) {
+	if caFile == "" {
+		return nil, nil
+	}
+	caFile = config.ResolvePath(caFile)
+
+	m.mu.RLock()
+	if pool, ok := m.pools[caFile]; ok {
+		m.mu.RUnlock()
+		return pool, nil
+	}
+	m.mu.RUnlock()
+
+	caData, err := m.LoadCAData(caFile)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caData) {
+		return nil, fmt.Errorf("failed to parse CA certificate")
+	}
+
+	m.mu.Lock()
+	m.pools[caFile] = pool
+	m.mu.Unlock()
+
+	return pool, nil
 }
 
 func (m *Manager) GetTLSConfig() (*tls.Config, error) {
@@ -142,34 +241,11 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 		// Case 1: Multiple Manual Certificates
 		var certs []tls.Certificate
 		for _, c := range m.config.Certificates {
-			certFile := config.ResolvePath(c.CertFile)
-			keyFile := config.ResolvePath(c.KeyFile)
-			caFile := config.ResolvePath(c.CaFile)
-
-			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			cert, _, err := m.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
 			if err != nil {
-				return nil, fmt.Errorf("failed to load key pair for %s: %w", certFile, err)
+				return nil, err
 			}
-
-			if caFile != "" {
-				caData, err := os.ReadFile(caFile)
-				if err != nil {
-					return nil, fmt.Errorf("failed to read CA file for %s: %w", certFile, err)
-				}
-				// Append CA to Certificate chain
-				data := caData
-				for {
-					var block *pem.Block
-					block, data = pem.Decode(data)
-					if block == nil {
-						break
-					}
-					if block.Type == "CERTIFICATE" {
-						cert.Certificate = append(cert.Certificate, block.Bytes)
-					}
-				}
-			}
-			certs = append(certs, cert)
+			certs = append(certs, *cert)
 		}
 		tlsConfig = &tls.Config{
 			Certificates: certs,
@@ -234,7 +310,7 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 	}
 
 	for _, ca := range m.config.ClientAuthorities {
-		caData, err := os.ReadFile(ca.CaFile)
+		caData, err := m.LoadCAData(ca.CaFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read client authority file %s: %w", ca.CaFile, err)
 		}

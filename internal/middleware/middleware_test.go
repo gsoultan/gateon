@@ -72,7 +72,8 @@ func TestAPIKeyValidator(t *testing.T) {
 	keys := map[string]string{
 		"key1": "tenant1",
 	}
-	v := NewAPIKeyValidator(keys, "X-API-Key", "")
+	store := NewMemoryAPIKeyStore(keys, false)
+	v := NewAPIKeyValidator(store, "X-API-Key", "", AuthBaseConfig{})
 
 	handler := v.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -549,5 +550,33 @@ func TestWasm_MinimalValid(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestErrors_ReplacesBody(t *testing.T) {
+	cfg := ErrorsConfig{
+		StatusCodes: []int{http.StatusNotFound},
+		CustomPages: map[int]string{
+			http.StatusNotFound: "<html>Custom 404</html>",
+		},
+	}
+	mw := Errors(cfg)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("original body"))
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", rr.Code)
+	}
+	if rr.Body.String() != "<html>Custom 404</html>" {
+		t.Errorf("expected custom body, got %q", rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("expected text/html, got %q", ct)
 	}
 }

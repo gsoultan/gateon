@@ -38,7 +38,8 @@ func (s *TLSOptionServiceImpl) SaveTLSOption(ctx context.Context, opt *gateonv1.
 	if err := s.store.Update(ctx, opt); err != nil {
 		return err
 	}
-	// Invalidate routes using this TLS option
+	// Invalidate TLS cache and routes using this TLS option
+	s.invalidator.InvalidateTLS()
 	s.invalidator.InvalidateRoutes(func(rt *gateonv1.Route) bool {
 		return rt.Tls != nil && rt.Tls.OptionId == opt.Id
 	})
@@ -67,7 +68,8 @@ func (s *TLSOptionServiceImpl) DeleteTLSOption(ctx context.Context, id string) e
 		return err
 	}
 
-	// 3. Invalidate proxies
+	// 3. Invalidate TLS cache and proxies
+	s.invalidator.InvalidateTLS()
 	for _, rid := range affectedIDs {
 		s.invalidator.InvalidateRoute(rid)
 	}

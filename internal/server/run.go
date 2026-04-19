@@ -30,17 +30,6 @@ const ShutdownTimeout = 30 * time.Second
 // Run starts the gateway: gRPC server, REST mux, base handler, entrypoints, and proxy sync loop.
 // It blocks until ctx is cancelled, then shuts down all servers gracefully and returns.
 func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
-	apiService := api.NewApiService(api.ApiServiceConfig{
-		Version:     s.Version,
-		Routes:      s.RouteStore,
-		Services:    s.ServiceStore,
-		Globals:     s.GlobalStore,
-		EntryPoints: s.EpStore,
-		Middlewares: s.MwStore,
-		TLSOptions:  s.TLSOptStore,
-		Auth:        s.AuthManager,
-	})
-
 	var wg syncutil.WaitGroup
 	l4Resolver := l4.NewResolver(s.RouteStore, s.ServiceStore)
 	proxyInvalidator := NewServerProxyInvalidator(s, l4Resolver, s.RouteStore)
@@ -50,6 +39,17 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 			StartInvalidationListener(ctx, proxyInvalidator, s.RedisClient)
 		})
 	}
+	apiService := api.NewApiService(api.ApiServiceConfig{
+		Version:     s.Version,
+		Routes:      s.RouteStore,
+		Services:    s.ServiceStore,
+		Globals:     s.GlobalStore,
+		EntryPoints: s.EpStore,
+		Middlewares: s.MwStore,
+		TLSOptions:  s.TLSOptStore,
+		Auth:        s.AuthManager,
+		Invalidator: proxyInvalidator,
+	})
 	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
 	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)
 	epService := domain.NewEntryPointService(s.EpStore)
@@ -93,8 +93,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		LoginLimiter: loginLimiter,
 	}, internalAPI, mux)
 	c := BuildCORS()
-	tlsManager := CreateTLSManager(s)
-	tlsConfig, err := tlsManager.GetTLSConfig()
+	s.TLSManager = CreateTLSManager(s)
+	tlsConfig, err := s.TLSManager.GetTLSConfig()
 	if err != nil {
 		logger.L.Fatal().Err(err).Msg("failed to initialize tls")
 	}
@@ -108,7 +108,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		}
 		logger.L.Info().Msg("created base TLS config for entrypoint-level TLS (global TLS not enabled)")
 	}
-	SetupSNI(tlsConfig, tlsManager, SNIDeps{
+	SetupSNI(tlsConfig, s.TLSManager, SNIDeps{
 		RouteStore:  s.RouteStore,
 		GlobalStore: s.GlobalStore,
 		TLSOptStore: s.TLSOptStore,
@@ -119,14 +119,14 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	if gc := s.GlobalStore.Get(ctx); gc != nil {
 		mgmtConfig = gc.Management
 	}
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, tlsManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig)
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	metricsStop := make(chan struct{})
 	telemetry.StartSystemMetricsCollector(metricsStop)
 
 	// Start TLS certificate expiry monitoring
-	certInfos := collectCertInfos(ctx, s, tlsManager)
+	certInfos := collectCertInfos(ctx, s, s.TLSManager)
 	telemetry.StartTLSCertMonitor(certInfos, metricsStop)
 
 	logger.L.Info().Str("port", s.Port).Msg("Gateon API Gateway started")
@@ -161,7 +161,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 }
 
 // collectCertInfos gathers TLS certificate info from global TLS config and TLS Manager for expiry monitoring.
-func collectCertInfos(ctx context.Context, s *Server, tlsManager *gtls.Manager) []telemetry.CertInfo {
+func collectCertInfos(ctx context.Context, s *Server, tlsManager gtls.TLSManager) []telemetry.CertInfo {
 	var certs []telemetry.CertInfo
 	seen := make(map[string]bool)
 
