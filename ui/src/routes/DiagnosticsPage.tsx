@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getDiagnostics } from "../hooks/api";
-import { GetDiagnosticsResponse } from "../types/gateon";
+import type { GetDiagnosticsResponse } from "../types/gateon";
 import { 
   Activity, 
   AlertTriangle, 
