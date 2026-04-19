@@ -7,8 +7,11 @@ import {
   Text,
   Button,
   FileButton,
+  ActionIcon,
+  Divider,
 } from "@mantine/core";
 import { useState } from "react";
+import { IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { apiFetch } from "../../hooks/useGateon";
 
@@ -233,6 +236,118 @@ export function HMACConfigEditor({ config, updateConfig }: EditorProps) {
         }
         min={1024}
       />
+    </Stack>
+  );
+}
+
+export function XFCCConfigEditor({ config, updateConfig }: EditorProps) {
+  return (
+    <Stack gap="md">
+      <Text size="sm">Extract and forward client certificate details to backend services via X-Forwarded-Client-Cert header.</Text>
+      <Switch
+        label="Forward By"
+        checked={config.forward_by === "true"}
+        onChange={(e) => updateConfig("forward_by", e.currentTarget.checked ? "true" : "false")}
+      />
+      <Switch
+        label="Forward Hash"
+        checked={config.forward_hash === "true"}
+        onChange={(e) => updateConfig("forward_hash", e.currentTarget.checked ? "true" : "false")}
+      />
+      <Switch
+        label="Forward Subject"
+        checked={config.forward_subject === "true"}
+        onChange={(e) => updateConfig("forward_subject", e.currentTarget.checked ? "true" : "false")}
+      />
+      <Switch
+        label="Forward URI"
+        checked={config.forward_uri === "true"}
+        onChange={(e) => updateConfig("forward_uri", e.currentTarget.checked ? "true" : "false")}
+      />
+      <Switch
+        label="Forward DNS"
+        checked={config.forward_dns === "true"}
+        onChange={(e) => updateConfig("forward_dns", e.currentTarget.checked ? "true" : "false")}
+      />
+    </Stack>
+  );
+}
+
+export function PolicyConfigEditor({ config, onChange }: { config: Record<string, string>; onChange: (config: Record<string, string>) => void }) {
+  const rules = Object.entries(config)
+    .filter(([k]) => k.startsWith("rule_"))
+    .map(([k, v]) => ({
+      name: k.replace("rule_", ""),
+      expression: v,
+      message: config[`message_${k.replace("rule_", "")}`] || "",
+    }));
+
+  const updateConfig = (key: string, value: string) => {
+    onChange({ ...config, [key]: value });
+  };
+
+  const addRule = () => {
+    const id = Date.now();
+    onChange({
+      ...config,
+      [`rule_new_rule_${id}`]: "true",
+      [`message_new_rule_${id}`]: "",
+    });
+  };
+
+  const removeRule = (name: string) => {
+    const newConfig = { ...config };
+    delete newConfig[`rule_${name}`];
+    delete newConfig[`message_${name}`];
+    onChange(newConfig);
+  };
+
+  return (
+    <Stack gap="md">
+      <Text size="sm">
+        Evaluate CEL (Common Expression Language) expressions against the request and auth context.
+        Variables: `request.method`, `request.path`, `request.header`, `auth.claims`.
+      </Text>
+      {rules.map((rule, index) => (
+        <Stack key={index} gap="xs" style={{ border: '1px solid var(--mantine-color-gray-2)', padding: '12px', borderRadius: '8px' }}>
+          <Group justify="space-between" align="flex-end">
+            <TextInput
+              label="Rule Name"
+              placeholder="e.g. admin_only"
+              value={rule.name}
+              onChange={(e) => {
+                const newName = e.currentTarget.value;
+                if (!newName || newName === rule.name) return;
+                const newConfig = { ...config };
+                delete newConfig[`rule_${rule.name}`];
+                delete newConfig[`message_${rule.name}`];
+                newConfig[`rule_${newName}`] = rule.expression;
+                newConfig[`message_${newName}`] = rule.message;
+                onChange(newConfig);
+              }}
+              style={{ flex: 1 }}
+            />
+            <ActionIcon color="red" variant="light" onClick={() => removeRule(rule.name)} mb="xs">
+              <IconTrash size={16} />
+            </ActionIcon>
+          </Group>
+          <TextInput
+            label="CEL Expression"
+            placeholder="auth.role == 'admin'"
+            value={rule.expression}
+            onChange={(e) => updateConfig(`rule_${rule.name}`, e.currentTarget.value)}
+          />
+          <TextInput
+            label="Error Message (optional)"
+            placeholder="Access denied: Admin role required"
+            value={rule.message}
+            onChange={(e) => updateConfig(`message_${rule.name}`, e.currentTarget.value)}
+          />
+        </Stack>
+      ))}
+      <Button variant="light" leftSection={<IconPlus size={14} />} onClick={addRule} style={{ alignSelf: 'flex-start' }}>
+        Add Rule
+      </Button>
     </Stack>
   );
 }
