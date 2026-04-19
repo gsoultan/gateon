@@ -11,7 +11,6 @@ import (
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -24,10 +23,12 @@ const (
 
 // JWTConfig holds configuration for JWT validation.
 type JWTConfig struct {
-	Issuer   string
-	Audience string
-	JWKSURL  string // For remote JWKS validation
-	Secret   []byte // For local secret validation
+	AuthBaseConfig
+	Issuer          string
+	Audience        string
+	JWKSURL         string          // For remote JWKS validation
+	Secret          []byte          // For local secret validation
+	RevocationStore RevocationStore // Optional store to check for revoked jti
 }
 
 // JWTValidator validates JWT tokens in the Authorization header.
@@ -57,113 +58,125 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		activeRouteID := GetRouteName(r)
 
-		tokenString := bearerToken(r)
-		if tokenString == "" {
-			tokenString = r.URL.Query().Get("token")
-		}
-		if tokenString == "" {
-			tokenString = r.URL.Query().Get("access_token")
-		}
+		activeRouteID := GetRouteName(r)
+		tokenString := ExtractToken(r)
+
 		if tokenString == "" {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header or token query param required", "")
+			v.config.HandleFailure(w, r, next, errors.New("authorization header, session cookie, or token query param required"))
 			return
 		}
 
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
-			if v.kf != nil {
-				return v.kf.Keyfunc(token)
-			}
-			// Validate algorithm for HMAC
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return v.config.Secret, nil
-		})
-
+		token, err := jwt.Parse(tokenString, v.keyFunc)
 		if err != nil {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
-			if errors.Is(err, jwt.ErrTokenExpired) {
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "token expired", "")
-				return
-			}
-			httputil.WriteJSONError(w, http.StatusUnauthorized, fmt.Sprintf("invalid token: %v", err), "")
+			v.config.HandleFailure(w, r, next, v.formatJWTError(err))
 			return
 		}
 
 		if !token.Valid {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid token", "")
+			v.config.HandleFailure(w, r, next, errors.New("invalid token"))
 			return
 		}
 
-		// Verify claims
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid token claims", "")
+			v.config.HandleFailure(w, r, next, errors.New("invalid token claims"))
 			return
 		}
 
-		if v.config.Issuer != "" {
-			iss, _ := claims.GetIssuer()
-			if iss != v.config.Issuer {
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid issuer", "")
-				return
-			}
+		if err := v.validateToken(r.Context(), claims); err != nil {
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
+			v.config.HandleFailure(w, r, next, err)
+			return
 		}
 
-		if v.config.Audience != "" {
-			aud, _ := claims.GetAudience()
-			found := false
-			for _, a := range aud {
-				if a == v.config.Audience {
-					found = true
-					break
-				}
-			}
-			if !found {
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid audience", "")
-				return
-			}
-		}
-
-		// Set claims in context
-		ctx := context.WithValue(r.Context(), UserContextKey, claims)
-
-		// Try to extract tenant_id from claims
-		if tenantID, ok := claims["tenant_id"].(string); ok {
-			ctx = context.WithValue(ctx, TenantIDContextKey, tenantID)
-		} else if sub, ok := claims["sub"].(string); ok {
-			// Fallback to sub as tenant_id if not present
-			ctx = context.WithValue(ctx, TenantIDContextKey, sub)
-		}
+		// Success: Inject metadata and continue
+		ctx := InjectContext(r.Context(), claims)
+		v.config.MapClaimsToHeaders(r, claims)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// APIKeyValidator validates API keys from header or query (for WebSocket clients).
-type APIKeyValidator struct {
-	Keys       map[string]string // Key -> TenantID mapping
-	HeaderName string            // e.g. "X-API-Key"
-	QueryParam string            // e.g. "api_key" for ?api_key=xxx (optional)
+func (v *JWTValidator) keyFunc(token *jwt.Token) (any, error) {
+	if v.kf != nil {
+		return v.kf.Keyfunc(token)
+	}
+	// Validate algorithm for HMAC
+	if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+	}
+	return v.config.Secret, nil
 }
 
-// NewAPIKeyValidator creates a new APIKeyValidator. headerName defaults to "X-API-Key".
-// queryParam enables ?api_key=xxx for WebSocket; "none" or empty = header only.
-func NewAPIKeyValidator(keys map[string]string, headerName, queryParam string) *APIKeyValidator {
-	if headerName == "" {
-		headerName = "X-API-Key"
+func (v *JWTValidator) formatJWTError(err error) error {
+	if errors.Is(err, jwt.ErrTokenExpired) {
+		return errors.New("token expired")
 	}
-	qp := strings.TrimSpace(queryParam)
-	if strings.EqualFold(qp, "none") || strings.EqualFold(qp, "disabled") {
-		qp = ""
-	} else if qp == "" {
-		qp = "api_key" // default for WebSocket compatibility
+	return fmt.Errorf("invalid token: %v", err)
+}
+
+func (v *JWTValidator) validateToken(ctx context.Context, claims jwt.MapClaims) error {
+	if v.config.Issuer != "" {
+		iss, _ := claims.GetIssuer()
+		if iss != v.config.Issuer {
+			return errors.New("invalid issuer")
+		}
 	}
-	return &APIKeyValidator{Keys: keys, HeaderName: headerName, QueryParam: qp}
+
+	if v.config.Audience != "" {
+		aud, _ := claims.GetAudience()
+		if !v.checkAudience(aud) {
+			return errors.New("invalid audience")
+		}
+	}
+
+	// Check revocation
+	if v.config.RevocationStore != nil {
+		jti, _ := claims["jti"].(string)
+		if revoked, _ := v.config.RevocationStore.IsRevoked(ctx, jti); revoked {
+			return errors.New("token revoked")
+		}
+	}
+
+	// RBAC/Scope checks
+	return v.config.ValidateClaims(claims)
+}
+
+func (v *JWTValidator) checkAudience(aud []string) bool {
+	for _, a := range aud {
+		if a == v.config.Audience {
+			return true
+		}
+	}
+	return false
+}
+
+// APIKeyValidator validates API keys.
+type APIKeyValidator struct {
+	config AuthBaseConfig
+	store  APIKeyStore
+	header string
+	query  string
+}
+
+// NewAPIKeyValidator creates a new APIKeyValidator.
+func NewAPIKeyValidator(store APIKeyStore, header, query string, baseCfg AuthBaseConfig) *APIKeyValidator {
+	if header == "" {
+		header = "X-API-Key"
+	}
+	if query == "" {
+		query = "api_key"
+	}
+	return &APIKeyValidator{
+		config: baseCfg,
+		store:  store,
+		header: header,
+		query:  query,
+	}
 }
 
 // Handler returns a middleware that validates API keys.
@@ -175,20 +188,21 @@ func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 		}
 		activeRouteID := GetRouteName(r)
 
-		apiKey := r.Header.Get(v.HeaderName)
-		if apiKey == "" && v.QueryParam != "" {
-			apiKey = r.URL.Query().Get(v.QueryParam)
+		apiKey := r.Header.Get(v.header)
+		if apiKey == "" && v.query != "" {
+			apiKey = r.URL.Query().Get(v.query)
 		}
+
 		if apiKey == "" {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "api_key").Inc()
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "API key missing (header or query)", "")
+			v.config.HandleFailure(w, r, next, errors.New("API key missing"))
 			return
 		}
 
-		tenantID, ok := v.Keys[apiKey]
-		if !ok {
+		tenantID, ok, err := v.store.GetTenantID(r.Context(), apiKey)
+		if err != nil || !ok {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "api_key").Inc()
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid API key", "")
+			v.config.HandleFailure(w, r, next, errors.New("invalid API key"))
 			return
 		}
 
@@ -258,7 +272,7 @@ func bearerToken(r *http.Request) string {
 }
 
 // PasetoAuth returns a middleware that validates PASETO tokens from Authorization Bearer or session cookie.
-func PasetoAuth(verifier TokenVerifier) Middleware {
+func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ShouldSkipMetrics(r) {
@@ -270,19 +284,33 @@ func PasetoAuth(verifier TokenVerifier) Middleware {
 			token := ExtractToken(r)
 			if token == "" {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "Authorization header, session cookie, or token/access_token/auth query required", "")
+				cfg.HandleFailure(w, r, next, errors.New("authorization header, session cookie, or token/access_token/auth query required"))
 				return
 			}
 
-			claims, err := verifier.VerifyToken(token)
+			claimsRaw, err := verifier.VerifyToken(token)
 			if err != nil {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "Invalid or expired token", "")
+				cfg.HandleFailure(w, r, next, errors.New("invalid or expired token"))
 				return
 			}
 
-			// Add claims to context
-			ctx := context.WithValue(r.Context(), UserContextKey, claims)
+			claims, ok := claimsRaw.(map[string]any)
+			if !ok {
+				cfg.HandleFailure(w, r, next, errors.New("invalid token claims"))
+				return
+			}
+
+			if err := cfg.ValidateClaims(claims); err != nil {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
+				cfg.HandleFailure(w, r, next, err)
+				return
+			}
+
+			// Add claims to context and headers
+			ctx := InjectContext(r.Context(), claims)
+			cfg.MapClaimsToHeaders(r, claims)
+
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -295,6 +323,11 @@ func BasicAuth(username, password string) Middleware {
 
 // BasicAuthWithRealm returns a middleware with a custom realm.
 func BasicAuthWithRealm(username, password, realm string) Middleware {
+	return BasicAuthWithConfig(username, password, realm, AuthBaseConfig{})
+}
+
+// BasicAuthWithConfig returns a middleware with custom realm and base configuration.
+func BasicAuthWithConfig(username, password, realm string, cfg AuthBaseConfig) Middleware {
 	if realm == "" {
 		realm = "Gateon"
 	}
@@ -310,7 +343,7 @@ func BasicAuthWithRealm(username, password, realm string) Middleware {
 			if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(password)) != 1 {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "Unauthorized", "")
+				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -320,6 +353,11 @@ func BasicAuthWithRealm(username, password, realm string) Middleware {
 
 // BasicAuthUsers validates against multiple users. users is "user1:pass1,user2:pass2".
 func BasicAuthUsers(users string, realm string) (Middleware, error) {
+	return BasicAuthUsersWithConfig(users, realm, AuthBaseConfig{})
+}
+
+// BasicAuthUsersWithConfig validates against multiple users with base configuration.
+func BasicAuthUsersWithConfig(users string, realm string, cfg AuthBaseConfig) (Middleware, error) {
 	if users == "" {
 		return nil, fmt.Errorf("basic auth requires users (format: user1:pass1,user2:pass2)")
 	}
@@ -354,14 +392,14 @@ func BasicAuthUsers(users string, realm string) (Middleware, error) {
 			if !ok {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "Unauthorized", "")
+				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
 				return
 			}
 			expected, found := pairs[u]
 			if !found || subtle.ConstantTimeCompare([]byte(p), []byte(expected)) != 1 {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-				httputil.WriteJSONError(w, http.StatusUnauthorized, "Unauthorized", "")
+				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
 				return
 			}
 			next.ServeHTTP(w, r)

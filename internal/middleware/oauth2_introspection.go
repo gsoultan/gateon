@@ -9,17 +9,15 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/gsoultan/gateon/internal/httputil"
 )
 
 // OAuth2IntrospectionConfig configures OAuth 2.0 token introspection (RFC 7662).
 type OAuth2IntrospectionConfig struct {
-	IntrospectionURL string   // Required
-	ClientID         string   // Required
-	ClientSecret     string   // Required
-	TokenTypeHint    string   // Optional: "access_token" or "refresh_token"
-	ClaimMappings    []string // Optional: e.g. "sub->tenant_id" to map claims to context
+	AuthBaseConfig
+	IntrospectionURL string // Required
+	ClientID         string // Required
+	ClientSecret     string // Required
+	TokenTypeHint    string // Optional: "access_token" or "refresh_token"
 }
 
 // oauth2IntrospectionResponse is the RFC 7662 introspection response.
@@ -53,7 +51,7 @@ const oauth2IntrospectionTimeout = 10 * time.Second
 
 // OAuth2IntrospectionValidator validates opaque access tokens via RFC 7662 introspection.
 type OAuth2IntrospectionValidator struct {
-	cfg    OAuth2IntrospectionConfig
+	config OAuth2IntrospectionConfig
 	client *http.Client
 }
 
@@ -66,45 +64,43 @@ func NewOAuth2IntrospectionValidator(cfg OAuth2IntrospectionConfig) (*OAuth2Intr
 		return nil, fmt.Errorf("oauth2 introspection requires introspection_url, client_id, and client_secret")
 	}
 	client := &http.Client{Timeout: oauth2IntrospectionTimeout}
-	return &OAuth2IntrospectionValidator{cfg: cfg, client: client}, nil
+	return &OAuth2IntrospectionValidator{config: cfg, client: client}, nil
 }
 
 // Handler returns a middleware that validates tokens via OAuth 2.0 introspection.
 func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := bearerToken(r)
+		token := ExtractToken(r)
 		if token == "" {
-			token = r.URL.Query().Get("token")
-		}
-		if token == "" {
-			token = r.URL.Query().Get("access_token")
-		}
-		if token == "" {
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "authorization header or token query required", "")
+			v.config.HandleFailure(w, r, next, fmt.Errorf("authorization header or token query required"))
 			return
 		}
 
 		resp, err := v.introspect(r.Context(), token)
 		if err != nil {
-			httputil.WriteJSONError(w, http.StatusUnauthorized, fmt.Sprintf("token introspection failed: %v", err), "")
+			v.config.HandleFailure(w, r, next, fmt.Errorf("token introspection failed: %v", err))
 			return
 		}
 		if !resp.Active {
-			httputil.WriteJSONError(w, http.StatusUnauthorized, "token inactive or invalid", "")
+			v.config.HandleFailure(w, r, next, fmt.Errorf("token inactive or invalid"))
 			return
 		}
 
-		claims := make(map[string]interface{})
+		claims := make(map[string]any)
 		claims["sub"] = resp.Sub
 		claims["scope"] = resp.Scope
 		for k, val := range resp.Extras {
 			claims[k] = val
 		}
 
-		ctx := context.WithValue(r.Context(), UserContextKey, claims)
-		if resp.Sub != "" {
-			ctx = context.WithValue(ctx, TenantIDContextKey, resp.Sub)
+		if err := v.config.ValidateClaims(claims); err != nil {
+			v.config.HandleFailure(w, r, next, err)
+			return
 		}
+
+		ctx := InjectContext(r.Context(), claims)
+		v.config.MapClaimsToHeaders(r, claims)
+
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -112,13 +108,13 @@ func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 func (v *OAuth2IntrospectionValidator) introspect(ctx context.Context, token string) (*oauth2IntrospectionResponse, error) {
 	form := url.Values{}
 	form.Set("token", token)
-	form.Set("client_id", v.cfg.ClientID)
-	form.Set("client_secret", v.cfg.ClientSecret)
-	if v.cfg.TokenTypeHint != "" {
-		form.Set("token_type_hint", v.cfg.TokenTypeHint)
+	form.Set("client_id", v.config.ClientID)
+	form.Set("client_secret", v.config.ClientSecret)
+	if v.config.TokenTypeHint != "" {
+		form.Set("token_type_hint", v.config.TokenTypeHint)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", v.cfg.IntrospectionURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", v.config.IntrospectionURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}

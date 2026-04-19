@@ -5,9 +5,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
@@ -44,12 +46,14 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			_, _ = w.Write([]byte("invalid file type"))
 			return
 		}
-		destPath := "certs/" + filename
-		if _, err := os.Stat("certs"); os.IsNotExist(err) {
-			_ = os.Mkdir("certs", 0755)
+		certsDir := filepath.Join(config.DataDir(), "certs")
+		if _, err := os.Stat(certsDir); os.IsNotExist(err) {
+			_ = os.MkdirAll(certsDir, 0755)
 		}
+		destPath := filepath.Join(certsDir, filename)
 		dst, err := os.Create(destPath)
 		if err != nil {
+			logger.L.Error().Err(err).Str("path", destPath).Msg("failed to create certificate file")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -58,7 +62,9 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"path": destPath})
+		// Return relative path for use in config, e.g. "certs/filename"
+		relPath := filepath.Join("certs", filename)
+		_ = json.NewEncoder(w).Encode(map[string]string{"path": relPath})
 		logger.L.Info().Str("path", destPath).Msg("certificate uploaded")
 	})
 }

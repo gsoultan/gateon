@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -79,6 +80,11 @@ func NewManager(cfg Config) *Manager {
 	return &Manager{config: cfg}
 }
 
+// Certificates returns the certificates managed by this Manager.
+func (m *Manager) Certificates() []CertificateConfig {
+	return m.config.Certificates
+}
+
 func (m *Manager) SetHostPolicy(policy func(ctx context.Context, host string) error) {
 	m.config.HostPolicy = policy
 }
@@ -88,6 +94,10 @@ func (m *Manager) SetCache(cache autocert.Cache) {
 }
 
 func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certificate, *x509.CertPool, error) {
+	certFile = config.ResolvePath(certFile)
+	keyFile = config.ResolvePath(keyFile)
+	caFile = config.ResolvePath(caFile)
+
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load key pair: %w", err)
@@ -132,15 +142,19 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 		// Case 1: Multiple Manual Certificates
 		var certs []tls.Certificate
 		for _, c := range m.config.Certificates {
-			cert, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+			certFile := config.ResolvePath(c.CertFile)
+			keyFile := config.ResolvePath(c.KeyFile)
+			caFile := config.ResolvePath(c.CaFile)
+
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 			if err != nil {
-				return nil, fmt.Errorf("failed to load key pair for %s: %w", c.CertFile, err)
+				return nil, fmt.Errorf("failed to load key pair for %s: %w", certFile, err)
 			}
 
-			if c.CaFile != "" {
-				caData, err := os.ReadFile(c.CaFile)
+			if caFile != "" {
+				caData, err := os.ReadFile(caFile)
 				if err != nil {
-					return nil, fmt.Errorf("failed to read CA file for %s: %w", c.CertFile, err)
+					return nil, fmt.Errorf("failed to read CA file for %s: %w", certFile, err)
 				}
 				// Append CA to Certificate chain
 				data := caData
@@ -168,10 +182,11 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 		if m.config.Cache != nil {
 			cache = m.config.Cache
 		} else {
-			if err := os.MkdirAll(m.config.CacheDir, 0700); err != nil {
+			cacheDir := config.ResolvePath(m.config.CacheDir)
+			if err := os.MkdirAll(cacheDir, 0700); err != nil {
 				return nil, fmt.Errorf("failed to create cert cache dir: %w", err)
 			}
-			cache = autocert.DirCache(m.config.CacheDir)
+			cache = autocert.DirCache(cacheDir)
 		}
 
 		hp := m.config.HostPolicy
@@ -296,7 +311,8 @@ func (m *Manager) HTTPChallengeHandler(fallback http.Handler) http.Handler {
 	if m.config.Cache != nil {
 		cache = m.config.Cache
 	} else {
-		cache = autocert.DirCache(m.config.CacheDir)
+		cacheDir := config.ResolvePath(m.config.CacheDir)
+		cache = autocert.DirCache(cacheDir)
 	}
 
 	hp := m.config.HostPolicy

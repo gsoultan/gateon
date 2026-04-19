@@ -18,8 +18,10 @@ func CreateTLSManager(s *Server) *gtls.Manager {
 	gc := s.GlobalStore.Get(context.Background())
 	cfg := gtls.InitFromEnv()
 
-	if gc != nil && gc.Tls != nil && gc.Tls.Enabled {
-		cfg.Enabled = true
+	if gc != nil && gc.Tls != nil {
+		if gc.Tls.Enabled {
+			cfg.Enabled = true
+		}
 		if gc.Tls.Email != "" {
 			cfg.Email = gc.Tls.Email
 		}
