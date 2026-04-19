@@ -22,6 +22,7 @@ message EntryPointDiagnostic {
   int64 active_connections = 6;
   string last_error = 7;
   repeated CertificateStatus certificates = 8;
+  string name = 9;
 }
 
 message CertificateStatus {
@@ -37,6 +38,7 @@ message HandshakeError {
   string remote_addr = 2;
   string error = 3;
   string entrypoint_id = 4;
+  string entrypoint_name = 5;
 }
 
 message SystemInfo {

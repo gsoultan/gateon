@@ -425,18 +425,18 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 	}
 
 	// Apply extra configurations
-	minVer := parseTLSVersion(m.config.MinVersion, tls.VersionTLS12)
+	minVer := ParseTLSVersion(m.config.MinVersion, tls.VersionTLS12)
 	if minVer != 0 && minVer < tls.VersionTLS12 {
 		logger.L.Warn().
 			Str("version", m.config.MinVersion).
 			Msg("Insecure TLS version configured. TLS 1.0 and 1.1 are deprecated and have known vulnerabilities. It is highly recommended to use at least TLS 1.2.")
 	}
 	tlsConfig.MinVersion = minVer
-	tlsConfig.MaxVersion = parseTLSVersion(m.config.MaxVersion, 0)
+	tlsConfig.MaxVersion = ParseTLSVersion(m.config.MaxVersion, 0)
 	tlsConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	if m.config.ClientAuthType != "" {
-		tlsConfig.ClientAuth = parseClientAuthType(m.config.ClientAuthType)
+		tlsConfig.ClientAuth = ParseClientAuthType(m.config.ClientAuthType)
 	}
 
 	for _, ca := range m.config.ClientAuthorities {
@@ -458,29 +458,34 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 	}
 
 	if len(m.config.CipherSuites) > 0 {
-		tlsConfig.CipherSuites = parseCipherSuites(m.config.CipherSuites)
+		tlsConfig.CipherSuites = ParseCipherSuites(m.config.CipherSuites)
 	}
 
 	return tlsConfig, nil
 }
 
-func parseTLSVersion(v string, defaultVer uint16) uint16 {
-	switch v {
-	case "TLS1.0":
+func ParseTLSVersion(v string, defaultVer uint16) uint16 {
+	vv := strings.ToUpper(strings.TrimSpace(v))
+	// Normalize variants: "TLS1.2", "TLS_1_2", "TLS12", "TLS 1.2" → TLS12
+	vv = strings.ReplaceAll(vv, "_", "")
+	vv = strings.ReplaceAll(vv, ".", "")
+	vv = strings.ReplaceAll(vv, " ", "")
+	switch vv {
+	case "TLS10":
 		return tls.VersionTLS10
-	case "TLS1.1":
+	case "TLS11":
 		return tls.VersionTLS11
-	case "TLS1.2":
+	case "TLS12":
 		return tls.VersionTLS12
-	case "TLS1.3":
+	case "TLS13":
 		return tls.VersionTLS13
 	default:
 		return defaultVer
 	}
 }
 
-func parseClientAuthType(v string) tls.ClientAuthType {
-	switch v {
+func ParseClientAuthType(v string) tls.ClientAuthType {
+	switch strings.TrimSpace(v) {
 	case "NoClientCert":
 		return tls.NoClientCert
 	case "RequestClientCert":
@@ -496,15 +501,39 @@ func parseClientAuthType(v string) tls.ClientAuthType {
 	}
 }
 
-func parseCipherSuites(suites []string) []uint16 {
+func ParseCipherSuites(suites []string) []uint16 {
+	if len(suites) == 0 {
+		return nil
+	}
 	var ids []uint16
 	for _, s := range suites {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		found := false
+		// Check secure suites
 		for _, suite := range tls.CipherSuites() {
-			if suite.Name == s {
+			if suite.Name == s || strings.ReplaceAll(suite.Name, "TLS_", "") == s {
 				ids = append(ids, suite.ID)
+				found = true
 				break
 			}
 		}
+		if found {
+			continue
+		}
+		// Check insecure suites
+		for _, suite := range tls.InsecureCipherSuites() {
+			if suite.Name == s || strings.ReplaceAll(suite.Name, "TLS_", "") == s {
+				ids = append(ids, suite.ID)
+				found = true
+				break
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
 	}
 	return ids
 }

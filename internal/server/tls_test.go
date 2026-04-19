@@ -3,6 +3,8 @@ package server
 import (
 	"crypto/tls"
 	"testing"
+
+	gtls "github.com/gsoultan/gateon/internal/tls"
 )
 
 func TestParseTLSVersion(t *testing.T) {
@@ -19,8 +21,8 @@ func TestParseTLSVersion(t *testing.T) {
 		{"unknown", tls.VersionTLS12}, // default fallback
 	}
 	for _, c := range cases {
-		if got := parseTLSVersion(c.in); got != c.want {
-			t.Fatalf("parseTLSVersion(%q) = %v, want %v", c.in, got, c.want)
+		if got := gtls.ParseTLSVersion(c.in, tls.VersionTLS12); got != c.want {
+			t.Fatalf("ParseTLSVersion(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }
@@ -38,8 +40,8 @@ func TestParseClientAuthType(t *testing.T) {
 		{"", tls.NoClientCert},
 	}
 	for _, c := range cases {
-		if got := parseClientAuthType(c.in); got != c.want {
-			t.Fatalf("parseClientAuthType(%q) = %v, want %v", c.in, got, c.want)
+		if got := gtls.ParseClientAuthType(c.in); got != c.want {
+			t.Fatalf("ParseClientAuthType(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }

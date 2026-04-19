@@ -496,11 +496,14 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	entrypoints := s.EntryPoints.List(ctx)
 	diagEPs := make([]*gateonv1.EntryPointDiagnostic, 0, len(entrypoints))
 
+	epNames := make(map[string]string)
 	for _, ep := range entrypoints {
+		epNames[ep.Id] = ep.Name
 		stats := telemetry.GlobalDiagnostics.GetEPStats(ep.Id)
 
 		d := &gateonv1.EntryPointDiagnostic{
 			Id:                ep.Id,
+			Name:              ep.Name,
 			Address:           ep.Address,
 			Type:              ep.Type.String(),
 			Listening:         true, // If it's in the list and started
@@ -518,11 +521,16 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	recentErrors := telemetry.GlobalDiagnostics.GetRecentTLSErrors()
 	diagErrors := make([]*gateonv1.HandshakeError, 0, len(recentErrors))
 	for _, e := range recentErrors {
+		name := epNames[e.EntryPointID]
+		if name == "" {
+			name = e.EntryPointID
+		}
 		diagErrors = append(diagErrors, &gateonv1.HandshakeError{
-			Timestamp:    e.Timestamp.Format(time.RFC3339),
-			RemoteAddr:   e.RemoteAddr,
-			Error:        e.Error,
-			EntrypointId: e.EntryPointID,
+			Timestamp:      e.Timestamp.Format(time.RFC3339),
+			RemoteAddr:     e.RemoteAddr,
+			Error:          e.Error,
+			EntrypointId:   e.EntryPointID,
+			EntrypointName: name,
 		})
 	}
 

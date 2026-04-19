@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/router"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 )
@@ -167,6 +168,11 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 							cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
 							if err == nil {
 								certs = append(certs, *cert)
+							} else {
+								logger.L.Error().Err(err).
+									Str("cert_id", c.Id).
+									Str("cert_file", c.CertFile).
+									Msg("Failed to load certificate for route")
 							}
 							break
 						}
@@ -179,13 +185,13 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					if rt.Tls.OptionId != "" {
 						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
 							if opt.MinTlsVersion != "" {
-								newCfg.MinVersion = parseTLSVersion(opt.MinTlsVersion)
+								newCfg.MinVersion = gtls.ParseTLSVersion(opt.MinTlsVersion, tls.VersionTLS12)
 							}
 							if opt.MaxTlsVersion != "" {
-								newCfg.MaxVersion = parseTLSVersion(opt.MaxTlsVersion)
+								newCfg.MaxVersion = gtls.ParseTLSVersion(opt.MaxTlsVersion, 0)
 							}
 							if len(opt.CipherSuites) > 0 && newCfg.MinVersion <= tls.VersionTLS12 {
-								newCfg.CipherSuites = parseCipherSuites(opt.CipherSuites)
+								newCfg.CipherSuites = gtls.ParseCipherSuites(opt.CipherSuites)
 							}
 							if opt.PreferServerCipherSuites {
 								newCfg.PreferServerCipherSuites = true
@@ -194,7 +200,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 								newCfg.NextProtos = opt.AlpnProtocols
 							}
 							if opt.ClientAuthType != "" {
-								newCfg.ClientAuth = parseClientAuthType(opt.ClientAuthType)
+								newCfg.ClientAuth = gtls.ParseClientAuthType(opt.ClientAuthType)
 							}
 							// Bind Client Authorities to tls.Config when present on TLS Option
 							if len(opt.ClientAuthorityIds) > 0 {
@@ -237,19 +243,24 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 				cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
 				if err == nil {
 					certs = append(certs, *cert)
+				} else {
+					logger.L.Error().Err(err).
+						Str("cert_id", c.Id).
+						Str("cert_file", c.CertFile).
+						Msg("Failed to load global certificate")
 				}
 			}
 			if len(certs) > 0 {
 				newCfg := tlsConfig.Clone()
 				newCfg.Certificates = certs
 				if gc.Tls.MinTlsVersion != "" {
-					newCfg.MinVersion = parseTLSVersion(gc.Tls.MinTlsVersion)
+					newCfg.MinVersion = gtls.ParseTLSVersion(gc.Tls.MinTlsVersion, tls.VersionTLS12)
 				}
 				if gc.Tls.MaxTlsVersion != "" {
-					newCfg.MaxVersion = parseTLSVersion(gc.Tls.MaxTlsVersion)
+					newCfg.MaxVersion = gtls.ParseTLSVersion(gc.Tls.MaxTlsVersion, 0)
 				}
 				if gc.Tls.ClientAuthType != "" {
-					newCfg.ClientAuth = parseClientAuthType(gc.Tls.ClientAuthType)
+					newCfg.ClientAuth = gtls.ParseClientAuthType(gc.Tls.ClientAuthType)
 				}
 				if len(gc.Tls.ClientAuthorities) > 0 {
 					var pool *x509.CertPool
@@ -270,55 +281,5 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 		}
 
 		return nil, nil
-	}
-}
-
-func parseTLSVersion(v string) uint16 {
-	vv := strings.ToUpper(strings.TrimSpace(v))
-	// Normalize variants: "TLS1.2", "TLS_1_2", "TLS12" → TLS12
-	vv = strings.ReplaceAll(vv, "_", "")
-	vv = strings.ReplaceAll(vv, ".", "")
-	switch vv {
-	case "TLS10":
-		return tls.VersionTLS10
-	case "TLS11":
-		return tls.VersionTLS11
-	case "TLS12":
-		return tls.VersionTLS12
-	case "TLS13":
-		return tls.VersionTLS13
-	default:
-		// Unknown → be safe and default to TLS 1.2
-		return tls.VersionTLS12
-	}
-}
-
-func parseCipherSuites(suites []string) []uint16 {
-	var ids []uint16
-	for _, s := range suites {
-		for _, c := range tls.CipherSuites() {
-			if c.Name == s {
-				ids = append(ids, c.ID)
-				break
-			}
-		}
-	}
-	return ids
-}
-
-func parseClientAuthType(v string) tls.ClientAuthType {
-	switch strings.TrimSpace(v) {
-	case "NoClientCert":
-		return tls.NoClientCert
-	case "RequestClientCert":
-		return tls.RequestClientCert
-	case "RequireAnyClientCert":
-		return tls.RequireAnyClientCert
-	case "VerifyClientCertIfGiven":
-		return tls.VerifyClientCertIfGiven
-	case "RequireAndVerifyClientCert":
-		return tls.RequireAndVerifyClientCert
-	default:
-		return tls.NoClientCert
 	}
 }
