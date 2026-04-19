@@ -72,6 +72,23 @@ const loginRoute = createRoute({
 const setupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/setup",
+  beforeLoad: async () => {
+    try {
+      const res = await apiFetch("/v1/setup/required");
+      if (!res.ok) {
+        return;
+      }
+
+      const data = await res.json();
+      if (data && !(data.required === true || data.required === "true")) {
+        throw redirect({ to: "/" });
+      }
+    } catch (e) {
+      if (isRedirect(e)) {
+        throw e;
+      }
+    }
+  },
   component: () => <SetupPage />,
 });
 

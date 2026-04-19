@@ -390,6 +390,12 @@ func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupReq
 }
 
 func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error) {
+	// Check if setup is already done
+	setupReq, err := s.IsSetupRequired(ctx, &gateonv1.IsSetupRequiredRequest{})
+	if err == nil && !setupReq.Required {
+		return &gateonv1.SetupResponse{Success: false, Error: "setup already completed"}, nil
+	}
+
 	if s.Auth == nil {
 		// Initialize Auth Manager if it doesn't exist
 		databaseURL := "gateon.db"
