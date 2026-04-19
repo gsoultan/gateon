@@ -211,65 +211,86 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 	}
 }
 
-// parsedIPRule holds a pre-parsed IP filter rule (exact IP or CIDR) to avoid per-request parsing.
-type parsedIPRule struct {
-	exact string     // non-empty for exact match
-	cidr  *net.IPNet // non-nil for CIDR match
+// ipFilterData holds pre-parsed IP filter rules optimized for lookups.
+type ipFilterData struct {
+	exactAllow map[string]struct{}
+	cidrAllow  []*net.IPNet
+	exactDeny  map[string]struct{}
+	cidrDeny   []*net.IPNet
 }
 
-func parseIPRules(rules []string) []parsedIPRule {
-	parsed := make([]parsedIPRule, len(rules))
-	for i, r := range rules {
+func newIPFilterData(allowList, denyList []string) *ipFilterData {
+	d := &ipFilterData{
+		exactAllow: make(map[string]struct{}),
+		exactDeny:  make(map[string]struct{}),
+	}
+	for _, r := range allowList {
 		if _, ipnet, err := net.ParseCIDR(r); err == nil {
-			parsed[i] = parsedIPRule{cidr: ipnet}
+			d.cidrAllow = append(d.cidrAllow, ipnet)
 		} else {
-			parsed[i] = parsedIPRule{exact: r}
+			d.exactAllow[r] = struct{}{}
 		}
 	}
-	return parsed
+	for _, r := range denyList {
+		if _, ipnet, err := net.ParseCIDR(r); err == nil {
+			d.cidrDeny = append(d.cidrDeny, ipnet)
+		} else {
+			d.exactDeny[r] = struct{}{}
+		}
+	}
+	return d
 }
 
-func matchParsedIP(clientIP string, rule parsedIPRule) bool {
-	if rule.exact != "" {
-		return clientIP == rule.exact
+func (d *ipFilterData) matches(clientIP string) bool {
+	// Deny list takes precedence
+	if _, ok := d.exactDeny[clientIP]; ok {
+		return true
 	}
-	if rule.cidr != nil {
-		ip := net.ParseIP(clientIP)
-		return ip != nil && rule.cidr.Contains(ip)
+	ip := net.ParseIP(clientIP)
+	if ip != nil {
+		for _, rule := range d.cidrDeny {
+			if rule.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (d *ipFilterData) allowed(clientIP string) bool {
+	if len(d.exactAllow) == 0 && len(d.cidrAllow) == 0 {
+		return true
+	}
+	if _, ok := d.exactAllow[clientIP]; ok {
+		return true
+	}
+	ip := net.ParseIP(clientIP)
+	if ip != nil {
+		for _, rule := range d.cidrAllow {
+			if rule.Contains(ip) {
+				return true
+			}
+		}
 	}
 	return false
 }
 
 // IPFilterWithClientIP returns a middleware that filters requests by IP address using the given clientIP resolver.
-// CIDRs are pre-parsed at construction time to avoid per-request overhead.
 func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Request) string) Middleware {
-	parsedDeny := parseIPRules(denyList)
-	parsedAllow := parseIPRules(allowList)
+	data := newIPFilterData(allowList, denyList)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			remoteAddr := clientIP(r)
 
-			// Deny list takes precedence
-			for _, rule := range parsedDeny {
-				if matchParsedIP(remoteAddr, rule) {
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
+			if data.matches(remoteAddr) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
 			}
 
-			if len(parsedAllow) > 0 {
-				found := false
-				for _, rule := range parsedAllow {
-					if matchParsedIP(remoteAddr, rule) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
+			if !data.allowed(remoteAddr) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
 			}
 
 			next.ServeHTTP(w, r)

@@ -42,12 +42,73 @@ func MaxConnections(max int) Middleware {
 	}
 }
 
+type connBucket struct {
+	sem chan struct{}
+	ref int
+}
+
+const connLimitShards = 16
+
+type perIPConnMap struct {
+	shards []*connLimitShard
+}
+
+type connLimitShard struct {
+	mu      sync.Mutex
+	buckets map[string]*connBucket
+}
+
+func newPerIPConnMap() *perIPConnMap {
+	m := &perIPConnMap{
+		shards: make([]*connLimitShard, connLimitShards),
+	}
+	for i := range connLimitShards {
+		m.shards[i] = &connLimitShard{
+			buckets: make(map[string]*connBucket),
+		}
+	}
+	return m
+}
+
+func (m *perIPConnMap) getShard(key string) *connLimitShard {
+	var hash uint32 = 2166136261
+	for i := range len(key) {
+		hash ^= uint32(key[i])
+		hash *= 16777619
+	}
+	return m.shards[hash%connLimitShards]
+}
+
+func (m *perIPConnMap) get(key string, cap int) *connBucket {
+	s := m.getShard(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.buckets[key]
+	if !ok {
+		b = &connBucket{sem: make(chan struct{}, cap)}
+		s.buckets[key] = b
+	}
+	b.ref++
+	return b
+}
+
+func (m *perIPConnMap) release(key string, b *connBucket) {
+	<-b.sem
+	s := m.getShard(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b.ref--
+	if b.ref <= 0 {
+		delete(s.buckets, key)
+	}
+}
+
 // MaxConnectionsPerIP limits concurrent in-flight requests per client IP.
 func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) Middleware {
 	if max <= 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
-	m := &perIPConnMap{buckets: make(map[string]*connBucket)}
+	m := newPerIPConnMap()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyFunc(r)
@@ -69,37 +130,5 @@ func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) Middleware
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many connections from this IP", "")
 			}
 		})
-	}
-}
-
-type perIPConnMap struct {
-	mu      sync.Mutex
-	buckets map[string]*connBucket
-}
-
-type connBucket struct {
-	sem chan struct{}
-	ref int
-}
-
-func (m *perIPConnMap) get(key string, cap int) *connBucket {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	b, ok := m.buckets[key]
-	if !ok {
-		b = &connBucket{sem: make(chan struct{}, cap)}
-		m.buckets[key] = b
-	}
-	b.ref++
-	return b
-}
-
-func (m *perIPConnMap) release(key string, b *connBucket) {
-	<-b.sem
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	b.ref--
-	if b.ref <= 0 {
-		delete(m.buckets, key)
 	}
 }
