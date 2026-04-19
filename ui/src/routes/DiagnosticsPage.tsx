@@ -115,7 +115,7 @@ const DiagnosticsPage: React.FC = () => {
               <IconGlobe size={20} color={theme.colors.blue[6]} />
             </Group>
             <Title order={3} fw={900} ff="monospace">
-              {data?.system.public_ip || "Unknown"}
+              {data?.system?.public_ip || "Unknown"}
             </Title>
             <Text size="xs" c="dimmed" mt="xs">
               Ensure DNS records point to this IP.
@@ -130,9 +130,9 @@ const DiagnosticsPage: React.FC = () => {
               <IconShield size={20} color={theme.colors.orange[6]} />
             </Group>
             <Group gap="xs">
-              {data?.system.cloudflare_reachable ? (
+              {data?.system?.cloudflare_reachable ? (
                 <>
-                  <IconCircleCheck size={24} color={theme.colors.emerald[6]} />
+                  <IconCircleCheck size={24} color={theme.colors.teal[6]} />
                   <Title order={3} fw={900}>Reachable</Title>
                 </>
               ) : (
@@ -155,7 +155,7 @@ const DiagnosticsPage: React.FC = () => {
               <IconActivity size={20} color={theme.colors.violet[6]} />
             </Group>
             <Title order={3} fw={900}>
-              {data?.recent_tls_errors.length || 0}
+              {data?.recent_tls_errors?.length || 0}
             </Title>
             <Text size="xs" c="dimmed" mt="xs">
               Handshake failures in the last buffer.
@@ -206,7 +206,7 @@ const DiagnosticsPage: React.FC = () => {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {data?.entrypoints.map((ep) => (
+                  {data?.entrypoints?.map((ep) => (
                     <Table.Tr key={ep.id}>
                       <Table.Td>
                         <Stack gap={0}>
@@ -245,7 +245,7 @@ const DiagnosticsPage: React.FC = () => {
                       </Table.Td>
                     </Table.Tr>
                   ))}
-                  {(!data?.entrypoints || data.entrypoints.length === 0) && (
+                  {(!data?.entrypoints || data.entrypoints?.length === 0) && (
                     <Table.Tr>
                       <Table.Td colSpan={4}>
                         <Text c="dimmed" ta="center" py="xl" size="sm">No entrypoints configured.</Text>
@@ -264,18 +264,18 @@ const DiagnosticsPage: React.FC = () => {
                 <IconShield size={20} c="dimmed" />
                 <Title order={4} fw={800}>Recent TLS Handshake Errors</Title>
               </Group>
-              <Badge variant="filled" color="red" size="sm">{data?.recent_tls_errors.length || 0}</Badge>
+              <Badge variant="filled" color="red" size="sm">{data?.recent_tls_errors?.length || 0}</Badge>
             </Group>
             <Divider />
             <ScrollArea h={400}>
-              {data?.recent_tls_errors.length === 0 ? (
+              {data?.recent_tls_errors?.length === 0 ? (
                 <Stack align="center" justify="center" h="100%" py="xl" gap="xs">
-                  <IconCircleCheck size={48} color={theme.colors.emerald[2]} />
+                  <IconCircleCheck size={48} color={theme.colors.teal[2]} />
                   <Text c="dimmed" size="sm" fw={500}>No recent TLS errors detected.</Text>
                 </Stack>
               ) : (
                 <Stack gap={0} p={0}>
-                  {data?.recent_tls_errors.map((err, i) => (
+                  {data?.recent_tls_errors?.map((err, i) => (
                     <Paper key={i} p="md" radius={0} className="hover:bg-mantine-color-default-hover" style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}>
                       <Group justify="space-between" mb={4}>
                         <Group gap={6}>
