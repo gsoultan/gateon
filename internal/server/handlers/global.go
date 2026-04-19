@@ -38,6 +38,21 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/global", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		gc := svc.GetGlobals().Get(r.Context())
+
+		if gc.Tls != nil && len(gc.Tls.Certificates) > 0 {
+			tm := svc.GetTLSManager()
+			if tm != nil {
+				for _, c := range gc.Tls.Certificates {
+					if c.CertFile != "" && c.KeyFile != "" {
+						v, err := tm.ValidateCertificateFiles(c.CertFile, c.KeyFile, c.CaFile)
+						if err == nil {
+							c.Validation = v
+						}
+					}
+				}
+			}
+		}
+
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
 	})

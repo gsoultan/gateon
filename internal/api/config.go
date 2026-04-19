@@ -4,6 +4,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/tls"
 )
 
 // ApiServiceConfig holds dependencies for ApiService (Factory pattern).
@@ -17,4 +18,5 @@ type ApiServiceConfig struct {
 	TLSOptions  config.TLSOptionStore
 	Auth        auth.Service
 	Invalidator domain.ProxyInvalidator
+	TLSManager  tls.TLSManager
 }

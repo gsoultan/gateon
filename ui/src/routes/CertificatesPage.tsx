@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center } from '@mantine/core'
-import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, IconKey, IconTrash, IconPencil } from '@tabler/icons-react'
+import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Badge, List, ThemeIcon, Textarea, Code } from '@mantine/core'
+import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, IconKey, IconTrash, IconPencil, IconAlertTriangle, IconCheck, IconBulb, IconClipboard } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import type { GlobalConfig, Certificate } from '../types/gateon'
 import { apiFetch } from '../hooks/useGateon'
@@ -16,7 +16,10 @@ export default function CertificatesPage() {
   const [savedOk, setSavedOk] = useState(false)
   const [uploading, setUploading] = useState<Record<string, boolean>>({})
   const [opened, { open, close }] = useDisclosure(false)
+  const [pasteOpened, { open: openPaste, close: closePaste }] = useDisclosure(false)
   const [editingCert, setEditingCert] = useState<Certificate | null>(null)
+  const [pastingField, setPastingField] = useState<'cert_file' | 'key_file' | 'ca_file' | null>(null)
+  const [pasteContent, setPasteContent] = useState('')
 
   useEffect(() => {
     fetchConfig()
@@ -78,6 +81,36 @@ export default function CertificatesPage() {
       setError(`Upload failed: ${err.message}`)
     } finally {
       setUploading(prev => ({ ...prev, [field]: false }))
+    }
+  }
+
+  const handlePaste = async () => {
+    if (!pastingField || !pasteContent) return
+    
+    setUploading(prev => ({ ...prev, [pastingField]: true }))
+    
+    try {
+      const res = await apiFetch("/v1/certs/paste", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          content: pasteContent, 
+          type: pastingField === 'cert_file' ? 'cert' : pastingField === 'key_file' ? 'key' : 'ca' 
+        }),
+      })
+      
+      if (!res.ok) throw new Error(await res.text())
+      
+      const data = await res.json()
+      if (editingCert) {
+        setEditingCert({ ...editingCert, [pastingField]: data.path })
+      }
+      closePaste()
+      setPasteContent('')
+    } catch (err: any) {
+      setError(`Paste failed: ${err.message}`)
+    } finally {
+      setUploading(prev => ({ ...prev, [pastingField]: false }))
     }
   }
 
@@ -184,7 +217,15 @@ export default function CertificatesPage() {
                     <Table.Td>
                       <Group gap="sm">
                         <IconCertificate size={16} color="var(--mantine-color-blue-6)" />
-                        <Text fw={600}>{cert.name}</Text>
+                        <Stack gap={0}>
+                          <Text fw={600}>{cert.name}</Text>
+                          {cert.validation?.warnings && cert.validation.warnings.length > 0 && (
+                            <Group gap={4}>
+                              <IconAlertTriangle size={12} color="var(--mantine-color-orange-6)" />
+                              <Text size="xs" c="orange.6" fw={500}>{cert.validation.warnings.length} issues</Text>
+                            </Group>
+                          )}
+                        </Stack>
                       </Group>
                     </Table.Td>
                     <Table.Td>
@@ -253,15 +294,22 @@ export default function CertificatesPage() {
             radius="md" 
             leftSection={<IconCertificate size={16} />}
             rightSection={
-              <FileButton onChange={(f) => handleUpload('cert_file', f)} accept=".pem,.crt,.cer">
-                {(props) => (
-                  <Tooltip label="Upload Certificate">
-                    <ActionIcon {...props} variant="subtle" loading={uploading['cert_file']}>
-                      <IconUpload size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-              </FileButton>
+              <Group gap={4} mr={4}>
+                <Tooltip label="Paste Certificate">
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('cert_file'); openPaste(); }}>
+                    <IconClipboard size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                <FileButton onChange={(f) => handleUpload('cert_file', f)} accept=".pem,.crt,.cer">
+                  {(props) => (
+                    <Tooltip label="Upload Certificate">
+                      <ActionIcon {...props} variant="subtle" loading={uploading['cert_file']}>
+                        <IconUpload size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </FileButton>
+              </Group>
             }
           />
           <TextInput 
@@ -272,15 +320,22 @@ export default function CertificatesPage() {
             radius="md" 
             leftSection={<IconKey size={16} />}
             rightSection={
-              <FileButton onChange={(f) => handleUpload('key_file', f)} accept=".pem,.key">
-                {(props) => (
-                  <Tooltip label="Upload Private Key">
-                    <ActionIcon {...props} variant="subtle" loading={uploading['key_file']}>
-                      <IconUpload size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-              </FileButton>
+              <Group gap={4} mr={4}>
+                <Tooltip label="Paste Private Key">
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('key_file'); openPaste(); }}>
+                    <IconClipboard size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                <FileButton onChange={(f) => handleUpload('key_file', f)} accept=".pem,.key">
+                  {(props) => (
+                    <Tooltip label="Upload Private Key">
+                      <ActionIcon {...props} variant="subtle" loading={uploading['key_file']}>
+                        <IconUpload size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </FileButton>
+              </Group>
             }
           />
           <TextInput 
@@ -292,18 +347,79 @@ export default function CertificatesPage() {
             radius="md" 
             leftSection={<IconShieldLock size={16} />}
             rightSection={
-              <FileButton onChange={(f) => handleUpload('ca_file', f)} accept=".pem,.crt,.cer">
-                {(props) => (
-                  <Tooltip label="Upload CA Certificate">
-                    <ActionIcon {...props} variant="subtle" loading={uploading['ca_file']}>
-                      <IconUpload size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-              </FileButton>
+              <Group gap={4} mr={4}>
+                <Tooltip label="Paste CA Certificate">
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('ca_file'); openPaste(); }}>
+                    <IconClipboard size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                <FileButton onChange={(f) => handleUpload('ca_file', f)} accept=".pem,.crt,.cer">
+                  {(props) => (
+                    <Tooltip label="Upload CA Certificate">
+                      <ActionIcon {...props} variant="subtle" loading={uploading['ca_file']}>
+                        <IconUpload size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </FileButton>
+              </Group>
             }
           />
+
+          {editingCert?.validation && (
+            <Stack gap="sm">
+              <Divider label="Validation" labelPosition="center" />
+              {editingCert.validation.warnings && editingCert.validation.warnings.length > 0 ? (
+                <Alert color="orange" title="Security Warnings" icon={<IconAlertTriangle size={16} />} radius="md">
+                  <List size="sm" withPadding>
+                    {editingCert.validation.warnings.map((w, i) => (
+                      <List.Item key={i}>{w}</List.Item>
+                    ))}
+                  </List>
+                </Alert>
+              ) : (
+                <Alert color="green" title="Valid Certificate" icon={<IconCheck size={16} />} radius="md">
+                  This certificate pair appears to be valid and meets security requirements.
+                </Alert>
+              )}
+
+              {editingCert.validation.recommended_ciphers && editingCert.validation.recommended_ciphers.length > 0 && (
+                <Paper withBorder p="md" radius="md" bg="var(--mantine-color-blue-light)">
+                  <Group gap="xs" mb="xs">
+                    <IconBulb size={16} color="var(--mantine-color-blue-6)" />
+                    <Text fw={700} size="sm">Recommended Cipher Suites</Text>
+                  </Group>
+                  <Text size="xs" mb="sm" c="dimmed">Use these in your TLS Options for optimal security and compatibility with this certificate:</Text>
+                  <Stack gap={4}>
+                    {editingCert.validation.recommended_ciphers.map((cipher) => (
+                      <Code key={cipher} block style={{ fontSize: '10px' }}>{cipher}</Code>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
+            </Stack>
+          )}
+
           <Button onClick={handleSaveCert} radius="md" mt="md">Save Certificate</Button>
+        </Stack>
+      </Modal>
+
+      <Modal opened={pasteOpened} onClose={closePaste} title={`Paste ${pastingField === 'key_file' ? 'Private Key' : 'Certificate'}`} radius="lg">
+        <Stack gap="md">
+          <Textarea
+            label="PEM Content"
+            placeholder="-----BEGIN ...-----"
+            minRows={10}
+            maxRows={20}
+            value={pasteContent}
+            onChange={(e) => setPasteContent(e.currentTarget.value)}
+            ff="monospace"
+            size="xs"
+            radius="md"
+          />
+          <Button onClick={handlePaste} loading={uploading[pastingField || '']} disabled={!pasteContent}>
+            Confirm and Save
+          </Button>
         </Stack>
       </Modal>
 

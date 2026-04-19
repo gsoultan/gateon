@@ -151,6 +151,12 @@ export type StatusResponse = {
   middlewares_count: number;
 };
 
+export type CertificateValidation = {
+  valid: boolean;
+  warnings?: string[];
+  recommended_ciphers?: string[];
+};
+
 export type Certificate = {
   id: string;
   name: string;
@@ -159,6 +165,7 @@ export type Certificate = {
   /** Optional CA/intermediate certificate file appended to the served chain during SNI selection. */
   ca_file?: string;
   host?: string;
+  validation?: CertificateValidation;
 };
 
 export type ClientAuthority = {

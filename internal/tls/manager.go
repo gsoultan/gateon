@@ -2,6 +2,7 @@ package tls
 
 import (
 	"context"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -12,6 +13,8 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -24,6 +27,7 @@ type TLSManager interface {
 	LoadCA(caFile string) (*x509.CertPool, error)
 	LoadCAData(caFile string) ([]byte, error)
 	Certificates() []CertificateConfig
+	ValidateCertificateFiles(certFile, keyFile, caFile string) (*gateonv1.CertificateValidation, error)
 	ClearCache()
 	UpdateConfig(cfg Config)
 	HTTPChallengeHandler(fallback http.Handler) http.Handler
@@ -143,6 +147,8 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 		return nil, nil, fmt.Errorf("failed to load key pair: %w", err)
 	}
 
+	m.validateCertificate(&cert, nil, certFile, "")
+
 	var clientCAs *x509.CertPool
 	if caFile != "" {
 		caData, err := os.ReadFile(caFile)
@@ -153,6 +159,7 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 		if !clientCAs.AppendCertsFromPEM(caData) {
 			return nil, nil, fmt.Errorf("failed to parse CA certificate")
 		}
+		m.validateCertificate(&cert, caData, certFile, caFile)
 		// Append intermediate/CA certificates to the served chain so that
 		// SNI-selected certificates include the full chain automatically.
 		data := caData
@@ -174,6 +181,123 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 	m.mu.Unlock()
 
 	return &cert, clientCAs, nil
+}
+
+func (m *Manager) validateCertificate(cert *tls.Certificate, caData []byte, certFile, caFile string) *gateonv1.CertificateValidation {
+	res := &gateonv1.CertificateValidation{
+		Valid: true,
+	}
+	if len(cert.Certificate) == 0 {
+		return res
+	}
+
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		logger.L.Warn().Err(err).Str("file", certFile).Msg("Failed to parse certificate for validation")
+		res.Valid = false
+		res.Warnings = append(res.Warnings, fmt.Sprintf("failed to parse certificate: %v", err))
+		return res
+	}
+
+	// Check RSA Key Size
+	if leaf.PublicKeyAlgorithm == x509.RSA {
+		if pub, ok := leaf.PublicKey.(*rsa.PublicKey); ok {
+			bits := pub.Size() * 8
+			if bits < 2048 {
+				msg := fmt.Sprintf("Insecure RSA key size (%d bits) detected. RSA keys should be at least 2048 bits for TLS 1.3 compatibility.", bits)
+				logger.L.Warn().
+					Str("file", certFile).
+					Int("bits", bits).
+					Msg(msg)
+				res.Warnings = append(res.Warnings, msg)
+			}
+		}
+	}
+
+	// Check for SHA-1
+	if leaf.SignatureAlgorithm == x509.SHA1WithRSA || leaf.SignatureAlgorithm == x509.DSAWithSHA1 || leaf.SignatureAlgorithm == x509.ECDSAWithSHA1 {
+		msg := fmt.Sprintf("Deprecated SHA-1 signature algorithm (%s) detected.", leaf.SignatureAlgorithm.String())
+		logger.L.Warn().
+			Str("file", certFile).
+			Str("algo", leaf.SignatureAlgorithm.String()).
+			Msg(msg)
+		res.Warnings = append(res.Warnings, msg)
+	}
+
+	// Check for RSA/ECC Mismatch
+	if len(caData) > 0 {
+		var caCerts []*x509.Certificate
+		rest := caData
+		for {
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			if block.Type == "CERTIFICATE" {
+				c, err := x509.ParseCertificate(block.Bytes)
+				if err == nil {
+					caCerts = append(caCerts, c)
+				}
+			}
+		}
+
+		for _, ca := range caCerts {
+			if leaf.PublicKeyAlgorithm != ca.PublicKeyAlgorithm {
+				msg := fmt.Sprintf("Algorithm mismatch: certificate uses %s, but CA uses %s. This will cause handshake failures.", leaf.PublicKeyAlgorithm.String(), ca.PublicKeyAlgorithm.String())
+				logger.L.Warn().
+					Str("cert_file", certFile).
+					Str("ca_file", caFile).
+					Str("cert_algo", leaf.PublicKeyAlgorithm.String()).
+					Str("ca_algo", ca.PublicKeyAlgorithm.String()).
+					Msg(msg)
+				res.Warnings = append(res.Warnings, msg)
+				break
+			}
+		}
+	}
+
+	// Cipher Suite Recommendations
+	var recommended []string
+	certType := ""
+	switch leaf.PublicKeyAlgorithm {
+	case x509.RSA:
+		certType = "RSA"
+		recommended = []string{
+			"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+			"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+			"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+		}
+	case x509.ECDSA:
+		certType = "ECDSA"
+		recommended = []string{
+			"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+			"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+			"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+		}
+	}
+
+	if certType != "" {
+		res.RecommendedCiphers = recommended
+		logger.L.Info().
+			Str("file", certFile).
+			Str("cert_type", certType).
+			Strs("recommended_ciphers", recommended).
+			Msg("Recommendation: For TLS 1.2, use these cipher suites for optimal security and compatibility with this certificate.")
+	}
+	return res
+}
+
+func (m *Manager) ValidateCertificateFiles(certFile, keyFile, caFile string) (*gateonv1.CertificateValidation, error) {
+	cert, err := tls.LoadX509KeyPair(config.ResolvePath(certFile), config.ResolvePath(keyFile))
+	if err != nil {
+		return nil, err
+	}
+	var caData []byte
+	if caFile != "" {
+		caData, _ = os.ReadFile(config.ResolvePath(caFile))
+	}
+	return m.validateCertificate(&cert, caData, certFile, caFile), nil
 }
 
 func (m *Manager) LoadCAData(caFile string) ([]byte, error) {
@@ -301,7 +425,13 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 	}
 
 	// Apply extra configurations
-	tlsConfig.MinVersion = parseTLSVersion(m.config.MinVersion, tls.VersionTLS12)
+	minVer := parseTLSVersion(m.config.MinVersion, tls.VersionTLS12)
+	if minVer != 0 && minVer < tls.VersionTLS12 {
+		logger.L.Warn().
+			Str("version", m.config.MinVersion).
+			Msg("Insecure TLS version configured. TLS 1.0 and 1.1 are deprecated and have known vulnerabilities. It is highly recommended to use at least TLS 1.2.")
+	}
+	tlsConfig.MinVersion = minVer
 	tlsConfig.MaxVersion = parseTLSVersion(m.config.MaxVersion, 0)
 	tlsConfig.NextProtos = []string{"h2", "http/1.1"}
 
@@ -336,12 +466,15 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 
 func parseTLSVersion(v string, defaultVer uint16) uint16 {
 	switch v {
+	case "TLS1.0":
+		return tls.VersionTLS10
+	case "TLS1.1":
+		return tls.VersionTLS11
 	case "TLS1.2":
 		return tls.VersionTLS12
 	case "TLS1.3":
 		return tls.VersionTLS13
 	default:
-		// TLS 1.0 and 1.1 are deprecated; treat unknown as default (TLS 1.2)
 		return defaultVer
 	}
 }

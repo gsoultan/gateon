@@ -39,6 +39,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 			StartInvalidationListener(ctx, proxyInvalidator, s.RedisClient)
 		})
 	}
+	s.TLSManager = CreateTLSManager(s)
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Version:     s.Version,
 		Routes:      s.RouteStore,
@@ -49,6 +50,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		TLSOptions:  s.TLSOptStore,
 		Auth:        s.AuthManager,
 		Invalidator: proxyInvalidator,
+		TLSManager:  s.TLSManager,
 	})
 	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
 	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)
@@ -93,7 +95,6 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		LoginLimiter: loginLimiter,
 	}, internalAPI, mux)
 	c := BuildCORS()
-	s.TLSManager = CreateTLSManager(s)
 	tlsConfig, err := s.TLSManager.GetTLSConfig()
 	if err != nil {
 		logger.L.Fatal().Err(err).Msg("failed to initialize tls")

@@ -32,11 +32,16 @@ type ApiService struct {
 	TLSOptions  config.TLSOptionStore
 	Auth        auth.Service
 	Invalidator domain.ProxyInvalidator
+	TLSManager  gtls.TLSManager
 }
 
 // GetGlobals returns the global config store for REST handlers.
 func (s *ApiService) GetGlobals() config.GlobalConfigStore {
 	return s.Globals
+}
+
+func (s *ApiService) GetTLSManager() gtls.TLSManager {
+	return s.TLSManager
 }
 
 // NewApiService creates an ApiService from config (Factory pattern).
@@ -51,6 +56,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		TLSOptions:  cfg.TLSOptions,
 		Auth:        cfg.Auth,
 		Invalidator: cfg.Invalidator,
+		TLSManager:  cfg.TLSManager,
 	}
 }
 

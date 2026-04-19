@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Select } from '@mantine/core'
-import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconTrash, IconLockCheck } from '@tabler/icons-react'
+import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Select, Textarea } from '@mantine/core'
+import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconTrash, IconLockCheck, IconClipboard } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import type { GlobalConfig, ClientAuthority } from '../types/gateon'
 import { apiFetch } from '../hooks/useGateon'
@@ -16,7 +16,9 @@ export default function ClientAuthoritiesPage() {
   const [savedOk, setSavedOk] = useState(false)
   const [uploading, setUploading] = useState<Record<string, boolean>>({})
   const [opened, { open, close }] = useDisclosure(false)
+  const [pasteOpened, { open: openPaste, close: closePaste }] = useDisclosure(false)
   const [editingCA, setEditingCA] = useState<ClientAuthority | null>(null)
+  const [pasteContent, setPasteContent] = useState('')
 
   useEffect(() => {
     fetchConfig()
@@ -76,6 +78,36 @@ export default function ClientAuthoritiesPage() {
       }
     } catch (err: any) {
       setError(`Upload failed: ${err.message}`)
+    } finally {
+      setUploading(prev => ({ ...prev, current: false }))
+    }
+  }
+
+  const handlePaste = async () => {
+    if (!pasteContent) return
+    
+    setUploading(prev => ({ ...prev, current: true }))
+    
+    try {
+      const res = await apiFetch("/v1/certs/paste", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          content: pasteContent, 
+          type: 'ca' 
+        }),
+      })
+      
+      if (!res.ok) throw new Error(await res.text())
+      
+      const data = await res.json()
+      if (editingCA) {
+        setEditingCA({ ...editingCA, ca_file: data.path })
+      }
+      closePaste()
+      setPasteContent('')
+    } catch (err: any) {
+      setError(`Paste failed: ${err.message}`)
     } finally {
       setUploading(prev => ({ ...prev, current: false }))
     }
@@ -249,15 +281,22 @@ export default function ClientAuthoritiesPage() {
             radius="md" 
             leftSection={<IconLockCheck size={16} />}
             rightSection={
-              <FileButton onChange={handleUpload} accept=".pem,.crt,.ca">
-                {(props) => (
-                  <Tooltip label="Upload CA Certificate">
-                    <ActionIcon {...props} variant="subtle" loading={uploading['current']}>
-                      <IconUpload size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-              </FileButton>
+              <Group gap={4} mr={4}>
+                <Tooltip label="Paste CA Certificate">
+                  <ActionIcon variant="subtle" color="blue" onClick={openPaste}>
+                    <IconClipboard size={16} />
+                  </ActionIcon>
+                </Tooltip>
+                <FileButton onChange={handleUpload} accept=".pem,.crt,.ca">
+                  {(props) => (
+                    <Tooltip label="Upload CA Certificate">
+                      <ActionIcon {...props} variant="subtle" loading={uploading['current']}>
+                        <IconUpload size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </FileButton>
+              </Group>
             }
           />
           <Select
@@ -276,6 +315,25 @@ export default function ClientAuthoritiesPage() {
             description="Per-CA preference; actual enforcement occurs via TLS Options or global TLS client_auth_type."
           />
           <Button onClick={handleSaveCA} radius="md" mt="md">Save Authority</Button>
+        </Stack>
+      </Modal>
+
+      <Modal opened={pasteOpened} onClose={closePaste} title="Paste CA Certificate" radius="lg">
+        <Stack gap="md">
+          <Textarea
+            label="PEM Content"
+            placeholder="-----BEGIN CERTIFICATE-----"
+            minRows={10}
+            maxRows={20}
+            value={pasteContent}
+            onChange={(e) => setPasteContent(e.currentTarget.value)}
+            ff="monospace"
+            size="xs"
+            radius="md"
+          />
+          <Button onClick={handlePaste} loading={uploading['current']} disabled={!pasteContent}>
+            Confirm and Save
+          </Button>
         </Stack>
       </Modal>
 
