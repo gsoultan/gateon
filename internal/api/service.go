@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/telemetry"
+	gtls "github.com/gsoultan/gateon/internal/tls"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
-
-	"github.com/gsoultan/gateon/internal/auth"
-	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/db"
-	"github.com/gsoultan/gateon/internal/telemetry"
-	gtls "github.com/gsoultan/gateon/internal/tls"
-	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 type ApiService struct {
@@ -31,6 +31,7 @@ type ApiService struct {
 	Middlewares config.MiddlewareStore
 	TLSOptions  config.TLSOptionStore
 	Auth        auth.Service
+	Invalidator domain.ProxyInvalidator
 }
 
 // GetGlobals returns the global config store for REST handlers.
@@ -49,6 +50,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		Middlewares: cfg.Middlewares,
 		TLSOptions:  cfg.TLSOptions,
 		Auth:        cfg.Auth,
+		Invalidator: cfg.Invalidator,
 	}
 }
 
@@ -276,6 +278,11 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
+	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateTLS()
+		// If TLS config changed, it might affect all routes
+		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 	}
 	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
 }

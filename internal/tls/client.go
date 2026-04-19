@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -21,7 +22,9 @@ func CreateTLSClientConfig(cfg *gateonv1.TlsClientConfig) (*tls.Config, error) {
 	}
 
 	if cfg.CertFile != "" && cfg.KeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		certFile := config.ResolvePath(cfg.CertFile)
+		keyFile := config.ResolvePath(cfg.KeyFile)
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client certificate: %w", err)
 		}
@@ -29,7 +32,8 @@ func CreateTLSClientConfig(cfg *gateonv1.TlsClientConfig) (*tls.Config, error) {
 	}
 
 	if cfg.CaFile != "" {
-		caData, err := os.ReadFile(cfg.CaFile)
+		caFile := config.ResolvePath(cfg.CaFile)
+		caData, err := os.ReadFile(caFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA file: %w", err)
 		}

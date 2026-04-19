@@ -12,4 +12,6 @@ type ProxyInvalidator interface {
 	InvalidateRoute(id string)
 	// InvalidateRoutes invalidates proxies for all routes matching the strategy.
 	InvalidateRoutes(strategy func(*gateonv1.Route) bool)
+	// InvalidateTLS invalidates the global TLS certificate cache.
+	InvalidateTLS()
 }

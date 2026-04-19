@@ -16,6 +16,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -205,7 +206,9 @@ func newTLSClientIdentitySelector(cfg *gateonv1.TlsClientConfig) (*tlsClientIden
 		if item.CertFile == "" || item.KeyFile == "" {
 			continue
 		}
-		cert, err := tls.LoadX509KeyPair(item.CertFile, item.KeyFile)
+		certFile := config.ResolvePath(item.CertFile)
+		keyFile := config.ResolvePath(item.KeyFile)
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			combinedErr = errors.Join(combinedErr, fmt.Errorf("failed to load tls client identity %q: %w", item.Id, err))
 			continue

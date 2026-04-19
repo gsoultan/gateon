@@ -7,6 +7,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/redis"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 )
 
 // Server is the main application container (Dependency Injection).
@@ -20,6 +21,7 @@ type Server struct {
 	GlobalStore  config.GlobalConfigStore
 	AuthManager  auth.Service
 	RedisClient  redis.Client
+	TLSManager   gtls.TLSManager
 	Port         string
 	Version      string
 	startTime    time.Time

@@ -14,7 +14,7 @@ import (
 const InvalidationChannel = "gateon:config:invalidation"
 
 type InvalidationMessage struct {
-	Type   string `json:"type"` // "route", "all"
+	Type   string `json:"type"` // "route", "all", "tls"
 	ID     string `json:"id,omitempty"`
 	NodeID string `json:"node_id"`
 }
@@ -54,6 +54,14 @@ func (i *distributedProxyInvalidator) InvalidateRoutes(strategy func(*gateonv1.R
 	}
 }
 
+func (i *distributedProxyInvalidator) InvalidateTLS() {
+	i.local.InvalidateTLS()
+	if i.redis != nil {
+		msg, _ := json.Marshal(InvalidationMessage{Type: "tls", NodeID: i.nodeID})
+		i.redis.Publish(context.Background(), InvalidationChannel, msg)
+	}
+}
+
 // StartListener listens for invalidation events from other nodes.
 func StartInvalidationListener(ctx context.Context, local domain.ProxyInvalidator, redisClient redis.Client) {
 	if redisClient == nil {
@@ -86,6 +94,9 @@ func StartInvalidationListener(ctx context.Context, local domain.ProxyInvalidato
 			case "all":
 				logger.L.Debug().Str("from", inv.NodeID).Msg("Received remote global invalidation")
 				local.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
+			case "tls":
+				logger.L.Debug().Str("from", inv.NodeID).Msg("Received remote TLS invalidation")
+				local.InvalidateTLS()
 			}
 		}
 	}
