@@ -13,6 +13,7 @@ import "gateon/v1/middleware.proto";
 import "gateon/v1/tls.proto";
 import "gateon/v1/auth.proto";
 import "gateon/v1/trace.proto";
+import "gateon/v1/diagnostics.proto";
 
 service ApiService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
@@ -47,4 +48,6 @@ service ApiService {
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+  rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
 }

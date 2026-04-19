@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
+
+
+message GetDiagnosticsRequest {}
+
+message GetDiagnosticsResponse {
+  repeated EntryPointDiagnostic entrypoints = 1;
+  repeated HandshakeError recent_tls_errors = 2;
+  SystemInfo system = 3;
+}
+
+message EntryPointDiagnostic {
+  string id = 1;
+  string address = 2;
+  string type = 3;
+  bool listening = 4;
+  int64 total_connections = 5;
+  int64 active_connections = 6;
+  string last_error = 7;
+  repeated CertificateStatus certificates = 8;
+}
+
+message CertificateStatus {
+  string domain = 1;
+  string expiry = 2;
+  bool valid = 3;
+  string error = 4;
+  string issuer = 5;
+}
+
+message HandshakeError {
+  string timestamp = 1;
+  string remote_addr = 2;
+  string error = 3;
+  string entrypoint_id = 4;
+}
+
+message SystemInfo {
+  string public_ip = 1;
+  bool cloudflare_reachable = 2;
+}
