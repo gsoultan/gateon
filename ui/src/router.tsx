@@ -33,6 +33,7 @@ const SetupPage = lazy(() => import("./routes/SetupPage"));
 const TopologyPage = lazy(() => import("./routes/TopologyPage"));
 const TracesPage = lazy(() => import("./routes/TracesPage"));
 const MetricsPage = lazy(() => import("./routes/MetricsPage"));
+const DiagnosticsPage = lazy(() => import("./routes/DiagnosticsPage"));
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -203,6 +204,12 @@ const metricsRoute = createRoute({
   component: () => <MetricsPage />,
 });
 
+const diagnosticsRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/diagnostics",
+  component: () => <DiagnosticsPage />,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
@@ -225,6 +232,7 @@ const routeTree = rootRoute.addChildren([
     topologyRoute,
     tracesRoute,
     metricsRoute,
+    diagnosticsRoute,
   ]),
 ]);
 

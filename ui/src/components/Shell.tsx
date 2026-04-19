@@ -49,6 +49,7 @@ import {
   IconTimeline,
   IconBrain,
   IconChartBar,
+  IconStethoscope,
 } from "@tabler/icons-react";
 
 export function Shell() {
@@ -92,6 +93,7 @@ export function Shell() {
 
   const systemLinks = [
     { label: "Docs", to: "/docs", icon: IconBook2 },
+    { label: "Diagnostics", to: "/diagnostics", icon: IconStethoscope },
     { label: "Logs", to: "/logs", icon: IconTerminal2 },
     ...(user?.role === "admin"
       ? [{ label: "Users", to: "/users", icon: IconUsers }]

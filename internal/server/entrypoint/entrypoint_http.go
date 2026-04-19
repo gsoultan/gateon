@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"net"
 	"net/http"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -76,13 +78,23 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	}
 
 	server := &http.Server{
-		Addr:              addr,
-		Handler:           tcpHandler,
-		TLSConfig:         epTLSConfig,
-		ErrorLog:          logger.NewFilteredHandshakeLogger(logger.L),
+		Addr:      addr,
+		Handler:   tcpHandler,
+		TLSConfig: epTLSConfig,
+		ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
+			telemetry.GlobalDiagnostics.RecordTLSError(ep.Id, addr, err)
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Duration(ep.ReadTimeoutMs) * time.Millisecond,
 		WriteTimeout:      time.Duration(ep.WriteTimeoutMs) * time.Millisecond,
+		ConnState: func(conn net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				telemetry.GlobalDiagnostics.RecordConnection(ep.Id)
+			case http.StateClosed, http.StateHijacked:
+				telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
+			}
+		},
 	}
 	if server.ReadTimeout == 0 {
 		server.ReadTimeout = 15 * time.Second

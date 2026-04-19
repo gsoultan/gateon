@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"runtime"
 	"strings"
 	"time"
@@ -487,6 +490,70 @@ func (s *ApiService) DeleteUser(_ context.Context, req *gateonv1.DeleteUserReque
 		return &gateonv1.DeleteUserResponse{Success: false}, err
 	}
 	return &gateonv1.DeleteUserResponse{Success: true}, nil
+}
+
+func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnosticsRequest) (*gateonv1.GetDiagnosticsResponse, error) {
+	entrypoints := s.EntryPoints.List(ctx)
+	diagEPs := make([]*gateonv1.EntryPointDiagnostic, 0, len(entrypoints))
+
+	for _, ep := range entrypoints {
+		stats := telemetry.GlobalDiagnostics.GetEPStats(ep.Id)
+
+		d := &gateonv1.EntryPointDiagnostic{
+			Id:                ep.Id,
+			Address:           ep.Address,
+			Type:              ep.Type.String(),
+			Listening:         true, // If it's in the list and started
+			TotalConnections:  stats.TotalConnections,
+			ActiveConnections: stats.ActiveConnections,
+			LastError:         stats.LastError,
+		}
+
+		// Add certificate status if TLS is enabled
+		// This is a bit complex as we need to match ep to certificates
+		// For now, let's just populate what we can
+		diagEPs = append(diagEPs, d)
+	}
+
+	recentErrors := telemetry.GlobalDiagnostics.GetRecentTLSErrors()
+	diagErrors := make([]*gateonv1.HandshakeError, 0, len(recentErrors))
+	for _, e := range recentErrors {
+		diagErrors = append(diagErrors, &gateonv1.HandshakeError{
+			Timestamp:    e.Timestamp.Format(time.RFC3339),
+			RemoteAddr:   e.RemoteAddr,
+			Error:        e.Error,
+			EntrypointId: e.EntryPointID,
+		})
+	}
+
+	return &gateonv1.GetDiagnosticsResponse{
+		Entrypoints:     diagEPs,
+		RecentTlsErrors: diagErrors,
+		System: &gateonv1.SystemInfo{
+			PublicIp:            getPublicIP(),
+			CloudflareReachable: isCloudflareReachable(),
+		},
+	}, nil
+}
+
+func getPublicIP() string {
+	client := http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("https://api.ipify.org")
+	if err != nil {
+		return "unknown"
+	}
+	defer resp.Body.Close()
+	ip, _ := io.ReadAll(resp.Body)
+	return string(ip)
+}
+
+func isCloudflareReachable() bool {
+	conn, err := net.DialTimeout("tcp", "1.1.1.1:53", 2*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func (s *ApiService) ChangePassword(_ context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {

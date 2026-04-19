@@ -21,4 +21,5 @@ type GlobalAndAuthAPI interface {
 	UpdateUser(ctx context.Context, req *gateonv1.UpdateUserRequest) (*gateonv1.UpdateUserResponse, error)
 	DeleteUser(ctx context.Context, req *gateonv1.DeleteUserRequest) (*gateonv1.DeleteUserResponse, error)
 	ChangePassword(ctx context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error)
+	GetDiagnostics(ctx context.Context, req *gateonv1.GetDiagnosticsRequest) (*gateonv1.GetDiagnosticsResponse, error)
 }

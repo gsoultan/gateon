@@ -405,3 +405,40 @@ export type ListUsersResponse = {
   page: number;
   page_size: number;
 };
+
+export type CertificateStatus = {
+  domain: string;
+  expiry: string;
+  valid: boolean;
+  error: string;
+  issuer: string;
+};
+
+export type EntryPointDiagnostic = {
+  id: string;
+  address: string;
+  type: string;
+  listening: boolean;
+  total_connections: number;
+  active_connections: number;
+  last_error: string;
+  certificates?: CertificateStatus[];
+};
+
+export type HandshakeError = {
+  timestamp: string;
+  remote_addr: string;
+  error: string;
+  entrypoint_id: string;
+};
+
+export type SystemInfo = {
+  public_ip: string;
+  cloudflare_reachable: boolean;
+};
+
+export type GetDiagnosticsResponse = {
+  entrypoints: EntryPointDiagnostic[];
+  recent_tls_errors: HandshakeError[];
+  system: SystemInfo;
+};

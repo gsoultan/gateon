@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -132,10 +133,20 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	)(injectEntryPointID("management", "management", true, deps.BaseHandler))
 
 	server := &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ErrorLog:          logger.NewFilteredHandshakeLogger(logger.L),
+		Addr:    addr,
+		Handler: handler,
+		ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
+			telemetry.GlobalDiagnostics.RecordTLSError("management", addr, err)
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ConnState: func(conn net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				telemetry.GlobalDiagnostics.RecordConnection("management")
+			case http.StateClosed, http.StateHijacked:
+				telemetry.GlobalDiagnostics.RecordDisconnect("management")
+			}
+		},
 	}
 
 	if deps.ShutdownRegistry != nil {
@@ -174,11 +185,14 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 		for {
 			conn, err := l.Accept()
 			if err != nil {
+				telemetry.GlobalDiagnostics.RecordEPError(ep.Id, err.Error())
 				return
 			}
+			telemetry.GlobalDiagnostics.RecordConnection(ep.Id)
 			c := conn
 			if plaintext {
 				wg.Go(func() {
+					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
 					handleTCPConnWithInspection(c, ep, deps, wg)
 				})
 			} else {
@@ -187,6 +201,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 					p = deps.L4Resolver.ResolveTCP(ep)
 				}
 				wg.Go(func() {
+					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
 					defer c.Close()
 					if p != nil {
 						handleTCPProxyL4(c, p)

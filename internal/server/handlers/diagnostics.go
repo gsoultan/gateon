@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -31,7 +32,18 @@ func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier)
 	return err == nil
 }
 
-func registerDiagnosticHandlers(mux *http.ServeMux, d *Deps) {
+func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
+	mux.HandleFunc("GET /v1/diagnostics", func(w http.ResponseWriter, r *http.Request) {
+		res, err := svc.GetDiagnostics(r.Context(), &gateonv1.GetDiagnosticsRequest{})
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := ProtojsonOptions().Marshal(res)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !isLogsRequestAuthorized(r, d.AuthManager) {
 			w.WriteHeader(http.StatusUnauthorized)
