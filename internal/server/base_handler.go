@@ -74,7 +74,7 @@ func CreateBaseHandler(
 				return
 			}
 			// Require Authorization header; do not accept auth token in URL.
-			middleware.PasetoAuth(deps.Auth)(internal).ServeHTTP(w, r)
+			middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(internal).ServeHTTP(w, r)
 			return
 		}
 

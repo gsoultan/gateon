@@ -47,11 +47,17 @@ type rateLimiterEntry struct {
 
 const rateLimiterEvictInterval = 60 * time.Second
 const rateLimiterEntryTTL = 5 * time.Minute
+const rateLimiterShards = 16
+
+type rateLimiterShard struct {
+	limiters map[string]*rateLimiterEntry
+	mu       sync.RWMutex
+}
 
 // LocalRateLimiter implements a flexible local rate limiter with automatic TTL eviction.
+// It uses sharding to reduce lock contention under heavy traffic.
 type LocalRateLimiter struct {
-	limiters  map[string]*rateLimiterEntry
-	mu        sync.RWMutex
+	shards    []*rateLimiterShard
 	rate      rate.Limit
 	burst     int
 	stopEvict chan struct{}
@@ -61,16 +67,30 @@ type LocalRateLimiter struct {
 // Stale entries are evicted automatically after rateLimiterEntryTTL of inactivity.
 func NewRateLimiter(r rate.Limit, b int) *LocalRateLimiter {
 	rl := &LocalRateLimiter{
-		limiters:  make(map[string]*rateLimiterEntry),
+		shards:    make([]*rateLimiterShard, rateLimiterShards),
 		rate:      r,
 		burst:     b,
 		stopEvict: make(chan struct{}),
+	}
+	for i := range rateLimiterShards {
+		rl.shards[i] = &rateLimiterShard{
+			limiters: make(map[string]*rateLimiterEntry),
+		}
 	}
 	go rl.evictLoop()
 	return rl
 }
 
-// evictLoop periodically removes stale rate limiter entries to prevent unbounded map growth.
+func (rl *LocalRateLimiter) getShard(key string) *rateLimiterShard {
+	var hash uint32 = 2166136261
+	for i := range len(key) {
+		hash ^= uint32(key[i])
+		hash *= 16777619
+	}
+	return rl.shards[hash%rateLimiterShards]
+}
+
+// evictLoop periodically removes stale rate limiter entries from all shards.
 func (rl *LocalRateLimiter) evictLoop() {
 	ticker := time.NewTicker(rateLimiterEvictInterval)
 	defer ticker.Stop()
@@ -79,13 +99,15 @@ func (rl *LocalRateLimiter) evictLoop() {
 		case <-ticker.C:
 			now := time.Now().Unix()
 			ttl := int64(rateLimiterEntryTTL.Seconds())
-			rl.mu.Lock()
-			for k, e := range rl.limiters {
-				if now-e.lastAccess.Load() > ttl {
-					delete(rl.limiters, k)
+			for _, s := range rl.shards {
+				s.mu.Lock()
+				for k, e := range s.limiters {
+					if now-e.lastAccess.Load() > ttl {
+						delete(s.limiters, k)
+					}
 				}
+				s.mu.Unlock()
 			}
-			rl.mu.Unlock()
 		case <-rl.stopEvict:
 			return
 		}
@@ -111,23 +133,25 @@ func NewQPSRateLimiter(requestsPerSec, burst int) *LocalRateLimiter {
 
 func (rl *LocalRateLimiter) getLimiter(key string) *rate.Limiter {
 	now := time.Now().Unix()
-	rl.mu.RLock()
-	entry, exists := rl.limiters[key]
-	rl.mu.RUnlock()
+	s := rl.getShard(key)
+
+	s.mu.RLock()
+	entry, exists := s.limiters[key]
+	s.mu.RUnlock()
 
 	if exists {
 		entry.lastAccess.Store(now)
 		return entry.limiter
 	}
 
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Double-check after acquiring write lock
-	entry, exists = rl.limiters[key]
+	entry, exists = s.limiters[key]
 	if !exists {
 		entry = &rateLimiterEntry{limiter: rate.NewLimiter(rl.rate, rl.burst)}
-		rl.limiters[key] = entry
+		s.limiters[key] = entry
 	}
 	entry.lastAccess.Store(now)
 

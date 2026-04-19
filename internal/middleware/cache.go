@@ -109,26 +109,52 @@ type cacheEntry struct {
 	expireAt time.Time
 }
 
-// memoryCacheBackend implements CacheBackend with in-memory LRU-style storage.
+const cacheShards = 16
+
+// memoryCacheBackend implements CacheBackend with in-memory storage and sharding.
 type memoryCacheBackend struct {
+	shards []*cacheShard
+}
+
+type cacheShard struct {
 	store *cacheStore
 	mu    sync.Mutex
 }
 
 func newMemoryCacheBackend(max int, maxBody int64) *memoryCacheBackend {
-	return &memoryCacheBackend{
-		store: &cacheStore{
-			entries: make(map[string]*cacheEntry),
-			max:     max,
-			maxBody: maxBody,
-		},
+	shardMax := max / cacheShards
+	if shardMax < 1 {
+		shardMax = 1
 	}
+	m := &memoryCacheBackend{
+		shards: make([]*cacheShard, cacheShards),
+	}
+	for i := range cacheShards {
+		m.shards[i] = &cacheShard{
+			store: &cacheStore{
+				entries: make(map[string]*cacheEntry),
+				max:     shardMax,
+				maxBody: maxBody,
+			},
+		}
+	}
+	return m
+}
+
+func (m *memoryCacheBackend) getShard(key string) *cacheShard {
+	var hash uint32 = 2166136261
+	for i := range len(key) {
+		hash ^= uint32(key[i])
+		hash *= 16777619
+	}
+	return m.shards[hash%cacheShards]
 }
 
 func (m *memoryCacheBackend) Get(ctx context.Context, key string) (int, http.Header, []byte, bool) {
-	m.mu.Lock()
-	ent := m.store.get(key)
-	m.mu.Unlock()
+	s := m.getShard(key)
+	s.mu.Lock()
+	ent := s.store.get(key)
+	s.mu.Unlock()
 	if ent == nil {
 		return 0, nil, nil, false
 	}
@@ -136,14 +162,15 @@ func (m *memoryCacheBackend) Get(ctx context.Context, key string) (int, http.Hea
 }
 
 func (m *memoryCacheBackend) Set(ctx context.Context, key string, status int, headers http.Header, body []byte, ttl time.Duration) {
-	m.mu.Lock()
-	m.store.set(key, &cacheEntry{
+	s := m.getShard(key)
+	s.mu.Lock()
+	s.store.set(key, &cacheEntry{
 		status:   status,
 		headers:  headers,
 		body:     body,
 		expireAt: time.Now().Add(ttl),
 	})
-	m.mu.Unlock()
+	s.mu.Unlock()
 }
 
 type responseRecorder struct {
@@ -206,11 +233,19 @@ func (s *cacheStore) get(key string) *cacheEntry {
 }
 
 func (s *cacheStore) set(key string, ent *cacheEntry) {
-	if len(s.entries) >= s.max && s.order != nil {
-		old := s.order[0]
-		s.order = s.order[1:]
-		delete(s.entries, old)
+	if _, exists := s.entries[key]; !exists {
+		if len(s.entries) >= s.max {
+			// Evict oldest entry that still exists
+			for len(s.order) > 0 {
+				old := s.order[0]
+				s.order = s.order[1:]
+				if _, ok := s.entries[old]; ok {
+					delete(s.entries, old)
+					break
+				}
+			}
+		}
+		s.order = append(s.order, key)
 	}
 	s.entries[key] = ent
-	s.order = append(s.order, key)
 }
