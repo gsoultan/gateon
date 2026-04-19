@@ -17,8 +17,8 @@ type oidcDiscoveryResponse struct {
 const oidcDiscoveryTimeout = 15 * time.Second
 
 // NewOIDCValidator creates a JWT validator by fetching OIDC discovery from the issuer.
-// Config: issuer (required), audience (optional).
-func NewOIDCValidator(issuer, audience string) (*JWTValidator, error) {
+// Config: issuer (required), audience (optional), baseCfg.
+func NewOIDCValidator(issuer, audience string, baseCfg AuthBaseConfig) (*JWTValidator, error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
 		return nil, fmt.Errorf("oidc auth requires issuer URL")
@@ -51,9 +51,10 @@ func NewOIDCValidator(issuer, audience string) (*JWTValidator, error) {
 	}
 
 	jwtCfg := JWTConfig{
-		Issuer:   strings.TrimSuffix(effectiveIssuer, "/"),
-		Audience: strings.TrimSpace(audience),
-		JWKSURL:  disc.JWKSURI,
+		AuthBaseConfig: baseCfg,
+		Issuer:         strings.TrimSuffix(effectiveIssuer, "/"),
+		Audience:       strings.TrimSpace(audience),
+		JWKSURL:        disc.JWKSURI,
 	}
 	return NewJWTValidator(jwtCfg)
 }

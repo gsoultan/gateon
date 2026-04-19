@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
@@ -125,7 +126,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	telemetry.StartSystemMetricsCollector(metricsStop)
 
 	// Start TLS certificate expiry monitoring
-	certInfos := collectCertInfos(ctx, s)
+	certInfos := collectCertInfos(ctx, s, tlsManager)
 	telemetry.StartTLSCertMonitor(certInfos, metricsStop)
 
 	logger.L.Info().Str("port", s.Port).Msg("Gateon API Gateway started")
@@ -159,30 +160,48 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	logger.L.Info().Msg("shutdown complete")
 }
 
-// collectCertInfos gathers TLS certificate info from global TLS config for expiry monitoring.
-func collectCertInfos(ctx context.Context, s *Server) []telemetry.CertInfo {
+// collectCertInfos gathers TLS certificate info from global TLS config and TLS Manager for expiry monitoring.
+func collectCertInfos(ctx context.Context, s *Server, tlsManager *gtls.Manager) []telemetry.CertInfo {
 	var certs []telemetry.CertInfo
 	seen := make(map[string]bool)
 
-	gc := s.GlobalStore.Get(ctx)
-	if gc == nil || gc.Tls == nil {
-		return certs
+	// Collect from TLS Manager (handles both global config and environment variables)
+	if tlsManager != nil {
+		for _, c := range tlsManager.Certificates() {
+			if c.CertFile == "" || c.KeyFile == "" {
+				continue
+			}
+			key := c.CertFile + ":" + c.KeyFile
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			certs = append(certs, telemetry.CertInfo{
+				CertName: c.Name,
+				CertFile: c.CertFile,
+				KeyFile:  c.KeyFile,
+			})
+		}
 	}
 
-	for _, c := range gc.Tls.Certificates {
-		if c.CertFile == "" || c.KeyFile == "" {
-			continue
+	// Double-check with GlobalStore for any that might have been added dynamically
+	gc := s.GlobalStore.Get(ctx)
+	if gc != nil && gc.Tls != nil {
+		for _, c := range gc.Tls.Certificates {
+			if c.CertFile == "" || c.KeyFile == "" {
+				continue
+			}
+			key := c.CertFile + ":" + c.KeyFile
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			certs = append(certs, telemetry.CertInfo{
+				CertName: c.Name,
+				CertFile: c.CertFile,
+				KeyFile:  c.KeyFile,
+			})
 		}
-		key := c.CertFile + ":" + c.KeyFile
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		certs = append(certs, telemetry.CertInfo{
-			CertName: c.Name,
-			CertFile: c.CertFile,
-			KeyFile:  c.KeyFile,
-		})
 	}
 
 	return certs

@@ -8,6 +8,8 @@ import (
 
 func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 	authType := cfg["type"]
+	baseCfg := f.parseAuthBaseConfig(cfg)
+
 	switch authType {
 	case "jwt":
 		jwksURL := strings.TrimSpace(cfg["jwks_url"])
@@ -18,11 +20,19 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 		if jwksURL == "" && secret == "" {
 			return nil, fmt.Errorf("jwt auth requires jwks_url or secret (or GATEON_JWT_SECRET env)")
 		}
+
+		var revStore RevocationStore
+		if cfg["enable_revocation"] == "true" && f.redisClient != nil {
+			revStore = NewRedisRevocationStore(f.redisClient, cfg["revocation_prefix"])
+		}
+
 		jwtCfg := JWTConfig{
-			Issuer:   cfg["issuer"],
-			Audience: cfg["audience"],
-			JWKSURL:  jwksURL,
-			Secret:   []byte(secret),
+			AuthBaseConfig:  baseCfg,
+			Issuer:          cfg["issuer"],
+			Audience:        cfg["audience"],
+			JWKSURL:         jwksURL,
+			Secret:          []byte(secret),
+			RevocationStore: revStore,
 		}
 		validator, err := NewJWTValidator(jwtCfg)
 		if err != nil {
@@ -41,23 +51,31 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 		if err != nil {
 			return nil, err
 		}
-		return PasetoAuth(verifier), nil
+		return PasetoAuth(verifier, baseCfg), nil
 	case "apikey":
-		keys := make(map[string]string)
-		for k, v := range cfg {
-			if strings.HasPrefix(k, "key_") {
-				keys[strings.TrimPrefix(k, "key_")] = v
+		hashed := cfg["hashed"] == "true"
+		var store APIKeyStore
+		if cfg["use_redis"] == "true" && f.redisClient != nil {
+			store = NewRedisAPIKeyStore(f.redisClient, cfg["redis_prefix"], hashed)
+		} else {
+			keys := make(map[string]string)
+			for k, v := range cfg {
+				if strings.HasPrefix(k, "key_") {
+					keys[strings.TrimPrefix(k, "key_")] = v
+				}
 			}
+			if len(keys) == 0 {
+				return nil, fmt.Errorf("apikey auth requires at least one key (key_name=value) or use_redis=true")
+			}
+			store = NewMemoryAPIKeyStore(keys, hashed)
 		}
-		if len(keys) == 0 {
-			return nil, fmt.Errorf("apikey auth requires at least one key (key_name=value)")
-		}
+
 		headerName := cfg["header"]
 		if headerName == "" {
 			headerName = "X-API-Key"
 		}
 		queryParam := cfg["query_param"]
-		return NewAPIKeyValidator(keys, headerName, queryParam).Handler, nil
+		return NewAPIKeyValidator(store, headerName, queryParam, baseCfg).Handler, nil
 	case "basic":
 		users := cfg["users"]
 		if users == "" {
@@ -66,16 +84,16 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 			if username == "" || password == "" {
 				return nil, fmt.Errorf("basic auth requires username and password, or users (user:pass,user2:pass2)")
 			}
-			return BasicAuthWithRealm(username, password, cfg["realm"]), nil
+			return BasicAuthWithConfig(username, password, cfg["realm"], baseCfg), nil
 		}
-		return BasicAuthUsers(users, cfg["realm"])
+		return BasicAuthUsersWithConfig(users, cfg["realm"], baseCfg)
 	case "oidc":
 		issuer := strings.TrimSpace(cfg["issuer"])
 		if issuer == "" {
 			return nil, fmt.Errorf("oidc auth requires issuer URL (e.g. https://auth.example.com)")
 		}
 		audience := strings.TrimSpace(cfg["audience"])
-		validator, err := NewOIDCValidator(issuer, audience)
+		validator, err := NewOIDCValidator(issuer, audience, baseCfg)
 		if err != nil {
 			return nil, err
 		}
@@ -91,6 +109,7 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 			return nil, fmt.Errorf("oauth2 introspection requires introspection_url, client_id, and client_secret (or GATEON_OAUTH2_CLIENT_SECRET env)")
 		}
 		introCfg := OAuth2IntrospectionConfig{
+			AuthBaseConfig:   baseCfg,
 			IntrospectionURL: introURL,
 			ClientID:         clientID,
 			ClientSecret:     clientSecret,
@@ -104,4 +123,29 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 	default:
 		return nil, fmt.Errorf("unknown auth type: %s (use jwt, paseto, apikey, basic, oidc, or oauth2)", authType)
 	}
+}
+
+func (f *Factory) parseAuthBaseConfig(cfg map[string]string) AuthBaseConfig {
+	base := AuthBaseConfig{
+		DryRun:        cfg["dry_run"] == "true",
+		ErrorTemplate: cfg["error_template"],
+	}
+
+	if scopes := cfg["required_scopes"]; scopes != "" {
+		base.RequiredScopes = strings.Split(scopes, ",")
+	}
+	if roles := cfg["required_roles"]; roles != "" {
+		base.RequiredRoles = strings.Split(roles, ",")
+	}
+
+	mappings := make(map[string]string)
+	for k, v := range cfg {
+		if strings.HasPrefix(k, "map_claim_") {
+			claim := strings.TrimPrefix(k, "map_claim_")
+			mappings[claim] = v
+		}
+	}
+	base.ClaimMappings = mappings
+
+	return base
 }

@@ -97,6 +97,10 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 		return f.createGeoIP(cfg)
 	case "hmac":
 		return f.createHMAC(cfg)
+	case "policy":
+		return f.createPolicy(cfg)
+	case "xfcc":
+		return f.createXFCC(cfg)
 	case "transform":
 		return BodyTransform(BodyTransformConfig{
 			RequestSearch:     cfg["request_search"],

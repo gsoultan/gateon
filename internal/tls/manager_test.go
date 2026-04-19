@@ -173,3 +173,23 @@ func TestManager_ClientAuthoritiesBuildPool_OK(t *testing.T) {
 		t.Fatalf("expected ClientCAs to be initialized")
 	}
 }
+
+func TestManager_Certificates(t *testing.T) {
+	certs := []CertificateConfig{
+		{ID: "1", Name: "Cert 1", CertFile: "cert1.crt", KeyFile: "cert1.key"},
+		{ID: "2", Name: "Cert 2", CertFile: "cert2.crt", KeyFile: "cert2.key"},
+	}
+	m := NewManager(Config{
+		Certificates: certs,
+	})
+
+	got := m.Certificates()
+	if len(got) != len(certs) {
+		t.Fatalf("expected %d certificates, got %d", len(certs), len(got))
+	}
+	for i := range certs {
+		if got[i].ID != certs[i].ID || got[i].Name != certs[i].Name {
+			t.Errorf("mismatch at index %d: expected %+v, got %+v", i, certs[i], got[i])
+		}
+	}
+}
