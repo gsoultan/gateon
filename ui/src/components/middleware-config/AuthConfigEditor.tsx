@@ -1,4 +1,4 @@
-import { Stack, Select, TextInput, Group } from "@mantine/core";
+import { Stack, Select, TextInput, Group, Switch, Divider, Title, Text } from "@mantine/core";
 import { KeyValueList } from "./KeyValueList";
 
 interface AuthConfigEditorProps {
@@ -10,6 +10,64 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
   const updateConfig = (key: string, value: string) => {
     onChange({ ...config, [key]: value });
   };
+
+  const renderCommonAuthFields = () => (
+    <>
+      <Divider label="Advanced & Authorization" labelPosition="center" my="sm" />
+      <Group grow>
+        <Switch
+          label="Dry Run Mode"
+          description="Validate but do not block request if auth fails"
+          checked={config.dry_run === "true"}
+          onChange={(e) => updateConfig("dry_run", e.currentTarget.checked ? "true" : "false")}
+        />
+        {(config.type === "jwt" || config.type === "paseto" || config.type === "oidc") && (
+          <Switch
+            label="Enable Revocation"
+            description="Check Redis for revoked tokens (JTI)"
+            checked={config.revocation_enabled === "true"}
+            onChange={(e) => updateConfig("revocation_enabled", e.currentTarget.checked ? "true" : "false")}
+          />
+        )}
+      </Group>
+
+      <Group grow>
+        <TextInput
+          label="Required Scopes"
+          description="Comma-separated scopes (e.g. read, write)"
+          placeholder="read, write"
+          value={config.required_scopes || ""}
+          onChange={(e) => updateConfig("required_scopes", e.currentTarget.value)}
+        />
+        <TextInput
+          label="Required Roles"
+          description="Comma-separated roles (e.g. admin, editor)"
+          placeholder="admin, editor"
+          value={config.required_roles || ""}
+          onChange={(e) => updateConfig("required_roles", e.currentTarget.value)}
+        />
+      </Group>
+
+      <TextInput
+        label="Custom Error Template"
+        description="JSON response if auth fails (e.g. { 'error': 'unauthorized' })"
+        placeholder='{ "error": "Unauthorized access", "code": 401 }'
+        value={config.error_template || ""}
+        onChange={(e) => updateConfig("error_template", e.currentTarget.value)}
+      />
+
+      <KeyValueList
+        config={config}
+        onChange={onChange}
+        title="Claim-to-Header Mapping"
+        prefix="claim_"
+        placeholderKey="email"
+        placeholderValue="X-User-Email"
+        keyLabel="JWT/Token Claim"
+        valueLabel="Request Header"
+      />
+    </>
+  );
 
   return (
     <Stack gap="md">
@@ -28,13 +86,22 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
       />
       {config.type === "apikey" && (
         <>
-          <TextInput
-            label="API Key Header"
-            description="Header to read API key from. Default: X-API-Key"
-            placeholder="X-API-Key"
-            value={config.header || ""}
-            onChange={(e) => updateConfig("header", e.currentTarget.value)}
-          />
+          <Group grow align="end">
+            <TextInput
+              label="API Key Header"
+              description="Header to read API key from. Default: X-API-Key"
+              placeholder="X-API-Key"
+              value={config.header || ""}
+              onChange={(e) => updateConfig("header", e.currentTarget.value)}
+            />
+            <Switch
+              label="Hashed Keys"
+              description="Store and compare SHA-256 hashes (secure)"
+              checked={config.hashed_keys === "true"}
+              onChange={(e) => updateConfig("hashed_keys", e.currentTarget.checked ? "true" : "false")}
+              mb="xs"
+            />
+          </Group>
           <KeyValueList
             config={config}
             onChange={onChange}
@@ -176,6 +243,7 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
           onChange={(e) => updateConfig("secret", e.currentTarget.value)}
         />
       )}
+      {renderCommonAuthFields()}
     </Stack>
   );
 }

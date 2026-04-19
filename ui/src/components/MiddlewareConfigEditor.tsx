@@ -31,6 +31,8 @@ import {
   StripPrefixRegexConfigEditor,
   ReplacePathConfigEditor,
   ReplacePathRegexConfigEditor,
+  XFCCConfigEditor,
+  PolicyConfigEditor,
 } from "./middleware-config";
 
 interface MiddlewareConfigEditorProps {
@@ -353,6 +355,12 @@ export function MiddlewareConfigEditor({
 
     case "hmac":
       return <HMACConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "xfcc":
+      return <XFCCConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "policy":
+      return <PolicyConfigEditor config={config} onChange={onChange} />;
 
     case "cache":
       return <CacheConfigEditor config={config} updateConfig={updateConfig} />;

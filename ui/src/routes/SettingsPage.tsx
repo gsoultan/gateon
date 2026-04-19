@@ -463,7 +463,7 @@ export default function SettingsPage() {
             />
             <Stack gap="sm">
               <Switch
-                label="Enable Redis (rate limiting and distributed cache)"
+                label="Enable Redis (rate limiting, token revocation, and distributed cache)"
                 checked={redis.enabled || false}
                 disabled={formDisabled}
                 onChange={(e) =>
