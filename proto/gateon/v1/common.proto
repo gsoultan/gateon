@@ -50,6 +50,13 @@ message Certificate {
   // Optional CA/intermediate certificate file appended to the served chain
   // during SNI selection so users don't need to pre-bundle a full-chain cert.
   string ca_file = 5;
+  CertificateValidation validation = 6;
+}
+
+message CertificateValidation {
+  bool valid = 1;
+  repeated string warnings = 2;
+  repeated string recommended_ciphers = 3;
 }
 
 message ClientAuthority {

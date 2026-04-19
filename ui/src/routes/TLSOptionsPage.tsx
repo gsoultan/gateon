@@ -27,6 +27,7 @@ import {
   IconPencil,
   IconShieldLock,
   IconCheck,
+  IconAlertTriangle,
 } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -36,6 +37,8 @@ import { useTLSOptions, apiFetch, getApiErrorMessage, useClientAuthorities } fro
 import { usePermissions } from "../hooks/usePermissions";
 
 const TLS_VERSIONS = [
+  { label: "TLS 1.0 (Insecure)", value: "TLS1.0" },
+  { label: "TLS 1.1 (Insecure)", value: "TLS1.1" },
   { label: "TLS 1.2", value: "TLS1.2" },
   { label: "TLS 1.3", value: "TLS1.3" },
 ];
@@ -158,6 +161,8 @@ export default function TLSOptionsPage() {
   const tlsOptions = data?.tls_options || [];
   const totalCount = data?.total_count || 0;
 
+  const isInsecureVersion = (ver?: string) => ver === "TLS1.0" || ver === "TLS1.1";
+
   return (
     <Stack gap="xl">
       <Group justify="space-between" mb="md">
@@ -240,11 +245,11 @@ export default function TLSOptionsPage() {
                     </Table.Td>
                     <Table.Td>
                       <Group gap={4}>
-                        <Badge size="xs" variant="outline">
+                        <Badge size="xs" variant="outline" color={isInsecureVersion(opt.min_tls_version) ? "red" : "blue"}>
                           {opt.min_tls_version || "TLS1.2"}
                         </Badge>
                         <Text size="xs">to</Text>
-                        <Badge size="xs" variant="outline">
+                        <Badge size="xs" variant="outline" color={isInsecureVersion(opt.max_tls_version) ? "red" : "blue"}>
                           {opt.max_tls_version || "TLS1.3"}
                         </Badge>
                       </Group>
@@ -376,6 +381,15 @@ export default function TLSOptionsPage() {
               }
             />
           </Group>
+
+          {isInsecureVersion(editingOption?.min_tls_version) && (
+            <Alert color="red" icon={<IconAlertTriangle size={16} />} title="Security Warning" radius="md">
+              <Text size="xs">
+                TLS 1.0 and 1.1 are deprecated and have known vulnerabilities. 
+                Using them may compromise the security of your gateway and cause modern browsers to show warnings.
+              </Text>
+            </Alert>
+          )}
 
           <MultiSelect
             label="Cipher Suites"

@@ -73,6 +73,7 @@ func TestIntegration_ProxyRequest(t *testing.T) {
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteStore, Services: s.ServiceStore, Globals: globalStore,
 		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
+		TLSManager: s.TLSManager,
 	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	wrapped := grpcweb.WrapServer(grpcServer)
@@ -134,6 +135,7 @@ func TestIntegration_ProxyWithIPFilterMiddleware(t *testing.T) {
 	apiSvc := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteStore, Services: s.ServiceStore, Globals: s.GlobalStore,
 		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
+		TLSManager: s.TLSManager,
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
@@ -189,6 +191,7 @@ func TestIntegration_RestApiAndProxy(t *testing.T) {
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteStore, Services: s.ServiceStore, Globals: globalStore,
 		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
+		TLSManager: s.TLSManager,
 	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	wrapped := grpcweb.WrapServer(grpcServer)
@@ -358,6 +361,7 @@ func TestIntegration_ProxyWithOAuth2IntrospectionMiddleware(t *testing.T) {
 	apiSvc := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteStore, Services: s.ServiceStore, Globals: s.GlobalStore,
 		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
+		TLSManager: s.TLSManager,
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
@@ -448,6 +452,7 @@ func TestIntegration_ProxyWithOIDCMiddleware(t *testing.T) {
 	apiSvc := api.NewApiService(api.ApiServiceConfig{
 		Routes: s.RouteStore, Services: s.ServiceStore, Globals: s.GlobalStore,
 		EntryPoints: s.EpStore, Middlewares: s.MwStore, TLSOptions: s.TLSOptStore,
+		TLSManager: s.TLSManager,
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
