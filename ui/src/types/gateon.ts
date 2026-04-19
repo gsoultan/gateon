@@ -422,6 +422,7 @@ export type EntryPointDiagnostic = {
   total_connections: number;
   active_connections: number;
   last_error: string;
+  name: string;
   certificates?: CertificateStatus[];
 };
 
@@ -430,6 +431,7 @@ export type HandshakeError = {
   remote_addr: string;
   error: string;
   entrypoint_id: string;
+  entrypoint_name: string;
 };
 
 export type SystemInfo = {

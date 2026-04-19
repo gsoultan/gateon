@@ -193,3 +193,30 @@ func TestManager_Certificates(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCipherSuites(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want []uint16
+	}{
+		{[]string{"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"}, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}},
+		{[]string{"ECDHE-RSA-AES128-GCM-SHA256"}, nil},                                         // No match by default, returns nil
+		{[]string{"TLS_RSA_WITH_AES_128_CBC_SHA"}, []uint16{tls.TLS_RSA_WITH_AES_128_CBC_SHA}}, // Insecure suite
+		{[]string{"RSA_WITH_AES_128_CBC_SHA"}, []uint16{tls.TLS_RSA_WITH_AES_128_CBC_SHA}},     // Match without TLS_ prefix
+		{[]string{"invalid"}, nil}, // Invalid suite returns nil
+		{[]string{}, nil},          // Empty list returns nil
+		{nil, nil},                 // Nil returns nil
+	}
+	for _, c := range cases {
+		got := ParseCipherSuites(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("ParseCipherSuites(%v) length = %v, want %v", c.in, len(got), len(c.want))
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("ParseCipherSuites(%v)[%d] = %v, want %v", c.in, i, got[i], c.want[i])
+			}
+		}
+	}
+}
