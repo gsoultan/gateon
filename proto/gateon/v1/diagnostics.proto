@@ -23,6 +23,27 @@ message EntryPointDiagnostic {
   string last_error = 7;
   repeated CertificateStatus certificates = 8;
   string name = 9;
+  repeated RouteDiagnostic routes = 10;
+}
+
+message RouteDiagnostic {
+  string id = 1;
+  string name = 2;
+  string rule = 3;
+  string service_id = 4;
+  string service_name = 5;
+  bool service_healthy = 6;
+  repeated MiddlewareDiagnostic middlewares = 7;
+  bool healthy = 8;
+  string error = 9;
+}
+
+message MiddlewareDiagnostic {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  bool healthy = 4;
+  string error = 5;
 }
 
 message CertificateStatus {
