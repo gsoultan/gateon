@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -41,12 +43,29 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	chain := []middleware.Middleware{
 		middleware.RequestID(), // Added for global correlation
 		middleware.Recovery(),
+		middleware.SecurityHeaders(),
 		middleware.Metrics("gateon-" + epLabel),
 	}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
 	}
-	finalEPHandler := middleware.Chain(chain...)(deps.CORS.Handler(deps.Limiter.Handler(middleware.PerIP)(epHandler)))
+	// Global per-IP connection limit to prevent Slowloris and basic DDOS.
+	chain = append(chain, entrypointConnLimiter())
+
+	// Final handler: wrap with monitoring, global rate limiter, and global CORS (for non-proxied requests).
+	// For proxied requests, they use their own CORS policy from their route config if provided.
+	finalEPHandler := middleware.Chain(chain...)(deps.Limiter.Handler(middleware.PerIP)(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// If it's a management or internal path, apply global CORS.
+			// For user-defined routes, they handle their own CORS (avoid double headers).
+			isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
+			if isMgmt || middleware.IsInternalPath(r.URL.Path) {
+				deps.CORS.Handler(epHandler).ServeHTTP(w, r)
+			} else {
+				epHandler.ServeHTTP(w, r)
+			}
+		}),
+	))
 	var epTLSConfig *tls.Config
 	if ep.Tls != nil && ep.Tls.Enabled {
 		epTLSConfig = deps.TLSConfig.Clone()
@@ -87,6 +106,8 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Duration(ep.ReadTimeoutMs) * time.Millisecond,
 		WriteTimeout:      time.Duration(ep.WriteTimeoutMs) * time.Millisecond,
+		IdleTimeout:       1 * time.Minute,
+		MaxHeaderBytes:    1 << 20, // 1MB
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			switch state {
 			case http.StateNew:
@@ -174,4 +195,18 @@ func protocols(ep *gateonv1.EntryPoint) (hasTCP, hasUDP bool) {
 		}
 	}
 	return hasTCP, hasUDP
+}
+
+func entrypointConnLimiter() middleware.Middleware {
+	maxStr := os.Getenv("GATEON_MAX_CONN_PER_IP")
+	if maxStr == "" {
+		// Default to 100 concurrent requests per IP if not set.
+		// This is a safe default for most use cases but prevents basic Slowloris.
+		return middleware.MaxConnectionsPerIP(100, middleware.PerIP)
+	}
+	max, _ := strconv.Atoi(maxStr)
+	if max <= 0 {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return middleware.MaxConnectionsPerIP(max, middleware.PerIP)
 }

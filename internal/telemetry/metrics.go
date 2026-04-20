@@ -118,6 +118,48 @@ var MiddlewareHMACFailuresTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total HMAC verification failures.",
 }, []string{"route"})
 
+// RequestsByIPTotal counts HTTP requests by client IP.
+var RequestsByIPTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_requests_by_ip_total",
+	Help: "Total number of HTTP requests by client IP.",
+}, []string{"ip"})
+
+// RequestBytesByIPTotal counts request/response bytes by client IP and direction.
+var RequestBytesByIPTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_request_bytes_by_ip_total",
+	Help: "Total bytes transferred by client IP and direction (in/out).",
+}, []string{"ip", "direction"})
+
+// RequestsByCountryTotal counts HTTP requests by country.
+var RequestsByCountryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_requests_by_country_total",
+	Help: "Total number of HTTP requests by country.",
+}, []string{"country"})
+
+// RequestBytesByCountryTotal counts request/response bytes by country and direction.
+var RequestBytesByCountryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_request_bytes_by_country_total",
+	Help: "Total bytes transferred by country and direction (in/out).",
+}, []string{"country", "direction"})
+
+// RequestsByDomainTotal counts HTTP requests by domain.
+var RequestsByDomainTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_requests_by_domain_total",
+	Help: "Total number of HTTP requests by domain.",
+}, []string{"domain"})
+
+// RequestBytesByDomainTotal counts request/response bytes by domain and direction.
+var RequestBytesByDomainTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_request_bytes_by_domain_total",
+	Help: "Total bytes transferred by domain and direction (in/out).",
+}, []string{"domain", "direction"})
+
+// RequestsByProtocolTotal counts HTTP requests by protocol (http1, http2, http3).
+var RequestsByProtocolTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_requests_by_protocol_total",
+	Help: "Total number of HTTP requests by protocol.",
+}, []string{"protocol"})
+
 // ConfigReloadsTotal counts configuration reloads.
 var ConfigReloadsTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "gateon_config_reloads_total",

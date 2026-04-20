@@ -30,6 +30,7 @@ type increment struct {
 	latS       float64
 	bytesTotal uint64
 	atTime     time.Time
+	isDomain   bool
 }
 
 type traceRecord struct {
@@ -109,6 +110,14 @@ func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 	return tx.Prepare(q)
 }
 
+func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
+	if s.dialect.Driver == db.DriverMySQL {
+		return tx.Prepare(QueryUpsertDomainStatsMySQL)
+	}
+	q := s.dialect.Rebind(QueryUpsertDomainStatsConflict)
+	return tx.Prepare(q)
+}
+
 func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 	if s.dialect.Driver == db.DriverMySQL {
 		return tx.Prepare(QueryInsertTraceMySQL)
@@ -131,21 +140,36 @@ func (s *pathStatsStore) loop() {
 		if len(batch) > 0 {
 			tx, err := s.db.Begin()
 			if err != nil {
-				logger.Default().Error().Err(err).Msg("path stats: begin transaction failed")
+				logger.Default().Error().Err(err).Msg("telemetry: begin transaction failed")
 			} else {
-				stmt, err := s.upsertStmt(tx)
-				if err == nil {
-					for _, inc := range batch {
-						day := inc.atTime.UTC().Format("2006-01-02")
-						if _, err := stmt.Exec(day, inc.host, inc.path, 1, inc.latS, inc.bytesTotal); err != nil {
-							logger.Default().Error().Err(err).Msg("path stats: upsert failed")
+				pathStmt, _ := s.upsertStmt(tx)
+				domainStmt, _ := s.domainUpsertStmt(tx)
+
+				for _, inc := range batch {
+					if inc.isDomain {
+						if domainStmt != nil {
+							day := inc.atTime.UTC().Format("2006-01-02")
+							hour := inc.atTime.UTC().Hour()
+							if _, err := domainStmt.Exec(day, hour, inc.host, 1, inc.latS, inc.bytesTotal); err != nil {
+								logger.Default().Error().Err(err).Msg("domain stats: upsert failed")
+							}
+						}
+					} else {
+						if pathStmt != nil {
+							day := inc.atTime.UTC().Format("2006-01-02")
+							if _, err := pathStmt.Exec(day, inc.host, inc.path, 1, inc.latS, inc.bytesTotal); err != nil {
+								logger.Default().Error().Err(err).Msg("path stats: upsert failed")
+							}
 						}
 					}
-					stmt.Close()
-					_ = tx.Commit()
-				} else {
-					_ = tx.Rollback()
 				}
+				if pathStmt != nil {
+					pathStmt.Close()
+				}
+				if domainStmt != nil {
+					domainStmt.Close()
+				}
+				_ = tx.Commit()
 			}
 			batch = batch[:0]
 		}
@@ -214,6 +238,11 @@ func (s *pathStatsStore) prune() {
 		logger.Default().Error().Err(err).Msg("path stats: prune failed")
 	}
 
+	qDomain := s.dialect.Rebind(QueryPruneDomainStats)
+	if _, err := s.db.ExecContext(ctx, qDomain, cutoff); err != nil {
+		logger.Default().Error().Err(err).Msg("domain stats: prune failed")
+	}
+
 	cutoffTime := time.Now().AddDate(0, 0, -days)
 	qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
 	if _, err := s.db.ExecContext(ctx, qTraces, cutoffTime); err != nil {
@@ -264,9 +293,21 @@ func recordToStore(host, path string, latencySeconds float64, bytesTotal uint64,
 		return
 	}
 	select {
-	case store.inCh <- increment{host: host, path: path, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at}:
+	case store.inCh <- increment{host: host, path: path, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: false}:
 	default:
 		// drop on backpressure to protect the request path
+	}
+}
+
+// recordDomainToStore attempts to enqueue an increment for a domain.
+func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint64, at time.Time) {
+	if store == nil {
+		return
+	}
+	select {
+	case store.inCh <- increment{host: domain, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: true}:
+	default:
+		// drop on backpressure
 	}
 }
 
@@ -358,6 +399,86 @@ func GetPathStatsWindow(days int) []PathStats {
 		})
 	}
 	return res
+}
+
+// GetDomainStatsWindow returns aggregated domain statistics for the last N days.
+func GetDomainStatsWindow(days int) []DomainStats {
+	if store == nil {
+		return nil
+	}
+	if days <= 0 {
+		days = int(store.retentionDays.Load())
+	}
+	cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
+	q := store.dialect.Rebind(QueryGetDomainStatsWin)
+	rows, err := store.db.Query(q, cutoff)
+	if err != nil {
+		logger.Default().Error().Err(err).Msg("domain stats: query failed")
+		return nil
+	}
+	defer rows.Close()
+
+	var stats []DomainStats
+	for rows.Next() {
+		var domain string
+		var rc int64
+		var lsum float64
+		var bsum int64
+		if err := rows.Scan(&domain, &rc, &lsum, &bsum); err != nil {
+			continue
+		}
+		avg := 0.0
+		if rc > 0 {
+			avg = lsum / float64(rc)
+		}
+		stats = append(stats, DomainStats{
+			Domain:       domain,
+			RequestCount: uint64(rc),
+			BytesTotal:   uint64(max(bsum, 0)),
+			LatencySum:   lsum,
+			AvgLatency:   float64(int(avg*1000+0.5)) / 1000.0,
+		})
+	}
+	return stats
+}
+
+// GetDomainStatsHourly returns domain statistics for a specific hour.
+func GetDomainStatsHourly(day string, hour int) []DomainStats {
+	if store == nil {
+		return nil
+	}
+	q := store.dialect.Rebind(QueryGetDomainStatsHourly)
+	rows, err := store.db.Query(q, day, hour)
+	if err != nil {
+		logger.Default().Error().Err(err).Msg("domain stats: hourly query failed")
+		return nil
+	}
+	defer rows.Close()
+
+	var stats []DomainStats
+	for rows.Next() {
+		var domain string
+		var hr int
+		var rc int64
+		var lsum float64
+		var bsum int64
+		if err := rows.Scan(&domain, &hr, &rc, &lsum, &bsum); err != nil {
+			continue
+		}
+		avg := 0.0
+		if rc > 0 {
+			avg = lsum / float64(rc)
+		}
+		stats = append(stats, DomainStats{
+			Domain:       domain,
+			Hour:         hr,
+			RequestCount: uint64(rc),
+			BytesTotal:   uint64(max(bsum, 0)),
+			LatencySum:   lsum,
+			AvgLatency:   float64(int(avg*1000+0.5)) / 1000.0,
+		})
+	}
+	return stats
 }
 
 // IsStoreEnabled returns true if the persistent store is active.

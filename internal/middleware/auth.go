@@ -54,11 +54,6 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 // Bearer, query param token, and query param access_token (for WebSocket clients).
 func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ShouldSkipMetrics(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		activeRouteID := GetRouteName(r)
 		tokenString := ExtractToken(r)
 
@@ -182,14 +177,10 @@ func NewAPIKeyValidator(store APIKeyStore, header, query string, baseCfg AuthBas
 // Handler returns a middleware that validates API keys.
 func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ShouldSkipMetrics(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
 		activeRouteID := GetRouteName(r)
 
 		apiKey := r.Header.Get(v.header)
-		if apiKey == "" && v.query != "" {
+		if apiKey == "" && v.query != "" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 			apiKey = r.URL.Query().Get(v.query)
 		}
 
@@ -246,14 +237,16 @@ func ExtractToken(r *http.Request) string {
 	if t := bearerToken(r); t != "" {
 		return t
 	}
-	if t := r.URL.Query().Get("token"); t != "" {
-		return t
-	}
-	if t := r.URL.Query().Get("access_token"); t != "" {
-		return t
-	}
-	if t := r.URL.Query().Get("auth"); t != "" {
-		return t
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if t := r.URL.Query().Get("token"); t != "" {
+			return t
+		}
+		if t := r.URL.Query().Get("access_token"); t != "" {
+			return t
+		}
+		if t := r.URL.Query().Get("auth"); t != "" {
+			return t
+		}
 	}
 	return ""
 }
@@ -275,10 +268,6 @@ func bearerToken(r *http.Request) string {
 func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ShouldSkipMetrics(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
 			activeRouteID := GetRouteName(r)
 
 			token := ExtractToken(r)
@@ -333,10 +322,6 @@ func BasicAuthWithConfig(username, password, realm string, cfg AuthBaseConfig) M
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ShouldSkipMetrics(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
 			activeRouteID := GetRouteName(r)
 
 			u, p, ok := r.BasicAuth()
@@ -382,10 +367,6 @@ func BasicAuthUsersWithConfig(users string, realm string, cfg AuthBaseConfig) (M
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ShouldSkipMetrics(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
 			activeRouteID := GetRouteName(r)
 
 			u, p, ok := r.BasicAuth()

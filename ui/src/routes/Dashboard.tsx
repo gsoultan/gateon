@@ -14,6 +14,8 @@ import {
   Box,
   Select,
   TextInput,
+  Badge,
+  Table,
 } from "@mantine/core";
 import { BarChart, LineChart } from "@mantine/charts";
 import {
@@ -21,11 +23,15 @@ import {
   IconAlertCircle,
   IconChartBar,
   IconTransferIn,
+  IconWorld,
+  IconAddressBook,
+  IconDeviceDesktop,
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import {
   useAggStatsHistory,
   useGateonStatus,
+  useMetricsSnapshot,
   usePathStats,
   useRequestsPerSecond,
   useRoutes,
@@ -34,6 +40,12 @@ import {
 import type { RequestDeltaSample } from "../hooks/useGateon";
 import { Sparkline } from "../components/Sparkline";
 import type { PathStats, Route, Service } from "../types/gateon";
+import { formatBytes, formatCompact, formatHourLabel } from "../utils/format";
+import { TrafficMetricsGrid } from "../components/Dashboard/TrafficMetricsGrid";
+import { DomainStatsTable } from "../components/Dashboard/DomainStatsTable";
+import { DistributionCard } from "../components/Dashboard/DistributionCard";
+import { CountryTrafficTable } from "../components/Dashboard/CountryTrafficTable";
+import { QuickActions } from "../components/Dashboard/QuickActions";
 
 const StatusCard = lazy(() => import("../components/StatusCard"));
 const ServiceOverviewCards = lazy(() =>
@@ -117,40 +129,12 @@ type TrafficRangeBounds = {
   endTs: number;
 };
 
-function formatCompact(num: number): string {
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-  return num.toLocaleString();
-}
-
-export function formatBytes(num: number): string {
-  if (num >= 1024 * 1024 * 1024) return `${(num / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  if (num >= 1024 * 1024) return `${(num / (1024 * 1024)).toFixed(1)} MB`;
-  if (num >= 1024) return `${(num / 1024).toFixed(1)} KB`;
-  return `${Math.round(num)} B`;
-}
-
-export function buildRequestTrendData(requestRateHistory: number[]) {
-  return requestRateHistory.map((requests, index) => ({
-    sample: `${index + 1}`,
-    requests,
-  }));
-}
-
 function parseDateInputToStartTs(value: string): number | null {
   if (!value) return null;
   const parsed = new Date(`${value}T00:00:00`);
   const ts = parsed.getTime();
   if (Number.isNaN(ts)) return null;
   return ts;
-}
-
-function formatHourLabel(ts: number): string {
-  const date = new Date(ts);
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const hour = `${date.getHours()}`.padStart(2, "0");
-  return `${month}/${day} ${hour}:00`;
 }
 
 export function resolveTrafficRangeBounds(
@@ -519,6 +503,7 @@ export default function Dashboard() {
   const { data: routesResponse, isLoading: routesLoading } = useRoutes();
   const { data: servicesResponse, isLoading: servicesLoading } = useServices();
   const reqPerSec = useRequestsPerSecond();
+  const { data: metricsSnap } = useMetricsSnapshot();
   const [trafficFilterMode, setTrafficFilterMode] = useState<TrafficFilterMode>("range");
   const [trafficDate, setTrafficDate] = useState("");
   const [trafficRangePreset, setTrafficRangePreset] = useState<TrafficRangePreset>("last24h");
@@ -652,6 +637,38 @@ export default function Dashboard() {
   const trafficByPortData = buildTrafficByPortData(pathStats ?? []);
   const trafficByPathData = buildTrafficByPathData(pathStats ?? []);
 
+  const ipDistributionData = useMemo(() => {
+    if (!metricsSnap?.ip_metrics) return [];
+    return metricsSnap.ip_metrics
+      .sort((a, b) => b.requests - a.requests)
+      .slice(0, 5)
+      .map((m) => ({ group: m.ip, requests: m.requests }));
+  }, [metricsSnap]);
+
+  const countryDistributionData = useMemo(() => {
+    if (!metricsSnap?.country_metrics) return [];
+    return metricsSnap.country_metrics
+      .sort((a, b) => b.requests - a.requests)
+      .slice(0, 5)
+      .map((m) => ({ group: m.country, requests: m.requests }));
+  }, [metricsSnap]);
+
+  const protocolDistributionData = useMemo(() => {
+    if (!metricsSnap?.protocol_metrics) return [];
+    return metricsSnap.protocol_metrics.map((m) => ({
+      group: m.label.toUpperCase(),
+      requests: m.value,
+    }));
+  }, [metricsSnap]);
+
+  const domainDistributionData = useMemo(() => {
+    if (!metricsSnap?.domain_metrics) return [];
+    return metricsSnap.domain_metrics
+      .sort((a, b) => b.requests - a.requests)
+      .slice(0, 5)
+      .map((m) => ({ group: m.domain, requests: m.requests }));
+  }, [metricsSnap]);
+
   const groupedTrafficCharts = [
     {
       title: "By Service",
@@ -671,6 +688,12 @@ export default function Dashboard() {
       color: "grape.6",
       data: trafficByPathData,
     },
+    {
+      title: "By Domain",
+      description: "Requests by target domain",
+      color: "cyan.6",
+      data: domainDistributionData,
+    },
   ];
 
   const groupedBandwidthCharts = [
@@ -686,7 +709,37 @@ export default function Dashboard() {
       color: "orange.6",
       data: bandwidthByRouterData,
     },
+    {
+      title: "By Domain",
+      description: "Bandwidth by target domain",
+      color: "cyan.6",
+      data: domainBandwidthData,
+    },
   ];
+
+  const ipBandwidthData = useMemo(() => {
+    if (!metricsSnap?.ip_metrics) return [];
+    return metricsSnap.ip_metrics
+      .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
+      .slice(0, 5)
+      .map((m) => ({ group: m.ip, requests: m.bytes_in + m.bytes_out }));
+  }, [metricsSnap]);
+
+  const countryBandwidthData = useMemo(() => {
+    if (!metricsSnap?.country_metrics) return [];
+    return metricsSnap.country_metrics
+      .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
+      .slice(0, 5)
+      .map((m) => ({ group: m.country, requests: m.bytes_in + m.bytes_out }));
+  }, [metricsSnap]);
+
+  const domainBandwidthData = useMemo(() => {
+    if (!metricsSnap?.domain_metrics) return [];
+    return metricsSnap.domain_metrics
+      .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
+      .slice(0, 5)
+      .map((m) => ({ group: m.domain, requests: m.bytes_in + m.bytes_out }));
+  }, [metricsSnap]);
 
   const totalRequests = agg?.total_requests ?? 0;
   const totalBandwidthBytes = agg?.total_bandwidth_bytes ?? 0;
@@ -758,9 +811,16 @@ export default function Dashboard() {
         </div>
       </Group>
 
-      <Suspense fallback={STATUS_FALLBACK}>
-        <StatusCard />
-      </Suspense>
+      <SimpleGrid cols={{ base: 1, md: 3 }} spacing="xl">
+        <Box style={{ gridColumn: "span 2" }}>
+          <Suspense fallback={STATUS_FALLBACK}>
+            <StatusCard />
+          </Suspense>
+        </Box>
+        <Box>
+          <QuickActions />
+        </Box>
+      </SimpleGrid>
 
       {/* Traffic Metrics Row */}
       <Card
@@ -789,59 +849,13 @@ export default function Dashboard() {
           )}
         </Group>
         {aggLoading ? (
-          <SimpleGrid cols={{ base: 2, sm: 5 }} spacing="md">
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 5 }} spacing="md">
             {[1, 2, 3, 4, 5].map((i) => (
-              <Skeleton key={i} h={80} radius="md" />
+              <Skeleton key={i} h={100} radius="md" />
             ))}
           </SimpleGrid>
         ) : (
-          <SimpleGrid cols={{ base: 2, sm: 5 }} spacing="md">
-            {trafficMetrics.map((m) => (
-              <Paper
-                key={m.label}
-                p="md"
-                radius="md"
-                withBorder
-                style={{
-                  borderLeftWidth: 4,
-                  borderLeftColor: `var(--mantine-color-${m.color}-6)`,
-                  transition: "box-shadow 150ms ease, transform 100ms ease",
-                }}
-                className="dashboard-metric-card"
-              >
-                <Group gap="sm" wrap="nowrap">
-                  <Box
-                    p={8}
-                    style={{
-                      borderRadius: "var(--mantine-radius-md)",
-                      backgroundColor: `var(--mantine-color-${m.color}-1)`,
-                    }}
-                  >
-                    <m.icon
-                      size={20}
-                      color={`var(--mantine-color-${m.color}-6)`}
-                    />
-                  </Box>
-                  <div style={{ minWidth: 0 }}>
-                    <Text
-                      size="xs"
-                      c="dimmed"
-                      fw={700}
-                      style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
-                    >
-                      {m.label}
-                    </Text>
-                    <Text size="xl" fw={800} c={`${m.color}.6`}>
-                      {m.value}
-                    </Text>
-                    <Text size="xs" c="dimmed" lineClamp={1} title={m.description}>
-                      {m.description}
-                    </Text>
-                  </div>
-                </Group>
-              </Paper>
-            ))}
-          </SimpleGrid>
+          <TrafficMetricsGrid metrics={trafficMetrics} />
         )}
       </Card>
 
@@ -947,6 +961,86 @@ export default function Dashboard() {
             </Paper>
           ))}
         </SimpleGrid>
+      </Card>
+
+      <Card
+        shadow="sm"
+        padding="lg"
+        radius="lg"
+        withBorder
+        style={{
+          background: "var(--mantine-color-body)",
+          borderColor: "var(--mantine-color-default-border)",
+        }}
+      >
+        <Group justify="space-between" mb="md" wrap="wrap">
+          <Title order={5} fw={700} c="dimmed" style={{ letterSpacing: 1 }}>
+            IP & GEOGRAPHIC DISTRIBUTION
+          </Title>
+          <Text size="xs" c="dimmed" fw={600}>
+            Real-time client metrics
+          </Text>
+        </Group>
+
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          <CountryTrafficTable
+            title="Top Countries"
+            subtitle="Request volume by country"
+            data={countryDistributionData}
+            totalRequests={totalRequests}
+          />
+
+          <DistributionCard
+            title="Top Client IPs"
+            subtitle="Requests by client IP address"
+            data={ipDistributionData}
+            color="cyan.6"
+          />
+
+          <DistributionCard
+            title="Top Domains"
+            subtitle="Requests by target domain"
+            data={domainDistributionData}
+            color="teal.6"
+          />
+
+          <DistributionCard
+            title="Protocols"
+            subtitle="HTTP/1.1 vs HTTP/2 vs HTTP/3"
+            data={protocolDistributionData}
+            color="indigo.6"
+          />
+        </SimpleGrid>
+
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" mt="md">
+          <CountryTrafficTable
+            title="Bandwidth by Country"
+            subtitle="Total bytes by country"
+            data={countryBandwidthData}
+            totalRequests={totalBandwidthBytes}
+            isBandwidth={true}
+          />
+
+          <DistributionCard
+            title="Bandwidth by Domain"
+            subtitle="Total bytes by target domain"
+            data={domainBandwidthData}
+            color="cyan.6"
+            valueFormatter={(value) => formatBytes(value)}
+          />
+
+          <DistributionCard
+            title="Bandwidth by IP"
+            subtitle="Total bytes by client IP"
+            data={ipBandwidthData}
+            color="cyan.6"
+            valueFormatter={(value) => formatBytes(value)}
+          />
+        </SimpleGrid>
+
+        <Box mt="md">
+          <DomainStatsTable metrics={metricsSnap?.hourly_domain_metrics ?? []} />
+        </Box>
       </Card>
 
       <Card

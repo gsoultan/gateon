@@ -36,6 +36,9 @@ func writeJSONError(w http.ResponseWriter, statusCode int, message string) {
 
 func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/global", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		gc := svc.GetGlobals().Get(r.Context())
 
@@ -104,6 +107,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		})
 	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
@@ -155,6 +161,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		DatabaseConfig *gateonv1.DatabaseConfig `json:"database_config"`
 	}
 	mux.HandleFunc("POST /v1/setup/test-db", func(w http.ResponseWriter, r *http.Request) {
+		// Only allow test-db during setup
+		setupReq, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{})
+		if err == nil && !setupReq.Required {
+			writeJSONError(w, http.StatusForbidden, "test-db is only allowed during initial setup")
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		var body testDBReq
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

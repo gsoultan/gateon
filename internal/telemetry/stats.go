@@ -23,6 +23,16 @@ type PathStats struct {
 	AvgLatency   float64 `json:"avg_latency_seconds"`
 }
 
+// DomainStats holds aggregated statistics for a domain.
+type DomainStats struct {
+	Domain       string  `json:"domain"`
+	Hour         int     `json:"hour,omitempty"`
+	RequestCount uint64  `json:"request_count"`
+	BytesTotal   uint64  `json:"bytes_total"`
+	LatencySum   float64 `json:"latency_sum_seconds"`
+	AvgLatency   float64 `json:"avg_latency_seconds"`
+}
+
 var (
 	pathStatsMap = make(map[string]*pathStatsInternal)
 	pathStatsMu  sync.RWMutex
@@ -79,6 +89,16 @@ func RecordPathRequest(host, path string, latencySeconds float64, bytesTotal uin
 
 	// Also persist to durable store if enabled (non-blocking)
 	recordToStore(host, path, latencySeconds, bytesTotal, time.Now())
+}
+
+// RecordDomainRequest records a request for a domain for hourly stats.
+func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint64) {
+	// Normalize domain by stripping port if present
+	if h, _, err := net.SplitHostPort(domain); err == nil {
+		domain = h
+	}
+	// Persist to durable store for hourly aggregation
+	recordDomainToStore(domain, latencySeconds, bytesTotal, time.Now())
 }
 
 // RecordTrace records a trace for an operation.

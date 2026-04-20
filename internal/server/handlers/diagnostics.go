@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -18,22 +20,43 @@ import (
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier) bool {
-	if r.Context().Value(middleware.UserContextKey) != nil {
-		return true
+	claimsVal := r.Context().Value(middleware.UserContextKey)
+	if claimsVal != nil {
+		claims, ok := claimsVal.(*auth.Claims)
+		if !ok || claims == nil {
+			return false
+		}
+		// Only Admin and Operator can see logs
+		return auth.Allowed(claims.Role, auth.ActionRead, auth.ResourceGlobal)
 	}
+
 	if verifier == nil {
+		// Auth disabled
 		return true
 	}
+
+	// Try extracting from query params (needed for WebSockets if middleware didn't run)
+	// or if we want to support manual verification.
 	token := middleware.ExtractToken(r)
 	if token == "" {
 		return false
 	}
-	_, err := verifier.VerifyToken(token)
-	return err == nil
+	claimsRaw, err := verifier.VerifyToken(token)
+	if err != nil {
+		return false
+	}
+	claims, ok := claimsRaw.(*auth.Claims)
+	if !ok || claims == nil {
+		return false
+	}
+	return auth.Allowed(claims.Role, auth.ActionRead, auth.ResourceGlobal)
 }
 
 func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/diagnostics", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		res, err := svc.GetDiagnostics(r.Context(), &gateonv1.GetDiagnosticsRequest{})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -79,6 +102,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 	})
 	mux.HandleFunc("GET /v1/diag/sys", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
@@ -89,14 +115,23 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/limit-stats", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(telemetry.GetLimitStats())
 	})
 	mux.HandleFunc("GET /v1/diag/circuit-breaker/events", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(telemetry.GetCircuitBreakerEvents())
 	})
 	mux.HandleFunc("GET /v1/diag/agg-stats", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		if d.RouteStatsProvider == nil {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -173,6 +208,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/path-stats", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		daysStr := r.URL.Query().Get("days")
 		if daysStr != "" {
@@ -186,6 +224,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_ = json.NewEncoder(w).Encode(stats)
 	})
 	mux.HandleFunc("GET /v1/diag/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
 		snap, err := telemetry.CollectMetricsSnapshot()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -196,6 +237,10 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_ = json.NewEncoder(w).Encode(snap)
 	})
 	mux.HandleFunc("POST /v1/diag/test-target", func(w http.ResponseWriter, r *http.Request) {
+		// Restrict to Admin only as this can be used for SSRF
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
 		var req struct {
 			Target string `json:"target"`
 			Method string `json:"method"`
@@ -208,6 +253,19 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+
+		// SSRF prevention: validate URL
+		u, err := url.Parse(req.Target)
+		if err != nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") {
+			writeJSONError(w, http.StatusBadRequest, "invalid target url")
+			return
+		}
+		// Basic SSRF: reject loopback
+		if u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1" {
+			writeJSONError(w, http.StatusBadRequest, "access to localhost is forbidden")
+			return
+		}
+
 		if req.Method == "" {
 			req.Method = "GET"
 		}

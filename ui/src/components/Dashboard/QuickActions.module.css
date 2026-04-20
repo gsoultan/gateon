@@ -1,0 +1,18 @@
+.item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-radius: var(--mantine-radius-md);
+  height: rem(90);
+  background-color: var(--mantine-color-body);
+  transition: background-color 150ms ease, transform 100ms ease;
+  border: 1px solid transparent;
+}
+
+.item:hover {
+  background-color: var(--mantine-color-default-hover);
+  transform: translateY(-2px);
+  border-color: var(--mantine-color-default-border);
+}

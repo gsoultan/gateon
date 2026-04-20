@@ -11,6 +11,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // AIService implements the gateon.v1.AIServiceServer interface.
@@ -41,12 +42,15 @@ func (s *AIService) AnalyzeConfig(ctx context.Context, req *gateonv1.AnalyzeConf
 		return nil, errors.New("AI service is not enabled in global configuration")
 	}
 
+	// Redact sensitive configuration before sending to AI provider.
+	redactedGlobal := redactConfig(conf)
+
 	// Gather configuration context.
 	routes, _ := s.routeStore.ListPaginated(ctx, 0, 100, "", nil)
 	services, _ := s.serviceStore.ListPaginated(ctx, 0, 100, "")
 
 	configJSON, _ := json.MarshalIndent(map[string]any{
-		"global":   conf,
+		"global":   redactedGlobal,
 		"routes":   routes,
 		"services": services,
 	}, "", "  ")
@@ -60,6 +64,33 @@ Configuration:
 %s`, string(configJSON))
 
 	return s.callLLM(ctx, prompt)
+}
+
+func redactConfig(conf *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
+	if conf == nil {
+		return nil
+	}
+	redacted := proto.Clone(conf).(*gateonv1.GlobalConfig)
+	if redacted.Auth != nil {
+		redacted.Auth.PasetoSecret = "[REDACTED]"
+		redacted.Auth.DatabaseUrl = "[REDACTED]"
+		if redacted.Auth.DatabaseConfig != nil {
+			redacted.Auth.DatabaseConfig.Password = "[REDACTED]"
+		}
+	}
+	if redacted.Ai != nil {
+		redacted.Ai.ApiKey = "[REDACTED]"
+	}
+	if redacted.Redis != nil {
+		redacted.Redis.Password = "[REDACTED]"
+	}
+	if redacted.Ha != nil {
+		redacted.Ha.AuthPass = "[REDACTED]"
+	}
+	if redacted.Tls != nil && redacted.Tls.Acme != nil {
+		redacted.Tls.Acme.DnsConfig = nil
+	}
+	return redacted
 }
 
 // ChatWithAI allows interactive chat with the AI about the gateway.

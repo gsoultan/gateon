@@ -64,6 +64,36 @@ export type TargetMetric = {
   active_conn: number;
 };
 
+export type IPMetric = {
+  ip: string;
+  requests: number;
+  bytes_in: number;
+  bytes_out: number;
+};
+
+export type CountryMetric = {
+  country: string;
+  requests: number;
+  bytes_in: number;
+  bytes_out: number;
+};
+
+export type DomainMetric = {
+  domain: string;
+  requests: number;
+  bytes_in: number;
+  bytes_out: number;
+};
+
+export type DomainStats = {
+  domain: string;
+  hour?: number;
+  request_count: number;
+  bytes_total: number;
+  latency_sum_seconds: number;
+  avg_latency_seconds: number;
+};
+
 export type SystemMetrics = {
   uptime_seconds: number;
   goroutines: number;
@@ -78,5 +108,10 @@ export type MetricsSnapshot = {
   middleware: MiddlewareMetrics;
   tls_certificates: TLSCertMetric[] | null;
   targets: TargetMetric[] | null;
+  ip_metrics: IPMetric[] | null;
+  country_metrics: CountryMetric[] | null;
+  protocol_metrics: LabeledCount[] | null;
+  domain_metrics: DomainMetric[] | null;
+  hourly_domain_metrics: DomainStats[] | null;
   system: SystemMetrics;
 };

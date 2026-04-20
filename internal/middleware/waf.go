@@ -80,10 +80,6 @@ Include @owasp_crs/rules/*.conf
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(waf, next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ShouldSkipMetrics(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
 			if cfg.TrustCloudflare {
 				r.RemoteAddr = request.GetClientIP(r, true)
 			}

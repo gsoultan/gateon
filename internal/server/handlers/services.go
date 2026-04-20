@@ -64,7 +64,7 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 	})
 
 	mux.HandleFunc("POST /v1/discover/grpc", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceServices) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceServices) {
 			return
 		}
 		var req gateonv1.DiscoverGrpcServicesRequest

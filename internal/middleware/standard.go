@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"cmp"
 	"net"
 	"net/http"
 	"os"
@@ -150,7 +151,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			defer telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Dec()
 
 			// Capture original host and path before proxying mutates r.Host/r.URL.
-			origHost := r.Host
+			origHost := cmp.Or(r.Host, r.URL.Host)
 			origPath := r.URL.Path
 			method := r.Method
 
@@ -198,6 +199,50 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// Rich Prometheus metrics
 			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, method, statusStr).Inc()
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
+
+			// IP-based metrics
+			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			telemetry.RequestsByIPTotal.WithLabelValues(clientIP).Inc()
+			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "in").Add(float64(reqInSize + 256))
+			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
+
+			// Country-based metrics
+			country := request.GetCountry(r)
+			telemetry.RequestsByCountryTotal.WithLabelValues(country).Inc()
+			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "in").Add(float64(reqInSize + 256))
+			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "out").Add(float64(respOutSize + 200))
+
+			// Domain-based metrics
+			origDomain := origHost
+			if h, _, err := net.SplitHostPort(origDomain); err == nil {
+				origDomain = h
+			}
+			if origDomain == "" {
+				origDomain = "unknown"
+			}
+			telemetry.RequestsByDomainTotal.WithLabelValues(origDomain).Inc()
+			telemetry.RequestBytesByDomainTotal.WithLabelValues(origDomain, "in").Add(float64(reqInSize + 256))
+			telemetry.RequestBytesByDomainTotal.WithLabelValues(origDomain, "out").Add(float64(respOutSize + 200))
+			telemetry.RecordDomainRequest(origDomain, duration.Seconds(), totalBandwidthBytes)
+
+			// Protocol metrics
+			protocol := "http1"
+			if r.ProtoMajor == 2 {
+				protocol = "http2"
+			} else if r.ProtoMajor == 3 {
+				protocol = "http3"
+			}
+			if r.TLS != nil && protocol == "http1" {
+				// If it's TLS but not identified as h2/h3 by ProtoMajor, it might still be h2/h3 if NegotiatedProtocol is set.
+				// This happens with some server implementations where ProtoMajor might still be 1 for h2.
+				switch r.TLS.NegotiatedProtocol {
+				case "h2":
+					protocol = "http2"
+				case "h3":
+					protocol = "http3"
+				}
+			}
+			telemetry.RequestsByProtocolTotal.WithLabelValues(protocol).Inc()
 
 			// Track response body size
 			// Add a baseline of 200 bytes to account for response headers.
