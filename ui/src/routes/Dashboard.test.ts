@@ -15,7 +15,7 @@ import {
   extractPortLabel,
   filterTrafficSamplesByRange,
   resolveTrafficRangeBounds,
-} from "./Dashboard";
+} from "../utils/dashboard";
 
 describe("buildRequestTrendData", () => {
   test("returns empty data for empty history", () => {
