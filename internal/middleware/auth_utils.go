@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/httputil"
@@ -157,6 +158,9 @@ func InjectContext(ctx context.Context, claims any) context.Context {
 
 // ToMap converts various map types to map[string]any.
 func ToMap(claims any) map[string]any {
+	if claims == nil {
+		return make(map[string]any)
+	}
 	if m, ok := claims.(map[string]any); ok {
 		return m
 	}
@@ -166,5 +170,21 @@ func ToMap(claims any) map[string]any {
 	if m, ok := claims.(interface{ ToMap() map[string]any }); ok {
 		return m.ToMap()
 	}
+
+	// Use reflection for named map types (e.g., jwt.MapClaims)
+	v := reflect.ValueOf(claims)
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.Map {
+		m := make(map[string]any)
+		for _, key := range v.MapKeys() {
+			if k, ok := key.Interface().(string); ok {
+				m[k] = v.MapIndex(key).Interface()
+			}
+		}
+		return m
+	}
+
 	return make(map[string]any)
 }

@@ -127,6 +127,31 @@ func (m *mockVerifier) VerifyToken(token string) (any, error) {
 	return m.claims, m.err
 }
 
+func TestToMap(t *testing.T) {
+	// 1. map[string]any
+	m1 := map[string]any{"user": "alice"}
+	if res := ToMap(m1); res["user"] != "alice" {
+		t.Errorf("expected alice, got %v", res["user"])
+	}
+
+	// 2. jwt.MapClaims (named map type)
+	m2 := jwt.MapClaims{"user": "bob"}
+	if res := ToMap(m2); res["user"] != "bob" {
+		t.Errorf("expected bob, got %v (named map check)", res["user"])
+	}
+
+	// 3. Struct with ToMap()
+	m3 := structClaims{User: "charlie", Role: "admin"}
+	if res := ToMap(m3); res["user"] != "charlie" {
+		t.Errorf("expected charlie, got %v (struct ToMap check)", res["user"])
+	}
+
+	// 4. nil
+	if res := ToMap(nil); res == nil || len(res) != 0 {
+		t.Error("expected empty map for nil")
+	}
+}
+
 func TestPasetoAuth_StructClaims(t *testing.T) {
 	claims := structClaims{User: "alice", Role: "admin"}
 	verifier := &mockVerifier{claims: claims}
@@ -149,6 +174,23 @@ func TestPasetoAuth_StructClaims(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected status 200 for struct claims with ToMap, got %d", rr.Code)
+	}
+
+	// 2. Missing required role
+	mwFail := PasetoAuth(verifier, AuthBaseConfig{
+		RequiredRoles: []string{"superadmin"},
+	})
+	handlerFail := mwFail(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	}))
+
+	reqFail := httptest.NewRequest("GET", "/", nil)
+	reqFail.Header.Set("Authorization", "Bearer valid-token")
+	rrFail := httptest.NewRecorder()
+	handlerFail.ServeHTTP(rrFail, reqFail)
+
+	if rrFail.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401 for missing role, got %d", rrFail.Code)
 	}
 }
 

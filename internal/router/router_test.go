@@ -214,9 +214,13 @@ func TestSelectRoute_Methods(t *testing.T) {
 		{"GET", "/data", "get-post"},
 		{"POST", "/data", "get-post"},
 		{"PUT", "/data", ""},
+		{"OPTIONS", "/submit", "post-only"}, // Now matches because it's a preflight for POST
 	}
 	for _, tt := range tests {
 		req, _ := http.NewRequest(tt.method, "http://localhost"+tt.path, nil)
+		if tt.method == "OPTIONS" {
+			req.Header.Set("Access-Control-Request-Method", "POST")
+		}
 		got := SelectRoute(req, routes)
 		if tt.expected == "" {
 			if got != nil {

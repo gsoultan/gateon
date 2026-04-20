@@ -132,8 +132,17 @@ func (m matcher) Match(r *http.Request) bool {
 		return false
 	}
 	if len(m.methods) > 0 && !m.methods[r.Method] {
+		// For CORS preflight (OPTIONS), we allow a match if the route supports
+		// the method requested in Access-Control-Request-Method.
+		if r.Method == http.MethodOptions {
+			reqMethod := r.Header.Get("Access-Control-Request-Method")
+			if reqMethod != "" && m.methods[strings.ToUpper(reqMethod)] {
+				goto matchMethod
+			}
+		}
 		return false
 	}
+matchMethod:
 	for name, want := range m.headers {
 		if r.Header.Get(name) != want {
 			return false
