@@ -43,7 +43,8 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 				return
 			}
 			if ((isGRPC || isGRPCWeb) && strings.EqualFold(rt.Type, "grpc")) || (!isGRPC && !isGRPCWeb) {
-				if isGRPCWeb && strings.EqualFold(rt.Type, "grpc") && !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {
+				isActualGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
+				if isActualGRPCWeb && strings.EqualFold(rt.Type, "grpc") && !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {
 					w.WriteHeader(http.StatusUnsupportedMediaType)
 					_, _ = w.Write([]byte("gRPC-Web requires the grpcweb middleware on this route"))
 					return
