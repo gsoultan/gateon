@@ -242,3 +242,53 @@ func TestGRPCWeb_TrailerPrefixConvention(t *testing.T) {
 		t.Errorf("expected trailer to contain Grpc-Message: UNKNOWN, got %q", trailerData)
 	}
 }
+
+func TestGRPCWeb_CORSPreflight(t *testing.T) {
+	mw := GRPCWeb(CORSConfig{
+		AllowedOrigins: []string{"http://example.com"},
+	})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called for preflight")
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/my.Service/Method", nil)
+	req.Header.Set("Origin", "http://example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "X-Grpc-Web")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent && rr.Code != http.StatusOK {
+		t.Errorf("expected status 204 or 200, got %d", rr.Code)
+	}
+	if origin := rr.Header().Get("Access-Control-Allow-Origin"); origin != "http://example.com" {
+		t.Errorf("expected Access-Control-Allow-Origin http://example.com, got %q", origin)
+	}
+	if headers := rr.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(headers, "X-Grpc-Web") {
+		t.Errorf("expected Access-Control-Allow-Headers to contain X-Grpc-Web, got %q", headers)
+	}
+}
+
+func TestGRPCWeb_CORSActual(t *testing.T) {
+	mw := GRPCWeb(CORSConfig{
+		AllowedOrigins: []string{"http://example.com"},
+	})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/grpc")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/my.Service/Method", nil)
+	req.Header.Set("Origin", "http://example.com")
+	req.Header.Set("Content-Type", "application/grpc-web")
+	req.Header.Set("X-Grpc-Web", "1")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if origin := rr.Header().Get("Access-Control-Allow-Origin"); origin != "http://example.com" {
+		t.Errorf("expected Access-Control-Allow-Origin http://example.com, got %q", origin)
+	}
+	if exposed := rr.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(exposed, "Grpc-Status") {
+		t.Errorf("expected Access-Control-Expose-Headers to contain Grpc-Status, got %q", exposed)
+	}
+}

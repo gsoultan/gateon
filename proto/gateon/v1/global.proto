@@ -41,8 +41,20 @@ message ManagementConfig {
   string port = 2;
   // AllowedIps is a whitelist of client IPs or CIDRs allowed to access the management API.
   repeated string allowed_ips = 3;
-  reserved 4;
+  // Cors defines the CORS configuration for the management API.
+  CorsConfig cors = 4;
+
+  reserved 5;
   reserved "host";
+}
+
+message CorsConfig {
+  repeated string allowed_origins = 1;
+  repeated string allowed_methods = 2;
+  repeated string allowed_headers = 3;
+  repeated string exposed_headers = 4;
+  bool allow_credentials = 5;
+  int32 max_age = 6;
 }
 
 message AIConfig {

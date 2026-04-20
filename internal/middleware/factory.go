@@ -78,7 +78,7 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 	case "cors":
 		return f.createCORS(cfg)
 	case "grpcweb":
-		return GRPCWeb(), nil
+		return f.createGRPCWeb(cfg)
 	case "ipfilter":
 		return f.createIPFilter(cfg)
 	case "cache":
@@ -114,4 +114,20 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 	default:
 		return nil, fmt.Errorf("unknown middleware type: %s", m.Type)
 	}
+}
+
+func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
+	origins := parseListStrict(cfg["allowed_origins"])
+	if len(origins) == 0 {
+		return GRPCWeb(), nil
+	}
+
+	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
+	maxAge, _ := strconv.Atoi(cfg["max_age"])
+
+	return GRPCWeb(CORSConfig{
+		AllowedOrigins:   origins,
+		AllowCredentials: allowCredentials,
+		MaxAge:           maxAge,
+	}), nil
 }

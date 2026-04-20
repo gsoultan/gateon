@@ -94,7 +94,7 @@ type Deps struct {
 	Port             string
 	BaseHandler      http.Handler
 	Wrapped          GRPCWebHandler
-	CORS             CORSProvider
+	CORS             CORSProvider // For management/internal
 	TLSConfig        *tls.Config
 	TLSManager       gtls.TLSManager
 	Limiter          RateLimiter
