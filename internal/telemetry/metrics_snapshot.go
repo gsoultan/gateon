@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"cmp"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,6 +26,21 @@ type MetricsSnapshot struct {
 
 	// Target health and connection status.
 	Targets []TargetMetric `json:"targets"`
+
+	// IP-based metrics
+	IPMetrics []IPMetric `json:"ip_metrics"`
+
+	// Country-based metrics
+	CountryMetrics []CountryMetric `json:"country_metrics"`
+
+	// Protocol-based metrics
+	ProtocolMetrics []LabeledCount `json:"protocol_metrics"`
+
+	// Domain-based metrics
+	DomainMetrics []DomainMetric `json:"domain_metrics"`
+
+	// Hourly domain metrics (current hour)
+	HourlyDomainMetrics []DomainStats `json:"hourly_domain_metrics"`
 
 	// System-level gauges.
 	System SystemMetrics `json:"system"`
@@ -101,6 +118,30 @@ type TargetMetric struct {
 	ActiveConn float64 `json:"active_conn"`
 }
 
+// DomainMetric holds per-domain request metrics.
+type DomainMetric struct {
+	Domain   string  `json:"domain"`
+	Requests float64 `json:"requests"`
+	BytesIn  float64 `json:"bytes_in"`
+	BytesOut float64 `json:"bytes_out"`
+}
+
+// IPMetric holds metrics per IP.
+type IPMetric struct {
+	IP       string  `json:"ip"`
+	Requests float64 `json:"requests"`
+	BytesIn  float64 `json:"bytes_in"`
+	BytesOut float64 `json:"bytes_out"`
+}
+
+// CountryMetric holds metrics per country.
+type CountryMetric struct {
+	Country  string  `json:"country"`
+	Requests float64 `json:"requests"`
+	BytesIn  float64 `json:"bytes_in"`
+	BytesOut float64 `json:"bytes_out"`
+}
+
 // SystemMetrics holds system-level gauge values.
 type SystemMetrics struct {
 	UptimeSeconds    float64 `json:"uptime_seconds"`
@@ -130,6 +171,11 @@ func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
 	snap.Middleware = buildMiddlewareMetrics(idx)
 	snap.TLSCertificates = buildTLSCertMetrics(idx)
 	snap.Targets = buildTargetMetrics(idx)
+	snap.IPMetrics = buildIPMetrics(idx)
+	snap.CountryMetrics = buildCountryMetrics(idx)
+	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
+	snap.DomainMetrics = buildDomainMetrics(idx)
+	snap.HourlyDomainMetrics = GetDomainStatsHourly(time.Now().UTC().Format("2006-01-02"), time.Now().UTC().Hour())
 	snap.System = buildSystemMetrics(idx)
 
 	return snap, nil
@@ -386,6 +432,179 @@ func buildTargetMetrics(idx map[string]*dto.MetricFamily) []TargetMetric {
 	return result
 }
 
+func buildIPMetrics(idx map[string]*dto.MetricFamily) []IPMetric {
+	ipMap := make(map[string]*IPMetric)
+
+	if fam, ok := idx["gateon_requests_by_ip_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			ip := labelValue(m, "ip")
+			if ip == "" {
+				continue
+			}
+			im := getOrCreateIP(ipMap, ip)
+			im.Requests += m.GetCounter().GetValue()
+		}
+	}
+
+	if fam, ok := idx["gateon_request_bytes_by_ip_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			ip := labelValue(m, "ip")
+			if ip == "" {
+				continue
+			}
+			im := getOrCreateIP(ipMap, ip)
+			dir := labelValue(m, "direction")
+			val := m.GetCounter().GetValue()
+			if dir == "in" {
+				im.BytesIn += val
+			} else {
+				im.BytesOut += val
+			}
+		}
+	}
+
+	result := make([]IPMetric, 0, len(ipMap))
+	for _, im := range ipMap {
+		result = append(result, *im)
+	}
+
+	// Sort by requests descending and limit to top 100 to avoid UI/bandwidth issues
+	slices.SortFunc(result, func(a, b IPMetric) int {
+		return cmp.Compare(b.Requests, a.Requests)
+	})
+	if len(result) > 100 {
+		result = result[:100]
+	}
+
+	return result
+}
+
+func getOrCreateIP(m map[string]*IPMetric, ip string) *IPMetric {
+	if im, ok := m[ip]; ok {
+		return im
+	}
+	im := &IPMetric{IP: ip}
+	m[ip] = im
+	return im
+}
+
+func buildCountryMetrics(idx map[string]*dto.MetricFamily) []CountryMetric {
+	countryMap := make(map[string]*CountryMetric)
+
+	if fam, ok := idx["gateon_requests_by_country_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			country := labelValue(m, "country")
+			if country == "" {
+				continue
+			}
+			cm := getOrCreateCountry(countryMap, country)
+			cm.Requests += m.GetCounter().GetValue()
+		}
+	}
+
+	if fam, ok := idx["gateon_request_bytes_by_country_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			country := labelValue(m, "country")
+			if country == "" {
+				continue
+			}
+			cm := getOrCreateCountry(countryMap, country)
+			dir := labelValue(m, "direction")
+			val := m.GetCounter().GetValue()
+			if dir == "in" {
+				cm.BytesIn += val
+			} else {
+				cm.BytesOut += val
+			}
+		}
+	}
+
+	result := make([]CountryMetric, 0, len(countryMap))
+	for _, cm := range countryMap {
+		result = append(result, *cm)
+	}
+
+	// Sort by requests descending
+	slices.SortFunc(result, func(a, b CountryMetric) int {
+		return cmp.Compare(b.Requests, a.Requests)
+	})
+	if len(result) > 50 {
+		result = result[:50]
+	}
+
+	return result
+}
+
+func getOrCreateCountry(m map[string]*CountryMetric, country string) *CountryMetric {
+	if cm, ok := m[country]; ok {
+		return cm
+	}
+	cm := &CountryMetric{Country: country}
+	m[country] = cm
+	return cm
+}
+
+func buildDomainMetrics(idx map[string]*dto.MetricFamily) []DomainMetric {
+	domainMap := make(map[string]*DomainMetric)
+
+	if fam, ok := idx["gateon_requests_by_domain_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			domain := labelValue(m, "domain")
+			if domain == "" {
+				continue
+			}
+			dm := getOrCreateDomain(domainMap, domain)
+			dm.Requests += m.GetCounter().GetValue()
+		}
+	}
+
+	if fam, ok := idx["gateon_request_bytes_by_domain_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			domain := labelValue(m, "domain")
+			if domain == "" {
+				continue
+			}
+			dm := getOrCreateDomain(domainMap, domain)
+			dir := labelValue(m, "direction")
+			val := m.GetCounter().GetValue()
+			if dir == "in" {
+				dm.BytesIn += val
+			} else {
+				dm.BytesOut += val
+			}
+		}
+	}
+
+	result := make([]DomainMetric, 0, len(domainMap))
+	for _, dm := range domainMap {
+		result = append(result, *dm)
+	}
+
+	// Sort by requests descending, then by domain name
+	slices.SortFunc(result, func(a, b DomainMetric) int {
+		if a.Requests != b.Requests {
+			return cmp.Compare(b.Requests, a.Requests)
+		}
+		return strings.Compare(a.Domain, b.Domain)
+	})
+
+	// Limit to top 50 domains
+	if len(result) > 50 {
+		result = result[:50]
+	}
+
+	return result
+}
+
+func getOrCreateDomain(m map[string]*DomainMetric, domain string) *DomainMetric {
+	if dm, ok := m[domain]; ok {
+		return dm
+	}
+	dm := &DomainMetric{Domain: domain}
+	m[domain] = dm
+	return dm
+}
+
 func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	return SystemMetrics{
 		UptimeSeconds:    gaugeValue(idx, "gateon_uptime_seconds"),
@@ -482,6 +701,12 @@ func collectLabeledCounts(idx map[string]*dto.MetricFamily, name, labelName stri
 			result = append(result, LabeledCount{Label: label, Value: val})
 		}
 	}
+
+	// Sort by value descending
+	slices.SortFunc(result, func(a, b LabeledCount) int {
+		return cmp.Compare(b.Value, a.Value)
+	})
+
 	return result
 }
 

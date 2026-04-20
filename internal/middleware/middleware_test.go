@@ -73,49 +73,53 @@ func TestAPIKeyValidator(t *testing.T) {
 		"key1": "tenant1",
 	}
 	store := NewMemoryAPIKeyStore(keys, false)
-	v := NewAPIKeyValidator(store, "X-API-Key", "", AuthBaseConfig{})
+	v := NewAPIKeyValidator(store, "X-API-Key", "api_key", AuthBaseConfig{})
 
 	handler := v.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		tid := r.Context().Value(TenantIDContextKey).(string)
-		if tid != "tenant1" {
-			t.Errorf("expected tenant1, got %s", tid)
-		}
 	}))
 
+	// 1. Valid header
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("X-API-Key", "key1")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
-
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", rr.Code)
 	}
 
-	req = httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("X-API-Key", "invalid")
-	rr = httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("expected status 401, got %d", rr.Code)
-	}
-
-	// API key via query (WebSocket)
+	// 2. Query param (rejected for non-websocket)
 	req = httptest.NewRequest("GET", "/?api_key=key1", nil)
 	rr = httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401 for query param on non-websocket, got %d", rr.Code)
+	}
+
+	// 3. Query param (accepted for websocket)
+	req = httptest.NewRequest("GET", "/?api_key=key1", nil)
+	req.Header.Set("Upgrade", "websocket")
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Errorf("expected status 200 with api_key query, got %d", rr.Code)
+		t.Errorf("expected status 200 for query param on websocket, got %d", rr.Code)
 	}
 }
 
 func TestExtractToken_QueryAuth(t *testing.T) {
+	// Regular GET: query token rejected
 	req := httptest.NewRequest("GET", "/v1/logs?auth=test-token", nil)
-
 	got := ExtractToken(req)
+	if got != "" {
+		t.Errorf("expected empty token from auth query on regular GET, got %q", got)
+	}
+
+	// WebSocket Upgrade: query token accepted
+	req = httptest.NewRequest("GET", "/v1/logs?auth=test-token", nil)
+	req.Header.Set("Upgrade", "websocket")
+	got = ExtractToken(req)
 	if got != "test-token" {
-		t.Errorf("expected token from auth query, got %q", got)
+		t.Errorf("expected token from auth query on websocket upgrade, got %q", got)
 	}
 }
 

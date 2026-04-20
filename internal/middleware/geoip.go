@@ -74,6 +74,9 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 				country = "XX"
 			}
 
+			// Add country to context for other middlewares to use
+			r = r.WithContext(request.WithCountry(r.Context(), country))
+
 			_, denied := denySet[country]
 			_, allowed := allowSet[country]
 

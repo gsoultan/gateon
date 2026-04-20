@@ -143,6 +143,8 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 		t.MaxIdleConns = tc.maxIdleConns()
 		t.MaxIdleConnsPerHost = tc.maxIdleConnsPerHost()
 		t.IdleConnTimeout = tc.idleConnTimeout()
+		t.ResponseHeaderTimeout = 1 * time.Minute
+		t.ExpectContinueTimeout = 1 * time.Second
 		t.ForceAttemptHTTP2 = !proxyProtocolEnabled
 		t.TLSClientConfig = tlsCfg
 

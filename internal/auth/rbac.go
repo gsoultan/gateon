@@ -40,7 +40,16 @@ func Allowed(role string, action Action, resource Resource) bool {
 		}
 		return false
 	case RoleViewer:
-		return action == ActionRead
+		if action != ActionRead {
+			return false
+		}
+		// Viewers can see general configuration but NOT system global config, users, or diagnostics.
+		switch resource {
+		case ResourceRoutes, ResourceServices, ResourceEntryPoints,
+			ResourceMiddlewares, ResourceTLSOptions, ResourceCerts:
+			return true
+		}
+		return false
 	default:
 		return false
 	}

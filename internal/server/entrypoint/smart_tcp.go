@@ -98,7 +98,19 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
 	}
-	return middleware.Chain(chain...)(deps.CORS.Handler(deps.Limiter.Handler(middleware.PerIP)(epHandler)))
+	// For proxied requests, they use their own CORS policy from their route config if provided.
+	return middleware.Chain(chain...)(deps.Limiter.Handler(middleware.PerIP)(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// If it's a management or internal path, apply global CORS.
+			// For user-defined routes, they handle their own CORS (avoid double headers).
+			isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
+			if isMgmt || middleware.IsInternalPath(r.URL.Path) {
+				deps.CORS.Handler(epHandler).ServeHTTP(w, r)
+			} else {
+				epHandler.ServeHTTP(w, r)
+			}
+		}),
+	))
 }
 
 // serveConnAsHTTP serves a single connection as HTTP (plaintext).

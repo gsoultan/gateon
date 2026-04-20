@@ -25,12 +25,13 @@ func TestAllowed(t *testing.T) {
 		{"operator write users", RoleOperator, ActionWrite, ResourceUsers, false},
 		{"operator write global", RoleOperator, ActionWrite, ResourceGlobal, false},
 		{"operator write certs", RoleOperator, ActionWrite, ResourceCerts, false},
-		// Viewer: read only
+		// Viewer: read only (limited resources)
 		{"viewer read routes", RoleViewer, ActionRead, ResourceRoutes, true},
 		{"viewer write routes", RoleViewer, ActionWrite, ResourceRoutes, false},
-		{"viewer read users", RoleViewer, ActionRead, ResourceUsers, true},
+		{"viewer read users", RoleViewer, ActionRead, ResourceUsers, false},
 		{"viewer write users", RoleViewer, ActionWrite, ResourceUsers, false},
 		{"viewer write global", RoleViewer, ActionWrite, ResourceGlobal, false},
+		{"viewer read global", RoleViewer, ActionRead, ResourceGlobal, false},
 		// Unknown role
 		{"unknown read", "unknown", ActionRead, ResourceRoutes, false},
 		{"empty role", "", ActionRead, ResourceRoutes, false},

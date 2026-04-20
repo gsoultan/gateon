@@ -127,6 +127,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	handler := middleware.Chain(
 		middleware.RequestID(), // Added
 		middleware.Recovery(),
+		middleware.SecurityHeaders(),
 		middleware.HostFilter(mgmtHost),
 		middleware.IPFilter(allowedIPs, nil),
 		middleware.MaxConnections(500),
@@ -139,6 +140,8 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 			telemetry.GlobalDiagnostics.RecordTLSError("management", addr, err)
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       1 * time.Minute,
+		MaxHeaderBytes:    1 << 20, // 1MB
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			switch state {
 			case http.StateNew:

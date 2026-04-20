@@ -149,4 +149,33 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(9, "create_domain_stats_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite {
+			query = `CREATE TABLE IF NOT EXISTS domain_stats (
+				day TEXT NOT NULL,
+				hour INTEGER NOT NULL,
+				domain TEXT NOT NULL,
+				req_count INTEGER NOT NULL DEFAULT 0,
+				latency_sum_s REAL NOT NULL DEFAULT 0,
+				bytes_total INTEGER NOT NULL DEFAULT 0,
+				updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY(day, hour, domain)
+			);`
+		} else {
+			query = `CREATE TABLE IF NOT EXISTS domain_stats (
+				day VARCHAR(10) NOT NULL,
+				hour INTEGER NOT NULL,
+				domain VARCHAR(255) NOT NULL,
+				req_count BIGINT NOT NULL DEFAULT 0,
+				latency_sum_s DOUBLE PRECISION NOT NULL DEFAULT 0,
+				bytes_total BIGINT NOT NULL DEFAULT 0,
+				updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY(day, hour, domain)
+			);`
+		}
+		_, err := db.Exec(query)
+		return err
+	})
 }

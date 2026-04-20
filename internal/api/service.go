@@ -203,6 +203,15 @@ func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.Dis
 		useTLS = true
 	}
 
+	// SSRF prevention: validate host
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host
+	}
+	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return nil, errors.New("access to localhost is forbidden")
+	}
+
 	var opts []grpc.DialOption
 	if useTLS {
 		tlsCfg, err := gtls.CreateTLSClientConfig(req.TlsConfig)

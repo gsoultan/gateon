@@ -1,6 +1,7 @@
-import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper } from '@mantine/core'
-import { IconActivity, IconRoute, IconClock, IconVersions } from '@tabler/icons-react'
+import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper, Progress, Box } from '@mantine/core'
+import { IconActivity, IconRoute, IconClock, IconVersions, IconCpu, IconDeviceDesktop } from '@tabler/icons-react'
 import { useGateonStatus } from '../hooks/useGateon'
+import { formatBytes } from '../utils/format'
 
 export default function StatusCard() {
   const { data: statusData, error: statusError, isLoading: isStatusLoading } = useGateonStatus()
@@ -54,8 +55,23 @@ export default function StatusCard() {
                 <IconActivity size={24} color="white" />
               </Paper>
               <div>
-                <Title order={3} fw={800} style={{ letterSpacing: -0.5 }}>Gateon Instances</Title>
-                <Text c="dimmed" size="sm" fw={500}>Core engine status and operational metrics</Text>
+                <Title order={3} fw={800} style={{ letterSpacing: -0.5 }}>System Health</Title>
+                <SimpleGrid cols={2} spacing="xs">
+                  <Box>
+                    <Group justify="space-between" mb={4}>
+                      <Text size="xs" fw={700} c="dimmed">CPU</Text>
+                      <Text size="xs" fw={700}>{statusData?.cpu_usage?.toFixed(1) || 0}%</Text>
+                    </Group>
+                    <Progress value={statusData?.cpu_usage || 0} size="sm" radius="xl" color="blue" animated />
+                  </Box>
+                  <Box>
+                    <Group justify="space-between" mb={4}>
+                      <Text size="xs" fw={700} c="dimmed">MEMORY</Text>
+                      <Text size="xs" fw={700}>{statusData?.memory_usage_percent?.toFixed(1) || 0}%</Text>
+                    </Group>
+                    <Progress value={statusData?.memory_usage_percent || 0} size="sm" radius="xl" color="orange" animated />
+                  </Box>
+                </SimpleGrid>
               </div>
             </Group>
             <Badge 
@@ -72,7 +88,7 @@ export default function StatusCard() {
 
           <Divider variant="dashed" />
 
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="xl">
+          <SimpleGrid cols={{ base: 1, sm: 4 }} spacing="xl">
             {stats.map((stat) => (
               <Paper key={stat.label} p="md" radius="md" withBorder bg="var(--mantine-color-default-hover)">
                 <Group>
@@ -81,7 +97,7 @@ export default function StatusCard() {
                     <Text size="xs" c="dimmed" fw={800} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                       {stat.label}
                     </Text>
-                    <Text fw={700} size="lg">{stat.value}</Text>
+                    <Text fw={700} size="md">{stat.value}</Text>
                   </div>
                 </Group>
               </Paper>
@@ -99,12 +115,4 @@ function formatUptime(seconds: number) {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   return `${hours}h ${minutes}m`
-}
-
-function formatBytes(bytes: number) {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
