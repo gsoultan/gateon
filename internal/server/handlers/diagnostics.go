@@ -172,7 +172,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 				}
 			}
 		}
-		pathStats := telemetry.GetPathStats()
+		pathStats := telemetry.GetPathStats(r.Context())
 		var pathTotalReqs uint64
 		var pathTotalBandwidth uint64
 		for _, p := range pathStats {
@@ -215,12 +215,12 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		daysStr := r.URL.Query().Get("days")
 		if daysStr != "" {
 			if days, err := strconv.Atoi(daysStr); err == nil {
-				stats := telemetry.GetPathStatsWindow(days)
+				stats := telemetry.GetPathStatsWindow(r.Context(), days)
 				_ = json.NewEncoder(w).Encode(stats)
 				return
 			}
 		}
-		stats := telemetry.GetPathStats()
+		stats := telemetry.GetPathStats(r.Context())
 		_ = json.NewEncoder(w).Encode(stats)
 	})
 	mux.HandleFunc("GET /v1/diag/metrics", func(w http.ResponseWriter, r *http.Request) {

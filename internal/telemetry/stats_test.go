@@ -12,7 +12,7 @@ func TestPathStats(t *testing.T) {
 	RecordPathRequest("example.com", "/api", 0.2, 150)
 	RecordPathRequest("other.com", "/", 0.5, 300)
 
-	stats := GetPathStats()
+	stats := GetPathStats(t.Context())
 	if len(stats) != 2 {
 		t.Errorf("expected 2 stats, got %d", len(stats))
 	}
@@ -57,7 +57,7 @@ func TestRecordPathRequest_ExcludesInternalAPIPaths(t *testing.T) {
 		RecordPathRequest("example.com", path, 0.1, 100)
 	}
 
-	stats := GetPathStats()
+	stats := GetPathStats(t.Context())
 	if len(stats) != 0 {
 		t.Errorf("expected 0 stats for internal paths, got %d", len(stats))
 	}

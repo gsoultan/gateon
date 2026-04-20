@@ -33,7 +33,7 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 
 	// Verify that we can still get traces
-	traces := GetTraces(10)
+	traces := GetTraces(t.Context(), 10)
 	found := false
 	count := 0
 	for _, tr := range traces {

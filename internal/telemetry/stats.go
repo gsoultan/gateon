@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"math"
 	"net"
 	"strings"
@@ -139,13 +140,13 @@ func getInMemoryPathStats() []PathStats {
 // When the persistent store is enabled, it queries the DB first and falls back
 // to in-memory stats when the DB returns no results (e.g. unflushed data,
 // query errors, or remote DB connectivity issues).
-func GetPathStats() []PathStats {
+func GetPathStats(ctx context.Context) []PathStats {
 	if IsStoreEnabled() {
 		days := CurrentRetentionDays()
 		if days <= 0 {
 			days = 1
 		}
-		if dbStats := GetPathStatsWindow(days); len(dbStats) > 0 {
+		if dbStats := GetPathStatsWindow(ctx, days); len(dbStats) > 0 {
 			return dbStats
 		}
 	}

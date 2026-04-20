@@ -332,21 +332,24 @@ func recordTraceToStore(id, operationName, serviceName string, durationMs float6
 }
 
 // GetTraces returns the last N traces from the store.
-func GetTraces(limit int) []traceRecord {
+func GetTraces(ctx context.Context, limit int) []traceRecord {
 	if store == nil {
 		return nil
 	}
 	if limit <= 0 {
 		limit = 100
 	}
+	if limit > 1000 {
+		limit = 1000
+	}
 	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path FROM traces ORDER BY timestamp DESC LIMIT ?")
-	rows, err := store.db.Query(query, limit)
+	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("traces: query failed")
 		return nil
 	}
 	defer rows.Close()
-	res := make([]traceRecord, 0, limit)
+	res := make([]traceRecord, 0, min(limit, 100))
 	for rows.Next() {
 		var tr traceRecord
 		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path); err != nil {
@@ -360,7 +363,7 @@ func GetTraces(limit int) []traceRecord {
 
 // GetPathStatsWindow returns aggregated stats from storage for the last `days` days.
 // Falls back to in-memory stats on DB errors to ensure metrics are always available.
-func GetPathStatsWindow(days int) []PathStats {
+func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 	if store == nil {
 		return getInMemoryPathStats()
 	}
@@ -369,7 +372,7 @@ func GetPathStatsWindow(days int) []PathStats {
 	}
 	cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
 	q := store.dialect.Rebind(QueryGetPathStatsWin)
-	rows, err := store.db.Query(q, cutoff)
+	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("path stats: DB query failed, falling back to in-memory stats")
 		return getInMemoryPathStats()
@@ -402,7 +405,7 @@ func GetPathStatsWindow(days int) []PathStats {
 }
 
 // GetDomainStatsWindow returns aggregated domain statistics for the last N days.
-func GetDomainStatsWindow(days int) []DomainStats {
+func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	if store == nil {
 		return nil
 	}
@@ -411,7 +414,7 @@ func GetDomainStatsWindow(days int) []DomainStats {
 	}
 	cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
 	q := store.dialect.Rebind(QueryGetDomainStatsWin)
-	rows, err := store.db.Query(q, cutoff)
+	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("domain stats: query failed")
 		return nil
