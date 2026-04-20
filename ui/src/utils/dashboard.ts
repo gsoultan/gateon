@@ -1,4 +1,11 @@
-import type { RequestDeltaSample, AggStats, PathStats, CountryTraffic } from "../types/gateon";
+import type {
+  RequestDeltaSample,
+  AggStats,
+  PathStats,
+  CountryTraffic,
+  Route,
+  Service,
+} from "../types/gateon";
 
 export type GroupedTrafficDatum = {
   group: string;
@@ -17,6 +24,29 @@ export type TrafficRangePreset = "last24h" | "last7d" | "last30d" | "custom";
 export type TrafficRangeBounds = {
   startTs: number;
   endTs: number;
+};
+
+export type BandwidthDeltaSample = {
+  ts: number;
+  totalBytes: number;
+  routerBytes: Record<string, number>;
+  serviceBytes: Record<string, number>;
+};
+
+export type HourlyBandwidthDatum = {
+  hourStartTs: number;
+  hour: string;
+  totalBytes: number;
+  routerBytes: number;
+  serviceBytes: number;
+};
+
+export type BandwidthSummaryDatum = {
+  label: string;
+  max: number;
+  min: number;
+  avg: number;
+  color: string;
 };
 
 export const TOP_GROUP_LIMIT = 6;
@@ -335,4 +365,145 @@ export function buildOSDistribution(agg: any) {
     { group: "iOS", requests: 120, color: "teal.6" },
     { group: "Android", requests: 80, color: "green.6" },
   ];
+}
+
+export function buildTrafficByServiceData(
+  pathStats: PathStats[],
+  routes: Route[],
+  services: Service[],
+): GroupedTrafficDatum[] {
+  const routeMatchers = buildRouteMatchers(routes);
+  const serviceNameById = new Map(services.map((service) => [service.id, service.name]));
+  const grouped = new Map<string, number>();
+
+  for (const stat of pathStats) {
+    const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
+    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.request_count);
+  }
+
+  return toTopGroupedData(grouped);
+}
+
+export function buildHourlyBandwidthData(
+  samples: BandwidthDeltaSample[],
+  range: TrafficRangeBounds | null = null,
+): HourlyBandwidthDatum[] {
+  const grouped = new Map<
+    number,
+    { totalBytes: number; routerBytes: number; serviceBytes: number }
+  >();
+
+  for (const sample of samples) {
+    const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
+    const existing = grouped.get(hourStartTs) ?? {
+      totalBytes: 0,
+      routerBytes: 0,
+      serviceBytes: 0,
+    };
+    const routerPeak = Object.values(sample.routerBytes).reduce(
+      (peak, value) => Math.max(peak, value),
+      0,
+    );
+    const servicePeak = Object.values(sample.serviceBytes).reduce(
+      (peak, value) => Math.max(peak, value),
+      0,
+    );
+    grouped.set(hourStartTs, {
+      totalBytes: existing.totalBytes + sample.totalBytes,
+      routerBytes: existing.routerBytes + routerPeak,
+      serviceBytes: existing.serviceBytes + servicePeak,
+    });
+  }
+
+  if (range) {
+    const result: HourlyBandwidthDatum[] = [];
+    let currentTs = Math.floor(range.startTs / HOUR_MS) * HOUR_MS;
+    const endTs = range.endTs;
+
+    while (currentTs < endTs) {
+      const values = grouped.get(currentTs) ?? {
+        totalBytes: 0,
+        routerBytes: 0,
+        serviceBytes: 0,
+      };
+      result.push({
+        hourStartTs: currentTs,
+        hour: formatHourLabel(currentTs),
+        totalBytes: values.totalBytes,
+        routerBytes: values.routerBytes,
+        serviceBytes: values.serviceBytes,
+      });
+      currentTs += HOUR_MS;
+    }
+    return result;
+  }
+
+  return Array.from(grouped.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([hourStartTs, values]) => ({
+      hourStartTs,
+      hour: formatHourLabel(hourStartTs),
+      totalBytes: values.totalBytes,
+      routerBytes: values.routerBytes,
+      serviceBytes: values.serviceBytes,
+    }));
+}
+
+export function buildBandwidthSummaries(hourly: HourlyBandwidthDatum[]): BandwidthSummaryDatum[] {
+  const toSummary = (
+    label: string,
+    color: string,
+    selector: (row: HourlyBandwidthDatum) => number,
+  ): BandwidthSummaryDatum => {
+    if (hourly.length === 0) {
+      return { label, max: 0, min: 0, avg: 0, color };
+    }
+    const values = hourly.map(selector);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return {
+      label,
+      max: Math.max(...values),
+      min: Math.min(...values),
+      avg: total / values.length,
+      color,
+    };
+  };
+
+  return [
+    toSummary("Total", "indigo", (row) => row.totalBytes),
+    toSummary("Router", "orange", (row) => row.routerBytes),
+    toSummary("Service", "teal", (row) => row.serviceBytes),
+  ];
+}
+
+export function buildBandwidthByRouterData(
+  pathStats: PathStats[],
+  routes: Route[],
+): GroupedTrafficDatum[] {
+  const routeMatchers = buildRouteMatchers(routes);
+  const grouped = new Map<string, number>();
+
+  for (const stat of pathStats) {
+    const routerLabel = resolveRouterLabel(stat, routeMatchers);
+    grouped.set(routerLabel, (grouped.get(routerLabel) ?? 0) + stat.bytes_total);
+  }
+
+  return toTopGroupedData(grouped);
+}
+
+export function buildBandwidthByServiceData(
+  pathStats: PathStats[],
+  routes: Route[],
+  services: Service[],
+): GroupedTrafficDatum[] {
+  const routeMatchers = buildRouteMatchers(routes);
+  const serviceNameById = new Map(services.map((service) => [service.id, service.name]));
+  const grouped = new Map<string, number>();
+
+  for (const stat of pathStats) {
+    const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
+    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.bytes_total);
+  }
+
+  return toTopGroupedData(grouped);
 }

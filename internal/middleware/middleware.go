@@ -27,7 +27,12 @@ func GetRouteName(r *http.Request) string {
 // IsInternalPath returns true if the given path belongs to Gateon's internal API,
 // monitoring, or health-check system.
 func IsInternalPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz"
+	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz" || IsDashboardPath(path)
+}
+
+// IsDashboardPath returns true if the path is a Gateon dashboard gRPC-Web service.
+func IsDashboardPath(path string) bool {
+	return strings.HasPrefix(path, "/gateon.v1.ApiService/") || strings.HasPrefix(path, "/gateon.v1.AIService/")
 }
 
 // ShouldSkipMetrics determines if Prometheus metrics recording should be skipped

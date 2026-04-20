@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
+	"github.com/rs/cors"
 )
 
 // grpcWebTrailerFlag is the gRPC frame flag indicating a trailer frame.
@@ -20,17 +21,34 @@ const grpcWebTrailerFlag byte = 0x80
 // and translates responses back to gRPC-Web format. This allows backends that only support
 // standard gRPC (over HTTP/2) to handle requests from web browsers.
 //
+// If cfg.AllowedOrigins is not empty, it also handles CORS for gRPC-Web requests with
+// sensible gRPC-specific defaults for headers.
+//
 // Request side: translates Content-Type from application/grpc-web to application/grpc,
 // base64-decodes body for grpc-web-text, and upgrades protocol version.
 //
 // Response side: translates Content-Type back to application/grpc-web, and appends
 // HTTP trailers as a gRPC trailer frame in the response body (required because
 // HTTP/1.1 browsers cannot read HTTP/2 trailers).
-func GRPCWeb() Middleware {
+func GRPCWeb(cfg ...CORSConfig) Middleware {
 	// We create a wrapper with nil server to use its detection methods.
 	// This avoids the type mismatch with http.HandlerFunc and allows us to use
 	// the library's detection logic while we handle the header mapping for the proxy.
-	detector := grpcweb.WrapServer(nil)
+	// We set WithCorsForRegisteredEndpointsOnly(false) to avoid panics with nil server.
+	detector := grpcweb.WrapServer(nil, grpcweb.WithCorsForRegisteredEndpointsOnly(false))
+
+	var c *cors.Cors
+	if len(cfg) > 0 && len(cfg[0].AllowedOrigins) > 0 {
+		c = cors.New(cors.Options{
+			AllowedOrigins:   cfg[0].AllowedOrigins,
+			AllowedMethods:   []string{"POST", "OPTIONS"},
+			AllowedHeaders:   []string{"*"}, // Allow any requested header for gRPC-Web
+			ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
+			AllowCredentials: cfg[0].AllowCredentials,
+			MaxAge:           cfg[0].MaxAge,
+			Debug:            cfg[0].Debug,
+		})
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,48 +57,59 @@ func GRPCWeb() Middleware {
 				return
 			}
 
-			contentType := r.Header.Get("Content-Type")
-			isTextFormat := strings.HasPrefix(contentType, "application/grpc-web-text")
-
-			// Determine the original grpc-web content type for the response
-			originalWebCT := "application/grpc-web"
-			if isTextFormat {
-				originalWebCT = "application/grpc-web-text"
+			if c != nil {
+				c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// Actual request handling (non-preflight)
+					serveGRPCWeb(w, r, detector, next)
+				})).ServeHTTP(w, r)
+			} else {
+				serveGRPCWeb(w, r, detector, next)
 			}
-			// Preserve any suffix (e.g. +proto)
-			if idx := strings.IndexByte(contentType, '+'); idx >= 0 {
-				originalWebCT += contentType[idx:]
-			}
-
-			// Handle base64 decoding for text-based gRPC-Web requests
-			if isTextFormat {
-				r.Body = io.NopCloser(base64.NewDecoder(base64.StdEncoding, r.Body))
-			}
-
-			if strings.HasPrefix(contentType, "application/grpc-web") {
-				// Translate gRPC-Web content type to standard gRPC
-				newType := contentType
-				newType = strings.Replace(newType, "application/grpc-web-text", "application/grpc", 1)
-				newType = strings.Replace(newType, "application/grpc-web", "application/grpc", 1)
-				r.Header.Set("Content-Type", newType)
-			}
-
-			// gRPC requires HTTP/2. We upgrade the request metadata
-			// so the proxy knows to treat it as a gRPC call.
-			if r.ProtoMajor < 2 {
-				r.ProtoMajor = 2
-				r.ProtoMinor = 0
-			}
-
-			gwrw := &grpcWebResponseWriter{
-				ResponseWriter: w,
-				isTextFormat:   isTextFormat,
-				originalWebCT:  originalWebCT,
-			}
-			next.ServeHTTP(gwrw, r)
-			gwrw.finalize()
 		})
 	}
+}
+
+func serveGRPCWeb(w http.ResponseWriter, r *http.Request, detector *grpcweb.WrappedGrpcServer, next http.Handler) {
+	contentType := r.Header.Get("Content-Type")
+	isTextFormat := strings.HasPrefix(contentType, "application/grpc-web-text")
+
+	// Determine the original grpc-web content type for the response
+	originalWebCT := "application/grpc-web"
+	if isTextFormat {
+		originalWebCT = "application/grpc-web-text"
+	}
+	// Preserve any suffix (e.g. +proto)
+	if idx := strings.IndexByte(contentType, '+'); idx >= 0 {
+		originalWebCT += contentType[idx:]
+	}
+
+	// Handle base64 decoding for text-based gRPC-Web requests
+	if isTextFormat {
+		r.Body = io.NopCloser(base64.NewDecoder(base64.StdEncoding, r.Body))
+	}
+
+	if strings.HasPrefix(contentType, "application/grpc-web") {
+		// Translate gRPC-Web content type to standard gRPC
+		newType := contentType
+		newType = strings.Replace(newType, "application/grpc-web-text", "application/grpc", 1)
+		newType = strings.Replace(newType, "application/grpc-web", "application/grpc", 1)
+		r.Header.Set("Content-Type", newType)
+	}
+
+	// gRPC requires HTTP/2. We upgrade the request metadata
+	// so the proxy knows to treat it as a gRPC call.
+	if r.ProtoMajor < 2 {
+		r.ProtoMajor = 2
+		r.ProtoMinor = 0
+	}
+
+	gwrw := &grpcWebResponseWriter{
+		ResponseWriter: w,
+		isTextFormat:   isTextFormat,
+		originalWebCT:  originalWebCT,
+	}
+	next.ServeHTTP(gwrw, r)
+	gwrw.finalize()
 }
 
 // grpcWebResponseWriter wraps an http.ResponseWriter to translate gRPC responses

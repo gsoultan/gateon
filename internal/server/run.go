@@ -94,7 +94,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Auth:         s.AuthManager,
 		LoginLimiter: loginLimiter,
 	}, internalAPI, mux)
-	c := BuildCORS()
+	var mgmtConfig *gateonv1.ManagementConfig
+	if gc := s.GlobalStore.Get(ctx); gc != nil {
+		mgmtConfig = gc.Management
+	}
+	mgmtCors := BuildManagementCORS(mgmtConfig)
 	tlsConfig, err := s.TLSManager.GetTLSConfig()
 	if err != nil {
 		logger.L.Fatal().Err(err).Msg("failed to initialize tls")
@@ -116,11 +120,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
-	var mgmtConfig *gateonv1.ManagementConfig
-	if gc := s.GlobalStore.Get(ctx); gc != nil {
-		mgmtConfig = gc.Management
-	}
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, c, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig)
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, mgmtCors, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	metricsStop := make(chan struct{})

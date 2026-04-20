@@ -50,12 +50,10 @@ import {
   TOP_GROUP_LIMIT,
   HOUR_MS,
   DAY_MS,
-  TrafficFilterMode,
-  TrafficRangePreset,
-  TrafficRangeBounds,
-  HourlyBandwidthDatum,
-  BandwidthSummaryDatum,
-  RouteMatcher,
+  DEFAULT_PORT_LABEL,
+  OTHER_GROUP_LABEL,
+  UNMATCHED_SERVICE_LABEL,
+  UNMATCHED_ROUTER_LABEL,
   resolveTrafficRangeBounds,
   filterTrafficSamplesByRange,
   buildHourlyTrafficData,
@@ -71,10 +69,14 @@ import {
   buildBandwidthByRouterData,
   buildBandwidthByServiceData,
   buildTrafficByPortData,
-  DEFAULT_PORT_LABEL,
-  OTHER_GROUP_LABEL,
-  UNMATCHED_SERVICE_LABEL,
-  UNMATCHED_ROUTER_LABEL,
+} from "../utils/dashboard";
+import type {
+  TrafficFilterMode,
+  TrafficRangePreset,
+  TrafficRangeBounds,
+  HourlyBandwidthDatum,
+  BandwidthSummaryDatum,
+  RouteMatcher,
 } from "../utils/dashboard";
 
 const StatusCard = lazy(() => import("../components/StatusCard"));

@@ -6,13 +6,17 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/rs/cors"
 )
 
 // parseAllowedOrigins returns allowed origins from GATEON_CORS_ORIGINS (comma-separated).
 // Defaults to ["*"] when unset or empty.
-func parseAllowedOrigins() []string {
-	originsStr := os.Getenv("GATEON_CORS_ORIGINS")
+func parseAllowedOrigins(envVar string) []string {
+	originsStr := os.Getenv(envVar)
+	if originsStr == "" && envVar != "GATEON_CORS_ORIGINS" {
+		originsStr = os.Getenv("GATEON_CORS_ORIGINS")
+	}
 	if originsStr == "" {
 		originsStr = "*"
 	}
@@ -29,10 +33,33 @@ func parseAllowedOrigins() []string {
 	return origins
 }
 
-// BuildCORS returns CORS options from env. GATEON_CORS_ORIGINS, GATEON_CORS_ALLOW_CREDENTIALS.
-func BuildCORS() *cors.Cors {
-	origins := parseAllowedOrigins()
-	allowCreds, _ := strconv.ParseBool(os.Getenv("GATEON_CORS_ALLOW_CREDENTIALS"))
+// BuildManagementCORS returns CORS options for management API from config or env.
+func BuildManagementCORS(cfg *gateonv1.ManagementConfig) *cors.Cors {
+	var origins []string
+	var allowCreds bool
+	var methods []string
+	var headers []string
+
+	if cfg != nil && cfg.Cors != nil {
+		origins = cfg.Cors.AllowedOrigins
+		allowCreds = cfg.Cors.AllowCredentials
+		methods = cfg.Cors.AllowedMethods
+		headers = cfg.Cors.AllowedHeaders
+	}
+
+	if len(origins) == 0 {
+		origins = parseAllowedOrigins("GATEON_CORS_ORIGINS")
+	}
+	if !allowCreds {
+		allowCreds, _ = strconv.ParseBool(os.Getenv("GATEON_CORS_ALLOW_CREDENTIALS"))
+	}
+	if len(methods) == 0 {
+		methods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+	}
+	if len(headers) == 0 {
+		headers = []string{"*"}
+	}
+
 	if allowCreds {
 		for _, o := range origins {
 			if o == "*" {
@@ -44,8 +71,8 @@ func BuildCORS() *cors.Cors {
 	}
 	return cors.New(cors.Options{
 		AllowedOrigins:   origins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"*"},
+		AllowedMethods:   methods,
+		AllowedHeaders:   headers,
 		ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding"},
 		AllowCredentials: allowCreds,
 	})
