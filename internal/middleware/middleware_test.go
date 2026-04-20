@@ -106,6 +106,52 @@ func TestAPIKeyValidator(t *testing.T) {
 	}
 }
 
+type structClaims struct {
+	User string `json:"user"`
+	Role string `json:"role"`
+}
+
+func (s structClaims) ToMap() map[string]any {
+	return map[string]any{
+		"user":  s.User,
+		"roles": []string{s.Role},
+	}
+}
+
+type mockVerifier struct {
+	claims any
+	err    error
+}
+
+func (m *mockVerifier) VerifyToken(token string) (any, error) {
+	return m.claims, m.err
+}
+
+func TestPasetoAuth_StructClaims(t *testing.T) {
+	claims := structClaims{User: "alice", Role: "admin"}
+	verifier := &mockVerifier{claims: claims}
+	mw := PasetoAuth(verifier, AuthBaseConfig{
+		RequiredRoles: []string{"admin"},
+	})
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		c := r.Context().Value(UserContextKey)
+		if c == nil {
+			t.Error("expected claims in context")
+		}
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status 200 for struct claims with ToMap, got %d", rr.Code)
+	}
+}
+
 func TestExtractToken_QueryAuth(t *testing.T) {
 	// Regular GET: query token rejected
 	req := httptest.NewRequest("GET", "/v1/logs?auth=test-token", nil)

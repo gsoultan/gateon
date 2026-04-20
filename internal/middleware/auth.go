@@ -284,21 +284,15 @@ func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 				return
 			}
 
-			claims, ok := claimsRaw.(map[string]any)
-			if !ok {
-				cfg.HandleFailure(w, r, next, errors.New("invalid token claims"))
-				return
-			}
-
-			if err := cfg.ValidateClaims(claims); err != nil {
+			if err := cfg.ValidateClaims(claimsRaw); err != nil {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
 				cfg.HandleFailure(w, r, next, err)
 				return
 			}
 
 			// Add claims to context and headers
-			ctx := InjectContext(r.Context(), claims)
-			cfg.MapClaimsToHeaders(r, claims)
+			ctx := InjectContext(r.Context(), claimsRaw)
+			cfg.MapClaimsToHeaders(r, claimsRaw)
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
