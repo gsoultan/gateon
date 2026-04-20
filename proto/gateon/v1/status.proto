@@ -13,4 +13,8 @@ message GetStatusResponse {
   int64 memory_usage = 4;
   int32 routes_count = 5;
   int32 services_count = 6;
+  int32 entry_points_count = 7;
+  int32 middlewares_count = 8;
+  double cpu_usage = 9;
+  double memory_usage_percent = 10;
 }

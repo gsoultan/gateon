@@ -90,8 +90,6 @@ func (s *ApiService) DeleteEntryPoint(ctx context.Context, req *gateonv1.DeleteE
 	return &gateonv1.DeleteEntryPointResponse{Success: true}, nil
 }
 
-var startTime = time.Now()
-
 func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest) (*gateonv1.GetStatusResponse, error) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -104,19 +102,36 @@ func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest
 	if s.Services != nil {
 		servicesCount = len(s.Services.List(ctx))
 	}
+	entryPointsCount := 0
+	if s.EntryPoints != nil {
+		entryPointsCount = len(s.EntryPoints.List(ctx))
+	}
+	middlewaresCount := 0
+	if s.Middlewares != nil {
+		middlewaresCount = len(s.Middlewares.List(ctx))
+	}
+
+	stats := telemetry.GetSystemStats()
 
 	return &gateonv1.GetStatusResponse{
-		Status:        "running",
-		Version:       s.Version,
-		Uptime:        int64(time.Since(startTime).Seconds()),
-		MemoryUsage:   int64(m.Alloc),
-		RoutesCount:   int32(routesCount),
-		ServicesCount: int32(servicesCount),
+		Status:             "running",
+		Version:            s.Version,
+		Uptime:             int64(time.Since(telemetry.GetStartTime()).Seconds()),
+		MemoryUsage:        int64(m.Alloc),
+		RoutesCount:        int32(routesCount),
+		ServicesCount:      int32(servicesCount),
+		EntryPointsCount:   int32(entryPointsCount),
+		MiddlewaresCount:   int32(middlewaresCount),
+		CpuUsage:           stats.CPUUsage,
+		MemoryUsagePercent: stats.MemoryUsagePercent,
 	}, nil
 }
 
-func (s *ApiService) ListTraces(_ context.Context, req *gateonv1.ListTracesRequest) (*gateonv1.ListTracesResponse, error) {
-	traces := telemetry.GetTraces(int(req.Limit))
+func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesRequest) (*gateonv1.ListTracesResponse, error) {
+	if req == nil {
+		return nil, errors.New("request is required")
+	}
+	traces := telemetry.GetTraces(ctx, int(req.Limit))
 	res := make([]*gateonv1.Trace, 0, len(traces))
 	for _, t := range traces {
 		res = append(res, &gateonv1.Trace{
@@ -187,6 +202,9 @@ func (s *ApiService) DeleteService(ctx context.Context, req *gateonv1.DeleteServ
 }
 
 func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.DiscoverGrpcServicesRequest) (*gateonv1.DiscoverGrpcServicesResponse, error) {
+	if req == nil {
+		return nil, errors.New("request is required")
+	}
 	if req.Url == "" {
 		return nil, errors.New("url is required")
 	}
@@ -360,8 +378,11 @@ func (s *ApiService) DeleteTLSOption(ctx context.Context, req *gateonv1.DeleteTL
 }
 
 func (s *ApiService) Login(_ context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error) {
+	if req == nil {
+		return nil, errors.New("request is required")
+	}
 	if s.Auth == nil {
-		return nil, nil
+		return &gateonv1.LoginResponse{}, nil
 	}
 	token, user, err := s.Auth.Authenticate(req.Username, req.Password)
 	if err != nil {
@@ -399,6 +420,9 @@ func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupReq
 }
 
 func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error) {
+	if req == nil {
+		return &gateonv1.SetupResponse{Success: false, Error: "request is required"}, nil
+	}
 	// Check if setup is already done
 	setupReq, err := s.IsSetupRequired(ctx, &gateonv1.IsSetupRequiredRequest{})
 	if err == nil && !setupReq.Required {
@@ -472,6 +496,9 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 }
 
 func (s *ApiService) ListUsers(_ context.Context, req *gateonv1.ListUsersRequest) (*gateonv1.ListUsersResponse, error) {
+	if req == nil {
+		return &gateonv1.ListUsersResponse{}, nil
+	}
 	if s.Auth == nil {
 		return &gateonv1.ListUsersResponse{}, nil
 	}
@@ -488,7 +515,7 @@ func (s *ApiService) ListUsers(_ context.Context, req *gateonv1.ListUsersRequest
 }
 
 func (s *ApiService) UpdateUser(_ context.Context, req *gateonv1.UpdateUserRequest) (*gateonv1.UpdateUserResponse, error) {
-	if s.Auth == nil || req.User == nil {
+	if s.Auth == nil || req == nil || req.User == nil {
 		return &gateonv1.UpdateUserResponse{Success: false}, nil
 	}
 	if err := s.Auth.UpsertUser(req.User); err != nil {
@@ -498,7 +525,7 @@ func (s *ApiService) UpdateUser(_ context.Context, req *gateonv1.UpdateUserReque
 }
 
 func (s *ApiService) DeleteUser(_ context.Context, req *gateonv1.DeleteUserRequest) (*gateonv1.DeleteUserResponse, error) {
-	if s.Auth == nil || req.Id == "" {
+	if s.Auth == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteUserResponse{Success: false}, nil
 	}
 	if err := s.Auth.DeleteUser(req.Id); err != nil {
@@ -580,7 +607,7 @@ func isCloudflareReachable() bool {
 }
 
 func (s *ApiService) ChangePassword(_ context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {
-	if s.Auth == nil || req.Id == "" || req.Password == "" {
+	if s.Auth == nil || req == nil || req.Id == "" || req.Password == "" {
 		return &gateonv1.ChangePasswordResponse{Success: false}, nil
 	}
 	if err := s.Auth.ChangePassword(req.Id, req.Password); err != nil {

@@ -2,9 +2,9 @@ package telemetry
 
 import (
 	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -255,6 +255,18 @@ var SQLiteWALSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
 var (
 	startTime     time.Time
 	startTimeOnce sync.Once
+
+	// System metrics gauges (global so they can be accessed by GetSystemStats)
+	goroutinesGauge  prometheus.Gauge
+	memoryAllocGauge prometheus.Gauge
+	memoryTotalGauge prometheus.Gauge
+	memorySysGauge   prometheus.Gauge
+	cpuUsageGauge    prometheus.Gauge
+	memoryUsageGauge prometheus.Gauge
+
+	// Latest values for API
+	lastCPUUsage    atomic.Pointer[float64]
+	lastMemoryUsage atomic.Pointer[float64]
 )
 
 // InitStartTime records the gateway start time for uptime tracking.
@@ -264,30 +276,53 @@ func InitStartTime() {
 	})
 }
 
+// GetStartTime returns the gateway start time.
+func GetStartTime() time.Time {
+	return startTime
+}
+
+// SystemStats holds current system-level metrics.
+type SystemStats struct {
+	CPUUsage           float64
+	MemoryUsagePercent float64
+}
+
+// GetSystemStats returns the current system metrics.
+func GetSystemStats() SystemStats {
+	var stats SystemStats
+	if v := lastCPUUsage.Load(); v != nil {
+		stats.CPUUsage = *v
+	}
+	if v := lastMemoryUsage.Load(); v != nil {
+		stats.MemoryUsagePercent = *v
+	}
+	return stats
+}
+
 // StartSystemMetricsCollector starts a background goroutine that periodically updates
 // system-level gauges (uptime, goroutines, memory). It stops when ctx is cancelled.
 func StartSystemMetricsCollector(stop <-chan struct{}) {
-	goroutines := promauto.NewGauge(prometheus.GaugeOpts{
+	goroutinesGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_goroutines",
 		Help: "Current number of goroutines.",
 	})
-	memoryAlloc := promauto.NewGauge(prometheus.GaugeOpts{
+	memoryAllocGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_memory_alloc_bytes",
 		Help: "Current heap allocation in bytes.",
 	})
-	memoryTotalAlloc := promauto.NewGauge(prometheus.GaugeOpts{
+	memoryTotalGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_memory_total_alloc_bytes",
 		Help: "Total heap allocations over lifetime in bytes.",
 	})
-	memorySys := promauto.NewGauge(prometheus.GaugeOpts{
+	memorySysGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_memory_sys_bytes",
 		Help: "Total memory obtained from the OS in bytes.",
 	})
-	cpuUsage := promauto.NewGauge(prometheus.GaugeOpts{
+	cpuUsageGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_cpu_usage_percent",
 		Help: "Current system CPU usage percentage.",
 	})
-	memoryUsage := promauto.NewGauge(prometheus.GaugeOpts{
+	memoryUsageGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_memory_usage_percent",
 		Help: "Current system memory usage percentage.",
 	})
@@ -303,19 +338,21 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 				if !startTime.IsZero() {
 					UptimeSeconds.Set(time.Since(startTime).Seconds())
 				}
-				goroutines.Set(float64(runtime.NumGoroutine()))
+				goroutinesGauge.Set(float64(runtime.NumGoroutine()))
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				memoryAlloc.Set(float64(m.Alloc))
-				memoryTotalAlloc.Set(float64(m.TotalAlloc))
-				memorySys.Set(float64(m.Sys))
+				memoryAllocGauge.Set(float64(m.Alloc))
+				memoryTotalGauge.Set(float64(m.TotalAlloc))
+				memorySysGauge.Set(float64(m.Sys))
 
 				// System-wide metrics
 				if v, err := mem.VirtualMemory(); err == nil {
-					memoryUsage.Set(v.UsedPercent)
+					memoryUsageGauge.Set(v.UsedPercent)
+					lastMemoryUsage.Store(new(v.UsedPercent))
 				}
 				if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
-					cpuUsage.Set(c[0])
+					cpuUsageGauge.Set(c[0])
+					lastCPUUsage.Store(new(c[0]))
 				}
 
 				// Process-specific metrics
@@ -325,13 +362,13 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 					}
 				}
 
-				// SQLite WAL metrics
-				_ = filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-					if err == nil && !info.IsDir() && filepath.Ext(path) == ".db-wal" {
-						SQLiteWALSize.WithLabelValues(filepath.Base(path)).Set(float64(info.Size()))
+				// SQLite WAL metrics - optimized to check only specific files
+				for _, dbFile := range []string{"gateon.db"} {
+					walPath := dbFile + "-wal"
+					if info, err := os.Stat(walPath); err == nil && !info.IsDir() {
+						SQLiteWALSize.WithLabelValues(dbFile).Set(float64(info.Size()))
 					}
-					return nil
-				})
+				}
 			case <-stop:
 				return
 			}
