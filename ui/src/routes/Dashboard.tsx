@@ -298,6 +298,14 @@ export default function Dashboard() {
       .map((m) => ({ group: m.domain, requests: m.requests }));
   }, [metricsSnap]);
 
+  const domainBandwidthData = useMemo(() => {
+    if (!metricsSnap?.domain_metrics) return [];
+    return metricsSnap.domain_metrics
+      .sort((a, b) => b.bytes_in + b.bytes_out - (a.bytes_in + a.bytes_out))
+      .slice(0, 5)
+      .map((m) => ({ group: m.domain, requests: m.bytes_in + m.bytes_out }));
+  }, [metricsSnap]);
+
   const groupedTrafficCharts = [
     {
       title: "By Service",
@@ -360,14 +368,6 @@ export default function Dashboard() {
       .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
       .slice(0, 5)
       .map((m) => ({ group: m.country, requests: m.bytes_in + m.bytes_out }));
-  }, [metricsSnap]);
-
-  const domainBandwidthData = useMemo(() => {
-    if (!metricsSnap?.domain_metrics) return [];
-    return metricsSnap.domain_metrics
-      .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
-      .slice(0, 5)
-      .map((m) => ({ group: m.domain, requests: m.bytes_in + m.bytes_out }));
   }, [metricsSnap]);
 
   const totalRequests = agg?.total_requests ?? 0;
