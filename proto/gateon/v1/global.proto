@@ -43,6 +43,13 @@ message ManagementConfig {
   repeated string allowed_ips = 3;
   // Cors defines the CORS configuration for the management API.
   CorsConfig cors = 4;
+  // AllowPublicManagement, if true, enables access to the management API and dashboard 
+  // on all entrypoints, not just the dedicated management port.
+  // Defaults to false for security.
+  bool allow_public_management = 6;
+  // AllowedHosts is a whitelist of hostnames (e.g., ["admin.example.com"]) 
+  // allowed to access the management API on public entrypoints.
+  repeated string allowed_hosts = 7;
 
   reserved 5;
   reserved "host";

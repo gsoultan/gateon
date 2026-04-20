@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -671,6 +672,40 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 			PublicIp:            getPublicIP(),
 			CloudflareReachable: isCloudflareReachable(),
 		},
+	}, nil
+}
+
+func (s *ApiService) GetCloudflareIPs(ctx context.Context, _ *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error) {
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("https://api.cloudflare.com/client/v4/ips")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch cloudflare ips: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("cloudflare api returned status: %d", resp.StatusCode)
+	}
+
+	var cfResp struct {
+		Result struct {
+			IPv4CIDRs []string `json:"ipv4_cidrs"`
+			IPv6CIDRs []string `json:"ipv6_cidrs"`
+		} `json:"result"`
+		Success bool `json:"success"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&cfResp); err != nil {
+		return nil, fmt.Errorf("failed to decode cloudflare response: %w", err)
+	}
+
+	if !cfResp.Success {
+		return nil, errors.New("cloudflare api reported failure")
+	}
+
+	return &gateonv1.GetCloudflareIPsResponse{
+		Ipv4Cidrs: cfResp.Result.IPv4CIDRs,
+		Ipv6Cidrs: cfResp.Result.IPv6CIDRs,
 	}, nil
 }
 

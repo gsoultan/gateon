@@ -12,7 +12,7 @@ func RegisterRESTHandlers(mux *http.ServeMux, apiService *api.ApiService, d *Dep
 	registerRouteHandlers(mux, d)
 	registerConfigImportExport(mux, d)
 	registerEntryPointHandlers(mux, d)
-	registerMiddlewareHandlers(mux, d)
+	registerMiddlewareHandlers(mux, apiService, d)
 	registerServiceHandlers(mux, apiService, d)
 	registerTLSOptionHandlers(mux, d)
 	registerGlobalHandlers(mux, apiService, d)

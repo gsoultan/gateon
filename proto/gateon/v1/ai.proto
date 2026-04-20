@@ -11,6 +11,7 @@ message AIInsight {
   string severity = 3; // "info", "warning", "critical"
   string category = 4; // "security", "performance", "availability"
   string recommendation = 5;
+  string suggested_config = 6;
 }
 
 message AnalyzeConfigRequest {
@@ -35,4 +36,14 @@ message ChatWithAIResponse {
 service AIService {
   rpc AnalyzeConfig(AnalyzeConfigRequest) returns (AnalyzeConfigResponse);
   rpc ChatWithAI(ChatWithAIRequest) returns (ChatWithAIResponse);
+  rpc AnalyzeLogs(AnalyzeLogsRequest) returns (AnalyzeLogsResponse);
+}
+
+message AnalyzeLogsRequest {
+  repeated string logs = 1;
+}
+
+message AnalyzeLogsResponse {
+  string analysis = 1;
+  repeated AIInsight insights = 2;
 }

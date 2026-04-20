@@ -28,7 +28,12 @@ func isLoginPath(path string) bool {
 // isPublicAuthPath returns true for setup, health, status, or login — these skip Paseto auth.
 func isPublicAuthPath(path string) bool {
 	return path == "/v1/setup" || path == "/v1/setup/required" ||
-		path == "/healthz" || path == "/readyz"
+		isHealthPath(path)
+}
+
+// isHealthPath returns true for /healthz or /readyz.
+func isHealthPath(path string) bool {
+	return path == "/healthz" || path == "/readyz"
 }
 
 // handleLoginWithRateLimit applies login rate limiting if configured, then serves internal.

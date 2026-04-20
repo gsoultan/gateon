@@ -37,6 +37,7 @@ service ApiService {
   rpc ListMiddlewares(ListMiddlewaresRequest) returns (ListMiddlewaresResponse);
   rpc UpdateMiddleware(UpdateMiddlewareRequest) returns (UpdateMiddlewareResponse);
   rpc DeleteMiddleware(DeleteMiddlewareRequest) returns (DeleteMiddlewareResponse);
+  rpc GetCloudflareIPs(GetCloudflareIPsRequest) returns (GetCloudflareIPsResponse);
 
   rpc ListTLSOptions(ListTLSOptionsRequest) returns (ListTLSOptionsResponse);
   rpc UpdateTLSOption(UpdateTLSOptionRequest) returns (UpdateTLSOptionResponse);

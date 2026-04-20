@@ -1,7 +1,9 @@
 package server
 
 import (
+	"net"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/auth"
@@ -39,6 +41,35 @@ func CreateBaseHandler(
 			if rt := router.SelectRoute(r, deps.RouteStore.List(r.Context())); rt != nil {
 				handler.ServeHTTP(w, r)
 				return
+			}
+
+			// Security: If no user route matched on a NON-management entrypoint,
+			// block access to the internal API/UI unless explicitly allowed.
+			if !isHealthPath(r.URL.Path) {
+				gc := deps.GlobalReg.Get(r.Context())
+				allowPublic := false
+				if gc != nil && gc.Management != nil {
+					allowPublic = gc.Management.AllowPublicManagement
+					if !allowPublic && len(gc.Management.AllowedHosts) > 0 {
+						host := r.Host
+						if h, _, err := net.SplitHostPort(r.Host); err == nil {
+							host = h
+						}
+						for _, allowedHost := range gc.Management.AllowedHosts {
+							if host == allowedHost {
+								allowPublic = true
+								break
+							}
+						}
+					}
+				}
+				if os.Getenv("GATEON_ALLOW_PUBLIC_MANAGEMENT") == "true" {
+					allowPublic = true
+				}
+				if !allowPublic {
+					http.NotFound(w, r)
+					return
+				}
 			}
 		}
 

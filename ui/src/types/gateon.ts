@@ -334,6 +334,8 @@ export type ManagementConfig = {
   bind?: string;
   port?: string;
   allowed_ips?: string[];
+  allow_public_management?: boolean;
+  allowed_hosts?: string[];
 };
 
 export enum EntryPointType {
@@ -464,4 +466,9 @@ export type GetDiagnosticsResponse = {
   entrypoints: EntryPointDiagnostic[];
   recent_tls_errors: HandshakeError[];
   system: SystemInfo;
+};
+
+export type GetCloudflareIPsResponse = {
+  ipv4_cidrs: string[];
+  ipv6_cidrs: string[];
 };

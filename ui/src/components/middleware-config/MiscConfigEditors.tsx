@@ -1,4 +1,4 @@
-import { Stack, TextInput, Group, NumberInput, Switch } from "@mantine/core";
+import { Stack, TextInput, Group, NumberInput, Switch, TagsInput } from "@mantine/core";
 import { KeyValueList } from "./KeyValueList";
 
 interface EditorProps {
@@ -43,35 +43,49 @@ export function RewriteConfigEditor({ config, updateConfig, onChange }: EditorPr
 }
 
 export function CORSConfigEditor({ config, updateConfig }: Omit<EditorProps, 'onChange'>) {
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
   return (
     <Stack gap="md">
-      <TextInput
+      <TagsInput
         label="Allowed Origins"
         placeholder="*, https://example.com"
-        value={config.allowed_origins || ""}
-        onChange={(e) => updateConfig("allowed_origins", e.currentTarget.value)}
-        description="Comma separated list of origins"
+        value={splitTags(config.allowed_origins)}
+        onChange={(val) => updateConfig("allowed_origins", joinTags(val))}
+        description="List of origins (e.g. *, https://example.com). Press Enter to add."
+        styles={{ input: { minHeight: 60 } }}
+        clearable
       />
-      <TextInput
+      <TagsInput
         label="Allowed Methods"
         placeholder="GET, POST, PUT, DELETE, OPTIONS"
-        value={config.allowed_methods || ""}
-        onChange={(e) => updateConfig("allowed_methods", e.currentTarget.value)}
-        description="Comma separated list of HTTP methods"
+        data={["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]}
+        value={splitTags(config.allowed_methods)}
+        onChange={(val) => updateConfig("allowed_methods", joinTags(val))}
+        description="List of HTTP methods. Select from dropdown or type and press Enter."
+        styles={{ input: { minHeight: 60 } }}
+        clearable
       />
-      <TextInput
+      <TagsInput
         label="Allowed Headers"
         placeholder="Content-Type, Authorization, X-Request-ID"
-        value={config.allowed_headers || ""}
-        onChange={(e) => updateConfig("allowed_headers", e.currentTarget.value)}
-        description="Comma separated list of headers"
+        data={["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "X-Request-ID"]}
+        value={splitTags(config.allowed_headers)}
+        onChange={(val) => updateConfig("allowed_headers", joinTags(val))}
+        description="List of headers. Select from dropdown or type and press Enter."
+        styles={{ input: { minHeight: 60 } }}
+        clearable
       />
-      <TextInput
+      <TagsInput
         label="Exposed Headers"
         placeholder="X-Custom-Header, Content-Length"
-        value={config.exposed_headers || ""}
-        onChange={(e) => updateConfig("exposed_headers", e.currentTarget.value)}
-        description="Headers that can be accessed from the client"
+        data={["Content-Length", "Content-Range", "X-Custom-Header"]}
+        value={splitTags(config.exposed_headers)}
+        onChange={(val) => updateConfig("exposed_headers", joinTags(val))}
+        description="Headers that can be accessed from the client."
+        styles={{ input: { minHeight: 60 } }}
+        clearable
       />
       <Group grow>
         <NumberInput
@@ -108,12 +122,17 @@ export function PrefixConfigEditor({ config, updateConfig }: Omit<EditorProps, '
 }
 
 export function StripPrefixConfigEditor({ config, updateConfig }: Omit<EditorProps, 'onChange'>) {
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
   return (
-    <TextInput
-      label="Prefixes (comma separated)"
-      placeholder="/api,/v1"
-      value={config.prefixes || ""}
-      onChange={(e) => updateConfig("prefixes", e.currentTarget.value)}
+    <TagsInput
+      label="Prefixes"
+      placeholder="/api, /v1"
+      value={splitTags(config.prefixes)}
+      onChange={(val) => updateConfig("prefixes", joinTags(val))}
+      description="List of prefixes to strip from the request path."
+      clearable
     />
   );
 }

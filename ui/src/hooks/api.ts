@@ -1,6 +1,12 @@
 import { useAuthStore } from "../store/useAuthStore";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
-import type { SetupRequest, SetupResponse, DatabaseConfig, GetDiagnosticsResponse } from "../types/gateon";
+import type {
+  SetupRequest,
+  SetupResponse,
+  DatabaseConfig,
+  GetDiagnosticsResponse,
+  GetCloudflareIPsResponse,
+} from "../types/gateon";
 
 export type PaginationParams = {
   page?: number;
@@ -109,6 +115,12 @@ export async function testDbConnection(payload: {
 
 export async function getDiagnostics(): Promise<GetDiagnosticsResponse> {
   const res = await apiFetch("/v1/diagnostics");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getCloudflareIPs(): Promise<GetCloudflareIPsResponse> {
+  const res = await apiFetch("/v1/cloudflare-ips");
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

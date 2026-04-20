@@ -35,6 +35,7 @@ type StatusResponseWriter struct {
 	http.ResponseWriter
 	Status       int
 	BytesWritten int64
+	Country      string
 	ttfbRecorded bool
 	firstByte    time.Time
 	start        time.Time
@@ -208,6 +209,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 			// Country-based metrics
 			country := request.GetCountry(r)
+			if sw.Country != "" {
+				country = sw.Country
+			}
 			telemetry.RequestsByCountryTotal.WithLabelValues(country).Inc()
 			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "in").Add(float64(reqInSize + 256))
 			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "out").Add(float64(respOutSize + 200))
