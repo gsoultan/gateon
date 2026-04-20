@@ -68,6 +68,22 @@ func (c *Claims) Validate() error {
 	return nil
 }
 
+func (c *Claims) ToMap() map[string]any {
+	return map[string]any{
+		"id":       c.ID,
+		"username": c.Username,
+		"role":     c.Role,
+		"roles":    []string{c.Role},
+		"aud":      c.Audience,
+		"iss":      c.Issuer,
+		"jti":      c.Jti,
+		"sub":      c.Subject,
+		"exp":      c.Expiration,
+		"iat":      c.IssuedAt,
+		"nbf":      c.NotBefore,
+	}
+}
+
 // NewManager creates an auth manager using the given database URL.
 // Supported: sqlite:path, postgres://..., mysql://..., mariadb://...
 // Plain path (e.g. "gateon.db") is treated as SQLite for backward compatibility.
