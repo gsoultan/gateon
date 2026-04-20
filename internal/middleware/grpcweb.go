@@ -52,19 +52,29 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !detector.IsGrpcWebRequest(r) && !detector.IsAcceptableGrpcCorsRequest(r) {
-				next.ServeHTTP(w, r)
+			isGRPCWeb := detector.IsGrpcWebRequest(r) || detector.IsAcceptableGrpcCorsRequest(r)
+
+			if isGRPCWeb {
+				if c != nil {
+					c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						// Actual request handling (non-preflight)
+						serveGRPCWeb(w, r, detector, next)
+					})).ServeHTTP(w, r)
+				} else {
+					serveGRPCWeb(w, r, detector, next)
+				}
 				return
 			}
 
-			if c != nil {
-				c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					// Actual request handling (non-preflight)
-					serveGRPCWeb(w, r, detector, next)
-				})).ServeHTTP(w, r)
-			} else {
-				serveGRPCWeb(w, r, detector, next)
+			// Special case: if it's an OPTIONS request and we have CORS config,
+			// let the CORS handler handle it even if the detector didn't recognize it
+			// as gRPC-Web. Browsers might vary in their preflight headers.
+			if r.Method == http.MethodOptions && c != nil {
+				c.Handler(next).ServeHTTP(w, r)
+				return
 			}
+
+			next.ServeHTTP(w, r)
 		})
 	}
 }

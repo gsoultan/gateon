@@ -269,6 +269,35 @@ func TestGRPCWeb_CORSPreflight(t *testing.T) {
 	}
 }
 
+func TestGRPCWeb_CORSPreflight_MissingXGrpcWeb(t *testing.T) {
+	mw := GRPCWeb(CORSConfig{
+		AllowedOrigins: []string{"http://example.com"},
+	})
+
+	// Next handler should be called if it's NOT a preflight or if it's a preflight that we decided to pass through.
+	// But for a valid CORS preflight, c.Handler should NOT call 'next'.
+	nextCalled := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/my.Service/Method", nil)
+	req.Header.Set("Origin", "http://example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	// Missing Access-Control-Request-Headers: X-Grpc-Web
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	origin := rr.Header().Get("Access-Control-Allow-Origin")
+	if origin != "http://example.com" {
+		t.Errorf("expected Access-Control-Allow-Origin http://example.com, got %q", origin)
+	}
+	if nextCalled {
+		t.Error("handler should not be called for preflight")
+	}
+}
+
 func TestGRPCWeb_CORSActual(t *testing.T) {
 	mw := GRPCWeb(CORSConfig{
 		AllowedOrigins: []string{"http://example.com"},

@@ -55,6 +55,13 @@ func ShouldSkipMetrics(r *http.Request) bool {
 	return false
 }
 
+// IsCorsPreflight returns true if the request is a CORS preflight request.
+func IsCorsPreflight(r *http.Request) bool {
+	return r.Method == http.MethodOptions &&
+		r.Header.Get("Origin") != "" &&
+		r.Header.Get("Access-Control-Request-Method") != ""
+}
+
 // Middleware defines a function that wraps an http.Handler.
 type Middleware func(http.Handler) http.Handler
 

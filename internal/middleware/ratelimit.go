@@ -162,6 +162,10 @@ func (rl *LocalRateLimiter) getLimiter(key string) *rate.Limiter {
 func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			key := keyFunc(r)
 			if key == "" {
 				next.ServeHTTP(w, r)
@@ -203,6 +207,10 @@ func NewRedisRateLimiter(client redis.Client, r int, b int) *RedisRateLimiter {
 func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			key := keyFunc(r)
 			if key == "" || rl.client == nil {
 				next.ServeHTTP(w, r)
