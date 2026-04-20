@@ -414,6 +414,26 @@ export type CertificateStatus = {
   issuer: string;
 };
 
+export type MiddlewareDiagnostic = {
+  id: string;
+  name: string;
+  type: string;
+  healthy: boolean;
+  error: string;
+};
+
+export type RouteDiagnostic = {
+  id: string;
+  name: string;
+  rule: string;
+  service_id: string;
+  service_name: string;
+  service_healthy: boolean;
+  middlewares: MiddlewareDiagnostic[];
+  healthy: boolean;
+  error: string;
+};
+
 export type EntryPointDiagnostic = {
   id: string;
   address: string;
@@ -424,6 +444,7 @@ export type EntryPointDiagnostic = {
   last_error: string;
   name: string;
   certificates?: CertificateStatus[];
+  routes?: RouteDiagnostic[];
 };
 
 export type HandshakeError = {

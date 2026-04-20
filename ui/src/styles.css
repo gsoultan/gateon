@@ -29,3 +29,7 @@ body {
 .dashboard-metric-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
+
+.hover-bg-default:hover {
+  background-color: var(--mantine-color-default-hover);
+}

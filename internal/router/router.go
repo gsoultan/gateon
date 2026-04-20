@@ -145,6 +145,11 @@ func (m matcher) Match(r *http.Request) bool {
 matchMethod:
 	for name, want := range m.headers {
 		if r.Header.Get(name) != want {
+			// For CORS preflight (OPTIONS), we skip header checks as the browser
+			// does not send the actual headers in the preflight request.
+			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+				continue
+			}
 			return false
 		}
 	}

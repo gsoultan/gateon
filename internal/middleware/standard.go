@@ -326,6 +326,10 @@ func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Requ
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			remoteAddr := clientIP(r)
 
 			if data.matches(remoteAddr) {
@@ -359,6 +363,10 @@ func HostFilter(host string) Middleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			// Strip port if present for comparison
 			h := r.Host
 			if sh, _, err := net.SplitHostPort(h); err == nil {

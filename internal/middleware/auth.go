@@ -277,6 +277,10 @@ func bearerToken(r *http.Request) string {
 func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			activeRouteID := GetRouteName(r)
 
 			token := ExtractToken(r)
@@ -325,6 +329,10 @@ func BasicAuthWithConfig(username, password, realm string, cfg AuthBaseConfig) M
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			activeRouteID := GetRouteName(r)
 
 			u, p, ok := r.BasicAuth()
@@ -370,6 +378,10 @@ func BasicAuthUsersWithConfig(users string, realm string, cfg AuthBaseConfig) (M
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			activeRouteID := GetRouteName(r)
 
 			u, p, ok := r.BasicAuth()

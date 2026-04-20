@@ -8,7 +8,6 @@ import {
   Badge,
   ActionIcon,
   SimpleGrid,
-  Table,
   Alert,
   LoadingOverlay,
   ScrollArea,
@@ -18,9 +17,11 @@ import {
   Anchor,
   Box,
   useMantineTheme,
+  Accordion,
+  ThemeIcon,
 } from "@mantine/core";
 import { getDiagnostics } from "../hooks/api";
-import type { GetDiagnosticsResponse } from "../types/gateon";
+import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic } from "../types/gateon";
 import {
   IconActivity,
   IconAlertTriangle,
@@ -30,10 +31,101 @@ import {
   IconServer,
   IconRefresh,
   IconClock,
-  IconExternalLink,
   IconAccessPoint,
   IconInfoCircle,
+  IconRoute,
+  IconArrowRight,
+  IconCheck,
+  IconX,
 } from "@tabler/icons-react";
+
+const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
+  <Tooltip label={mw.error || `Type: ${mw.type}`}>
+    <Badge
+      variant="light"
+      color={mw.healthy ? "blue" : "red"}
+      leftSection={mw.healthy ? <IconCheck size={10} /> : <IconX size={10} />}
+      size="sm"
+      style={{ textTransform: "none" }}
+    >
+      {mw.name || mw.id}
+    </Badge>
+  </Tooltip>
+);
+
+const RouteTrace: React.FC<{ route: RouteDiagnostic }> = ({ route }) => {
+  return (
+    <Paper withBorder p="md" radius="md" mb="sm" shadow="xs">
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <Group gap="xs">
+            <ThemeIcon color={route.healthy ? "teal" : "red"} variant="light" size="md" radius="md">
+              <IconRoute size={18} />
+            </ThemeIcon>
+            <Stack gap={0}>
+              <Text fw={700} size="sm">{route.name || "Unnamed Route"}</Text>
+              <Text size="xs" c="dimmed" ff="monospace">{route.id}</Text>
+            </Stack>
+          </Group>
+          <Group gap="xs">
+            {route.healthy ? (
+              <Badge color="teal" variant="light" size="sm">Healthy Path</Badge>
+            ) : (
+              <Badge color="red" variant="filled" size="sm">Path Broken</Badge>
+            )}
+          </Group>
+        </Group>
+
+        <Paper p="xs" radius="xs" withBorder style={{ borderStyle: "dashed", backgroundColor: "var(--mantine-color-gray-0)" }}>
+          <Text size="xs" c="dimmed" ff="monospace">
+            Rule: {route.rule}
+          </Text>
+        </Paper>
+
+        <Group gap="sm" wrap="nowrap" mt="xs" justify="center" style={{ overflowX: "auto", paddingBottom: 8 }}>
+          <Stack align="center" gap={4} style={{ minWidth: 80 }}>
+            <ThemeIcon radius="xl" size="md" color="blue" variant="light">
+              <IconAccessPoint size={18}/>
+            </ThemeIcon>
+            <Text size="10px" fw={700}>Entrypoint</Text>
+          </Stack>
+
+          <IconArrowRight size={16} color="gray" />
+
+          <Stack align="center" gap={4} style={{ minWidth: 120 }}>
+            <Group gap={4} justify="center">
+              {route.middlewares && route.middlewares.length > 0 ? (
+                route.middlewares.map(mw => (
+                  <MiddlewareBadge key={mw.id} mw={mw} />
+                ))
+              ) : (
+                <Badge variant="transparent" color="gray" size="sm">No Middleware</Badge>
+              )}
+            </Group>
+            <Text size="10px" fw={700}>Middlewares</Text>
+          </Stack>
+
+          <IconArrowRight size={16} color="gray" />
+
+          <Stack align="center" gap={4} style={{ minWidth: 100 }}>
+             <ThemeIcon color={route.service_healthy ? "teal" : "red"} variant="filled" radius="md" size="md">
+               <IconServer size={18} />
+             </ThemeIcon>
+             <Text size="10px" fw={700} ta="center" truncate maw={120}>
+               {route.service_name || route.service_id}
+             </Text>
+          </Stack>
+        </Group>
+
+        {route.error && (
+          <Alert color="red" variant="light" p="xs" icon={<IconAlertTriangle size={16} />}>
+            <Text size="xs" fw={600}>{route.error}</Text>
+          </Alert>
+        )}
+      </Stack>
+    </Paper>
+  );
+};
 
 const DiagnosticsPage: React.FC = () => {
   const [data, setData] = useState<GetDiagnosticsResponse | null>(null);
@@ -185,75 +277,63 @@ const DiagnosticsPage: React.FC = () => {
         </Alert>
 
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="xl">
-          {/* Entrypoints List */}
+          {/* Connectivity & Entrypoints */}
           <Card withBorder radius="lg" shadow="sm" p={0}>
             <Group p="md" bg="var(--mantine-color-default-hover)" justify="space-between">
               <Group gap="xs">
-                <IconAccessPoint size={20} c="dimmed" />
-                <Title order={4} fw={800}>Entrypoint Status</Title>
+                <IconAccessPoint size={20} color="gray" />
+                <Title order={4} fw={800}>Connectivity Trace</Title>
               </Group>
-              <Badge variant="dot" color="blue" size="sm">Live</Badge>
+              <Badge variant="dot" color="blue" size="sm">Real-time</Badge>
             </Group>
             <Divider />
-            <ScrollArea>
-              <Table verticalSpacing="sm" horizontalSpacing="md" highlightOnHover>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Name / ID</Table.Th>
-                    <Table.Th>Address</Table.Th>
-                    <Table.Th>Connections</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {data?.entrypoints?.map((ep) => (
-                    <Table.Tr key={ep.id}>
-                      <Table.Td>
-                        <Stack gap={0}>
-                          <Text size="sm" fw={700}>{ep.name || "Unnamed"}</Text>
-                          <Text size="xs" c="dimmed" ff="monospace">{ep.id}</Text>
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" ff="monospace" c="dimmed">{ep.address}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4}>
-                          <Text size="sm" fw={800} c="blue">{ep.active_connections}</Text>
-                          <Text size="xs" c="dimmed">/</Text>
-                          <Text size="xs" c="dimmed">{ep.total_connections}</Text>
+            <ScrollArea h={400}>
+              <Accordion variant="separated" p="md">
+                {data?.entrypoints?.map((ep) => (
+                  <Accordion.Item key={ep.id} value={ep.id} style={{ border: "1px solid var(--mantine-color-gray-2)", borderRadius: "var(--mantine-radius-md)", marginBottom: 8 }}>
+                    <Accordion.Control>
+                      <Group justify="space-between" wrap="nowrap">
+                        <Group gap="xs">
+                          <ThemeIcon color={ep.listening ? "teal" : "red"} variant="light" radius="xl">
+                            <IconAccessPoint size={18} />
+                          </ThemeIcon>
+                          <Stack gap={0}>
+                            <Text size="sm" fw={700}>{ep.name || "Unnamed"}</Text>
+                            <Text size="xs" c="dimmed" ff="monospace">{ep.address}</Text>
+                          </Stack>
                         </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={4}>
-                          <Badge
-                            variant="light"
-                            color={ep.listening ? "green" : "red"}
-                            size="xs"
-                            radius="sm"
-                          >
-                            {ep.listening ? "Listening" : "Stopped"}
-                          </Badge>
-                          {ep.last_error && (
-                            <Tooltip label={ep.last_error}>
-                              <Text size="10px" c="red" truncate maw={120}>
-                                {ep.last_error}
-                              </Text>
-                            </Tooltip>
-                          )}
-                        </Stack>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                  {(!data?.entrypoints || data.entrypoints?.length === 0) && (
-                    <Table.Tr>
-                      <Table.Td colSpan={4}>
-                        <Text c="dimmed" ta="center" py="xl" size="sm">No entrypoints configured.</Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  )}
-                </Table.Tbody>
-              </Table>
+                        <Group gap="xs" visibleFrom="xs">
+                           <Badge variant="outline" size="xs" color="blue">{ep.active_connections} active</Badge>
+                           {!ep.listening && <Badge color="red" size="xs">Stopped</Badge>}
+                        </Group>
+                      </Group>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <Stack gap="xs" mt="xs">
+                        {ep.last_error && (
+                          <Alert color="red" variant="light" p="xs" title="Entrypoint Error" icon={<IconAlertTriangle size={16} />}>
+                            <Text size="xs" ff="monospace">{ep.last_error}</Text>
+                          </Alert>
+                        )}
+                        
+                        <Text size="xs" fw={800} c="dimmed" style={{ textTransform: "uppercase" }}>Routes & Backend Chain</Text>
+                        {ep.routes && ep.routes.length > 0 ? (
+                          ep.routes.map(rt => <RouteTrace key={rt.id} route={rt} />)
+                        ) : (
+                          <Paper p="md" withBorder style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
+                            <Text size="sm" c="dimmed" ta="center">No routes attached to this entrypoint.</Text>
+                          </Paper>
+                        )}
+                      </Stack>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                ))}
+              </Accordion>
+              {(!data?.entrypoints || data.entrypoints?.length === 0) && (
+                <Stack align="center" py="xl">
+                  <Text c="dimmed" size="sm">No entrypoints configured.</Text>
+                </Stack>
+              )}
             </ScrollArea>
           </Card>
 
@@ -261,7 +341,7 @@ const DiagnosticsPage: React.FC = () => {
           <Card withBorder radius="lg" shadow="sm" p={0}>
             <Group p="md" bg="var(--mantine-color-default-hover)" justify="space-between">
               <Group gap="xs">
-                <IconShield size={20} c="dimmed" />
+                <IconShield size={20} color="gray" />
                 <Title order={4} fw={800}>Recent TLS Handshake Errors</Title>
               </Group>
               <Badge variant="filled" color="red" size="sm">{data?.recent_tls_errors?.length || 0}</Badge>
@@ -276,7 +356,7 @@ const DiagnosticsPage: React.FC = () => {
               ) : (
                 <Stack gap={0} p={0}>
                   {data?.recent_tls_errors?.map((err, i) => (
-                    <Paper key={i} p="md" radius={0} className="hover:bg-mantine-color-default-hover" style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}>
+                    <Paper key={i} p="md" radius={0} className="hover-bg-default" style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}>
                       <Group justify="space-between" mb={4}>
                         <Group gap={6}>
                           <IconClock size={12} color={theme.colors.gray[5]} />

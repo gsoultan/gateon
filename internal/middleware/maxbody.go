@@ -42,6 +42,10 @@ func MaxBodySize(max int64) Middleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			sw, ok := w.(*StatusResponseWriter)
 			if !ok {
 				sw = &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}

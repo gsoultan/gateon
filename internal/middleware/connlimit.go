@@ -26,6 +26,10 @@ func MaxConnections(max int) Middleware {
 	sem := make(chan struct{}, max)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -111,6 +115,10 @@ func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) Middleware
 	m := newPerIPConnMap()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			key := keyFunc(r)
 			if key == "" {
 				next.ServeHTTP(w, r)

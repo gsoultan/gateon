@@ -55,6 +55,10 @@ func Policy(cfg PolicyConfig) (Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			data := map[string]any{
 				"request": map[string]any{
 					"method": r.Method,
