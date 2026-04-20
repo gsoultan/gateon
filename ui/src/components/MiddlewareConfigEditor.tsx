@@ -7,6 +7,7 @@ import {
   Group,
   Text,
   FileInput,
+  TagsInput,
 } from "@mantine/core";
 import {
   IconCheck,
@@ -33,6 +34,7 @@ import {
   ReplacePathRegexConfigEditor,
   XFCCConfigEditor,
   PolicyConfigEditor,
+  IPFilterConfigEditor,
 } from "./middleware-config";
 
 interface MiddlewareConfigEditorProps {
@@ -102,15 +104,18 @@ export function MiddlewareConfigEditor({
       );
 
     case "errors":
+      const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const joinTags = (tags: string[]) => tags.join(", ");
+
       return (
         <Stack gap="md">
-          <TextInput
-            label="Status Codes (comma separated)"
+          <TagsInput
+            label="Status Codes"
             placeholder="404, 500, 503"
-            value={config.status_codes || ""}
-            onChange={(e) =>
-              updateConfig("status_codes", e.currentTarget.value)
-            }
+            value={splitTags(config.status_codes)}
+            onChange={(val) => updateConfig("status_codes", joinTags(val))}
+            description="HTTP status codes that should trigger custom error pages."
+            clearable
           />
           <KeyValueList
             config={config}
@@ -298,51 +303,48 @@ export function MiddlewareConfigEditor({
       );
 
     case "grpcweb":
+      const splitGrpcTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const joinGrpcTags = (tags: string[]) => tags.join(", ");
+
       return (
-        <Stack gap="xs">
+        <Stack gap="md">
           <Text size="sm" c="dimmed">
             Required for grpc routes when clients run in the browser. Converts
-            gRPC-Web requests to standard gRPC before proxying. No configuration
-            needed.
+            gRPC-Web requests to standard gRPC before proxying.
           </Text>
-          <Text size="xs" c="dimmed">
-            Add this middleware to grpc routes that will be called from web apps
-            (e.g. via @improbable-eng/grpc-web). Without it, gRPC-Web requests
-            return 415.
-          </Text>
+          <TagsInput
+            label="Allowed Origins"
+            placeholder="*, https://example.com"
+            value={splitGrpcTags(config.allowed_origins)}
+            onChange={(val) => updateConfig("allowed_origins", joinGrpcTags(val))}
+            description="CORS allowed origins for gRPC-Web requests."
+            styles={{ input: { minHeight: 60 } }}
+            clearable
+          />
+          <Group grow>
+            <NumberInput
+              label="Max Age (seconds)"
+              value={parseInt(config.max_age) || 86400}
+              onChange={(val) => updateConfig("max_age", (val ?? 86400).toString())}
+              min={0}
+            />
+            <Switch
+              label="Allow Credentials"
+              checked={config.allow_credentials === "true"}
+              onChange={(e) =>
+                updateConfig(
+                  "allow_credentials",
+                  e.currentTarget.checked ? "true" : "false"
+                )
+              }
+              mt="xl"
+            />
+          </Group>
         </Stack>
       );
 
     case "ipfilter":
-      return (
-        <Stack gap="md">
-          <TextInput
-            label="Allow List (comma-separated IPs/CIDRs)"
-            placeholder="10.0.0.0/8, 192.168.1.1"
-            value={config.allow_list || ""}
-            onChange={(e) => updateConfig("allow_list", e.currentTarget.value)}
-            description="If set, only these IPs are allowed. Empty = allow all (except deny list)."
-          />
-          <TextInput
-            label="Deny List (comma-separated IPs/CIDRs)"
-            placeholder="10.0.0.100, 192.168.0.0/24"
-            value={config.deny_list || ""}
-            onChange={(e) => updateConfig("deny_list", e.currentTarget.value)}
-            description="These IPs are always rejected. Takes precedence over allow list."
-          />
-          <Switch
-            label="Trust Cloudflare Headers"
-            description="Use CF-Connecting-IP when behind Cloudflare"
-            checked={config.trust_cloudflare_headers === "true"}
-            onChange={(e) =>
-              updateConfig(
-                "trust_cloudflare_headers",
-                e.currentTarget.checked ? "true" : "false",
-              )
-            }
-          />
-        </Stack>
-      );
+      return <IPFilterConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "waf":
       return <WAFConfigEditor config={config} updateConfig={updateConfig} />;

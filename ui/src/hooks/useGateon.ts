@@ -6,6 +6,7 @@ export {
   restoreSessionFromCookie,
   setupGateon,
   testDbConnection,
+  getCloudflareIPs,
 } from "./api";
 export type { PaginationParams, RouteListParams } from "./api";
 

@@ -44,3 +44,10 @@ message Middleware {
   map<string, string> config = 4;
   bytes wasm_blob = 5;
 }
+
+message GetCloudflareIPsRequest {}
+
+message GetCloudflareIPsResponse {
+  repeated string ipv4_cidrs = 1;
+  repeated string ipv6_cidrs = 2;
+}

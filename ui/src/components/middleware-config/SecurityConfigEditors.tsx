@@ -9,11 +9,12 @@ import {
   FileButton,
   ActionIcon,
   Divider,
+  TagsInput,
 } from "@mantine/core";
 import { useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 
-import { apiFetch } from "../../hooks/useGateon";
+import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -70,6 +71,9 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
 }
 
 export function TurnstileConfigEditor({ config, updateConfig }: EditorProps) {
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
   return (
     <Stack gap="md">
       <TextInput
@@ -87,12 +91,14 @@ export function TurnstileConfigEditor({ config, updateConfig }: EditorProps) {
         value={config.header || ""}
         onChange={(e) => updateConfig("header", e.currentTarget.value)}
       />
-      <TextInput
+      <TagsInput
         label="Methods to Verify"
-        description="Comma-separated HTTP methods. Default: POST,PUT,PATCH,DELETE"
+        description="HTTP methods to verify. Select or type and press Enter."
         placeholder="POST, PUT, PATCH, DELETE"
-        value={config.methods || ""}
-        onChange={(e) => updateConfig("methods", e.currentTarget.value)}
+        data={["POST", "PUT", "PATCH", "DELETE", "GET"]}
+        value={splitTags(config.methods)}
+        onChange={(val) => updateConfig("methods", joinTags(val))}
+        clearable
       />
     </Stack>
   );
@@ -102,6 +108,9 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
 
   const handleUpload = async (file: File | null) => {
     if (!file) return;
@@ -166,19 +175,23 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
           {uploadSuccess}
         </Text>
       )}
-      <TextInput
+      <TagsInput
         label="Allow Countries"
-        description="Comma-separated ISO 3166-1 alpha-2 codes (e.g. US,GB,DE). Empty = allow all except deny list."
+        description="ISO 3166-1 alpha-2 codes (e.g. US, GB, DE). Empty = allow all except deny list."
         placeholder="US, GB, DE, FR"
-        value={config.allow_countries || ""}
-        onChange={(e) => updateConfig("allow_countries", e.currentTarget.value)}
+        value={splitTags(config.allow_countries)}
+        onChange={(val) => updateConfig("allow_countries", joinTags(val))}
+        styles={{ input: { minHeight: 60 } }}
+        clearable
       />
-      <TextInput
+      <TagsInput
         label="Deny Countries"
-        description="Comma-separated ISO codes. Takes precedence over allow list."
+        description="ISO codes to always block. Takes precedence over allow list."
         placeholder="CN, RU"
-        value={config.deny_countries || ""}
-        onChange={(e) => updateConfig("deny_countries", e.currentTarget.value)}
+        value={splitTags(config.deny_countries)}
+        onChange={(val) => updateConfig("deny_countries", joinTags(val))}
+        styles={{ input: { minHeight: 60 } }}
+        clearable
       />
       <Switch
         label="Trust Cloudflare Headers"
@@ -196,6 +209,9 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
 }
 
 export function HMACConfigEditor({ config, updateConfig }: EditorProps) {
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
   return (
     <Stack gap="md">
       <TextInput
@@ -220,12 +236,14 @@ export function HMACConfigEditor({ config, updateConfig }: EditorProps) {
         value={config.prefix || ""}
         onChange={(e) => updateConfig("prefix", e.currentTarget.value)}
       />
-      <TextInput
+      <TagsInput
         label="Methods to Verify"
-        description="Comma-separated. Empty = verify all methods"
+        description="HTTP methods to verify. Empty = verify all."
         placeholder="POST, PUT"
-        value={config.methods || ""}
-        onChange={(e) => updateConfig("methods", e.currentTarget.value)}
+        data={["POST", "PUT", "PATCH", "DELETE", "GET"]}
+        value={splitTags(config.methods)}
+        onChange={(val) => updateConfig("methods", joinTags(val))}
+        clearable
       />
       <NumberInput
         label="Body Limit (bytes)"
@@ -268,6 +286,76 @@ export function XFCCConfigEditor({ config, updateConfig }: EditorProps) {
         label="Forward DNS"
         checked={config.forward_dns === "true"}
         onChange={(e) => updateConfig("forward_dns", e.currentTarget.checked ? "true" : "false")}
+      />
+    </Stack>
+  );
+}
+
+export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
+  const [importing, setImporting] = useState(false);
+
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
+  const handleImportCloudflare = async () => {
+    setImporting(true);
+    try {
+      const ips = await getCloudflareIPs();
+      const newIps = [...ips.ipv4_cidrs, ...ips.ipv6_cidrs];
+      const current = config.allow_list
+        ? config.allow_list.split(",").map((s) => s.trim())
+        : [];
+      const merged = Array.from(new Set([...current, ...newIps]))
+        .filter(Boolean)
+        .join(", ");
+      updateConfig("allow_list", merged);
+    } catch (err) {
+      console.error("Failed to import Cloudflare IPs:", err);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <Stack gap="md">
+      <TagsInput
+        label="Allow List"
+        description="IPs or CIDRs to allow. If set, only these are allowed."
+        placeholder="10.0.0.0/8, 192.168.1.1"
+        value={splitTags(config.allow_list)}
+        onChange={(val) => updateConfig("allow_list", joinTags(val))}
+        styles={{ input: { minHeight: 60 } }}
+        clearable
+      />
+      <Group>
+        <Button
+          variant="light"
+          size="xs"
+          loading={importing}
+          onClick={handleImportCloudflare}
+        >
+          Import Cloudflare IPs
+        </Button>
+      </Group>
+      <TagsInput
+        label="Deny List"
+        description="IPs or CIDRs to always block."
+        placeholder="10.0.0.100, 192.168.0.0/24"
+        value={splitTags(config.deny_list)}
+        onChange={(val) => updateConfig("deny_list", joinTags(val))}
+        styles={{ input: { minHeight: 60 } }}
+        clearable
+      />
+      <Switch
+        label="Trust Cloudflare Headers"
+        description="Use CF-Connecting-IP when behind Cloudflare"
+        checked={config.trust_cloudflare_headers === "true"}
+        onChange={(e) =>
+          updateConfig(
+            "trust_cloudflare_headers",
+            e.currentTarget.checked ? "true" : "false"
+          )
+        }
       />
     </Stack>
   );

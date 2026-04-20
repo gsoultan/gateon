@@ -60,7 +60,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	mwService := domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{})
 	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator)
 	canaryService := domain.NewCanaryService(serviceService)
-	aiService := ai.NewAIService(s.GlobalStore, s.RouteStore, s.ServiceStore)
+	aiService := ai.NewAIService(s.GlobalStore, s.RouteStore, s.ServiceStore, s.MwStore, s.EpStore)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)

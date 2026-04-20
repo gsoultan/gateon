@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -20,15 +21,19 @@ type AIService struct {
 	globalStore  config.GlobalConfigStore
 	routeStore   config.RouteStore
 	serviceStore config.ServiceStore
+	mwStore      config.MiddlewareStore
+	epStore      config.EntryPointStore
 	httpClient   *http.Client
 }
 
 // NewAIService creates a new AI service.
-func NewAIService(globals config.GlobalConfigStore, routes config.RouteStore, services config.ServiceStore) *AIService {
+func NewAIService(globals config.GlobalConfigStore, routes config.RouteStore, services config.ServiceStore, mws config.MiddlewareStore, eps config.EntryPointStore) *AIService {
 	return &AIService{
 		globalStore:  globals,
 		routeStore:   routes,
 		serviceStore: services,
+		mwStore:      mws,
+		epStore:      eps,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -48,22 +53,29 @@ func (s *AIService) AnalyzeConfig(ctx context.Context, req *gateonv1.AnalyzeConf
 	// Gather configuration context.
 	routes, _ := s.routeStore.ListPaginated(ctx, 0, 100, "", nil)
 	services, _ := s.serviceStore.ListPaginated(ctx, 0, 100, "")
+	middlewares, _ := s.mwStore.ListPaginated(ctx, 0, 100, "")
+	entrypoints, _ := s.epStore.ListPaginated(ctx, 0, 100, "")
 
 	configJSON, _ := json.MarshalIndent(map[string]any{
-		"global":   redactedGlobal,
-		"routes":   routes,
-		"services": services,
+		"global":      redactedGlobal,
+		"routes":      routes,
+		"services":    services,
+		"middlewares": middlewares,
+		"entrypoints": entrypoints,
 	}, "", "  ")
 
 	prompt := fmt.Sprintf(`You are an expert API Gateway administrator for Gateon. 
 Analyze the following configuration and provide performance, security, and availability insights.
-Format your response as a JSON object with "summary" (string) and "insights" (array of objects with "title", "description", "severity", "category", "recommendation").
+Format your response as a JSON object with "summary" (string) and "insights" (array of objects with "title", "description", "severity", "category", "recommendation", "suggested_config").
 Severity must be "info", "warning", or "critical". Category must be "security", "performance", or "availability".
+If you suggest a configuration change, provide the JSON snippet in "suggested_config".
 
 Configuration:
 %s`, string(configJSON))
 
-	return s.callLLM(ctx, prompt)
+	var resp gateonv1.AnalyzeConfigResponse
+	err := s.callLLM(ctx, prompt, &resp)
+	return &resp, err
 }
 
 func redactConfig(conf *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
@@ -100,8 +112,28 @@ func (s *AIService) ChatWithAI(ctx context.Context, req *gateonv1.ChatWithAIRequ
 		return nil, errors.New("AI service is not enabled")
 	}
 
-	prompt := fmt.Sprintf("User Question: %s\n\nProvide a helpful answer based on Gateon gateway best practices.", req.Message)
-	resp, err := s.callLLM(ctx, prompt)
+	// Redact sensitive configuration before sending to AI provider.
+	redactedGlobal := redactConfig(conf)
+	routes, _ := s.routeStore.ListPaginated(ctx, 0, 50, "", nil)
+	services, _ := s.serviceStore.ListPaginated(ctx, 0, 50, "")
+
+	configContext, _ := json.Marshal(map[string]any{
+		"global":   redactedGlobal,
+		"routes":   routes,
+		"services": services,
+	})
+
+	prompt := fmt.Sprintf(`Current Gateon Configuration: %s
+
+User Question: %s
+
+Provide a helpful answer based on Gateon gateway best practices and the current configuration.
+Format your response as a JSON object with a "summary" field containing your answer.`, string(configContext), req.Message)
+
+	var resp struct {
+		Summary string `json:"summary"`
+	}
+	err := s.callLLM(ctx, prompt, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -111,25 +143,65 @@ func (s *AIService) ChatWithAI(ctx context.Context, req *gateonv1.ChatWithAIRequ
 	}, nil
 }
 
-func (s *AIService) callLLM(ctx context.Context, prompt string) (*gateonv1.AnalyzeConfigResponse, error) {
+// AnalyzeLogs analyzes gateway logs for issues.
+func (s *AIService) AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error) {
+	conf := s.globalStore.Get(ctx)
+	if conf.Ai == nil || !conf.Ai.Enabled {
+		return nil, errors.New("AI service is not enabled")
+	}
+
+	logsJSON, _ := json.Marshal(req.Logs)
+	prompt := fmt.Sprintf(`Analyze the following Gateon gateway logs and provide insights on potential issues, security threats, or performance bottlenecks.
+Format your response as a JSON object with "analysis" (string) and "insights" (array of objects with "title", "description", "severity", "category", "recommendation").
+
+Logs:
+%s`, string(logsJSON))
+
+	var resp gateonv1.AnalyzeLogsResponse
+	err := s.callLLM(ctx, prompt, &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+func (s *AIService) callLLM(ctx context.Context, prompt string, target any) error {
 	conf := s.globalStore.Get(ctx).Ai
 
 	switch conf.Provider {
 	case "openai":
-		return s.callOpenAI(ctx, conf, prompt)
+		return s.callOpenAI(ctx, conf, prompt, target)
 	case "anthropic":
-		return s.callAnthropic(ctx, conf, prompt)
+		return s.callAnthropic(ctx, conf, prompt, target)
 	default:
 		// Fallback for demonstration if no key is provided.
 		if conf.ApiKey == "" {
-			resp, _ := s.mockResponse()
-			return resp, nil
+			mock, _ := s.mockResponse()
+			if ar, ok := target.(*gateonv1.AnalyzeConfigResponse); ok {
+				*ar = *mock
+				return nil
+			}
+			if al, ok := target.(*gateonv1.AnalyzeLogsResponse); ok {
+				al.Analysis = "Mock analysis: Everything looks normal in the logs."
+				al.Insights = mock.Insights
+				return nil
+			}
+			// For ChatWithAI local struct
+			val := reflect.ValueOf(target)
+			if val.Kind() == reflect.Ptr && val.Elem().Kind() == reflect.Struct {
+				f := val.Elem().FieldByName("Summary")
+				if f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+					f.SetString("I am currently in mock mode. Please configure an AI API key to get real answers.")
+				}
+			}
+			return nil
 		}
-		return nil, fmt.Errorf("unsupported AI provider: %s", conf.Provider)
+		return fmt.Errorf("unsupported AI provider: %s", conf.Provider)
 	}
 }
 
-func (s *AIService) callOpenAI(ctx context.Context, conf *gateonv1.AIConfig, prompt string) (*gateonv1.AnalyzeConfigResponse, error) {
+func (s *AIService) callOpenAI(ctx context.Context, conf *gateonv1.AIConfig, prompt string, target any) error {
 	url := "https://api.openai.com/v1/chat/completions"
 	if conf.BaseUrl != "" {
 		url = conf.BaseUrl
@@ -156,12 +228,12 @@ func (s *AIService) callOpenAI(ctx context.Context, conf *gateonv1.AIConfig, pro
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call OpenAI: %w", err)
+		return fmt.Errorf("failed to call OpenAI: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenAI API returned status %d", resp.StatusCode)
+		return fmt.Errorf("OpenAI API returned status %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -172,24 +244,76 @@ func (s *AIService) callOpenAI(ctx context.Context, conf *gateonv1.AIConfig, pro
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return err
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, errors.New("no response from OpenAI")
+		return errors.New("no response from OpenAI")
 	}
 
-	var aiResp gateonv1.AnalyzeConfigResponse
-	if err := json.Unmarshal([]byte(result.Choices[0].Message.Content), &aiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse AI response: %w", err)
+	if err := json.Unmarshal([]byte(result.Choices[0].Message.Content), target); err != nil {
+		return fmt.Errorf("failed to parse AI response: %w", err)
 	}
 
-	return &aiResp, nil
+	return nil
 }
 
-func (s *AIService) callAnthropic(ctx context.Context, conf *gateonv1.AIConfig, prompt string) (*gateonv1.AnalyzeConfigResponse, error) {
-	// Implementation for Anthropic...
-	return nil, errors.New("Anthropic provider not yet implemented")
+func (s *AIService) callAnthropic(ctx context.Context, conf *gateonv1.AIConfig, prompt string, target any) error {
+	// Simple implementation for Anthropic Claude 3
+	url := "https://api.anthropic.com/v1/messages"
+	if conf.BaseUrl != "" {
+		url = conf.BaseUrl
+	}
+
+	model := "claude-3-5-sonnet-20240620"
+	if conf.Model != "" {
+		model = conf.Model
+	}
+
+	payload := map[string]any{
+		"model":      model,
+		"max_tokens": 4096,
+		"system":     "You are a Gateon API Gateway expert. Always respond with valid JSON.",
+		"messages": []any{
+			map[string]string{"role": "user", "content": prompt},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", conf.ApiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to call Anthropic: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Anthropic API returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+			Type string `json:"type"`
+		} `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	if len(result.Content) == 0 {
+		return errors.New("no response from Anthropic")
+	}
+
+	if err := json.Unmarshal([]byte(result.Content[0].Text), target); err != nil {
+		return fmt.Errorf("failed to parse Anthropic response: %w", err)
+	}
+
+	return nil
 }
 
 func (s *AIService) mockResponse() (*gateonv1.AnalyzeConfigResponse, error) {

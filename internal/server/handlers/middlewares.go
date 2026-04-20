@@ -72,7 +72,15 @@ var middlewarePresets = []MiddlewarePreset{
 	},
 }
 
-func registerMiddlewareHandlers(mux *http.ServeMux, d *Deps) {
+func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
+	mux.HandleFunc("GET /v1/cloudflare-ips", func(w http.ResponseWriter, r *http.Request) {
+		res, err := svc.GetCloudflareIPs(r.Context(), &gateonv1.GetCloudflareIPsRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		WriteProtoResponse(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("GET /v1/middlewares/presets", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(middlewarePresets)
