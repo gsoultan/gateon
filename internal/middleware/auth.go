@@ -54,6 +54,11 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 // Bearer, query param token, and query param access_token (for WebSocket clients).
 func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsCorsPreflight(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		activeRouteID := GetRouteName(r)
 		tokenString := ExtractToken(r)
 
@@ -177,6 +182,10 @@ func NewAPIKeyValidator(store APIKeyStore, header, query string, baseCfg AuthBas
 // Handler returns a middleware that validates API keys.
 func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsCorsPreflight(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		activeRouteID := GetRouteName(r)
 
 		apiKey := r.Header.Get(v.header)

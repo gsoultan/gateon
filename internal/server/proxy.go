@@ -28,6 +28,13 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 	isGRPC := (r.ProtoMajor == 2 || r.ProtoMajor == 3) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 	isGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsAcceptableGrpcCorsRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
 
+	// For CORS preflight (OPTIONS), the detector might be too strict.
+	// If it's a preflight for a POST request, we treat it as potentially gRPC-Web
+	// to ensure it can match gRPC routes or be handled by the internal gRPC-Web CORS handler.
+	if !isGRPCWeb && r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") == "POST" {
+		isGRPCWeb = true
+	}
+
 	isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
 	if !isMgmt {
 		if rt := router.SelectRoute(r, s.RouteStore.List(r.Context())); rt != nil {
@@ -42,7 +49,7 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 				_, _ = w.Write([]byte("HTTPS required"))
 				return
 			}
-			if ((isGRPC || isGRPCWeb) && strings.EqualFold(rt.Type, "grpc")) || (!isGRPC && !isGRPCWeb) {
+			if ((isGRPC || isGRPCWeb) && (strings.EqualFold(rt.Type, "grpc") || strings.EqualFold(rt.Type, "http"))) || (!isGRPC && !isGRPCWeb) {
 				isActualGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
 				if isActualGRPCWeb && strings.EqualFold(rt.Type, "grpc") && !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {
 					w.WriteHeader(http.StatusUnsupportedMediaType)
