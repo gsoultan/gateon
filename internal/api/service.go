@@ -26,16 +26,17 @@ import (
 
 type ApiService struct {
 	gateonv1.UnimplementedApiServiceServer
-	Version     string
-	Routes      config.RouteStore
-	Services    config.ServiceStore
-	Globals     config.GlobalConfigStore
-	EntryPoints config.EntryPointStore
-	Middlewares config.MiddlewareStore
-	TLSOptions  config.TLSOptionStore
-	Auth        auth.Service
-	Invalidator domain.ProxyInvalidator
-	TLSManager  gtls.TLSManager
+	Version            string
+	Routes             config.RouteStore
+	Services           config.ServiceStore
+	Globals            config.GlobalConfigStore
+	EntryPoints        config.EntryPointStore
+	Middlewares        config.MiddlewareStore
+	TLSOptions         config.TLSOptionStore
+	Auth               auth.Service
+	Invalidator        domain.ProxyInvalidator
+	TLSManager         gtls.TLSManager
+	RouteStatsProvider RouteStatsProvider
 }
 
 // GetGlobals returns the global config store for REST handlers.
@@ -50,16 +51,17 @@ func (s *ApiService) GetTLSManager() gtls.TLSManager {
 // NewApiService creates an ApiService from config (Factory pattern).
 func NewApiService(cfg ApiServiceConfig) *ApiService {
 	return &ApiService{
-		Version:     cfg.Version,
-		Routes:      cfg.Routes,
-		Services:    cfg.Services,
-		Globals:     cfg.Globals,
-		EntryPoints: cfg.EntryPoints,
-		Middlewares: cfg.Middlewares,
-		TLSOptions:  cfg.TLSOptions,
-		Auth:        cfg.Auth,
-		Invalidator: cfg.Invalidator,
-		TLSManager:  cfg.TLSManager,
+		Version:            cfg.Version,
+		Routes:             cfg.Routes,
+		Services:           cfg.Services,
+		Globals:            cfg.Globals,
+		EntryPoints:        cfg.EntryPoints,
+		Middlewares:        cfg.Middlewares,
+		TLSOptions:         cfg.TLSOptions,
+		Auth:               cfg.Auth,
+		Invalidator:        cfg.Invalidator,
+		TLSManager:         cfg.TLSManager,
+		RouteStatsProvider: cfg.RouteStatsProvider,
 	}
 }
 
@@ -536,9 +538,32 @@ func (s *ApiService) DeleteUser(_ context.Context, req *gateonv1.DeleteUserReque
 
 func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnosticsRequest) (*gateonv1.GetDiagnosticsResponse, error) {
 	entrypoints := s.EntryPoints.List(ctx)
-	diagEPs := make([]*gateonv1.EntryPointDiagnostic, 0, len(entrypoints))
+	routes := s.Routes.List(ctx)
+	services := s.Services.List(ctx)
+	middlewares := s.Middlewares.List(ctx)
 
+	// Build lookup maps
+	serviceMap := make(map[string]*gateonv1.Service)
+	for _, svc := range services {
+		serviceMap[svc.Id] = svc
+	}
+
+	middlewareMap := make(map[string]*gateonv1.Middleware)
+	for _, mw := range middlewares {
+		middlewareMap[mw.Id] = mw
+	}
+
+	// Group routes by entrypoint
+	epToRoutes := make(map[string][]*gateonv1.Route)
+	for _, rt := range routes {
+		for _, epID := range rt.Entrypoints {
+			epToRoutes[epID] = append(epToRoutes[epID], rt)
+		}
+	}
+
+	diagEPs := make([]*gateonv1.EntryPointDiagnostic, 0, len(entrypoints))
 	epNames := make(map[string]string)
+
 	for _, ep := range entrypoints {
 		epNames[ep.Id] = ep.Name
 		stats := telemetry.GlobalDiagnostics.GetEPStats(ep.Id)
@@ -554,9 +579,72 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 			LastError:         stats.LastError,
 		}
 
-		// Add certificate status if TLS is enabled
-		// This is a bit complex as we need to match ep to certificates
-		// For now, let's just populate what we can
+		// Enhanced Diagnostics: Route -> Middleware -> Service
+		for _, rt := range epToRoutes[ep.Id] {
+			rd := &gateonv1.RouteDiagnostic{
+				Id:        rt.Id,
+				Name:      rt.Name,
+				Rule:      rt.Rule,
+				ServiceId: rt.ServiceId,
+				Healthy:   !rt.Disabled,
+			}
+
+			if rt.Disabled {
+				rd.Error = "Route is disabled"
+			}
+
+			// Service info
+			if svc, ok := serviceMap[rt.ServiceId]; ok {
+				rd.ServiceName = svc.Name
+				// Check service health from RouteStatsProvider if available
+				if s.RouteStatsProvider != nil && !rt.Disabled {
+					targetStats := s.RouteStatsProvider(rt.Id)
+					rd.ServiceHealthy = true
+					if len(targetStats) > 0 {
+						allDown := true
+						for _, ts := range targetStats {
+							if ts.Alive {
+								allDown = false
+								break
+							}
+						}
+						if allDown {
+							rd.ServiceHealthy = false
+							rd.Healthy = false
+							rd.Error = "All backend targets are down"
+						}
+					} else {
+						rd.ServiceHealthy = false
+						rd.Healthy = false
+						rd.Error = "No targets available for service"
+					}
+				}
+			} else {
+				rd.Healthy = false
+				rd.Error = fmt.Sprintf("Service %s not found", rt.ServiceId)
+			}
+
+			// Middleware info
+			for _, mwID := range rt.Middlewares {
+				md := &gateonv1.MiddlewareDiagnostic{
+					Id:      mwID,
+					Healthy: true,
+				}
+				if mw, ok := middlewareMap[mwID]; ok {
+					md.Name = mw.Name
+					md.Type = mw.Type
+				} else {
+					md.Healthy = false
+					md.Error = "Middleware not found"
+					rd.Healthy = false
+					rd.Error = fmt.Sprintf("Middleware %s not found", mwID)
+				}
+				rd.Middlewares = append(rd.Middlewares, md)
+			}
+
+			d.Routes = append(d.Routes, rd)
+		}
+
 		diagEPs = append(diagEPs, d)
 	}
 

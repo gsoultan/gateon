@@ -41,16 +41,17 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 	s.TLSManager = CreateTLSManager(s)
 	apiService := api.NewApiService(api.ApiServiceConfig{
-		Version:     s.Version,
-		Routes:      s.RouteStore,
-		Services:    s.ServiceStore,
-		Globals:     s.GlobalStore,
-		EntryPoints: s.EpStore,
-		Middlewares: s.MwStore,
-		TLSOptions:  s.TLSOptStore,
-		Auth:        s.AuthManager,
-		Invalidator: proxyInvalidator,
-		TLSManager:  s.TLSManager,
+		Version:            s.Version,
+		Routes:             s.RouteStore,
+		Services:           s.ServiceStore,
+		Globals:            s.GlobalStore,
+		EntryPoints:        s.EpStore,
+		Middlewares:        s.MwStore,
+		TLSOptions:         s.TLSOptStore,
+		Auth:               s.AuthManager,
+		Invalidator:        proxyInvalidator,
+		TLSManager:         s.TLSManager,
+		RouteStatsProvider: s.GetRouteStats,
 	})
 	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
 	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)
