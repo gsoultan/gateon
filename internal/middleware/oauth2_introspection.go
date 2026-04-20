@@ -70,6 +70,10 @@ func NewOAuth2IntrospectionValidator(cfg OAuth2IntrospectionConfig) (*OAuth2Intr
 // Handler returns a middleware that validates tokens via OAuth 2.0 introspection.
 func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsCorsPreflight(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		token := ExtractToken(r)
 		if token == "" {
 			v.config.HandleFailure(w, r, next, fmt.Errorf("authorization header or token query required"))

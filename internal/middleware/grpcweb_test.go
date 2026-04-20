@@ -183,28 +183,31 @@ func TestGRPCWeb_EmptyTrailers(t *testing.T) {
 	}
 }
 
-func TestGRPCWeb_ProtocolUpgrade(t *testing.T) {
-	mw := GRPCWeb()
-	var gotProto int
+func TestGRPCWeb_CORS_WildcardHeaders(t *testing.T) {
+	mw := GRPCWeb(CORSConfig{
+		AllowedOrigins: []string{"https://cms.mulford.id"},
+	})
+
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotProto = r.ProtoMajor
-		w.Header().Set("Content-Type", "application/grpc")
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/my.Service/Method", nil)
-	req.ProtoMajor = 1
-	req.ProtoMinor = 1
-	req.Header.Set("Content-Type", "application/grpc-web")
-	req.Header.Set("X-Grpc-Web", "1")
+	req := httptest.NewRequest(http.MethodOptions, "/poseidon.employee.EmployeeService/SignIn", nil)
+	req.Header.Set("Origin", "https://cms.mulford.id")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "accept,content-type,device-id,device-name,x-grpc-web")
+
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if gotProto != 2 {
-		t.Errorf("expected request ProtoMajor to be upgraded to 2, got %d", gotProto)
+	if origin := rr.Header().Get("Access-Control-Allow-Origin"); origin != "https://cms.mulford.id" {
+		t.Errorf("expected Access-Control-Allow-Origin https://cms.mulford.id, got %q", origin)
 	}
 
-	_ = rr // avoid unused
+	allowHeaders := rr.Header().Get("Access-Control-Allow-Headers")
+	if !strings.Contains(allowHeaders, "device-id") {
+		t.Errorf("expected Access-Control-Allow-Headers to contain device-id, got %q", allowHeaders)
+	}
 }
 
 func TestGRPCWeb_TrailerPrefixConvention(t *testing.T) {

@@ -252,4 +252,11 @@ func TestSelectRoute_Headers(t *testing.T) {
 	if got := SelectRoute(req, routes); got != nil {
 		t.Errorf("X-Version=v1: expected nil, got %s", got.Id)
 	}
+
+	// Test OPTIONS preflight should match even without the header
+	reqOpt, _ := http.NewRequest("OPTIONS", "http://localhost/api", nil)
+	reqOpt.Header.Set("Access-Control-Request-Method", "GET")
+	if got := SelectRoute(reqOpt, routes); got == nil || got.Id != "v2" {
+		t.Errorf("OPTIONS without header: expected v2, got %v", got)
+	}
 }

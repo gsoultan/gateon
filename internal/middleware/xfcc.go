@@ -20,6 +20,10 @@ type XFCCConfig struct {
 func XFCC(cfg XFCCConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 				next.ServeHTTP(w, r)
 				return
