@@ -40,12 +40,42 @@ import {
 import type { RequestDeltaSample } from "../hooks/useGateon";
 import { Sparkline } from "../components/Sparkline";
 import type { PathStats, Route, Service } from "../types/gateon";
-import { formatBytes, formatCompact, formatHourLabel } from "../utils/format";
+import { formatBytes, formatCompact } from "../utils/format";
 import { TrafficMetricsGrid } from "../components/Dashboard/TrafficMetricsGrid";
 import { DomainStatsTable } from "../components/Dashboard/DomainStatsTable";
 import { DistributionCard } from "../components/Dashboard/DistributionCard";
 import { CountryTrafficTable } from "../components/Dashboard/CountryTrafficTable";
 import { QuickActions } from "../components/Dashboard/QuickActions";
+import {
+  TOP_GROUP_LIMIT,
+  HOUR_MS,
+  DAY_MS,
+  TrafficFilterMode,
+  TrafficRangePreset,
+  TrafficRangeBounds,
+  HourlyBandwidthDatum,
+  BandwidthSummaryDatum,
+  RouteMatcher,
+  resolveTrafficRangeBounds,
+  filterTrafficSamplesByRange,
+  buildHourlyTrafficData,
+  toTopGroupedData,
+  buildTrafficByPathData,
+  formatHourLabel,
+  buildRouteMatchers,
+  resolveRouterLabel,
+  resolveServiceLabel,
+  buildTrafficByServiceData,
+  buildHourlyBandwidthData,
+  buildBandwidthSummaries,
+  buildBandwidthByRouterData,
+  buildBandwidthByServiceData,
+  buildTrafficByPortData,
+  DEFAULT_PORT_LABEL,
+  OTHER_GROUP_LABEL,
+  UNMATCHED_SERVICE_LABEL,
+  UNMATCHED_ROUTER_LABEL,
+} from "../utils/dashboard";
 
 const StatusCard = lazy(() => import("../components/StatusCard"));
 const ServiceOverviewCards = lazy(() =>
@@ -66,13 +96,6 @@ const ROUTE_LIST_FALLBACK = (
     <Loader />
   </Card>
 );
-const TOP_GROUP_LIMIT = 6;
-const DEFAULT_PORT_LABEL = "default";
-const OTHER_GROUP_LABEL = "Other";
-const UNMATCHED_SERVICE_LABEL = "Unmatched";
-const UNMATCHED_ROUTER_LABEL = "Unmatched";
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
 
 const TRAFFIC_FILTER_MODE_OPTIONS = [
   { value: "all", label: "All data" },
@@ -87,17 +110,6 @@ const TRAFFIC_RANGE_PRESET_OPTIONS = [
   { value: "custom", label: "Custom range" },
 ];
 
-type GroupedTrafficDatum = {
-  group: string;
-  requests: number;
-};
-
-type HourlyTrafficDatum = {
-  hourStartTs: number;
-  hour: string;
-  requests: number;
-};
-
 type BandwidthDeltaSample = {
   ts: number;
   totalBytes: number;
@@ -105,391 +117,6 @@ type BandwidthDeltaSample = {
   serviceBytes: Record<string, number>;
 };
 
-type HourlyBandwidthDatum = {
-  hourStartTs: number;
-  hour: string;
-  totalBytes: number;
-  routerBytes: number;
-  serviceBytes: number;
-};
-
-type BandwidthSummaryDatum = {
-  label: string;
-  max: number;
-  min: number;
-  avg: number;
-  color: string;
-};
-
-type TrafficFilterMode = "all" | "date" | "range";
-type TrafficRangePreset = "last24h" | "last7d" | "last30d" | "custom";
-
-type TrafficRangeBounds = {
-  startTs: number;
-  endTs: number;
-};
-
-function parseDateInputToStartTs(value: string): number | null {
-  if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00`);
-  const ts = parsed.getTime();
-  if (Number.isNaN(ts)) return null;
-  return ts;
-}
-
-export function resolveTrafficRangeBounds(
-  mode: TrafficFilterMode,
-  dateValue: string,
-  rangePreset: TrafficRangePreset,
-  customRangeStart: string,
-  customRangeEnd: string,
-  nowTs = Date.now(),
-): TrafficRangeBounds | null {
-  if (mode === "all") {
-    return null;
-  }
-
-  if (mode === "date") {
-    const startTs = parseDateInputToStartTs(dateValue);
-    if (startTs === null) return null;
-    return { startTs, endTs: startTs + DAY_MS };
-  }
-
-  if (rangePreset !== "custom") {
-    const durationMs =
-      rangePreset === "last24h" ? DAY_MS : rangePreset === "last7d" ? 7 * DAY_MS : 30 * DAY_MS;
-    return {
-      startTs: nowTs - durationMs,
-      endTs: nowTs,
-    };
-  }
-
-  const customStartTs = parseDateInputToStartTs(customRangeStart);
-  const customEndTs = parseDateInputToStartTs(customRangeEnd);
-
-  if (customStartTs === null && customEndTs === null) {
-    return null;
-  }
-
-  const startTs = customStartTs ?? 0;
-  const endTs = customEndTs !== null ? customEndTs + DAY_MS : nowTs;
-
-  if (endTs <= startTs) {
-    return null;
-  }
-
-  return { startTs, endTs };
-}
-
-export function filterTrafficSamplesByRange(
-  samples: RequestDeltaSample[],
-  range: TrafficRangeBounds | null,
-): RequestDeltaSample[] {
-  if (range === null) return samples;
-  return samples.filter((sample) => sample.ts >= range.startTs && sample.ts < range.endTs);
-}
-
-export function buildHourlyTrafficData(
-  samples: RequestDeltaSample[],
-  range: TrafficRangeBounds | null = null,
-): HourlyTrafficDatum[] {
-  const grouped = new Map<number, number>();
-
-  for (const sample of samples) {
-    const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
-    grouped.set(hourStartTs, (grouped.get(hourStartTs) ?? 0) + sample.requests);
-  }
-
-  if (range) {
-    const result: HourlyTrafficDatum[] = [];
-    let currentTs = Math.floor(range.startTs / HOUR_MS) * HOUR_MS;
-    const endTs = range.endTs;
-
-    while (currentTs < endTs) {
-      result.push({
-        hourStartTs: currentTs,
-        hour: formatHourLabel(currentTs),
-        requests: grouped.get(currentTs) ?? 0,
-      });
-      currentTs += HOUR_MS;
-    }
-    return result;
-  }
-
-  return Array.from(grouped.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([hourStartTs, requests]) => ({
-      hourStartTs,
-      hour: formatHourLabel(hourStartTs),
-      requests,
-    }));
-}
-
-function toTopGroupedData(
-  counters: Map<string, number>,
-  limit = TOP_GROUP_LIMIT,
-): GroupedTrafficDatum[] {
-  const grouped = Array.from(counters.entries())
-    .filter(([, requests]) => requests > 0)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  if (grouped.length <= limit) {
-    return grouped.map(([group, requests]) => ({ group, requests }));
-  }
-
-  const visible = grouped.slice(0, Math.max(1, limit - 1));
-  const otherRequests = grouped
-    .slice(Math.max(1, limit - 1))
-    .reduce((sum, [, requests]) => sum + requests, 0);
-
-  return [
-    ...visible.map(([group, requests]) => ({ group, requests })),
-    { group: OTHER_GROUP_LABEL, requests: otherRequests },
-  ];
-}
-
-export function extractPortLabel(host: string): string {
-  const trimmed = host.trim();
-  if (!trimmed) return DEFAULT_PORT_LABEL;
-
-  const ipv6PortMatch = trimmed.match(/^\[[^\]]+\]:(\d+)$/);
-  if (ipv6PortMatch) return ipv6PortMatch[1];
-
-  try {
-    const parsed = new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`);
-    if (parsed.port) return parsed.port;
-  } catch {
-    // Best effort fallback handled below.
-  }
-
-  const trailingPortMatch = trimmed.match(/:(\d+)$/);
-  if (trailingPortMatch) return trailingPortMatch[1];
-  return DEFAULT_PORT_LABEL;
-}
-
-export function buildTrafficByPathData(pathStats: PathStats[]): GroupedTrafficDatum[] {
-  const grouped = new Map<string, number>();
-  for (const stat of pathStats) {
-    const path = stat.path || "/";
-    grouped.set(path, (grouped.get(path) ?? 0) + stat.request_count);
-  }
-  return toTopGroupedData(grouped);
-}
-
-export function buildTrafficByPortData(pathStats: PathStats[]): GroupedTrafficDatum[] {
-  const grouped = new Map<string, number>();
-  for (const stat of pathStats) {
-    const port = extractPortLabel(stat.host);
-    grouped.set(port, (grouped.get(port) ?? 0) + stat.request_count);
-  }
-  return toTopGroupedData(grouped);
-}
-
-type RouteMatcher = {
-  routeLabel: string;
-  serviceId: string;
-  hosts: string[];
-  exactPaths: string[];
-  pathPrefixes: string[];
-};
-
-function buildRouteMatchers(routes: Route[]): RouteMatcher[] {
-  return routes.map((route) => ({
-    routeLabel: route.name?.trim() || route.id,
-    serviceId: route.service_id,
-    hosts: Array.from(route.rule.matchAll(/Host\(`([^`]*)`\)/g), (m) => m[1]),
-    exactPaths: Array.from(route.rule.matchAll(/Path\(`([^`]*)`\)/g), (m) => m[1]),
-    pathPrefixes: Array.from(route.rule.matchAll(/PathPrefix\(`([^`]*)`\)/g), (m) => m[1]),
-  }));
-}
-
-function scoreRouteMatch(stat: PathStats, matcher: RouteMatcher): number {
-  if (matcher.hosts.length > 0 && !matcher.hosts.includes(stat.host)) {
-    return -1;
-  }
-
-  let pathScore = 0;
-  for (const exactPath of matcher.exactPaths) {
-    if (stat.path === exactPath) {
-      pathScore = Math.max(pathScore, 10_000 + exactPath.length);
-    }
-  }
-  for (const prefix of matcher.pathPrefixes) {
-    if (stat.path.startsWith(prefix)) {
-      pathScore = Math.max(pathScore, prefix.length);
-    }
-  }
-
-  if (matcher.exactPaths.length === 0 && matcher.pathPrefixes.length === 0) {
-    pathScore = 1;
-  }
-
-  if (pathScore <= 0) return -1;
-  return pathScore + (matcher.hosts.length > 0 ? 1_000 : 0);
-}
-
-function resolveServiceLabel(
-  stat: PathStats,
-  routeMatchers: RouteMatcher[],
-  serviceNameById: Map<string, string>,
-): string {
-  let bestScore = -1;
-  let bestServiceId: string | null = null;
-
-  for (const matcher of routeMatchers) {
-    const score = scoreRouteMatch(stat, matcher);
-    if (score > bestScore) {
-      bestScore = score;
-      bestServiceId = matcher.serviceId;
-    }
-  }
-
-  if (!bestServiceId) return UNMATCHED_SERVICE_LABEL;
-  return serviceNameById.get(bestServiceId) ?? bestServiceId;
-}
-
-function resolveRouterLabel(stat: PathStats, routeMatchers: RouteMatcher[]): string {
-  let bestScore = -1;
-  let bestRouteLabel: string | null = null;
-
-  for (const matcher of routeMatchers) {
-    const score = scoreRouteMatch(stat, matcher);
-    if (score > bestScore) {
-      bestScore = score;
-      bestRouteLabel = matcher.routeLabel;
-    }
-  }
-
-  return bestRouteLabel ?? UNMATCHED_ROUTER_LABEL;
-}
-
-export function buildTrafficByServiceData(
-  pathStats: PathStats[],
-  routes: Route[],
-  services: Service[],
-): GroupedTrafficDatum[] {
-  const routeMatchers = buildRouteMatchers(routes);
-  const serviceNameById = new Map(services.map((service) => [service.id, service.name]));
-  const grouped = new Map<string, number>();
-
-  for (const stat of pathStats) {
-    const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
-    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.request_count);
-  }
-
-  return toTopGroupedData(grouped);
-}
-
-export function buildHourlyBandwidthData(
-  samples: BandwidthDeltaSample[],
-  range: TrafficRangeBounds | null = null,
-): HourlyBandwidthDatum[] {
-  const grouped = new Map<number, { totalBytes: number; routerBytes: number; serviceBytes: number }>();
-
-  for (const sample of samples) {
-    const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
-    const existing = grouped.get(hourStartTs) ?? {
-      totalBytes: 0,
-      routerBytes: 0,
-      serviceBytes: 0,
-    };
-    const routerPeak = Object.values(sample.routerBytes).reduce((peak, value) => Math.max(peak, value), 0);
-    const servicePeak = Object.values(sample.serviceBytes).reduce((peak, value) => Math.max(peak, value), 0);
-    grouped.set(hourStartTs, {
-      totalBytes: existing.totalBytes + sample.totalBytes,
-      routerBytes: existing.routerBytes + routerPeak,
-      serviceBytes: existing.serviceBytes + servicePeak,
-    });
-  }
-
-  if (range) {
-    const result: HourlyBandwidthDatum[] = [];
-    let currentTs = Math.floor(range.startTs / HOUR_MS) * HOUR_MS;
-    const endTs = range.endTs;
-
-    while (currentTs < endTs) {
-      const values = grouped.get(currentTs) ?? {
-        totalBytes: 0,
-        routerBytes: 0,
-        serviceBytes: 0,
-      };
-      result.push({
-        hourStartTs: currentTs,
-        hour: formatHourLabel(currentTs),
-        totalBytes: values.totalBytes,
-        routerBytes: values.routerBytes,
-        serviceBytes: values.serviceBytes,
-      });
-      currentTs += HOUR_MS;
-    }
-    return result;
-  }
-
-  return Array.from(grouped.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([hourStartTs, values]) => ({
-      hourStartTs,
-      hour: formatHourLabel(hourStartTs),
-      totalBytes: values.totalBytes,
-      routerBytes: values.routerBytes,
-      serviceBytes: values.serviceBytes,
-    }));
-}
-
-export function buildBandwidthSummaries(hourly: HourlyBandwidthDatum[]): BandwidthSummaryDatum[] {
-  const toSummary = (
-    label: string,
-    color: string,
-    selector: (row: HourlyBandwidthDatum) => number,
-  ): BandwidthSummaryDatum => {
-    if (hourly.length === 0) {
-      return { label, max: 0, min: 0, avg: 0, color };
-    }
-    const values = hourly.map(selector);
-    const total = values.reduce((sum, value) => sum + value, 0);
-    return {
-      label,
-      max: Math.max(...values),
-      min: Math.min(...values),
-      avg: total / values.length,
-      color,
-    };
-  };
-
-  return [
-    toSummary("Total", "indigo", (row) => row.totalBytes),
-    toSummary("Router", "orange", (row) => row.routerBytes),
-    toSummary("Service", "teal", (row) => row.serviceBytes),
-  ];
-}
-
-export function buildBandwidthByRouterData(pathStats: PathStats[], routes: Route[]): GroupedTrafficDatum[] {
-  const routeMatchers = buildRouteMatchers(routes);
-  const grouped = new Map<string, number>();
-
-  for (const stat of pathStats) {
-    const routerLabel = resolveRouterLabel(stat, routeMatchers);
-    grouped.set(routerLabel, (grouped.get(routerLabel) ?? 0) + stat.bytes_total);
-  }
-
-  return toTopGroupedData(grouped);
-}
-
-export function buildBandwidthByServiceData(
-  pathStats: PathStats[],
-  routes: Route[],
-  services: Service[],
-): GroupedTrafficDatum[] {
-  const routeMatchers = buildRouteMatchers(routes);
-  const serviceNameById = new Map(services.map((service) => [service.id, service.name]));
-  const grouped = new Map<string, number>();
-
-  for (const stat of pathStats) {
-    const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
-    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.bytes_total);
-  }
-
-  return toTopGroupedData(grouped);
-}
 
 export default function Dashboard() {
   const { data: status } = useGateonStatus();
