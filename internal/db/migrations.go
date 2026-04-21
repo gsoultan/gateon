@@ -178,4 +178,24 @@ func init() {
 		_, err := db.Exec(query)
 		return err
 	})
+
+	Register(10, "add_source_ip_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS source_ip TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS source_ip TEXT NOT NULL DEFAULT '';`
+		default:
+			query = `ALTER TABLE traces ADD COLUMN source_ip TEXT NOT NULL DEFAULT '';`
+		}
+
+		if _, err := db.Exec(query); err != nil {
+			if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 }

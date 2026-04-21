@@ -11,6 +11,34 @@ message GetDiagnosticsResponse {
   repeated EntryPointDiagnostic entrypoints = 1;
   repeated HandshakeError recent_tls_errors = 2;
   SystemInfo system = 3;
+  repeated Anomaly anomalies = 4;
+  repeated DependencyHealth dependencies = 5;
+}
+
+message Anomaly {
+  string type = 1;
+  string severity = 2;
+  string description = 3;
+  string timestamp = 4;
+  string source = 5;
+  string recommendation = 6;
+}
+
+message DependencyHealth {
+  string name = 1;
+  bool healthy = 2;
+  string error = 3;
+  string latency_ms = 4;
+}
+
+message ApplyRecommendationRequest {
+  string anomaly_type = 1;
+  string source = 2;
+}
+
+message ApplyRecommendationResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message EntryPointDiagnostic {
@@ -65,4 +93,9 @@ message HandshakeError {
 message SystemInfo {
   string public_ip = 1;
   bool cloudflare_reachable = 2;
+  string uptime = 3;
+  int64 goroutines = 4;
+  string memory_usage = 5;
+  string cpu_usage = 6;
+  string version = 7;
 }

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
+	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -145,6 +147,7 @@ func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesReq
 			Timestamp:     t.Timestamp.Format(time.RFC3339),
 			Status:        t.Status,
 			Path:          t.Path,
+			SourceIp:      t.SourceIP,
 		})
 	}
 	return &gateonv1.ListTracesResponse{Traces: res}, nil
@@ -214,13 +217,13 @@ func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.Dis
 
 	host := req.Url
 	useTLS := false
-	if strings.HasPrefix(req.Url, "h2c://") {
-		host = strings.TrimPrefix(req.Url, "h2c://")
-	} else if strings.HasPrefix(req.Url, "h2://") {
-		host = strings.TrimPrefix(req.Url, "h2://")
+	if h, ok := strings.CutPrefix(req.Url, "h2c://"); ok {
+		host = h
+	} else if h, ok := strings.CutPrefix(req.Url, "h2://"); ok {
+		host = h
 		useTLS = true
-	} else if strings.HasPrefix(req.Url, "h3://") {
-		host = strings.TrimPrefix(req.Url, "h3://")
+	} else if h, ok := strings.CutPrefix(req.Url, "h3://"); ok {
+		host = h
 		useTLS = true
 	}
 
@@ -459,11 +462,8 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		Role:     auth.RoleAdmin,
 	}
 	if existing, _, _ := s.Auth.ListUsers(0, 1000, admin.Username); len(existing) > 0 {
-		for _, u := range existing {
-			if u.Username == admin.Username {
-				admin.Id = u.Id
-				break
-			}
+		if i := slices.IndexFunc(existing, func(u *gateonv1.User) bool { return u.Username == admin.Username }); i >= 0 {
+			admin.Id = existing[i].Id
 		}
 	}
 	if err := s.Auth.UpsertUser(admin); err != nil {
@@ -602,14 +602,7 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 					targetStats := s.RouteStatsProvider(rt.Id)
 					rd.ServiceHealthy = true
 					if len(targetStats) > 0 {
-						allDown := true
-						for _, ts := range targetStats {
-							if ts.Alive {
-								allDown = false
-								break
-							}
-						}
-						if allDown {
+						if !slices.ContainsFunc(targetStats, func(ts proxy.TargetStats) bool { return ts.Alive }) {
 							rd.ServiceHealthy = false
 							rd.Healthy = false
 							rd.Error = "All backend targets are down"
@@ -649,6 +642,63 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		diagEPs = append(diagEPs, d)
 	}
 
+	// Anomaly detection
+	mgmtHosts := []string{}
+	if s.Globals != nil {
+		if globalCfg := s.Globals.Get(ctx); globalCfg != nil && globalCfg.Management != nil {
+			if globalCfg.Management.Bind != "" {
+				// If bind is a hostname, use it
+				if ip := net.ParseIP(globalCfg.Management.Bind); ip == nil {
+					mgmtHosts = append(mgmtHosts, globalCfg.Management.Bind)
+				}
+			}
+			mgmtHosts = append(mgmtHosts, globalCfg.Management.AllowedHosts...)
+		}
+	}
+
+	traces := telemetry.GetTraces(ctx, 1000)
+	engine := NewAnomalyAnalysisEngine()
+	anomalies := engine.Analyze(ctx, &DiagnosticData{
+		Traces:          traces,
+		Routes:          routes,
+		ManagementHosts: mgmtHosts,
+	})
+
+	// System metrics
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	sysStats := telemetry.GetSystemStats()
+	uptime := time.Since(telemetry.GetStartTime()).Round(time.Second).String()
+
+	systemInfo := &gateonv1.SystemInfo{
+		PublicIp:            getPublicIP(),
+		CloudflareReachable: isCloudflareReachable(),
+		Uptime:              uptime,
+		Goroutines:          int64(runtime.NumGoroutine()),
+		MemoryUsage:         fmt.Sprintf("%.2f MB", float64(m.Alloc)/1024/1024),
+		CpuUsage:            fmt.Sprintf("%.1f%%", sysStats.CPUUsage),
+		Version:             s.Version,
+	}
+
+	// Dependency Health Checks
+	deps := []*gateonv1.DependencyHealth{
+		{Name: "Internet (Cloudflare)", Healthy: systemInfo.CloudflareReachable},
+	}
+
+	// Database Check (Ping telemetry store)
+	dbStart := time.Now()
+	if err := telemetry.PingStore(); err != nil {
+		deps = append(deps, &gateonv1.DependencyHealth{
+			Name: "Database", Healthy: false, Error: err.Error(),
+			LatencyMs: fmt.Sprintf("%dms", time.Since(dbStart).Milliseconds()),
+		})
+	} else {
+		deps = append(deps, &gateonv1.DependencyHealth{
+			Name: "Database", Healthy: true,
+			LatencyMs: fmt.Sprintf("%dms", time.Since(dbStart).Milliseconds()),
+		})
+	}
+
 	recentErrors := telemetry.GlobalDiagnostics.GetRecentTLSErrors()
 	diagErrors := make([]*gateonv1.HandshakeError, 0, len(recentErrors))
 	for _, e := range recentErrors {
@@ -668,11 +718,112 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	return &gateonv1.GetDiagnosticsResponse{
 		Entrypoints:     diagEPs,
 		RecentTlsErrors: diagErrors,
-		System: &gateonv1.SystemInfo{
-			PublicIp:            getPublicIP(),
-			CloudflareReachable: isCloudflareReachable(),
-		},
+		System:          systemInfo,
+		Anomalies:       anomalies,
+		Dependencies:    deps,
 	}, nil
+}
+
+func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+	if req == nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Request is required"}, nil
+	}
+
+	switch req.AnomalyType {
+	case "high_traffic", "brute_force_attempt", "security_scan":
+		// Action: Block IP by creating a middleware and adding it to all routes
+		if req.Source == "" {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Source IP is required to block"}, nil
+		}
+
+		mwID := "block-ip-" + strings.ReplaceAll(req.Source, ".", "-")
+		mwID = strings.ReplaceAll(mwID, ":", "-") // For IPv6
+
+		mw := &gateonv1.Middleware{
+			Id:   mwID,
+			Name: "Auto-Block: " + req.Source,
+			Type: "ipfilter",
+			Config: map[string]string{
+				"deny_list": req.Source,
+			},
+		}
+
+		if err := s.Middlewares.Update(ctx, mw); err != nil {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to create block middleware: " + err.Error()}, nil
+		}
+
+		// Add this middleware to all routes
+		routes := s.Routes.List(ctx)
+		count := 0
+		for _, rt := range routes {
+			if !slices.Contains(rt.Middlewares, mwID) {
+				rt.Middlewares = append(rt.Middlewares, mwID)
+				if err := s.Routes.Update(ctx, rt); err == nil {
+					count++
+				}
+			}
+		}
+
+		if s.Invalidator != nil {
+			s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
+		}
+
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: true,
+			Message: fmt.Sprintf("IP %s blocked and applied to %d routes.", req.Source, count),
+		}, nil
+
+	case "management_access_violation":
+		// Action: Disable public management access
+		conf := s.Globals.Get(ctx)
+		if conf.Management == nil {
+			conf.Management = &gateonv1.ManagementConfig{}
+		}
+		if !conf.Management.AllowPublicManagement {
+			return &gateonv1.ApplyRecommendationResponse{Success: true, Message: "Public management access is already disabled."}, nil
+		}
+
+		conf.Management.AllowPublicManagement = false
+		if err := s.Globals.Update(ctx, conf); err != nil {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update global config: " + err.Error()}, nil
+		}
+
+		if s.Invalidator != nil {
+			s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
+		}
+
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: true,
+			Message: "Public management access disabled for security.",
+		}, nil
+
+	case "shadowed_route":
+		// Action: Increase priority of the shadowed route
+		if req.Source == "" {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route ID is required to fix shadowing"}, nil
+		}
+		rt, ok := s.Routes.Get(ctx, req.Source)
+		if !ok {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route not found"}, nil
+		}
+		rt.Priority += 100 // Boost priority
+		if err := s.Routes.Update(ctx, rt); err != nil {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update route priority: " + err.Error()}, nil
+		}
+		if s.Invalidator != nil {
+			s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
+		}
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: true,
+			Message: fmt.Sprintf("Priority for route '%s' increased to %d.", rt.Name, rt.Priority),
+		}, nil
+
+	default:
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Automatic resolution for '%s' is not implemented yet. Please follow the recommendation manually.", req.AnomalyType),
+		}, nil
+	}
 }
 
 func (s *ApiService) GetCloudflareIPs(ctx context.Context, _ *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error) {

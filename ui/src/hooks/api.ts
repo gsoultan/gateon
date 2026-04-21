@@ -119,6 +119,16 @@ export async function getDiagnostics(): Promise<GetDiagnosticsResponse> {
   return res.json();
 }
 
+export async function applyRecommendation(anomalyType: string, source: string): Promise<{ success: boolean; message: string }> {
+  const res = await apiFetch("/v1/diagnostics/recommendation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ anomaly_type: anomalyType, source: source }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function getCloudflareIPs(): Promise<GetCloudflareIPsResponse> {
   const res = await apiFetch("/v1/cloudflare-ips");
   if (!res.ok) throw new Error(await res.text());

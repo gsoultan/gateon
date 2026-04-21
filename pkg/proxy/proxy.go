@@ -75,6 +75,7 @@ type ProxyHandler struct {
 	transportFactory    *backendTransportFactory
 	healthCheckClient   *http.Client
 	tlsConfig           *tls.Config
+	StripCORS           bool
 	proxyPool           sync.Map // map[targetURL string]*httputil.ReverseProxy
 }
 
@@ -380,6 +381,17 @@ func (h *ProxyHandler) getOrCreateProxy(cacheKey string, targetURL *url.URL) *ht
 	rp.Transport = h.transport
 	rp.BufferPool = bufferPool
 	rp.FlushInterval = flushIntervalImmediate // flush immediately for SSE/streaming
+	if h.StripCORS {
+		rp.ModifyResponse = func(resp *http.Response) error {
+			resp.Header.Del("Access-Control-Allow-Origin")
+			resp.Header.Del("Access-Control-Allow-Methods")
+			resp.Header.Del("Access-Control-Allow-Headers")
+			resp.Header.Del("Access-Control-Exposed-Headers")
+			resp.Header.Del("Access-Control-Allow-Credentials")
+			resp.Header.Del("Access-Control-Max-Age")
+			return nil
+		}
+	}
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		if st, ok := r.Context().Value(targetStateContextKey).(*targetState); ok && st != nil {
 			atomic.AddUint64(&st.errorCount, 1)

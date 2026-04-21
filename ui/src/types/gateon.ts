@@ -460,12 +460,35 @@ export type HandshakeError = {
 export type SystemInfo = {
   public_ip: string;
   cloudflare_reachable: boolean;
+  uptime: string;
+  goroutines: number;
+  memory_usage: string;
+  cpu_usage: string;
+  version: string;
+};
+
+export type Anomaly = {
+  type: string;
+  severity: string;
+  description: string;
+  timestamp: string;
+  source: string;
+  recommendation: string;
+};
+
+export type DependencyHealth = {
+  name: string;
+  healthy: boolean;
+  error: string;
+  latency_ms: string;
 };
 
 export type GetDiagnosticsResponse = {
   entrypoints: EntryPointDiagnostic[];
   recent_tls_errors: HandshakeError[];
   system: SystemInfo;
+  anomalies: Anomaly[];
+  dependencies: DependencyHealth[];
 };
 
 export type GetCloudflareIPsResponse = {

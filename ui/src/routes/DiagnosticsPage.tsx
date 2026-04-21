@@ -20,8 +20,8 @@ import {
   Accordion,
   ThemeIcon,
 } from "@mantine/core";
-import { getDiagnostics } from "../hooks/api";
-import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic } from "../types/gateon";
+import { getDiagnostics, applyRecommendation } from "../hooks/api";
+import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
 import {
   IconActivity,
   IconAlertTriangle,
@@ -37,7 +37,12 @@ import {
   IconArrowRight,
   IconCheck,
   IconX,
+  IconRobot,
+  IconBug,
+  IconLock,
+  IconShieldLock,
 } from "@tabler/icons-react";
+import { notifications } from "@mantine/notifications";
 
 const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
   <Tooltip label={mw.error || `Type: ${mw.type}`}>
@@ -51,6 +56,35 @@ const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
       {mw.name || mw.id}
     </Badge>
   </Tooltip>
+);
+
+const SystemStatCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
+  <Paper withBorder p="md" radius="lg" shadow="xs">
+    <Group justify="space-between" mb="xs">
+      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", letterSpacing: 1 }}>
+        {title}
+      </Text>
+      {icon}
+    </Group>
+    <Title order={3} fw={900}>
+      {value || "---"}
+    </Title>
+  </Paper>
+);
+
+const DependencyBadge: React.FC<{ dep: DependencyHealth }> = ({ dep }) => (
+  <Paper withBorder p="sm" radius="md" bg="var(--mantine-color-gray-0)">
+    <Group justify="space-between">
+      <Text size="sm" fw={700}>{dep.name}</Text>
+      <Badge color={dep.healthy ? "teal" : "red"} variant="dot">
+        {dep.healthy ? "Healthy" : "Degraded"}
+      </Badge>
+    </Group>
+    <Group justify="space-between" mt={4}>
+      <Text size="xs" c="dimmed">Latency: {dep.latency_ms}</Text>
+      {dep.error && <Text size="xs" c="red" fw={500} truncate maw={200}>{dep.error}</Text>}
+    </Group>
+  </Paper>
 );
 
 const RouteTrace: React.FC<{ route: RouteDiagnostic }> = ({ route }) => {
@@ -127,22 +161,119 @@ const RouteTrace: React.FC<{ route: RouteDiagnostic }> = ({ route }) => {
   );
 };
 
+const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: boolean }> = ({ anomaly, onApply, applying }) => {
+  const getSeverityColor = (sev: string) => {
+    switch (sev.toLowerCase()) {
+      case "critical": return "red";
+      case "high": return "orange";
+      case "medium": return "yellow";
+      default: return "blue";
+    }
+  };
+
+  const getIcon = (type: string) => {
+    if (type.includes("attack") || type.includes("hacker") || type.includes("violation")) return <IconShieldLock size={20} />;
+    if (type.includes("brute")) return <IconLock size={20} />;
+    if (type.includes("scan") || type.includes("security")) return <IconBug size={20} />;
+    return <IconActivity size={20} />;
+  };
+
+  return (
+    <Paper withBorder p="md" radius="lg" shadow="sm" style={{ borderLeft: `4px solid var(--mantine-color-${getSeverityColor(anomaly.severity)}-6)` }}>
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <Group gap="sm">
+            <ThemeIcon variant="light" color={getSeverityColor(anomaly.severity)} size="lg" radius="md">
+              {getIcon(anomaly.type)}
+            </ThemeIcon>
+            <Stack gap={0}>
+              <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+                {anomaly.type.replace(/_/g, " ")}
+              </Text>
+              <Text size="xs" c="dimmed">{new Date(anomaly.timestamp).toLocaleString()}</Text>
+            </Stack>
+          </Group>
+          <Badge color={getSeverityColor(anomaly.severity)} variant="filled" size="xs">
+            {anomaly.severity}
+          </Badge>
+        </Group>
+
+        <Text size="sm" fw={500}>{anomaly.description}</Text>
+
+        <Alert variant="light" color="indigo" radius="md" p="sm" icon={<IconRobot size={18} />}>
+          <Stack gap="xs">
+            <Text size="xs" fw={700}>System Recommendation:</Text>
+            <Text size="xs">{anomaly.recommendation}</Text>
+            <Group justify="flex-end">
+              <Anchor
+                component="button"
+                size="xs"
+                fw={800}
+                onClick={onApply}
+                loading={applying}
+                style={{ display: "flex", alignItems: "center", gap: 4 }}
+              >
+                Apply Automatic Fix <IconArrowRight size={12} />
+              </Anchor>
+            </Group>
+          </Stack>
+        </Alert>
+      </Stack>
+    </Paper>
+  );
+};
+
 const DiagnosticsPage: React.FC = () => {
   const [data, setData] = useState<GetDiagnosticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const theme = useMantineTheme();
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-      const res = await getDiagnostics();
-      setData(res);
-      setError(null);
+      if (!applying) { // Don't refresh while applying a fix to avoid UI jumps
+        const res = await getDiagnostics();
+        setData(res);
+        setError(null);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to fetch diagnostics");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApplyRecommendation = async (anomaly: Anomaly) => {
+    const key = `${anomaly.type}-${anomaly.source}`;
+    try {
+      setApplying(key);
+      const res = await applyRecommendation(anomaly.type, anomaly.source);
+      if (res.success) {
+        notifications.show({
+          title: "Recommendation Applied",
+          message: res.message,
+          color: "teal",
+          icon: <IconCheck size={18} />,
+        });
+        // Refresh data after a short delay
+        setTimeout(fetchData, 1000);
+      } else {
+        notifications.show({
+          title: "Fix Failed",
+          message: res.message,
+          color: "red",
+          icon: <IconX size={18} />,
+        });
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: "Error",
+        message: err.message || "Failed to apply recommendation",
+        color: "red",
+      });
+    } finally {
+      setApplying(null);
     }
   };
 
@@ -197,63 +328,78 @@ const DiagnosticsPage: React.FC = () => {
           </ActionIcon>
         </Group>
 
-        {/* System Status Summary */}
-        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-          <Paper withBorder p="lg" radius="lg" shadow="xs">
-            <Group justify="space-between" mb="xs">
-              <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", letterSpacing: 1 }}>
-                Public IP Address
-              </Text>
-              <IconGlobe size={20} color={theme.colors.blue[6]} />
-            </Group>
-            <Title order={3} fw={900} ff="monospace">
-              {data?.system?.public_ip || "Unknown"}
-            </Title>
-            <Text size="xs" c="dimmed" mt="xs">
-              Ensure DNS records point to this IP.
-            </Text>
-          </Paper>
+        {/* System Health Dashboard */}
+        <Stack gap="sm">
+          <Group gap="xs">
+            <IconActivity size={20} color={theme.colors.blue[6]} />
+            <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 1 }}>System Health Dashboard</Text>
+          </Group>
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 4, lg: 6 }} spacing="md">
+            <SystemStatCard title="Public IP" value={data?.system?.public_ip} icon={<IconGlobe size={20} color="blue" />} />
+            <SystemStatCard title="CPU Usage" value={data?.system?.cpu_usage} icon={<IconActivity size={20} color="red" />} />
+            <SystemStatCard title="Memory" value={data?.system?.memory_usage} icon={<IconServer size={20} color="orange" />} />
+            <SystemStatCard title="Goroutines" value={data?.system?.goroutines} icon={<IconRoute size={20} color="teal" />} />
+            <SystemStatCard title="Uptime" value={data?.system?.uptime} icon={<IconClock size={20} color="violet" />} />
+            <SystemStatCard title="Version" value={data?.system?.version} icon={<IconInfoCircle size={20} color="gray" />} />
+          </SimpleGrid>
+        </Stack>
 
-          <Paper withBorder p="lg" radius="lg" shadow="xs">
-            <Group justify="space-between" mb="xs">
-              <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", letterSpacing: 1 }}>
-                Cloudflare Reachability
-              </Text>
-              <IconShield size={20} color={theme.colors.orange[6]} />
-            </Group>
-            <Group gap="xs">
-              {data?.system?.cloudflare_reachable ? (
-                <>
-                  <IconCircleCheck size={24} color={theme.colors.teal[6]} />
-                  <Title order={3} fw={900}>Reachable</Title>
-                </>
-              ) : (
-                <>
-                  <IconAlertTriangle size={24} color={theme.colors.red[6]} />
-                  <Title order={3} fw={900}>Unreachable</Title>
-                </>
-              )}
-            </Group>
-            <Text size="xs" c="dimmed" mt="xs">
-              TCP check to 1.1.1.1:53.
-            </Text>
-          </Paper>
+        {/* Dependency Health */}
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Stack gap="md">
+             <Group justify="space-between">
+                <Group gap="xs">
+                   <IconServer size={24} color={theme.colors.teal[6]} />
+                   <Title order={3} fw={900}>Infrastructure Dependencies</Title>
+                </Group>
+                <Badge variant="light" color="teal">All checks active</Badge>
+             </Group>
+             <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+                {data?.dependencies?.map((dep, i) => (
+                   <DependencyBadge key={i} dep={dep} />
+                ))}
+             </SimpleGrid>
+          </Stack>
+        </Card>
 
-          <Paper withBorder p="lg" radius="lg" shadow="xs">
-            <Group justify="space-between" mb="xs">
-              <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", letterSpacing: 1 }}>
-                Recent TLS Errors
-              </Text>
-              <IconActivity size={20} color={theme.colors.violet[6]} />
+        {/* Anomaly Detection Engine */}
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Stack gap="md">
+            <Group justify="space-between">
+              <Group gap="xs">
+                <IconRobot size={24} color={theme.colors.indigo[6]} />
+                <Title order={3} fw={900}>Anomaly Intelligence Engine</Title>
+              </Group>
+              <Badge variant="dot" color="indigo" size="lg">Autonomous Protection</Badge>
             </Group>
-            <Title order={3} fw={900}>
-              {data?.recent_tls_errors?.length || 0}
-            </Title>
-            <Text size="xs" c="dimmed" mt="xs">
-              Handshake failures in the last buffer.
+            
+            <Text size="sm" c="dimmed">
+              Real-time heuristic analysis of traffic patterns and security events. 
+              The engine identifies potential threats and provides actionable recommendations.
             </Text>
-          </Paper>
-        </SimpleGrid>
+
+            {data?.anomalies && data.anomalies.length > 0 ? (
+              <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                {data.anomalies.map((a, i) => (
+                  <AnomalyCard 
+                    key={i} 
+                    anomaly={a} 
+                    onApply={() => handleApplyRecommendation(a)}
+                    applying={applying === `${a.type}-${a.source}`}
+                  />
+                ))}
+              </SimpleGrid>
+            ) : (
+              <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
+                <Stack align="center" gap="xs">
+                  <IconCircleCheck size={40} color={theme.colors.teal[3]} />
+                  <Text fw={700} c="teal">No Anomalies Detected</Text>
+                  <Text size="xs" c="dimmed">The engine is monitoring your traffic and everything looks normal.</Text>
+                </Stack>
+              </Paper>
+            )}
+          </Stack>
+        </Card>
 
         {/* Troubleshooting Tips */}
         <Alert

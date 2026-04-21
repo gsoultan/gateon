@@ -32,6 +32,7 @@ type ProxyHandlerBuilder struct {
 	tlsConfig           *tls.Config
 	transportConfig     *TransportConfig
 	tlsClientConfig     *gateonv1.TlsClientConfig
+	stripCORS           bool
 }
 
 // NewProxyHandlerBuilder creates a builder for the given route.
@@ -99,6 +100,11 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 	}
 }
 
+func (b *ProxyHandlerBuilder) SetStripCORS(strip bool) *ProxyHandlerBuilder {
+	b.stripCORS = strip
+	return b
+}
+
 // Build constructs the ProxyHandler.
 func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 	if b.lb == nil {
@@ -145,6 +151,7 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		transportFactory:    b.transportFactory,
 		healthCheckClient:   b.healthCheckClient,
 		tlsConfig:           b.tlsConfig,
+		StripCORS:           b.stripCORS,
 	}
 	if h.discoveryURL != "" {
 		go h.runDiscovery()

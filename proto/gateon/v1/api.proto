@@ -51,4 +51,5 @@ service ApiService {
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
 
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
+  rpc ApplyRecommendation(ApplyRecommendationRequest) returns (ApplyRecommendationResponse);
 }
