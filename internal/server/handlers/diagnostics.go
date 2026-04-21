@@ -67,6 +67,25 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("POST /v1/diagnostics/recommendation", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		var req gateonv1.ApplyRecommendationRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		res, err := svc.ApplyRecommendation(r.Context(), &req)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := ProtojsonOptions().Marshal(res)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !isLogsRequestAuthorized(r, d.AuthManager) {
 			w.WriteHeader(http.StatusUnauthorized)

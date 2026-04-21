@@ -33,7 +33,7 @@ type increment struct {
 	isDomain   bool
 }
 
-type traceRecord struct {
+type TraceRecord struct {
 	ID            string
 	OperationName string
 	ServiceName   string
@@ -41,13 +41,14 @@ type traceRecord struct {
 	Timestamp     time.Time
 	Status        string
 	Path          string
+	SourceIP      string
 }
 
 type pathStatsStore struct {
 	db            *sql.DB
 	dialect       db.Dialect
 	inCh          chan increment
-	traceInCh     chan traceRecord
+	traceInCh     chan TraceRecord
 	stopCh        chan struct{}
 	stopped       atomic.Bool
 	wg            sync.WaitGroup
@@ -85,7 +86,7 @@ func initStore(databaseURL string, retentionDays int) error {
 		db:        database,
 		dialect:   dialect,
 		inCh:      make(chan increment, 4096),
-		traceInCh: make(chan traceRecord, 4096),
+		traceInCh: make(chan TraceRecord, 4096),
 		stopCh:    make(chan struct{}),
 	}
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
@@ -134,7 +135,7 @@ func (s *pathStatsStore) loop() {
 	defer pruneTicker.Stop()
 
 	batch := make([]increment, 0, 1024)
-	traceBatch := make([]traceRecord, 0, 1024)
+	traceBatch := make([]TraceRecord, 0, 1024)
 
 	flush := func() {
 		if len(batch) > 0 {
@@ -182,7 +183,7 @@ func (s *pathStatsStore) loop() {
 				stmt, err := s.traceInsertStmt(tx)
 				if err == nil {
 					for _, tr := range traceBatch {
-						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path); err != nil {
+						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP); err != nil {
 							logger.Default().Error().Err(err).Msg("traces: insert failed")
 						}
 					}
@@ -312,12 +313,12 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path string) {
+func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP string) {
 	if store == nil {
 		return
 	}
 	select {
-	case store.traceInCh <- traceRecord{
+	case store.traceInCh <- TraceRecord{
 		ID:            id,
 		OperationName: operationName,
 		ServiceName:   serviceName,
@@ -325,6 +326,7 @@ func recordTraceToStore(id, operationName, serviceName string, durationMs float6
 		Timestamp:     timestamp,
 		Status:        status,
 		Path:          path,
+		SourceIP:      sourceIP,
 	}:
 	default:
 		// drop on backpressure
@@ -332,7 +334,7 @@ func recordTraceToStore(id, operationName, serviceName string, durationMs float6
 }
 
 // GetTraces returns the last N traces from the store.
-func GetTraces(ctx context.Context, limit int) []traceRecord {
+func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	if store == nil {
 		return nil
 	}
@@ -342,17 +344,17 @@ func GetTraces(ctx context.Context, limit int) []traceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path FROM traces ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip FROM traces ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("traces: query failed")
 		return nil
 	}
 	defer rows.Close()
-	res := make([]traceRecord, 0, min(limit, 100))
+	res := make([]TraceRecord, 0, min(limit, 100))
 	for rows.Next() {
-		var tr traceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path); err != nil {
+		var tr TraceRecord
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP); err != nil {
 			logger.Default().Error().Err(err).Msg("traces: scan failed")
 			continue
 		}
@@ -487,6 +489,14 @@ func GetDomainStatsHourly(day string, hour int) []DomainStats {
 // IsStoreEnabled returns true if the persistent store is active.
 func IsStoreEnabled() bool {
 	return store != nil
+}
+
+// PingStore checks the health of the telemetry database.
+func PingStore() error {
+	if store == nil {
+		return fmt.Errorf("telemetry store not initialized")
+	}
+	return store.db.Ping()
 }
 
 // CurrentRetentionDays returns the active retention configuration.

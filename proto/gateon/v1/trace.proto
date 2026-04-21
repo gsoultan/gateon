@@ -12,6 +12,7 @@ message Trace {
   string timestamp = 5;
   string status = 6;
   string path = 7;
+  string source_ip = 8;
 }
 
 message ListTracesRequest {

@@ -181,6 +181,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			duration := time.Since(start)
 			telemetry.RecordPathRequest(origHost, origPath, duration.Seconds(), totalBandwidthBytes)
 
+			// IP-based metrics
+			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+
 			status := "success"
 			if sw.Status >= 400 {
 				status = "error"
@@ -193,6 +196,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				start,
 				status,
 				origHost+origPath,
+				clientIP,
 			)
 
 			statusStr := getStatusString(sw.Status)
@@ -201,8 +205,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, method, statusStr).Inc()
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
 
-			// IP-based metrics
-			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
 			telemetry.RequestsByIPTotal.WithLabelValues(clientIP).Inc()
 			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "in").Add(float64(reqInSize + 256))
 			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
