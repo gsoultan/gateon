@@ -5,6 +5,7 @@ import {
   Text,
   Stack,
   TextInput,
+  Textarea,
   NumberInput,
   Button,
   Group,
@@ -1367,7 +1368,7 @@ export default function SettingsPage() {
                 </>
               )}
 
-              <TextInput
+              <Textarea
                 label="Custom Global Directives"
                 description="Coraza/ModSecurity compatible directives applied globally."
                 placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
@@ -1382,6 +1383,8 @@ export default function SettingsPage() {
                   })
                 }
                 disabled={formDisabled}
+                minRows={4}
+                autosize
               />
             </Stack>
           )}

@@ -508,6 +508,33 @@ func TestWAF_PassesNormalRequest(t *testing.T) {
 	}
 }
 
+func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
+	mw, err := WAF(WAFConfig{
+		UseCRS:     false,
+		Directives: `SecRule ARGS "blockme" "id:1,deny,status:403"`,
+	})
+	if err != nil {
+		t.Fatalf("create WAF: %v", err)
+	}
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/?test=blockme", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("custom directive match: expected 403, got %d", rr.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/?test=safe", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("custom directive no-match: expected 200, got %d", rr.Code)
+	}
+}
+
 func TestTurnstile_MissingTokenReturns400(t *testing.T) {
 	mw := Turnstile(TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
