@@ -22,6 +22,7 @@ import {
 } from "@mantine/core";
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
 import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
+import AnomalyMap from "../components/Diagnostics/AnomalyMap";
 import {
   IconActivity,
   IconAlertTriangle,
@@ -373,6 +374,8 @@ const DiagnosticsPage: React.FC = () => {
               <Badge variant="dot" color="indigo" size="lg">Autonomous Protection</Badge>
             </Group>
             
+            <AnomalyMap anomalies={data?.anomalies || []} />
+
             <Text size="sm" c="dimmed">
               Real-time heuristic analysis of traffic patterns and security events. 
               The engine identifies potential threats and provides actionable recommendations.

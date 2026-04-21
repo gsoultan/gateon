@@ -30,11 +30,22 @@ type IPStats struct {
 	TotalDuration float64
 	LastSeen      time.Time
 	UniquePaths   map[string]struct{}
+	CountryCode   string
 }
 
 // AnomalyDetector defines the interface for different anomaly detection strategies.
 type AnomalyDetector interface {
 	Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly
+}
+
+func populateAnomalyGeo(a *gateonv1.Anomaly, countryCode string) {
+	if countryCode == "" || countryCode == "XX" {
+		return
+	}
+	a.CountryCode = countryCode
+	lat, lon := telemetry.GetCountryCoordinates(countryCode)
+	a.Latitude = lat
+	a.Longitude = lon
 }
 
 // HackerAttackDetector detects potential hacker attacks like high frequency requests from a single IP.
@@ -45,14 +56,16 @@ func (d *HackerAttackDetector) Detect(ctx context.Context, data *DiagnosticData)
 
 	for ip, stats := range data.IPStats {
 		if stats.TotalRequests > 100 { // Increased threshold for real-world
-			anomalies = append(anomalies, &gateonv1.Anomaly{
+			anomaly := &gateonv1.Anomaly{
 				Type:           "high_traffic",
 				Severity:       "medium",
 				Description:    fmt.Sprintf("High request volume (%d requests) from IP %s", stats.TotalRequests, ip),
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
 				Source:         ip,
 				Recommendation: "Implement rate limiting for this IP or check if it is a legitimate crawler.",
-			})
+			}
+			populateAnomalyGeo(anomaly, stats.CountryCode)
+			anomalies = append(anomalies, anomaly)
 		}
 	}
 	return anomalies
@@ -66,14 +79,16 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 
 	for _, tr := range data.Traces {
 		if tr.ServiceName == "" || tr.ServiceName == "unknown" {
-			anomalies = append(anomalies, &gateonv1.Anomaly{
+			anomaly := &gateonv1.Anomaly{
 				Type:           "unlisted_route",
 				Severity:       "medium",
 				Description:    fmt.Sprintf("Request to unlisted route/host: %s", tr.Path),
 				Timestamp:      tr.Timestamp.Format(time.RFC3339),
 				Source:         tr.SourceIP,
 				Recommendation: "Verify if this path should be registered in the proxy configuration or blocked.",
-			})
+			}
+			populateAnomalyGeo(anomaly, tr.CountryCode)
+			anomalies = append(anomalies, anomaly)
 		}
 	}
 	return anomalies
@@ -101,14 +116,16 @@ func (d *ManagementDomainDetector) Detect(ctx context.Context, data *DiagnosticD
 		if isMgmt {
 			// If it's a management request but not from an internal IP
 			if !isInternalIP(tr.SourceIP) && tr.SourceIP != "127.0.0.1" && tr.SourceIP != "::1" && tr.SourceIP != "" {
-				anomalies = append(anomalies, &gateonv1.Anomaly{
+				anomaly := &gateonv1.Anomaly{
 					Type:           "management_access_violation",
 					Severity:       "critical",
 					Description:    fmt.Sprintf("External IP %s accessed management domain %s", tr.SourceIP, tr.Path),
 					Timestamp:      tr.Timestamp.Format(time.RFC3339),
 					Source:         tr.SourceIP,
 					Recommendation: "Restrict management access to internal VPN or specific trusted IP addresses only.",
-				})
+				}
+				populateAnomalyGeo(anomaly, tr.CountryCode)
+				anomalies = append(anomalies, anomaly)
 			}
 		}
 	}
@@ -130,14 +147,16 @@ func (d *BruteForceDetector) Detect(ctx context.Context, data *DiagnosticData) [
 	var anomalies []*gateonv1.Anomaly
 	for ip, stats := range data.IPStats {
 		if stats.Error401+stats.Error403 > 10 {
-			anomalies = append(anomalies, &gateonv1.Anomaly{
+			anomaly := &gateonv1.Anomaly{
 				Type:           "brute_force_attempt",
 				Severity:       "high",
 				Description:    fmt.Sprintf("Multiple authentication failures (%d) from IP %s", stats.Error401+stats.Error403, ip),
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
 				Source:         ip,
 				Recommendation: "Investigate authentication logs and consider temporary IP blocking or account lockout.",
-			})
+			}
+			populateAnomalyGeo(anomaly, stats.CountryCode)
+			anomalies = append(anomalies, anomaly)
 		}
 	}
 	return anomalies
@@ -150,14 +169,16 @@ func (d *ScannerDetector) Detect(ctx context.Context, data *DiagnosticData) []*g
 	var anomalies []*gateonv1.Anomaly
 	for ip, stats := range data.IPStats {
 		if stats.Error404 > 20 {
-			anomalies = append(anomalies, &gateonv1.Anomaly{
+			anomaly := &gateonv1.Anomaly{
 				Type:           "security_scan",
 				Severity:       "medium",
 				Description:    fmt.Sprintf("High volume of 404 errors (%d) from IP %s - possible scanning", stats.Error404, ip),
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
 				Source:         ip,
 				Recommendation: "Block this IP or implement a WAF to mitigate automated scanning tools.",
-			})
+			}
+			populateAnomalyGeo(anomaly, stats.CountryCode)
+			anomalies = append(anomalies, anomaly)
 		}
 	}
 	return anomalies
@@ -172,14 +193,16 @@ func (d *SlowClientDetector) Detect(ctx context.Context, data *DiagnosticData) [
 		if stats.TotalRequests > 5 {
 			avgLatency := stats.TotalDuration / float64(stats.TotalRequests)
 			if avgLatency > 5000 { // > 5 seconds average
-				anomalies = append(anomalies, &gateonv1.Anomaly{
+				anomaly := &gateonv1.Anomaly{
 					Type:           "slow_client_anomaly",
 					Severity:       "low",
 					Description:    fmt.Sprintf("Abnormally high average latency (%.2fms) from IP %s", avgLatency, ip),
 					Timestamp:      stats.LastSeen.Format(time.RFC3339),
 					Source:         ip,
 					Recommendation: "Check for network latency issues or potential Slowloris attack; adjust request timeouts.",
-				})
+				}
+				populateAnomalyGeo(anomaly, stats.CountryCode)
+				anomalies = append(anomalies, anomaly)
 			}
 		}
 	}
@@ -290,6 +313,7 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		if !ok {
 			stats = &IPStats{
 				UniquePaths: make(map[string]struct{}),
+				CountryCode: tr.CountryCode,
 			}
 			data.IPStats[tr.SourceIP] = stats
 		}

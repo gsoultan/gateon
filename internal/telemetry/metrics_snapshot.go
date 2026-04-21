@@ -136,10 +136,11 @@ type IPMetric struct {
 
 // CountryMetric holds metrics per country.
 type CountryMetric struct {
-	Country  string  `json:"country"`
-	Requests float64 `json:"requests"`
-	BytesIn  float64 `json:"bytes_in"`
-	BytesOut float64 `json:"bytes_out"`
+	Country     string  `json:"country"`
+	CountryName string  `json:"country_name"`
+	Requests    float64 `json:"requests"`
+	BytesIn     float64 `json:"bytes_in"`
+	BytesOut    float64 `json:"bytes_out"`
 }
 
 // SystemMetrics holds system-level gauge values.
@@ -539,7 +540,10 @@ func getOrCreateCountry(m map[string]*CountryMetric, country string) *CountryMet
 	if cm, ok := m[country]; ok {
 		return cm
 	}
-	cm := &CountryMetric{Country: country}
+	cm := &CountryMetric{
+		Country:     country,
+		CountryName: getCountryName(country),
+	}
 	m[country] = cm
 	return cm
 }

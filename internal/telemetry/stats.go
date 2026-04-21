@@ -103,8 +103,8 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP string) {
-	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP)
+func RecordTrace(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, countryCode string) {
+	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP, countryCode)
 }
 
 // getInMemoryPathStats returns aggregated path statistics from the in-memory map.

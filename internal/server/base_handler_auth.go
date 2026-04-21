@@ -15,19 +15,20 @@ func needsAuth(gc *gateonv1.GlobalConfig, deps BaseHandlerDeps) bool {
 	return gc != nil && gc.Auth != nil && gc.Auth.Enabled && deps.Auth != nil
 }
 
-// isAPIMetricsPath returns true for /v1/* or /metrics.
+// isAPIMetricsPath returns true for /v1/*, /gateon.v1.*, or /metrics.
 func isAPIMetricsPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/") || path == "/metrics"
+	return strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/gateon.v1.") || path == "/metrics"
 }
 
-// isLoginPath returns true for /v1/login.
+// isLoginPath returns true for /v1/login or /gateon.v1.ApiService/Login.
 func isLoginPath(path string) bool {
-	return path == "/v1/login"
+	return path == "/v1/login" || path == "/gateon.v1.ApiService/Login"
 }
 
 // isPublicAuthPath returns true for setup, health, status, or login — these skip Paseto auth.
 func isPublicAuthPath(path string) bool {
 	return path == "/v1/setup" || path == "/v1/setup/required" ||
+		path == "/gateon.v1.ApiService/Setup" || path == "/gateon.v1.ApiService/IsSetupRequired" ||
 		isHealthPath(path)
 }
 

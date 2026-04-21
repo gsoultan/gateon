@@ -279,7 +279,7 @@ export default function Dashboard() {
     return metricsSnap.country_metrics
       .sort((a, b) => b.requests - a.requests)
       .slice(0, 5)
-      .map((m) => ({ group: m.country, requests: m.requests }));
+      .map((m) => ({ group: m.country, name: m.country_name, requests: m.requests }));
   }, [metricsSnap]);
 
   const protocolDistributionData = useMemo(() => {
@@ -367,7 +367,7 @@ export default function Dashboard() {
     return metricsSnap.country_metrics
       .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
       .slice(0, 5)
-      .map((m) => ({ group: m.country, requests: m.bytes_in + m.bytes_out }));
+      .map((m) => ({ group: m.country, name: m.country_name, requests: m.bytes_in + m.bytes_out }));
   }, [metricsSnap]);
 
   const totalRequests = agg?.total_requests ?? 0;

@@ -188,6 +188,11 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			if sw.Status >= 400 {
 				status = "error"
 			}
+			country := request.GetCountry(r)
+			if sw.Country != "" {
+				country = sw.Country
+			}
+
 			telemetry.RecordTrace(
 				request.GetID(r),
 				method+" "+origPath,
@@ -197,6 +202,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				status,
 				origHost+origPath,
 				clientIP,
+				country,
 			)
 
 			statusStr := getStatusString(sw.Status)
@@ -210,10 +216,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
 
 			// Country-based metrics
-			country := request.GetCountry(r)
-			if sw.Country != "" {
-				country = sw.Country
-			}
 			telemetry.RequestsByCountryTotal.WithLabelValues(country).Inc()
 			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "in").Add(float64(reqInSize + 256))
 			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "out").Add(float64(respOutSize + 200))

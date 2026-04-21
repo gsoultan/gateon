@@ -73,6 +73,7 @@ export type IPMetric = {
 
 export type CountryMetric = {
   country: string;
+  country_name?: string;
   requests: number;
   bytes_in: number;
   bytes_out: number;

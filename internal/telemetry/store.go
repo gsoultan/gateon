@@ -42,6 +42,7 @@ type TraceRecord struct {
 	Status        string
 	Path          string
 	SourceIP      string
+	CountryCode   string
 }
 
 type pathStatsStore struct {
@@ -183,7 +184,7 @@ func (s *pathStatsStore) loop() {
 				stmt, err := s.traceInsertStmt(tx)
 				if err == nil {
 					for _, tr := range traceBatch {
-						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP); err != nil {
+						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.CountryCode); err != nil {
 							logger.Default().Error().Err(err).Msg("traces: insert failed")
 						}
 					}
@@ -313,7 +314,7 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP string) {
+func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, countryCode string) {
 	if store == nil {
 		return
 	}
@@ -327,6 +328,7 @@ func recordTraceToStore(id, operationName, serviceName string, durationMs float6
 		Status:        status,
 		Path:          path,
 		SourceIP:      sourceIP,
+		CountryCode:   countryCode,
 	}:
 	default:
 		// drop on backpressure
@@ -344,7 +346,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip FROM traces ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code FROM traces ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("traces: query failed")
@@ -354,7 +356,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	res := make([]TraceRecord, 0, min(limit, 100))
 	for rows.Next() {
 		var tr TraceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP); err != nil {
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode); err != nil {
 			logger.Default().Error().Err(err).Msg("traces: scan failed")
 			continue
 		}

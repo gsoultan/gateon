@@ -198,4 +198,55 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(11, "add_country_code_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS country_code VARCHAR(5) NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS country_code VARCHAR(5) NOT NULL DEFAULT '';`
+		default:
+			query = `ALTER TABLE traces ADD COLUMN country_code TEXT NOT NULL DEFAULT '';`
+		}
+
+		if _, err := db.Exec(query); err != nil {
+			if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
+
+	Register(12, "add_lockout_to_users", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0;`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP NULL;`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0;`,
+				`ALTER TABLE users ADD COLUMN locked_until TIMESTAMP;`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }
