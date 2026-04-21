@@ -29,6 +29,15 @@ message GlobalConfig {
   EbpfConfig ebpf = 10;
   AIConfig ai = 11;
   ManagementConfig management = 12;
+  GeoIPConfig geoip = 13;
+}
+
+message GeoIPConfig {
+  bool enabled = 1;
+  string db_path = 2;
+  string maxmind_license_key = 3;
+  bool auto_update = 4;
+  int32 update_interval_days = 5;
 }
 
 // ManagementConfig holds the configuration for the Gateon management server.
@@ -103,6 +112,7 @@ message AnomalyDetectionConfig {
   string prometheus_url = 2;
   int32 check_interval_seconds = 3;
   double sensitivity = 4;
+  double security_threat_threshold = 5;
 }
 
 message EbpfConfig {

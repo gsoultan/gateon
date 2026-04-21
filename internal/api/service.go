@@ -151,6 +151,10 @@ func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesReq
 			Status:        t.Status,
 			Path:          t.Path,
 			SourceIp:      t.SourceIP,
+			UserAgent:     t.UserAgent,
+			Method:        t.Method,
+			Referer:       t.Referer,
+			RequestUri:    t.RequestURI,
 		})
 	}
 	return &gateonv1.ListTracesResponse{Traces: res}, nil
@@ -676,8 +680,15 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		}
 	}
 
+	var securityThreshold float64
+	if s.Globals != nil {
+		if globalCfg := s.Globals.Get(ctx); globalCfg != nil && globalCfg.AnomalyDetection != nil {
+			securityThreshold = globalCfg.AnomalyDetection.SecurityThreatThreshold
+		}
+	}
+
 	traces := telemetry.GetTraces(ctx, 1000)
-	engine := NewAnomalyAnalysisEngine()
+	engine := NewAnomalyAnalysisEngine(securityThreshold)
 	anomalies := engine.Analyze(ctx, &DiagnosticData{
 		Traces:          traces,
 		Routes:          routes,
@@ -690,9 +701,12 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	sysStats := telemetry.GetSystemStats()
 	uptime := time.Since(telemetry.GetStartTime()).Round(time.Second).String()
 
+	// Dependency Health Checks
+	cfReachable, cfLatency := isCloudflareReachable()
+
 	systemInfo := &gateonv1.SystemInfo{
 		PublicIp:            getPublicIP(),
-		CloudflareReachable: isCloudflareReachable(),
+		CloudflareReachable: cfReachable,
 		Uptime:              uptime,
 		Goroutines:          int64(runtime.NumGoroutine()),
 		MemoryUsage:         fmt.Sprintf("%.2f MB", float64(m.Alloc)/1024/1024),
@@ -700,9 +714,12 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		Version:             s.Version,
 	}
 
-	// Dependency Health Checks
 	deps := []*gateonv1.DependencyHealth{
-		{Name: "Internet (Cloudflare)", Healthy: systemInfo.CloudflareReachable},
+		{
+			Name:      "Internet (Cloudflare)",
+			Healthy:   cfReachable,
+			LatencyMs: cfLatency.String(),
+		},
 	}
 
 	// Database Check (Ping telemetry store)
@@ -710,12 +727,12 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	if err := telemetry.PingStore(); err != nil {
 		deps = append(deps, &gateonv1.DependencyHealth{
 			Name: "Database", Healthy: false, Error: err.Error(),
-			LatencyMs: fmt.Sprintf("%dms", time.Since(dbStart).Milliseconds()),
+			LatencyMs: time.Since(dbStart).String(),
 		})
 	} else {
 		deps = append(deps, &gateonv1.DependencyHealth{
 			Name: "Database", Healthy: true,
-			LatencyMs: fmt.Sprintf("%dms", time.Since(dbStart).Milliseconds()),
+			LatencyMs: time.Since(dbStart).String(),
 		})
 	}
 
@@ -750,7 +767,7 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 	}
 
 	switch req.AnomalyType {
-	case "high_traffic", "brute_force_attempt", "security_scan":
+	case "high_traffic", "brute_force_attempt", "security_scan", "security_threat":
 		// Action: Block IP by creating a middleware and adding it to all routes
 		if req.Source == "" {
 			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Source IP is required to block"}, nil
@@ -891,13 +908,14 @@ func getPublicIP() string {
 	return string(ip)
 }
 
-func isCloudflareReachable() bool {
+func isCloudflareReachable() (bool, time.Duration) {
+	start := time.Now()
 	conn, err := net.DialTimeout("tcp", "1.1.1.1:53", 2*time.Second)
 	if err != nil {
-		return false
+		return false, 0
 	}
-	conn.Close()
-	return true
+	defer conn.Close()
+	return true, time.Since(start)
 }
 
 func (s *ApiService) TraceRoute(ctx context.Context, req *gateonv1.TraceRouteRequest) (*gateonv1.TraceRouteResponse, error) {

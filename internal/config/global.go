@@ -38,6 +38,11 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 				Port:       "8080",
 				AllowedIps: []string{"0.0.0.0/0", "::/0"},
 			},
+			Geoip: &gateonv1.GeoIPConfig{
+				Enabled:            true,
+				AutoUpdate:         true,
+				UpdateIntervalDays: 30,
+			},
 		},
 		path: path,
 	}
@@ -93,24 +98,34 @@ func (r *GlobalRegistry) saveLocked() error {
 }
 
 func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
-	if c == nil || c.Auth == nil {
+	if c == nil {
 		return
 	}
-	c.Auth.PasetoSecret = ResolveSecret(c.Auth.PasetoSecret)
-	c.Auth.DatabaseUrl = ResolveSecret(c.Auth.DatabaseUrl)
-	if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
-		c.Auth.DatabaseConfig.Password = ResolveSecret(c.Auth.DatabaseConfig.Password)
+	if c.Auth != nil {
+		c.Auth.PasetoSecret = ResolveSecret(c.Auth.PasetoSecret)
+		c.Auth.DatabaseUrl = ResolveSecret(c.Auth.DatabaseUrl)
+		if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
+			c.Auth.DatabaseConfig.Password = ResolveSecret(c.Auth.DatabaseConfig.Password)
+		}
+	}
+	if c.Geoip != nil {
+		c.Geoip.MaxmindLicenseKey = ResolveSecret(c.Geoip.MaxmindLicenseKey)
 	}
 }
 
 func encryptSensitiveFields(c *gateonv1.GlobalConfig) {
-	if c == nil || c.Auth == nil {
+	if c == nil {
 		return
 	}
-	c.Auth.PasetoSecret = EncryptIfKeySet(c.Auth.PasetoSecret)
-	c.Auth.DatabaseUrl = EncryptIfKeySet(c.Auth.DatabaseUrl)
-	if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
-		c.Auth.DatabaseConfig.Password = EncryptIfKeySet(c.Auth.DatabaseConfig.Password)
+	if c.Auth != nil {
+		c.Auth.PasetoSecret = EncryptIfKeySet(c.Auth.PasetoSecret)
+		c.Auth.DatabaseUrl = EncryptIfKeySet(c.Auth.DatabaseUrl)
+		if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
+			c.Auth.DatabaseConfig.Password = EncryptIfKeySet(c.Auth.DatabaseConfig.Password)
+		}
+	}
+	if c.Geoip != nil {
+		c.Geoip.MaxmindLicenseKey = EncryptIfKeySet(c.Geoip.MaxmindLicenseKey)
 	}
 }
 

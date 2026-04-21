@@ -197,9 +197,13 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				float64(duration.Nanoseconds())/1e6,
 				start,
 				status,
-				origHost+origPath,
+				origPath,
 				clientIP,
 				country,
+				r.UserAgent(),
+				method,
+				r.Referer(),
+				origHost+r.URL.RequestURI(),
 			)
 
 			statusStr := getStatusString(sw.Status)

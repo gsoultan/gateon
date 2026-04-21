@@ -9,10 +9,12 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
-func registerGeoIPHandlers(mux *http.ServeMux) {
+func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStore) {
 	mux.HandleFunc("POST /v1/geoip/upload", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
 			return
@@ -61,5 +63,46 @@ func registerGeoIPHandlers(mux *http.ServeMux) {
 
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": destPath})
 		logger.L.Info().Str("path", destPath).Msg("geoip database uploaded")
+
+		// Reload the database
+		if err := telemetry.InitGeoIP(destPath); err != nil {
+			logger.L.Error().Err(err).Msg("failed to reload GeoIP database after upload")
+		}
+	})
+
+	mux.HandleFunc("GET /v1/geoip/status", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceMiddlewares) {
+			return
+		}
+
+		exists, path, info := telemetry.GetGeoIPStatus()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"exists": exists,
+			"path":   path,
+			"info":   info,
+		})
+	})
+
+	mux.HandleFunc("POST /v1/geoip/update", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
+			return
+		}
+
+		gc := globalReg.Get(r.Context())
+		if gc == nil || gc.Geoip == nil || gc.Geoip.MaxmindLicenseKey == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("maxmind license key not configured in global settings"))
+			return
+		}
+
+		err := telemetry.DownloadGeoIP(gc.Geoip.MaxmindLicenseKey)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(err.Error()))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("geoip database updated successfully"))
 	})
 }

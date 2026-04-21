@@ -10,6 +10,9 @@ export interface Trace {
   status: string;
   path: string;
   source_ip: string;
+  user_agent?: string;
+  method?: string;
+  referer?: string;
 }
 
 export function useTraces(limit: number = 100) {

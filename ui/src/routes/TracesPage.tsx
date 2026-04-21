@@ -17,6 +17,13 @@ import {
   Select,
   Button,
   Pagination,
+  CopyButton,
+  HoverCard,
+  UnstyledButton,
+  Skeleton,
+  Center,
+  Modal,
+  Grid,
 } from "@mantine/core";
 import {
   IconSearch,
@@ -25,13 +32,40 @@ import {
   IconTimeline,
   IconCircleCheck,
   IconCircleX,
+  IconCopy,
+  IconCheck,
+  IconClock,
+  IconFingerprint,
+  IconRoute,
+  IconArrowRight,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 import { useState, useMemo, useTransition } from "react";
 
 import { useTraces } from "../hooks/useGateon";
+import type { Trace } from "../hooks/useGateon";
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 
 const PAGE_SIZE = 20;
+
+const getStatusColor = (status: string) => {
+  const code = parseInt(status);
+  if (isNaN(code)) {
+    return status === "success" ? "green" : "red";
+  }
+  if (code >= 200 && code < 300) return "green";
+  if (code >= 300 && code < 400) return "blue";
+  if (code >= 400 && code < 500) return "orange";
+  if (code >= 500) return "red";
+  return "gray";
+};
+
+const getDurationColor = (duration: number) => {
+  if (duration < 50) return "teal";
+  if (duration < 200) return "blue";
+  if (duration < 500) return "orange";
+  return "red";
+};
 
 export default function TracesPage() {
   const { data: traces = [], isLoading, refetch } = useTraces();
@@ -43,11 +77,18 @@ export default function TracesPage() {
 
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
   const [visualizerOpened, setVisualizerOpened] = useState(false);
+  const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
+  const [detailsOpened, setDetailsOpened] = useState(false);
 
   const openVisualizer = (ip: string) => {
     if (!ip || ip === "-" || ip === "127.0.0.1") return;
     setSelectedIp(ip);
     setVisualizerOpened(true);
+  };
+
+  const openDetails = (trace: Trace) => {
+    setSelectedTrace(trace);
+    setDetailsOpened(true);
   };
 
   const routeOptions = useMemo(
@@ -97,23 +138,35 @@ export default function TracesPage() {
     <Stack gap="lg">
       <Group justify="space-between">
         <Stack gap={0}>
-          <Title order={2}>Distributed Tracing</Title>
+          <Group gap="sm" align="center">
+            <Title order={2}>Distributed Tracing</Title>
+            {traces.length > 0 && (
+              <Badge variant="light" size="lg" radius="sm">
+                {traces.length} Total
+              </Badge>
+            )}
+          </Group>
           <Text c="dimmed">
             Monitor and visualize end-to-end request flows across your
             microservices.
           </Text>
         </Stack>
         <Group>
-          <Button
-            leftSection={<IconRefresh size={16} />}
-            variant="light"
-            loading={isLoading}
-            onClick={() => refetch()}
-          >
-            Refresh
-          </Button>
+          <Stack gap={0} align="flex-end">
+            <Button
+              leftSection={<IconRefresh size={16} />}
+              variant="light"
+              loading={isLoading}
+              onClick={() => refetch()}
+            >
+              Refresh
+            </Button>
+            <Text size="xs" c="dimmed" mt={4}>
+              Auto-refreshes every 5s
+            </Text>
+          </Stack>
           <Tooltip label="Open in Jaeger">
-            <ActionIcon variant="light" color="blue" size="lg">
+            <ActionIcon variant="light" color="blue" size="lg" component="a" href="#" onClick={(e) => e.preventDefault()}>
               <IconExternalLink size={20} />
             </ActionIcon>
           </Tooltip>
@@ -164,75 +217,149 @@ export default function TracesPage() {
           </Group>
 
           <ScrollArea>
-            <Table highlightOnHover verticalSpacing="sm" style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}>
+            <Table 
+              highlightOnHover 
+              verticalSpacing="sm" 
+              striped
+              style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}
+            >
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
+                  <Table.Th><Group gap={4}><IconFingerprint size={14} /> ID</Group></Table.Th>
+                  <Table.Th>Method</Table.Th>
                   <Table.Th>Operation</Table.Th>
                   <Table.Th>Service</Table.Th>
-                  <Table.Th>Source IP</Table.Th>
+                  <Table.Th><Group gap={4}><IconRoute size={14} /> Source IP</Group></Table.Th>
                   <Table.Th>Path</Table.Th>
-                  <Table.Th>Duration</Table.Th>
+                  <Table.Th><Group gap={4}><IconClock size={14} /> Duration</Group></Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Timestamp</Table.Th>
+                  <Table.Th>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {paginatedTraces.map((trace) => (
+                {isLoading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <Table.Tr key={i}>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                    </Table.Tr>
+                  ))
+                ) : (
+                  paginatedTraces.map((trace) => (
                   <Table.Tr key={trace.id}>
                     <Table.Td>
-                      <Code color="blue.1" c="blue.8">
-                        {trace.id}
-                      </Code>
+                      <Group gap="xs" wrap="nowrap">
+                        <Tooltip label={trace.id} withArrow>
+                          <Code color="blue.1" c="blue.8">
+                            {trace.id.substring(0, 8)}...
+                          </Code>
+                        </Tooltip>
+                        <CopyButton value={trace.id} timeout={2000}>
+                          {({ copied, copy }) => (
+                            <ActionIcon variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copy} size="sm">
+                              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                            </ActionIcon>
+                          )}
+                        </CopyButton>
+                      </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Text fw={500}>{trace.operation_name}</Text>
+                      <Badge variant="outline" color="blue" size="xs">
+                        {trace.method || "-"}
+                      </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Badge variant="light">{trace.service_name}</Badge>
+                      <Text fw={600} size="sm">{trace.operation_name}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge variant="dot" color="blue" size="sm">{trace.service_name}</Badge>
                     </Table.Td>
                     <Table.Td>
                       <Tooltip label={trace.source_ip && trace.source_ip !== "-" ? "Click to visualize IP route" : ""}>
-                        <Text 
-                          size="sm" 
-                          ff="monospace" 
-                          style={{ 
-                            cursor: trace.source_ip && trace.source_ip !== "-" ? "pointer" : "default",
-                            color: trace.source_ip && trace.source_ip !== "-" ? "var(--mantine-color-blue-6)" : "inherit"
-                          }}
+                        <UnstyledButton 
                           onClick={() => openVisualizer(trace.source_ip)}
+                          disabled={!trace.source_ip || trace.source_ip === "-"}
                         >
-                          {trace.source_ip || "-"}
+                          <Text 
+                            size="sm" 
+                            ff="monospace" 
+                            c={trace.source_ip && trace.source_ip !== "-" ? "blue.6" : "inherit"}
+                            style={{ 
+                              textDecoration: trace.source_ip && trace.source_ip !== "-" ? "underline" : "none",
+                              textUnderlineOffset: '2px',
+                              textDecorationStyle: 'dotted'
+                            }}
+                          >
+                            {trace.source_ip || "-"}
+                          </Text>
+                        </UnstyledButton>
+                      </Tooltip>
+                    </Table.Td>
+                    <Table.Td>
+                      <Tooltip label={trace.request_uri || trace.path} multiline maw={400} withArrow>
+                        <Text size="xs" c="dimmed" truncate="end" maw={200}>
+                          {trace.path}
                         </Text>
                       </Tooltip>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm" c="dimmed">
-                        {trace.path}
-                      </Text>
+                      <Badge 
+                        variant="light" 
+                        color={getDurationColor(trace.duration_ms)}
+                        radius="sm"
+                      >
+                        {trace.duration_ms < 1
+                          ? trace.duration_ms.toFixed(3)
+                          : trace.duration_ms.toFixed(2)}
+                        ms
+                      </Badge>
                     </Table.Td>
                     <Table.Td>
-                      {trace.duration_ms < 1
-                        ? trace.duration_ms.toFixed(3)
-                        : trace.duration_ms.toFixed(2)}
-                      ms
+                      <Badge 
+                        variant="filled" 
+                        color={getStatusColor(trace.status)}
+                        leftSection={
+                          trace.status === "success" || (parseInt(trace.status) >= 200 && parseInt(trace.status) < 400) ? (
+                            <IconCircleCheck size={14} />
+                          ) : (
+                            <IconCircleX size={14} />
+                          )
+                        }
+                      >
+                        {trace.status}
+                      </Badge>
                     </Table.Td>
                     <Table.Td>
-                      {trace.status === "success" ? (
-                        <IconCircleCheck color="green" size={20} />
-                      ) : (
-                        <IconCircleX color="red" size={20} />
-                      )}
+                      <Tooltip label={new Date(trace.timestamp).toLocaleString()}>
+                        <Text size="xs" c="dimmed">
+                          {new Date(trace.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </Text>
+                      </Tooltip>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="xs">{new Date(trace.timestamp).toLocaleString()}</Text>
+                      <ActionIcon variant="subtle" onClick={() => openDetails(trace)} title="View details">
+                        <IconInfoCircle size={16} />
+                      </ActionIcon>
                     </Table.Td>
                   </Table.Tr>
-                ))}
+                )))}
                 {filteredTraces.length === 0 && !isLoading && (
                   <Table.Tr>
-                    <Table.Td colSpan={8} style={{ textAlign: "center" }}>
-                      <Text c="dimmed">No traces found.</Text>
+                    <Table.Td colSpan={10}>
+                      <Center py="xl">
+                        <Stack align="center" gap="xs">
+                          <IconSearch size={40} stroke={1.5} color="var(--mantine-color-dimmed)" />
+                          <Text fw={500} c="dimmed">No traces found</Text>
+                          <Text size="xs" c="dimmed">Try adjusting your search or filters</Text>
+                        </Stack>
+                      </Center>
                     </Table.Td>
                   </Table.Tr>
                 )}
@@ -260,29 +387,52 @@ export default function TracesPage() {
             For full visualization of spans and child relationships, we recommend
             integrating with a dedicated store like Jaeger or Honeycomb.
           </Text>
-          <Box mt="md">
+          <Box mt="md" w="100%">
              <Divider label="Visualization Preview" labelPosition="center" mb="xl" />
-             <Stack gap="xs" style={{ minWidth: 600 }}>
-                <Paper withBorder p="xs" style={{ backgroundColor: "rgba(0,0,0,0.02)" }}>
-                   <Group gap="xs">
-                      <Badge size="xs" color="blue">GATEWAY</Badge>
-                      <div style={{ flex: 1, height: 8, backgroundColor: "#339af0", borderRadius: 4 }} />
-                      <Text size="xs">42ms</Text>
+             <Stack gap="xs" style={{ maxWidth: 800, margin: '0 auto' }}>
+                <Paper withBorder p="sm" radius="md" style={{ backgroundColor: "var(--mantine-color-gray-0)", borderLeft: '4px solid var(--mantine-color-blue-6)' }}>
+                   <Group justify="space-between">
+                      <Group gap="xs">
+                        <Badge size="sm" color="blue" variant="filled">GATEWAY</Badge>
+                        <Text size="sm" fw={500}>ingress-request</Text>
+                      </Group>
+                      <Text size="xs" fw={700} c="blue">42.4ms</Text>
                    </Group>
+                   <Box mt="xs" style={{ height: 6, backgroundColor: "var(--mantine-color-gray-2)", borderRadius: 3, overflow: 'hidden' }}>
+                      <Box style={{ width: '100%', height: '100%', backgroundColor: "var(--mantine-color-blue-6)" }} />
+                   </Box>
                 </Paper>
-                <Paper withBorder p="xs" ml={40} style={{ backgroundColor: "rgba(0,0,0,0.02)" }}>
-                   <Group gap="xs">
-                      <Badge size="xs" color="violet">AUTH-MW</Badge>
-                      <div style={{ flex: 0.2, height: 8, backgroundColor: "#7950f2", borderRadius: 4 }} />
-                      <Text size="xs">8ms</Text>
+
+                <Paper withBorder p="sm" radius="md" ml={40} style={{ backgroundColor: "var(--mantine-color-gray-0)", borderLeft: '4px solid var(--mantine-color-violet-6)' }}>
+                   <Group justify="space-between">
+                      <Group gap="xs">
+                        <Badge size="sm" color="violet" variant="filled">AUTH-MW</Badge>
+                        <Text size="sm" fw={500}>validate-token</Text>
+                      </Group>
+                      <Text size="xs" fw={700} c="violet">8.2ms</Text>
                    </Group>
+                   <Box mt="xs" style={{ height: 6, backgroundColor: "var(--mantine-color-gray-2)", borderRadius: 3, overflow: 'hidden' }}>
+                      <Group justify="flex-start" h="100%" gap={0}>
+                        <Box style={{ width: '10%', height: '100%' }} />
+                        <Box style={{ width: '20%', height: '100%', backgroundColor: "var(--mantine-color-violet-6)" }} />
+                      </Group>
+                   </Box>
                 </Paper>
-                <Paper withBorder p="xs" ml={80} style={{ backgroundColor: "rgba(0,0,0,0.02)" }}>
-                   <Group gap="xs">
-                      <Badge size="xs" color="teal">USER-SVC</Badge>
-                      <div style={{ flex: 0.6, height: 8, backgroundColor: "#0ca678", borderRadius: 4 }} />
-                      <Text size="xs">25ms</Text>
+
+                <Paper withBorder p="sm" radius="md" ml={80} style={{ backgroundColor: "var(--mantine-color-gray-0)", borderLeft: '4px solid var(--mantine-color-teal-6)' }}>
+                   <Group justify="space-between">
+                      <Group gap="xs">
+                        <Badge size="sm" color="teal" variant="filled">USER-SVC</Badge>
+                        <Text size="sm" fw={500}>fetch-profile</Text>
+                      </Group>
+                      <Text size="xs" fw={700} c="teal">25.1ms</Text>
                    </Group>
+                   <Box mt="xs" style={{ height: 6, backgroundColor: "var(--mantine-color-gray-2)", borderRadius: 3, overflow: 'hidden' }}>
+                      <Group justify="flex-start" h="100%" gap={0}>
+                        <Box style={{ width: '35%', height: '100%' }} />
+                        <Box style={{ width: '60%', height: '100%', backgroundColor: "var(--mantine-color-teal-6)" }} />
+                      </Group>
+                   </Box>
                 </Paper>
              </Stack>
           </Box>
@@ -293,6 +443,91 @@ export default function TracesPage() {
         onClose={() => setVisualizerOpened(false)} 
         targetIp={selectedIp || ""} 
       />
+
+      <Modal
+        opened={detailsOpened}
+        onClose={() => setDetailsOpened(false)}
+        title={<Text fw={700}>Trace Details</Text>}
+        size="lg"
+      >
+        {selectedTrace && (
+          <Stack gap="md">
+            <Paper withBorder p="sm" bg="gray.0">
+              <Group justify="space-between">
+                <Text size="sm" fw={700} c="dimmed">TRACE ID</Text>
+                <Code color="blue.1" c="blue.8">{selectedTrace.id}</Code>
+              </Group>
+            </Paper>
+
+            <Grid columns={2}>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">METHOD</Text>
+                  <Badge variant="filled" color="blue">{selectedTrace.method || "N/A"}</Badge>
+                </Stack>
+              </Grid.Col>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">STATUS</Text>
+                  <Badge 
+                    variant="filled" 
+                    color={getStatusColor(selectedTrace.status)}
+                  >
+                    {selectedTrace.status}
+                  </Badge>
+                </Stack>
+              </Grid.Col>
+            </Grid>
+
+            <Stack gap={4}>
+              <Text size="xs" fw={700} c="dimmed">REQUEST URI</Text>
+              <Paper withBorder p="xs" bg="gray.0">
+                <Text size="sm" style={{ wordBreak: 'break-all' }}>
+                  {selectedTrace.request_uri || selectedTrace.path}
+                </Text>
+              </Paper>
+            </Stack>
+
+            <Divider />
+
+            <Grid columns={2}>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">SOURCE IP</Text>
+                  <Text size="sm" ff="monospace">{selectedTrace.source_ip || "-"}</Text>
+                </Stack>
+              </Grid.Col>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">DURATION</Text>
+                  <Text size="sm">{selectedTrace.duration_ms.toFixed(3)} ms</Text>
+                </Stack>
+              </Grid.Col>
+            </Grid>
+
+            <Divider />
+
+            <Stack gap={4}>
+              <Text size="xs" fw={700} c="dimmed">USER AGENT</Text>
+              <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                {selectedTrace.user_agent || "N/A"}
+              </Text>
+            </Stack>
+
+            <Stack gap={4}>
+              <Text size="xs" fw={700} c="dimmed">REFERER</Text>
+              <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                {selectedTrace.referer || "N/A"}
+              </Text>
+            </Stack>
+
+            <Stack gap={4}>
+              <Text size="xs" fw={700} c="dimmed">TIMESTAMP</Text>
+              <Text size="sm">{new Date(selectedTrace.timestamp).toLocaleString()}</Text>
+            </Stack>
+          </Stack>
+        )}
+      </Modal>
     </Stack>
   );
 }
