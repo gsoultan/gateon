@@ -522,6 +522,7 @@ export default function Dashboard() {
               ) : chart.data.length > 0 ? (
                 <BarChart
                   h={180}
+                  minWidth={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -574,6 +575,7 @@ export default function Dashboard() {
               ) : chart.data.length > 0 ? (
                 <BarChart
                   h={180}
+                  minWidth={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -757,6 +759,7 @@ export default function Dashboard() {
         ) : hourlyTrafficData.length > 0 ? (
           <BarChart
             h={240}
+            minWidth={0}
             data={hourlyTrafficData}
             dataKey="hour"
             withLegend={false}
@@ -805,6 +808,7 @@ export default function Dashboard() {
           {hourlyBandwidthData.length > 0 ? (
             <LineChart
               h={260}
+              minWidth={0}
               data={hourlyBandwidthData}
               dataKey="hour"
               withLegend
