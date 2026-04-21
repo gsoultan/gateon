@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,63 +56,62 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 		var sb strings.Builder
 		sb.WriteString(engineDirective)
 		fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
-Include @owasp_crs/crs-setup.conf
+Include @crs-setup.conf.example
 `, pl)
 
 		// Basic enforcement and common rules
-		sb.WriteString("Include @owasp_crs/rules/REQUEST-901-INITIALIZATION.conf\n")
-		sb.WriteString("Include @owasp_crs/rules/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
+		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
+		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
 
 		if !cfg.DisableProtocol {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf\n")
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-921-PROTOCOL-ATTACK.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-920-PROTOCOL-ENFORCEMENT.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-921-PROTOCOL-ATTACK.conf\n")
 		}
 		if !cfg.DisableScanner {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-913-SCANNER-DETECTION.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-913-SCANNER-DETECTION.conf\n")
 		}
 		if !cfg.DisableLFI {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf\n")
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-931-APPLICATION-ATTACK-RFI.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-930-APPLICATION-ATTACK-LFI.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-931-APPLICATION-ATTACK-RFI.conf\n")
 		}
 		if !cfg.DisableRCE {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-932-APPLICATION-ATTACK-RCE.conf\n")
 		}
 		if !cfg.DisablePHP {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-933-APPLICATION-ATTACK-PHP.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-933-APPLICATION-ATTACK-PHP.conf\n")
 		}
 		if !cfg.DisableXSS {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-941-APPLICATION-ATTACK-XSS.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-941-APPLICATION-ATTACK-XSS.conf\n")
 		}
 		if !cfg.DisableSQLI {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-942-APPLICATION-ATTACK-SQLI.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-942-APPLICATION-ATTACK-SQLI.conf\n")
 		}
-		sb.WriteString("Include @owasp_crs/rules/REQUEST-943-APPLICATION-ATTACK-SESSION-FIXATION.conf\n")
+		sb.WriteString("Include @owasp_crs/REQUEST-943-APPLICATION-ATTACK-SESSION-FIXATION.conf\n")
 		if !cfg.DisableJava {
-			sb.WriteString("Include @owasp_crs/rules/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
 		}
 
 		// Blocking evaluation
-		sb.WriteString("Include @owasp_crs/rules/REQUEST-949-BLOCKING-EVALUATION.conf\n")
+		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
 
 		// Response rules
 		if !cfg.DisableSQLI {
-			sb.WriteString("Include @owasp_crs/rules/RESPONSE-950-DATA-LEAKAGES-SQL.conf\n")
+			sb.WriteString("Include @owasp_crs/RESPONSE-951-DATA-LEAKAGES-SQL.conf\n")
 		}
 		if !cfg.DisableJava {
-			sb.WriteString("Include @owasp_crs/rules/RESPONSE-951-DATA-LEAKAGES-JAVA.conf\n")
+			sb.WriteString("Include @owasp_crs/RESPONSE-952-DATA-LEAKAGES-JAVA.conf\n")
 		}
 		if !cfg.DisablePHP {
-			sb.WriteString("Include @owasp_crs/rules/RESPONSE-952-DATA-LEAKAGES-PHP.conf\n")
+			sb.WriteString("Include @owasp_crs/RESPONSE-953-DATA-LEAKAGES-PHP.conf\n")
 		}
-		sb.WriteString("Include @owasp_crs/rules/RESPONSE-953-DATA-LEAKAGES-IIS.conf\n")
-		sb.WriteString("Include @owasp_crs/rules/RESPONSE-954-DATA-LEAKAGES-ASP.conf\n")
-		sb.WriteString("Include @owasp_crs/rules/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
-		sb.WriteString("Include @owasp_crs/rules/RESPONSE-980-CORRELATION.conf\n")
+		sb.WriteString("Include @owasp_crs/RESPONSE-954-DATA-LEAKAGES-IIS.conf\n")
+		sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
+		sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
 
 		wafConfig = wafConfig.
-			WithDirectives(sb.String()).
-			WithRootFS(coreruleset.FS)
+			WithRootFS(fsWrapper{coreruleset.FS}).
+			WithDirectives(sb.String())
 	}
 
 	if cfg.GlobalDirectives != "" {
@@ -157,6 +157,16 @@ Include @owasp_crs/crs-setup.conf
 			wafHandler.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+// fsWrapper wraps an fs.FS to convert backslashes to forward slashes,
+// which is required for embed.FS to work correctly on Windows.
+type fsWrapper struct {
+	fs.FS
+}
+
+func (f fsWrapper) Open(name string) (fs.File, error) {
+	return f.FS.Open(strings.ReplaceAll(name, "\\", "/"))
 }
 
 // parseWAFConfig parses middleware config map into WAFConfig.

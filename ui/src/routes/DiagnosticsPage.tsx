@@ -19,6 +19,7 @@ import {
   useMantineTheme,
   Accordion,
   ThemeIcon,
+  Code,
 } from "@mantine/core";
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
 import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
