@@ -1,6 +1,7 @@
 import {
   Stack,
   TextInput,
+  Textarea,
   Switch,
   NumberInput,
   Group,
@@ -107,12 +108,14 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       )}
 
       <Divider label="Advanced" labelPosition="center" />
-      <TextInput
-        label="Custom Directives File"
-        description="Optional path to custom SecLang rules (advanced)"
-        placeholder="/etc/gateon/waf.conf"
-        value={config.directives_file || ""}
-        onChange={(e) => updateConfig("directives_file", e.currentTarget.value)}
+      <Textarea
+        label="Custom Directives"
+        description="Coraza/ModSecurity compatible SecLang rules (advanced)"
+        placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
+        value={config.directives || ""}
+        onChange={(e) => updateConfig("directives", e.currentTarget.value)}
+        minRows={4}
+        autosize
       />
       <Switch
         label="Trust Cloudflare Headers"

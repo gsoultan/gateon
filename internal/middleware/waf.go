@@ -23,6 +23,7 @@ type WAFConfig struct {
 	TrustCloudflare  bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
 	AuditOnly        bool   // If true, log matches but do not block (SecRuleEngine DetectionOnly)
 	GlobalDirectives string // Combined global rules from GlobalConfig
+	Directives       string // Custom SecLang directives (replaces DirectivesFile)
 
 	// Specific CRS protections (only used if UseCRS is true)
 	DisableSQLI     bool
@@ -118,10 +119,14 @@ Include @crs-setup.conf.example
 		wafConfig = wafConfig.WithDirectives(cfg.GlobalDirectives)
 	}
 
+	if cfg.Directives != "" {
+		wafConfig = wafConfig.WithDirectives(cfg.Directives)
+	}
+
 	if cfg.DirectivesFile != "" {
 		wafConfig = wafConfig.WithDirectivesFromFile(cfg.DirectivesFile)
-	} else if !cfg.UseCRS {
-		// Minimal pass-through when neither CRS nor custom file
+	} else if !cfg.UseCRS && cfg.Directives == "" {
+		// Minimal pass-through when neither CRS nor custom directives
 		wafConfig = wafConfig.WithDirectives(`SecRuleEngine Off`)
 	}
 
@@ -195,6 +200,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 	return WAFConfig{
 		UseCRS:          useCRS,
 		ParanoiaLevel:   pl,
+		Directives:      strings.TrimSpace(cfg["directives"]),
 		DirectivesFile:  strings.TrimSpace(cfg["directives_file"]),
 		TrustCloudflare: request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
 		AuditOnly:       auditOnly,
