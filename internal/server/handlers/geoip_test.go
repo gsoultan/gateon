@@ -14,7 +14,21 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/middleware"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
+
+type mockGlobalStore struct{}
+
+func (m *mockGlobalStore) Get(ctx context.Context) *gateonv1.GlobalConfig {
+	return &gateonv1.GlobalConfig{
+		Geoip: &gateonv1.GeoIPConfig{
+			Enabled:           true,
+			MaxmindLicenseKey: "test-key",
+		},
+	}
+}
+func (m *mockGlobalStore) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error { return nil }
+func (m *mockGlobalStore) ConfigFileExists() bool                                        { return true }
 
 func TestGeoIPUploadSuccess(t *testing.T) {
 	oldWD, err := os.Getwd()
@@ -30,7 +44,7 @@ func TestGeoIPUploadSuccess(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	registerGeoIPHandlers(mux)
+	registerGeoIPHandlers(mux, &mockGlobalStore{})
 
 	req := newGeoIPUploadRequest(t, "GeoLite2-Country.mmdb", []byte("mmdb-content"), nil)
 	rr := httptest.NewRecorder()
@@ -67,7 +81,7 @@ func TestGeoIPUploadSuccess(t *testing.T) {
 
 func TestGeoIPUploadRejectsInvalidExtension(t *testing.T) {
 	mux := http.NewServeMux()
-	registerGeoIPHandlers(mux)
+	registerGeoIPHandlers(mux, &mockGlobalStore{})
 
 	req := newGeoIPUploadRequest(t, "not-mmdb.txt", []byte("ignored"), nil)
 	rr := httptest.NewRecorder()
@@ -84,7 +98,7 @@ func TestGeoIPUploadRejectsInvalidExtension(t *testing.T) {
 
 func TestGeoIPUploadRequiresWritePermission(t *testing.T) {
 	mux := http.NewServeMux()
-	registerGeoIPHandlers(mux)
+	registerGeoIPHandlers(mux, &mockGlobalStore{})
 
 	claims := &auth.Claims{ID: "viewer-1", Username: "viewer", Role: auth.RoleViewer}
 	req := newGeoIPUploadRequest(t, "GeoLite2-Country.mmdb", []byte("ignored"), claims)

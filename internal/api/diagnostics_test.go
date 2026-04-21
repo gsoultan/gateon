@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,7 +128,7 @@ func TestGetDiagnostics_ServiceDown(t *testing.T) {
 }
 
 func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
-	engine := NewAnomalyAnalysisEngine()
+	engine := NewAnomalyAnalysisEngine(30.0)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -165,8 +166,8 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 		})
 	}
 
-	// High traffic from 10.10.10.10 (101 requests)
-	for i := 0; i < 101; i++ {
+	// High traffic from 10.10.10.10 (201 requests)
+	for i := 0; i < 201; i++ {
 		traces = append(traces, telemetry.TraceRecord{
 			SourceIP: "10.10.10.10", Status: "200 OK", Timestamp: now, Path: "/", DurationMs: 10,
 		})
@@ -200,7 +201,7 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 				foundSlowClient = true
 				assert.NotEmpty(t, a.Recommendation)
 			}
-		case "high_traffic":
+		case "high_traffic", "security_threat":
 			if a.Source == "10.10.10.10" {
 				foundHighTraffic = true
 				assert.NotEmpty(t, a.Recommendation)
@@ -212,6 +213,72 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 	assert.True(t, foundScanner, "Should detect scanner")
 	assert.True(t, foundSlowClient, "Should detect slow client")
 	assert.True(t, foundHighTraffic, "Should detect high traffic")
+}
+
+func TestSecurityThreatDetector_Advanced(t *testing.T) {
+	ctx := context.Background()
+	engine := NewAnomalyAnalysisEngine(30.0)
+	now := time.Now()
+
+	traces := []telemetry.TraceRecord{}
+
+	// 1. Burst from IP 1.1.1.1 (40 requests in same 10s slot)
+	for i := 0; i < 40; i++ {
+		traces = append(traces, telemetry.TraceRecord{
+			SourceIP: "1.1.1.1", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET",
+		})
+	}
+
+	// 2. Suspicious Referer from IP 2.2.2.2
+	traces = append(traces, telemetry.TraceRecord{
+		SourceIP: "2.2.2.2", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET", Referer: "http://evil.com/exploit",
+	})
+
+	// 3. Coordinated Scan from 3.3.3.3 and 4.4.4.4 on same suspicious path
+	traces = append(traces, telemetry.TraceRecord{
+		SourceIP: "3.3.3.3", Status: "404 Not Found", Timestamp: now, Path: "/.env", Method: "GET",
+	})
+	traces = append(traces, telemetry.TraceRecord{
+		SourceIP: "4.4.4.4", Status: "404 Not Found", Timestamp: now, Path: "/.env", Method: "GET",
+	})
+
+	// 4. Unusual POST-only traffic from 5.5.5.5
+	for i := 0; i < 25; i++ {
+		traces = append(traces, telemetry.TraceRecord{
+			SourceIP: "5.5.5.5", Status: "200 OK", Timestamp: now, Path: "/api/submit", Method: "POST",
+		})
+	}
+
+	data := &DiagnosticData{
+		Traces: traces,
+	}
+
+	anomalies := engine.Analyze(ctx, data)
+
+	foundBurst := false
+	foundReferer := false
+	foundCoordinated := 0
+	foundPostOnly := false
+
+	for _, a := range anomalies {
+		if a.Source == "1.1.1.1" && strings.Contains(strings.ToLower(a.Description), "burst") {
+			foundBurst = true
+		}
+		if a.Source == "2.2.2.2" && strings.Contains(strings.ToLower(a.Description), "referer") {
+			foundReferer = true
+		}
+		if (a.Source == "3.3.3.3" || a.Source == "4.4.4.4") && strings.Contains(strings.ToLower(a.Description), "coordinated") {
+			foundCoordinated++
+		}
+		if a.Source == "5.5.5.5" && strings.Contains(strings.ToLower(a.Description), "post-only") {
+			foundPostOnly = true
+		}
+	}
+
+	assert.True(t, foundBurst, "Should detect burst from 1.1.1.1")
+	assert.True(t, foundReferer, "Should detect suspicious referer from 2.2.2.2")
+	assert.GreaterOrEqual(t, foundCoordinated, 2, "Should detect coordinated scan from 3.3.3.3 and 4.4.4.4")
+	assert.True(t, foundPostOnly, "Should detect POST-only traffic from 5.5.5.5")
 }
 
 func TestApplyRecommendation(t *testing.T) {
@@ -286,7 +353,7 @@ func TestApplyRecommendation(t *testing.T) {
 }
 
 func TestShadowedRouteDetection(t *testing.T) {
-	engine := NewAnomalyAnalysisEngine()
+	engine := NewAnomalyAnalysisEngine(30.0)
 	ctx := context.Background()
 
 	data := &DiagnosticData{

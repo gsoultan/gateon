@@ -249,4 +249,75 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(13, "add_user_agent_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '';`
+		default:
+			query = `ALTER TABLE traces ADD COLUMN user_agent TEXT NOT NULL DEFAULT '';`
+		}
+
+		if _, err := db.Exec(query); err != nil {
+			if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
+
+	Register(14, "add_method_referer_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS referer TEXT NOT NULL DEFAULT '';`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS referer TEXT NOT NULL DEFAULT '';`,
+			}
+		default:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN method TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE traces ADD COLUMN referer TEXT NOT NULL DEFAULT '';`,
+			}
+		}
+
+		for _, query := range queries {
+			if _, err := db.Exec(query); err != nil {
+				if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
+
+	Register(15, "add_request_uri_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`
+		default:
+			query = `ALTER TABLE traces ADD COLUMN request_uri TEXT NOT NULL DEFAULT '';`
+		}
+
+		if _, err := db.Exec(query); err != nil {
+			if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 }

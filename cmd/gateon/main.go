@@ -24,6 +24,7 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/tui"
 	"github.com/gsoultan/gateon/internal/ui"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
@@ -83,7 +84,10 @@ func main() {
 		}()
 	}
 
-	initTelemetry(globalReg)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	initTelemetry(globalReg, ctx)
 
 	if gc := globalReg.Get(context.Background()); gc != nil {
 		if gc.Ha != nil && gc.Ha.Enabled {
@@ -124,9 +128,6 @@ func main() {
 		logger.L.Info().Str("addr", redisAddr).Msg("redis client initialized")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 		startK8sController(ctx, s)
 	}
@@ -158,18 +159,28 @@ func initConfigRegistries() (*config.GlobalRegistry, string) {
 	return config.NewGlobalRegistry(globalFile), globalFile
 }
 
-func initTelemetry(globalReg *config.GlobalRegistry) {
+func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 	// Initialize global GeoIP for background resolution
-	if err := telemetry.InitGeoIP(""); err == nil {
+	dbPath := ""
+	if gc := globalReg.Get(ctx); gc != nil && gc.Geoip != nil {
+		dbPath = gc.Geoip.DbPath
+	}
+
+	if err := telemetry.InitGeoIP(dbPath); err == nil {
 		request.RegisterCountryResolver(&telemetry.GeoIPResolver{})
 	} else {
 		logger.L.Warn().Err(err).Msg("failed to initialize GeoIP background resolver")
 	}
 
+	// Start GeoIP worker
+	go telemetry.StartGeoIPWorker(ctx, func() *gateonv1.GlobalConfig {
+		return globalReg.Get(ctx)
+	})
+
 	if !globalReg.ConfigFileExists() {
 		return
 	}
-	if gc := globalReg.Get(context.Background()); gc != nil {
+	if gc := globalReg.Get(ctx); gc != nil {
 		databaseURL := db.AuthDatabaseURL(gc.Auth)
 		retention := 7
 		if gc.Log != nil && gc.Log.PathStatsRetentionDays > 0 {

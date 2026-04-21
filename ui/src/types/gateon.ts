@@ -316,6 +316,7 @@ export type AnomalyDetectionConfig = {
   prometheus_url?: string;
   check_interval_seconds?: number;
   sensitivity?: number;
+  security_threat_threshold?: number;
 };
 
 export type EbpfConfig = {
@@ -323,6 +324,14 @@ export type EbpfConfig = {
   xdp_rate_limit?: boolean;
   tc_filtering?: boolean;
 };
+
+export interface GeoIPConfig {
+  enabled?: boolean;
+  db_path?: string;
+  maxmind_license_key?: string;
+  auto_update?: boolean;
+  update_interval_days?: number;
+}
 
 export type GlobalConfig = {
   tls?: TlsConfig;
@@ -336,6 +345,7 @@ export type GlobalConfig = {
   anomaly_detection?: AnomalyDetectionConfig;
   ebpf?: EbpfConfig;
   management?: ManagementConfig;
+  geoip?: GeoIPConfig;
 };
 
 export type ManagementConfig = {

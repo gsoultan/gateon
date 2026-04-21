@@ -39,6 +39,7 @@ import {
 } from "@tabler/icons-react";
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
 import { GeneralSettingsCard } from "../components/settings/GeneralSettingsCard";
+import { GeoIPSettingsCard } from "../components/settings/GeoIPSettingsCard";
 import { PresetsCard } from "../components/settings/PresetsCard";
 import { AppearanceCard } from "../components/settings/AppearanceCard";
 import { usePermissions } from "../hooks/usePermissions";
@@ -1517,6 +1518,16 @@ export default function SettingsPage() {
                   onChange={(v) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, sensitivity: Number(v)}})}
                   disabled={formDisabled}
                 />
+                <NumberInput
+                  label="Security Threat Threshold"
+                  decimalScale={1}
+                  step={1}
+                  min={1}
+                  max={100}
+                  value={config.anomaly_detection.security_threat_threshold || 15.0}
+                  onChange={(v) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, security_threat_threshold: Number(v)}})}
+                  disabled={formDisabled}
+                />
               </Group>
             </Stack>
           )}
@@ -1569,6 +1580,11 @@ export default function SettingsPage() {
           )}
         </Stack>
       </Card>
+      
+      <GeoIPSettingsCard
+        config={config.geoip || {}}
+        onChange={(geoip) => setConfig({ ...config, geoip })}
+      />
 
       <AppearanceCard colorScheme={colorScheme} setColorScheme={setColorScheme} />
     </Stack>

@@ -59,11 +59,11 @@ const (
 		WHERE day = ? AND hour = ?`
 
 	QueryInsertTraceMySQL = `
-	INSERT IGNORE INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
+	INSERT IGNORE INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	QueryInsertTraceConflict = `
-	INSERT INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING;`
 )
