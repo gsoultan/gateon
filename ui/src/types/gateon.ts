@@ -474,6 +474,9 @@ export type Anomaly = {
   timestamp: string;
   source: string;
   recommendation: string;
+  latitude?: number;
+  longitude?: number;
+  country_code?: string;
 };
 
 export type DependencyHealth = {

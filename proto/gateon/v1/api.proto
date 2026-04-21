@@ -46,6 +46,7 @@ service ApiService {
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc IsSetupRequired(IsSetupRequiredRequest) returns (IsSetupRequiredResponse);
   rpc Setup(SetupRequest) returns (SetupResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);

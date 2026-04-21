@@ -22,6 +22,9 @@ message Anomaly {
   string timestamp = 4;
   string source = 5;
   string recommendation = 6;
+  double latitude = 7;
+  double longitude = 8;
+  string country_code = 9;
 }
 
 message DependencyHealth {

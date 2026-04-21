@@ -3,6 +3,7 @@ import { getCountryFlag, formatBytes } from "../../utils/format";
 
 interface CountryMetric {
   group: string;
+  name?: string;
   requests: number;
 }
 
@@ -38,7 +39,10 @@ export function CountryTrafficTable({
         <Table.Td>
           <Group gap="xs">
             <Text size="lg">{getCountryFlag(m.group)}</Text>
-            <Text size="sm" fw={500}>{m.group}</Text>
+            <Box>
+              <Text size="sm" fw={500}>{m.name || m.group}</Text>
+              {m.name && <Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>{m.group}</Text>}
+            </Box>
           </Group>
         </Table.Td>
         <Table.Td>

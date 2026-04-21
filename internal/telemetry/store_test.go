@@ -26,8 +26,8 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 	traceID := "test-trace-1"
 
 	// Record the same trace twice
-	RecordTrace(traceID, "GET /test", "service-1", 10.5, time.Now(), "success", "example.com/test", "127.0.0.1")
-	RecordTrace(traceID, "GET /test", "service-1", 10.5, time.Now(), "success", "example.com/test", "127.0.0.1")
+	RecordTrace(traceID, "GET /test", "service-1", 10.5, time.Now(), "success", "example.com/test", "127.0.0.1", "US")
+	RecordTrace(traceID, "GET /test", "service-1", 10.5, time.Now(), "success", "example.com/test", "127.0.0.1", "US")
 
 	// Flush is triggered every 1s or when batch is full (1024)
 	time.Sleep(1500 * time.Millisecond)

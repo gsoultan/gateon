@@ -22,6 +22,12 @@ const (
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrAccountLocked      = errors.New("account locked due to multiple failed attempts; please try again later")
+)
+
+const (
+	MaxFailedAttempts = 5
+	LockoutDuration   = 15 * time.Minute
 )
 
 type Manager struct {
@@ -121,9 +127,12 @@ func (m *Manager) IsSetupDone() bool {
 func (m *Manager) Authenticate(username, password string) (string, *gateonv1.User, error) {
 	var user gateonv1.User
 	var hashed string
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+
 	q := m.dialect.Rebind(QueryUserByUsername)
 	err := m.db.QueryRow(q, username).
-		Scan(&user.Id, &user.Username, &hashed, &user.Role)
+		Scan(&user.Id, &user.Username, &hashed, &user.Role, &failedAttempts, &lockedUntil)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil, ErrInvalidCredentials
@@ -131,9 +140,16 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 		return "", nil, err
 	}
 
+	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
+		return "", nil, ErrAccountLocked
+	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)); err != nil {
+		m.handleFailedLogin(username, failedAttempts)
 		return "", nil, ErrInvalidCredentials
 	}
+
+	m.resetFailedAttempts(username)
 
 	now := time.Now()
 	exp := now.Add(24 * time.Hour)
@@ -265,6 +281,20 @@ func (m *Manager) DeleteUser(id string) error {
 
 func (m *Manager) UpdateSymmetricKey(key string) {
 	m.symmetricKey = []byte(key)
+}
+
+func (m *Manager) handleFailedLogin(username string, currentAttempts int) {
+	var lockedUntil any
+	if currentAttempts+1 >= MaxFailedAttempts {
+		lockedUntil = time.Now().Add(LockoutDuration)
+	}
+	q := m.dialect.Rebind(QueryIncrementFailedAttempts)
+	_, _ = m.db.Exec(q, lockedUntil, username)
+}
+
+func (m *Manager) resetFailedAttempts(username string) {
+	q := m.dialect.Rebind(QueryResetFailedAttempts)
+	_, _ = m.db.Exec(q, username)
 }
 
 func (m *Manager) Close() error {

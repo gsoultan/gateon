@@ -17,14 +17,17 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
+	"google.golang.org/grpc/status"
 )
 
 type ApiService struct {
@@ -498,12 +501,23 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	return &gateonv1.SetupResponse{Success: true}, nil
 }
 
-func (s *ApiService) ListUsers(_ context.Context, req *gateonv1.ListUsersRequest) (*gateonv1.ListUsersResponse, error) {
+func (s *ApiService) requireAdmin(ctx context.Context) error {
+	claims, _ := ctx.Value(middleware.UserContextKey).(*auth.Claims)
+	if claims == nil || claims.Role != auth.RoleAdmin {
+		return status.Error(codes.PermissionDenied, "admin role required")
+	}
+	return nil
+}
+
+func (s *ApiService) ListUsers(ctx context.Context, req *gateonv1.ListUsersRequest) (*gateonv1.ListUsersResponse, error) {
 	if req == nil {
 		return &gateonv1.ListUsersResponse{}, nil
 	}
 	if s.Auth == nil {
 		return &gateonv1.ListUsersResponse{}, nil
+	}
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
 	}
 	users, totalCount, err := s.Auth.ListUsers(req.Page, req.PageSize, req.Search)
 	if err != nil {
@@ -517,9 +531,12 @@ func (s *ApiService) ListUsers(_ context.Context, req *gateonv1.ListUsersRequest
 	}, nil
 }
 
-func (s *ApiService) UpdateUser(_ context.Context, req *gateonv1.UpdateUserRequest) (*gateonv1.UpdateUserResponse, error) {
+func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserRequest) (*gateonv1.UpdateUserResponse, error) {
 	if s.Auth == nil || req == nil || req.User == nil {
 		return &gateonv1.UpdateUserResponse{Success: false}, nil
+	}
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
 	}
 	if err := s.Auth.UpsertUser(req.User); err != nil {
 		return &gateonv1.UpdateUserResponse{Success: false}, err
@@ -527,9 +544,12 @@ func (s *ApiService) UpdateUser(_ context.Context, req *gateonv1.UpdateUserReque
 	return &gateonv1.UpdateUserResponse{Success: true}, nil
 }
 
-func (s *ApiService) DeleteUser(_ context.Context, req *gateonv1.DeleteUserRequest) (*gateonv1.DeleteUserResponse, error) {
+func (s *ApiService) DeleteUser(ctx context.Context, req *gateonv1.DeleteUserRequest) (*gateonv1.DeleteUserResponse, error) {
 	if s.Auth == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteUserResponse{Success: false}, nil
+	}
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
 	}
 	if err := s.Auth.DeleteUser(req.Id); err != nil {
 		return &gateonv1.DeleteUserResponse{Success: false}, err
@@ -880,10 +900,17 @@ func isCloudflareReachable() bool {
 	return true
 }
 
-func (s *ApiService) ChangePassword(_ context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {
+func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {
 	if s.Auth == nil || req == nil || req.Id == "" || req.Password == "" {
 		return &gateonv1.ChangePasswordResponse{Success: false}, nil
 	}
+
+	// Security: Verify user identity. Only Admins can change other users' passwords.
+	claims, _ := ctx.Value(middleware.UserContextKey).(*auth.Claims)
+	if claims != nil && claims.Role != auth.RoleAdmin && claims.ID != req.Id {
+		return nil, status.Error(codes.PermissionDenied, "cannot change password for another user")
+	}
+
 	if err := s.Auth.ChangePassword(req.Id, req.Password); err != nil {
 		return &gateonv1.ChangePasswordResponse{Success: false}, err
 	}
