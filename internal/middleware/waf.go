@@ -22,6 +22,16 @@ type WAFConfig struct {
 	TrustCloudflare  bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
 	AuditOnly        bool   // If true, log matches but do not block (SecRuleEngine DetectionOnly)
 	GlobalDirectives string // Combined global rules from GlobalConfig
+
+	// Specific CRS protections (only used if UseCRS is true)
+	DisableSQLI     bool
+	DisableXSS      bool
+	DisableLFI      bool
+	DisableRCE      bool
+	DisablePHP      bool
+	DisableScanner  bool
+	DisableProtocol bool
+	DisableJava     bool
 }
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
@@ -41,12 +51,66 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			engineDirective = `SecRuleEngine DetectionOnly
 `
 		}
-		directives := fmt.Sprintf(`%sSecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
+
+		var sb strings.Builder
+		sb.WriteString(engineDirective)
+		fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
 Include @owasp_crs/crs-setup.conf
-Include @owasp_crs/rules/*.conf
-`, engineDirective, pl)
+`, pl)
+
+		// Basic enforcement and common rules
+		sb.WriteString("Include @owasp_crs/rules/REQUEST-901-INITIALIZATION.conf\n")
+		sb.WriteString("Include @owasp_crs/rules/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
+
+		if !cfg.DisableProtocol {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-920-PROTOCOL-ENFORCEMENT.conf\n")
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-921-PROTOCOL-ATTACK.conf\n")
+		}
+		if !cfg.DisableScanner {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-913-SCANNER-DETECTION.conf\n")
+		}
+		if !cfg.DisableLFI {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf\n")
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-931-APPLICATION-ATTACK-RFI.conf\n")
+		}
+		if !cfg.DisableRCE {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf\n")
+		}
+		if !cfg.DisablePHP {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-933-APPLICATION-ATTACK-PHP.conf\n")
+		}
+		if !cfg.DisableXSS {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-941-APPLICATION-ATTACK-XSS.conf\n")
+		}
+		if !cfg.DisableSQLI {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-942-APPLICATION-ATTACK-SQLI.conf\n")
+		}
+		sb.WriteString("Include @owasp_crs/rules/REQUEST-943-APPLICATION-ATTACK-SESSION-FIXATION.conf\n")
+		if !cfg.DisableJava {
+			sb.WriteString("Include @owasp_crs/rules/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
+		}
+
+		// Blocking evaluation
+		sb.WriteString("Include @owasp_crs/rules/REQUEST-949-BLOCKING-EVALUATION.conf\n")
+
+		// Response rules
+		if !cfg.DisableSQLI {
+			sb.WriteString("Include @owasp_crs/rules/RESPONSE-950-DATA-LEAKAGES-SQL.conf\n")
+		}
+		if !cfg.DisableJava {
+			sb.WriteString("Include @owasp_crs/rules/RESPONSE-951-DATA-LEAKAGES-JAVA.conf\n")
+		}
+		if !cfg.DisablePHP {
+			sb.WriteString("Include @owasp_crs/rules/RESPONSE-952-DATA-LEAKAGES-PHP.conf\n")
+		}
+		sb.WriteString("Include @owasp_crs/rules/RESPONSE-953-DATA-LEAKAGES-IIS.conf\n")
+		sb.WriteString("Include @owasp_crs/rules/RESPONSE-954-DATA-LEAKAGES-ASP.conf\n")
+		sb.WriteString("Include @owasp_crs/rules/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
+		sb.WriteString("Include @owasp_crs/rules/RESPONSE-980-CORRELATION.conf\n")
+
 		wafConfig = wafConfig.
-			WithDirectives(directives).
+			WithDirectives(sb.String()).
 			WithRootFS(coreruleset.FS)
 	}
 
@@ -109,11 +173,28 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 	}
 	auditOnly := strings.TrimSpace(strings.ToLower(cfg["audit_only"])) == "true" ||
 		strings.TrimSpace(strings.ToLower(cfg["audit_only"])) == "1"
+
+	isFalse := func(key string) bool {
+		v, ok := cfg[key]
+		if !ok {
+			return false
+		}
+		return strings.TrimSpace(strings.ToLower(v)) == "false"
+	}
+
 	return WAFConfig{
 		UseCRS:          useCRS,
 		ParanoiaLevel:   pl,
 		DirectivesFile:  strings.TrimSpace(cfg["directives_file"]),
 		TrustCloudflare: request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
 		AuditOnly:       auditOnly,
+		DisableSQLI:     isFalse("sqli"),
+		DisableXSS:      isFalse("xss"),
+		DisableLFI:      isFalse("lfi"),
+		DisableRCE:      isFalse("rce"),
+		DisablePHP:      isFalse("php"),
+		DisableScanner:  isFalse("scanner"),
+		DisableProtocol: isFalse("protocol"),
+		DisableJava:     isFalse("java"),
 	}
 }

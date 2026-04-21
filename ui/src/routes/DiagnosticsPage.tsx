@@ -23,6 +23,7 @@ import {
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
 import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
 import AnomalyMap from "../components/Diagnostics/AnomalyMap";
+import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 import {
   IconActivity,
   IconAlertTriangle,
@@ -162,7 +163,7 @@ const RouteTrace: React.FC<{ route: RouteDiagnostic }> = ({ route }) => {
   );
 };
 
-const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: boolean }> = ({ anomaly, onApply, applying }) => {
+const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: boolean; onTrace: (ip: string) => void }> = ({ anomaly, onApply, applying, onTrace }) => {
   const getSeverityColor = (sev: string) => {
     switch (sev.toLowerCase()) {
       case "critical": return "red";
@@ -194,12 +195,23 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
               <Text size="xs" c="dimmed">{new Date(anomaly.timestamp).toLocaleString()}</Text>
             </Stack>
           </Group>
-          <Badge color={getSeverityColor(anomaly.severity)} variant="filled" size="xs">
-            {anomaly.severity}
-          </Badge>
+          <Group gap="xs">
+            <Tooltip label="Trace IP Route">
+              <ActionIcon variant="light" color="blue" size="sm" onClick={() => onTrace(anomaly.source)}>
+                <IconGlobe size={14} />
+              </ActionIcon>
+            </Tooltip>
+            <Badge color={getSeverityColor(anomaly.severity)} variant="filled" size="xs">
+              {anomaly.severity}
+            </Badge>
+          </Group>
         </Group>
 
         <Text size="sm" fw={500}>{anomaly.description}</Text>
+        <Group gap={4}>
+          <Text size="xs" c="dimmed">Source:</Text>
+          <Code color="blue.0" c="blue.8" style={{ cursor: 'pointer' }} onClick={() => onTrace(anomaly.source)}>{anomaly.source}</Code>
+        </Group>
 
         <Alert variant="light" color="indigo" radius="md" p="sm" icon={<IconRobot size={18} />}>
           <Stack gap="xs">
@@ -229,6 +241,15 @@ const DiagnosticsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [selectedIp, setSelectedIp] = useState<string | null>(null);
+  const [visualizerOpened, setVisualizerOpened] = useState(false);
+
+  const openVisualizer = (ip: string) => {
+    if (!ip || ip === "-" || ip === "127.0.0.1") return;
+    setSelectedIp(ip);
+    setVisualizerOpened(true);
+  };
   const theme = useMantineTheme();
 
   const fetchData = async () => {
@@ -374,7 +395,7 @@ const DiagnosticsPage: React.FC = () => {
               <Badge variant="dot" color="indigo" size="lg">Autonomous Protection</Badge>
             </Group>
             
-            <AnomalyMap anomalies={data?.anomalies || []} />
+            <AnomalyMap anomalies={data?.anomalies || []} onTrace={openVisualizer} />
 
             <Text size="sm" c="dimmed">
               Real-time heuristic analysis of traffic patterns and security events. 
@@ -389,6 +410,7 @@ const DiagnosticsPage: React.FC = () => {
                     anomaly={a} 
                     onApply={() => handleApplyRecommendation(a)}
                     applying={applying === `${a.type}-${a.source}`}
+                    onTrace={openVisualizer}
                   />
                 ))}
               </SimpleGrid>
@@ -533,6 +555,11 @@ const DiagnosticsPage: React.FC = () => {
           </Card>
         </SimpleGrid>
       </Stack>
+      <TraceVisualizer 
+        opened={visualizerOpened} 
+        onClose={() => setVisualizerOpened(false)} 
+        targetIp={selectedIp || ""} 
+      />
     </Box>
   );
 };

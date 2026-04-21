@@ -900,6 +900,22 @@ func isCloudflareReachable() bool {
 	return true
 }
 
+func (s *ApiService) TraceRoute(ctx context.Context, req *gateonv1.TraceRouteRequest) (*gateonv1.TraceRouteResponse, error) {
+	if req.Ip == "" {
+		return nil, status.Error(codes.InvalidArgument, "IP address is required")
+	}
+
+	serverIP := getPublicIP()
+	hops, err := telemetry.TraceRoute(ctx, req.Ip, serverIP)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to perform traceroute: %v", err)
+	}
+
+	return &gateonv1.TraceRouteResponse{
+		Hops: hops,
+	}, nil
+}
+
 func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {
 	if s.Auth == nil || req == nil || req.Id == "" || req.Password == "" {
 		return &gateonv1.ChangePasswordResponse{Success: false}, nil

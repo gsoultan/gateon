@@ -291,6 +291,14 @@ export type WafConfig = {
   use_crs: boolean;
   paranoia_level: number;
   custom_directives?: string;
+  sqli?: boolean;
+  xss?: boolean;
+  lfi?: boolean;
+  rce?: boolean;
+  php?: boolean;
+  scanner?: boolean;
+  protocol?: boolean;
+  java?: boolean;
 };
 
 export type HaConfig = {
@@ -497,4 +505,18 @@ export type GetDiagnosticsResponse = {
 export type GetCloudflareIPsResponse = {
   ipv4_cidrs: string[];
   ipv6_cidrs: string[];
+};
+
+export type TraceHop = {
+  hop: number;
+  ip: string;
+  latitude: number;
+  longitude: number;
+  country_code: string;
+  city: string;
+  rtt_ms: number;
+};
+
+export type TraceRouteResponse = {
+  hops: TraceHop[];
 };

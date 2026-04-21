@@ -22,6 +22,9 @@ interface EditorProps {
 }
 
 export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
+  const isEnabled = (key: string) => config[key] !== "false";
+  const toggle = (key: string, val: boolean) => updateConfig(key, val ? "true" : "false");
+
   return (
     <Stack gap="md">
       <Switch
@@ -32,14 +35,78 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
           updateConfig("use_crs", e.currentTarget.checked ? "true" : "false")
         }
       />
-      <NumberInput
-        label="Paranoia Level"
-        description="CRS paranoia 1-4. Higher = stricter, more false positives. Default: 1"
-        value={parseInt(config.paranoia_level) || 1}
-        onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
-        min={1}
-        max={4}
-      />
+
+      {config.use_crs !== "false" && (
+        <>
+          <Divider label="Protection Categories" labelPosition="center" />
+          <Group grow>
+            <Stack gap="xs">
+              <Switch
+                label="SQL Injection"
+                description="Detects common SQL injection attacks"
+                checked={isEnabled("sqli")}
+                onChange={(e) => toggle("sqli", e.currentTarget.checked)}
+              />
+              <Switch
+                label="Cross-Site Scripting (XSS)"
+                description="Detects XSS injection attempts"
+                checked={isEnabled("xss")}
+                onChange={(e) => toggle("xss", e.currentTarget.checked)}
+              />
+              <Switch
+                label="Local/Remote File Inclusion"
+                description="Detects LFI/RFI attacks"
+                checked={isEnabled("lfi")}
+                onChange={(e) => toggle("lfi", e.currentTarget.checked)}
+              />
+              <Switch
+                label="Remote Code Execution"
+                description="Detects RCE and shell commands"
+                checked={isEnabled("rce")}
+                onChange={(e) => toggle("rce", e.currentTarget.checked)}
+              />
+            </Stack>
+            <Stack gap="xs">
+              <Switch
+                label="Scanner Detection"
+                description="Blocks known vulnerability scanners"
+                checked={isEnabled("scanner")}
+                onChange={(e) => toggle("scanner", e.currentTarget.checked)}
+              />
+              <Switch
+                label="Protocol Enforcement"
+                description="Enforces strict HTTP protocol compliance"
+                checked={isEnabled("protocol")}
+                onChange={(e) => toggle("protocol", e.currentTarget.checked)}
+              />
+              <Switch
+                label="PHP Injection"
+                description="Detects PHP-specific injection attacks"
+                checked={isEnabled("php")}
+                onChange={(e) => toggle("php", e.currentTarget.checked)}
+              />
+              <Switch
+                label="Java Injection"
+                description="Detects Java-specific injection attacks"
+                checked={isEnabled("java")}
+                onChange={(e) => toggle("java", e.currentTarget.checked)}
+              />
+            </Stack>
+          </Group>
+
+          <Divider label="CRS Settings" labelPosition="center" />
+          <NumberInput
+            label="Paranoia Level"
+            description="CRS paranoia 1-4. Higher = stricter, more false positives. Default: 1"
+            value={parseInt(config.paranoia_level) || 1}
+            onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
+            min={1}
+            max={4}
+          />
+        </>
+      )}
+
+      <Divider label="Advanced" labelPosition="center" />
       <TextInput
         label="Custom Directives File"
         description="Optional path to custom SecLang rules (advanced)"

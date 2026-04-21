@@ -6,6 +6,7 @@ import type {
   DatabaseConfig,
   GetDiagnosticsResponse,
   GetCloudflareIPsResponse,
+  TraceRouteResponse,
 } from "../types/gateon";
 
 export type PaginationParams = {
@@ -131,6 +132,16 @@ export async function applyRecommendation(anomalyType: string, source: string): 
 
 export async function getCloudflareIPs(): Promise<GetCloudflareIPsResponse> {
   const res = await apiFetch("/v1/cloudflare-ips");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function traceRoute(ip: string): Promise<TraceRouteResponse> {
+  const res = await apiFetch("/v1/diagnostics/traceroute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ip }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

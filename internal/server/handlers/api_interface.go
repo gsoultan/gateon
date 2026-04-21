@@ -23,5 +23,6 @@ type GlobalAndAuthAPI interface {
 	ChangePassword(ctx context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error)
 	GetDiagnostics(ctx context.Context, req *gateonv1.GetDiagnosticsRequest) (*gateonv1.GetDiagnosticsResponse, error)
 	ApplyRecommendation(ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error)
+	TraceRoute(ctx context.Context, req *gateonv1.TraceRouteRequest) (*gateonv1.TraceRouteResponse, error)
 	GetCloudflareIPs(ctx context.Context, req *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error)
 }

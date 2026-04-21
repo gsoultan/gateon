@@ -29,6 +29,7 @@ import {
 import { useState, useMemo, useTransition } from "react";
 
 import { useTraces } from "../hooks/useGateon";
+import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 
 const PAGE_SIZE = 20;
 
@@ -39,6 +40,15 @@ export default function TracesPage() {
   const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [isPending, startTransition] = useTransition();
+
+  const [selectedIp, setSelectedIp] = useState<string | null>(null);
+  const [visualizerOpened, setVisualizerOpened] = useState(false);
+
+  const openVisualizer = (ip: string) => {
+    if (!ip || ip === "-" || ip === "127.0.0.1") return;
+    setSelectedIp(ip);
+    setVisualizerOpened(true);
+  };
 
   const routeOptions = useMemo(
     () =>
@@ -70,6 +80,7 @@ export default function TracesPage() {
         t.id.toLowerCase().includes(lower) ||
         t.operation_name.toLowerCase().includes(lower) ||
         t.service_name.toLowerCase().includes(lower) ||
+        t.source_ip.toLowerCase().includes(lower) ||
         t.path.toLowerCase().includes(lower) ||
         t.status.toLowerCase().includes(lower)
       );
@@ -159,6 +170,7 @@ export default function TracesPage() {
                   <Table.Th>ID</Table.Th>
                   <Table.Th>Operation</Table.Th>
                   <Table.Th>Service</Table.Th>
+                  <Table.Th>Source IP</Table.Th>
                   <Table.Th>Path</Table.Th>
                   <Table.Th>Duration</Table.Th>
                   <Table.Th>Status</Table.Th>
@@ -178,6 +190,21 @@ export default function TracesPage() {
                     </Table.Td>
                     <Table.Td>
                       <Badge variant="light">{trace.service_name}</Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Tooltip label={trace.source_ip && trace.source_ip !== "-" ? "Click to visualize IP route" : ""}>
+                        <Text 
+                          size="sm" 
+                          ff="monospace" 
+                          style={{ 
+                            cursor: trace.source_ip && trace.source_ip !== "-" ? "pointer" : "default",
+                            color: trace.source_ip && trace.source_ip !== "-" ? "var(--mantine-color-blue-6)" : "inherit"
+                          }}
+                          onClick={() => openVisualizer(trace.source_ip)}
+                        >
+                          {trace.source_ip || "-"}
+                        </Text>
+                      </Tooltip>
                     </Table.Td>
                     <Table.Td>
                       <Text size="sm" c="dimmed">
@@ -204,7 +231,7 @@ export default function TracesPage() {
                 ))}
                 {filteredTraces.length === 0 && !isLoading && (
                   <Table.Tr>
-                    <Table.Td colSpan={7} style={{ textAlign: "center" }}>
+                    <Table.Td colSpan={8} style={{ textAlign: "center" }}>
                       <Text c="dimmed">No traces found.</Text>
                     </Table.Td>
                   </Table.Tr>
@@ -261,6 +288,11 @@ export default function TracesPage() {
           </Box>
         </Stack>
       </Paper>
+      <TraceVisualizer 
+        opened={visualizerOpened} 
+        onClose={() => setVisualizerOpened(false)} 
+        targetIp={selectedIp || ""} 
+      />
     </Stack>
   );
 }

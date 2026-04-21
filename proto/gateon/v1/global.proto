@@ -77,6 +77,15 @@ message WafConfig {
   bool use_crs = 2;
   int32 paranoia_level = 3;
   string custom_directives = 4;
+  // Protection categories
+  bool sqli = 5;
+  bool xss = 6;
+  bool lfi = 7;
+  bool rce = 8;
+  bool php = 9;
+  bool scanner = 10;
+  bool protocol = 11;
+  bool java = 12;
 }
 
 message HaConfig {

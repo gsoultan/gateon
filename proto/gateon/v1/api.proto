@@ -53,4 +53,5 @@ service ApiService {
 
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
   rpc ApplyRecommendation(ApplyRecommendationRequest) returns (ApplyRecommendationResponse);
+  rpc TraceRoute(TraceRouteRequest) returns (TraceRouteResponse);
 }

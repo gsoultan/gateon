@@ -1306,6 +1306,67 @@ export default function SettingsPage() {
                   disabled={formDisabled || !config.waf.use_crs}
                 />
               </Group>
+
+              {config.waf.use_crs && (
+                <>
+                  <Divider label="Global Protection Categories" labelPosition="center" />
+                  <Group grow>
+                    <Stack gap="xs">
+                      <Switch
+                        label="SQL Injection"
+                        checked={config.waf.sqli !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, sqli: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="Cross-Site Scripting"
+                        checked={config.waf.xss !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, xss: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="File Inclusion"
+                        checked={config.waf.lfi !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, lfi: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="Code Execution"
+                        checked={config.waf.rce !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, rce: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                    </Stack>
+                    <Stack gap="xs">
+                      <Switch
+                        label="Scanner Detection"
+                        checked={config.waf.scanner !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, scanner: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="Protocol Enforcement"
+                        checked={config.waf.protocol !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, protocol: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="PHP Protection"
+                        checked={config.waf.php !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, php: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="Java Protection"
+                        checked={config.waf.java !== false}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, java: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                    </Stack>
+                  </Group>
+                </>
+              )}
+
               <TextInput
                 label="Custom Global Directives"
                 description="Coraza/ModSecurity compatible directives applied globally."
