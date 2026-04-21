@@ -184,10 +184,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// IP-based metrics
 			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
 
-			status := "success"
-			if sw.Status >= 400 {
-				status = "error"
-			}
+			status := strconv.Itoa(sw.Status)
 			country := request.GetCountry(r)
 			if sw.Country != "" {
 				country = sw.Country

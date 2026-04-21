@@ -44,6 +44,24 @@ message ApplyRecommendationResponse {
   string message = 2;
 }
 
+message TraceRouteRequest {
+  string ip = 1;
+}
+
+message TraceRouteResponse {
+  repeated TraceHop hops = 1;
+}
+
+message TraceHop {
+  int32 hop = 1;
+  string ip = 2;
+  double latitude = 3;
+  double longitude = 4;
+  string country_code = 5;
+  string city = 6;
+  int64 rtt_ms = 7;
+}
+
 message EntryPointDiagnostic {
   string id = 1;
   string address = 2;

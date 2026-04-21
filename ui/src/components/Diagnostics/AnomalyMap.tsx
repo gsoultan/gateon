@@ -5,6 +5,7 @@ import type { Anomaly } from "../../types/gateon";
 
 interface AnomalyMapProps {
   anomalies: Anomaly[];
+  onTrace?: (ip: string) => void;
 }
 
 const getSeverityColor = (sev: string) => {
@@ -23,11 +24,16 @@ const getIcon = (type: string) => {
   return <IconActivity size={14} />;
 };
 
-const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies }) => {
+const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies, onTrace }) => {
   const [hovered, setHovered] = useState<number | null>(null);
 
   // Filter anomalies that have geo coordinates
-  const geoAnomalies = anomalies.filter(a => a.latitude !== undefined && a.longitude !== undefined && a.latitude !== 0);
+  const geoAnomalies = anomalies.filter(a => 
+    a.latitude !== undefined && 
+    a.longitude !== undefined && 
+    a.country_code && 
+    a.country_code !== "XX"
+  );
 
   // Equirectangular projection
   // x: -180 to 180 -> 0% to 100%
@@ -44,16 +50,25 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies }) => {
       <Box style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0.2, pointerEvents: "none" }}>
         <svg width="100%" height="100%" viewBox="0 0 360 180" preserveAspectRatio="xMidYMid slice">
           <pattern id="dotPattern" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
-             <circle cx="1" cy="1" r="0.5" fill="#94a3b8" />
+             <circle cx="1" cy="1" r="0.8" fill="#334155" />
           </pattern>
-          <rect width="100%" height="100%" fill="url(#dotPattern)" />
-          {/* Simple world outline - very approximate */}
-          <path 
-            d="M30,50 L50,40 L70,45 L90,30 L120,35 L150,30 L180,35 L210,30 L240,40 L270,35 L300,45 L330,60 L320,100 L280,140 L240,150 L200,140 L160,150 L120,140 L80,150 L40,120 Z" 
-            fill="none" 
-            stroke="#1e293b" 
-            strokeWidth="1" 
-          />
+          {/* Detailed World Map Paths */}
+          <g fill="url(#dotPattern)" stroke="#1e293b" strokeWidth="0.2">
+            {/* North America */}
+            <path d="M50,30 L70,25 L100,30 L115,50 L100,80 L80,85 L50,80 L40,50 Z" />
+            {/* South America */}
+            <path d="M90,90 L110,95 L115,120 L100,155 L80,165 L70,140 L80,110 Z" />
+            {/* Europe */}
+            <path d="M160,25 L190,20 L210,30 L205,55 L170,60 L155,45 Z" />
+            {/* Africa */}
+            <path d="M155,65 L200,60 L230,85 L220,130 L195,160 L165,150 L145,110 L150,80 Z" />
+            {/* Asia */}
+            <path d="M210,25 L280,20 L330,30 L350,70 L330,105 L280,115 L225,100 L215,60 Z" />
+            {/* Australia */}
+            <path d="M300,120 L340,125 L345,150 L310,160 L290,145 Z" />
+            {/* Greenland */}
+            <path d="M120,10 L150,15 L140,30 L115,25 Z" />
+          </g>
         </svg>
       </Box>
 
@@ -80,6 +95,7 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies }) => {
                     <Badge color={color} size="xs">{a.severity}</Badge>
                     <Text size="10px" c="dimmed">{a.country_code} - {a.source}</Text>
                   </Group>
+                  <Text size="10px" c="blue" fw={700} ta="center" mt={4}>Click to trace IP route</Text>
                 </Stack>
               }
               opened={isHovered || undefined}
@@ -95,6 +111,7 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies }) => {
                 }}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered(null)}
+                onClick={() => onTrace?.(a.source)}
               >
                 {/* Ping Animation */}
                 <Box

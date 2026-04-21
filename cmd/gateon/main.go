@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/k8s"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/tui"
@@ -158,6 +159,13 @@ func initConfigRegistries() (*config.GlobalRegistry, string) {
 }
 
 func initTelemetry(globalReg *config.GlobalRegistry) {
+	// Initialize global GeoIP for background resolution
+	if err := telemetry.InitGeoIP(""); err == nil {
+		request.RegisterCountryResolver(&telemetry.GeoIPResolver{})
+	} else {
+		logger.L.Warn().Err(err).Msg("failed to initialize GeoIP background resolver")
+	}
+
 	if !globalReg.ConfigFileExists() {
 		return
 	}

@@ -9,6 +9,7 @@ export interface Trace {
   timestamp: string;
   status: string;
   path: string;
+  source_ip: string;
 }
 
 export function useTraces(limit: number = 100) {

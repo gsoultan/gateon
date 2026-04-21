@@ -55,7 +55,7 @@ func (d *HackerAttackDetector) Detect(ctx context.Context, data *DiagnosticData)
 	var anomalies []*gateonv1.Anomaly
 
 	for ip, stats := range data.IPStats {
-		if stats.TotalRequests > 100 { // Increased threshold for real-world
+		if stats.TotalRequests > 50 { // Lowered threshold for better visibility
 			anomaly := &gateonv1.Anomaly{
 				Type:           "high_traffic",
 				Severity:       "medium",
@@ -146,7 +146,7 @@ type BruteForceDetector struct{}
 func (d *BruteForceDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	for ip, stats := range data.IPStats {
-		if stats.Error401+stats.Error403 > 10 {
+		if stats.Error401+stats.Error403 > 5 {
 			anomaly := &gateonv1.Anomaly{
 				Type:           "brute_force_attempt",
 				Severity:       "high",
@@ -168,7 +168,7 @@ type ScannerDetector struct{}
 func (d *ScannerDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	for ip, stats := range data.IPStats {
-		if stats.Error404 > 20 {
+		if stats.Error404 > 10 {
 			anomaly := &gateonv1.Anomaly{
 				Type:           "security_scan",
 				Severity:       "medium",
