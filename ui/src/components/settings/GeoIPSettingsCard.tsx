@@ -16,6 +16,7 @@ import { IconDatabase, IconDownload, IconAlertCircle, IconCheck } from "@tabler/
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import type { GeoIPConfig } from "../../types/gateon";
+import { apiFetch } from "../../hooks/useGateon";
 
 interface GeoIPStatus {
   exists: boolean;
@@ -36,7 +37,7 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const resp = await fetch("/v1/geoip/status");
+      const resp = await apiFetch("/v1/geoip/status");
       if (resp.ok) {
         const data = await resp.json();
         setStatus(data);
@@ -55,7 +56,15 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
   const handleUpdate = async () => {
     try {
       setUpdating(true);
-      const resp = await fetch("/v1/geoip/update", { method: "POST" });
+      const resp = await apiFetch("/v1/geoip/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          maxmind_license_key: config.maxmind_license_key,
+        }),
+      });
       if (resp.ok) {
         notifications.show({
           title: "Success",
