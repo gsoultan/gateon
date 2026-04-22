@@ -1,57 +1,19 @@
 package proxy
 
 import (
-	"bufio"
-	"context"
 	"crypto/tls"
-	"fmt"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/health/grpc_health_v1"
-
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/discovery"
-	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 const flushIntervalImmediate = -1
-
-var bufferPool = &syncBufferPool{
-	pool: sync.Pool{
-		New: func() any {
-			return make([]byte, 32*1024)
-		},
-	},
-}
-
-type syncBufferPool struct {
-	pool sync.Pool
-}
-
-func (p *syncBufferPool) Get() []byte {
-	b := p.pool.Get()
-	if b == nil {
-		return make([]byte, 32*1024)
-	}
-	return b.([]byte)
-}
-
-func (p *syncBufferPool) Put(b []byte) {
-	p.pool.Put(b)
-}
 
 // context key for passing targetState to shared ErrorHandler
 type contextKey int
@@ -98,236 +60,6 @@ func NewProxyHandlerWithOpts(rt *gateonv1.Route, serviceStore config.ServiceStor
 	return b.Build()
 }
 
-func (h *ProxyHandler) runHealthCheck() {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	client := h.healthCheckClient
-	if client == nil {
-		transport := h.transport
-		if h.transportFactory != nil {
-			transport = h.transportFactory.HealthCheckTransport()
-		}
-		client = &http.Client{
-			Timeout:   5 * time.Second,
-			Transport: transport,
-		}
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			currentStats := h.lb.GetStats()
-			for _, s := range currentStats {
-				u := s.URL
-				alive := h.checkTargetHealth(context.Background(), client, u)
-				h.lb.SetAlive(u, alive)
-				// Update Prometheus target health gauge
-				healthVal := 0.0
-				if alive {
-					healthVal = 1.0
-				}
-				telemetry.TargetHealth.WithLabelValues(h.routeName, u).Set(healthVal)
-				telemetry.ActiveConnections.WithLabelValues(u).Set(float64(s.ActiveConn))
-			}
-		case <-h.stopHealthCheck:
-			return
-		}
-	}
-}
-
-func (h *ProxyHandler) checkTargetHealth(ctx context.Context, client *http.Client, targetURL string) bool {
-	switch h.healthCheckType {
-	case gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_GRPC:
-		return h.checkGRPCHealth(ctx, targetURL)
-	case gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_TCP:
-		return h.checkTCPHealth(ctx, targetURL)
-	case gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_CUSTOM:
-		return h.checkCustomHealth(ctx, client, targetURL)
-	default:
-		return h.checkHTTPHealth(client, targetURL)
-	}
-}
-
-func (h *ProxyHandler) checkGRPCHealth(ctx context.Context, targetURL string) bool {
-	host := targetURL
-	useTLS := false
-	if strings.HasPrefix(targetURL, "h2c://") {
-		host = strings.TrimPrefix(targetURL, "h2c://")
-	} else if strings.HasPrefix(targetURL, "h2://") {
-		host = strings.TrimPrefix(targetURL, "h2://")
-		useTLS = true
-	} else if strings.HasPrefix(targetURL, "h3://") {
-		host = strings.TrimPrefix(targetURL, "h3://")
-		useTLS = true
-	}
-
-	// Apply port override if configured
-	if h.healthCheckPort > 0 {
-		hostOnly, _, err := net.SplitHostPort(host)
-		if err == nil {
-			host = net.JoinHostPort(hostOnly, fmt.Sprintf("%d", h.healthCheckPort))
-		} else {
-			// If no port in host, just append it
-			host = net.JoinHostPort(host, fmt.Sprintf("%d", h.healthCheckPort))
-		}
-	}
-
-	var opts []grpc.DialOption
-	if useTLS {
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(h.tlsConfig)))
-	} else {
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
-
-	// Set a reasonable timeout for health check dial
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(dialCtx, host, opts...)
-	if err != nil {
-		return false
-	}
-	defer func() {
-		_ = conn.Close()
-	}()
-
-	client := grpc_health_v1.NewHealthClient(conn)
-	resp, err := client.Check(dialCtx, &grpc_health_v1.HealthCheckRequest{
-		Service: h.healthCheckPath,
-	})
-
-	return err == nil && resp != nil && resp.Status == grpc_health_v1.HealthCheckResponse_SERVING
-}
-
-func (h *ProxyHandler) checkHTTPHealth(client *http.Client, targetURL string) bool {
-	healthURL := h.buildHealthCheckURL(targetURL)
-	resp, err := client.Get(healthURL)
-	alive := err == nil && resp != nil && resp.StatusCode < 500
-	if resp != nil {
-		_ = resp.Body.Close()
-	}
-	return alive
-}
-
-func (h *ProxyHandler) checkTCPHealth(ctx context.Context, targetURL string) bool {
-	host := h.targetHostForHealth(targetURL)
-	if host == "" {
-		return false
-	}
-
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	var d net.Dialer
-	conn, err := d.DialContext(checkCtx, "tcp", host)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
-}
-
-func (h *ProxyHandler) checkCustomHealth(ctx context.Context, client *http.Client, targetURL string) bool {
-	proto := strings.ToLower(strings.TrimSpace(h.healthCheckProtocol))
-	switch proto {
-	case "grpc", "h2", "h2c":
-		return h.checkGRPCHealth(ctx, targetURL)
-	case "tcp":
-		return h.checkTCPHealth(ctx, targetURL)
-	default:
-		if h.healthCheckPath == "" {
-			return h.checkTCPHealth(ctx, targetURL)
-		}
-		return h.checkHTTPHealth(client, targetURL)
-	}
-}
-
-func (h *ProxyHandler) targetHostForHealth(targetURL string) string {
-	host := targetURL
-	if strings.HasPrefix(targetURL, "h2c://") {
-		host = strings.TrimPrefix(targetURL, "h2c://")
-	} else if strings.HasPrefix(targetURL, "h2://") {
-		host = strings.TrimPrefix(targetURL, "h2://")
-	} else if strings.HasPrefix(targetURL, "h3://") {
-		host = strings.TrimPrefix(targetURL, "h3://")
-	} else if strings.HasPrefix(targetURL, "http://") {
-		host = strings.TrimPrefix(targetURL, "http://")
-	} else if strings.HasPrefix(targetURL, "https://") {
-		host = strings.TrimPrefix(targetURL, "https://")
-	}
-
-	if h.healthCheckPort > 0 {
-		hostOnly, _, err := net.SplitHostPort(host)
-		if err == nil {
-			return net.JoinHostPort(hostOnly, fmt.Sprintf("%d", h.healthCheckPort))
-		}
-		return net.JoinHostPort(host, fmt.Sprintf("%d", h.healthCheckPort))
-	}
-
-	if _, _, err := net.SplitHostPort(host); err == nil {
-		return host
-	}
-
-	switch {
-	case strings.HasPrefix(targetURL, "https://"), strings.HasPrefix(targetURL, "h2://"), strings.HasPrefix(targetURL, "h3://"):
-		return net.JoinHostPort(host, "443")
-	default:
-		return net.JoinHostPort(host, "80")
-	}
-}
-
-// buildHealthCheckURL constructs the health check URL for a given target URL.
-// It applies health_check_port and health_check_protocol overrides when configured,
-// enabling scenarios like gRPC on port 3000 with HTTP health checks on port 3001.
-func (h *ProxyHandler) buildHealthCheckURL(targetURL string) string {
-	uForHealth := targetURL
-	if strings.HasPrefix(targetURL, "h2c://") {
-		uForHealth = "http://" + strings.TrimPrefix(targetURL, "h2c://")
-	} else if strings.HasPrefix(targetURL, "h2://") || strings.HasPrefix(targetURL, "h3://") {
-		uForHealth = "https://" + strings.TrimPrefix(strings.TrimPrefix(targetURL, "h2://"), "h3://")
-	}
-
-	parsed, err := url.Parse(uForHealth)
-	if err != nil {
-		return strings.TrimSuffix(uForHealth, "/") + h.healthCheckPath
-	}
-
-	if h.healthCheckProtocol != "" {
-		parsed.Scheme = h.healthCheckProtocol
-	}
-
-	if h.healthCheckPort > 0 {
-		host := parsed.Hostname()
-		parsed.Host = net.JoinHostPort(host, fmt.Sprintf("%d", h.healthCheckPort))
-	}
-
-	parsed.Path = h.healthCheckPath
-	return parsed.String()
-}
-
-func (h *ProxyHandler) runDiscovery() {
-	if h.discoveryURL == "" {
-		return
-	}
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	resolver := discovery.NewResolver()
-
-	for {
-		select {
-		case <-ticker.C:
-			targets, err := resolver.Resolve(context.Background(), h.discoveryURL)
-			if err == nil && len(targets) > 0 {
-				h.lb.UpdateWeightedTargets(targets)
-			}
-		case <-h.stopDiscovery:
-			return
-		}
-	}
-}
-
 func (h *ProxyHandler) Close() {
 	h.closeOnce.Do(func() {
 		if h.stopDiscovery != nil {
@@ -344,7 +76,6 @@ func (h *ProxyHandler) Close() {
 }
 
 // DrainAndClose waits for in-flight requests to complete (up to timeout), then closes.
-// Use for zero-downtime config reload: remove handler from routing first, then DrainAndClose.
 func (h *ProxyHandler) DrainAndClose(timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -365,8 +96,6 @@ func (h *ProxyHandler) activeConnCount() int32 {
 }
 
 // getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.
-// Reusing proxies avoids per-request allocations at high throughput (100k+ req/s).
-// The cacheKey is pre-computed in targetState to avoid per-request string allocation.
 func (h *ProxyHandler) getOrCreateProxy(cacheKey string, targetURL *url.URL) *httputil.ReverseProxy {
 	if v, ok := h.proxyPool.Load(cacheKey); ok {
 		return v.(*httputil.ReverseProxy)
@@ -404,137 +133,6 @@ func (h *ProxyHandler) getOrCreateProxy(cacheKey string, targetURL *url.URL) *ht
 	return rp
 }
 
-var statusResponseWriterPool = sync.Pool{
-	New: func() any {
-		return &statusResponseWriter{status: http.StatusOK}
-	},
-}
-
-func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-
-	state := h.lb.NextState()
-	if state == nil || state.url == "" {
-		http.Error(w, "no targets available for service", http.StatusBadGateway)
-		return
-	}
-
-	logger.L.Debug().
-		Str("flow_step", "service_dispatch").
-		Str("request_id", request.GetID(r)).
-		Str("target", state.url).
-		Msg("Forwarding to service target")
-
-	atomic.AddInt32(&state.activeConn, 1)
-	telemetry.ActiveConnections.WithLabelValues(state.url).Inc()
-	defer func() {
-		atomic.AddInt32(&state.activeConn, -1)
-		telemetry.ActiveConnections.WithLabelValues(state.url).Dec()
-	}()
-
-	// Use pre-parsed URL from targetState to avoid per-request url.Parse allocation
-	targetURL := state.parsedURL
-	if targetURL == nil {
-		http.Error(w, "invalid target URL", http.StatusInternalServerError)
-		return
-	}
-
-	origScheme := state.url
-	isH2C := strings.HasPrefix(origScheme, "h2c://")
-	isH3 := strings.HasPrefix(origScheme, "h3://")
-
-	// Pass state via context for shared ErrorHandler
-	ctx := context.WithValue(r.Context(), targetStateContextKey, state)
-	ctx = withClientRemoteAddr(ctx, r.RemoteAddr)
-	r = r.WithContext(ctx)
-
-	proxy := h.getOrCreateProxy(state.cacheKey, targetURL)
-
-	// Update request headers for proxying
-	r.URL.Host = targetURL.Host
-	r.URL.Scheme = targetURL.Scheme
-	r.Header.Set("X-Forwarded-Host", r.Host)
-	if r.TLS != nil {
-		r.Header.Set("X-Forwarded-Proto", "https")
-	} else {
-		r.Header.Set("X-Forwarded-Proto", "http")
-	}
-	r.Host = targetURL.Host
-
-	// WebSocket: ReverseProxy strips Upgrade/Connection (hop-by-hop). Use hijack tunnel.
-	if isWebSocketRequest(r) {
-		h.proxyWebSocket(w, r, targetURL, state, start)
-		return
-	}
-
-	// Handle gRPC metadata translation or h2c/h3
-	contentType := r.Header.Get("Content-Type")
-	isGRPC := len(contentType) >= 16 && strings.EqualFold(contentType[:16], "application/grpc")
-	if isH3 {
-		r.ProtoMajor = 3
-		r.ProtoMinor = 0
-		r.Proto = "HTTP/3.0"
-	} else if isGRPC || isH2C {
-		r.ProtoMajor = 2
-		r.ProtoMinor = 0
-		r.Proto = "HTTP/2.0"
-		if isGRPC {
-			// gRPC requires trailers and no content-length
-			r.Header.Del("Content-Length")
-			r.ContentLength = -1
-			if r.Header.Get("TE") == "" {
-				r.Header.Set("TE", "trailers")
-			}
-		}
-	}
-
-	srw := statusResponseWriterPool.Get().(*statusResponseWriter)
-	srw.ResponseWriter = w
-	srw.status = http.StatusOK
-
-	proxy.ServeHTTP(srw, r)
-
-	duration := time.Since(start)
-	atomic.AddUint64(&state.requestCount, 1)
-	atomic.AddUint64(&state.latencySumMs, uint64(duration.Milliseconds()))
-	if srw.status >= 500 {
-		atomic.AddUint64(&state.errorCount, 1)
-	}
-
-	srw.ResponseWriter = nil
-	statusResponseWriterPool.Put(srw)
-}
-
 func (h *ProxyHandler) GetStats() []TargetStats {
 	return h.lb.GetStats()
-}
-
-type statusResponseWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *statusResponseWriter) WriteHeader(code int) {
-	w.status = code
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *statusResponseWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return h.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
-}
-
-func (w *statusResponseWriter) Push(target string, opts *http.PushOptions) error {
-	if p, ok := w.ResponseWriter.(http.Pusher); ok {
-		return p.Push(target, opts)
-	}
-	return http.ErrNotSupported
 }

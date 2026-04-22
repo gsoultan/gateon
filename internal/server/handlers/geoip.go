@@ -89,13 +89,27 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 		}
 
 		gc := globalReg.Get(r.Context())
-		if gc == nil || gc.Geoip == nil || gc.Geoip.MaxmindLicenseKey == "" {
+		var licenseKey string
+		if r.Body != nil {
+			var body struct {
+				LicenseKey string `json:"maxmind_license_key"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.LicenseKey != "" {
+				licenseKey = body.LicenseKey
+			}
+		}
+
+		if licenseKey == "" && gc != nil && gc.Geoip != nil {
+			licenseKey = gc.Geoip.MaxmindLicenseKey
+		}
+
+		if licenseKey == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("maxmind license key not configured in global settings"))
 			return
 		}
 
-		err := telemetry.DownloadGeoIP(gc.Geoip.MaxmindLicenseKey)
+		err := telemetry.DownloadGeoIP(licenseKey)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(err.Error()))

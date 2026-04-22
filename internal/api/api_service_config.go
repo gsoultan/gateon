@@ -5,11 +5,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain"
 	"github.com/gsoultan/gateon/internal/tls"
-	"github.com/gsoultan/gateon/pkg/proxy"
 )
-
-// RouteStatsProvider returns target stats for a route.
-type RouteStatsProvider func(routeID string) []proxy.TargetStats
 
 // ApiServiceConfig holds dependencies for ApiService (Factory pattern).
 type ApiServiceConfig struct {
