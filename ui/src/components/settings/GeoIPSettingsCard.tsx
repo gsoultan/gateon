@@ -11,8 +11,9 @@ import {
   Divider,
   Badge,
   Alert,
+  FileButton,
 } from "@mantine/core";
-import { IconDatabase, IconDownload, IconAlertCircle, IconCheck } from "@tabler/icons-react";
+import { IconDatabase, IconDownload, IconAlertCircle, IconCheck, IconUpload } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import type { GeoIPConfig } from "../../types/gateon";
@@ -27,12 +28,16 @@ interface GeoIPStatus {
 interface GeoIPSettingsCardProps {
   config: GeoIPConfig;
   onChange: (config: GeoIPConfig) => void;
+  onSave?: () => void;
+  saving?: boolean;
+  disabled?: boolean;
 }
 
-export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) {
+export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }: GeoIPSettingsCardProps) {
   const [status, setStatus] = useState<GeoIPStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const fetchStatus = async () => {
     try {
@@ -72,6 +77,7 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
           color: "green",
           icon: <IconCheck size={16} />,
         });
+        onChange({ ...config, db_path: "geoip/GeoLite2-City.mmdb" });
         fetchStatus();
       } else {
         const msg = await resp.text();
@@ -90,6 +96,49 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
       });
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleUpload = async (file: File | null) => {
+    if (!file) return;
+
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const resp = await apiFetch("/v1/geoip/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        notifications.show({
+          title: "Success",
+          message: "GeoIP database uploaded successfully",
+          color: "green",
+          icon: <IconCheck size={16} />,
+        });
+        onChange({ ...config, db_path: data.path });
+        fetchStatus();
+      } else {
+        const msg = await resp.text();
+        notifications.show({
+          title: "Upload Failed",
+          message: msg || "Failed to upload GeoIP database",
+          color: "red",
+          icon: <IconAlertCircle size={16} />,
+        });
+      }
+    } catch (err) {
+      notifications.show({
+        title: "Error",
+        message: "Network error occurred during upload",
+        color: "red",
+      });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -134,16 +183,33 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
             description="Use GeoIP database to resolve IP addresses to geographical locations"
             checked={config.enabled}
             onChange={(e) => onChange({ ...config, enabled: e.currentTarget.checked })}
+            disabled={disabled}
           />
 
-          <TextInput
-            label="Database Path"
-            placeholder="e.g. geoip/GeoLite2-City.mmdb"
-            description="Custom path to your MaxMind GeoLite2 City database"
-            value={config.db_path || ""}
-            onChange={(e) => onChange({ ...config, db_path: e.currentTarget.value })}
-            disabled={!config.enabled}
-          />
+          <Group align="flex-end">
+            <TextInput
+              label="Database Path"
+              placeholder="e.g. geoip/GeoLite2-City.mmdb"
+              description="Custom path to your MaxMind GeoLite2 City database"
+              value={config.db_path || ""}
+              onChange={(e) => onChange({ ...config, db_path: e.currentTarget.value })}
+              disabled={!config.enabled || disabled}
+              style={{ flex: 1 }}
+            />
+            <FileButton onChange={handleUpload} accept=".mmdb">
+              {(props) => (
+                <Button 
+                  {...props} 
+                  variant="outline" 
+                  leftSection={<IconUpload size={16} />} 
+                  loading={uploading}
+                  disabled={!config.enabled || disabled}
+                >
+                  Upload MMDB
+                </Button>
+              )}
+            </FileButton>
+          </Group>
 
           <Divider label="Auto Update" labelPosition="center" />
 
@@ -152,7 +218,7 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
             description="Periodically download the latest database from MaxMind"
             checked={config.auto_update}
             onChange={(e) => onChange({ ...config, auto_update: e.currentTarget.checked })}
-            disabled={!config.enabled}
+            disabled={!config.enabled || disabled}
           />
 
           <TextInput
@@ -162,7 +228,7 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
             type="password"
             value={config.maxmind_license_key || ""}
             onChange={(e) => onChange({ ...config, maxmind_license_key: e.currentTarget.value })}
-            disabled={!config.enabled || !config.auto_update}
+            disabled={!config.enabled || !config.auto_update || disabled}
           />
 
           <NumberInput
@@ -172,7 +238,7 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
             max={365}
             value={config.update_interval_days || 30}
             onChange={(val) => onChange({ ...config, update_interval_days: Number(val) })}
-            disabled={!config.enabled || !config.auto_update}
+            disabled={!config.enabled || !config.auto_update || disabled}
           />
 
           <Button
@@ -180,10 +246,18 @@ export function GeoIPSettingsCard({ config, onChange }: GeoIPSettingsCardProps) 
             variant="light"
             onClick={handleUpdate}
             loading={updating}
-            disabled={!config.enabled || !config.maxmind_license_key}
+            disabled={!config.enabled || !config.maxmind_license_key || disabled}
           >
-            Update Now
+            Update From MaxMind Now
           </Button>
+
+          {onSave && (
+            <Group justify="flex-end" mt="md">
+              <Button onClick={onSave} loading={saving} size="sm" disabled={disabled}>
+                Save GeoIP Settings
+              </Button>
+            </Group>
+          )}
         </Stack>
       </Stack>
     </Card>

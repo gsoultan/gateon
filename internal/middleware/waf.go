@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"cmp"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/corazawaf/coraza/v3/types"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // WAFConfig configures the WAF middleware.
@@ -24,6 +26,7 @@ type WAFConfig struct {
 	AuditOnly        bool   // If true, log matches but do not block (SecRuleEngine DetectionOnly)
 	GlobalDirectives string // Combined global rules from GlobalConfig
 	Directives       string // Custom SecLang directives (replaces DirectivesFile)
+	RouteID          string // Route identifier for metrics
 
 	// Specific CRS protections (only used if UseCRS is true)
 	DisableSQLI     bool
@@ -56,7 +59,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 
 		var sb strings.Builder
 		sb.WriteString(engineDirective)
-		fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
+		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
 Include @crs-setup.conf.example
 `, pl)
 
@@ -146,8 +149,10 @@ Include @crs-setup.conf.example
 		return nil, fmt.Errorf("create WAF: %w", err)
 	}
 
+	wrappedWaf := &wafWrapper{WAF: waf, routeID: cfg.RouteID}
+
 	return func(next http.Handler) http.Handler {
-		wafHandler := txhttp.WrapHandler(waf, next)
+		wafHandler := txhttp.WrapHandler(wrappedWaf, next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
@@ -162,6 +167,40 @@ Include @crs-setup.conf.example
 			wafHandler.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+type wafWrapper struct {
+	coraza.WAF
+	routeID string
+}
+
+func (w *wafWrapper) NewTransaction() types.Transaction {
+	return &txWrapper{
+		Transaction: w.WAF.NewTransaction(),
+		routeID:     w.routeID,
+	}
+}
+
+func (w *wafWrapper) NewTransactionWithID(id string) types.Transaction {
+	return &txWrapper{
+		Transaction: w.WAF.NewTransactionWithID(id),
+		routeID:     w.routeID,
+	}
+}
+
+type txWrapper struct {
+	types.Transaction
+	routeID string
+}
+
+func (t *txWrapper) Close() error {
+	if t.IsInterrupted() {
+		it := t.Interruption()
+		ruleID := strconv.Itoa(it.RuleID)
+		telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(t.routeID, ruleID).Inc()
+		telemetry.RequestFailuresTotal.WithLabelValues(t.routeID, "waf:"+ruleID).Inc()
+	}
+	return t.Transaction.Close()
 }
 
 // fsWrapper wraps an fs.FS to convert backslashes to forward slashes,
@@ -197,6 +236,11 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		return strings.TrimSpace(strings.ToLower(v)) == "false"
 	}
 
+	routeID := cmp.Or(cfg["route"], cfg["route_id"])
+	if routeID == "" {
+		routeID = "unknown"
+	}
+
 	return WAFConfig{
 		UseCRS:          useCRS,
 		ParanoiaLevel:   pl,
@@ -212,5 +256,6 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		DisableScanner:  isFalse("scanner"),
 		DisableProtocol: isFalse("protocol"),
 		DisableJava:     isFalse("java"),
+		RouteID:         routeID,
 	}
 }

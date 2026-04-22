@@ -1387,6 +1387,13 @@ export default function SettingsPage() {
                 minRows={4}
                 autosize
               />
+              {canEditGlobal && (
+                <Group justify="flex-end" mt="md">
+                  <Button onClick={saveGatewayConfig} loading={saving} size="sm">
+                    Save WAF Settings
+                  </Button>
+                </Group>
+              )}
             </Stack>
           )}
         </Stack>
@@ -1456,6 +1463,13 @@ export default function SettingsPage() {
                 onChange={(e) => setConfig({...config, ha: {...config.ha!, virtual_ips: e.currentTarget.value.split(",").map(s => s.trim()).filter(Boolean)}})}
                 disabled={formDisabled}
               />
+              {canEditGlobal && (
+                <Group justify="flex-end" mt="md">
+                  <Button onClick={saveGatewayConfig} loading={saving} size="sm">
+                    Save HA Settings
+                  </Button>
+                </Group>
+              )}
             </Stack>
           )}
         </Stack>
@@ -1529,6 +1543,13 @@ export default function SettingsPage() {
                   disabled={formDisabled}
                 />
               </Group>
+              {canEditGlobal && (
+                <Group justify="flex-end" mt="md">
+                  <Button onClick={saveGatewayConfig} loading={saving} size="sm">
+                    Save Anomaly Settings
+                  </Button>
+                </Group>
+              )}
             </Stack>
           )}
         </Stack>
@@ -1576,6 +1597,13 @@ export default function SettingsPage() {
                 onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, tc_filtering: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
+              {canEditGlobal && (
+                <Group justify="flex-end" mt="md">
+                  <Button onClick={saveGatewayConfig} loading={saving} size="sm">
+                    Save eBPF Settings
+                  </Button>
+                </Group>
+              )}
             </Stack>
           )}
         </Stack>
@@ -1584,6 +1612,9 @@ export default function SettingsPage() {
       <GeoIPSettingsCard
         config={config.geoip || {}}
         onChange={(geoip) => setConfig({ ...config, geoip })}
+        onSave={saveGatewayConfig}
+        saving={saving}
+        disabled={formDisabled}
       />
 
       <AppearanceCard colorScheme={colorScheme} setColorScheme={setColorScheme} />

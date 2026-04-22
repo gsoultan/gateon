@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -124,6 +126,10 @@ func (h *ProxyHandler) getOrCreateProxy(cacheKey string, targetURL *url.URL) *ht
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		if st, ok := r.Context().Value(targetStateContextKey).(*targetState); ok && st != nil {
 			atomic.AddUint64(&st.errorCount, 1)
+		}
+		routeID := middleware.GetRouteName(r)
+		if routeID != "" {
+			telemetry.RequestFailuresTotal.WithLabelValues(routeID, "service_down").Inc()
 		}
 		w.WriteHeader(http.StatusBadGateway)
 	}
