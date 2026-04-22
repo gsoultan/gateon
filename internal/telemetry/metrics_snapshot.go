@@ -73,6 +73,7 @@ type RouteMetric struct {
 	BytesIn     float64            `json:"bytes_in"`
 	BytesOut    float64            `json:"bytes_out"`
 	StatusCodes map[string]float64 `json:"status_codes"`
+	Failures    []LabeledCount     `json:"failures"`
 }
 
 // MiddlewareMetrics holds counters for all middleware instrumentation.
@@ -309,6 +310,20 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 			h := m.GetHistogram()
 			if h.GetSampleCount() > 0 {
 				rm.AvgLatency = (h.GetSampleSum() / float64(h.GetSampleCount())) * 1000
+			}
+		}
+	}
+	if fam, ok := idx["gateon_request_failures_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			route := labelValue(m, "route")
+			if route == "" || strings.HasPrefix(route, "gateon-") {
+				continue
+			}
+			rm := getOrCreateRoute(routeMap, route)
+			reason := labelValue(m, "reason")
+			val := m.GetCounter().GetValue()
+			if val > 0 {
+				rm.Failures = append(rm.Failures, LabeledCount{Label: reason, Value: val})
 			}
 		}
 	}
@@ -630,6 +645,7 @@ func getOrCreateRoute(m map[string]*RouteMetric, route string) *RouteMetric {
 	rm := &RouteMetric{
 		Route:       route,
 		StatusCodes: make(map[string]float64),
+		Failures:    make([]LabeledCount, 0),
 	}
 	m[route] = rm
 	return rm
@@ -697,6 +713,13 @@ func collectLabeledCounts(idx map[string]*dto.MetricFamily, name, labelName stri
 		if lbl == "" {
 			lbl = "unknown"
 		}
+
+		// Include route if present
+		route := labelValue(m, "route")
+		if route != "" {
+			lbl = route + ": " + lbl
+		}
+
 		agg[lbl] += m.GetCounter().GetValue()
 	}
 	result := make([]LabeledCount, 0, len(agg))

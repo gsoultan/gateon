@@ -78,9 +78,18 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to update global config")
 			return
 		}
+
+		// Apply settings that require immediate action
 		if conf.Log != nil && conf.Log.PathStatsRetentionDays > 0 {
 			telemetry.ConfigureRetention(int(conf.Log.PathStatsRetentionDays))
 		}
+		if conf.Waf != nil {
+			middleware.InvalidateWAFCache()
+		}
+		if conf.Geoip != nil && conf.Geoip.Enabled && conf.Geoip.DbPath != "" {
+			_ = telemetry.InitGeoIP(conf.Geoip.DbPath)
+		}
+
 		_ = json.NewEncoder(w).Encode(struct {
 			Success bool `json:"success,omitzero"`
 		}{Success: true})

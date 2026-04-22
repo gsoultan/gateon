@@ -23,6 +23,7 @@ export type RouteMetric = {
   bytes_in: number;
   bytes_out: number;
   status_codes: Record<string, number>;
+  failures: LabeledCount[] | null;
 };
 
 export type LabeledCount = {
@@ -101,6 +102,8 @@ export type SystemMetrics = {
   memory_alloc_bytes: number;
   memory_total_alloc_bytes: number;
   memory_sys_bytes: number;
+  cpu_usage_percent: number;
+  memory_usage_percent: number;
 };
 
 export type MetricsSnapshot = {

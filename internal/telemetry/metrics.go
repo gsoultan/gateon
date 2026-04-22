@@ -28,6 +28,12 @@ var RequestBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total bytes transferred by route and direction (in/out).",
 }, []string{"route", "direction"})
 
+// RequestFailuresTotal counts failed requests broken down by route and reason.
+var RequestFailuresTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_request_failures_total",
+	Help: "Total number of failed requests by route and reason.",
+}, []string{"route", "reason"})
+
 // MiddlewareRateLimitRejectedTotal counts requests rejected by rate limiter.
 var MiddlewareRateLimitRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_ratelimit_rejected_total",

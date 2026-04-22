@@ -354,6 +354,7 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                     <Table.Th style={{ textAlign: "right" }}>Error Rate</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>Avg Latency</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>In-Flight</Table.Th>
+                    <Table.Th>Failures / Reasons</Table.Th>
                     <Table.Th>Status Codes</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -400,6 +401,23 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>
                         <Text size="sm">{r.in_flight}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4}>
+                          {r.failures && r.failures.length > 0 ? (
+                            r.failures.map((f) => (
+                              <Tooltip key={f.label} label={f.label}>
+                                <Badge size="xs" variant="outline" color="red">
+                                  {f.label}: {formatNumber(f.value)}
+                                </Badge>
+                              </Tooltip>
+                            ))
+                          ) : (
+                            <Text size="xs" c="dimmed">
+                              —
+                            </Text>
+                          )}
+                        </Group>
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap="wrap">

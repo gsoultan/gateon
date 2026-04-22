@@ -64,6 +64,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 
 		if tokenString == "" {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
+			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:jwt").Inc()
 			v.config.HandleFailure(w, r, next, errors.New("authorization header, session cookie, or token query param required"))
 			return
 		}
@@ -71,12 +72,14 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 		token, err := jwt.Parse(tokenString, v.keyFunc)
 		if err != nil {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
+			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:jwt").Inc()
 			v.config.HandleFailure(w, r, next, v.formatJWTError(err))
 			return
 		}
 
 		if !token.Valid {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
+			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:jwt").Inc()
 			v.config.HandleFailure(w, r, next, errors.New("invalid token"))
 			return
 		}
@@ -89,6 +92,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 
 		if err := v.validateToken(r.Context(), claims); err != nil {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
+			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:jwt").Inc()
 			v.config.HandleFailure(w, r, next, err)
 			return
 		}
@@ -195,6 +199,7 @@ func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 
 		if apiKey == "" {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "api_key").Inc()
+			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:api_key").Inc()
 			v.config.HandleFailure(w, r, next, errors.New("API key missing"))
 			return
 		}
@@ -202,6 +207,7 @@ func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 		tenantID, ok, err := v.store.GetTenantID(r.Context(), apiKey)
 		if err != nil || !ok {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "api_key").Inc()
+			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:api_key").Inc()
 			v.config.HandleFailure(w, r, next, errors.New("invalid API key"))
 			return
 		}
@@ -286,6 +292,7 @@ func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 			token := ExtractToken(r)
 			if token == "" {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
+				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
 				cfg.HandleFailure(w, r, next, errors.New("authorization header, session cookie, or token/access_token/auth query required"))
 				return
 			}
@@ -293,12 +300,14 @@ func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 			claimsRaw, err := verifier.VerifyToken(token)
 			if err != nil {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
+				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
 				cfg.HandleFailure(w, r, next, errors.New("invalid or expired token"))
 				return
 			}
 
 			if err := cfg.ValidateClaims(claimsRaw); err != nil {
 				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
+				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
 				cfg.HandleFailure(w, r, next, err)
 				return
 			}
