@@ -9,7 +9,7 @@ import {
   Button,
   Box,
 } from "@mantine/core";
-import { IconShieldAlert, IconArrowRight, IconLock } from "@tabler/icons-react";
+import { IconShieldExclamation, IconArrowRight, IconLock } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useSecurityThreats } from "../hooks/useGateon";
 
@@ -24,7 +24,7 @@ export function SecurityThreatsCard() {
       <Card.Section withBorder inheritPadding py="xs">
         <Group justify="space-between">
           <Group gap="xs">
-            <IconShieldAlert size={20} color="var(--mantine-color-red-6)" />
+            <IconShieldExclamation size={20} color="var(--mantine-color-red-6)" />
             <Text fw={700}>Security Insights</Text>
           </Group>
           <Badge color={criticalThreats > 0 ? "red" : threats.length > 0 ? "orange" : "teal"}>
