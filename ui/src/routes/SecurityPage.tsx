@@ -17,7 +17,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import {
-  IconShieldAlert,
+  IconShieldExclamation,
   IconFingerprint,
   IconWorld,
   IconClock,
@@ -75,7 +75,7 @@ export default function SecurityPage() {
             Recent security anomalies and potential threats detected by the system.
           </Text>
         </Stack>
-        <Badge size="lg" color={threats.length > 0 ? "orange" : "teal"} leftSection={threats.length > 0 ? <IconShieldAlert size={14} /> : <IconShieldCheck size={14} />}>
+        <Badge size="lg" color={threats.length > 0 ? "orange" : "teal"} leftSection={threats.length > 0 ? <IconShieldExclamation size={14} /> : <IconShieldCheck size={14} />}>
           {threats.length} Events Detected
         </Badge>
       </Group>
@@ -84,7 +84,7 @@ export default function SecurityPage() {
         <Paper withBorder p="md" radius="md">
           <Group justify="space-between">
             <Text size="xs" c="dimmed" fw={700}>THREAT LEVEL</Text>
-            <IconShieldAlert size={16} color="var(--mantine-color-red-6)" />
+            <IconShieldExclamation size={16} color="var(--mantine-color-red-6)" />
           </Group>
           <Title order={3} mt="xs">
             {threats.some(t => t.severity === "critical" || t.severity === "high") ? "High" : threats.length > 0 ? "Elevated" : "Normal"}
