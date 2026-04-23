@@ -1,10 +1,12 @@
 package request
 
 import (
-	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/httputil"
 )
 
 const (
@@ -19,7 +21,7 @@ const (
 )
 
 var (
-	trustedProxies []*net.IPNet
+	trustedProxies []netip.Prefix
 )
 
 func init() {
@@ -29,18 +31,15 @@ func init() {
 			if cidr == "" {
 				continue
 			}
-			_, network, err := net.ParseCIDR(cidr)
-			if err == nil {
-				trustedProxies = append(trustedProxies, network)
-			} else {
-				// Try parsing as single IP
-				if ip := net.ParseIP(cidr); ip != nil {
-					mask := net.CIDRMask(32, 32)
-					if ip.To4() == nil {
-						mask = net.CIDRMask(128, 128)
-					}
-					trustedProxies = append(trustedProxies, &net.IPNet{IP: ip, Mask: mask})
+			if prefix, err := netip.ParsePrefix(cidr); err == nil {
+				trustedProxies = append(trustedProxies, prefix)
+			} else if addr, err := netip.ParseAddr(cidr); err == nil {
+				// Single IP as /32 or /128
+				bits := 32
+				if addr.Is6() {
+					bits = 128
 				}
+				trustedProxies = append(trustedProxies, netip.PrefixFrom(addr, bits))
 			}
 		}
 	}
@@ -50,12 +49,9 @@ func isTrustedProxy(remoteAddr string) bool {
 	if len(trustedProxies) == 0 {
 		return true // Default to trust all if not configured (User Friendly)
 	}
-	host, _, err := net.SplitHostPort(remoteAddr)
+	host := httputil.StripPort(remoteAddr)
+	ip, err := netip.ParseAddr(host)
 	if err != nil {
-		host = remoteAddr
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
 		return false
 	}
 	for _, n := range trustedProxies {
@@ -71,38 +67,29 @@ func isTrustedProxy(remoteAddr string) bool {
 // X-Forwarded-For (leftmost), falling back to RemoteAddr.
 func GetClientIP(r *http.Request, trustCloudflare bool) string {
 	if !isTrustedProxy(r.RemoteAddr) {
-		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if host == "" {
-			return r.RemoteAddr
-		}
-		return host
+		return httputil.StripPort(r.RemoteAddr)
 	}
 
 	if trustCloudflare {
 		if cf := r.Header.Get(HeaderCloudflareConnectingIP); cf != "" {
-			ip := strings.TrimSpace(cf)
-			if net.ParseIP(ip) != nil {
-				return ip
+			ipStr := strings.TrimSpace(cf)
+			if _, err := netip.ParseAddr(ipStr); err == nil {
+				return ipStr
 			}
 		}
 	}
 	if xff := r.Header.Get(HeaderXForwardedFor); xff != "" {
 		// Leftmost is original client; rightmost is closest proxy
-		left := strings.TrimSpace(strings.Split(xff, ",")[0])
+		left := xff
+		if idx := strings.IndexByte(xff, ','); idx != -1 {
+			left = xff[:idx]
+		}
+		left = strings.TrimSpace(left)
 		if left != "" {
-			// Strip port if present
-			host, _, err := net.SplitHostPort(left)
-			if err == nil {
-				return host
-			}
-			return left
+			return httputil.StripPort(left)
 		}
 	}
-	ip := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		return host
-	}
-	return ip
+	return httputil.StripPort(r.RemoteAddr)
 }
 
 // TrustCloudflareFromEnv returns true if GATEON_TRUST_CLOUDFLARE_HEADERS is set

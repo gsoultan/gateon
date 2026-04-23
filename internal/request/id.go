@@ -3,7 +3,7 @@ package request
 import (
 	"context"
 	"crypto/rand"
-	"fmt"
+	"encoding/hex"
 	"net/http"
 )
 
@@ -26,7 +26,7 @@ func WithID(ctx context.Context, id string) context.Context {
 
 // GenerateID creates a new unique request ID.
 func GenerateID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("req-%x", b)
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return "req-" + hex.EncodeToString(b[:])
 }

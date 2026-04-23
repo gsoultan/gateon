@@ -365,3 +365,37 @@ func (s *ApiService) applyFixShadowedRouteRecommendation(ctx context.Context, ro
 		Message: fmt.Sprintf("Priority for route '%s' increased to %d.", rt.Name, rt.Priority),
 	}, nil
 }
+
+func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error) {
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 50
+	}
+	threats := telemetry.GetSecurityThreats(ctx, limit)
+	res := make([]*gateonv1.Anomaly, 0, len(threats))
+	for _, t := range threats {
+		severity := "low"
+		if t.Score >= 100 {
+			severity = "critical"
+		} else if t.Score >= 60 {
+			severity = "high"
+		} else if t.Score >= 30 {
+			severity = "medium"
+		}
+
+		a := &gateonv1.Anomaly{
+			Type:        t.Type,
+			Severity:    severity,
+			Description: t.Details,
+			Timestamp:   t.Time.Format(time.RFC3339),
+			Source:      t.SourceIP,
+			Score:       t.Score,
+			Ja3:         t.JA3,
+		}
+		// Try to populate geo if available (though here we only have the IP)
+		// We can use the same helper as in security_threat_detector.go
+		populateAnomalyGeo(a, telemetry.ResolveCountry(t.SourceIP))
+		res = append(res, a)
+	}
+	return &gateonv1.ListSecurityThreatsResponse{Threats: res}, nil
+}

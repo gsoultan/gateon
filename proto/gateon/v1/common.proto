@@ -102,6 +102,7 @@ message LogConfig {
   bool development = 2;
   string format = 3; // "json", "text"
   int32 path_stats_retention_days = 4;
+  int32 access_log_retention_days = 5;
 }
 
 message TlsClientConfig {

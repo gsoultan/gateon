@@ -10,63 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
-
-var statusCodes = make(map[int]string)
-
-func init() {
-	for i := 100; i < 600; i++ {
-		statusCodes[i] = strconv.Itoa(i)
-	}
-}
-
-func getStatusString(code int) string {
-	if s, ok := statusCodes[code]; ok {
-		return s
-	}
-	return strconv.Itoa(code)
-}
-
-// StatusResponseWriter wraps http.ResponseWriter to capture status code, bytes written, and TTFB.
-type StatusResponseWriter struct {
-	http.ResponseWriter
-	Status       int
-	BytesWritten int64
-	Country      string
-	ttfbRecorded bool
-	firstByte    time.Time
-	start        time.Time
-}
-
-func (w *StatusResponseWriter) WriteHeader(code int) {
-	if !w.ttfbRecorded {
-		w.firstByte = time.Now()
-		w.ttfbRecorded = true
-	}
-	w.Status = code
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *StatusResponseWriter) Write(b []byte) (int, error) {
-	if !w.ttfbRecorded {
-		w.firstByte = time.Now()
-		w.ttfbRecorded = true
-	}
-	n, err := w.ResponseWriter.Write(b)
-	w.BytesWritten += int64(n)
-	return n, err
-}
-
-// TTFB returns the time-to-first-byte duration. Returns zero if no bytes were written.
-func (w *StatusResponseWriter) TTFB() time.Duration {
-	if !w.ttfbRecorded {
-		return 0
-	}
-	return w.firstByte.Sub(w.start)
-}
 
 // AccessLog returns a middleware that logs request details.
 func AccessLog(routeID string) Middleware {
@@ -91,7 +39,8 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 			origPath := r.URL.Path
 			remoteAddr := r.RemoteAddr
 
-			sw := &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK, start: start}
+			sw := GetStatusResponseWriter(w)
+			defer PutStatusResponseWriter(sw)
 
 			next.ServeHTTP(sw, r)
 
@@ -165,9 +114,14 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(reqInSize + 256))
 
 			sw, ok := w.(*StatusResponseWriter)
+			var pooled bool
 			if !ok {
-				sw = &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK, start: start}
+				sw = GetStatusResponseWriter(w)
 				w = sw
+				pooled = true
+			}
+			if pooled {
+				defer PutStatusResponseWriter(sw)
 			}
 
 			next.ServeHTTP(sw, r)
@@ -184,7 +138,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// IP-based metrics
 			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
 
-			status := strconv.Itoa(sw.Status)
+			status := getStatusString(sw.Status)
 			country := request.GetCountry(r)
 			if sw.Country != "" {
 				country = sw.Country
@@ -204,6 +158,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				method,
 				r.Referer(),
 				origHost+r.URL.RequestURI(),
+				"", // JA3
 			)
 
 			statusStr := getStatusString(sw.Status)
@@ -377,10 +332,7 @@ func HostFilter(host string) Middleware {
 				return
 			}
 			// Strip port if present for comparison
-			h := r.Host
-			if sh, _, err := net.SplitHostPort(h); err == nil {
-				h = sh
-			}
+			h := httputil.StripPort(r.Host)
 
 			if !strings.EqualFold(h, host) {
 				http.Error(w, "Forbidden: Invalid Host", http.StatusForbidden)
@@ -391,11 +343,6 @@ func HostFilter(host string) Middleware {
 	}
 }
 
-func lastIndex(s, sep string) int {
-	return strings.LastIndex(s, sep)
-}
-
-// RequestID returns a middleware that adds a unique ID to each request.
 func RequestID() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

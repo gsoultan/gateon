@@ -91,6 +91,11 @@ const LimitRejectionsCard = lazy(() =>
     default: m.LimitRejectionsCard,
   }))
 );
+const SecurityThreatsCard = lazy(() =>
+  import("../components/SecurityThreatsCard").then((m) => ({
+    default: m.SecurityThreatsCard,
+  }))
+);
 
 const STATUS_FALLBACK = <Text>Loading status...</Text>;
 const ROUTE_LIST_FALLBACK = (
@@ -845,6 +850,9 @@ export default function Dashboard() {
           <Stack gap="md">
             <Suspense fallback={<Card withBorder h={120}><Loader /></Card>}>
               <LimitRejectionsCard />
+            </Suspense>
+            <Suspense fallback={<Card withBorder h={120}><Loader /></Card>}>
+              <SecurityThreatsCard />
             </Suspense>
             <Card
               shadow="xs"

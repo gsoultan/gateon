@@ -183,8 +183,12 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 	if gc := globalReg.Get(ctx); gc != nil {
 		databaseURL := db.AuthDatabaseURL(gc.Auth)
 		retention := 7
-		if gc.Log != nil && gc.Log.PathStatsRetentionDays > 0 {
-			retention = int(gc.Log.PathStatsRetentionDays)
+		if gc.Log != nil {
+			if gc.Log.AccessLogRetentionDays > 0 {
+				retention = int(gc.Log.AccessLogRetentionDays)
+			} else if gc.Log.PathStatsRetentionDays > 0 {
+				retention = int(gc.Log.PathStatsRetentionDays)
+			}
 		}
 		if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
 			logger.L.Error().Err(err).Str("database_url", databaseURL).Msg("failed to init path stats store")

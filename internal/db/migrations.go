@@ -320,4 +320,61 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(16, "create_security_threats_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `CREATE TABLE IF NOT EXISTS security_threats (
+				id VARCHAR(36) PRIMARY KEY,
+				type TEXT NOT NULL,
+				source_ip VARCHAR(45) NOT NULL,
+				score DOUBLE PRECISION NOT NULL,
+				details TEXT NOT NULL,
+				timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				ja3 TEXT NOT NULL DEFAULT ''
+			);`
+		case DriverMySQL:
+			query = `CREATE TABLE IF NOT EXISTS security_threats (
+				id VARCHAR(36) PRIMARY KEY,
+				type TEXT NOT NULL,
+				source_ip VARCHAR(45) NOT NULL,
+				score DOUBLE NOT NULL,
+				details TEXT NOT NULL,
+				timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				ja3 TEXT NOT NULL DEFAULT ''
+			);`
+		default: // sqlite
+			query = `CREATE TABLE IF NOT EXISTS security_threats (
+				id TEXT PRIMARY KEY,
+				type TEXT NOT NULL,
+				source_ip TEXT NOT NULL,
+				score REAL NOT NULL,
+				details TEXT NOT NULL,
+				timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				ja3 TEXT NOT NULL DEFAULT ''
+			);`
+		}
+		_, err := db.Exec(query)
+		return err
+	})
+
+	Register(17, "add_ja3_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja3 TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja3 TEXT NOT NULL DEFAULT '';`
+		default:
+			query = `ALTER TABLE traces ADD COLUMN ja3 TEXT NOT NULL DEFAULT '';`
+		}
+		if _, err := db.Exec(query); err != nil {
+			if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 }

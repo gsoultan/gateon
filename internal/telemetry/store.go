@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 )
@@ -47,6 +48,17 @@ type TraceRecord struct {
 	Method        string
 	Referer       string
 	RequestURI    string
+	JA3           string
+}
+
+type SecurityThreat struct {
+	ID       string
+	Type     string
+	SourceIP string
+	Score    float64
+	Details  string
+	Time     time.Time
+	JA3      string
 }
 
 type pathStatsStore struct {
@@ -54,6 +66,7 @@ type pathStatsStore struct {
 	dialect       db.Dialect
 	inCh          chan increment
 	traceInCh     chan TraceRecord
+	threatInCh    chan SecurityThreat
 	stopCh        chan struct{}
 	stopped       atomic.Bool
 	wg            sync.WaitGroup
@@ -88,11 +101,12 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 
 	st := &pathStatsStore{
-		db:        database,
-		dialect:   dialect,
-		inCh:      make(chan increment, 4096),
-		traceInCh: make(chan TraceRecord, 4096),
-		stopCh:    make(chan struct{}),
+		db:         database,
+		dialect:    dialect,
+		inCh:       make(chan increment, 4096),
+		traceInCh:  make(chan TraceRecord, 4096),
+		threatInCh: make(chan SecurityThreat, 1024),
+		stopCh:     make(chan struct{}),
 	}
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
 
@@ -132,6 +146,11 @@ func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 	return tx.Prepare(q)
 }
 
+func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, score, details, timestamp, ja3) VALUES (?, ?, ?, ?, ?, ?, ?)")
+	return tx.Prepare(q)
+}
+
 func (s *pathStatsStore) loop() {
 	defer s.wg.Done()
 	flushTicker := time.NewTicker(1 * time.Second)
@@ -141,6 +160,7 @@ func (s *pathStatsStore) loop() {
 
 	batch := make([]increment, 0, 1024)
 	traceBatch := make([]TraceRecord, 0, 1024)
+	threatBatch := make([]SecurityThreat, 0, 128)
 
 	flush := func() {
 		if len(batch) > 0 {
@@ -187,7 +207,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.traceInsertStmt(tx); err == nil {
 					for _, tr := range traceBatch {
-						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI); err != nil {
+						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI, tr.JA3); err != nil {
 							logger.Default().Error().Err(err).Msg("traces: insert failed")
 						}
 					}
@@ -198,6 +218,26 @@ func (s *pathStatsStore) loop() {
 				}
 			}
 			traceBatch = traceBatch[:0]
+		}
+
+		if len(threatBatch) > 0 {
+			tx, err := s.db.Begin()
+			if err != nil {
+				logger.Default().Error().Err(err).Msg("threats: begin transaction failed")
+			} else {
+				if stmt, err := s.threatInsertStmt(tx); err == nil {
+					for _, th := range threatBatch {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Score, th.Details, th.Time, th.JA3); err != nil {
+							logger.Default().Error().Err(err).Msg("threats: insert failed")
+						}
+					}
+					stmt.Close()
+					_ = tx.Commit()
+				} else {
+					_ = tx.Rollback()
+				}
+			}
+			threatBatch = threatBatch[:0]
 		}
 	}
 
@@ -211,6 +251,11 @@ func (s *pathStatsStore) loop() {
 		case tr := <-s.traceInCh:
 			traceBatch = append(traceBatch, tr)
 			if len(traceBatch) >= cap(traceBatch) {
+				flush()
+			}
+		case th := <-s.threatInCh:
+			threatBatch = append(threatBatch, th)
+			if len(threatBatch) >= cap(threatBatch) {
 				flush()
 			}
 		case <-flushTicker.C:
@@ -252,6 +297,11 @@ func (s *pathStatsStore) prune() {
 	qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
 	if _, err := s.db.ExecContext(ctx, qTraces, cutoffTime); err != nil {
 		logger.Default().Error().Err(err).Msg("traces: prune failed")
+	}
+
+	qThreats := s.dialect.Rebind("DELETE FROM security_threats WHERE timestamp < ?")
+	if _, err := s.db.ExecContext(ctx, qThreats, cutoffTime); err != nil {
+		logger.Default().Error().Err(err).Msg("security_threats: prune failed")
 	}
 }
 
@@ -317,7 +367,7 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, countryCode, userAgent, method, referer, requestURI string) {
+func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, countryCode, userAgent, method, referer, requestURI, ja3 string) {
 	if store == nil {
 		return
 	}
@@ -336,7 +386,26 @@ func recordTraceToStore(id, operationName, serviceName string, durationMs float6
 		Method:        method,
 		Referer:       referer,
 		RequestURI:    requestURI,
+		JA3:           ja3,
 	}:
+	default:
+		// drop on backpressure
+	}
+}
+
+// RecordSecurityThreat attempts to enqueue a security threat.
+func RecordSecurityThreat(t SecurityThreat) {
+	if store == nil {
+		return
+	}
+	if t.ID == "" {
+		t.ID = uuid.NewString()
+	}
+	if t.Time.IsZero() {
+		t.Time = time.Now()
+	}
+	select {
+	case store.threatInCh <- t:
 	default:
 		// drop on backpressure
 	}
@@ -353,7 +422,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri FROM traces ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3 FROM traces ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("traces: query failed")
@@ -363,7 +432,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	res := make([]TraceRecord, 0, min(limit, 100))
 	for rows.Next() {
 		var tr TraceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI); err != nil {
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3); err != nil {
 			logger.Default().Error().Err(err).Msg("traces: scan failed")
 			continue
 		}
@@ -496,6 +565,36 @@ func GetDomainStatsHourly(day string, hour int) []DomainStats {
 }
 
 // IsStoreEnabled returns true if the persistent store is active.
+// GetSecurityThreats returns the last N security threats from the store.
+func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
+	if store == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	query := store.dialect.Rebind("SELECT id, type, source_ip, score, details, timestamp, ja3 FROM security_threats ORDER BY timestamp DESC LIMIT ?")
+	rows, err := store.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		logger.Default().Error().Err(err).Msg("threats: query failed")
+		return nil
+	}
+	defer rows.Close()
+	res := make([]SecurityThreat, 0, min(limit, 100))
+	for rows.Next() {
+		var th SecurityThreat
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Score, &th.Details, &th.Time, &th.JA3); err != nil {
+			logger.Default().Error().Err(err).Msg("threats: scan failed")
+			continue
+		}
+		res = append(res, th)
+	}
+	return res
+}
+
 func IsStoreEnabled() bool {
 	return store != nil
 }

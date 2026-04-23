@@ -52,6 +52,7 @@ service ApiService {
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
 
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
+  rpc ListSecurityThreats(ListSecurityThreatsRequest) returns (ListSecurityThreatsResponse);
   rpc ApplyRecommendation(ApplyRecommendationRequest) returns (ApplyRecommendationResponse);
   rpc TraceRoute(TraceRouteRequest) returns (TraceRouteResponse);
 }

@@ -113,6 +113,7 @@ message AnomalyDetectionConfig {
   int32 check_interval_seconds = 3;
   double sensitivity = 4;
   double security_threat_threshold = 5;
+  int32 anomaly_retention_days = 6;
 }
 
 message EbpfConfig {

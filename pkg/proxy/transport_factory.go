@@ -17,6 +17,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -309,9 +310,7 @@ func normalizeHostForMatch(host string) string {
 	if host == "" {
 		return ""
 	}
-	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-		host = parsedHost
-	}
+	host = httputil.StripPort(host)
 	return strings.Trim(host, "[]")
 }
 

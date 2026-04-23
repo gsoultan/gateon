@@ -3,11 +3,12 @@ package telemetry
 import (
 	"context"
 	"math"
-	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/httputil"
 )
 
 // maxPathStatsMapSize limits in-memory path stats to avoid unbounded growth.
@@ -37,6 +38,12 @@ type DomainStats struct {
 var (
 	pathStatsMap = make(map[string]*pathStatsInternal)
 	pathStatsMu  sync.RWMutex
+
+	internalPaths = map[string]bool{
+		"/metrics": true,
+		"/healthz": true,
+		"/readyz":  true,
+	}
 )
 
 type pathStatsInternal struct {
@@ -49,7 +56,10 @@ type pathStatsInternal struct {
 
 // isInternalAPIPath returns true for gateway-internal paths that should not appear in path metrics.
 func isInternalAPIPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz"
+	if internalPaths[path] {
+		return true
+	}
+	return strings.HasPrefix(path, "/v1/")
 }
 
 // RecordPathRequest records a request for a host and path.
@@ -59,9 +69,7 @@ func RecordPathRequest(host, path string, latencySeconds float64, bytesTotal uin
 		return
 	}
 	// Normalize host by stripping port if present
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
+	host = httputil.StripPort(host)
 
 	key := host + ":" + path
 	pathStatsMu.RLock()
@@ -95,16 +103,14 @@ func RecordPathRequest(host, path string, latencySeconds float64, bytesTotal uin
 // RecordDomainRequest records a request for a domain for hourly stats.
 func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint64) {
 	// Normalize domain by stripping port if present
-	if h, _, err := net.SplitHostPort(domain); err == nil {
-		domain = h
-	}
+	domain = httputil.StripPort(domain)
 	// Persist to durable store for hourly aggregation
 	recordDomainToStore(domain, latencySeconds, bytesTotal, time.Now())
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, countryCode, userAgent, method, referer, requestURI string) {
-	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP, countryCode, userAgent, method, referer, requestURI)
+func RecordTrace(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, countryCode, userAgent, method, referer, requestURI, ja3 string) {
+	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP, countryCode, userAgent, method, referer, requestURI, ja3)
 }
 
 // getInMemoryPathStats returns aggregated path statistics from the in-memory map.
