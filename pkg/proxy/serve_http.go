@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -43,17 +44,21 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.handleGRPCAndHTTP2(r, state.url)
 
-	srw := statusResponseWriterPool.Get().(*statusResponseWriter)
-	srw.ResponseWriter = w
-	srw.status = http.StatusOK
+	sw, ok := w.(*middleware.StatusResponseWriter)
+	var pooled bool
+	if !ok {
+		sw = middleware.GetStatusResponseWriter(w)
+		w = sw
+		pooled = true
+	}
+	if pooled {
+		defer middleware.PutStatusResponseWriter(sw)
+	}
 
 	proxy := h.getOrCreateProxy(state.cacheKey, targetURL)
-	proxy.ServeHTTP(srw, r)
+	proxy.ServeHTTP(sw, r)
 
-	h.recordMetrics(state, start, srw.status)
-
-	srw.ResponseWriter = nil
-	statusResponseWriterPool.Put(srw)
+	h.recordMetrics(state, start, sw.Status)
 }
 
 func (h *ProxyHandler) logRequest(r *http.Request, targetURL string) {

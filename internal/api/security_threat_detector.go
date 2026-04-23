@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -26,11 +27,13 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		".env", ".git", ".htaccess", ".config", "wp-admin", "wp-login",
 		"phpinfo", "/etc/passwd", "win.ini", "cgi-bin", "bin/sh", "backup",
 		"db.sql", "config.php", "web-config", "node_modules",
+		"169.254.169.254", "metadata.google.internal",
 	}
 
 	suspiciousQueries := []string{
 		"union select", "union all select", "waitfor delay", "pg_sleep",
 		"<script>", "javascript:", "onload=", "onerror=", "../", "..\\",
+		"${jndi:", "() { :; };",
 	}
 
 	suspiciousAgents := []string{
@@ -205,6 +208,15 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			}
 			populateAnomalyGeo(anomaly, stats.CountryCode)
 			anomalies = append(anomalies, anomaly)
+
+			// Persist to security_threats table
+			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+				Type:     primaryType,
+				SourceIP: ip,
+				Score:    float64(score),
+				Details:  strings.Join(reasons, "; "),
+				Time:     stats.LastSeen,
+			})
 		}
 	}
 	return anomalies

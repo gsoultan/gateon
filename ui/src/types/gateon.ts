@@ -495,6 +495,8 @@ export type Anomaly = {
   latitude?: number;
   longitude?: number;
   country_code?: string;
+  country_name?: string;
+  ja3?: string;
 };
 
 export type DependencyHealth = {

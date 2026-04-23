@@ -25,6 +25,16 @@ message Anomaly {
   double latitude = 7;
   double longitude = 8;
   string country_code = 9;
+  double score = 10;
+  string ja3 = 11;
+}
+
+message ListSecurityThreatsRequest {
+  int32 limit = 1;
+}
+
+message ListSecurityThreatsResponse {
+  repeated Anomaly threats = 1;
 }
 
 message DependencyHealth {

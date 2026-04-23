@@ -47,14 +47,19 @@ func MaxBodySize(max int64) Middleware {
 				return
 			}
 			sw, ok := w.(*StatusResponseWriter)
+			var pooled bool
 			if !ok {
-				sw = &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
+				sw = GetStatusResponseWriter(w)
 				w = sw
+				pooled = true
+			}
+			if pooled {
+				defer PutStatusResponseWriter(sw)
 			}
 			if r.Body != nil {
 				r.Body = http.MaxBytesReader(sw, r.Body, max)
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(sw, r)
 			if sw.Status == http.StatusRequestEntityTooLarge {
 				if !ShouldSkipMetrics(r) {
 					bufferingRejectedTotal.WithLabelValues("max_request_body_bytes").Inc()

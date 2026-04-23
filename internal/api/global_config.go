@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -20,6 +21,17 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
+	}
+
+	// Update telemetry retention if log config is present
+	if req.Config.Log != nil {
+		days := req.Config.Log.AccessLogRetentionDays
+		if days <= 0 {
+			days = req.Config.Log.PathStatsRetentionDays
+		}
+		if days > 0 {
+			telemetry.ConfigureRetention(int(days))
+		}
 	}
 
 	// Invalidate cache if needed
