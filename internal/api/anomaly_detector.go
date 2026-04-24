@@ -12,12 +12,18 @@ type AnomalyDetector interface {
 	Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly
 }
 
-func populateAnomalyGeo(a *gateonv1.Anomaly, countryCode string) {
-	if countryCode == "" || countryCode == "XX" {
+func populateAnomalyGeo(a *gateonv1.Anomaly, ip string) {
+	if ip == "" {
 		return
 	}
-	a.CountryCode = countryCode
-	lat, lon := telemetry.GetCountryCoordinates(countryCode)
+	country, _, lat, lon := telemetry.ResolveIPInfo(ip)
+	if country == "" || country == "XX" {
+		// Fallback to coordinates only if we have them but country is unknown
+		if lat == 0 && lon == 0 {
+			return
+		}
+	}
+	a.CountryCode = country
 	a.Latitude = lat
 	a.Longitude = lon
 }

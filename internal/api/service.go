@@ -4,6 +4,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -22,6 +23,7 @@ type ApiService struct {
 	Invalidator        domain.ProxyInvalidator
 	TLSManager         gtls.TLSManager
 	RouteStatsProvider RouteStatsProvider
+	EbpfManager        ebpf.Manager
 }
 
 // GetGlobals returns the global config store for REST handlers.
@@ -48,5 +50,6 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		Invalidator:        cfg.Invalidator,
 		TLSManager:         cfg.TLSManager,
 		RouteStatsProvider: cfg.RouteStatsProvider,
+		EbpfManager:        cfg.EbpfManager,
 	}
 }

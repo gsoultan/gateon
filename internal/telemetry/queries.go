@@ -54,16 +54,26 @@ const (
 		WHERE day >= ?
 		GROUP BY domain`
 
+	QueryGetTotalTrafficToday = `SELECT SUM(req_count), SUM(bytes_total)
+		FROM domain_stats
+		WHERE day = ?`
+
+	QueryGetTrafficHistory = `SELECT day, hour, SUM(req_count), SUM(bytes_total)
+		FROM domain_stats
+		WHERE day >= ?
+		GROUP BY day, hour
+		ORDER BY day ASC, hour ASC`
+
 	QueryGetDomainStatsHourly = `SELECT domain, hour, req_count, latency_sum_s, bytes_total
 		FROM domain_stats
 		WHERE day = ? AND hour = ?`
 
 	QueryInsertTraceMySQL = `
-	INSERT IGNORE INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+	INSERT IGNORE INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, user_agent, method, referer, request_uri, ja3, request_headers, request_body, response_headers, response_body)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	QueryInsertTraceConflict = `
-	INSERT INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, user_agent, method, referer, request_uri, ja3, request_headers, request_body, response_headers, response_body)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING;`
 )

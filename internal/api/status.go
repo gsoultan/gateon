@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"runtime"
 	"time"
@@ -56,19 +57,32 @@ func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesReq
 	traces := telemetry.GetTraces(ctx, int(req.Limit))
 	res := make([]*gateonv1.Trace, 0, len(traces))
 	for _, t := range traces {
+		reqHeaders := make(map[string]string)
+		if t.RequestHeaders != "" {
+			_ = json.Unmarshal([]byte(t.RequestHeaders), &reqHeaders)
+		}
+		respHeaders := make(map[string]string)
+		if t.ResponseHeaders != "" {
+			_ = json.Unmarshal([]byte(t.ResponseHeaders), &respHeaders)
+		}
+
 		res = append(res, &gateonv1.Trace{
-			Id:            t.ID,
-			OperationName: t.OperationName,
-			ServiceName:   t.ServiceName,
-			DurationMs:    t.DurationMs,
-			Timestamp:     t.Timestamp.Format(time.RFC3339),
-			Status:        t.Status,
-			Path:          t.Path,
-			SourceIp:      t.SourceIP,
-			UserAgent:     t.UserAgent,
-			Method:        t.Method,
-			Referer:       t.Referer,
-			RequestUri:    t.RequestURI,
+			Id:              t.ID,
+			OperationName:   t.OperationName,
+			ServiceName:     t.ServiceName,
+			DurationMs:      t.DurationMs,
+			Timestamp:       t.Timestamp.Format(time.RFC3339),
+			Status:          t.Status,
+			Path:            t.Path,
+			SourceIp:        t.SourceIP,
+			UserAgent:       t.UserAgent,
+			Method:          t.Method,
+			Referer:         t.Referer,
+			RequestUri:      t.RequestURI,
+			RequestHeaders:  reqHeaders,
+			RequestBody:     t.RequestBody,
+			ResponseHeaders: respHeaders,
+			ResponseBody:    t.ResponseBody,
 		})
 	}
 	return &gateonv1.ListTracesResponse{Traces: res}, nil

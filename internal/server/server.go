@@ -6,6 +6,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/redis"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 )
@@ -20,6 +21,7 @@ type Server struct {
 	TLSOptStore  config.TLSOptionStore
 	GlobalStore  config.GlobalConfigStore
 	AuthManager  auth.Service
+	EbpfManager  ebpf.Manager
 	RedisClient  redis.Client
 	TLSManager   gtls.TLSManager
 	Port         string

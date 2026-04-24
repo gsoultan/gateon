@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"strings"
 	"time"
@@ -42,6 +43,9 @@ type MetricsSnapshot struct {
 	// Hourly domain metrics (current hour)
 	HourlyDomainMetrics []DomainStats `json:"hourly_domain_metrics"`
 
+	// Traffic history for charts (last 24-48 hours)
+	TrafficHistory []TrafficSample `json:"traffic_history"`
+
 	// System-level gauges.
 	System SystemMetrics `json:"system"`
 }
@@ -59,6 +63,8 @@ type GoldenSignals struct {
 	BytesInTotal    float64 `json:"bytes_in_total"`
 	BytesOutTotal   float64 `json:"bytes_out_total"`
 	ActiveConnTotal float64 `json:"active_conn_total"`
+	RequestsToday   uint64  `json:"requests_today"`
+	BytesToday      uint64  `json:"bytes_today"`
 }
 
 // RouteMetric holds per-route request metrics.
@@ -177,7 +183,8 @@ func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
 	snap.CountryMetrics = buildCountryMetrics(idx)
 	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
 	snap.DomainMetrics = buildDomainMetrics(idx)
-	snap.HourlyDomainMetrics = GetDomainStatsHourly(time.Now().UTC().Format("2006-01-02"), time.Now().UTC().Hour())
+	snap.HourlyDomainMetrics = GetDomainStatsHourly(time.Now().UTC().Format("2006-01-02"), time.Now().UTC().Hour()*2+time.Now().UTC().Minute()/30)
+	snap.TrafficHistory = GetSystemTrafficHistory(context.Background(), 2) // Last 2 days for 24h+ coverage
 	snap.System = buildSystemMetrics(idx)
 
 	return snap, nil
@@ -245,6 +252,11 @@ func buildGoldenSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
 			}
 		}
 	}
+
+	// Populate daily totals from store
+	reqToday, bytesToday := GetSystemTrafficToday(context.Background())
+	gs.RequestsToday = reqToday
+	gs.BytesToday = bytesToday
 
 	return gs
 }

@@ -299,6 +299,13 @@ export type WafConfig = {
   scanner?: boolean;
   protocol?: boolean;
   java?: boolean;
+  bot_management?: BotManagementConfig;
+};
+
+export type BotManagementConfig = {
+  enabled?: boolean;
+  enable_js_challenge?: boolean;
+  challenge_timeout_seconds?: number;
 };
 
 export type HaConfig = {
@@ -317,12 +324,16 @@ export type AnomalyDetectionConfig = {
   check_interval_seconds?: number;
   sensitivity?: number;
   security_threat_threshold?: number;
+  anomaly_retention_days?: number;
+  enable_behavioral_fingerprinting?: boolean;
 };
 
 export type EbpfConfig = {
   enabled?: boolean;
   xdp_rate_limit?: boolean;
   tc_filtering?: boolean;
+  xdp_ip_shunning?: boolean;
+  xdp_load_balancing?: boolean;
 };
 
 export interface GeoIPConfig {

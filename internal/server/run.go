@@ -52,6 +52,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Invalidator:        proxyInvalidator,
 		TLSManager:         s.TLSManager,
 		RouteStatsProvider: s.GetRouteStats,
+		EbpfManager:        s.EbpfManager,
 	})
 	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
 	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)

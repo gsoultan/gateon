@@ -14,7 +14,15 @@ const (
 	EntryPointIDContextKey ContextKey = "entrypoint_id"
 	RouteNameContextKey    ContextKey = "route_name"
 	IsManagementContextKey ContextKey = "is_management"
+	DebugInfoContextKey    ContextKey = "debug_info"
 )
+
+type DebugInfo struct {
+	RequestHeaders  string
+	RequestBody     string
+	ResponseHeaders string
+	ResponseBody    string
+}
 
 // GetRouteName returns the route ID from the request context, or empty if not set.
 func GetRouteName(r *http.Request) string {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -312,9 +313,17 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 	}
 
+	if s.EbpfManager != nil {
+		if err := s.EbpfManager.ShunIP(sourceIP); err != nil {
+			logger.L.Error().Err(err).Str("ip", sourceIP).Msg("Failed to shun IP at XDP level")
+		} else {
+			logger.L.Info().Str("ip", sourceIP).Msg("IP shunned at XDP level for DDoS mitigation")
+		}
+	}
+
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
-		Message: fmt.Sprintf("IP %s blocked and added to %d routes.", sourceIP, updatedCount),
+		Message: fmt.Sprintf("IP %s blocked via middleware and shunned at XDP level.", sourceIP),
 	}, nil
 }
 
@@ -394,7 +403,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 		}
 		// Try to populate geo if available (though here we only have the IP)
 		// We can use the same helper as in security_threat_detector.go
-		populateAnomalyGeo(a, telemetry.ResolveCountry(t.SourceIP))
+		populateAnomalyGeo(a, t.SourceIP)
 		res = append(res, a)
 	}
 	return &gateonv1.ListSecurityThreatsResponse{Threats: res}, nil

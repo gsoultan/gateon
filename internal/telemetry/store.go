@@ -35,30 +35,36 @@ type increment struct {
 }
 
 type TraceRecord struct {
-	ID            string
-	OperationName string
-	ServiceName   string
-	DurationMs    float64
-	Timestamp     time.Time
-	Status        string
-	Path          string
-	SourceIP      string
-	CountryCode   string
-	UserAgent     string
-	Method        string
-	Referer       string
-	RequestURI    string
-	JA3           string
+	ID              string
+	OperationName   string
+	ServiceName     string
+	DurationMs      float64
+	Timestamp       time.Time
+	Status          string
+	Path            string
+	SourceIP        string
+	Fingerprint     string
+	CountryCode     string
+	UserAgent       string
+	Method          string
+	Referer         string
+	RequestURI      string
+	JA3             string
+	RequestHeaders  string
+	RequestBody     string
+	ResponseHeaders string
+	ResponseBody    string
 }
 
 type SecurityThreat struct {
-	ID       string
-	Type     string
-	SourceIP string
-	Score    float64
-	Details  string
-	Time     time.Time
-	JA3      string
+	ID          string
+	Type        string
+	SourceIP    string
+	Fingerprint string
+	Score       float64
+	Details     string
+	Time        time.Time
+	JA3         string
 }
 
 type pathStatsStore struct {
@@ -147,7 +153,7 @@ func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, score, details, timestamp, ja3) VALUES (?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -175,8 +181,9 @@ func (s *pathStatsStore) loop() {
 					if inc.isDomain {
 						if domainStmt != nil {
 							day := inc.atTime.UTC().Format("2006-01-02")
-							hour := inc.atTime.UTC().Hour()
-							if _, err := domainStmt.Exec(day, hour, inc.host, 1, inc.latS, inc.bytesTotal); err != nil {
+							// Use 30-minute buckets: hour*2 + (minute/30) -> 0-47
+							bucket := inc.atTime.UTC().Hour()*2 + inc.atTime.UTC().Minute()/30
+							if _, err := domainStmt.Exec(day, bucket, inc.host, 1, inc.latS, inc.bytesTotal); err != nil {
 								logger.Default().Error().Err(err).Msg("domain stats: upsert failed")
 							}
 						}
@@ -207,7 +214,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.traceInsertStmt(tx); err == nil {
 					for _, tr := range traceBatch {
-						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI, tr.JA3); err != nil {
+						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.Fingerprint, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI, tr.JA3, tr.RequestHeaders, tr.RequestBody, tr.ResponseHeaders, tr.ResponseBody); err != nil {
 							logger.Default().Error().Err(err).Msg("traces: insert failed")
 						}
 					}
@@ -227,7 +234,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Score, th.Details, th.Time, th.JA3); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3); err != nil {
 							logger.Default().Error().Err(err).Msg("threats: insert failed")
 						}
 					}
@@ -367,26 +374,31 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, countryCode, userAgent, method, referer, requestURI, ja3 string) {
+func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, reqHeaders, reqBody, respHeaders, respBody string) {
 	if store == nil {
 		return
 	}
 	select {
 	case store.traceInCh <- TraceRecord{
-		ID:            id,
-		OperationName: operationName,
-		ServiceName:   serviceName,
-		DurationMs:    durationMs,
-		Timestamp:     timestamp,
-		Status:        status,
-		Path:          path,
-		SourceIP:      sourceIP,
-		CountryCode:   countryCode,
-		UserAgent:     userAgent,
-		Method:        method,
-		Referer:       referer,
-		RequestURI:    requestURI,
-		JA3:           ja3,
+		ID:              id,
+		OperationName:   operationName,
+		ServiceName:     serviceName,
+		DurationMs:      durationMs,
+		Timestamp:       timestamp,
+		Status:          status,
+		Path:            path,
+		SourceIP:        sourceIP,
+		Fingerprint:     fingerprint,
+		CountryCode:     countryCode,
+		UserAgent:       userAgent,
+		Method:          method,
+		Referer:         referer,
+		RequestURI:      requestURI,
+		JA3:             ja3,
+		RequestHeaders:  reqHeaders,
+		RequestBody:     reqBody,
+		ResponseHeaders: respHeaders,
+		ResponseBody:    respBody,
 	}:
 	default:
 		// drop on backpressure
@@ -422,7 +434,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3 FROM traces ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3, request_headers, request_body, response_headers, response_body FROM traces ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("traces: query failed")
@@ -432,10 +444,15 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	res := make([]TraceRecord, 0, min(limit, 100))
 	for rows.Next() {
 		var tr TraceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3); err != nil {
+		var reqHeaders, reqBody, respHeaders, respBody sql.NullString
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &reqHeaders, &reqBody, &respHeaders, &respBody); err != nil {
 			logger.Default().Error().Err(err).Msg("traces: scan failed")
 			continue
 		}
+		tr.RequestHeaders = reqHeaders.String
+		tr.RequestBody = reqBody.String
+		tr.ResponseHeaders = respHeaders.String
+		tr.ResponseBody = respBody.String
 		res = append(res, tr)
 	}
 	return res
@@ -525,6 +542,58 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	return stats
 }
 
+// GetSystemTrafficToday returns total requests and bandwidth for the current day.
+func GetSystemTrafficToday(ctx context.Context) (uint64, uint64) {
+	if store == nil {
+		return 0, 0
+	}
+	day := time.Now().UTC().Format("2006-01-02")
+	q := store.dialect.Rebind(QueryGetTotalTrafficToday)
+	var rc, bsum sql.NullInt64
+	err := store.db.QueryRowContext(ctx, q, day).Scan(&rc, &bsum)
+	if err != nil {
+		return 0, 0
+	}
+	return uint64(rc.Int64), uint64(bsum.Int64)
+}
+
+// GetSystemTrafficHistory returns traffic samples for the last N days.
+func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
+	if store == nil {
+		return nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
+	q := store.dialect.Rebind(QueryGetTrafficHistory)
+	rows, err := store.db.QueryContext(ctx, q, cutoff)
+	if err != nil {
+		logger.Default().Error().Err(err).Msg("traffic history: query failed")
+		return nil
+	}
+	defer rows.Close()
+
+	var samples []TrafficSample
+	for rows.Next() {
+		var day string
+		var bucket int
+		var rc, bsum int64
+		if err := rows.Scan(&day, &bucket, &rc, &bsum); err != nil {
+			continue
+		}
+
+		// Convert day and bucket back to timestamp
+		t, _ := time.Parse("2006-01-02", day)
+		// bucket is half-hour index (0-47)
+		t = t.Add(time.Duration(bucket*30) * time.Minute)
+
+		samples = append(samples, TrafficSample{
+			Timestamp: t.UnixMilli(),
+			Requests:  uint64(rc),
+			Bytes:     uint64(bsum),
+		})
+	}
+	return samples
+}
+
 // GetDomainStatsHourly returns domain statistics for a specific hour.
 func GetDomainStatsHourly(day string, hour int) []DomainStats {
 	if store == nil {
@@ -576,7 +645,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, score, details, timestamp, ja3 FROM security_threats ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3 FROM security_threats ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("threats: query failed")
@@ -586,7 +655,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	res := make([]SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
 		var th SecurityThreat
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Score, &th.Details, &th.Time, &th.JA3); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3); err != nil {
 			logger.Default().Error().Err(err).Msg("threats: scan failed")
 			continue
 		}

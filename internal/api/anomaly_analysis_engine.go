@@ -27,6 +27,7 @@ func NewAnomalyAnalysisEngine(securityThreshold float64) *AnomalyAnalysisEngine 
 func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	// Pre-process traces for performance - single pass
 	data.IPStats = make(map[string]*IPStats)
+	data.FingerprintStats = make(map[string]*FingerprintStats)
 
 	// For burst detection
 	type ipTime struct {
@@ -72,6 +73,30 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		burstTracker[it]++
 		if burstTracker[it] > stats.BurstCount {
 			stats.BurstCount = burstTracker[it]
+		}
+
+		// Fingerprint aggregation
+		if tr.Fingerprint != "" {
+			fStats, ok := data.FingerprintStats[tr.Fingerprint]
+			if !ok {
+				fStats = &FingerprintStats{
+					Fingerprint: tr.Fingerprint,
+					IPs:         make(map[string]struct{}),
+					UniquePaths: make(map[string]struct{}),
+				}
+				data.FingerprintStats[tr.Fingerprint] = fStats
+			}
+			fStats.TotalRequests++
+			fStats.IPs[tr.SourceIP] = struct{}{}
+			fStats.UniquePaths[tr.Path] = struct{}{}
+			if tr.Timestamp.After(fStats.LastSeen) {
+				fStats.LastSeen = tr.Timestamp
+			}
+			if strings.HasPrefix(tr.Status, "4") {
+				fStats.Error4xx++
+			} else if strings.HasPrefix(tr.Status, "5") {
+				fStats.Error5xx++
+			}
 		}
 
 		if strings.Contains(tr.Status, "401") {
