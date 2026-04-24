@@ -377,4 +377,77 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(18, "add_debug_info_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_headers TEXT;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_body TEXT;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_headers TEXT;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_body TEXT;`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_headers LONGTEXT;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_body LONGTEXT;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_headers LONGTEXT;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_body LONGTEXT;`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN request_headers TEXT;`,
+				`ALTER TABLE traces ADD COLUMN request_body TEXT;`,
+				`ALTER TABLE traces ADD COLUMN response_headers TEXT;`,
+				`ALTER TABLE traces ADD COLUMN response_body TEXT;`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
+
+	Register(18, "convert_domain_stats_hour_to_half_hour_buckets", func(db *sql.DB, dialect Dialect) error {
+		_, err := db.Exec("UPDATE domain_stats SET hour = hour * 2 WHERE hour < 24")
+		return err
+	})
+
+	Register(20, "add_fingerprint_to_telemetry", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS fingerprint TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS fingerprint TEXT NOT NULL DEFAULT '';`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(255) NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(255) NOT NULL DEFAULT '';`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

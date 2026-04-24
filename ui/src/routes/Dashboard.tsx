@@ -13,6 +13,7 @@ import {
   Skeleton,
   Box,
   Select,
+  SegmentedControl,
   TextInput,
   Badge,
   Table,
@@ -69,6 +70,8 @@ import {
   buildBandwidthByRouterData,
   buildBandwidthByServiceData,
   buildTrafficByPortData,
+  aggregateTrafficSamples,
+  aggregateBandwidthSamples,
 } from "../utils/dashboard";
 import type {
   TrafficFilterMode,
@@ -143,6 +146,7 @@ export default function Dashboard() {
   const [trafficRangePreset, setTrafficRangePreset] = useState<TrafficRangePreset>("last24h");
   const [trafficRangeStart, setTrafficRangeStart] = useState("");
   const [trafficRangeEnd, setTrafficRangeEnd] = useState("");
+  const [chartResolution, setChartResolution] = useState("60");
   const previousPathStatsRef = useRef<Map<string, number> | null>(null);
   const [bandwidthDeltaHistory, setBandwidthDeltaHistory] = useState<BandwidthDeltaSample[]>([]);
 
@@ -219,24 +223,54 @@ export default function Dashboard() {
     setBandwidthDeltaHistory((prev) => [...prev, sample].slice(-100000));
   }, [pathStats, routesResponse?.routes, servicesResponse?.services]);
 
+  const combinedTrafficHistory = useMemo(() => {
+    const history = metricsSnap?.traffic_history ?? [];
+    const samples: RequestDeltaSample[] = history.map((h) => ({
+      ts: h.ts,
+      requests: h.requests,
+    }));
+
+    // Add session deltas that are newer than history
+    const lastHistoryTs = history.length > 0 ? history[history.length - 1].ts : 0;
+    const sessionDeltas = requestDeltaHistory.filter((s) => s.ts > lastHistoryTs);
+
+    return [...samples, ...sessionDeltas];
+  }, [metricsSnap?.traffic_history, requestDeltaHistory]);
+
+  const combinedBandwidthHistory = useMemo(() => {
+    // Currently history doesn't have breakdown by router/service, so we just use total
+    const history = metricsSnap?.traffic_history ?? [];
+    const samples: BandwidthDeltaSample[] = history.map((h) => ({
+      ts: h.ts,
+      totalBytes: h.bytes,
+      routerBytes: {},
+      serviceBytes: {},
+    }));
+
+    const lastHistoryTs = history.length > 0 ? history[history.length - 1].ts : 0;
+    const sessionDeltas = bandwidthDeltaHistory.filter((s) => s.ts > lastHistoryTs);
+
+    return [...samples, ...sessionDeltas];
+  }, [metricsSnap?.traffic_history, bandwidthDeltaHistory]);
+
   const filteredTrafficSamples = useMemo(
-    () => filterTrafficSamplesByRange(requestDeltaHistory, trafficRangeBounds),
-    [requestDeltaHistory, trafficRangeBounds],
+    () => filterTrafficSamplesByRange(combinedTrafficHistory, trafficRangeBounds),
+    [combinedTrafficHistory, trafficRangeBounds],
   );
 
   const filteredBandwidthSamples = useMemo(
-    () => filterTrafficSamplesByRange(bandwidthDeltaHistory, trafficRangeBounds),
-    [bandwidthDeltaHistory, trafficRangeBounds],
+    () => filterTrafficSamplesByRange(combinedBandwidthHistory, trafficRangeBounds),
+    [combinedBandwidthHistory, trafficRangeBounds],
   );
 
   const hourlyTrafficData = useMemo(
-    () => buildHourlyTrafficData(filteredTrafficSamples, trafficRangeBounds),
-    [filteredTrafficSamples, trafficRangeBounds],
+    () => aggregateTrafficSamples(filteredTrafficSamples, parseInt(chartResolution), trafficRangeBounds),
+    [filteredTrafficSamples, chartResolution, trafficRangeBounds],
   );
 
   const hourlyBandwidthData = useMemo(
-    () => buildHourlyBandwidthData(filteredBandwidthSamples, trafficRangeBounds),
-    [filteredBandwidthSamples, trafficRangeBounds],
+    () => aggregateBandwidthSamples(filteredBandwidthSamples, parseInt(chartResolution), trafficRangeBounds),
+    [filteredBandwidthSamples, chartResolution, trafficRangeBounds],
   );
 
   const bandwidthSummaries = useMemo(
@@ -377,6 +411,8 @@ export default function Dashboard() {
 
   const totalRequests = agg?.total_requests ?? 0;
   const totalBandwidthBytes = agg?.total_bandwidth_bytes ?? 0;
+  const requestsToday = metricsSnap?.golden_signals?.requests_today ?? 0;
+  const bytesToday = metricsSnap?.golden_signals?.bytes_today ?? 0;
   const totalErrors = agg?.total_errors ?? 0;
   const errorRate =
     totalRequests > 0 ? ((totalErrors / totalRequests) * 100).toFixed(2) : "0.00";
@@ -395,6 +431,20 @@ export default function Dashboard() {
       icon: IconTransferIn,
       color: "blue" as const,
       description: "Cumulative ingress + egress bytes",
+    },
+    {
+      label: "Requests / Day",
+      value: formatCompact(requestsToday),
+      icon: IconActivity,
+      color: "teal" as const,
+      description: "Total requests in the last 24h",
+    },
+    {
+      label: "Bandwidth / Day",
+      value: formatBytes(bytesToday),
+      icon: IconTransferIn,
+      color: "cyan" as const,
+      description: "Total bandwidth in the last 24h",
     },
     {
       label: "Total Errors",
@@ -691,7 +741,7 @@ export default function Dashboard() {
       >
         <Group justify="space-between" mb="md" wrap="wrap">
           <Title order={5} fw={700} c="dimmed" style={{ letterSpacing: 1 }}>
-            TRAFFIC PER HOUR
+            TRAFFIC OVER TIME
           </Title>
           <Text size="xs" c="dimmed" fw={600}>
             {trafficWindowLabel}
@@ -757,6 +807,21 @@ export default function Dashboard() {
           <Button size="xs" variant="subtle" onClick={resetTrafficFilters}>
             Reset
           </Button>
+
+          <Select
+            label="Resolution"
+            size="xs"
+            w={120}
+            data={[
+              { value: "30", label: "30 min" },
+              { value: "60", label: "1 hour" },
+              { value: "180", label: "3 hours" },
+              { value: "360", label: "6 hours" },
+              { value: "1440", label: "1 day" },
+            ]}
+            value={chartResolution}
+            onChange={(value) => setChartResolution(value ?? "60")}
+          />
         </Group>
 
         {aggLoading && requestRateHistory.length === 0 ? (
@@ -784,7 +849,7 @@ export default function Dashboard() {
         <Stack mt="lg" gap="md">
           <Group justify="space-between" wrap="wrap">
             <Text size="sm" fw={700}>
-              BANDWIDTH PER HOUR
+              BANDWIDTH OVER TIME
             </Text>
             <Text size="xs" c="dimmed">
               Total, router, and service hourly bandwidth

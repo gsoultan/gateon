@@ -89,6 +89,7 @@ func main() {
 
 	initTelemetry(globalReg, ctx)
 
+	var ebpfManager ebpf.Manager
 	if gc := globalReg.Get(context.Background()); gc != nil {
 		if gc.Ha != nil && gc.Ha.Enabled {
 			haManager := ha.NewHAManager(gc.Ha)
@@ -103,7 +104,7 @@ func main() {
 			}
 		}
 		if gc.Ebpf != nil && gc.Ebpf.Enabled {
-			ebpfManager := ebpf.NewEbpfManager(gc.Ebpf)
+			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
 			go ebpfManager.Start(context.Background())
 		}
 	}
@@ -112,6 +113,7 @@ func main() {
 	s, err := server.NewServer(
 		server.WithGlobalRegistry(globalReg),
 		server.WithAuthManager(authManager),
+		server.WithEbpfManager(ebpfManager),
 		server.WithPort(port),
 		server.WithVersion(version()),
 		server.WithRouteRegistry(config.NewRouteRegistry(getEnvDefault("ROUTES_FILE", "routes.json"))),

@@ -30,6 +30,13 @@ message GlobalConfig {
   AIConfig ai = 11;
   ManagementConfig management = 12;
   GeoIPConfig geoip = 13;
+  DebuggerConfig debugger = 14;
+}
+
+message DebuggerConfig {
+  bool enabled = 1;
+  int32 max_captures = 2; // Maximum number of requests to keep in memory
+  int32 max_body_size = 3; // Maximum body size to capture in bytes
 }
 
 message GeoIPConfig {
@@ -95,6 +102,13 @@ message WafConfig {
   bool scanner = 10;
   bool protocol = 11;
   bool java = 12;
+  BotManagementConfig bot_management = 13;
+}
+
+message BotManagementConfig {
+  bool enabled = 1;
+  bool enable_js_challenge = 2;
+  int32 challenge_timeout_seconds = 3;
 }
 
 message HaConfig {
@@ -114,6 +128,7 @@ message AnomalyDetectionConfig {
   double sensitivity = 4;
   double security_threat_threshold = 5;
   int32 anomaly_retention_days = 6;
+  bool enable_behavioral_fingerprinting = 7;
 }
 
 message EbpfConfig {
@@ -121,6 +136,8 @@ message EbpfConfig {
   bool xdp_rate_limit = 2;
   bool tc_filtering = 3;
   string interface = 4;
+  bool xdp_ip_shunning = 5;
+  bool xdp_load_balancing = 6;
 }
 
 message AuthConfig {

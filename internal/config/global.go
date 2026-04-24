@@ -20,6 +20,11 @@ type GlobalRegistry struct {
 	path   string
 }
 
+var (
+	globalInstance *GlobalRegistry
+	globalMu       sync.RWMutex
+)
+
 func NewGlobalRegistry(path string) *GlobalRegistry {
 	reg := &GlobalRegistry{
 		config: &gateonv1.GlobalConfig{
@@ -43,11 +48,28 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 				AutoUpdate:         true,
 				UpdateIntervalDays: 30,
 			},
+			Debugger: &gateonv1.DebuggerConfig{
+				Enabled:     false,
+				MaxCaptures: 1000,
+				MaxBodySize: 1024 * 64, // 64KB
+			},
 		},
 		path: path,
 	}
 	reg.load()
+	globalMu.Lock()
+	globalInstance = reg
+	globalMu.Unlock()
 	return reg
+}
+
+func GetGlobalConfig() *gateonv1.GlobalConfig {
+	globalMu.RLock()
+	defer globalMu.RUnlock()
+	if globalInstance == nil {
+		return nil
+	}
+	return globalInstance.config
 }
 
 func (r *GlobalRegistry) load() {

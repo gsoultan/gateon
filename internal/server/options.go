@@ -3,6 +3,7 @@ package server
 import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	redigo "github.com/redis/go-redis/v9"
 )
 
@@ -63,6 +64,14 @@ func WithAuthManager(a *auth.Manager) ServerOption {
 		if a != nil {
 			s.AuthManager = a
 		}
+		return nil
+	}
+}
+
+// WithEbpfManager sets the eBPF manager.
+func WithEbpfManager(e ebpf.Manager) ServerOption {
+	return func(s *Server) error {
+		s.EbpfManager = e
 		return nil
 	}
 }

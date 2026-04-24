@@ -24,7 +24,7 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 				Source:         tr.SourceIP,
 				Recommendation: "Verify if this path should be registered in the proxy configuration or blocked.",
 			}
-			populateAnomalyGeo(anomaly, tr.CountryCode)
+			populateAnomalyGeo(anomaly, tr.SourceIP)
 			anomalies = append(anomalies, anomaly)
 		}
 	}

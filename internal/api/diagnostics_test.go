@@ -308,7 +308,7 @@ func TestApplyRecommendation(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.True(t, resp.Success)
-		assert.Contains(t, resp.Message, "1.2.3.4 blocked")
+		assert.Contains(t, resp.Message, "1.2.3.4 blocked via middleware")
 
 		// Verify middleware created
 		mw, ok := mwStore.Get(ctx, "block-ip-1-2-3-4")

@@ -91,6 +91,10 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 		return f.createForwardAuth(cfg)
 	case "waf":
 		return f.createWAF(cfg)
+	case "graphql_firewall":
+		return f.createGraphQLFirewall(cfg)
+	case "bot_management":
+		return f.createBotManagement(cfg)
 	case "turnstile":
 		return f.createTurnstile(cfg)
 	case "geoip":

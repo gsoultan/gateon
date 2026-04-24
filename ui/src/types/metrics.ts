@@ -10,6 +10,8 @@ export type GoldenSignals = {
   bytes_in_total: number;
   bytes_out_total: number;
   active_conn_total: number;
+  requests_today: number;
+  bytes_today: number;
 };
 
 export type RouteMetric = {
@@ -117,5 +119,12 @@ export type MetricsSnapshot = {
   protocol_metrics: LabeledCount[] | null;
   domain_metrics: DomainMetric[] | null;
   hourly_domain_metrics: DomainStats[] | null;
+  traffic_history: TrafficSample[] | null;
   system: SystemMetrics;
+};
+
+export type TrafficSample = {
+  ts: number;
+  requests: number;
+  bytes: number;
 };

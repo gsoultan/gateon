@@ -40,7 +40,7 @@ func (d *ManagementDomainDetector) Detect(ctx context.Context, data *DiagnosticD
 					Source:         tr.SourceIP,
 					Recommendation: "Restrict management access to internal VPN or specific trusted IP addresses only.",
 				}
-				populateAnomalyGeo(anomaly, tr.CountryCode)
+				populateAnomalyGeo(anomaly, tr.SourceIP)
 				anomalies = append(anomalies, anomaly)
 			}
 		}

@@ -274,7 +274,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
-	chain = append(chain, middleware.Recovery(), middleware.AccessLog(routeLabel), middleware.Metrics(routeLabel))
+	chain = append(chain, middleware.Recovery(), middleware.AccessLog(routeLabel), middleware.Metrics(routeLabel), middleware.Debugger(globalStore))
 
 	// Resolve and append user-defined middlewares from the registry
 	for _, mid := range rt.Middlewares {

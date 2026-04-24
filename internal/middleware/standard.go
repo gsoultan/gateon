@@ -1,15 +1,21 @@
 package middleware
 
 import (
+	"bytes"
 	"cmp"
+	"context"
+	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
@@ -138,28 +144,61 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// IP-based metrics
 			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
 
+			// Behavioral Fingerprinting
+			fingerprint := ""
+			if gc := config.GetGlobalConfig(); gc != nil && gc.AnomalyDetection != nil && gc.AnomalyDetection.EnableBehavioralFingerprinting {
+				fp := telemetry.GenerateFingerprint(r)
+				fingerprint = fp.Hash
+			}
+
 			status := getStatusString(sw.Status)
 			country := request.GetCountry(r)
 			if sw.Country != "" {
 				country = sw.Country
 			}
 
-			telemetry.RecordTrace(
-				request.GetID(r),
-				method+" "+origPath,
-				activeRouteID,
-				float64(duration.Nanoseconds())/1e6,
-				start,
-				status,
-				origPath,
-				clientIP,
-				country,
-				r.UserAgent(),
-				method,
-				r.Referer(),
-				origHost+r.URL.RequestURI(),
-				"", // JA3
-			)
+			id := request.GetID(r)
+			if debug, ok := r.Context().Value(DebugInfoContextKey).(*DebugInfo); ok && debug != nil {
+				telemetry.RecordTraceDetailed(
+					id,
+					method+" "+origPath,
+					activeRouteID,
+					float64(duration.Nanoseconds())/1e6,
+					start,
+					status,
+					origPath,
+					clientIP,
+					fingerprint,
+					country,
+					r.UserAgent(),
+					method,
+					r.Referer(),
+					origHost+r.URL.RequestURI(),
+					"", // JA3
+					debug.RequestHeaders,
+					debug.RequestBody,
+					debug.ResponseHeaders,
+					debug.ResponseBody,
+				)
+			} else {
+				telemetry.RecordTrace(
+					id,
+					method+" "+origPath,
+					activeRouteID,
+					float64(duration.Nanoseconds())/1e6,
+					start,
+					status,
+					origPath,
+					clientIP,
+					fingerprint,
+					country,
+					r.UserAgent(),
+					method,
+					r.Referer(),
+					origHost+r.URL.RequestURI(),
+					"", // JA3
+				)
+			}
 
 			statusStr := getStatusString(sw.Status)
 
@@ -355,4 +394,85 @@ func RequestID() Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+type bodyRecorder struct {
+	http.ResponseWriter
+	body    *bytes.Buffer
+	maxSize int
+}
+
+func (r *bodyRecorder) Write(b []byte) (int, error) {
+	if r.body.Len() < r.maxSize {
+		toWrite := min(len(b), r.maxSize-r.body.Len())
+		r.body.Write(b[:toWrite])
+	}
+	return r.ResponseWriter.Write(b)
+}
+
+func (r *bodyRecorder) WriteHeader(status int) {
+	r.ResponseWriter.WriteHeader(status)
+}
+
+var bodyRecorderPool = sync.Pool{
+	New: func() any {
+		return &bodyRecorder{
+			body: new(bytes.Buffer),
+		}
+	},
+}
+
+func Debugger(globalStore config.GlobalConfigStore) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conf := globalStore.Get(r.Context())
+			if conf == nil || conf.Debugger == nil || !conf.Debugger.Enabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			maxBodySize := int(conf.Debugger.MaxBodySize)
+			if maxBodySize <= 0 {
+				maxBodySize = 64 * 1024
+			}
+
+			// Capture Request Body
+			var reqBody []byte
+			if r.Body != nil {
+				reqBody, _ = io.ReadAll(io.LimitReader(r.Body, int64(maxBodySize)))
+				r.Body = io.NopCloser(bytes.NewBuffer(reqBody))
+			}
+
+			reqHeaders, _ := json.Marshal(flattenHeaders(r.Header))
+
+			// Wrap ResponseWriter
+			rec := bodyRecorderPool.Get().(*bodyRecorder)
+			rec.ResponseWriter = w
+			rec.body.Reset()
+			rec.maxSize = maxBodySize
+			defer bodyRecorderPool.Put(rec)
+
+			r = r.WithContext(context.WithValue(r.Context(), DebugInfoContextKey, &DebugInfo{
+				RequestHeaders: string(reqHeaders),
+				RequestBody:    string(reqBody),
+			}))
+
+			next.ServeHTTP(rec, r)
+
+			respHeaders, _ := json.Marshal(flattenHeaders(rec.Header()))
+			debugInfo := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
+			debugInfo.ResponseHeaders = string(respHeaders)
+			debugInfo.ResponseBody = rec.body.String()
+		})
+	}
+}
+
+func flattenHeaders(h http.Header) map[string]string {
+	m := make(map[string]string)
+	for k, v := range h {
+		if len(v) > 0 {
+			m[k] = strings.Join(v, ", ")
+		}
+	}
+	return m
 }

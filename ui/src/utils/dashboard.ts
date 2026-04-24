@@ -51,7 +51,8 @@ export type BandwidthSummaryDatum = {
 
 export const TOP_GROUP_LIMIT = 6;
 export const REFRESH_INTERVAL_MS = 5000;
-export const HOUR_MS = 60 * 60 * 1000;
+export const MINUTE_MS = 60 * 1000;
+export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
 
 export const DEFAULT_PORT_LABEL = "default";
@@ -168,6 +169,115 @@ export function resolveRouterLabel(stat: PathStats, routeMatchers: RouteMatcher[
 export function formatHourLabel(ts: number): string {
   const date = new Date(ts);
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: false });
+}
+
+export function formatTimeLabel(ts: number, resolutionMinutes: number): string {
+  const date = new Date(ts);
+  if (resolutionMinutes >= 1440) {
+    return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+export function aggregateTrafficSamples(
+  samples: RequestDeltaSample[],
+  resolutionMinutes: number,
+  range: TrafficRangeBounds | null,
+): HourlyTrafficDatum[] {
+  const stepMs = resolutionMinutes * MINUTE_MS;
+  const grouped = new Map<number, number>();
+
+  for (const sample of samples) {
+    const bucketTs = Math.floor(sample.ts / stepMs) * stepMs;
+    grouped.set(bucketTs, (grouped.get(bucketTs) ?? 0) + sample.requests);
+  }
+
+  if (!range) {
+    const keys = Array.from(grouped.keys());
+    if (keys.length === 0) return [];
+    const min = Math.min(...keys);
+    const max = Math.max(...keys);
+    range = { startTs: min, endTs: max + stepMs };
+  }
+
+  const startTs = Math.floor(range.startTs / stepMs) * stepMs;
+  const endTs = range.endTs;
+
+  const result: HourlyTrafficDatum[] = [];
+  for (let ts = startTs; ts < endTs; ts += stepMs) {
+    result.push({
+      hourStartTs: ts,
+      hour: formatTimeLabel(ts, resolutionMinutes),
+      requests: grouped.get(ts) ?? 0,
+    });
+  }
+  return result;
+}
+
+export function aggregateBandwidthSamples(
+  samples: BandwidthDeltaSample[],
+  resolutionMinutes: number,
+  range: TrafficRangeBounds | null,
+): HourlyBandwidthDatum[] {
+  const stepMs = resolutionMinutes * MINUTE_MS;
+  const grouped = new Map<
+    number,
+    { totalBytes: number; routerBytes: number; serviceBytes: number }
+  >();
+
+  for (const sample of samples) {
+    const bucketTs = Math.floor(sample.ts / stepMs) * stepMs;
+    const existing = grouped.get(bucketTs) ?? {
+      totalBytes: 0,
+      routerBytes: 0,
+      serviceBytes: 0,
+    };
+    const routerPeak = Object.values(sample.routerBytes).reduce(
+      (peak, value) => Math.max(peak, value),
+      0,
+    );
+    const servicePeak = Object.values(sample.serviceBytes).reduce(
+      (peak, value) => Math.max(peak, value),
+      0,
+    );
+    grouped.set(bucketTs, {
+      totalBytes: existing.totalBytes + sample.totalBytes,
+      routerBytes: existing.routerBytes + routerPeak,
+      serviceBytes: existing.serviceBytes + servicePeak,
+    });
+  }
+
+  if (!range) {
+    const keys = Array.from(grouped.keys());
+    if (keys.length === 0) return [];
+    const min = Math.min(...keys);
+    const max = Math.max(...keys);
+    range = { startTs: min, endTs: max + stepMs };
+  }
+
+  const startTs = Math.floor(range.startTs / stepMs) * stepMs;
+  const endTs = range.endTs;
+
+  const result: HourlyBandwidthDatum[] = [];
+  for (let ts = startTs; ts < endTs; ts += stepMs) {
+    const values = grouped.get(ts) ?? {
+      totalBytes: 0,
+      routerBytes: 0,
+      serviceBytes: 0,
+    };
+    result.push({
+      hourStartTs: ts,
+      hour: formatTimeLabel(ts, resolutionMinutes),
+      totalBytes: values.totalBytes,
+      routerBytes: values.routerBytes,
+      serviceBytes: values.serviceBytes,
+    });
+  }
+  return result;
 }
 
 export function parseDateInputToStartTs(value: string): number | null {

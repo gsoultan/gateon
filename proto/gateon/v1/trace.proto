@@ -17,6 +17,10 @@ message Trace {
   string method = 10;
   string referer = 11;
   string request_uri = 12;
+  map<string, string> request_headers = 13;
+  string request_body = 14;
+  map<string, string> response_headers = 15;
+  string response_body = 16;
 }
 
 message ListTracesRequest {
