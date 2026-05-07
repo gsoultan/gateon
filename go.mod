@@ -19,6 +19,7 @@ require (
 	github.com/hashicorp/consul/api v1.33.7
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/improbable-eng/grpc-web v0.15.0
+	github.com/kaptinlin/jsonschema v0.7.7
 	github.com/lib/pq v1.12.2
 	github.com/o1egl/paseto/v2 v2.1.1
 	github.com/oschwald/geoip2-golang v1.13.0
@@ -114,7 +115,6 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kaptinlin/go-i18n v0.3.0 // indirect
 	github.com/kaptinlin/jsonpointer v0.4.17 // indirect
-	github.com/kaptinlin/jsonschema v0.7.7 // indirect
 	github.com/kaptinlin/messageformat-go v0.4.19 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
