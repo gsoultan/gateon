@@ -1,3 +1,4 @@
+import React from "react";
 import { SimpleGrid, Paper, Group, Text, ThemeIcon, Stack, Box, Badge } from "@mantine/core";
 import { IconArrowUpRight, IconArrowDownRight } from "@tabler/icons-react";
 import type { TablerIconsProps } from "@tabler/icons-react";
