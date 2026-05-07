@@ -29,14 +29,22 @@ type WAFConfig struct {
 	RouteID          string // Route identifier for metrics
 
 	// Specific CRS protections (only used if UseCRS is true)
-	DisableSQLI     bool
-	DisableXSS      bool
-	DisableLFI      bool
-	DisableRCE      bool
-	DisablePHP      bool
-	DisableScanner  bool
-	DisableProtocol bool
-	DisableJava     bool
+	DisableSQLI               bool
+	DisableXSS                bool
+	DisableLFI                bool
+	DisableRCE                bool
+	DisablePHP                bool
+	DisableScanner            bool
+	DisableProtocol           bool
+	DisableJava               bool
+	DisableNodeJS             bool
+	DisableWordPress          bool
+	EnableIPReputation        bool
+	EnableDOSProtection       bool
+	EnableMalwareDetection    bool
+	EnableRansomwareDetection bool
+	EnableDLP                 bool
+	AnomalyThreshold          int
 }
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
@@ -62,6 +70,11 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
 Include @crs-setup.conf.example
 `, pl)
+
+		if cfg.AnomalyThreshold > 0 {
+			_, _ = fmt.Fprintf(&sb, `SecAction "id:900001,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d"
+`, cfg.AnomalyThreshold, cfg.AnomalyThreshold)
+		}
 
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
@@ -95,11 +108,54 @@ Include @crs-setup.conf.example
 		if !cfg.DisableJava {
 			sb.WriteString("Include @owasp_crs/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
 		}
+		if !cfg.DisableNodeJS {
+			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-NODEJS.conf\n")
+		}
+		if cfg.EnableIPReputation {
+			sb.WriteString("Include @owasp_crs/REQUEST-910-IP-REPUTATION.conf\n")
+		}
+		if cfg.EnableDOSProtection {
+			sb.WriteString("Include @owasp_crs/REQUEST-912-DOS-PROTECTION.conf\n")
+		}
+
+		// WP Scanning and Exploits
+		if !cfg.DisableWordPress {
+			// Basic WP protection rules if CRS doesn't have them enabled by default
+			sb.WriteString(`
+SecRule REQUEST_URI "@contains /wp-admin" "id:100001,phase:1,deny,status:403,msg:'WordPress admin access attempt',tag:'wp_scan',severity:CRITICAL,chain"
+  SecRule REMOTE_ADDR "!@ipMatch 127.0.0.1"
+SecRule REQUEST_URI "@contains /wp-login.php" "id:100002,phase:1,deny,status:403,msg:'WordPress login attempt',tag:'wp_scan',severity:CRITICAL"
+SecRule REQUEST_URI "@rx /wp-content/plugins/.*\.php" "id:100003,phase:1,deny,status:403,msg:'WordPress plugin execution attempt',tag:'wp_scan',severity:CRITICAL"
+`)
+		}
+
+		// Malware and File Upload protection
+		if cfg.EnableMalwareDetection {
+			sb.WriteString(`
+SecRule FILES_NAMES "@rx \.(exe|php|phtml|sh|py|pl|rb|jsp|asp|aspx)$" \
+    "id:100004,phase:2,deny,status:403,msg:'Suspicious file upload extension',tag:'malware',severity:CRITICAL"
+SecRule FILES "@contains <?php" \
+    "id:100005,phase:2,deny,status:403,msg:'PHP code injection in file upload',tag:'malware',severity:CRITICAL"
+SecRule FILES "@rx %PDF-1\.[0-7].*obj.*<<.*\/JS.*>>.*endobj" \
+    "id:100006,phase:2,deny,status:403,msg:'PDF with JavaScript detected',tag:'malware',severity:CRITICAL"
+`)
+		}
+
+		// Ransomware protection
+		if cfg.EnableRansomwareDetection {
+			sb.WriteString(`
+SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lockbit|clop|conti|ryuk|cerber|gandcrab|pysa)$" \
+    "id:100007,phase:2,deny,status:403,msg:'Ransomware file extension detected',tag:'ransomware',severity:CRITICAL"
+`)
+		}
 
 		// Blocking evaluation
 		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
 
 		// Response rules
+		if cfg.EnableDLP {
+			sb.WriteString("Include @owasp_crs/RESPONSE-950-DATA-LEAKAGES.conf\n")
+		}
 		if !cfg.DisableSQLI {
 			sb.WriteString("Include @owasp_crs/RESPONSE-951-DATA-LEAKAGES-SQL.conf\n")
 		}
@@ -242,20 +298,36 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 	}
 
 	return WAFConfig{
-		UseCRS:          useCRS,
-		ParanoiaLevel:   pl,
-		Directives:      strings.TrimSpace(cfg["directives"]),
-		DirectivesFile:  strings.TrimSpace(cfg["directives_file"]),
-		TrustCloudflare: request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
-		AuditOnly:       auditOnly,
-		DisableSQLI:     isFalse("sqli"),
-		DisableXSS:      isFalse("xss"),
-		DisableLFI:      isFalse("lfi"),
-		DisableRCE:      isFalse("rce"),
-		DisablePHP:      isFalse("php"),
-		DisableScanner:  isFalse("scanner"),
-		DisableProtocol: isFalse("protocol"),
-		DisableJava:     isFalse("java"),
-		RouteID:         routeID,
+		UseCRS:                    useCRS,
+		ParanoiaLevel:             pl,
+		Directives:                strings.TrimSpace(cfg["directives"]),
+		DirectivesFile:            strings.TrimSpace(cfg["directives_file"]),
+		TrustCloudflare:           request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
+		AuditOnly:                 auditOnly,
+		DisableSQLI:               isFalse("sqli"),
+		DisableXSS:                isFalse("xss"),
+		DisableLFI:                isFalse("lfi"),
+		DisableRCE:                isFalse("rce"),
+		DisablePHP:                isFalse("php"),
+		DisableScanner:            isFalse("scanner"),
+		DisableProtocol:           isFalse("protocol"),
+		DisableJava:               isFalse("java"),
+		DisableNodeJS:             isFalse("nodejs"),
+		DisableWordPress:          isFalse("wordpress"),
+		EnableIPReputation:        strings.TrimSpace(strings.ToLower(cfg["ip_reputation"])) == "true",
+		EnableDOSProtection:       strings.TrimSpace(strings.ToLower(cfg["dos_protection"])) == "true",
+		EnableMalwareDetection:    strings.TrimSpace(strings.ToLower(cfg["malware_detection"])) == "true",
+		EnableRansomwareDetection: strings.TrimSpace(strings.ToLower(cfg["ransomware_detection"])) == "true",
+		EnableDLP:                 strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
+		AnomalyThreshold:          intVal(cfg["anomaly_threshold"]),
+		RouteID:                   routeID,
 	}
+}
+
+func intVal(v string) int {
+	if v == "" {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(v))
+	return n
 }

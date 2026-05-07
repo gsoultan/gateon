@@ -75,7 +75,6 @@ export function Shell() {
     { label: "Routes", to: "/routes", icon: IconRoute },
     { label: "Services", to: "/services", icon: IconServer },
     { label: "Metrics", to: "/metrics", icon: IconChartBar },
-    { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
     { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
     { label: "EntryPoints", to: "/entrypoints", icon: IconAccessPoint },
   ];
@@ -104,9 +103,9 @@ export function Shell() {
 
   return (
     <AppShell
-      header={{ height: 64 }}
+      header={{ height: 60 }}
       navbar={{
-        width: desktopOpened ? 260 : 80,
+        width: desktopOpened ? 240 : 80,
         breakpoint: "sm",
         collapsed: { mobile: !mobileOpened },
       }}
@@ -122,16 +121,17 @@ export function Shell() {
         navbar: {
           transition: "width 300ms ease, border-color 200ms ease",
           overflow: "hidden",
-          borderRight: `1px solid ${colorScheme === "dark" ? "var(--mantine-color-dark-4)" : "var(--mantine-color-gray-2)"}`,
+          backgroundColor: colorScheme === "dark" ? "var(--mantine-color-dark-7)" : "var(--mantine-color-white)",
+          borderRight: `1px solid ${colorScheme === "dark" ? "var(--mantine-color-dark-5)" : "var(--mantine-color-gray-2)"}`,
         },
         header: {
           backgroundColor:
             colorScheme === "dark"
               ? "var(--mantine-color-dark-7)"
               : "var(--mantine-color-white)",
-          borderBottom: `1px solid ${colorScheme === "dark" ? "var(--mantine-color-dark-4)" : "var(--mantine-color-gray-2)"}`,
+          borderBottom: `1px solid ${colorScheme === "dark" ? "var(--mantine-color-dark-5)" : "var(--mantine-color-gray-2)"}`,
           overflow: "hidden",
-          boxShadow: colorScheme === "dark" ? "0 1px 0 rgba(255,255,255,0.03)" : "0 1px 3px rgba(0,0,0,0.04)",
+          boxShadow: "var(--mantine-shadow-xs)",
         },
       }}
     >
@@ -229,41 +229,57 @@ export function Shell() {
             </Group>
 
             <Group gap="xs" style={{ flexShrink: 0 }}>
-              <Menu shadow="md" width={160} position="bottom-end">
-                <Menu.Target>
-                  <Tooltip label="Theme (Light / Dark / System)">
-                    <ActionIcon variant="default" size="md" radius="md">
-                      {colorScheme === "auto" ? (
-                        <IconDeviceDesktop size={18} />
-                      ) : colorScheme === "dark" ? (
-                        <IconMoon size={18} />
-                      ) : (
-                        <IconSun size={18} />
-                      )}
-                    </ActionIcon>
-                  </Tooltip>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Item
-                    leftSection={<IconSun size={16} />}
-                    onClick={() => cycleScheme("light")}
-                  >
-                    Light
-                  </Menu.Item>
-                  <Menu.Item
-                    leftSection={<IconMoon size={16} />}
-                    onClick={() => cycleScheme("dark")}
-                  >
-                    Dark
-                  </Menu.Item>
-                  <Menu.Item
-                    leftSection={<IconDeviceDesktop size={16} />}
-                    onClick={() => cycleScheme("auto")}
-                  >
-                    System
-                  </Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
+      <Menu shadow="md" width={220} position="bottom-end">
+        <Menu.Target>
+          <Tooltip label="Theme (Light / Dark / System)">
+            <ActionIcon variant="default" size="md" radius="md">
+              {colorScheme === "auto" ? (
+                <IconDeviceDesktop size={18} />
+              ) : colorScheme === "dark" ? (
+                <IconMoon size={18} />
+              ) : (
+                <IconSun size={18} />
+              )}
+            </ActionIcon>
+          </Tooltip>
+        </Menu.Target>
+        <Menu.Dropdown p={4}>
+          <Menu.Label>Appearance</Menu.Label>
+          <Menu.Item
+            leftSection={<IconSun size={16} stroke={1.5} />}
+            onClick={() => cycleScheme("light")}
+            active={colorScheme === "light"}
+          >
+            Light Mode
+          </Menu.Item>
+          <Menu.Item
+            leftSection={<IconMoon size={16} stroke={1.5} />}
+            onClick={() => cycleScheme("dark")}
+            active={colorScheme === "dark"}
+          >
+            Dark Mode
+          </Menu.Item>
+          <Menu.Item
+            leftSection={<IconDeviceDesktop size={16} stroke={1.5} />}
+            onClick={() => cycleScheme("auto")}
+            active={colorScheme === "auto"}
+          >
+            Follow System
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Label>Account</Menu.Label>
+          <Menu.Item
+            color="red"
+            leftSection={<IconPower size={16} stroke={1.5} />}
+            onClick={() => {
+              logout();
+              void navigate({ to: "/login" });
+            }}
+          >
+            Logout session
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
               <Tooltip label="Refresh Status">
                 <ActionIcon
                   variant="subtle"
@@ -275,16 +291,6 @@ export function Shell() {
                   <IconRefresh size={18} />
                 </ActionIcon>
               </Tooltip>
-              <Tooltip label="Logout">
-                <ActionIcon
-                  variant="light"
-                  color="red"
-                  size="md"
-                  onClick={() => { logout(); void navigate({ to: "/login" }); }}
-                >
-                  <IconPower size={18} />
-                </ActionIcon>
-              </Tooltip>
             </Group>
           </Flex>
         </Flex>
@@ -292,19 +298,21 @@ export function Shell() {
 
       <AppShell.Navbar p="md">
         <AppShell.Section grow component={ScrollArea}>
-          <Stack gap="sm">
+          <Stack gap={2}>
             {desktopOpened && (
               <Text
                 size="xs"
-                fw={800}
+                fw={700}
                 c="dimmed"
-                px="xs"
-                style={{ textTransform: "uppercase", letterSpacing: 1 }}
+                px="md"
+                mt="md"
+                mb={4}
+                style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
               >
-                CORE
+                Core
               </Text>
             )}
-            <Stack gap="xs">
+            <Stack gap={2}>
               {coreLinks.map((l) => (
                 <Tooltip
                   key={l.to}
@@ -315,20 +323,21 @@ export function Shell() {
                 >
                   <NavLink
                     label={desktopOpened ? l.label : null}
-                    leftSection={<l.icon size={22} stroke={1.5} />}
+                    leftSection={<l.icon size={20} stroke={1.5} />}
                     component={Link as any}
                     to={l.to}
                     active={location.pathname === l.to}
-                    variant="filled"
+                    variant="light"
                     styles={{
                       root: {
-                        borderRadius: "var(--mantine-radius-md)",
-                        fontWeight: 500,
-                        height: 48,
+                        borderRadius: "var(--mantine-radius-sm)",
+                        fontWeight: 600,
+                        height: 40,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: desktopOpened ? "flex-start" : "center",
                         padding: desktopOpened ? "0 12px" : 0,
+                        margin: "0 8px",
                       },
                       section: {
                         marginRight: desktopOpened ? 12 : 0,
@@ -339,20 +348,20 @@ export function Shell() {
               ))}
             </Stack>
 
-            <Divider my="xs" variant="transparent" />
-
             {desktopOpened && (
               <Text
                 size="xs"
-                fw={800}
+                fw={700}
                 c="dimmed"
-                px="xs"
-                style={{ textTransform: "uppercase", letterSpacing: 1 }}
+                px="md"
+                mt="lg"
+                mb={4}
+                style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
               >
-                SECURITY
+                Security
               </Text>
             )}
-            <Stack gap="xs">
+            <Stack gap={2}>
               {securityLinks.map((l) => (
                 <Tooltip
                   key={l.to}
@@ -363,20 +372,21 @@ export function Shell() {
                 >
                   <NavLink
                     label={desktopOpened ? l.label : null}
-                    leftSection={<l.icon size={22} stroke={1.5} />}
+                    leftSection={<l.icon size={20} stroke={1.5} />}
                     component={Link as any}
                     to={l.to}
                     active={location.pathname === l.to}
-                    variant="filled"
+                    variant="light"
                     styles={{
                       root: {
-                        borderRadius: "var(--mantine-radius-md)",
-                        fontWeight: 500,
-                        height: 48,
+                        borderRadius: "var(--mantine-radius-sm)",
+                        fontWeight: 600,
+                        height: 40,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: desktopOpened ? "flex-start" : "center",
                         padding: desktopOpened ? "0 12px" : 0,
+                        margin: "0 8px",
                       },
                       section: {
                         marginRight: desktopOpened ? 12 : 0,
@@ -387,20 +397,20 @@ export function Shell() {
               ))}
             </Stack>
 
-            <Divider my="xs" variant="transparent" />
-
             {desktopOpened && (
               <Text
                 size="xs"
-                fw={800}
+                fw={700}
                 c="dimmed"
-                px="xs"
-                style={{ textTransform: "uppercase", letterSpacing: 1 }}
+                px="md"
+                mt="lg"
+                mb={4}
+                style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
               >
-                SYSTEM
+                System
               </Text>
             )}
-            <Stack gap="xs">
+            <Stack gap={2}>
               {systemLinks.map((l) => (
                 <Tooltip
                   key={l.to}
@@ -411,20 +421,21 @@ export function Shell() {
                 >
                   <NavLink
                     label={desktopOpened ? l.label : null}
-                    leftSection={<l.icon size={22} stroke={1.5} />}
+                    leftSection={<l.icon size={20} stroke={1.5} />}
                     component={Link as any}
                     to={l.to}
                     active={location.pathname === l.to}
-                    variant="filled"
+                    variant="light"
                     styles={{
                       root: {
-                        borderRadius: "var(--mantine-radius-md)",
-                        fontWeight: 500,
-                        height: 48,
+                        borderRadius: "var(--mantine-radius-sm)",
+                        fontWeight: 600,
+                        height: 40,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: desktopOpened ? "flex-start" : "center",
                         padding: desktopOpened ? "0 12px" : 0,
+                        margin: "0 8px",
                       },
                       section: {
                         marginRight: desktopOpened ? 12 : 0,

@@ -183,8 +183,8 @@ func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
 	snap.CountryMetrics = buildCountryMetrics(idx)
 	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
 	snap.DomainMetrics = buildDomainMetrics(idx)
-	snap.HourlyDomainMetrics = GetDomainStatsHourly(time.Now().UTC().Format("2006-01-02"), time.Now().UTC().Hour()*2+time.Now().UTC().Minute()/30)
-	snap.TrafficHistory = GetSystemTrafficHistory(context.Background(), 2) // Last 2 days for 24h+ coverage
+	snap.HourlyDomainMetrics = GetDomainStatsWindow(context.Background(), 1)
+	snap.TrafficHistory = GetSystemTrafficHistory(context.Background(), CurrentRetentionDays())
 	snap.System = buildSystemMetrics(idx)
 
 	return snap, nil

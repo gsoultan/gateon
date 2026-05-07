@@ -73,11 +73,62 @@ func (ad *AnomalyDetector) runChecks(ctx context.Context, now time.Time) {
 
 	// 2. Latency Anomaly Detection (P99)
 	ad.checkLatency(ctx, now)
+
+	// 3. Brute Force Detection (401/403 spikes)
+	if ad.config.GetEnableBruteForceDetection() {
+		ad.checkBruteForce(ctx, now)
+	}
+
+	// 4. Exploit Scanning Detection (WAF block spikes)
+	if ad.config.GetEnableExploitDetection() {
+		ad.checkExploitScanning(ctx, now)
+	}
+}
+
+func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
+	// Detect if 401/403 rate is higher than sensitivity (e.g. 0.10 = 10%)
+	query := `sum(rate(gateon_requests_total{status_code=~"401|403"}[5m])) / sum(rate(gateon_requests_total[5m]))`
+
+	val, _, err := ad.api.Query(ctx, query, now)
+	if err != nil {
+		return
+	}
+
+	if vector, ok := val.(model.Vector); ok && len(vector) > 0 {
+		rate := float64(vector[0].Value)
+		if rate > ad.config.Sensitivity*1.5 { // Brute force threshold is higher than generic error rate
+			logger.L.Warn().
+				Float64("auth_failure_rate", rate).
+				Msg("ANOMALY DETECTED: Potential brute force or credential stuffing attack detected")
+		}
+	}
+}
+
+func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Time) {
+	// Detect unusual spike in WAF blocks
+	query := `sum(rate(gateon_middleware_waf_blocked_total[5m]))`
+
+	val, _, err := ad.api.Query(ctx, query, now)
+	if err != nil {
+		return
+	}
+
+	if vector, ok := val.(model.Vector); ok && len(vector) > 0 {
+		rate := float64(vector[0].Value)
+		// threshold depends on sensitivity, e.g. 1 block per sec if sensitivity is 0.5
+		threshold := 0.5 / ad.config.Sensitivity
+		if rate > threshold {
+			logger.L.Warn().
+				Float64("waf_block_rate", rate).
+				Float64("threshold", threshold).
+				Msg("ANOMALY DETECTED: High rate of WAF blocks detected - potential exploit scanning in progress")
+		}
+	}
 }
 
 func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 	// Detect if 5xx rate is higher than sensitivity (e.g. 0.05 = 5%)
-	query := `sum(rate(gateon_http_requests_total{status=~"5.."}[5m])) / sum(rate(gateon_http_requests_total[5m]))`
+	query := `sum(rate(gateon_requests_total{status_code=~"5.."}[5m])) / sum(rate(gateon_requests_total[5m]))`
 
 	val, _, err := ad.api.Query(ctx, query, now)
 	if err != nil {
@@ -101,7 +152,7 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 	// For simplicity, we compare with a static high threshold scaled by sensitivity
 	// In a real ML model, we'd use Prometheus HOLT_WINTERS or similar functions.
 
-	query := `histogram_quantile(0.99, sum(rate(gateon_http_request_duration_seconds_bucket[5m])) by (le))`
+	query := `histogram_quantile(0.99, sum(rate(gateon_request_duration_seconds_bucket[5m])) by (le))`
 
 	val, _, err := ad.api.Query(ctx, query, now)
 	if err != nil {

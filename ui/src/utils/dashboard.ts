@@ -176,11 +176,24 @@ export function formatTimeLabel(ts: number, resolutionMinutes: number): string {
   if (resolutionMinutes >= 1440) {
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
   }
-  return date.toLocaleTimeString([], {
+
+  const now = new Date();
+  const isSameDay =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  const timeStr = date.toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
     hour12: false,
   });
+
+  if (isSameDay) {
+    return timeStr;
+  }
+
+  return `${date.getDate()}/${date.getMonth() + 1} ${timeStr}`;
 }
 
 export function aggregateTrafficSamples(

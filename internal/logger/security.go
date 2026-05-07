@@ -10,6 +10,7 @@ import (
 func SecurityEvent(event string, r *http.Request, reason string) {
 	L.Warn().
 		Str("event", event).
+		Str("request_id", request.GetID(r)).
 		Str("ip", clientIP(r)).
 		Str("path", r.URL.Path).
 		Str("reason", reason).
@@ -20,6 +21,7 @@ func SecurityEvent(event string, r *http.Request, reason string) {
 func RBACPermissionDenied(r *http.Request, userID, role, action, resource string) {
 	L.Warn().
 		Str("event", "rbac_permission_denied").
+		Str("request_id", request.GetID(r)).
 		Str("ip", clientIP(r)).
 		Str("path", r.URL.Path).
 		Str("method", r.Method).

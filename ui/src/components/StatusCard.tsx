@@ -14,7 +14,7 @@ export default function StatusCard() {
   ]
 
   const counts = [
-    { label: 'Routes', value: statusData?.routes_count ?? 0, color: 'indigo' },
+    { label: 'Routes', value: statusData?.routes_count ?? 0, color: 'brand' },
     { label: 'Services', value: statusData?.services_count ?? 0, color: 'blue' },
     { label: 'EntryPoints', value: statusData?.entry_points_count ?? 0, color: 'teal' },
     { label: 'Middlewares', value: statusData?.middlewares_count ?? 0, color: 'orange' },
@@ -38,40 +38,25 @@ export default function StatusCard() {
       
       <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
         {counts.map((c) => (
-          <Paper key={c.label} p="md" radius="lg" withBorder shadow="xs">
+          <Paper key={c.label} p="md" radius="md" withBorder shadow="xs" style={{ transition: 'all 0.2s ease', borderLeft: `4px solid var(--mantine-color-${c.color}-6)` }} className="hover:shadow-md">
             <Stack gap={0}>
-              <Text size="xs" c="dimmed" fw={800} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{c.label}</Text>
-              <Text size="xl" fw={900} c={`${c.color}.6`}>{c.value}</Text>
+              <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>{c.label}</Text>
+              <Text size="xl" fw={800} c={`${c.color}.6`} style={{ letterSpacing: -0.5 }}>{c.value}</Text>
             </Stack>
           </Paper>
         ))}
       </SimpleGrid>
       
-      <Card shadow="xs" padding="xl" radius="lg" withBorder>
+      <Card shadow="xs" padding="xl" radius="md" withBorder>
         <Stack gap="xl">
           <Group justify="space-between">
             <Group gap="md">
-              <Paper p="xs" radius="md" bg="indigo.6" shadow="md">
-                <IconActivity size={24} color="white" />
-              </Paper>
+              <ThemeIcon variant="filled" size={42} radius="md" color="brand">
+                <IconActivity size={24} stroke={1.5} />
+              </ThemeIcon>
               <div>
                 <Title order={3} fw={800} style={{ letterSpacing: -0.5 }}>System Health</Title>
-                <SimpleGrid cols={2} spacing="xs">
-                  <Box>
-                    <Group justify="space-between" mb={4}>
-                      <Text size="xs" fw={700} c="dimmed">CPU</Text>
-                      <Text size="xs" fw={700}>{statusData?.cpu_usage?.toFixed(1) || 0}%</Text>
-                    </Group>
-                    <Progress value={statusData?.cpu_usage || 0} size="sm" radius="xl" color="blue" animated />
-                  </Box>
-                  <Box>
-                    <Group justify="space-between" mb={4}>
-                      <Text size="xs" fw={700} c="dimmed">MEMORY</Text>
-                      <Text size="xs" fw={700}>{statusData?.memory_usage_percent?.toFixed(1) || 0}%</Text>
-                    </Group>
-                    <Progress value={statusData?.memory_usage_percent || 0} size="sm" radius="xl" color="orange" animated />
-                  </Box>
-                </SimpleGrid>
+                <Text size="sm" c="dimmed">Live performance metrics and system status</Text>
               </div>
             </Group>
             <Badge 
@@ -86,18 +71,37 @@ export default function StatusCard() {
             </Badge>
           </Group>
 
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+            <Box>
+              <Group justify="space-between" mb={6}>
+                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>CPU Load</Text>
+                <Text size="xs" fw={700}>{statusData?.cpu_usage?.toFixed(1) || 0}%</Text>
+              </Group>
+              <Progress value={statusData?.cpu_usage || 0} size="md" radius="xl" color="brand" animated />
+            </Box>
+            <Box>
+              <Group justify="space-between" mb={6}>
+                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Memory Utilization</Text>
+                <Text size="xs" fw={700}>{statusData?.memory_usage_percent?.toFixed(1) || 0}%</Text>
+              </Group>
+              <Progress value={statusData?.memory_usage_percent || 0} size="md" radius="xl" color="orange" animated />
+            </Box>
+          </SimpleGrid>
+
           <Divider variant="dashed" />
 
-          <SimpleGrid cols={{ base: 1, sm: 4 }} spacing="xl">
+          <SimpleGrid cols={{ base: 1, sm: 4 }} spacing="md">
             {stats.map((stat) => (
-              <Paper key={stat.label} p="md" radius="md" withBorder bg="var(--mantine-color-default-hover)">
-                <Group>
-                  <stat.icon size={24} color={`var(--mantine-color-${stat.color}-6)`} />
+              <Paper key={stat.label} p="sm" radius="md" withBorder bg="var(--mantine-color-body)" style={{ borderStyle: 'dashed' }}>
+                <Group gap="sm">
+                  <ThemeIcon variant="light" color={stat.color} size="md">
+                    <stat.icon size={18} stroke={1.5} />
+                  </ThemeIcon>
                   <div>
-                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                    <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
                       {stat.label}
                     </Text>
-                    <Text fw={700} size="md">{stat.value}</Text>
+                    <Text fw={700} size="sm">{stat.value}</Text>
                   </div>
                 </Group>
               </Paper>

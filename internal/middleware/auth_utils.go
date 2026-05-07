@@ -164,9 +164,6 @@ func ToMap(claims any) map[string]any {
 	if m, ok := claims.(map[string]any); ok {
 		return m
 	}
-	if m, ok := claims.(map[string]interface{}); ok {
-		return m
-	}
 	if m, ok := claims.(interface{ ToMap() map[string]any }); ok {
 		return m.ToMap()
 	}

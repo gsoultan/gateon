@@ -3,16 +3,21 @@ package middleware
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 type BotManagementConfig struct {
 	Enabled                 bool
 	EnableJSChallenge       bool
+	EnableBrowserIntegrity  bool
 	ChallengeTimeoutSeconds int
 	SecretKey               string
 }
@@ -29,7 +34,16 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				return
 			}
 
-			// 1. Check if challenge is already solved
+			// 1. Check browser integrity
+			if cfg.EnableBrowserIntegrity {
+				if !checkBrowserIntegrity(r) {
+					logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
+					http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
+					return
+				}
+			}
+
+			// 2. Check if challenge is already solved
 			cookie, err := r.Cookie(ChallengeCookieName)
 			if err == nil {
 				if verifyChallengeToken(cookie.Value, cfg.SecretKey, r.UserAgent()) {
@@ -122,19 +136,16 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
 func verifyChallengeToken(token, secret, ua string) bool {
 	// Simple verification logic
 	// Token format: payload.signature
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
+	payload, signature, ok := strings.Cut(token, ".")
+	if !ok {
 		return false
 	}
 
-	payload := parts[0]
-	signature := parts[1]
-
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(payload + ua))
-	expectedSignature := fmt.Sprintf("%x", mac.Sum(nil))
-
-	if signature != expectedSignature {
+	expectedSignature := mac.Sum(nil)
+	sigBytes, err := hex.DecodeString(signature)
+	if err != nil || subtle.ConstantTimeCompare(sigBytes, expectedSignature) != 1 {
 		return false
 	}
 
@@ -160,4 +171,36 @@ func GenerateChallengeSeed(secret, ua string) string {
 	mac.Write([]byte(payload + ua))
 	signature := fmt.Sprintf("%x", mac.Sum(nil))
 	return payload + "." + signature
+}
+
+func checkBrowserIntegrity(r *http.Request) bool {
+	ua := r.UserAgent()
+	if ua == "" {
+		return false
+	}
+
+	lowerUA := strings.ToLower(ua)
+	isBrowser := strings.Contains(lowerUA, "mozilla") ||
+		strings.Contains(lowerUA, "chrome") ||
+		strings.Contains(lowerUA, "safari") ||
+		strings.Contains(lowerUA, "edge")
+
+	if !isBrowser {
+		return true // Skip for non-browser-like UAs (APIs)
+	}
+
+	// Modern browsers should have Sec-Fetch headers
+	// If it's a modern browser UA but missing these, it's likely a script
+	if strings.Contains(lowerUA, "chrome/") || strings.Contains(lowerUA, "edge/") || strings.Contains(lowerUA, "safari/") {
+		fetchSite := r.Header.Get("Sec-Fetch-Site")
+		fetchMode := r.Header.Get("Sec-Fetch-Mode")
+		fetchDest := r.Header.Get("Sec-Fetch-Dest")
+
+		if fetchSite == "" && fetchMode == "" && fetchDest == "" {
+			// Suspicious: claims to be a modern browser but lacks fetch metadata
+			return false
+		}
+	}
+
+	return true
 }
