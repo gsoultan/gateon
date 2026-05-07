@@ -415,7 +415,7 @@ func init() {
 		return nil
 	})
 
-	Register(18, "convert_domain_stats_hour_to_half_hour_buckets", func(db *sql.DB, dialect Dialect) error {
+	Register(19, "convert_domain_stats_hour_to_half_hour_buckets", func(db *sql.DB, dialect Dialect) error {
 		_, err := db.Exec("UPDATE domain_stats SET hour = hour * 2 WHERE hour < 24")
 		return err
 	})
@@ -437,6 +437,37 @@ func init() {
 			queries = []string{
 				`ALTER TABLE traces ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE security_threats ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
+
+	Register(21, "add_route_info_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS route_id TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS route_id VARCHAR(255) NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN route_id TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN request_uri TEXT NOT NULL DEFAULT '';`,
 			}
 		}
 

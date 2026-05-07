@@ -65,6 +65,8 @@ type SecurityThreat struct {
 	Details     string
 	Time        time.Time
 	JA3         string
+	RouteID     string
+	RequestURI  string
 }
 
 type pathStatsStore struct {
@@ -152,7 +154,7 @@ func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, route_id, request_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -232,7 +234,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.RouteID, th.RequestURI); err != nil {
 							logger.Default().Error().Err(err).Msg("threats: insert failed")
 						}
 					}
@@ -643,7 +645,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3 FROM security_threats ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, route_id, request_uri FROM security_threats ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("threats: query failed")
@@ -653,7 +655,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	res := make([]SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
 		var th SecurityThreat
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.RouteID, &th.RequestURI); err != nil {
 			logger.Default().Error().Err(err).Msg("threats: scan failed")
 			continue
 		}

@@ -16,6 +16,6 @@ export function useSecurityThreats(limit = 50) {
       }
       return res.json();
     },
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 10000, // Refresh every 10 seconds for real-time feel
   });
 }

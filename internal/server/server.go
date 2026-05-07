@@ -34,7 +34,7 @@ type Server struct {
 
 func (s *Server) proxyCache() *ProxyCache {
 	s.cacheOnce.Do(func() {
-		s.cache = NewProxyCache(s.RouteStore, s.ServiceStore, s.MwStore, s.RedisClient, s.GlobalStore)
+		s.cache = NewProxyCache(s.RouteStore, s.ServiceStore, s.MwStore, s.RedisClient, s.GlobalStore, s.EbpfManager)
 	})
 	return s.cache
 }

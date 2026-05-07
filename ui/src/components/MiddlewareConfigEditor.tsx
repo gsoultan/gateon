@@ -35,6 +35,10 @@ import {
   XFCCConfigEditor,
   PolicyConfigEditor,
   IPFilterConfigEditor,
+  BotManagementConfigEditor,
+  SchemaValidationConfigEditor,
+  HoneypotConfigEditor,
+  RequestIDConfigEditor,
 } from "./middleware-config";
 
 interface MiddlewareConfigEditorProps {
@@ -348,6 +352,18 @@ export function MiddlewareConfigEditor({
 
     case "waf":
       return <WAFConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "bot_management":
+      return <BotManagementConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "schema_validation":
+      return <SchemaValidationConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "honeypot":
+      return <HoneypotConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "request_id":
+      return <RequestIDConfigEditor />;
 
     case "turnstile":
       return <TurnstileConfigEditor config={config} updateConfig={updateConfig} />;

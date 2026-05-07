@@ -112,6 +112,12 @@ var MiddlewareTurnstileTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total Turnstile challenge outcomes.",
 }, []string{"route", "outcome"})
 
+// MiddlewareBotManagementTotal counts bot management outcomes.
+var MiddlewareBotManagementTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_bot_management_total",
+	Help: "Total bot management challenge outcomes.",
+}, []string{"route", "outcome"})
+
 // MiddlewareGeoIPBlockedTotal counts GeoIP blocks by country.
 var MiddlewareGeoIPBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_geoip_blocked_total",

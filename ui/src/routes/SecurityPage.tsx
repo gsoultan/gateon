@@ -75,9 +75,16 @@ export default function SecurityPage() {
             Recent security anomalies and potential threats detected by the system.
           </Text>
         </Stack>
-        <Badge size="lg" color={threats.length > 0 ? "orange" : "teal"} leftSection={threats.length > 0 ? <IconShieldExclamation size={14} /> : <IconShieldCheck size={14} />}>
-          {threats.length} Events Detected
-        </Badge>
+        <Group>
+          <Badge size="lg" color={threats.length > 0 ? "orange" : "teal"} leftSection={threats.length > 0 ? <IconShieldExclamation size={14} /> : <IconShieldCheck size={14} />}>
+            {threats.length} Events Detected
+          </Badge>
+          <Tooltip label="Advanced protections are configured in Settings > Global WAF">
+            <Badge variant="outline" color="blue" leftSection={<IconInfoCircle size={14} />}>
+              Advanced Protection Active
+            </Badge>
+          </Tooltip>
+        </Group>
       </Group>
 
       <SimpleGrid cols={{ base: 1, md: 3 }}>
@@ -92,20 +99,23 @@ export default function SecurityPage() {
         </Paper>
         <Paper withBorder p="md" radius="md">
           <Group justify="space-between">
+            <Text size="xs" c="dimmed" fw={700}>ADVANCED DETECTION</Text>
+            <IconShieldCheck size={16} color="var(--mantine-color-teal-6)" />
+          </Group>
+          <Group gap={4} mt="xs">
+            <Tooltip label="Data Loss Prevention"><Badge size="xs" variant="dot">DLP</Badge></Tooltip>
+            <Tooltip label="Ransomware Protection"><Badge size="xs" variant="dot">RANSOM</Badge></Tooltip>
+            <Tooltip label="Bot Management"><Badge size="xs" variant="dot">BOT</Badge></Tooltip>
+            <Tooltip label="API Schema Validation"><Badge size="xs" variant="dot">API</Badge></Tooltip>
+          </Group>
+        </Paper>
+        <Paper withBorder p="md" radius="md">
+          <Group justify="space-between">
             <Text size="xs" c="dimmed" fw={700}>UNIQUE SOURCES</Text>
             <IconWorld size={16} color="var(--mantine-color-blue-6)" />
           </Group>
           <Title order={3} mt="xs">
             {new Set(threats.map(t => t.source)).size} IPs
-          </Title>
-        </Paper>
-        <Paper withBorder p="md" radius="md">
-          <Group justify="space-between">
-            <Text size="xs" c="dimmed" fw={700}>TLS FINGERPRINTS</Text>
-            <IconFingerprint size={16} color="var(--mantine-color-teal-6)" />
-          </Group>
-          <Title order={3} mt="xs">
-            {new Set(threats.filter(t => !!t.ja3).map(t => t.ja3)).size} JA3
           </Title>
         </Paper>
       </SimpleGrid>
@@ -117,6 +127,7 @@ export default function SecurityPage() {
               <Table.Tr>
                 <Table.Th>Event</Table.Th>
                 <Table.Th>Severity</Table.Th>
+                <Table.Th>Target</Table.Th>
                 <Table.Th>Source IP</Table.Th>
                 <Table.Th>Location</Table.Th>
                 <Table.Th>JA3 Fingerprint</Table.Th>
@@ -126,8 +137,8 @@ export default function SecurityPage() {
             <Table.Tbody>
               {threats.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={6}>
-                    <Text align="center" py="xl" c="dimmed">No security threats detected recently.</Text>
+                  <Table.Td colSpan={7}>
+                    <Text ta="center" py="xl" c="dimmed">No security threats detected recently.</Text>
                   </Table.Td>
                 </Table.Tr>
               ) : (
@@ -146,6 +157,18 @@ export default function SecurityPage() {
                     </Table.Td>
                     <Table.Td>
                       <SeverityBadge severity={threat.severity} />
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap={2}>
+                        {threat.route_id && (
+                          <Badge size="xs" variant="light" color="gray" radius="xs" tt="none">
+                            Route: {threat.route_id}
+                          </Badge>
+                        )}
+                        <Text size="xs" ff="monospace" style={{ wordBreak: 'break-all', maxWidth: '200px' }}>
+                          {threat.request_uri || "-"}
+                        </Text>
+                      </Stack>
                     </Table.Td>
                     <Table.Td>
                       <Text size="sm" ff="monospace">{threat.source}</Text>

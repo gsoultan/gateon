@@ -57,7 +57,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
 	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)
 	epService := domain.NewEntryPointService(s.EpStore)
-	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore)
+	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager)
 	mwService := domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{})
 	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator)
 	canaryService := domain.NewCanaryService(serviceService)
