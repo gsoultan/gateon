@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
@@ -268,9 +269,9 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 }
 
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
-func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore) http.Handler {
+func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager) http.Handler {
 	var chain []middleware.Middleware
-	mwFactory := middleware.NewFactory(redisClient, globalStore)
+	mwFactory := middleware.NewFactory(redisClient, globalStore, ebpfManager)
 
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
@@ -285,7 +286,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 
 		if mwStore != nil {
 			if mwConf, ok := mwStore.Get(context.Background(), mid); ok {
-				mw, err := mwFactory.Create(mwConf)
+				mw, err := mwFactory.Create(mwConf, routeLabel)
 				if err == nil {
 					mID := mid
 					wrapped := func(next http.Handler) http.Handler {

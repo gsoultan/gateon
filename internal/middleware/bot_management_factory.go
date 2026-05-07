@@ -14,7 +14,15 @@ func (f *Factory) createBotManagement(cfg map[string]string) (Middleware, error)
 	}
 	secret := cfg["secret_key"]
 	if secret == "" {
-		secret = "gateon-default-secret" // Should be from global config in production
+		if f.globalStore != nil {
+			global := f.globalStore.Get(nil)
+			if global != nil && global.Waf != nil && global.Waf.BotManagement != nil && global.Waf.BotManagement.SecretKey != "" {
+				secret = global.Waf.BotManagement.SecretKey
+			}
+		}
+	}
+	if secret == "" {
+		secret = "gateon-default-secret"
 	}
 
 	return BotManagement(BotManagementConfig{
@@ -23,5 +31,6 @@ func (f *Factory) createBotManagement(cfg map[string]string) (Middleware, error)
 		EnableBrowserIntegrity:  enableIntegrity,
 		ChallengeTimeoutSeconds: timeout,
 		SecretKey:               secret,
+		RouteID:                 cfg["_route_id"],
 	}), nil
 }

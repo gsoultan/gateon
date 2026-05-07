@@ -1312,7 +1312,7 @@ export default function SettingsPage() {
               {config.waf.use_crs && (
                 <>
                   <Divider label="Global Protection Categories" labelPosition="center" />
-                  <Group grow>
+                  <Group grow align="flex-start">
                     <Stack gap="xs">
                       <Switch
                         label="SQL Injection"
@@ -1359,12 +1359,116 @@ export default function SettingsPage() {
                         disabled={formDisabled}
                       />
                       <Switch
+                        label="NodeJS Protection"
+                        checked={config.waf.nodejs}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, nodejs: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                    </Stack>
+                    <Stack gap="xs">
+                      <Switch
                         label="Java Protection"
                         checked={config.waf.java !== false}
                         onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, java: e.currentTarget.checked } })}
                         disabled={formDisabled}
                       />
+                      <Switch
+                        label="WordPress Protection"
+                        checked={config.waf.wordpress}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, wordpress: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="IP Reputation"
+                        checked={config.waf.ip_reputation}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, ip_reputation: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="DOS Protection"
+                        checked={config.waf.dos_protection}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, dos_protection: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
                     </Stack>
+                    <Stack gap="xs">
+                      <Switch
+                        label="Malware Detection"
+                        checked={config.waf.malware_detection}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, malware_detection: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="Ransomware Detection"
+                        checked={config.waf.ransomware_detection}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, ransomware_detection: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                      <Switch
+                        label="Data Loss Prevention (DLP)"
+                        checked={config.waf.dlp}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, dlp: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                    </Stack>
+                  </Group>
+
+                  <NumberInput
+                    label="Global Anomaly Threshold"
+                    description="Default score required to block if not specified on route. Default: 5"
+                    value={config.waf.anomaly_threshold || 5}
+                    onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, anomaly_threshold: parseInt(v?.toString() || "5") } })}
+                    min={1}
+                    disabled={formDisabled}
+                  />
+
+                  <Divider label="Global Bot Management" labelPosition="center" />
+                  <Group grow>
+                    <Switch
+                      label="Enable Bot Management"
+                      checked={config.waf.bot_management?.enabled}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          bot_management: {
+                            ...(config.waf!.bot_management || {}),
+                            enabled: e.currentTarget.checked
+                          }
+                        }
+                      })}
+                      disabled={formDisabled}
+                    />
+                    <Switch
+                      label="Browser Integrity"
+                      checked={config.waf.bot_management?.enable_browser_integrity}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          bot_management: {
+                            ...(config.waf!.bot_management || {}),
+                            enable_browser_integrity: e.currentTarget.checked
+                          }
+                        }
+                      })}
+                      disabled={formDisabled || !config.waf.bot_management?.enabled}
+                    />
+                    <Switch
+                      label="JS Challenge"
+                      checked={config.waf.bot_management?.enable_js_challenge}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          bot_management: {
+                            ...(config.waf!.bot_management || {}),
+                            enable_js_challenge: e.currentTarget.checked
+                          }
+                        }
+                      })}
+                      disabled={formDisabled || !config.waf.bot_management?.enabled}
+                    />
                   </Group>
                 </>
               )}
@@ -1583,11 +1687,26 @@ export default function SettingsPage() {
 
           {config.ebpf?.enabled && (
             <Stack gap="sm">
+              <TextInput
+                label="Network Interface"
+                description="The network interface to attach eBPF programs to (e.g. eth0)"
+                placeholder="eth0"
+                value={config.ebpf.interface || ""}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, interface: e.currentTarget.value}})}
+                disabled={formDisabled}
+              />
               <Switch
                 label="XDP Rate Limiting"
                 description="Drop packets at the network driver level"
                 checked={config.ebpf.xdp_rate_limit || false}
                 onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdp_rate_limit: e.currentTarget.checked}})}
+                disabled={formDisabled}
+              />
+              <Switch
+                label="XDP IP Shunning"
+                description="Automatically shun malicious IPs at the driver level (IPS)"
+                checked={config.ebpf.xdp_ip_shunning || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdp_ip_shunning: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
               <Switch

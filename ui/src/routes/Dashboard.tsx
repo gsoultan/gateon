@@ -231,9 +231,10 @@ export default function Dashboard() {
       requests: h.requests,
     }));
 
-    // Add session deltas that are newer than history
+    // Add session deltas that are newer than history bucket coverage
     const lastHistoryTs = history.length > 0 ? history[history.length - 1].ts : 0;
-    const sessionDeltas = requestDeltaHistory.filter((s) => s.ts > lastHistoryTs);
+    const historyBucketEndTs = history.length > 0 ? lastHistoryTs + 30 * 60 * 1000 : 0;
+    const sessionDeltas = requestDeltaHistory.filter((s) => s.ts >= historyBucketEndTs);
 
     return [...samples, ...sessionDeltas];
   }, [metricsSnap?.traffic_history, requestDeltaHistory]);
@@ -244,12 +245,14 @@ export default function Dashboard() {
     const samples: BandwidthDeltaSample[] = history.map((h) => ({
       ts: h.ts,
       totalBytes: h.bytes,
-      routerBytes: {},
-      serviceBytes: {},
+      routerBytes: { Total: h.bytes },
+      serviceBytes: { Total: h.bytes },
     }));
 
+    // Add session deltas that are newer than history bucket coverage
     const lastHistoryTs = history.length > 0 ? history[history.length - 1].ts : 0;
-    const sessionDeltas = bandwidthDeltaHistory.filter((s) => s.ts > lastHistoryTs);
+    const historyBucketEndTs = history.length > 0 ? lastHistoryTs + 30 * 60 * 1000 : 0;
+    const sessionDeltas = bandwidthDeltaHistory.filter((s) => s.ts >= historyBucketEndTs);
 
     return [...samples, ...sessionDeltas];
   }, [metricsSnap?.traffic_history, bandwidthDeltaHistory]);
@@ -942,6 +945,32 @@ export default function Dashboard() {
                   </Text>
                 </div>
                 <Text size="xs" c="teal" fw={600}>
+                  Open →
+                </Text>
+              </Group>
+            </Card>
+            <Card
+              shadow="xs"
+              padding="lg"
+              radius="lg"
+              withBorder
+              component={Link}
+              to="/path-metrics"
+              style={{
+                textDecoration: "none",
+                transition: "background-color 150ms ease",
+              }}
+            >
+              <Group justify="space-between">
+                <div>
+                  <Text size="sm" fw={600}>
+                    Path Metrics
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    Detailed per-path request counts and average latency
+                  </Text>
+                </div>
+                <Text size="xs" c="blue" fw={600}>
                   Open →
                 </Text>
               </Group>

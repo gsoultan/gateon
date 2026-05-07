@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/corazawaf/coraza-coreruleset"
 	"github.com/corazawaf/coraza/v3"
 	txhttp "github.com/corazawaf/coraza/v3/http"
 	"github.com/corazawaf/coraza/v3/types"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -45,11 +47,17 @@ type WAFConfig struct {
 	EnableRansomwareDetection bool
 	EnableDLP                 bool
 	AnomalyThreshold          int
+	RequestBodyLimit          int    // Maximum request body size in bytes
+	ResponseBodyLimit         int    // Maximum response body size in bytes
+	AuditLogPath              string // Path to audit log file
+	AuditLogRelevantOnly      bool   // Only log relevant transactions
+	EbpfManager               ebpf.Manager
 }
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
 func WAF(cfg WAFConfig) (Middleware, error) {
 	wafConfig := coraza.NewWAFConfig()
+	var sb strings.Builder
 
 	if cfg.UseCRS {
 		pl := cfg.ParanoiaLevel
@@ -65,7 +73,6 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 `
 		}
 
-		var sb strings.Builder
 		sb.WriteString(engineDirective)
 		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
 Include @crs-setup.conf.example
@@ -115,6 +122,8 @@ Include @crs-setup.conf.example
 			sb.WriteString("Include @owasp_crs/REQUEST-910-IP-REPUTATION.conf\n")
 		}
 		if cfg.EnableDOSProtection {
+			sb.WriteString(`SecAction "id:900002,phase:1,nolog,pass,setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
+`)
 			sb.WriteString("Include @owasp_crs/REQUEST-912-DOS-PROTECTION.conf\n")
 		}
 
@@ -169,9 +178,24 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
 		sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
 		sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
 
-		wafConfig = wafConfig.
-			WithRootFS(fsWrapper{coreruleset.FS}).
-			WithDirectives(sb.String())
+		wafConfig = wafConfig.WithRootFS(fsWrapper{coreruleset.FS})
+	}
+
+	if cfg.AuditLogPath != "" {
+		auditEngine := "On"
+		if cfg.AuditLogRelevantOnly {
+			auditEngine = "RelevantOnly"
+		}
+		_, _ = fmt.Fprintf(&sb, `
+SecAuditEngine %s
+SecAuditLogParts ABIJDEFHKZ
+SecAuditLogType Serial
+SecAuditLog "%s"
+`, auditEngine, strings.ReplaceAll(cfg.AuditLogPath, "\\", "/"))
+	}
+
+	if sb.Len() > 0 {
+		wafConfig = wafConfig.WithDirectives(sb.String())
 	}
 
 	if cfg.GlobalDirectives != "" {
@@ -192,13 +216,40 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
 	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
 		ruleID := strconv.Itoa(mr.Rule().ID())
 		logger.L.Warn().
+			Str("event", "waf_match").
 			Str("rule_id", ruleID).
+			Str("client_ip", mr.ClientIPAddress()).
+			Str("uri", mr.URI()).
+			Str("severity", mr.Rule().Severity().String()).
 			Str("message", mr.ErrorLog()).
 			Msg("WAF matched rule")
-		// Note: ErrorCallback doesn't have access to *http.Request directly here in Coraza v3
-		// but we can check it in the middleware itself if we want to skip metrics.
-		// However, most WAF matches will be recorded unless we wrap them.
+
+		// IPS feature: automatically shun IPs that trigger critical security rules
+		if mr.Rule().Severity() <= types.RuleSeverityCritical && cfg.EbpfManager != nil {
+			_ = cfg.EbpfManager.ShunIP(mr.ClientIPAddress())
+		}
+
+		// Record security threat for telemetry and UI
+		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+			ID:         fmt.Sprintf("waf-%d-%s", mr.Rule().ID(), mr.TransactionID()),
+			Type:       "waf_block",
+			SourceIP:   mr.ClientIPAddress(),
+			Score:      float64(100 - (int(mr.Rule().Severity()) * 10)),
+			Details:    fmt.Sprintf("WAF Rule %s: %s", ruleID, mr.ErrorLog()),
+			Time:       time.Now(),
+			RouteID:    cfg.RouteID,
+			RequestURI: mr.URI(),
+		})
 	})
+
+	if cfg.RequestBodyLimit > 0 {
+		wafConfig = wafConfig.WithRequestBodyLimit(cfg.RequestBodyLimit)
+		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
+	}
+	if cfg.ResponseBodyLimit > 0 {
+		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
+		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
+	}
 
 	waf, err := coraza.NewWAF(wafConfig)
 	if err != nil {
@@ -320,6 +371,10 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		EnableRansomwareDetection: strings.TrimSpace(strings.ToLower(cfg["ransomware_detection"])) == "true",
 		EnableDLP:                 strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
 		AnomalyThreshold:          intVal(cfg["anomaly_threshold"]),
+		RequestBodyLimit:          intVal(cfg["request_body_limit"]),
+		ResponseBodyLimit:         intVal(cfg["response_body_limit"]),
+		AuditLogPath:              strings.TrimSpace(cfg["audit_log_path"]),
+		AuditLogRelevantOnly:      strings.TrimSpace(strings.ToLower(cfg["audit_log_relevant_only"])) != "false",
 		RouteID:                   routeID,
 	}
 }

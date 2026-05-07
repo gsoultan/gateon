@@ -249,18 +249,18 @@ export function aggregateBandwidthSamples(
       routerBytes: 0,
       serviceBytes: 0,
     };
-    const routerPeak = Object.values(sample.routerBytes).reduce(
-      (peak, value) => Math.max(peak, value),
+    const routerTotal = Object.values(sample.routerBytes).reduce(
+      (sum, value) => sum + value,
       0,
     );
-    const servicePeak = Object.values(sample.serviceBytes).reduce(
-      (peak, value) => Math.max(peak, value),
+    const serviceTotal = Object.values(sample.serviceBytes).reduce(
+      (sum, value) => sum + value,
       0,
     );
     grouped.set(bucketTs, {
       totalBytes: existing.totalBytes + sample.totalBytes,
-      routerBytes: existing.routerBytes + routerPeak,
-      serviceBytes: existing.serviceBytes + servicePeak,
+      routerBytes: existing.routerBytes + routerTotal,
+      serviceBytes: existing.serviceBytes + serviceTotal,
     });
   }
 
@@ -523,18 +523,18 @@ export function buildHourlyBandwidthData(
       routerBytes: 0,
       serviceBytes: 0,
     };
-    const routerPeak = Object.values(sample.routerBytes).reduce(
-      (peak, value) => Math.max(peak, value),
+    const routerTotal = Object.values(sample.routerBytes).reduce(
+      (sum, value) => sum + value,
       0,
     );
-    const servicePeak = Object.values(sample.serviceBytes).reduce(
-      (peak, value) => Math.max(peak, value),
+    const serviceTotal = Object.values(sample.serviceBytes).reduce(
+      (sum, value) => sum + value,
       0,
     );
     grouped.set(hourStartTs, {
       totalBytes: existing.totalBytes + sample.totalBytes,
-      routerBytes: existing.routerBytes + routerPeak,
-      serviceBytes: existing.serviceBytes + servicePeak,
+      routerBytes: existing.routerBytes + routerTotal,
+      serviceBytes: existing.serviceBytes + serviceTotal,
     });
   }
 

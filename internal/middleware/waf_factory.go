@@ -44,6 +44,18 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				if _, ok := cfg["anomaly_threshold"]; !ok && global.Waf.AnomalyThreshold > 0 {
 					cfg["anomaly_threshold"] = strconv.Itoa(int(global.Waf.AnomalyThreshold))
 				}
+				if _, ok := cfg["request_body_limit"]; !ok && global.Waf.RequestBodyLimit > 0 {
+					cfg["request_body_limit"] = strconv.Itoa(int(global.Waf.RequestBodyLimit))
+				}
+				if _, ok := cfg["response_body_limit"]; !ok && global.Waf.ResponseBodyLimit > 0 {
+					cfg["response_body_limit"] = strconv.Itoa(int(global.Waf.ResponseBodyLimit))
+				}
+				if _, ok := cfg["audit_log_path"]; !ok && global.Waf.AuditLogPath != "" {
+					cfg["audit_log_path"] = global.Waf.AuditLogPath
+				}
+				if _, ok := cfg["audit_log_relevant_only"]; !ok {
+					cfg["audit_log_relevant_only"] = strconv.FormatBool(global.Waf.AuditLogRelevantOnly)
+				}
 			}
 		}
 	}
@@ -54,6 +66,7 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 	}
 	wafCfg := parseWAFConfig(cfg)
 	wafCfg.GlobalDirectives = globalDirectives
+	wafCfg.EbpfManager = f.ebpfManager
 
 	mw, err := WAF(wafCfg)
 	if err != nil {

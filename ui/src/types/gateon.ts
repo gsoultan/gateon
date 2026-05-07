@@ -308,6 +308,10 @@ export type WafConfig = {
   dlp?: boolean;
   anomaly_threshold?: number;
   bot_management?: BotManagementConfig;
+  request_body_limit?: number;
+  response_body_limit?: number;
+  audit_log_path?: string;
+  audit_log_relevant_only?: boolean;
 };
 
 export type BotManagementConfig = {
@@ -315,6 +319,7 @@ export type BotManagementConfig = {
   enable_js_challenge?: boolean;
   enable_browser_integrity?: boolean;
   challenge_timeout_seconds?: number;
+  secret_key?: string;
 };
 
 export type HaConfig = {
@@ -343,6 +348,7 @@ export type EbpfConfig = {
   enabled?: boolean;
   xdp_rate_limit?: boolean;
   tc_filtering?: boolean;
+  interface?: string;
   xdp_ip_shunning?: boolean;
   xdp_load_balancing?: boolean;
 };
@@ -519,6 +525,9 @@ export type Anomaly = {
   country_code?: string;
   country_name?: string;
   ja3?: string;
+  score?: number;
+  route_id?: string;
+  request_uri?: string;
 };
 
 export type DependencyHealth = {

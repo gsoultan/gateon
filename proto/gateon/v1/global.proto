@@ -110,6 +110,10 @@ message WafConfig {
   bool ransomware_detection = 20;
   bool dlp = 21;
   int32 anomaly_threshold = 19;
+  int32 request_body_limit = 22;
+  int32 response_body_limit = 23;
+  string audit_log_path = 24;
+  bool audit_log_relevant_only = 25;
   BotManagementConfig bot_management = 13;
 }
 
@@ -118,6 +122,7 @@ message BotManagementConfig {
   bool enable_js_challenge = 2;
   bool enable_browser_integrity = 5;
   int32 challenge_timeout_seconds = 3;
+  string secret_key = 4;
 }
 
 message HaConfig {

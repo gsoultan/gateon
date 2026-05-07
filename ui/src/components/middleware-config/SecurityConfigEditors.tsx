@@ -87,23 +87,117 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
                 onChange={(e) => toggle("php", e.currentTarget.checked)}
               />
               <Switch
+                label="NodeJS Attacks"
+                description="Detects NodeJS-specific injection attacks"
+                checked={isEnabled("nodejs")}
+                onChange={(e) => toggle("nodejs", e.currentTarget.checked)}
+              />
+              <Switch
                 label="Java Injection"
                 description="Detects Java-specific injection attacks"
                 checked={isEnabled("java")}
                 onChange={(e) => toggle("java", e.currentTarget.checked)}
               />
+              <Switch
+                label="WordPress Protection"
+                description="Detects WP-specific attacks and probes"
+                checked={isEnabled("wordpress")}
+                onChange={(e) => toggle("wordpress", e.currentTarget.checked)}
+              />
+            </Stack>
+          </Group>
+
+          <Divider label="Advanced Protections" labelPosition="center" />
+          <Group grow>
+            <Stack gap="xs">
+              <Switch
+                label="IP Reputation"
+                description="Block requests from known malicious IPs"
+                checked={config.ip_reputation === "true"}
+                onChange={(e) => updateConfig("ip_reputation", e.currentTarget.checked ? "true" : "false")}
+              />
+              <Switch
+                label="DOS Protection"
+                description="Basic HTTP-level DOS protection rules"
+                checked={config.dos_protection === "true"}
+                onChange={(e) => updateConfig("dos_protection", e.currentTarget.checked ? "true" : "false")}
+              />
+              <Switch
+                label="Malware Detection"
+                description="Detect common malware and web shell patterns"
+                checked={config.malware_detection === "true"}
+                onChange={(e) => updateConfig("malware_detection", e.currentTarget.checked ? "true" : "false")}
+              />
+            </Stack>
+            <Stack gap="xs">
+              <Switch
+                label="Ransomware Detection"
+                description="Detect ransomware file extension uploads"
+                checked={config.ransomware_detection === "true"}
+                onChange={(e) => updateConfig("ransomware_detection", e.currentTarget.checked ? "true" : "false")}
+              />
+              <Switch
+                label="Data Loss Prevention (DLP)"
+                description="Detect sensitive data leakage (CC, SSN) in responses"
+                checked={config.dlp === "true"}
+                onChange={(e) => updateConfig("dlp", e.currentTarget.checked ? "true" : "false")}
+              />
             </Stack>
           </Group>
 
           <Divider label="CRS Settings" labelPosition="center" />
-          <NumberInput
-            label="Paranoia Level"
-            description="CRS paranoia 1-4. Higher = stricter, more false positives. Default: 1"
-            value={parseInt(config.paranoia_level) || 1}
-            onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
-            min={1}
-            max={4}
-          />
+          <Group grow>
+            <NumberInput
+              label="Paranoia Level"
+              description="CRS paranoia 1-4. Higher = stricter."
+              value={parseInt(config.paranoia_level) || 1}
+              onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
+              min={1}
+              max={4}
+            />
+            <NumberInput
+              label="Anomaly Threshold"
+              description="Score required to block. Default: 5"
+              value={parseInt(config.anomaly_threshold) || 5}
+              onChange={(val) => updateConfig("anomaly_threshold", (val ?? 5).toString())}
+              min={1}
+            />
+          </Group>
+
+          <Divider label="Body Limits" labelPosition="center" />
+          <Group grow>
+            <NumberInput
+              label="Request Body Limit"
+              description="Max request body size in bytes. 0 = unlimited."
+              value={parseInt(config.request_body_limit) || 0}
+              onChange={(val) => updateConfig("request_body_limit", (val ?? 0).toString())}
+              min={0}
+            />
+            <NumberInput
+              label="Response Body Limit"
+              description="Max response body size in bytes. 0 = unlimited."
+              value={parseInt(config.response_body_limit) || 0}
+              onChange={(val) => updateConfig("response_body_limit", (val ?? 0).toString())}
+              min={0}
+            />
+          </Group>
+
+          <Divider label="Audit Logging" labelPosition="center" />
+          <Stack gap="xs">
+            <TextInput
+              label="Audit Log Path"
+              description="File path for Coraza audit logs (e.g. /var/log/gateon/waf_audit.log)"
+              placeholder="/var/log/gateon/waf_audit.log"
+              value={config.audit_log_path || ""}
+              onChange={(e) => updateConfig("audit_log_path", e.currentTarget.value)}
+            />
+            <Switch
+              label="Relevant Only"
+              description="Only log 'relevant' events (e.g. those that triggered a rule)"
+              checked={config.audit_log_relevant_only === "true"}
+              onChange={(e) => updateConfig("audit_log_relevant_only", e.currentTarget.checked ? "true" : "false")}
+            />
+          </Stack>
         </>
       )}
 
@@ -171,6 +265,86 @@ export function TurnstileConfigEditor({ config, updateConfig }: EditorProps) {
         clearable
       />
     </Stack>
+  );
+}
+
+export function BotManagementConfigEditor({ config, updateConfig }: EditorProps) {
+  const isEnabled = (key: string) => config[key] === "true";
+  const toggle = (key: string, val: boolean) => updateConfig(key, val ? "true" : "false");
+
+  return (
+    <Stack gap="md">
+      <Switch
+        label="Browser Integrity Check"
+        description="Verify request is from a legitimate browser using Sec-Fetch-* headers"
+        checked={isEnabled("enable_browser_integrity")}
+        onChange={(e) => toggle("enable_browser_integrity", e.currentTarget.checked)}
+      />
+      <Switch
+        label="JS Challenge"
+        description="Serve a non-interactive JS challenge to verify browser capability"
+        checked={isEnabled("enable_js_challenge")}
+        onChange={(e) => toggle("enable_js_challenge", e.currentTarget.checked)}
+      />
+      <NumberInput
+        label="Challenge Timeout"
+        description="How long a solved challenge remains valid (seconds). Default: 3600"
+        value={parseInt(config.challenge_timeout) || 3600}
+        onChange={(val) => updateConfig("challenge_timeout", (val ?? 3600).toString())}
+        min={60}
+      />
+      <TextInput
+        label="Secret Key"
+        description="Secret used for signing challenge tokens"
+        placeholder="gateon-default-secret"
+        type="password"
+        value={config.secret_key || ""}
+        onChange={(e) => updateConfig("secret_key", e.currentTarget.value)}
+      />
+    </Stack>
+  );
+}
+
+export function SchemaValidationConfigEditor({ config, updateConfig }: EditorProps) {
+  return (
+    <Stack gap="md">
+      <Textarea
+        label="JSON Schema"
+        description="JSON Schema to validate request bodies against"
+        placeholder='{ "type": "object", "properties": { "id": { "type": "integer" } } }'
+        value={config.schema || ""}
+        onChange={(e) => updateConfig("schema", e.currentTarget.value)}
+        minRows={10}
+        autosize
+        styles={{ input: { fontFamily: "monospace" } }}
+      />
+    </Stack>
+  );
+}
+
+export function HoneypotConfigEditor({ config, updateConfig }: EditorProps) {
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
+  return (
+    <Stack gap="md">
+      <TagsInput
+        label="Trap Paths"
+        description="Requests to these paths will immediately block the source IP"
+        placeholder="/.env, /wp-admin.php, /config.php"
+        value={splitTags(config.paths)}
+        onChange={(val) => updateConfig("paths", joinTags(val))}
+        clearable
+      />
+    </Stack>
+  );
+}
+
+export function RequestIDConfigEditor() {
+  return (
+    <Text size="sm" c="dimmed">
+      Automatically generates and injects a unique X-Request-ID header for each request. No configuration required.
+    </Text>
   );
 }
 

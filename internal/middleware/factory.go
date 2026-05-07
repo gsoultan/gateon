@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/redis"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -16,22 +17,28 @@ import (
 type Factory struct {
 	redisClient redis.Client
 	globalStore config.GlobalConfigStore
+	ebpfManager ebpf.Manager
 }
 
-func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore) *Factory {
-	return &Factory{redisClient: redisClient, globalStore: globalStore}
+func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager) *Factory {
+	return &Factory{redisClient: redisClient, globalStore: globalStore, ebpfManager: ebpfManager}
 }
 
 // Validate checks that the middleware config is valid without creating the middleware.
 func (f *Factory) Validate(m *gateonv1.Middleware) error {
-	_, err := f.Create(m)
+	_, err := f.Create(m, "")
 	return err
 }
 
-func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
+func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, error) {
 	cfg := make(map[string]string)
 	for k, v := range m.Config {
 		cfg[k] = config.ResolveSecret(v)
+	}
+	if routeID != "" {
+		if _, ok := cfg["_route_id"]; !ok {
+			cfg["_route_id"] = routeID
+		}
 	}
 
 	switch m.Type {

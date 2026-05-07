@@ -376,6 +376,11 @@ func (s *ApiService) applyFixShadowedRouteRecommendation(ctx context.Context, ro
 }
 
 func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error) {
+	// Trigger detection pass to ensure threats are up to date in the DB
+	// whenever the UI requests the latest list.
+	routes := s.Routes.List(ctx)
+	_ = s.detectAnomalies(ctx, routes)
+
 	limit := int(req.GetLimit())
 	if limit <= 0 {
 		limit = 50
@@ -400,6 +405,8 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 			Source:      t.SourceIP,
 			Score:       t.Score,
 			Ja3:         t.JA3,
+			RouteId:     t.RouteID,
+			RequestUri:  t.RequestURI,
 		}
 		// Try to populate geo if available (though here we only have the IP)
 		// We can use the same helper as in security_threat_detector.go

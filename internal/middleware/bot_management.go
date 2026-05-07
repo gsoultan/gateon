@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 type BotManagementConfig struct {
@@ -20,6 +22,7 @@ type BotManagementConfig struct {
 	EnableBrowserIntegrity  bool
 	ChallengeTimeoutSeconds int
 	SecretKey               string
+	RouteID                 string
 }
 
 const (
@@ -34,10 +37,25 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				return
 			}
 
+			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+
 			// 1. Check browser integrity
 			if cfg.EnableBrowserIntegrity {
 				if !checkBrowserIntegrity(r) {
 					logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
+					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "integrity_failed").Inc()
+
+					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+						ID:         fmt.Sprintf("bot-integrity-%s-%s", cfg.RouteID, clientIP),
+						Type:       "bot_detected",
+						SourceIP:   clientIP,
+						Score:      40,
+						Details:    "Failed browser integrity check (Sec-Fetch headers)",
+						Time:       time.Now(),
+						RouteID:    cfg.RouteID,
+						RequestURI: r.URL.RequestURI(),
+					})
+
 					http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
 					return
 				}
@@ -46,7 +64,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 			// 2. Check if challenge is already solved
 			cookie, err := r.Cookie(ChallengeCookieName)
 			if err == nil {
-				if verifyChallengeToken(cookie.Value, cfg.SecretKey, r.UserAgent()) {
+				if verifyChallengeToken(cookie.Value, cfg.SecretKey, r.UserAgent(), clientIP) {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -55,7 +73,8 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 			// 2. If it's the challenge submission
 			if r.Method == http.MethodPost && r.URL.Path == "/_gateon/challenge" {
 				token := r.FormValue("token")
-				if verifyChallengeToken(token, cfg.SecretKey, r.UserAgent()) {
+				if verifyChallengeToken(token, cfg.SecretKey, r.UserAgent(), clientIP) {
+					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_solved").Inc()
 					http.SetCookie(w, &http.Cookie{
 						Name:     ChallengeCookieName,
 						Value:    token,
@@ -66,11 +85,22 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 					http.Redirect(w, r, r.FormValue("redirect"), http.StatusFound)
 					return
 				}
+				telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_failed").Inc()
+				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+					ID:         fmt.Sprintf("bot-challenge-fail-%s-%s", cfg.RouteID, clientIP),
+					Type:       "bot_detected",
+					SourceIP:   clientIP,
+					Score:      60,
+					Details:    "Failed JavaScript challenge submission",
+					Time:       time.Now(),
+					RouteID:    cfg.RouteID,
+					RequestURI: r.URL.RequestURI(),
+				})
 			}
 
 			// 3. Handle seed request
 			if r.URL.Path == "/_gateon/seed" {
-				seed := GenerateChallengeSeed(cfg.SecretKey, r.UserAgent())
+				seed := GenerateChallengeSeed(cfg.SecretKey, r.UserAgent(), clientIP)
 				w.Header().Set("Content-Type", "text/plain")
 				_, _ = w.Write([]byte(seed))
 				return
@@ -78,6 +108,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 
 			// 4. Serve JS Challenge
 			if cfg.EnableJSChallenge {
+				telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_served").Inc()
 				serveJSChallenge(w, r)
 				return
 			}
@@ -102,7 +133,7 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
 </head>
 <body>
     <div class="container">
-        <h1>Checking your browser...</h1>
+        <h1>Security Challenge</h1>
         <p>Please wait while we verify your request.</p>
         <form id="challenge-form" method="POST" action="/_gateon/challenge">
             <input type="hidden" name="token" id="token">
@@ -133,7 +164,7 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(html))
 }
 
-func verifyChallengeToken(token, secret, ua string) bool {
+func verifyChallengeToken(token, secret, ua, ip string) bool {
 	// Simple verification logic
 	// Token format: payload.signature
 	payload, signature, ok := strings.Cut(token, ".")
@@ -142,7 +173,7 @@ func verifyChallengeToken(token, secret, ua string) bool {
 	}
 
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload + ua))
+	mac.Write([]byte(payload + ua + ip))
 	expectedSignature := mac.Sum(nil)
 	sigBytes, err := hex.DecodeString(signature)
 	if err != nil || subtle.ConstantTimeCompare(sigBytes, expectedSignature) != 1 {
@@ -164,11 +195,11 @@ func verifyChallengeToken(token, secret, ua string) bool {
 	return true
 }
 
-func GenerateChallengeSeed(secret, ua string) string {
+func GenerateChallengeSeed(secret, ua, ip string) string {
 	ts := time.Now().Unix()
 	payload := strconv.FormatInt(ts, 10)
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload + ua))
+	mac.Write([]byte(payload + ua + ip))
 	signature := fmt.Sprintf("%x", mac.Sum(nil))
 	return payload + "." + signature
 }

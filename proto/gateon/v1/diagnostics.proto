@@ -27,6 +27,8 @@ message Anomaly {
   string country_code = 9;
   double score = 10;
   string ja3 = 11;
+  string route_id = 12;
+  string request_uri = 13;
 }
 
 message ListSecurityThreatsRequest {

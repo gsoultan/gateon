@@ -53,9 +53,19 @@ export function SecurityThreatsCard() {
                   <ThemeIcon color={threat.severity === "critical" ? "red" : "orange"} variant="light" size="sm">
                     <IconLock size={12} />
                   </ThemeIcon>
-                  <Box style={{ overflow: "hidden" }}>
-                    <Text size="xs" fw={700} truncate style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>{threat.type.replace(/_/g, ' ')}</Text>
-                    <Text size="xs" c="dimmed" truncate>{threat.source}</Text>
+                  <Box style={{ overflow: "hidden", flex: 1 }}>
+                    <Text size="xs" fw={700} truncate style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      {threat.type.replace(/_/g, ' ')}
+                    </Text>
+                    <Group gap={4} wrap="nowrap">
+                      <Text size="xs" c="dimmed" truncate>{threat.source}</Text>
+                      {threat.route_id && (
+                        <>
+                          <Text size="xs" c="dimmed">•</Text>
+                          <Text size="xs" c="brand" fw={600} truncate>{threat.route_id}</Text>
+                        </>
+                      )}
+                    </Group>
                   </Box>
                 </Group>
                 <Badge variant="light" size="xs" color={threat.severity === "critical" ? "red" : "orange"}>
