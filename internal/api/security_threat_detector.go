@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -12,43 +11,13 @@ import (
 )
 
 var (
-	// suspiciousPathRegex matches common sensitive files and directories.
-	suspiciousPathRegex = regexp.MustCompile(`(?i)(\.env|\.git|\.htaccess|\.config|wp-admin|wp-login|phpinfo|/etc/passwd|win\.ini|cgi-bin|bin/sh|backup|db\.sql|config\.php|web-config|node_modules|169\.254\.169\.254|metadata\.google\.internal|\.aws/credentials|/etc/shadow|\.ssh/|/proc/self/|\.docker/config\.json|autoexec\.bat|web\.config)`)
-
-	// sqlIPathRegex matches common SQL injection patterns.
-	sqlIPathRegex = regexp.MustCompile(`(?i)(union\s+select|union\s+all\s+select|waitfor\s+delay|pg_sleep|sleep\(|benchmark\(|'(\s+)?or(\s+)?'1'(\s+)?=|--|;|\/\*|xp_cmdshell|information_schema|drop\s+table|truncate\s+table)`)
-
-	// xssPathRegex matches common Cross-Site Scripting patterns.
-	xssPathRegex = regexp.MustCompile(`(?i)(<script>|javascript:|onload=|onerror=|alert\(|prompt\(|confirm\(|eval\(|document\.cookie|window\.location|onmouseover=)`)
-
-	// traversalPathRegex matches path traversal attempts.
-	traversalPathRegex = regexp.MustCompile(`(?i)(\.\./|\.\.\\|/etc/|/var/log/|/windows/|/boot\.ini)`)
-
-	// rcePathRegex matches Remote Code Execution patterns like Log4Shell or Shellshock.
-	rcePathRegex = regexp.MustCompile(`(?i)(\$\{jndi:|()\s*\{\s*:\s*;\s*\}\s*;|base64\s*--decode|python\s+-c|perl\s+-e|php\s+-r|sh\s+-c|nc\s+-e|cmd\.exe|powershell\.exe)`)
-
-	// suspiciousAgentRegex matches known security scanning tools and aggressive bots.
-	suspiciousAgentRegex = regexp.MustCompile(`(?i)(sqlmap|nikto|nmap|masscan|zgrab|gobuster|dirb|dirbuster|ffuf|hydra|burp|metasploit|w3af)`)
-
-	// suspiciousRefererRegex matches suspicious referer headers.
-	suspiciousRefererRegex = regexp.MustCompile(`(?i)(evil\.com|attacker|hacker|exploit|malicious|pwned)`)
-
-	// ssrfPathRegex matches potential Server-Side Request Forgery attempts.
-	ssrfPathRegex = regexp.MustCompile(`(?i)(169\.254\.169\.254|metadata\.google\.internal|instance-data|v1/meta-data|latest/meta-data|localhost|127\.0\.0\.1|0\.0\.0\.0)`)
-
-	// nosqlIPathRegex matches common NoSQL injection patterns.
-	nosqlIPathRegex = regexp.MustCompile(`(?i)(\$gt|\$ne|\$in|\$where|\$regex|\$expr|\$exists)`)
-
-	// commandInjectionRegex matches command injection patterns.
-	commandInjectionRegex = regexp.MustCompile(`(?i)(;|\d|\||&|\$\(|\x60)(?i)(cat|ls|id|whoami|pwd|uname|netstat|nc|bash|curl|wget|powershell|cmd|type|dir)`)
-
-	// protoPollutionRegex matches Prototype Pollution attempts.
-	protoPollutionRegex = regexp.MustCompile(`(?i)(__proto__|constructor\.prototype)`)
+// External intelligence clients can be added here
 )
 
 // SecurityThreatDetector detects potential security threats based on multiple signals.
 type SecurityThreatDetector struct {
-	Threshold float64
+	Threshold    float64
+	ThreatClient *AbuseIPDBClient
 }
 
 func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
@@ -95,8 +64,35 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		// 5. Behavioral Patterns
 		score += d.analyzeBehavior(stats, &reasons)
 
+		// 6. External Threat Intelligence
+		if d.ThreatClient != nil && (score > 0 || stats.TotalRequests > 10) {
+			if abuseScore, err := d.ThreatClient.CheckIP(ctx, ip); err == nil && abuseScore > 20 {
+				score += abuseScore / 2
+				reasons = append(reasons, fmt.Sprintf("External threat feed (AbuseIPDB) confidence: %d%%", abuseScore))
+			}
+		}
+
 		if score >= int(threshold) {
 			severity := d.calculateSeverity(score, threshold)
+
+			mitigated := false
+			// Check if IP is already blocked in middlewares
+			for _, mw := range data.Middlewares {
+				if mw.Type == "ipfilter" {
+					if denyList, ok := mw.Config["deny_list"]; ok {
+						ips := strings.Split(denyList, ",")
+						for _, blockedIP := range ips {
+							if strings.TrimSpace(blockedIP) == ip {
+								mitigated = true
+								break
+							}
+						}
+					}
+				}
+				if mitigated {
+					break
+				}
+			}
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           primaryType,
@@ -105,6 +101,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
 				Source:         ip,
 				Recommendation: "Review IP activity, consider blocking via firewall or middleware, and check backend logs for exploitation attempts.",
+				Mitigated:      mitigated,
 			}
 			populateAnomalyGeo(anomaly, ip)
 			anomalies = append(anomalies, anomaly)
@@ -205,12 +202,13 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 	score := 0
 	matches := 0
 	coordinatedCount := 0
+	patterns := GetCompiledPatterns()
 
 	for path := range stats.UniquePaths {
 		lp := strings.ToLower(path)
 		pathMatched := false
 
-		if suspiciousPathRegex.MatchString(lp) {
+		if patterns.SuspiciousPath.MatchString(lp) {
 			score += 25
 			pathMatched = true
 			if len(pathIPs[lp]) > 1 {
@@ -218,42 +216,42 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 			}
 		}
 
-		if sqlIPathRegex.MatchString(lp) {
+		if patterns.SQLI.MatchString(lp) {
 			score += 40
 			pathMatched = true
 		}
 
-		if xssPathRegex.MatchString(lp) {
+		if patterns.XSS.MatchString(lp) {
 			score += 35
 			pathMatched = true
 		}
 
-		if traversalPathRegex.MatchString(lp) {
+		if patterns.Traversal.MatchString(lp) {
 			score += 40
 			pathMatched = true
 		}
 
-		if rcePathRegex.MatchString(lp) {
+		if patterns.RCE.MatchString(lp) {
 			score += 60
 			pathMatched = true
 		}
 
-		if ssrfPathRegex.MatchString(lp) {
+		if patterns.SSRF.MatchString(lp) {
 			score += 45
 			pathMatched = true
 		}
 
-		if nosqlIPathRegex.MatchString(lp) {
+		if patterns.NoSQLI.MatchString(lp) {
 			score += 40
 			pathMatched = true
 		}
 
-		if commandInjectionRegex.MatchString(lp) {
+		if patterns.CommandInjection.MatchString(lp) {
 			score += 65
 			pathMatched = true
 		}
 
-		if protoPollutionRegex.MatchString(lp) {
+		if patterns.ProtoPollution.MatchString(lp) {
 			score += 50
 			pathMatched = true
 		}
@@ -303,8 +301,10 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]string) int {
 	score := 0
 	agentMatched := false
+	patterns := GetCompiledPatterns()
+
 	for agent := range stats.UserAgents {
-		if suspiciousAgentRegex.MatchString(strings.ToLower(agent)) {
+		if patterns.SuspiciousAgent.MatchString(strings.ToLower(agent)) {
 			score += 70
 			agentMatched = true
 			break
@@ -316,7 +316,7 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 
 	refererMatched := false
 	for ref := range stats.Referers {
-		if suspiciousRefererRegex.MatchString(strings.ToLower(ref)) {
+		if patterns.SuspiciousReferer.MatchString(strings.ToLower(ref)) {
 			score += 40
 			refererMatched = true
 			break
@@ -329,7 +329,13 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 	// JA3 Analysis
 	if len(stats.JA3s) > 1 {
 		score += 30
-		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (%d) from single IP", len(stats.JA3s)))
+		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA3: %d) from single IP", len(stats.JA3s)))
+	}
+
+	// JA4 Analysis
+	if len(stats.JA4s) > 1 {
+		score += 40 // JA4 is more robust
+		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA4+: %d) from single IP", len(stats.JA4s)))
 	}
 
 	return score
@@ -361,6 +367,35 @@ func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, thre
 	var anomalies []*gateonv1.Anomaly
 	for fp, stats := range data.FingerprintStats {
 		if len(stats.IPs) > 3 { // Threshold for IP rotation detection
+			mitigated := false
+			// Check if all IPs for this fingerprint are already blocked
+			blockedCount := 0
+			for ip := range stats.IPs {
+				ipBlocked := false
+				for _, mw := range data.Middlewares {
+					if mw.Type == "ipfilter" {
+						if denyList, ok := mw.Config["deny_list"]; ok {
+							ips := strings.Split(denyList, ",")
+							for _, blockedIP := range ips {
+								if strings.TrimSpace(blockedIP) == ip {
+									ipBlocked = true
+									break
+								}
+							}
+						}
+					}
+					if ipBlocked {
+						break
+					}
+				}
+				if ipBlocked {
+					blockedCount++
+				}
+			}
+			if blockedCount == len(stats.IPs) {
+				mitigated = true
+			}
+
 			anomaly := &gateonv1.Anomaly{
 				Type:           "security_threat",
 				Severity:       "high",
@@ -368,6 +403,7 @@ func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, thre
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
 				Source:         fp, // Use fingerprint as source
 				Recommendation: "This actor is rotating IPs to bypass rate limits. Consider blocking the entire fingerprint or implementing more aggressive bot challenges.",
+				Mitigated:      mitigated,
 			}
 			anomalies = append(anomalies, anomaly)
 

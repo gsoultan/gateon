@@ -116,13 +116,12 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3 string) {
-	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, "", "", "", "")
+func RecordTrace(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4 string) {
+	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, "", "", "", "")
 }
 
-// RecordTraceDetailed records a trace with full request/response details for debugging.
-func RecordTraceDetailed(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, reqHeaders, reqBody, respHeaders, respBody string) {
-	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, reqHeaders, reqBody, respHeaders, respBody)
+func RecordTraceDetailed(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
+	recordTraceToStore(id, operationName, serviceName, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody)
 }
 
 // getInMemoryPathStats returns aggregated path statistics from the in-memory map.

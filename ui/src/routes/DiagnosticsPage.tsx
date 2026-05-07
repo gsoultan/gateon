@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   Card,
   Group,
@@ -178,6 +178,9 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
     if (type.includes("attack") || type.includes("hacker") || type.includes("violation")) return <IconShieldLock size={20} />;
     if (type.includes("brute")) return <IconLock size={20} />;
     if (type.includes("scan") || type.includes("security")) return <IconBug size={20} />;
+    if (type.includes("geofence")) return <IconGlobe size={20} />;
+    if (type.includes("integrity")) return <IconShield size={20} />;
+    if (type.includes("honeypot")) return <IconAlertTriangle size={20} />;
     return <IconActivity size={20} />;
   };
 
@@ -197,6 +200,11 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
             </Stack>
           </Group>
           <Group gap="xs">
+            {anomaly.mitigated && (
+              <Badge color="teal" variant="light" size="xs" leftSection={<IconCircleCheck size={10} />}>
+                Mitigated
+              </Badge>
+            )}
             <Tooltip label="Trace IP Route">
               <ActionIcon variant="light" color="blue" size="sm" onClick={() => onTrace(anomaly.source)}>
                 <IconGlobe size={14} />
@@ -218,18 +226,20 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
           <Stack gap="xs">
             <Text size="xs" fw={700}>System Recommendation:</Text>
             <Text size="xs">{anomaly.recommendation}</Text>
-            <Group justify="flex-end">
-              <Anchor
-                component="button"
-                size="xs"
-                fw={800}
-                onClick={onApply}
-                loading={applying}
-                style={{ display: "flex", alignItems: "center", gap: 4 }}
-              >
-                Apply Automatic Fix <IconArrowRight size={12} />
-              </Anchor>
-            </Group>
+            {!anomaly.mitigated && (
+              <Group justify="flex-end">
+                <Anchor
+                  component="button"
+                  size="xs"
+                  fw={800}
+                  onClick={onApply}
+                  loading={applying}
+                  style={{ display: "flex", alignItems: "center", gap: 4 }}
+                >
+                  Apply Automatic Fix <IconArrowRight size={12} />
+                </Anchor>
+              </Group>
+            )}
           </Stack>
         </Alert>
       </Stack>
@@ -252,6 +262,31 @@ const DiagnosticsPage: React.FC = () => {
     setVisualizerOpened(true);
   };
   const theme = useMantineTheme();
+  
+  const sortedAnomalies = useMemo(() => {
+    if (!data?.anomalies) return [];
+    return [...data.anomalies].sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime();
+      const timeB = new Date(b.timestamp).getTime();
+      if (timeA !== timeB) return timeB - timeA;
+      return a.type.localeCompare(b.type) || a.source.localeCompare(b.source);
+    });
+  }, [data?.anomalies]);
+
+  const sortedDependencies = useMemo(() => {
+    if (!data?.dependencies) return [];
+    return [...data.dependencies].sort((a, b) => a.name.localeCompare(b.name));
+  }, [data?.dependencies]);
+
+  const sortedEntrypoints = useMemo(() => {
+    if (!data?.entrypoints) return [];
+    return [...data.entrypoints].sort((a, b) => a.name.localeCompare(b.name) || a.address.localeCompare(b.address));
+  }, [data?.entrypoints]);
+
+  const sortedTlsErrors = useMemo(() => {
+    if (!data?.recent_tls_errors) return [];
+    return [...data.recent_tls_errors].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [data?.recent_tls_errors]);
 
   const fetchData = async () => {
     try {
@@ -378,8 +413,8 @@ const DiagnosticsPage: React.FC = () => {
                 <Badge variant="light" color="teal">All checks active</Badge>
              </Group>
              <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-                {data?.dependencies?.map((dep, i) => (
-                   <DependencyBadge key={i} dep={dep} />
+                {sortedDependencies.map((dep) => (
+                   <DependencyBadge key={dep.name} dep={dep} />
                 ))}
              </SimpleGrid>
           </Stack>
@@ -396,18 +431,18 @@ const DiagnosticsPage: React.FC = () => {
               <Badge variant="dot" color="indigo" size="lg">Autonomous Protection</Badge>
             </Group>
             
-            <AnomalyMap anomalies={data?.anomalies || []} onTrace={openVisualizer} />
+            <AnomalyMap anomalies={sortedAnomalies} onTrace={openVisualizer} />
 
             <Text size="sm" c="dimmed">
               Real-time heuristic analysis of traffic patterns and security events. 
               The engine identifies potential threats and provides actionable recommendations.
             </Text>
 
-            {data?.anomalies && data.anomalies.length > 0 ? (
+            {sortedAnomalies.length > 0 ? (
               <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                {data.anomalies.map((a, i) => (
+                {sortedAnomalies.map((a) => (
                   <AnomalyCard 
-                    key={i} 
+                    key={`${a.type}-${a.source}-${a.timestamp}`} 
                     anomaly={a} 
                     onApply={() => handleApplyRecommendation(a)}
                     applying={applying === `${a.type}-${a.source}`}
@@ -461,7 +496,7 @@ const DiagnosticsPage: React.FC = () => {
             <Divider />
             <ScrollArea h={400}>
               <Accordion variant="separated" p="md">
-                {data?.entrypoints?.map((ep) => (
+                {sortedEntrypoints.map((ep) => (
                   <Accordion.Item key={ep.id} value={ep.id} style={{ border: "1px solid var(--mantine-color-gray-2)", borderRadius: "var(--mantine-radius-md)", marginBottom: 8 }}>
                     <Accordion.Control>
                       <Group justify="space-between" wrap="nowrap">
@@ -527,8 +562,8 @@ const DiagnosticsPage: React.FC = () => {
                 </Stack>
               ) : (
                 <Stack gap={0} p={0}>
-                  {data?.recent_tls_errors?.map((err, i) => (
-                    <Paper key={i} p="md" radius={0} className="hover-bg-default" style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}>
+                  {sortedTlsErrors.map((err) => (
+                    <Paper key={`${err.timestamp}-${err.remote_addr}-${err.entrypoint_id}`} p="md" radius={0} className="hover-bg-default" style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}>
                       <Group justify="space-between" mb={4}>
                         <Group gap={6}>
                           <IconClock size={12} color={theme.colors.gray[5]} />

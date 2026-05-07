@@ -46,6 +46,9 @@ type mockEbpfManager struct {
 
 func (m *mockEbpfManager) ShunIP(ip string) error                        { m.shunnedIP = ip; return nil }
 func (m *mockEbpfManager) UnshunIP(ip string) error                      { return nil }
+func (m *mockEbpfManager) BlockCountry(countryCode string) error         { return nil }
+func (m *mockEbpfManager) UpdateManagementWhitelist(ips []string) error  { return nil }
+func (m *mockEbpfManager) SetPortKnockingSequence(seq []int32) error     { return nil }
 func (m *mockEbpfManager) Start(ctx context.Context)                     {}
 func (m *mockEbpfManager) UpdateLoadBalancerBackends(ips []string) error { return nil }
 

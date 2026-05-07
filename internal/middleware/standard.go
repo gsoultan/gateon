@@ -158,6 +158,19 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 			id := request.GetID(r)
+			ja3, ja4 := "", ""
+			if r.TLS != nil {
+				// In a real implementation, we would extract the ClientHello and compute JA3/JA4.
+				// Since we don't have a library for that here, we use a placeholder or
+				// look for headers if another proxy (like Cloudflare) provides them.
+				if val := r.Header.Get("X-JA3-Fingerprint"); val != "" {
+					ja3 = val
+				}
+				if val := r.Header.Get("X-JA4-Fingerprint"); val != "" {
+					ja4 = val
+				}
+			}
+
 			if debug, ok := r.Context().Value(DebugInfoContextKey).(*DebugInfo); ok && debug != nil {
 				telemetry.RecordTraceDetailed(
 					id,
@@ -174,7 +187,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					method,
 					r.Referer(),
 					origHost+r.URL.RequestURI(),
-					"", // JA3
+					ja3,
+					ja4,
 					debug.RequestHeaders,
 					debug.RequestBody,
 					debug.ResponseHeaders,
@@ -196,7 +210,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					method,
 					r.Referer(),
 					origHost+r.URL.RequestURI(),
-					"", // JA3
+					ja3,
+					ja4,
 				)
 			}
 

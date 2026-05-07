@@ -481,4 +481,35 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(22, "add_ja4_to_telemetry", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja4 TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS ja4 TEXT NOT NULL DEFAULT '';`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja4 VARCHAR(255) NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS ja4 VARCHAR(255) NOT NULL DEFAULT '';`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN ja4 TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN ja4 TEXT NOT NULL DEFAULT '';`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

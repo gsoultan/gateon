@@ -146,6 +146,19 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			"middlewares_count":    mwsCount,
 		})
 	})
+	mux.HandleFunc("POST /v1/waf/update", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp, err := svc.TriggerWafUpdate(r.Context(), &gateonv1.TriggerWafUpdateRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

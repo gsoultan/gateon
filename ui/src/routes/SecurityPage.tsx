@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   Card,
   Group,
@@ -48,6 +48,16 @@ const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
 export default function SecurityPage() {
   const { data, isLoading, error } = useSecurityThreats(100);
 
+  const sortedThreats = useMemo(() => {
+    if (!data?.threats) return [];
+    return [...data.threats].sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime();
+      const timeB = new Date(b.timestamp).getTime();
+      if (timeA !== timeB) return timeB - timeA;
+      return a.type.localeCompare(b.type) || a.source.localeCompare(b.source);
+    });
+  }, [data?.threats]);
+
   if (isLoading) {
     return (
       <Box p="xl" style={{ display: "flex", justifyContent: "center" }}>
@@ -64,7 +74,8 @@ export default function SecurityPage() {
     );
   }
 
-  const threats = data?.threats || [];
+  const threats = sortedThreats;
+  const mitigatedIpsCount = new Set(threats.filter(t => t.mitigated).map(t => t.source)).size;
 
   return (
     <Stack gap="lg">
@@ -87,7 +98,7 @@ export default function SecurityPage() {
         </Group>
       </Group>
 
-      <SimpleGrid cols={{ base: 1, md: 3 }}>
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
         <Paper withBorder p="md" radius="md">
           <Group justify="space-between">
             <Text size="xs" c="dimmed" fw={700}>THREAT LEVEL</Text>
@@ -118,32 +129,43 @@ export default function SecurityPage() {
             {new Set(threats.map(t => t.source)).size} IPs
           </Title>
         </Paper>
+        <Paper withBorder p="md" radius="md">
+          <Group justify="space-between">
+            <Text size="xs" c="dimmed" fw={700}>MITIGATED SOURCES</Text>
+            <IconShieldCheck size={16} color="var(--mantine-color-teal-6)" />
+          </Group>
+          <Title order={3} mt="xs">
+            {mitigatedIpsCount} IPs
+          </Title>
+        </Paper>
       </SimpleGrid>
 
       <Card withBorder radius="md" p={0}>
         <ScrollArea h={600}>
           <Table verticalSpacing="sm" horizontalSpacing="md" highlightOnHover>
-            <Table.Thead bg="var(--mantine-color-gray-0)">
+            <Table.Thead bg="var(--mantine-color-default-hover)">
               <Table.Tr>
                 <Table.Th>Event</Table.Th>
                 <Table.Th>Severity</Table.Th>
+                <Table.Th>Status</Table.Th>
                 <Table.Th>Target</Table.Th>
                 <Table.Th>Source IP</Table.Th>
                 <Table.Th>Location</Table.Th>
-                <Table.Th>JA3 Fingerprint</Table.Th>
+                <Table.Th>Recommendation</Table.Th>
+                <Table.Th>Fingerprints (JA3/JA4+)</Table.Th>
                 <Table.Th>Time</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {threats.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={7}>
+                  <Table.Td colSpan={9}>
                     <Text ta="center" py="xl" c="dimmed">No security threats detected recently.</Text>
                   </Table.Td>
                 </Table.Tr>
               ) : (
-                threats.map((threat, index) => (
-                  <Table.Tr key={index}>
+                threats.map((threat) => (
+                  <Table.Tr key={`${threat.type}-${threat.source}-${threat.timestamp}`}>
                     <Table.Td>
                       <Group gap="sm">
                         <ThemeIcon color="red" variant="light" size="sm">
@@ -157,6 +179,17 @@ export default function SecurityPage() {
                     </Table.Td>
                     <Table.Td>
                       <SeverityBadge severity={threat.severity} />
+                    </Table.Td>
+                    <Table.Td>
+                      {threat.mitigated ? (
+                        <Badge color="teal" variant="light" size="xs" leftSection={<IconShieldCheck size={10} />}>
+                          Mitigated
+                        </Badge>
+                      ) : (
+                        <Badge color="red" variant="light" size="xs" leftSection={<IconShieldExclamation size={10} />}>
+                          Active
+                        </Badge>
+                      )}
                     </Table.Td>
                     <Table.Td>
                       <Stack gap={2}>
@@ -185,18 +218,29 @@ export default function SecurityPage() {
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      {threat.ja3 ? (
-                        <Tooltip label={threat.ja3}>
-                          <Badge variant="outline" size="xs" ff="monospace" style={{ maxWidth: 100 }}>
-                            {threat.ja3.substring(0, 12)}...
-                          </Badge>
-                        </Tooltip>
-                      ) : (
-                        <Text size="xs" c="dimmed">N/A</Text>
-                      )}
+                      <Text size="xs" style={{ maxWidth: 250 }}>{threat.recommendation}</Text>
                     </Table.Td>
                     <Table.Td>
-                      <Group gap="xs">
+                      <Stack gap={4}>
+                        {threat.ja3 && (
+                          <Tooltip label={`JA3: ${threat.ja3}`}>
+                            <Badge variant="outline" size="xs" ff="monospace" style={{ maxWidth: 100 }}>
+                              JA3: {threat.ja3.substring(0, 8)}...
+                            </Badge>
+                          </Tooltip>
+                        )}
+                        {threat.ja4 && (
+                          <Tooltip label={`JA4+: ${threat.ja4}`}>
+                            <Badge variant="light" color="violet" size="xs" ff="monospace" style={{ maxWidth: 100 }}>
+                              JA4: {threat.ja4.substring(0, 8)}...
+                            </Badge>
+                          </Tooltip>
+                        )}
+                        {!threat.ja3 && !threat.ja4 && <Text size="xs" c="dimmed">N/A</Text>}
+                      </Stack>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap="xs" wrap="nowrap">
                         <IconClock size={12} color="var(--mantine-color-gray-5)" />
                         <Text size="xs" c="dimmed">
                           {new Date(threat.timestamp).toLocaleString()}

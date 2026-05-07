@@ -21,6 +21,9 @@ type Manager interface {
 	Start(ctx context.Context)
 	ShunIP(ip string) error
 	UnshunIP(ip string) error
+	BlockCountry(countryCode string) error
+	UpdateManagementWhitelist(ips []string) error
+	SetPortKnockingSequence(seq []int32) error
 	UpdateLoadBalancerBackends(ips []string) error
 }
 
@@ -111,6 +114,27 @@ func (m *EbpfManager) ShunIP(ip string) error {
 func (m *EbpfManager) UnshunIP(ip string) error {
 	logger.L.Info().Str("ip", ip).Msg("Unshunning IP at XDP level")
 	// Implementation would use bpf_map_delete_elem on shunned_ips map
+	return nil
+}
+
+// BlockCountry adds a country code to the XDP blocklist.
+func (m *EbpfManager) BlockCountry(countryCode string) error {
+	logger.L.Info().Str("country", countryCode).Msg("Blocking country at XDP level")
+	// Implementation would update a country_block_map
+	return nil
+}
+
+// UpdateManagementWhitelist updates the list of IPs allowed to access management port.
+func (m *EbpfManager) UpdateManagementWhitelist(ips []string) error {
+	logger.L.Info().Interface("ips", ips).Msg("Updating management whitelist in eBPF")
+	// Implementation would update management_whitelist_map
+	return nil
+}
+
+// SetPortKnockingSequence sets the required port sequence for management access.
+func (m *EbpfManager) SetPortKnockingSequence(seq []int32) error {
+	logger.L.Info().Interface("sequence", seq).Msg("Setting port knocking sequence in eBPF")
+	// Implementation would update knocking_config_map
 	return nil
 }
 

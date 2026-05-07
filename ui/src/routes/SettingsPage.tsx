@@ -133,6 +133,27 @@ export default function SettingsPage() {
     }
   };
 
+  const triggerWafUpdate = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiFetch("/v1/waf/update", {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      if (data.success) {
+        setSavedOk(true);
+      } else {
+        setError(data.message || "Failed to update WAF rules");
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to trigger WAF update");
+    } finally {
+      setSaving(false);
+    }
+  };
+
 
   const tls = config.tls || { enabled: false };
   const redis = config.redis || { enabled: false };
@@ -1378,6 +1399,16 @@ export default function SettingsPage() {
                         onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, wordpress: e.currentTarget.checked } })}
                         disabled={formDisabled}
                       />
+                      {config.waf.wordpress && (
+                        <TagsInput
+                          label="Allowed Admin IPs"
+                          description="IPs allowed to access /wp-admin and /wp-login.php"
+                          placeholder="1.2.3.4, 5.6.7.8"
+                          value={config.waf.allowed_admin_ips || []}
+                          onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, allowed_admin_ips: v } })}
+                          disabled={formDisabled}
+                        />
+                      )}
                       <Switch
                         label="IP Reputation"
                         checked={config.waf.ip_reputation}
@@ -1421,6 +1452,47 @@ export default function SettingsPage() {
                     min={1}
                     disabled={formDisabled}
                   />
+
+                  <Divider label="WAF Rules Management" labelPosition="center" />
+                  <Group grow align="flex-start">
+                    <Stack gap="xs">
+                      <Switch
+                        label="Auto Update Rules"
+                        description="Periodically check for CRS updates"
+                        checked={config.waf.auto_update_rules}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, auto_update_rules: e.currentTarget.checked } })}
+                        disabled={formDisabled}
+                      />
+                    </Stack>
+                    <Stack gap="xs">
+                      <NumberInput
+                        label="Update Interval (hours)"
+                        value={config.waf.update_interval_hours || 24}
+                        onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, update_interval_hours: parseInt(v?.toString() || "24") } })}
+                        min={1}
+                        disabled={formDisabled || !config.waf.auto_update_rules}
+                      />
+                    </Stack>
+                  </Group>
+                  <TextInput
+                    label="Rules Source URL"
+                    description="URL to CRS rules ZIP (leave empty for default)"
+                    placeholder="https://github.com/coreruleset/coreruleset/archive/refs/tags/v4.0.0.zip"
+                    value={config.waf.rules_url || ""}
+                    onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, rules_url: e.currentTarget.value } })}
+                    disabled={formDisabled || !config.waf.auto_update_rules}
+                  />
+
+                  <Button
+                    variant="light"
+                    color="blue"
+                    onClick={triggerWafUpdate}
+                    loading={saving}
+                    disabled={formDisabled}
+                    mt="xs"
+                  >
+                    Update WAF Rules Now
+                  </Button>
 
                   <Divider label="Global Bot Management" labelPosition="center" />
                   <Group grow>

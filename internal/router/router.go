@@ -271,7 +271,7 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
 func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager) http.Handler {
 	var chain []middleware.Middleware
-	mwFactory := middleware.NewFactory(redisClient, globalStore, ebpfManager)
+	mwFactory := middleware.NewFactory(redisClient, globalStore, ebpfManager, ".")
 
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)

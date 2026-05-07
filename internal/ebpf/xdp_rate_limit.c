@@ -4,7 +4,10 @@
 #include <linux/if_ether.h>
 #include <linux/ip.h>
 #include <linux/in.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 
 struct backend {
     __u32 ip;
@@ -26,6 +29,34 @@ struct {
 } shunned_ips SEC(".maps");
 
 struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u32);   // IPv4 address (Management Whitelist)
+    __type(value, __u32); 
+} mgmt_whitelist SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __type(key, __u32);   // Country Code (Simplified)
+    __type(value, __u32);
+} country_block_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u32);   // IP
+    __type(value, __u32); // Current step in sequence
+} knocking_state SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 8);
+    __type(key, __u32);   // Step
+    __type(value, __u32); // Port
+} knocking_config SEC(".maps");
+
+struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 64);
     __type(key, __u32);   // Index
@@ -38,6 +69,19 @@ struct {
     __type(key, __u32);   // Always 0
     __type(value, __u32); // Count
 } lb_backends_count SEC(".maps");
+
+struct ebpf_config {
+    __u32 mgmt_port;
+    __u32 enable_knocking;
+    __u32 enable_mgmt_whitelist;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct ebpf_config);
+} global_ebpf_config SEC(".maps");
 
 static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *eth) {
     void *data_end = (void *)(long)ctx->data_end;
@@ -54,7 +98,28 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
         return XDP_DROP;
     }
 
-    // 2. Rate Limiting
+    // 2. Management Protection
+    __u32 config_key = 0;
+    struct ebpf_config *cfg = bpf_map_lookup_elem(&global_ebpf_config, &config_key);
+    if (cfg && cfg->mgmt_port > 0) {
+        if (iph->protocol == IPPROTO_TCP) {
+            struct tcphdr *tcph = (void *)(iph + 1);
+            if ((void *)(tcph + 1) <= data_end) {
+                if (bpf_ntohs(tcph->dest) == cfg->mgmt_port) {
+                    // Check whitelist
+                    if (cfg->enable_mgmt_whitelist) {
+                        __u32 *allowed = bpf_map_lookup_elem(&mgmt_whitelist, &src_ip);
+                        if (!allowed) {
+                            return XDP_DROP;
+                        }
+                    }
+                    // Port Knocking check could go here
+                }
+            }
+        }
+    }
+
+    // 3. Rate Limiting
     __u64 now = bpf_ktime_get_ns();
     __u64 *last_seen = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
     if (last_seen) {

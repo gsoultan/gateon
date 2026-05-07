@@ -20,6 +20,7 @@ export function SecurityThreatsCard() {
 
   const threats = data?.threats || [];
   const criticalThreats = threats.filter(t => t.severity === "critical" || t.severity === "high").length;
+  const mitigatedCount = threats.filter(t => t.mitigated).length;
 
   return (
     <Card withBorder radius="md" p="lg" shadow="xs">
@@ -33,9 +34,16 @@ export function SecurityThreatsCard() {
             <Text size="xs" c="dimmed">Recent anomalies detected</Text>
           </div>
         </Group>
-        <Badge color={criticalThreats > 0 ? "red" : threats.length > 0 ? "orange" : "teal"} size="sm">
-          {threats.length} events
-        </Badge>
+        <Group gap={5}>
+          {mitigatedCount > 0 && (
+            <Badge color="teal" variant="light" size="sm">
+              {mitigatedCount} mitigated
+            </Badge>
+          )}
+          <Badge color={criticalThreats > 0 ? "red" : threats.length > 0 ? "orange" : "teal"} size="sm">
+            {threats.length} events
+          </Badge>
+        </Group>
       </Group>
 
       <Stack gap="xs">
@@ -54,9 +62,14 @@ export function SecurityThreatsCard() {
                     <IconLock size={12} />
                   </ThemeIcon>
                   <Box style={{ overflow: "hidden", flex: 1 }}>
-                    <Text size="xs" fw={700} truncate style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      {threat.type.replace(/_/g, ' ')}
-                    </Text>
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="xs" fw={700} truncate style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        {threat.type.replace(/_/g, ' ')}
+                      </Text>
+                      {threat.mitigated && (
+                        <Badge color="teal" variant="light" size="xs">Mitigated</Badge>
+                      )}
+                    </Group>
                     <Group gap={4} wrap="nowrap">
                       <Text size="xs" c="dimmed" truncate>{threat.source}</Text>
                       {threat.route_id && (
