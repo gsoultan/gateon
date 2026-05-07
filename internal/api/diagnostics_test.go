@@ -128,7 +128,11 @@ func TestGetDiagnostics_ServiceDown(t *testing.T) {
 }
 
 func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
-	engine := NewAnomalyAnalysisEngine(30.0)
+	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+			SecurityThreatThreshold: 30.0,
+		},
+	})
 	ctx := context.Background()
 
 	now := time.Now()
@@ -217,7 +221,11 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 
 func TestSecurityThreatDetector_Advanced(t *testing.T) {
 	ctx := context.Background()
-	engine := NewAnomalyAnalysisEngine(30.0)
+	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+			SecurityThreatThreshold: 30.0,
+		},
+	})
 	now := time.Now()
 
 	traces := []telemetry.TraceRecord{}
@@ -283,7 +291,11 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 
 func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 	ctx := context.Background()
-	engine := NewAnomalyAnalysisEngine(30.0)
+	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+			SecurityThreatThreshold: 30.0,
+		},
+	})
 	now := time.Now()
 
 	traces := []telemetry.TraceRecord{}
@@ -418,7 +430,11 @@ func TestApplyRecommendation(t *testing.T) {
 }
 
 func TestShadowedRouteDetection(t *testing.T) {
-	engine := NewAnomalyAnalysisEngine(30.0)
+	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+			SecurityThreatThreshold: 30.0,
+		},
+	})
 	ctx := context.Background()
 
 	data := &DiagnosticData{
