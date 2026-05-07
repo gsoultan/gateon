@@ -17,6 +17,7 @@ import {
   TextInput,
   Badge,
   Table,
+  Divider,
 } from "@mantine/core";
 import { BarChart, LineChart } from "@mantine/charts";
 import {

@@ -22,15 +22,15 @@ type OAuth2IntrospectionConfig struct {
 
 // oauth2IntrospectionResponse is the RFC 7662 introspection response.
 type oauth2IntrospectionResponse struct {
-	Active bool                   `json:"active"`
-	Sub    string                 `json:"sub,omitempty"`
-	Scope  string                 `json:"scope,omitempty"`
-	Extras map[string]interface{} `json:"-"`
+	Active bool           `json:"active"`
+	Sub    string         `json:"sub,omitempty"`
+	Scope  string         `json:"scope,omitempty"`
+	Extras map[string]any `json:"-"`
 }
 
 // UnmarshalJSON allows capturing extra claims.
 func (r *oauth2IntrospectionResponse) UnmarshalJSON(data []byte) error {
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}

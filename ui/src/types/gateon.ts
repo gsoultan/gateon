@@ -299,12 +299,21 @@ export type WafConfig = {
   scanner?: boolean;
   protocol?: boolean;
   java?: boolean;
+  nodejs?: boolean;
+  wordpress?: boolean;
+  ip_reputation?: boolean;
+  dos_protection?: boolean;
+  malware_detection?: boolean;
+  ransomware_detection?: boolean;
+  dlp?: boolean;
+  anomaly_threshold?: number;
   bot_management?: BotManagementConfig;
 };
 
 export type BotManagementConfig = {
   enabled?: boolean;
   enable_js_challenge?: boolean;
+  enable_browser_integrity?: boolean;
   challenge_timeout_seconds?: number;
 };
 
@@ -326,6 +335,8 @@ export type AnomalyDetectionConfig = {
   security_threat_threshold?: number;
   anomaly_retention_days?: number;
   enable_behavioral_fingerprinting?: boolean;
+  enable_brute_force_detection?: boolean;
+  enable_exploit_detection?: boolean;
 };
 
 export type EbpfConfig = {

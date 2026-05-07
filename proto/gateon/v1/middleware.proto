@@ -36,7 +36,7 @@ message DeleteMiddlewareResponse {
 // Supported types: ratelimit, inflightreq, buffering, auth, headers, rewrite,
 // addprefix, stripprefix, stripprefixregex, replacepath, replacepathregex,
 // compress, forwardauth, accesslog, metrics, errors, retry, cors, grpcweb,
-// ipfilter, waf, turnstile, geoip, hmac, cache
+// ipfilter, waf, honeypot, bot_management, turnstile, geoip, hmac, cache, policy, xfcc, wasm, transform, schema_validation, request_id
 message Middleware {
   string id = 1;
   string name = 2;

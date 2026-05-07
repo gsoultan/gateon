@@ -21,21 +21,24 @@ const actions = [
 export function QuickActions() {
   const items = actions.map((item) => (
     <UnstyledButton key={item.title} className={classes.item} component={Link} to={item.to}>
-      <ThemeIcon color={item.color} variant="light" size={44} radius="md">
-        <item.icon style={{ width: rem(26), height: rem(26) }} stroke={1.5} />
+      <ThemeIcon color={item.color} variant="light" size={42} radius="md">
+        <item.icon style={{ width: rem(22), height: rem(22) }} stroke={1.5} />
       </ThemeIcon>
-      <Text size="xs" mt={7} fw={500}>
+      <Text size="xs" mt={8} fw={700} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
         {item.title}
       </Text>
     </UnstyledButton>
   ));
 
   return (
-    <Paper withBorder radius="md" p="md">
-      <Group justify="space-between" mb="md">
-        <Text fw={700} size="sm">Quick Actions</Text>
+    <Paper withBorder radius="md" p="lg" shadow="xs">
+      <Group justify="space-between" mb="lg">
+        <div>
+          <Title order={5} fw={800} style={{ letterSpacing: -0.2 }}>Quick Actions</Title>
+          <Text size="xs" c="dimmed">Common management tasks</Text>
+        </div>
       </Group>
-      <SimpleGrid cols={3} spacing="sm">
+      <SimpleGrid cols={3} spacing="md">
         {items}
       </SimpleGrid>
     </Paper>

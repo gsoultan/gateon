@@ -32,6 +32,18 @@ var (
 
 	// suspiciousRefererRegex matches suspicious referer headers.
 	suspiciousRefererRegex = regexp.MustCompile(`(?i)(evil\.com|attacker|hacker|exploit|malicious|pwned)`)
+
+	// ssrfPathRegex matches potential Server-Side Request Forgery attempts.
+	ssrfPathRegex = regexp.MustCompile(`(?i)(169\.254\.169\.254|metadata\.google\.internal|instance-data|v1/meta-data|latest/meta-data|localhost|127\.0\.0\.1|0\.0\.0\.0)`)
+
+	// nosqlIPathRegex matches common NoSQL injection patterns.
+	nosqlIPathRegex = regexp.MustCompile(`(?i)(\$gt|\$ne|\$in|\$where|\$regex|\$expr|\$exists)`)
+
+	// commandInjectionRegex matches command injection patterns.
+	commandInjectionRegex = regexp.MustCompile(`(?i)(;|\d|\||&|\$\(|\x60)(?i)(cat|ls|id|whoami|pwd|uname|netstat|nc|bash|curl|wget|powershell|cmd|type|dir)`)
+
+	// protoPollutionRegex matches Prototype Pollution attempts.
+	protoPollutionRegex = regexp.MustCompile(`(?i)(__proto__|constructor\.prototype)`)
 )
 
 // SecurityThreatDetector detects potential security threats based on multiple signals.
@@ -77,7 +89,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		// 3. Pattern Matching (Paths, Queries, Payloads)
 		score += d.analyzePatterns(stats, pathIPs, &reasons, &primaryType)
 
-		// 4. Header Analysis (User-Agent, Referer)
+		// 4. Header Analysis (User-Agent, Referer, JA3)
 		score += d.analyzeHeaders(stats, &reasons)
 
 		// 5. Behavioral Patterns
@@ -116,12 +128,11 @@ func (d *SecurityThreatDetector) detectCoordinatedScans(data *DiagnosticData) ma
 	for ip, stats := range data.IPStats {
 		for path := range stats.UniquePaths {
 			lp := strings.ToLower(path)
-			if suspiciousPathRegex.MatchString(lp) || traversalPathRegex.MatchString(lp) {
-				if _, ok := pathIPs[lp]; !ok {
-					pathIPs[lp] = make(map[string]struct{})
-				}
-				pathIPs[lp][ip] = struct{}{}
+			// Track all paths to detect distributed sweeps, but prioritize suspicious ones
+			if _, ok := pathIPs[lp]; !ok {
+				pathIPs[lp] = make(map[string]struct{})
 			}
+			pathIPs[lp][ip] = struct{}{}
 		}
 	}
 	return pathIPs
@@ -161,7 +172,20 @@ func (d *SecurityThreatDetector) analyzeErrors(stats *IPStats, reasons *[]string
 		score += 15
 	}
 
-	if stats.Error401+stats.Error403 > 10 {
+	// Advanced Auth Failure Detection
+	loginPaths := []string{"/login", "/auth", "/signin", "/api/v1/auth", "/api/auth"}
+	loginFailures := 0
+	for _, p := range loginPaths {
+		if count, ok := stats.PathErrors[p]; ok {
+			loginFailures += count
+		}
+	}
+
+	if loginFailures > 5 {
+		score += 60
+		*reasons = append(*reasons, fmt.Sprintf("Targeted brute force on auth endpoints (%d failures)", loginFailures))
+		*primaryType = "brute_force_attempt"
+	} else if stats.Error401+stats.Error403 > 10 {
 		score += 50
 		*reasons = append(*reasons, fmt.Sprintf("Multiple authentication failures (%d)", stats.Error401+stats.Error403))
 		*primaryType = "brute_force_attempt"
@@ -214,6 +238,26 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 			pathMatched = true
 		}
 
+		if ssrfPathRegex.MatchString(lp) {
+			score += 45
+			pathMatched = true
+		}
+
+		if nosqlIPathRegex.MatchString(lp) {
+			score += 40
+			pathMatched = true
+		}
+
+		if commandInjectionRegex.MatchString(lp) {
+			score += 65
+			pathMatched = true
+		}
+
+		if protoPollutionRegex.MatchString(lp) {
+			score += 50
+			pathMatched = true
+		}
+
 		if pathMatched {
 			matches++
 		}
@@ -229,6 +273,28 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 	if coordinatedCount > 0 {
 		score += 20 * coordinatedCount
 		*reasons = append(*reasons, fmt.Sprintf("Coordinated scan of %d suspicious paths detected", coordinatedCount))
+	}
+
+	// Distributed sweep detection
+	distributedPaths := 0
+	for path := range stats.UniquePaths {
+		lp := strings.ToLower(path)
+		if len(pathIPs[lp]) > 5 { // Path is being hit by more than 5 IPs in the sample
+			distributedPaths++
+		}
+	}
+	if distributedPaths > 3 {
+		score += 15
+		*reasons = append(*reasons, fmt.Sprintf("Involved in distributed sweep across %d common targets", distributedPaths))
+	}
+
+	// High Path Diversity (Scraping/Crawling)
+	if len(stats.UniquePaths) > 50 && stats.TotalRequests > 100 {
+		score += 30
+		*reasons = append(*reasons, fmt.Sprintf("High path diversity (%d unique paths) - potential scraping", len(stats.UniquePaths)))
+		if *primaryType == "security_threat" {
+			*primaryType = "api_scraping"
+		}
 	}
 
 	return score
@@ -258,6 +324,12 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 	}
 	if refererMatched {
 		*reasons = append(*reasons, "Suspicious Referer header detected")
+	}
+
+	// JA3 Analysis
+	if len(stats.JA3s) > 1 {
+		score += 30
+		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (%d) from single IP", len(stats.JA3s)))
 	}
 
 	return score

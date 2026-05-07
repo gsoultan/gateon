@@ -281,6 +281,71 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 	assert.True(t, foundPostOnly, "Should detect POST-only traffic from 5.5.5.5")
 }
 
+func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
+	ctx := context.Background()
+	engine := NewAnomalyAnalysisEngine(30.0)
+	now := time.Now()
+
+	traces := []telemetry.TraceRecord{}
+
+	// 1. Targeted Brute Force on /login (IP 6.6.6.6)
+	for i := 0; i < 6; i++ {
+		traces = append(traces, telemetry.TraceRecord{
+			SourceIP: "6.6.6.6", Status: "401 Unauthorized", Timestamp: now, Path: "/login", Method: "POST",
+		})
+	}
+
+	// 2. SSRF Attempt (IP 7.7.7.7)
+	traces = append(traces, telemetry.TraceRecord{
+		SourceIP: "7.7.7.7", Status: "200 OK", Timestamp: now, Path: "/api/fetch?url=http://169.254.169.254/latest/meta-data", Method: "GET",
+	})
+
+	// 3. Command Injection Attempt (IP 8.8.8.8)
+	traces = append(traces, telemetry.TraceRecord{
+		SourceIP: "8.8.8.8", Status: "200 OK", Timestamp: now, Path: "/search?q=;whoami", Method: "GET",
+	})
+
+	// 4. JA3 Fingerprint Rotation (IP 9.9.9.9)
+	traces = append(traces, telemetry.TraceRecord{
+		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET", JA3: "fingerprint1",
+	})
+	traces = append(traces, telemetry.TraceRecord{
+		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/api", Method: "GET", JA3: "fingerprint2",
+	})
+
+	data := &DiagnosticData{
+		Traces: traces,
+	}
+
+	anomalies := engine.Analyze(ctx, data)
+
+	foundTargetedBruteForce := false
+	foundSSRF := false
+	foundCmdInjection := false
+	foundJA3Rotation := false
+
+	for _, a := range anomalies {
+		if a.Source == "6.6.6.6" && strings.Contains(strings.ToLower(a.Description), "targeted brute force") {
+			foundTargetedBruteForce = true
+		}
+		if a.Source == "7.7.7.7" && strings.Contains(strings.ToLower(a.Description), "suspicious paths/payloads") {
+			// SSRF is handled by analyzePatterns which adds "suspicious paths/payloads"
+			foundSSRF = true
+		}
+		if a.Source == "8.8.8.8" && strings.Contains(strings.ToLower(a.Description), "suspicious paths/payloads") {
+			foundCmdInjection = true
+		}
+		if a.Source == "9.9.9.9" && strings.Contains(strings.ToLower(a.Description), "multiple tls fingerprints") {
+			foundJA3Rotation = true
+		}
+	}
+
+	assert.True(t, foundTargetedBruteForce, "Should detect targeted brute force from 6.6.6.6")
+	assert.True(t, foundSSRF, "Should detect SSRF from 7.7.7.7")
+	assert.True(t, foundCmdInjection, "Should detect command injection from 8.8.8.8")
+	assert.True(t, foundJA3Rotation, "Should detect JA3 rotation from 9.9.9.9")
+}
+
 func TestApplyRecommendation(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

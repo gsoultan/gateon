@@ -47,6 +47,8 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 				UserAgents:  make(map[string]struct{}),
 				Methods:     make(map[string]int),
 				Referers:    make(map[string]int),
+				JA3s:        make(map[string]int),
+				PathErrors:  make(map[string]int),
 				CountryCode: tr.CountryCode,
 			}
 			data.IPStats[tr.SourceIP] = stats
@@ -65,6 +67,9 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		}
 		if tr.Referer != "" {
 			stats.Referers[tr.Referer]++
+		}
+		if tr.JA3 != "" {
+			stats.JA3s[tr.JA3]++
 		}
 
 		// Burst detection: 10-second slots
@@ -101,8 +106,10 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 
 		if strings.Contains(tr.Status, "401") {
 			stats.Error401++
+			stats.PathErrors[tr.Path]++
 		} else if strings.Contains(tr.Status, "403") {
 			stats.Error403++
+			stats.PathErrors[tr.Path]++
 		} else if strings.Contains(tr.Status, "404") {
 			stats.Error404++
 		} else if strings.HasPrefix(tr.Status, "4") {

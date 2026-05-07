@@ -57,16 +57,9 @@ func InitFromEnv() Config {
 }
 
 func splitAndTrim(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
 	var res []string
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			res = append(res, trimmed)
-		}
+	for p := range strings.FieldsSeq(strings.ReplaceAll(s, ",", " ")) {
+		res = append(res, p)
 	}
 	return res
 }

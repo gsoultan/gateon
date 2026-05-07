@@ -3,7 +3,8 @@ package middleware
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,16 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				setIfMissing("scanner", global.Waf.Scanner)
 				setIfMissing("protocol", global.Waf.Protocol)
 				setIfMissing("java", global.Waf.Java)
+				setIfMissing("nodejs", global.Waf.Nodejs)
+				setIfMissing("wordpress", global.Waf.Wordpress)
+				setIfMissing("ip_reputation", global.Waf.IpReputation)
+				setIfMissing("dos_protection", global.Waf.DosProtection)
+				setIfMissing("malware_detection", global.Waf.MalwareDetection)
+				setIfMissing("ransomware_detection", global.Waf.RansomwareDetection)
+				setIfMissing("dlp", global.Waf.Dlp)
+				if _, ok := cfg["anomaly_threshold"]; !ok && global.Waf.AnomalyThreshold > 0 {
+					cfg["anomaly_threshold"] = strconv.Itoa(int(global.Waf.AnomalyThreshold))
+				}
 			}
 		}
 	}
@@ -54,7 +65,7 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 
 // InvalidateWAFCache clears all cached WAF instances. Call when a WAF middleware is saved or deleted.
 func InvalidateWAFCache() {
-	wafCache.Range(func(key, _ interface{}) bool {
+	wafCache.Range(func(key, _ any) bool {
 		wafCache.Delete(key)
 		return true
 	})
@@ -68,11 +79,7 @@ func (WAFCacheInvalidator) Invalidate() {
 }
 
 func wafConfigKey(cfg map[string]string) string {
-	keys := make([]string, 0, len(cfg))
-	for k := range cfg {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(cfg))
 	var b strings.Builder
 	for _, k := range keys {
 		b.WriteString(k)

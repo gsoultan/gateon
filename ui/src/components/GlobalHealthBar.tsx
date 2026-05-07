@@ -35,20 +35,12 @@ export function GlobalHealthBar() {
         ? `${(totalReqs / 1000).toFixed(1)}K`
         : String(totalReqs);
 
-  const bg =
-    colorScheme === "dark"
-      ? "var(--mantine-color-dark-5)"
-      : "var(--mantine-color-gray-2)";
-
-  const hasAlerts =
-    (aggStats?.open_circuits ?? 0) + (aggStats?.half_open_circuits ?? 0) > 0;
-
   const stats = [
     {
       icon: IconRoute,
       value: status?.routes_count ?? 0,
       label: "Routes",
-      color: "var(--mantine-color-indigo-6)",
+      color: "var(--mantine-color-brand-6)",
     },
     {
       icon: IconServer,
@@ -70,6 +62,9 @@ export function GlobalHealthBar() {
     },
   ];
 
+  const hasAlerts =
+    (aggStats?.open_circuits ?? 0) + (aggStats?.half_open_circuits ?? 0) > 0;
+
   if (hasAlerts) {
     stats.push({
       icon: IconAlertTriangle,
@@ -80,22 +75,34 @@ export function GlobalHealthBar() {
     });
   }
 
+  const bg =
+    colorScheme === "dark"
+      ? "var(--mantine-color-dark-6)"
+      : "var(--mantine-color-gray-1)";
+
+  const borderColor = 
+    colorScheme === "dark"
+      ? "var(--mantine-color-dark-4)"
+      : "var(--mantine-color-gray-3)";
+
   return (
-    <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+    <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
       {stats.map(({ icon: Icon, value, label, color }) => (
-        <Tooltip key={label} label={label}>
+        <Tooltip key={label} label={label} openDelay={500}>
           <Box
             style={{
               display: "flex",
               alignItems: "center",
               gap: 6,
-              padding: "4px 8px",
-              borderRadius: "var(--mantine-radius-sm)",
+              padding: "2px 10px",
+              borderRadius: "20px",
               backgroundColor: bg,
+              border: `1px solid ${borderColor}`,
+              height: 28,
             }}
           >
-            <Icon size={14} color={color} stroke={2} />
-            <Text size="sm" fw={600} lh={1}>
+            <Icon size={12} color={color} stroke={2.5} />
+            <Text size="xs" fw={700} lh={1} style={{ fontVariantNumeric: 'tabular-nums' }}>
               {value}
             </Text>
           </Box>

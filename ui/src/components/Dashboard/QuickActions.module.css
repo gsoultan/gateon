@@ -5,14 +5,15 @@
   justify-content: center;
   text-align: center;
   border-radius: var(--mantine-radius-md);
-  height: rem(90);
+  height: 90px;
   background-color: var(--mantine-color-body);
-  transition: background-color 150ms ease, transform 100ms ease;
-  border: 1px solid transparent;
+  transition: all 150ms ease;
+  border: 1px solid var(--mantine-color-default-border);
 }
 
 .item:hover {
   background-color: var(--mantine-color-default-hover);
   transform: translateY(-2px);
-  border-color: var(--mantine-color-default-border);
+  border-color: var(--mantine-color-brand-filled);
+  box-shadow: var(--mantine-shadow-sm);
 }

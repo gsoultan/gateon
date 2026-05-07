@@ -81,6 +81,8 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 		return f.createGRPCWeb(cfg)
 	case "ipfilter":
 		return f.createIPFilter(cfg)
+	case "request_id":
+		return RequestID(), nil
 	case "cache":
 		return f.createCache(cfg)
 	case "inflightreq":
@@ -95,6 +97,10 @@ func (f *Factory) Create(m *gateonv1.Middleware) (Middleware, error) {
 		return f.createGraphQLFirewall(cfg)
 	case "bot_management":
 		return f.createBotManagement(cfg)
+	case "schema_validation":
+		return SchemaValidation(SchemaValidationConfig{Schema: cfg["schema"]}), nil
+	case "honeypot":
+		return Honeypot(parseHoneypotConfig(cfg)), nil
 	case "turnstile":
 		return f.createTurnstile(cfg)
 	case "geoip":

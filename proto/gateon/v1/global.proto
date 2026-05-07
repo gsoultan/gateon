@@ -102,12 +102,21 @@ message WafConfig {
   bool scanner = 10;
   bool protocol = 11;
   bool java = 12;
+  bool nodejs = 14;
+  bool wordpress = 15;
+  bool ip_reputation = 16;
+  bool dos_protection = 17;
+  bool malware_detection = 18;
+  bool ransomware_detection = 20;
+  bool dlp = 21;
+  int32 anomaly_threshold = 19;
   BotManagementConfig bot_management = 13;
 }
 
 message BotManagementConfig {
   bool enabled = 1;
   bool enable_js_challenge = 2;
+  bool enable_browser_integrity = 5;
   int32 challenge_timeout_seconds = 3;
 }
 
@@ -129,6 +138,8 @@ message AnomalyDetectionConfig {
   double security_threat_threshold = 5;
   int32 anomaly_retention_days = 6;
   bool enable_behavioral_fingerprinting = 7;
+  bool enable_brute_force_detection = 8;
+  bool enable_exploit_detection = 9;
 }
 
 message EbpfConfig {

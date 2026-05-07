@@ -121,8 +121,7 @@ func initStore(databaseURL string, retentionDays int) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	st.wg.Add(1)
-	go st.loop()
+	st.wg.Go(st.loop)
 
 	store = st
 	return nil
@@ -158,7 +157,6 @@ func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) loop() {
-	defer s.wg.Done()
 	flushTicker := time.NewTicker(1 * time.Second)
 	pruneTicker := time.NewTicker(1 * time.Hour)
 	defer flushTicker.Stop()
