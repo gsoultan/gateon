@@ -11,6 +11,7 @@ import (
 type DiagnosticData struct {
 	Traces           []telemetry.TraceRecord
 	Routes           []*gateonv1.Route
+	Middlewares      []*gateonv1.Middleware
 	ManagementHosts  []string
 	IPStats          map[string]*IPStats
 	FingerprintStats map[string]*FingerprintStats

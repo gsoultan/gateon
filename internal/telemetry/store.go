@@ -54,6 +54,7 @@ type TraceRecord struct {
 	RequestBody     string
 	ResponseHeaders string
 	ResponseBody    string
+	JA4             string
 }
 
 type SecurityThreat struct {
@@ -65,6 +66,7 @@ type SecurityThreat struct {
 	Details     string
 	Time        time.Time
 	JA3         string
+	JA4         string
 	RouteID     string
 	RequestURI  string
 }
@@ -154,7 +156,7 @@ func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, route_id, request_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -214,7 +216,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.traceInsertStmt(tx); err == nil {
 					for _, tr := range traceBatch {
-						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.Fingerprint, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI, tr.JA3, tr.RequestHeaders, tr.RequestBody, tr.ResponseHeaders, tr.ResponseBody); err != nil {
+						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.Fingerprint, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI, tr.JA3, tr.RequestHeaders, tr.RequestBody, tr.ResponseHeaders, tr.ResponseBody, tr.JA4); err != nil {
 							logger.Default().Error().Err(err).Msg("traces: insert failed")
 						}
 					}
@@ -234,7 +236,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.RouteID, th.RequestURI); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI); err != nil {
 							logger.Default().Error().Err(err).Msg("threats: insert failed")
 						}
 					}
@@ -374,7 +376,7 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, reqHeaders, reqBody, respHeaders, respBody string) {
+func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
 	if store == nil {
 		return
 	}
@@ -395,6 +397,7 @@ func recordTraceToStore(id, operationName, serviceName string, durationMs float6
 		Referer:         referer,
 		RequestURI:      requestURI,
 		JA3:             ja3,
+		JA4:             ja4,
 		RequestHeaders:  reqHeaders,
 		RequestBody:     reqBody,
 		ResponseHeaders: respHeaders,
@@ -434,7 +437,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3, request_headers, request_body, response_headers, response_body FROM traces ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3, ja4, request_headers, request_body, response_headers, response_body FROM traces ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("traces: query failed")
@@ -445,7 +448,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	for rows.Next() {
 		var tr TraceRecord
 		var reqHeaders, reqBody, respHeaders, respBody sql.NullString
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &reqHeaders, &reqBody, &respHeaders, &respBody); err != nil {
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &reqHeaders, &reqBody, &respHeaders, &respBody); err != nil {
 			logger.Default().Error().Err(err).Msg("traces: scan failed")
 			continue
 		}
@@ -645,7 +648,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, route_id, request_uri FROM security_threats ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri FROM security_threats ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().Error().Err(err).Msg("threats: query failed")
@@ -655,7 +658,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	res := make([]SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
 		var th SecurityThreat
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.RouteID, &th.RequestURI); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI); err != nil {
 			logger.Default().Error().Err(err).Msg("threats: scan failed")
 			continue
 		}

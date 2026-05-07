@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/install"
 	"github.com/gsoultan/gateon/internal/k8s"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/server"
@@ -90,6 +91,7 @@ func main() {
 	initTelemetry(globalReg, ctx)
 
 	var ebpfManager ebpf.Manager
+	var wafUpdater *middleware.WAFUpdater
 	if gc := globalReg.Get(context.Background()); gc != nil {
 		if gc.Ha != nil && gc.Ha.Enabled {
 			haManager := ha.NewHAManager(gc.Ha)
@@ -107,6 +109,10 @@ func main() {
 			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
 			go ebpfManager.Start(context.Background())
 		}
+		wafUpdater = middleware.NewWAFUpdater(globalReg, ".")
+		if gc.Waf != nil && gc.Waf.AutoUpdateRules {
+			go wafUpdater.Start(ctx)
+		}
 	}
 
 	port := getPort()
@@ -114,6 +120,7 @@ func main() {
 		server.WithGlobalRegistry(globalReg),
 		server.WithAuthManager(authManager),
 		server.WithEbpfManager(ebpfManager),
+		server.WithWafUpdater(wafUpdater),
 		server.WithPort(port),
 		server.WithVersion(version()),
 		server.WithRouteRegistry(config.NewRouteRegistry(getEnvDefault("ROUTES_FILE", "routes.json"))),

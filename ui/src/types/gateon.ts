@@ -312,6 +312,10 @@ export type WafConfig = {
   response_body_limit?: number;
   audit_log_path?: string;
   audit_log_relevant_only?: boolean;
+  allowed_admin_ips?: string[];
+  auto_update_rules?: boolean;
+  update_interval_hours?: number;
+  rules_url?: string;
 };
 
 export type BotManagementConfig = {
@@ -525,9 +529,11 @@ export type Anomaly = {
   country_code?: string;
   country_name?: string;
   ja3?: string;
+  ja4?: string;
   score?: number;
   route_id?: string;
   request_uri?: string;
+  mitigated?: boolean;
 };
 
 export type DependencyHealth = {

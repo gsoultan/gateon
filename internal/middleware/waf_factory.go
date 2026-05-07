@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -55,6 +57,16 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				}
 				if _, ok := cfg["audit_log_relevant_only"]; !ok {
 					cfg["audit_log_relevant_only"] = strconv.FormatBool(global.Waf.AuditLogRelevantOnly)
+				}
+				if _, ok := cfg["allowed_admin_ips"]; !ok && len(global.Waf.AllowedAdminIps) > 0 {
+					cfg["allowed_admin_ips"] = strings.Join(global.Waf.AllowedAdminIps, ",")
+				}
+
+				if global.Waf.AutoUpdateRules {
+					rulesPath := filepath.Join(f.dataDir, "waf", "rules")
+					if _, err := os.Stat(rulesPath); err == nil {
+						cfg["rules_path"] = rulesPath
+					}
 				}
 			}
 		}

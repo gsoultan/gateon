@@ -26,4 +26,5 @@ type GlobalAndAuthAPI interface {
 	TraceRoute(ctx context.Context, req *gateonv1.TraceRouteRequest) (*gateonv1.TraceRouteResponse, error)
 	ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error)
 	GetCloudflareIPs(ctx context.Context, req *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error)
+	TriggerWafUpdate(ctx context.Context, req *gateonv1.TriggerWafUpdateRequest) (*gateonv1.TriggerWafUpdateResponse, error)
 }

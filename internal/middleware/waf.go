@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +53,8 @@ type WAFConfig struct {
 	AuditLogPath              string // Path to audit log file
 	AuditLogRelevantOnly      bool   // Only log relevant transactions
 	EbpfManager               ebpf.Manager
+	AllowedAdminIps           []string // IPs allowed to access WP admin
+	RulesPath                 string   // Path to external WAF rules (CRS)
 }
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
@@ -116,26 +119,37 @@ Include @crs-setup.conf.example
 			sb.WriteString("Include @owasp_crs/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
 		}
 		if !cfg.DisableNodeJS {
-			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-NODEJS.conf\n")
+			// In CRS 4.0, NodeJS attacks are covered by the Generic Attacks ruleset
+			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf\n")
 		}
 		if cfg.EnableIPReputation {
-			sb.WriteString("Include @owasp_crs/REQUEST-910-IP-REPUTATION.conf\n")
+			// REQUEST-910-IP-REPUTATION.conf is missing in some CRS 4.0 distributions.
+			// We provide a basic rule that blocks based on the ip_reputation_block_flag.
+			// We use phase:2 to ensure it catches variables set in phase:1 directives.
+			sb.WriteString("SecRule TX:ip_reputation_block_flag \"@eq 1\" \"id:910001,phase:2,deny,status:403,msg:'IP Reputation block',tag:'reputation',severity:CRITICAL\"\n")
 		}
 		if cfg.EnableDOSProtection {
 			sb.WriteString(`SecAction "id:900002,phase:1,nolog,pass,setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
 `)
-			sb.WriteString("Include @owasp_crs/REQUEST-912-DOS-PROTECTION.conf\n")
+			// REQUEST-912-DOS-PROTECTION.conf is missing in some CRS 4.0 distributions
+			// sb.WriteString("Include @owasp_crs/REQUEST-912-DOS-PROTECTION.conf\n")
 		}
 
 		// WP Scanning and Exploits
 		if !cfg.DisableWordPress {
 			// Basic WP protection rules if CRS doesn't have them enabled by default
-			sb.WriteString(`
+			allowedIps := "127.0.0.1"
+			if len(cfg.AllowedAdminIps) > 0 {
+				allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
+			}
+
+			sb.WriteString(fmt.Sprintf(`
 SecRule REQUEST_URI "@contains /wp-admin" "id:100001,phase:1,deny,status:403,msg:'WordPress admin access attempt',tag:'wp_scan',severity:CRITICAL,chain"
-  SecRule REMOTE_ADDR "!@ipMatch 127.0.0.1"
-SecRule REQUEST_URI "@contains /wp-login.php" "id:100002,phase:1,deny,status:403,msg:'WordPress login attempt',tag:'wp_scan',severity:CRITICAL"
+  SecRule REMOTE_ADDR "!@ipMatch %s"
+SecRule REQUEST_URI "@contains /wp-login.php" "id:100002,phase:1,deny,status:403,msg:'WordPress login attempt',tag:'wp_scan',severity:CRITICAL,chain"
+  SecRule REMOTE_ADDR "!@ipMatch %s"
 SecRule REQUEST_URI "@rx /wp-content/plugins/.*\.php" "id:100003,phase:1,deny,status:403,msg:'WordPress plugin execution attempt',tag:'wp_scan',severity:CRITICAL"
-`)
+`, allowedIps, allowedIps))
 		}
 
 		// Malware and File Upload protection
@@ -178,7 +192,11 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
 		sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
 		sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
 
-		wafConfig = wafConfig.WithRootFS(fsWrapper{coreruleset.FS})
+		if cfg.RulesPath != "" {
+			wafConfig = wafConfig.WithRootFS(os.DirFS(cfg.RulesPath))
+		} else {
+			wafConfig = wafConfig.WithRootFS(fsWrapper{coreruleset.FS})
+		}
 	}
 
 	if cfg.AuditLogPath != "" {
@@ -348,6 +366,15 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		routeID = "unknown"
 	}
 
+	var allowedAdminIps []string
+	if v, ok := cfg["allowed_admin_ips"]; ok && v != "" {
+		for _, s := range strings.Split(v, ",") {
+			if ip := strings.TrimSpace(s); ip != "" {
+				allowedAdminIps = append(allowedAdminIps, ip)
+			}
+		}
+	}
+
 	return WAFConfig{
 		UseCRS:                    useCRS,
 		ParanoiaLevel:             pl,
@@ -376,6 +403,8 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		AuditLogPath:              strings.TrimSpace(cfg["audit_log_path"]),
 		AuditLogRelevantOnly:      strings.TrimSpace(strings.ToLower(cfg["audit_log_relevant_only"])) != "false",
 		RouteID:                   routeID,
+		AllowedAdminIps:           allowedAdminIps,
+		RulesPath:                 strings.TrimSpace(cfg["rules_path"]),
 	}
 }
 

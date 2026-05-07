@@ -27,8 +27,10 @@ message Anomaly {
   string country_code = 9;
   double score = 10;
   string ja3 = 11;
+  string ja4 = 33;
   string route_id = 12;
   string request_uri = 13;
+  bool mitigated = 14;
 }
 
 message ListSecurityThreatsRequest {
@@ -62,6 +64,13 @@ message TraceRouteRequest {
 
 message TraceRouteResponse {
   repeated TraceHop hops = 1;
+}
+
+message TriggerWafUpdateRequest {}
+
+message TriggerWafUpdateResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message TraceHop {

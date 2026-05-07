@@ -104,6 +104,15 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
                 checked={isEnabled("wordpress")}
                 onChange={(e) => toggle("wordpress", e.currentTarget.checked)}
               />
+              {isEnabled("wordpress") && (
+                <TagsInput
+                  label="Allowed Admin IPs"
+                  description="Comma-separated list of IPs allowed to access /wp-admin"
+                  placeholder="1.2.3.4, 5.6.7.8"
+                  value={config.allowed_admin_ips ? config.allowed_admin_ips.split(",") : []}
+                  onChange={(v) => updateConfig("allowed_admin_ips", v.join(","))}
+                />
+              )}
             </Stack>
           </Group>
 

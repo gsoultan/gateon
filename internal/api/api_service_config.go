@@ -5,6 +5,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/tls"
 )
 
@@ -22,4 +23,5 @@ type ApiServiceConfig struct {
 	TLSManager         tls.TLSManager
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager
+	WafUpdater         *middleware.WAFUpdater
 }

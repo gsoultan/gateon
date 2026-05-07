@@ -21,5 +21,6 @@ type IPStats struct {
 	Referers      map[string]int
 	BurstCount    int            // Requests in the peak 10-second window
 	JA3s          map[string]int // Track JA3 fingerprints per IP
+	JA4s          map[string]int // Track JA4 fingerprints per IP
 	PathErrors    map[string]int // Track 401/403 errors per path
 }

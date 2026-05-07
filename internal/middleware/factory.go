@@ -18,10 +18,11 @@ type Factory struct {
 	redisClient redis.Client
 	globalStore config.GlobalConfigStore
 	ebpfManager ebpf.Manager
+	dataDir     string
 }
 
-func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager) *Factory {
-	return &Factory{redisClient: redisClient, globalStore: globalStore, ebpfManager: ebpfManager}
+func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, dataDir string) *Factory {
+	return &Factory{redisClient: redisClient, globalStore: globalStore, ebpfManager: ebpfManager, dataDir: dataDir}
 }
 
 // Validate checks that the middleware config is valid without creating the middleware.

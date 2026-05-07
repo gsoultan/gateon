@@ -46,6 +46,7 @@ const TraceVisualizer: React.FC<TraceVisualizerProps> = ({ opened, onClose, targ
     <Modal 
       opened={opened} 
       onClose={onClose} 
+      zIndex={10000}
       title={
         <Group>
           <IconMap2 size={20} color="var(--mantine-color-blue-6)" />

@@ -45,6 +45,10 @@ message GeoIPConfig {
   string maxmind_license_key = 3;
   bool auto_update = 4;
   int32 update_interval_days = 5;
+  // BlockedCountries is a list of ISO country codes to block.
+  repeated string blocked_countries = 6;
+  // XdpGeofencing, if true, uses eBPF/XDP to block countries at the kernel level.
+  bool xdp_geofencing = 7;
 }
 
 // ManagementConfig holds the configuration for the Gateon management server.
@@ -66,6 +70,13 @@ message ManagementConfig {
   // AllowedHosts is a whitelist of hostnames (e.g., ["admin.example.com"]) 
   // allowed to access the management API on public entrypoints.
   repeated string allowed_hosts = 7;
+  // XdpManagementWhitelisting, if true, uses eBPF/XDP to drop management traffic 
+  // from non-whitelisted IPs at the kernel level.
+  bool xdp_management_whitelisting = 8;
+  // EnablePortKnocking, if true, enables a stealth mode for the management port.
+  bool enable_port_knocking = 9;
+  // PortKnockingSequence is the sequence of ports to "knock" on to open management.
+  repeated int32 port_knocking_sequence = 10;
 
   reserved 5;
   reserved "host";
@@ -115,6 +126,10 @@ message WafConfig {
   string audit_log_path = 24;
   bool audit_log_relevant_only = 25;
   BotManagementConfig bot_management = 13;
+  repeated string allowed_admin_ips = 26;
+  bool auto_update_rules = 27;
+  int32 update_interval_hours = 28;
+  string rules_url = 29;
 }
 
 message BotManagementConfig {

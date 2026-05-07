@@ -12,7 +12,17 @@ type AnomalyAnalysisEngine struct {
 	detectors []AnomalyDetector
 }
 
-func NewAnomalyAnalysisEngine(securityThreshold float64) *AnomalyAnalysisEngine {
+func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig) *AnomalyAnalysisEngine {
+	securityThreshold := 30.0
+	if config != nil && config.AnomalyDetection != nil {
+		securityThreshold = config.AnomalyDetection.SecurityThreatThreshold
+	}
+
+	var blockedCountries []string
+	if config != nil && config.Geoip != nil {
+		blockedCountries = config.Geoip.BlockedCountries
+	}
+
 	return &AnomalyAnalysisEngine{
 		detectors: []AnomalyDetector{
 			&SecurityThreatDetector{Threshold: securityThreshold},
@@ -20,6 +30,8 @@ func NewAnomalyAnalysisEngine(securityThreshold float64) *AnomalyAnalysisEngine 
 			&ManagementDomainDetector{},
 			&SlowClientDetector{},
 			&ShadowedRouteDetector{},
+			&GeofenceDetector{BlockedCountries: blockedCountries},
+			&IntegrityDetector{},
 		},
 	}
 }
@@ -48,6 +60,7 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 				Methods:     make(map[string]int),
 				Referers:    make(map[string]int),
 				JA3s:        make(map[string]int),
+				JA4s:        make(map[string]int),
 				PathErrors:  make(map[string]int),
 				CountryCode: tr.CountryCode,
 			}
@@ -70,6 +83,9 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		}
 		if tr.JA3 != "" {
 			stats.JA3s[tr.JA3]++
+		}
+		if tr.JA4 != "" {
+			stats.JA4s[tr.JA4]++
 		}
 
 		// Burst detection: 10-second slots
