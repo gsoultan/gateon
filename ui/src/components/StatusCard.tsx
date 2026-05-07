@@ -1,4 +1,4 @@
-import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper, Progress, Box } from '@mantine/core'
+import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper, Progress, Box, ThemeIcon } from '@mantine/core'
 import { IconActivity, IconRoute, IconClock, IconVersions, IconCpu, IconDeviceDesktop } from '@tabler/icons-react'
 import { useGateonStatus } from '../hooks/useGateon'
 import { formatBytes } from '../utils/format'

@@ -1,4 +1,4 @@
-import { Table, Text, Paper, Box, Group, Badge } from "@mantine/core";
+import { Table, Text, Paper, Box, Group, Badge, Title } from "@mantine/core";
 import { formatBytes } from "../../utils/format";
 
 interface HourlyDomainMetric {

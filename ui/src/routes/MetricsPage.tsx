@@ -41,7 +41,7 @@ import {
   IconTransferIn,
 } from "@tabler/icons-react";
 import { useMetricsSnapshot } from "../hooks/useMetricsSnapshot";
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import type {
   GoldenSignals,
   RouteMetric,

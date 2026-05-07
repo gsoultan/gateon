@@ -8,6 +8,8 @@ import {
   ThemeIcon,
   Button,
   Box,
+  Title,
+  Paper,
 } from "@mantine/core";
 import { IconShieldExclamation, IconArrowRight, IconLock } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
