@@ -103,6 +103,8 @@ message LogConfig {
   string format = 3; // "json", "text"
   int32 path_stats_retention_days = 4;
   int32 access_log_retention_days = 5;
+  int32 security_threat_retention_days = 6;
+  int32 audit_log_retention_days = 7;
 }
 
 message TlsClientConfig {

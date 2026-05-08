@@ -73,17 +73,21 @@ type SecurityThreat struct {
 }
 
 type pathStatsStore struct {
-	db            *sql.DB
-	dialect       db.Dialect
-	inCh          chan increment
-	traceInCh     chan TraceRecord
-	threatInCh    chan SecurityThreat
-	stopCh        chan struct{}
-	stopped       atomic.Bool
-	wg            sync.WaitGroup
-	retentionDays atomic.Int32
-	pruning       atomic.Bool
-	scoreCache    *lru.ARCCache
+	db                          *sql.DB
+	dialect                     db.Dialect
+	inCh                        chan increment
+	traceInCh                   chan TraceRecord
+	threatInCh                  chan SecurityThreat
+	stopCh                      chan struct{}
+	stopped                     atomic.Bool
+	wg                          sync.WaitGroup
+	retentionDays               atomic.Int32
+	pathStatsRetentionDays      atomic.Int32
+	accessLogRetentionDays      atomic.Int32
+	securityThreatRetentionDays atomic.Int32
+	auditLogRetentionDays       atomic.Int32
+	pruning                     atomic.Bool
+	scoreCache                  *lru.ARCCache
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -290,33 +294,60 @@ func (s *pathStatsStore) prune() {
 	}
 	defer s.pruning.Store(false)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	days := int(s.retentionDays.Load())
+	// 1. Path Stats & Domain Stats Retention
+	days := int(s.pathStatsRetentionDays.Load())
 	if days <= 0 {
-		return
+		days = int(s.retentionDays.Load())
 	}
-	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
-	q := s.dialect.Rebind(QueryPrunePathStats)
-	if _, err := s.db.ExecContext(ctx, q, cutoff); err != nil {
-		logger.Default().Error().Err(err).Msg("path stats: prune failed")
+	if days > 0 {
+		cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
+		q := s.dialect.Rebind(QueryPrunePathStats)
+		if _, err := s.db.ExecContext(ctx, q, cutoff); err != nil {
+			logger.Default().Error().Err(err).Msg("path stats: prune failed")
+		}
+
+		qDomain := s.dialect.Rebind(QueryPruneDomainStats)
+		if _, err := s.db.ExecContext(ctx, qDomain, cutoff); err != nil {
+			logger.Default().Error().Err(err).Msg("domain stats: prune failed")
+		}
 	}
 
-	qDomain := s.dialect.Rebind(QueryPruneDomainStats)
-	if _, err := s.db.ExecContext(ctx, qDomain, cutoff); err != nil {
-		logger.Default().Error().Err(err).Msg("domain stats: prune failed")
+	// 2. Access Logs (Traces) Retention
+	accessDays := int(s.accessLogRetentionDays.Load())
+	if accessDays <= 0 {
+		accessDays = int(s.retentionDays.Load())
+	}
+	if accessDays > 0 {
+		cutoffTime := time.Now().AddDate(0, 0, -accessDays)
+		qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
+		if _, err := s.db.ExecContext(ctx, qTraces, cutoffTime); err != nil {
+			logger.Default().Error().Err(err).Msg("traces: prune failed")
+		}
 	}
 
-	cutoffTime := time.Now().AddDate(0, 0, -days)
-	qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
-	if _, err := s.db.ExecContext(ctx, qTraces, cutoffTime); err != nil {
-		logger.Default().Error().Err(err).Msg("traces: prune failed")
+	// 3. Security Threats Retention
+	threatDays := int(s.securityThreatRetentionDays.Load())
+	if threatDays <= 0 {
+		threatDays = int(s.retentionDays.Load())
+	}
+	if threatDays > 0 {
+		cutoffTime := time.Now().AddDate(0, 0, -threatDays)
+		qThreats := s.dialect.Rebind("DELETE FROM security_threats WHERE timestamp < ?")
+		if _, err := s.db.ExecContext(ctx, qThreats, cutoffTime); err != nil {
+			logger.Default().Error().Err(err).Msg("security_threats: prune failed")
+		}
 	}
 
-	qThreats := s.dialect.Rebind("DELETE FROM security_threats WHERE timestamp < ?")
-	if _, err := s.db.ExecContext(ctx, qThreats, cutoffTime); err != nil {
-		logger.Default().Error().Err(err).Msg("security_threats: prune failed")
+	// 4. Audit Logs (if any table exists)
+	auditDays := int(s.auditLogRetentionDays.Load())
+	if auditDays > 0 {
+		// Assuming an audit_logs table exists or will be added
+		cutoffTime := time.Now().AddDate(0, 0, -auditDays)
+		qAudit := s.dialect.Rebind("DELETE FROM audit_logs WHERE timestamp < ?")
+		_, _ = s.db.ExecContext(ctx, qAudit, cutoffTime)
 	}
 }
 
@@ -355,6 +386,16 @@ func ConfigureRetention(days int) {
 		days = 1
 	}
 	store.retentionDays.Store(int32(days))
+}
+
+func ConfigureGranularRetention(pathStats, accessLog, securityThreat, auditLog int) {
+	if store == nil {
+		return
+	}
+	store.pathStatsRetentionDays.Store(int32(pathStats))
+	store.accessLogRetentionDays.Store(int32(accessLog))
+	store.securityThreatRetentionDays.Store(int32(securityThreat))
+	store.auditLogRetentionDays.Store(int32(auditLog))
 }
 
 // recordToStore attempts to enqueue an increment; if the store is not initialized or channel is full, it drops silently to avoid impacting the hot path.

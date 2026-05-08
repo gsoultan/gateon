@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain"
@@ -26,6 +28,7 @@ type ApiService struct {
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager
 	WafUpdater         *middleware.WAFUpdater
+	IPReputation       *IPReputationStore
 }
 
 // GetGlobals returns the global config store for REST handlers.
@@ -40,7 +43,7 @@ func (s *ApiService) GetTLSManager() gtls.TLSManager {
 
 // NewApiService creates an ApiService from config (Factory pattern).
 func NewApiService(cfg ApiServiceConfig) *ApiService {
-	return &ApiService{
+	s := &ApiService{
 		Version:            cfg.Version,
 		Routes:             cfg.Routes,
 		Services:           cfg.Services,
@@ -55,4 +58,13 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		EbpfManager:        cfg.EbpfManager,
 		WafUpdater:         cfg.WafUpdater,
 	}
+
+	if cfg.Globals != nil {
+		if gc := cfg.Globals.Get(context.Background()); gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.IpReputation != nil {
+			s.IPReputation = NewIPReputationStore(gc.SecurityAdvanced.IpReputation)
+			s.IPReputation.Start(context.Background())
+		}
+	}
+
+	return s
 }

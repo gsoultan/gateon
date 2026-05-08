@@ -31,6 +31,7 @@ import {
 import { useUsers, apiFetch } from "../hooks/useGateon";
 import type { User } from "../types/gateon";
 import { useAuthStore } from "../store/useAuthStore";
+import { TwoFactorModal } from "../components/TwoFactorModal";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -43,6 +44,7 @@ export default function UsersPage() {
   });
   const [opened, { open, close }] = useDisclosure(false);
   const [pwOpened, { open: pwOpen, close: pwClose }] = useDisclosure(false);
+  const [tfaOpened, { open: tfaOpen, close: tfaClose }] = useDisclosure(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [targetUser, setTargetUser] = useState<User | null>(null);
   const currentUser = useAuthStore((state) => state.user);
@@ -75,6 +77,11 @@ export default function UsersPage() {
     setTargetUser(user);
     passwordForm.reset();
     pwOpen();
+  };
+
+  const handle2FA = (user: User) => {
+    setTargetUser(user);
+    tfaOpen();
   };
 
   const handleCreate = () => {
@@ -196,6 +203,16 @@ export default function UsersPage() {
               disabled={currentUser?.role !== "admin" && currentUser?.id !== user.id}
             >
               <IconKey size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Two-factor authentication">
+            <ActionIcon
+              variant="subtle"
+              color={user.two_factor_enabled ? "green" : "gray"}
+              onClick={() => handle2FA(user)}
+              disabled={currentUser?.id !== user.id}
+            >
+              <IconShieldLock size={16} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="Edit user">
@@ -383,6 +400,15 @@ export default function UsersPage() {
           </Stack>
         </form>
       </Modal>
+
+      {targetUser && (
+        <TwoFactorModal
+          opened={tfaOpened}
+          onClose={tfaClose}
+          user={targetUser}
+          onSuccess={() => refetch()}
+        />
+      )}
 
       <Paper withBorder p="md" radius="md" bg="blue.0">
         <Group gap="xs" align="flex-start" wrap="nowrap">

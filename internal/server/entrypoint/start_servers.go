@@ -57,6 +57,7 @@ func StartServers(
 	shutdownReg *ShutdownRegistry,
 	l4Resolver L4Resolver,
 	mgmtConfig *gateonv1.ManagementConfig,
+	globalStore config.GlobalConfigStore,
 ) {
 	limiter := entrypointRateLimiter()
 	deps := &Deps{
@@ -70,6 +71,7 @@ func StartServers(
 		ShutdownRegistry: shutdownReg,
 		L4Resolver:       l4Resolver,
 		ManagementConfig: mgmtConfig,
+		GlobalStore:      globalStore,
 	}
 
 	// ALWAYS start a dedicated management listener

@@ -25,13 +25,13 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 
 	// Update telemetry retention if log config is present
 	if req.Config.Log != nil {
-		days := req.Config.Log.AccessLogRetentionDays
-		if days <= 0 {
-			days = req.Config.Log.PathStatsRetentionDays
-		}
-		if days > 0 {
-			telemetry.ConfigureRetention(int(days))
-		}
+		l := req.Config.Log
+		telemetry.ConfigureGranularRetention(
+			int(l.PathStatsRetentionDays),
+			int(l.AccessLogRetentionDays),
+			int(l.SecurityThreatRetentionDays),
+			int(l.AuditLogRetentionDays),
+		)
 	}
 
 	// Invalidate cache if needed

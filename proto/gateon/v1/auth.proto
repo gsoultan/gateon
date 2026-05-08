@@ -51,6 +51,7 @@ message SetupResponse {
 message LoginResponse {
   string token = 1;
   User user = 2;
+  bool two_factor_required = 3;
 }
 
 message ListUsersRequest {
@@ -96,4 +97,28 @@ message User {
   string username = 2;
   string password = 3;
   string role = 4;
+  bool two_factor_enabled = 5;
+  string two_factor_secret = 6;
+  repeated string recovery_codes = 7;
+}
+
+message Setup2FARequest {
+  string id = 1;
+}
+
+message Setup2FAResponse {
+  string secret = 1;
+  string qr_code_url = 2;
+  repeated string recovery_codes = 3;
+}
+
+message Verify2FARequest {
+  string id = 1;
+  string code = 2;
+}
+
+message Verify2FAResponse {
+  bool success = 1;
+  string token = 2;
+  User user = 3;
 }

@@ -160,14 +160,18 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			id := request.GetID(r)
 			ja3, ja4 := "", ""
 			if r.TLS != nil {
-				// In a real implementation, we would extract the ClientHello and compute JA3/JA4.
-				// Since we don't have a library for that here, we use a placeholder or
-				// look for headers if another proxy (like Cloudflare) provides them.
-				if val := r.Header.Get("X-JA3-Fingerprint"); val != "" {
-					ja3 = val
+				// Try to get fingerprints from our internal map first
+				if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
+					f := GetFingerprints(conn)
+					ja3, ja4 = f.JA3, f.JA4
 				}
-				if val := r.Header.Get("X-JA4-Fingerprint"); val != "" {
-					ja4 = val
+
+				// Fallback to headers if still empty
+				if ja3 == "" {
+					ja3 = r.Header.Get("X-JA3-Fingerprint")
+				}
+				if ja4 == "" {
+					ja4 = r.Header.Get("X-JA4-Fingerprint")
 				}
 			}
 

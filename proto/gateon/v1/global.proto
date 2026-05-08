@@ -40,6 +40,14 @@ message SecurityAdvancedConfig {
   EntropyConfig entropy = 3;
   BehavioralConfig behavioral = 4;
   PowConfig pow = 5;
+  IPReputationConfig ip_reputation = 6;
+}
+
+message IPReputationConfig {
+  bool enabled = 1;
+  repeated string feed_urls = 2;
+  int32 update_interval_hours = 3;
+  double block_threshold = 4;
 }
 
 message DeceptionConfig {

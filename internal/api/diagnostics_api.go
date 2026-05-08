@@ -164,7 +164,7 @@ func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Rou
 	}
 
 	traces := telemetry.GetTraces(ctx, 1000)
-	engine := NewAnomalyAnalysisEngine(globalCfg)
+	engine := NewAnomalyAnalysisEngine(globalCfg, s.IPReputation)
 	return engine.Analyze(ctx, &DiagnosticData{
 		Traces:          traces,
 		Routes:          routes,
