@@ -132,7 +132,7 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
 			SecurityThreatThreshold: 30.0,
 		},
-	})
+	}, nil)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -225,7 +225,7 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
 			SecurityThreatThreshold: 30.0,
 		},
-	})
+	}, nil)
 	now := time.Now()
 
 	traces := []telemetry.TraceRecord{}
@@ -295,7 +295,7 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
 			SecurityThreatThreshold: 30.0,
 		},
-	})
+	}, nil)
 	now := time.Now()
 
 	traces := []telemetry.TraceRecord{}
@@ -434,7 +434,7 @@ func TestShadowedRouteDetection(t *testing.T) {
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
 			SecurityThreatThreshold: 30.0,
 		},
-	})
+	}, nil)
 	ctx := context.Background()
 
 	data := &DiagnosticData{
