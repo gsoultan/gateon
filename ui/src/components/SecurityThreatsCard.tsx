@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Card,
   Group,
@@ -10,13 +10,33 @@ import {
   Box,
   Title,
   Paper,
+  Tooltip,
 } from "@mantine/core";
-import { IconShieldExclamation, IconArrowRight, IconLock } from "@tabler/icons-react";
+import { useDisclosure } from "@mantine/hooks";
+import { IconShieldExclamation, IconArrowRight, IconLock, IconMap2 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useSecurityThreats } from "../hooks/useGateon";
+import { SecurityAnomalyModal } from "./SecurityAnomalyModal";
+import type { Anomaly } from "../types/gateon";
+import TraceVisualizer from "./Diagnostics/TraceVisualizer";
 
 export function SecurityThreatsCard() {
   const { data, isLoading } = useSecurityThreats(5);
+  const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
+  const [opened, { open, close }] = useDisclosure(false);
+  const [traceIp, setTraceIp] = useState<string>("");
+  const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
+
+  const handleAnomalyClick = (anomaly: Anomaly) => {
+    setSelectedAnomaly(anomaly);
+    open();
+  };
+
+  const handleTraceClick = (e: React.MouseEvent, ip: string) => {
+    e.stopPropagation();
+    setTraceIp(ip);
+    openTrace();
+  };
 
   const threats = data?.threats || [];
   const criticalThreats = threats.filter(t => t.severity === "critical" || t.severity === "high").length;
@@ -55,7 +75,16 @@ export function SecurityThreatsCard() {
           </Paper>
         ) : (
           threats.map((threat, index) => (
-            <Paper key={index} withBorder p="xs" radius="sm" bg="var(--mantine-color-default-hover)" style={{ transition: 'all 0.1s ease' }} className="hover:border-brand-5">
+            <Paper 
+              key={index} 
+              withBorder 
+              p="xs" 
+              radius="sm" 
+              bg="var(--mantine-color-default-hover)" 
+              style={{ transition: 'all 0.1s ease', cursor: 'pointer' }} 
+              className="hover:border-brand-5"
+              onClick={() => handleAnomalyClick(threat)}
+            >
               <Group justify="space-between" wrap="nowrap">
                 <Group gap="sm" wrap="nowrap">
                   <ThemeIcon color={threat.severity === "critical" ? "red" : "orange"} variant="light" size="sm">
@@ -71,7 +100,23 @@ export function SecurityThreatsCard() {
                       )}
                     </Group>
                     <Group gap={4} wrap="nowrap">
-                      <Text size="xs" c="dimmed" truncate>{threat.source}</Text>
+                      <Text 
+                        size="xs" 
+                        c="brand" 
+                        fw={600} 
+                        truncate 
+                        style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dashed' }}
+                        onClick={(e) => handleTraceClick(e, threat.source)}
+                      >
+                        {threat.source}
+                      </Text>
+                      <Tooltip label="Visual Trace">
+                        <IconMap2 
+                          size={10} 
+                          style={{ cursor: 'pointer', opacity: 0.6 }}
+                          onClick={(e) => handleTraceClick(e, threat.source)}
+                        />
+                      </Tooltip>
                       {threat.route_id && (
                         <>
                           <Text size="xs" c="dimmed">•</Text>
@@ -103,6 +148,18 @@ export function SecurityThreatsCard() {
       >
         Explore full security report
       </Button>
+
+      <SecurityAnomalyModal 
+        anomaly={selectedAnomaly}
+        opened={opened}
+        onClose={close}
+      />
+
+      <TraceVisualizer 
+        opened={traceOpened}
+        onClose={closeTrace}
+        targetIp={traceIp}
+      />
     </Card>
   );
 }

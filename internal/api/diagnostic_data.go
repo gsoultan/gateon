@@ -25,4 +25,5 @@ type FingerprintStats struct {
 	Error5xx      int
 	UniquePaths   map[string]struct{}
 	LastSeen      time.Time
+	Countries     map[string]time.Time // CountryCode -> LastSeen
 }

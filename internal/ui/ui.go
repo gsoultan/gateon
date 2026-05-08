@@ -5,6 +5,7 @@ package ui
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path"
@@ -29,12 +30,42 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(dist))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		f, err := dist.Open(strings.TrimPrefix(path.Clean(r.URL.Path), "/"))
+		cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if cleanPath == "" {
+			cleanPath = "index.html"
+		}
+
+		f, err := dist.Open(cleanPath)
 		if err != nil {
+			// If the file is not found:
+			// 1. If it's an asset (js, css, images, etc.), return 404.
+			// 2. Otherwise, serve index.html for SPA routing.
+			if isAsset(cleanPath) {
+				// For assets, return a clear 404 with a plain text message to avoid MIME mismatch errors.
+				// Browsers are strict about module scripts needing valid JS/Wasm MIME types.
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprintln(w, "Asset not found")
+				return
+			}
 			r.URL.Path = "/"
 		} else {
 			f.Close()
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+func isAsset(p string) bool {
+	p = strings.ToLower(p)
+	if strings.HasPrefix(p, "assets/") || strings.HasPrefix(p, "static/") || strings.HasPrefix(p, "favicon") {
+		return true
+	}
+	ext := path.Ext(p)
+	switch ext {
+	case ".js", ".mjs", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".json", ".wasm", ".map":
+		return true
+	}
+	return false
 }

@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Card,
   Group,
@@ -16,6 +16,7 @@ import {
   Alert,
   Tooltip,
 } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import {
   IconShieldExclamation,
   IconFingerprint,
@@ -25,9 +26,12 @@ import {
   IconAlertTriangle,
   IconShieldCheck,
   IconLock,
+  IconMap2,
 } from "@tabler/icons-react";
 import { useSecurityThreats } from "../hooks/useGateon";
 import type { Anomaly } from "../types/gateon";
+import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
+import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 
 const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
   const color =
@@ -47,6 +51,21 @@ const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
 
 export default function SecurityPage() {
   const { data, isLoading, error } = useSecurityThreats(100);
+  const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
+  const [opened, { open, close }] = useDisclosure(false);
+  const [traceIp, setTraceIp] = useState<string>("");
+  const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
+
+  const handleRowClick = (anomaly: Anomaly) => {
+    setSelectedAnomaly(anomaly);
+    open();
+  };
+
+  const handleTraceClick = (e: React.MouseEvent, ip: string) => {
+    e.stopPropagation();
+    setTraceIp(ip);
+    openTrace();
+  };
 
   const sortedThreats = useMemo(() => {
     if (!data?.threats) return [];
@@ -165,7 +184,11 @@ export default function SecurityPage() {
                 </Table.Tr>
               ) : (
                 threats.map((threat) => (
-                  <Table.Tr key={`${threat.type}-${threat.source}-${threat.timestamp}`}>
+                  <Table.Tr 
+                    key={`${threat.type}-${threat.source}-${threat.timestamp}`}
+                    onClick={() => handleRowClick(threat)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <Table.Td>
                       <Group gap="sm">
                         <ThemeIcon color="red" variant="light" size="sm">
@@ -204,7 +227,25 @@ export default function SecurityPage() {
                       </Stack>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm" ff="monospace">{threat.source}</Text>
+                      <Group gap="xs" wrap="nowrap">
+                        <Text 
+                          size="sm" 
+                          ff="monospace" 
+                          c="brand" 
+                          fw={600}
+                          style={{ cursor: 'pointer', borderBottom: '1px dashed var(--mantine-color-brand-6)' }}
+                          onClick={(e) => handleTraceClick(e, threat.source)}
+                        >
+                          {threat.source}
+                        </Text>
+                        <Tooltip label="Visual Trace">
+                          <IconMap2 
+                            size={14} 
+                            style={{ cursor: 'pointer', opacity: 0.6 }} 
+                            onClick={(e) => handleTraceClick(e, threat.source)}
+                          />
+                        </Tooltip>
+                      </Group>
                     </Table.Td>
                     <Table.Td>
                       <Group gap="xs">
@@ -254,6 +295,18 @@ export default function SecurityPage() {
           </Table>
         </ScrollArea>
       </Card>
+
+      <SecurityAnomalyModal 
+        anomaly={selectedAnomaly}
+        opened={opened}
+        onClose={close}
+      />
+
+      <TraceVisualizer 
+        opened={traceOpened}
+        onClose={closeTrace}
+        targetIp={traceIp}
+      />
     </Stack>
   );
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
+	lru "github.com/hashicorp/golang-lru"
 )
 
 // Persistent store for path metrics with retention control.
@@ -82,6 +83,7 @@ type pathStatsStore struct {
 	wg            sync.WaitGroup
 	retentionDays atomic.Int32
 	pruning       atomic.Bool
+	scoreCache    *lru.ARCCache
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -119,6 +121,10 @@ func initStore(databaseURL string, retentionDays int) error {
 		stopCh:     make(chan struct{}),
 	}
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
+
+	if cache, err := lru.NewARC(10000); err == nil {
+		st.scoreCache = cache
+	}
 
 	if err := db.Migrate(database, dialect); err != nil {
 		_ = database.Close()
@@ -419,11 +425,32 @@ func RecordSecurityThreat(t SecurityThreat) {
 	if t.Time.IsZero() {
 		t.Time = time.Now()
 	}
+
+	if store.scoreCache != nil {
+		current, ok := store.scoreCache.Get(t.SourceIP)
+		score := t.Score
+		if ok {
+			score += current.(float64)
+		}
+		store.scoreCache.Add(t.SourceIP, score)
+	}
+
 	select {
 	case store.threatInCh <- t:
 	default:
 		// drop on backpressure
 	}
+}
+
+// GetIPThreatScore returns the current security threat score for an IP.
+func GetIPThreatScore(ip string) float64 {
+	if store == nil || store.scoreCache == nil {
+		return 0
+	}
+	if val, ok := store.scoreCache.Get(ip); ok {
+		return val.(float64)
+	}
+	return 0
 }
 
 // GetTraces returns the last N traces from the store.

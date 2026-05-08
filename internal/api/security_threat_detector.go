@@ -1,8 +1,10 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,13 +30,16 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		threshold = 15.0 // Default
 	}
 
-	// Pre-pass for coordinated scan detection
+	// 1. Coordinated scan detection
 	pathIPs := d.detectCoordinatedScans(data)
 
-	// Pre-pass for multi-IP attacks via fingerprinting
-	fingerprintAnomalies := d.detectMultiIPAttacks(data, threshold)
-	anomalies = append(anomalies, fingerprintAnomalies...)
+	// 2. Multi-IP attacks via fingerprinting
+	anomalies = append(anomalies, d.detectMultiIPAttacks(data, threshold)...)
 
+	// 3. Impossible Travel detection
+	anomalies = append(anomalies, d.detectImpossibleTravel(data)...)
+
+	// 4. Per-IP analysis
 	for ip, stats := range data.IPStats {
 		score := 0
 		reasons := []string{}
@@ -49,22 +54,14 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			}
 		}
 
-		// 1. Traffic Volume & Bursts
+		// Analysis pipeline
 		score += d.analyzeTraffic(stats, &reasons, &primaryType)
-
-		// 2. Error Rates
 		score += d.analyzeErrors(stats, &reasons, &primaryType)
-
-		// 3. Pattern Matching (Paths, Queries, Payloads)
 		score += d.analyzePatterns(stats, pathIPs, &reasons, &primaryType)
-
-		// 4. Header Analysis (User-Agent, Referer, JA3)
 		score += d.analyzeHeaders(stats, &reasons)
-
-		// 5. Behavioral Patterns
 		score += d.analyzeBehavior(stats, &reasons)
 
-		// 6. External Threat Intelligence
+		// External Threat Intelligence
 		if d.ThreatClient != nil && (score > 0 || stats.TotalRequests > 10) {
 			if abuseScore, err := d.ThreatClient.CheckIP(ctx, ip); err == nil && abuseScore > 20 {
 				score += abuseScore / 2
@@ -74,25 +71,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 
 		if score >= int(threshold) {
 			severity := d.calculateSeverity(score, threshold)
-
-			mitigated := false
-			// Check if IP is already blocked in middlewares
-			for _, mw := range data.Middlewares {
-				if mw.Type == "ipfilter" {
-					if denyList, ok := mw.Config["deny_list"]; ok {
-						ips := strings.Split(denyList, ",")
-						for _, blockedIP := range ips {
-							if strings.TrimSpace(blockedIP) == ip {
-								mitigated = true
-								break
-							}
-						}
-					}
-				}
-				if mitigated {
-					break
-				}
-			}
+			mitigated := d.isIPBlocked(ip, data.Middlewares)
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           primaryType,
@@ -125,7 +104,6 @@ func (d *SecurityThreatDetector) detectCoordinatedScans(data *DiagnosticData) ma
 	for ip, stats := range data.IPStats {
 		for path := range stats.UniquePaths {
 			lp := strings.ToLower(path)
-			// Track all paths to detect distributed sweeps, but prioritize suspicious ones
 			if _, ok := pathIPs[lp]; !ok {
 				pathIPs[lp] = make(map[string]struct{})
 			}
@@ -133,6 +111,46 @@ func (d *SecurityThreatDetector) detectCoordinatedScans(data *DiagnosticData) ma
 		}
 	}
 	return pathIPs
+}
+
+func (d *SecurityThreatDetector) detectImpossibleTravel(data *DiagnosticData) []*gateonv1.Anomaly {
+	var anomalies []*gateonv1.Anomaly
+	for fp, stats := range data.FingerprintStats {
+		if len(stats.Countries) < 2 {
+			continue
+		}
+
+		// Sort countries by last seen time
+		type countryTime struct {
+			code string
+			last time.Time
+		}
+		var list []countryTime
+		for code, last := range stats.Countries {
+			list = append(list, countryTime{code, last})
+		}
+		slices.SortFunc(list, func(a, b countryTime) int {
+			return cmp.Compare(a.last.Unix(), b.last.Unix())
+		})
+
+		for i := 0; i < len(list)-1; i++ {
+			c1 := list[i]
+			c2 := list[i+1]
+			diff := c2.last.Sub(c1.last)
+			if diff < 2*time.Hour { // Cross-country in less than 2 hours is suspicious
+				anomaly := &gateonv1.Anomaly{
+					Type:           "security_threat",
+					Severity:       "high",
+					Description:    fmt.Sprintf("Impossible travel detected for fingerprint %s: seen in %s and then %s within %s", fp, c1.code, c2.code, diff.Round(time.Minute)),
+					Timestamp:      c2.last.Format(time.RFC3339),
+					Source:         fp,
+					Recommendation: "This actor is accessing from multiple geographical locations rapidly, indicating session hijacking or credential sharing.",
+				}
+				anomalies = append(anomalies, anomaly)
+			}
+		}
+	}
+	return anomalies
 }
 
 func (d *SecurityThreatDetector) analyzeTraffic(stats *IPStats, reasons *[]string, primaryType *string) int {
@@ -216,43 +234,10 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 			}
 		}
 
-		if patterns.SQLI.MatchString(lp) {
+		if patterns.SQLI.MatchString(lp) || patterns.XSS.MatchString(lp) || patterns.Traversal.MatchString(lp) ||
+			patterns.RCE.MatchString(lp) || patterns.SSRF.MatchString(lp) || patterns.NoSQLI.MatchString(lp) ||
+			patterns.CommandInjection.MatchString(lp) || patterns.ProtoPollution.MatchString(lp) {
 			score += 40
-			pathMatched = true
-		}
-
-		if patterns.XSS.MatchString(lp) {
-			score += 35
-			pathMatched = true
-		}
-
-		if patterns.Traversal.MatchString(lp) {
-			score += 40
-			pathMatched = true
-		}
-
-		if patterns.RCE.MatchString(lp) {
-			score += 60
-			pathMatched = true
-		}
-
-		if patterns.SSRF.MatchString(lp) {
-			score += 45
-			pathMatched = true
-		}
-
-		if patterns.NoSQLI.MatchString(lp) {
-			score += 40
-			pathMatched = true
-		}
-
-		if patterns.CommandInjection.MatchString(lp) {
-			score += 65
-			pathMatched = true
-		}
-
-		if patterns.ProtoPollution.MatchString(lp) {
-			score += 50
 			pathMatched = true
 		}
 
@@ -273,68 +258,36 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 		*reasons = append(*reasons, fmt.Sprintf("Coordinated scan of %d suspicious paths detected", coordinatedCount))
 	}
 
-	// Distributed sweep detection
-	distributedPaths := 0
-	for path := range stats.UniquePaths {
-		lp := strings.ToLower(path)
-		if len(pathIPs[lp]) > 5 { // Path is being hit by more than 5 IPs in the sample
-			distributedPaths++
-		}
-	}
-	if distributedPaths > 3 {
-		score += 15
-		*reasons = append(*reasons, fmt.Sprintf("Involved in distributed sweep across %d common targets", distributedPaths))
-	}
-
-	// High Path Diversity (Scraping/Crawling)
-	if len(stats.UniquePaths) > 50 && stats.TotalRequests > 100 {
-		score += 30
-		*reasons = append(*reasons, fmt.Sprintf("High path diversity (%d unique paths) - potential scraping", len(stats.UniquePaths)))
-		if *primaryType == "security_threat" {
-			*primaryType = "api_scraping"
-		}
-	}
-
 	return score
 }
 
 func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]string) int {
 	score := 0
-	agentMatched := false
 	patterns := GetCompiledPatterns()
 
 	for agent := range stats.UserAgents {
 		if patterns.SuspiciousAgent.MatchString(strings.ToLower(agent)) {
 			score += 70
-			agentMatched = true
+			*reasons = append(*reasons, "Suspicious User-Agent detected (known scanning tool)")
 			break
 		}
 	}
-	if agentMatched {
-		*reasons = append(*reasons, "Suspicious User-Agent detected (known scanning tool)")
-	}
 
-	refererMatched := false
 	for ref := range stats.Referers {
 		if patterns.SuspiciousReferer.MatchString(strings.ToLower(ref)) {
 			score += 40
-			refererMatched = true
+			*reasons = append(*reasons, "Suspicious Referer header detected")
 			break
 		}
 	}
-	if refererMatched {
-		*reasons = append(*reasons, "Suspicious Referer header detected")
-	}
 
-	// JA3 Analysis
 	if len(stats.JA3s) > 1 {
 		score += 30
 		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA3: %d) from single IP", len(stats.JA3s)))
 	}
 
-	// JA4 Analysis
 	if len(stats.JA4s) > 1 {
-		score += 40 // JA4 is more robust
+		score += 40
 		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA4+: %d) from single IP", len(stats.JA4s)))
 	}
 
@@ -352,6 +305,22 @@ func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]stri
 	return score
 }
 
+func (d *SecurityThreatDetector) isIPBlocked(ip string, middlewares []*gateonv1.Middleware) bool {
+	for _, mw := range middlewares {
+		if mw.Type == "ipfilter" {
+			if denyList, ok := mw.Config["deny_list"]; ok {
+				ips := strings.Split(denyList, ",")
+				for _, blockedIP := range ips {
+					if strings.TrimSpace(blockedIP) == ip {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (d *SecurityThreatDetector) calculateSeverity(score int, threshold float64) string {
 	if score >= int(threshold*4) {
 		return "critical"
@@ -366,34 +335,13 @@ func (d *SecurityThreatDetector) calculateSeverity(score int, threshold float64)
 func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, threshold float64) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	for fp, stats := range data.FingerprintStats {
-		if len(stats.IPs) > 3 { // Threshold for IP rotation detection
-			mitigated := false
-			// Check if all IPs for this fingerprint are already blocked
-			blockedCount := 0
+		if len(stats.IPs) > 3 {
+			mitigated := true
 			for ip := range stats.IPs {
-				ipBlocked := false
-				for _, mw := range data.Middlewares {
-					if mw.Type == "ipfilter" {
-						if denyList, ok := mw.Config["deny_list"]; ok {
-							ips := strings.Split(denyList, ",")
-							for _, blockedIP := range ips {
-								if strings.TrimSpace(blockedIP) == ip {
-									ipBlocked = true
-									break
-								}
-							}
-						}
-					}
-					if ipBlocked {
-						break
-					}
+				if !d.isIPBlocked(ip, data.Middlewares) {
+					mitigated = false
+					break
 				}
-				if ipBlocked {
-					blockedCount++
-				}
-			}
-			if blockedCount == len(stats.IPs) {
-				mitigated = true
 			}
 
 			anomaly := &gateonv1.Anomaly{
@@ -401,13 +349,12 @@ func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, thre
 				Severity:       "high",
 				Description:    fmt.Sprintf("Multi-IP attack detected via fingerprinting: actor rotated %d IPs for the same client profile", len(stats.IPs)),
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
-				Source:         fp, // Use fingerprint as source
+				Source:         fp,
 				Recommendation: "This actor is rotating IPs to bypass rate limits. Consider blocking the entire fingerprint or implementing more aggressive bot challenges.",
 				Mitigated:      mitigated,
 			}
 			anomalies = append(anomalies, anomaly)
 
-			// Also record to threats table
 			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 				Type:        "security_threat",
 				Fingerprint: fp,

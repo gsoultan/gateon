@@ -17,6 +17,8 @@ func main() {
 	}
 
 	fmt.Printf("Syncing assets from %s to %s...\n", src, dst)
+	// Clean destination directory first to remove stale assets (hashes changed)
+	_ = os.RemoveAll(dst)
 	err := copyDir(src, dst)
 	if err != nil {
 		fmt.Printf("Error syncing assets: %v\n", err)
