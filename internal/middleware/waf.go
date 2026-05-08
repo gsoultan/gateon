@@ -232,16 +232,19 @@ SecAuditLog "%s"
 	}
 
 	if cfg.RequestBodyLimit > 0 {
-		wafConfig = wafConfig.WithRequestBodyLimit(int(cfg.RequestBodyLimit))
-		// Also set in-memory limit to 10% of total limit or 1MB min
+		wafConfig = wafConfig.WithRequestBodyLimit(cfg.RequestBodyLimit)
+		// Also set in-memory limit to 10% of total limit or 1MB min, but not exceeding the total limit
 		memLimit := int64(cfg.RequestBodyLimit) / 10
 		if memLimit < 1024*1024 {
 			memLimit = 1024 * 1024
 		}
+		memLimit = min(memLimit, int64(cfg.RequestBodyLimit))
 		wafConfig = wafConfig.WithRequestBodyInMemoryLimit(int(memLimit))
+		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
 	}
 	if cfg.ResponseBodyLimit > 0 {
-		wafConfig = wafConfig.WithResponseBodyLimit(int(cfg.ResponseBodyLimit))
+		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
+		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
 	}
 
 	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
@@ -272,15 +275,6 @@ SecAuditLog "%s"
 			RequestURI: mr.URI(),
 		})
 	})
-
-	if cfg.RequestBodyLimit > 0 {
-		wafConfig = wafConfig.WithRequestBodyLimit(cfg.RequestBodyLimit)
-		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
-	}
-	if cfg.ResponseBodyLimit > 0 {
-		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
-		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
-	}
 
 	waf, err := coraza.NewWAF(wafConfig)
 	if err != nil {
