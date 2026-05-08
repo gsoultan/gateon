@@ -3,9 +3,10 @@ package auth
 // SQL queries for user management. Dialect.Rebind replaces ? with $N (Postgres) as needed.
 const (
 	QueryCountUsers           = "SELECT COUNT(*) FROM users"
-	QueryUserByUsername       = "SELECT id, username, password, role, failed_attempts, locked_until FROM users WHERE username = ?"
+	QueryUserByUsername       = "SELECT id, username, password, role, failed_attempts, locked_until, two_factor_enabled, two_factor_secret, recovery_codes FROM users WHERE username = ?"
+	QueryUserByID             = "SELECT id, username, password, role, failed_attempts, locked_until, two_factor_enabled, two_factor_secret, recovery_codes FROM users WHERE id = ?"
 	QueryCountUsersSearch     = "SELECT COUNT(*) FROM users WHERE username LIKE ?"
-	QueryListUsersBase        = "SELECT id, username, role FROM users WHERE username LIKE ? ORDER BY username ASC"
+	QueryListUsersBase        = "SELECT id, username, role, two_factor_enabled FROM users WHERE username LIKE ? ORDER BY username ASC"
 	QueryListUsersLimitOffset = " LIMIT ? OFFSET ?"
 
 	QueryIncrementFailedAttempts = "UPDATE users SET failed_attempts = failed_attempts + 1, locked_until = ? WHERE username = ?"
@@ -23,4 +24,5 @@ const (
 
 	QueryDeleteUser     = "DELETE FROM users WHERE id = ?"
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"
+	QueryUpdate2FA      = "UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?"
 )

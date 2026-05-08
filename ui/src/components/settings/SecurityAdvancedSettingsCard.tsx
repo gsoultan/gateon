@@ -26,6 +26,7 @@ import {
   IconLockSearch,
   IconInfoCircle,
   IconRefresh,
+  IconDatabaseSearch,
 } from "@tabler/icons-react";
 import type { GlobalConfig, SecurityAdvancedConfig } from "../../types/gateon";
 
@@ -276,6 +277,52 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                       disabled={disabled}
                     />
                   </Group>
+                </Stack>
+              )}
+            </Stack>
+          </Paper>
+
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="md">
+              <Group justify="space-between">
+                <Group>
+                  <IconDatabaseSearch size={20} color="var(--mantine-color-blue-filled)" />
+                  <Text fw={500}>IP Reputation & Threat Feeds</Text>
+                </Group>
+                <Switch
+                  checked={security.ip_reputation?.enabled}
+                  onChange={(e) => updateSection("ip_reputation", { enabled: e.currentTarget.checked })}
+                  disabled={disabled}
+                />
+              </Group>
+              {security.ip_reputation?.enabled && (
+                <Stack gap="sm">
+                  <TagsInput
+                    label="Feed URLs"
+                    description="URLs to plaintext IP/CIDR blocklists"
+                    placeholder="https://feeds.example.com/bad-ips.txt"
+                    value={security.ip_reputation.feed_urls || []}
+                    onChange={(val) => updateSection("ip_reputation", { feed_urls: val })}
+                    disabled={disabled}
+                  />
+                  <NumberInput
+                    label="Update Interval (Hours)"
+                    value={security.ip_reputation.update_interval_hours || 24}
+                    onChange={(val) => updateSection("ip_reputation", { update_interval_hours: val })}
+                    disabled={disabled}
+                    min={1}
+                  />
+                  <NumberInput
+                    label="Block Threshold"
+                    description="Score to block (0.0 to 1.0)"
+                    value={security.ip_reputation.block_threshold || 0.5}
+                    onChange={(val) => updateSection("ip_reputation", { block_threshold: val })}
+                    disabled={disabled}
+                    step={0.1}
+                    min={0}
+                    max={1}
+                    decimalScale={2}
+                  />
                 </Stack>
               )}
             </Stack>

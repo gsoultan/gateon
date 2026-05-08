@@ -20,6 +20,7 @@ var (
 type SecurityThreatDetector struct {
 	Threshold    float64
 	ThreatClient *AbuseIPDBClient
+	Reputation   *IPReputationStore
 }
 
 func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
@@ -44,6 +45,15 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		score := 0
 		reasons := []string{}
 		primaryType := "security_threat"
+
+		// Check IP Reputation
+		if d.Reputation != nil {
+			if bad, repScore := d.Reputation.IsBad(ip); bad {
+				score += int(repScore * 50)
+				reasons = append(reasons, fmt.Sprintf("IP has bad reputation (score: %.2f)", repScore))
+				primaryType = "reputation_hit"
+			}
+		}
 
 		// Associate fingerprint if available
 		var fingerprint string

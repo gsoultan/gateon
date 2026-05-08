@@ -285,6 +285,65 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("POST /v1/auth/2fa/setup", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var req gateonv1.Setup2FARequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		// Verify permission (admin or self)
+		claimsVal := r.Context().Value(middleware.UserContextKey)
+		if claimsVal == nil {
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
+			if claims.ID != req.Id && !auth.Allowed(claims.Role, auth.ActionWrite, auth.ResourceUsers) {
+				writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+				return
+			}
+		}
+
+		resp, err := svc.Setup2FA(r.Context(), &req)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("POST /v1/auth/2fa/verify", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var req gateonv1.Verify2FARequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		// If it's for enabling (authenticated user)
+		claimsVal := r.Context().Value(middleware.UserContextKey)
+		var isLoginStep bool
+		if claimsVal == nil {
+			// Might be the second step of login, which is not yet "authenticated" in context
+			isLoginStep = true
+		}
+
+		resp, err := svc.Verify2FA(r.Context(), &req)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if resp.Success && isLoginStep {
+			// Set HttpOnly secure cookie for session (24h)
+			middleware.SetSessionCookie(w, resp.Token, 24*3600, r.TLS != nil)
+		}
+
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("POST /v1/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.LoginRequest
@@ -300,8 +359,12 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			writeJSONError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
-		// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
-		middleware.SetSessionCookie(w, resp.Token, 24*3600, r.TLS != nil)
+
+		if !resp.TwoFactorRequired {
+			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
+			middleware.SetSessionCookie(w, resp.Token, 24*3600, r.TLS != nil)
+		}
+
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})

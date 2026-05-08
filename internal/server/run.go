@@ -126,7 +126,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, mgmtCors, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig)
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, mgmtCors, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	metricsStop := make(chan struct{})

@@ -217,6 +217,9 @@ export type LogConfig = {
   development?: boolean;
   format?: "json" | "text";
   path_stats_retention_days?: number;
+  access_log_retention_days?: number;
+  security_threat_retention_days?: number;
+  audit_log_retention_days?: number;
 };
 
 export type TransportConfig = {
@@ -251,11 +254,36 @@ export type User = {
   username: string;
   password?: string;
   role: "admin" | "operator" | "viewer";
+  two_factor_enabled?: boolean;
+  two_factor_secret?: string;
+  recovery_codes?: string[];
 };
 
 export type LoginResponse = {
   token: string;
   user: User;
+  two_factor_required?: boolean;
+};
+
+export type Setup2FARequest = {
+  id: string;
+};
+
+export type Setup2FAResponse = {
+  secret: string;
+  qr_code_url: string;
+  recovery_codes: string[];
+};
+
+export type Verify2FARequest = {
+  id: string;
+  code: string;
+};
+
+export type Verify2FAResponse = {
+  success: boolean;
+  token?: string;
+  user?: User;
 };
 
 export type IsSetupRequiredResponse = {
@@ -387,6 +415,14 @@ export type SecurityAdvancedConfig = {
   entropy?: EntropyConfig;
   behavioral?: BehavioralConfig;
   pow?: PowConfig;
+  ip_reputation?: IPReputationConfig;
+};
+
+export type IPReputationConfig = {
+  enabled?: boolean;
+  feed_urls?: string[];
+  update_interval_hours?: number;
+  block_threshold?: number;
 };
 
 export type DeceptionConfig = {

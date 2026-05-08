@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -101,6 +102,7 @@ type Deps struct {
 	ShutdownRegistry *ShutdownRegistry
 	L4Resolver       L4Resolver
 	ManagementConfig *gateonv1.ManagementConfig
+	GlobalStore      config.GlobalConfigStore
 }
 
 // RateLimiter provides per-key rate limiting middleware.

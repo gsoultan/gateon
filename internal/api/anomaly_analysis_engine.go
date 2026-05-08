@@ -13,7 +13,7 @@ type AnomalyAnalysisEngine struct {
 	detectors []AnomalyDetector
 }
 
-func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig) *AnomalyAnalysisEngine {
+func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *IPReputationStore) *AnomalyAnalysisEngine {
 	securityThreshold := 30.0
 	if config != nil && config.AnomalyDetection != nil {
 		securityThreshold = config.AnomalyDetection.SecurityThreatThreshold
@@ -26,7 +26,7 @@ func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig) *AnomalyAnalysisEng
 
 	return &AnomalyAnalysisEngine{
 		detectors: []AnomalyDetector{
-			&SecurityThreatDetector{Threshold: securityThreshold},
+			&SecurityThreatDetector{Threshold: securityThreshold, Reputation: reputation},
 			&UnlistedRouteDetector{},
 			&ManagementDomainDetector{},
 			&SlowClientDetector{},

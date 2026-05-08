@@ -13,6 +13,8 @@ export interface Trace {
   user_agent?: string;
   method?: string;
   referer?: string;
+  ja3?: string;
+  ja4?: string;
 }
 
 export function useTraces(limit: number = 100) {

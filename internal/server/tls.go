@@ -9,6 +9,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/router"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 )
@@ -182,6 +183,11 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					}
 					newCfg := tlsConfig.Clone()
 					newCfg.Certificates = certs
+
+					// Calculate and store TLS fingerprints
+					f := middleware.CalcFingerprints(hello)
+					middleware.SetFingerprints(hello.Conn, f)
+
 					if rt.Tls.OptionId != "" {
 						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
 							if opt.MinTlsVersion != "" {

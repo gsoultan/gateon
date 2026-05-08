@@ -44,6 +44,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		middleware.RequestID(), // Added for global correlation
 		middleware.Recovery(),
 		middleware.SecurityHeaders(),
+		middleware.HoneypotGlobal(deps.GlobalStore),
 		middleware.Metrics("gateon-" + epLabel),
 	}
 	if ep.AccessLogEnabled {
@@ -108,12 +109,17 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		WriteTimeout:      time.Duration(ep.WriteTimeoutMs) * time.Millisecond,
 		IdleTimeout:       1 * time.Minute,
 		MaxHeaderBytes:    1 << 20, // 1MB
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			return context.WithValue(ctx, middleware.ConnContextKey, c)
+		},
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			switch state {
 			case http.StateNew:
 				telemetry.GlobalDiagnostics.RecordConnection(ep.Id)
 			case http.StateClosed, http.StateHijacked:
 				telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
+				// Clean up fingerprints when connection is closed
+				middleware.RemoveFingerprints(conn)
 			}
 		},
 	}

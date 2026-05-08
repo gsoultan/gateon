@@ -2,14 +2,18 @@ package auth
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/db"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/o1egl/paseto/v2"
+	"github.com/pquerna/otp/totp"
+	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -57,15 +61,21 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 	var hashed string
 	var failedAttempts int
 	var lockedUntil sql.NullTime
+	var recoveryCodes string
 
 	q := m.dialect.Rebind(QueryUserByUsername)
 	err := m.db.QueryRow(q, username).
-		Scan(&user.Id, &user.Username, &hashed, &user.Role, &failedAttempts, &lockedUntil)
+		Scan(&user.Id, &user.Username, &hashed, &user.Role, &failedAttempts, &lockedUntil,
+			&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil, ErrInvalidCredentials
 		}
 		return "", nil, err
+	}
+
+	if recoveryCodes != "" {
+		user.RecoveryCodes = strings.Split(recoveryCodes, ",")
 	}
 
 	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
@@ -79,6 +89,14 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 
 	m.resetFailedAttempts(username)
 
+	if user.TwoFactorEnabled {
+		return "", &user, ErrTwoFactorRequired
+	}
+
+	return m.issueToken(&user)
+}
+
+func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error) {
 	now := time.Now()
 	exp := now.Add(24 * time.Hour)
 
@@ -97,7 +115,8 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 	}
 
 	user.Password = ""
-	return token, &user, nil
+	user.TwoFactorSecret = "" // Don't leak secret
+	return token, user, nil
 }
 
 func (m *Manager) VerifyToken(token string) (any, error) {
@@ -141,7 +160,7 @@ func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.Us
 	var users []*gateonv1.User
 	for rows.Next() {
 		var u gateonv1.User
-		if err := rows.Scan(&u.Id, &u.Username, &u.Role); err != nil {
+		if err := rows.Scan(&u.Id, &u.Username, &u.Role, &u.TwoFactorEnabled); err != nil {
 			return nil, 0, err
 		}
 		users = append(users, &u)
@@ -209,6 +228,104 @@ func (m *Manager) DeleteUser(id string) error {
 
 func (m *Manager) UpdateSymmetricKey(key string) {
 	m.symmetricKey = []byte(key)
+}
+
+func (m *Manager) Setup2FA(id string) (string, string, []string, error) {
+	var user gateonv1.User
+	var hashed, role, recoveryCodes string
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+
+	q := m.dialect.Rebind(QueryUserByID)
+	err := m.db.QueryRow(q, id).Scan(&user.Id, &user.Username, &hashed, &role, &failedAttempts, &lockedUntil,
+		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      "Gateon",
+		AccountName: user.Username,
+	})
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	// Generate recovery codes
+	codes := make([]string, 10)
+	for i := range 10 {
+		codes[i] = uuid.New().String()[:8]
+	}
+
+	// Update user with secret but don't enable it yet
+	qUpdate := m.dialect.Rebind(QueryUpdate2FA)
+	_, err = m.db.Exec(qUpdate, false, key.Secret(), strings.Join(codes, ","), id)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	var png []byte
+	png, err = qrcode.Encode(key.URL(), qrcode.Medium, 256)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	qrBase64 := "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+	return key.Secret(), qrBase64, codes, nil
+}
+
+func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, error) {
+	var user gateonv1.User
+	var hashed, role, recoveryCodes string
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+
+	q := m.dialect.Rebind(QueryUserByID)
+	err := m.db.QueryRow(q, id).Scan(&user.Id, &user.Username, &hashed, &role, &failedAttempts, &lockedUntil,
+		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes)
+	if err != nil {
+		return false, "", nil, err
+	}
+
+	// Check recovery codes first
+	if recoveryCodes != "" {
+		codes := strings.Split(recoveryCodes, ",")
+		for i, c := range codes {
+			if c == code {
+				// Use code, remove it
+				newCodes := append(codes[:i], codes[i+1:]...)
+				qUpdate := m.dialect.Rebind(QueryUpdate2FA)
+				_, err = m.db.Exec(qUpdate, true, user.TwoFactorSecret, strings.Join(newCodes, ","), id)
+				if err != nil {
+					return false, "", nil, err
+				}
+				token, u, err := m.issueToken(&user)
+				return true, token, u, err
+			}
+		}
+	}
+
+	valid := totp.Validate(code, user.TwoFactorSecret)
+	if valid {
+		if !user.TwoFactorEnabled {
+			// Enable 2FA on first successful verification
+			qUpdate := m.dialect.Rebind(QueryUpdate2FA)
+			_, err = m.db.Exec(qUpdate, true, user.TwoFactorSecret, recoveryCodes, id)
+			if err != nil {
+				return false, "", nil, err
+			}
+		}
+		token, u, err := m.issueToken(&user)
+		return true, token, u, err
+	}
+
+	return false, "", nil, nil
+}
+
+func (m *Manager) Disable2FA(id string) error {
+	qUpdate := m.dialect.Rebind(QueryUpdate2FA)
+	_, err := m.db.Exec(qUpdate, false, "", "", id)
+	return err
 }
 
 func (m *Manager) handleFailedLogin(username string, currentAttempts int) {

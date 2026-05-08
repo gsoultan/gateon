@@ -15,4 +15,9 @@ type Service interface {
 	DeleteUser(id string) error
 	ChangePassword(id, password string) error
 	UpdateSymmetricKey(key string)
+
+	// 2FA methods
+	Setup2FA(id string) (string, string, []string, error)
+	Verify2FA(id, code string) (bool, string, *gateonv1.User, error)
+	Disable2FA(id string) error
 }

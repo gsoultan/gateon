@@ -231,6 +231,19 @@ SecAuditLog "%s"
 		wafConfig = wafConfig.WithDirectives(`SecRuleEngine Off`)
 	}
 
+	if cfg.RequestBodyLimit > 0 {
+		wafConfig = wafConfig.WithRequestBodyLimit(int(cfg.RequestBodyLimit))
+		// Also set in-memory limit to 10% of total limit or 1MB min
+		memLimit := int64(cfg.RequestBodyLimit) / 10
+		if memLimit < 1024*1024 {
+			memLimit = 1024 * 1024
+		}
+		wafConfig = wafConfig.WithRequestBodyInMemoryLimit(int(memLimit))
+	}
+	if cfg.ResponseBodyLimit > 0 {
+		wafConfig = wafConfig.WithResponseBodyLimit(int(cfg.ResponseBodyLimit))
+	}
+
 	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
 		ruleID := strconv.Itoa(mr.Rule().ID())
 		logger.L.Warn().

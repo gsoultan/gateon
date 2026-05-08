@@ -804,7 +804,7 @@ export default function SettingsPage() {
               />
               <NumberInput
                 label="Path metrics retention (days)"
-                description="How long to keep aggregated path metrics in storage"
+                description="Aggregated path metrics"
                 disabled={formDisabled}
                 min={1}
                 max={365}
@@ -815,6 +815,60 @@ export default function SettingsPage() {
                     log: {
                       ...(config.log || {}),
                       path_stats_retention_days: typeof v === 'number' ? v : 7,
+                    },
+                  })
+                }
+                radius="md"
+              />
+              <NumberInput
+                label="Access log retention (days)"
+                description="Detailed request traces"
+                disabled={formDisabled}
+                min={1}
+                max={365}
+                value={config.log?.access_log_retention_days ?? 7}
+                onChange={(v) =>
+                  setConfig({
+                    ...config,
+                    log: {
+                      ...(config.log || {}),
+                      access_log_retention_days: typeof v === 'number' ? v : 7,
+                    },
+                  })
+                }
+                radius="md"
+              />
+              <NumberInput
+                label="Security threats retention (days)"
+                description="WAF and anomaly logs"
+                disabled={formDisabled}
+                min={1}
+                max={365}
+                value={config.log?.security_threat_retention_days ?? 30}
+                onChange={(v) =>
+                  setConfig({
+                    ...config,
+                    log: {
+                      ...(config.log || {}),
+                      security_threat_retention_days: typeof v === 'number' ? v : 30,
+                    },
+                  })
+                }
+                radius="md"
+              />
+              <NumberInput
+                label="Audit log retention (days)"
+                description="System changes and login logs"
+                disabled={formDisabled}
+                min={1}
+                max={365}
+                value={config.log?.audit_log_retention_days ?? 90}
+                onChange={(v) =>
+                  setConfig({
+                    ...config,
+                    log: {
+                      ...(config.log || {}),
+                      audit_log_retention_days: typeof v === 'number' ? v : 90,
                     },
                   })
                 }

@@ -33,6 +33,9 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeFeature, setActiveFeature] = useState(0);
+  const [step, setStep] = useState<"login" | "2fa">("login");
+  const [tempUser, setTempUser] = useState<any>(null);
+  const [tfaCode, setTfaCode] = useState("");
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
 
@@ -86,8 +89,13 @@ export default function LoginPage() {
 
       if (res.ok) {
         const data = await res.json();
-        setAuth(data.token, data.user);
-        navigate({ to: "/" });
+        if (data.two_factor_required) {
+          setTempUser(data.user);
+          setStep("2fa");
+        } else {
+          setAuth(data.token, data.user);
+          navigate({ to: "/" });
+        }
       } else if (res.status === 401) {
         setError("Invalid username or password");
       } else {
@@ -98,6 +106,35 @@ export default function LoginPage() {
       setError(
         "Failed to connect to Gateon API. Please check if the gateway is running.",
       );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handle2FAVerify = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/v1/auth/2fa/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: tempUser.id, code: tfaCode }),
+        credentials: "include",
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setAuth(data.token, data.user);
+          navigate({ to: "/" });
+        } else {
+          setError("Invalid 2FA code");
+        }
+      } else {
+        setError("Failed to verify 2FA code");
+      }
+    } catch (err) {
+      setError("Connection error");
     } finally {
       setLoading(false);
     }
@@ -184,17 +221,19 @@ export default function LoginPage() {
             <Paper radius="md" p={0}>
               <Box mb={40}>
                 <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-                  Welcome back
+                  {step === "login" ? "Welcome back" : "Second-step security"}
                 </Title>
                 <Text c="dimmed" size="sm" mt={5}>
-                  Enter your credentials to manage your gateway
+                  {step === "login" 
+                    ? "Enter your credentials to manage your gateway"
+                    : "Enter the 6-digit code from your authenticator app"}
                 </Text>
               </Box>
 
               {error && (
                 <Alert
                   icon={<IconAlertCircle size="1.1rem" />}
-                  title="Authentication Failed"
+                  title={step === "login" ? "Authentication Failed" : "Verification Failed"}
                   color="red"
                   variant="filled"
                   radius="md"
@@ -204,37 +243,64 @@ export default function LoginPage() {
                 </Alert>
               )}
 
-              <form onSubmit={form.onSubmit(handleSubmit)}>
+              {step === "login" ? (
+                <form onSubmit={form.onSubmit(handleSubmit)}>
+                  <Stack gap="md">
+                    <TextInput
+                      label="Username"
+                      placeholder="admin"
+                      required
+                      size="md"
+                      leftSection={<IconUser size={rem(18)} stroke={1.5} />}
+                      {...form.getInputProps("username")}
+                    />
+                    <PasswordInput
+                      label="Password"
+                      placeholder="Your password"
+                      required
+                      size="md"
+                      leftSection={<IconLock size={rem(18)} stroke={1.5} />}
+                      {...form.getInputProps("password")}
+                    />
+                    <Button
+                      fullWidth
+                      mt="lg"
+                      type="submit"
+                      loading={loading}
+                      size="md"
+                      radius="md"
+                      className="bg-indigo-600 hover:bg-indigo-700 transition-colors"
+                    >
+                      Sign in to Dashboard
+                    </Button>
+                  </Stack>
+                </form>
+              ) : (
                 <Stack gap="md">
                   <TextInput
-                    label="Username"
-                    placeholder="admin"
+                    label="Verification Code"
+                    placeholder="000000"
                     required
                     size="md"
-                    leftSection={<IconUser size={rem(18)} stroke={1.5} />}
-                    {...form.getInputProps("username")}
-                  />
-                  <PasswordInput
-                    label="Password"
-                    placeholder="Your password"
-                    required
-                    size="md"
-                    leftSection={<IconLock size={rem(18)} stroke={1.5} />}
-                    {...form.getInputProps("password")}
+                    value={tfaCode}
+                    onChange={(e) => setTfaCode(e.currentTarget.value)}
+                    autoFocus
                   />
                   <Button
                     fullWidth
                     mt="lg"
-                    type="submit"
+                    onClick={handle2FAVerify}
                     loading={loading}
                     size="md"
                     radius="md"
-                    className="bg-indigo-600 hover:bg-indigo-700 transition-colors"
                   >
-                    Sign in to Dashboard
+                    Verify & Sign in
+                  </Button>
+                  <Button variant="subtle" fullWidth onClick={() => setStep("login")}>
+                    Back to login
                   </Button>
                 </Stack>
-              </form>
+              )}
             </Paper>
           </Box>
         </Box>

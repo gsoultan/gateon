@@ -514,6 +514,21 @@ export default function TracesPage() {
               </Text>
             </Stack>
 
+            <Grid columns={2}>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">TLS JA3 FINGERPRINT</Text>
+                  <Text size="xs" ff="monospace" c="dimmed">{selectedTrace.ja3 || "N/A"}</Text>
+                </Stack>
+              </Grid.Col>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">TLS JA4 FINGERPRINT</Text>
+                  <Text size="xs" ff="monospace" c="dimmed">{selectedTrace.ja4 || "N/A"}</Text>
+                </Stack>
+              </Grid.Col>
+            </Grid>
+
             <Stack gap={4}>
               <Text size="xs" fw={700} c="dimmed">REFERER</Text>
               <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>

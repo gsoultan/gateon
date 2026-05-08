@@ -512,4 +512,38 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(23, "add_2fa_to_users", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes TEXT NOT NULL DEFAULT '';`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes TEXT NOT NULL DEFAULT '';`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE users ADD COLUMN two_factor_enabled BOOLEAN DEFAULT FALSE;`,
+				`ALTER TABLE users ADD COLUMN two_factor_secret TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE users ADD COLUMN recovery_codes TEXT NOT NULL DEFAULT '';`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }
