@@ -31,6 +31,47 @@ message GlobalConfig {
   ManagementConfig management = 12;
   GeoIPConfig geoip = 13;
   DebuggerConfig debugger = 14;
+  SecurityAdvancedConfig security_advanced = 15;
+}
+
+message SecurityAdvancedConfig {
+  DeceptionConfig deception = 1;
+  TarpitConfig tarpit = 2;
+  EntropyConfig entropy = 3;
+  BehavioralConfig behavioral = 4;
+  PowConfig pow = 5;
+}
+
+message DeceptionConfig {
+  bool enabled = 1;
+  repeated string honeypot_paths = 2;
+  bool inject_invisible_links = 3;
+  repeated string invisible_link_paths = 4;
+}
+
+message TarpitConfig {
+  bool enabled = 1;
+  int32 delay_base_ms = 2;
+  int32 delay_max_ms = 3;
+  double score_threshold = 4;
+}
+
+message EntropyConfig {
+  bool enabled = 1;
+  double threshold = 2;
+}
+
+message BehavioralConfig {
+  bool enabled = 1;
+  bool enable_impossible_travel = 2;
+  bool enable_sequence_validation = 3;
+}
+
+message PowConfig {
+  bool enabled = 1;
+  int32 difficulty = 2;
+  double score_threshold = 3;
+  string secret = 4;
 }
 
 message DebuggerConfig {

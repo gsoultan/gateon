@@ -20,6 +20,7 @@ import {
   Accordion,
   ThemeIcon,
   Code,
+  Tabs,
 } from "@mantine/core";
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
 import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
@@ -44,6 +45,7 @@ import {
   IconBug,
   IconLock,
   IconShieldLock,
+  IconShieldExclamation,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 
@@ -86,6 +88,20 @@ const DependencyBadge: React.FC<{ dep: DependencyHealth }> = ({ dep }) => (
     <Group justify="space-between" mt={4}>
       <Text size="xs" c="dimmed">Latency: {dep.latency_ms}</Text>
       {dep.error && <Text size="xs" c="red" fw={500} truncate maw={200}>{dep.error}</Text>}
+    </Group>
+  </Paper>
+);
+
+const SeverityStatCard: React.FC<{ label: string; count: number; color: string; icon: React.ReactNode }> = ({ label, count, color, icon }) => (
+  <Paper withBorder p="xs" radius="md" style={{ flex: 1 }}>
+    <Group gap="xs" wrap="nowrap">
+      <ThemeIcon color={color} variant="light" size="sm">
+        {icon}
+      </ThemeIcon>
+      <Box>
+        <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase', fontSize: '9px', letterSpacing: 0.5 }}>{label}</Text>
+        <Text fw={800} size="sm" style={{ lineHeight: 1 }}>{count}</Text>
+      </Box>
     </Group>
   </Paper>
 );
@@ -273,6 +289,21 @@ const DiagnosticsPage: React.FC = () => {
     });
   }, [data?.anomalies]);
 
+  const activeThreats = useMemo(() => sortedAnomalies.filter(a => !a.mitigated), [sortedAnomalies]);
+  const mitigatedThreats = useMemo(() => sortedAnomalies.filter(a => a.mitigated), [sortedAnomalies]);
+
+  const getStats = (threats: Anomaly[]) => {
+    return {
+      critical: threats.filter(t => t.severity.toLowerCase() === "critical").length,
+      high: threats.filter(t => t.severity.toLowerCase() === "high").length,
+      medium: threats.filter(t => t.severity.toLowerCase() === "medium").length,
+      low: threats.filter(t => t.severity.toLowerCase() === "low").length,
+    };
+  };
+
+  const activeStats = useMemo(() => getStats(activeThreats), [activeThreats]);
+  const mitigatedStats = useMemo(() => getStats(mitigatedThreats), [mitigatedThreats]);
+
   const sortedDependencies = useMemo(() => {
     if (!data?.dependencies) return [];
     return [...data.dependencies].sort((a, b) => a.name.localeCompare(b.name));
@@ -438,27 +469,82 @@ const DiagnosticsPage: React.FC = () => {
               The engine identifies potential threats and provides actionable recommendations.
             </Text>
 
-            {sortedAnomalies.length > 0 ? (
-              <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                {sortedAnomalies.map((a) => (
-                  <AnomalyCard 
-                    key={`${a.type}-${a.source}-${a.timestamp}`} 
-                    anomaly={a} 
-                    onApply={() => handleApplyRecommendation(a)}
-                    applying={applying === `${a.type}-${a.source}`}
-                    onTrace={openVisualizer}
-                  />
-                ))}
-              </SimpleGrid>
-            ) : (
-              <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
-                <Stack align="center" gap="xs">
-                  <IconCircleCheck size={40} color={theme.colors.teal[3]} />
-                  <Text fw={700} c="teal">No Anomalies Detected</Text>
-                  <Text size="xs" c="dimmed">The engine is monitoring your traffic and everything looks normal.</Text>
+            <Tabs defaultValue="active" variant="pills" radius="md">
+              <Tabs.List mb="md">
+                <Tabs.Tab value="active" leftSection={<IconAlertTriangle size={14} />} color="red">
+                  Active Threats ({activeThreats.length})
+                </Tabs.Tab>
+                <Tabs.Tab value="mitigated" leftSection={<IconCircleCheck size={14} />} color="teal">
+                  Mitigated ({mitigatedThreats.length})
+                </Tabs.Tab>
+              </Tabs.List>
+
+              <Tabs.Panel value="active">
+                <Stack gap="md">
+                  <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+                    <SeverityStatCard label="Critical" count={activeStats.critical} color="red" icon={<IconShieldExclamation size={14} />} />
+                    <SeverityStatCard label="High" count={activeStats.high} color="orange" icon={<IconShield size={14} />} />
+                    <SeverityStatCard label="Medium" count={activeStats.medium} color="yellow" icon={<IconInfoCircle size={14} />} />
+                    <SeverityStatCard label="Low" count={activeStats.low} color="blue" icon={<IconInfoCircle size={14} />} />
+                  </SimpleGrid>
+
+                  {activeThreats.length > 0 ? (
+                    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                      {activeThreats.map((a) => (
+                        <AnomalyCard 
+                          key={`${a.type}-${a.source}-${a.timestamp}`} 
+                          anomaly={a} 
+                          onApply={() => handleApplyRecommendation(a)}
+                          applying={applying === `${a.type}-${a.source}`}
+                          onTrace={openVisualizer}
+                        />
+                      ))}
+                    </SimpleGrid>
+                  ) : (
+                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
+                      <Stack align="center" gap="xs">
+                        <IconCircleCheck size={40} color={theme.colors.teal[3]} />
+                        <Text fw={700} c="teal">No Active Threats</Text>
+                        <Text size="xs" c="dimmed">No immediate threats detected in your network.</Text>
+                      </Stack>
+                    </Paper>
+                  )}
                 </Stack>
-              </Paper>
-            )}
+              </Tabs.Panel>
+
+              <Tabs.Panel value="mitigated">
+                <Stack gap="md">
+                  <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+                    <SeverityStatCard label="Critical" count={mitigatedStats.critical} color="red" icon={<IconShieldExclamation size={14} />} />
+                    <SeverityStatCard label="High" count={mitigatedStats.high} color="orange" icon={<IconShield size={14} />} />
+                    <SeverityStatCard label="Medium" count={mitigatedStats.medium} color="yellow" icon={<IconInfoCircle size={14} />} />
+                    <SeverityStatCard label="Low" count={mitigatedStats.low} color="blue" icon={<IconInfoCircle size={14} />} />
+                  </SimpleGrid>
+
+                  {mitigatedThreats.length > 0 ? (
+                    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                      {mitigatedThreats.map((a) => (
+                        <AnomalyCard 
+                          key={`${a.type}-${a.source}-${a.timestamp}`} 
+                          anomaly={a} 
+                          onApply={() => handleApplyRecommendation(a)}
+                          applying={applying === `${a.type}-${a.source}`}
+                          onTrace={openVisualizer}
+                        />
+                      ))}
+                    </SimpleGrid>
+                  ) : (
+                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
+                      <Stack align="center" gap="xs">
+                        <IconInfoCircle size={40} color={theme.colors.gray[3]} />
+                        <Text fw={700} c="dimmed">No Mitigated Threats</Text>
+                        <Text size="xs" c="dimmed">History of mitigated threats will appear here.</Text>
+                      </Stack>
+                    </Paper>
+                  )}
+                </Stack>
+              </Tabs.Panel>
+            </Tabs>
           </Stack>
         </Card>
 

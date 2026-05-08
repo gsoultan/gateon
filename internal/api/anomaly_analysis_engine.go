@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"strings"
+	"time"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -104,12 +105,18 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 					Fingerprint: tr.Fingerprint,
 					IPs:         make(map[string]struct{}),
 					UniquePaths: make(map[string]struct{}),
+					Countries:   make(map[string]time.Time),
 				}
 				data.FingerprintStats[tr.Fingerprint] = fStats
 			}
 			fStats.TotalRequests++
 			fStats.IPs[tr.SourceIP] = struct{}{}
 			fStats.UniquePaths[tr.Path] = struct{}{}
+			if tr.CountryCode != "" {
+				if last, ok := fStats.Countries[tr.CountryCode]; !ok || tr.Timestamp.After(last) {
+					fStats.Countries[tr.CountryCode] = tr.Timestamp
+				}
+			}
 			if tr.Timestamp.After(fStats.LastSeen) {
 				fStats.LastSeen = tr.Timestamp
 			}

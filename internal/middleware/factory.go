@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
@@ -115,6 +116,26 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return f.createGeoIP(cfg)
 	case "hmac":
 		return f.createHMAC(cfg)
+	case "deception":
+		return Deception(DeceptionConfig{
+			HoneypotPaths:        parseListStrict(cfg["honeypot_paths"]),
+			InjectInvisibleLinks: parseBoolStrict(cfg["inject_invisible_links"], false),
+			InvisibleLinkPaths:   parseListStrict(cfg["invisible_link_paths"]),
+			RouteID:              routeID,
+		}), nil
+	case "tarpit":
+		baseDelay, _ := time.ParseDuration(cfg["base_delay"])
+		maxDelay, _ := time.ParseDuration(cfg["max_delay"])
+		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
+		return Tarpit(baseDelay, maxDelay, threshold), nil
+	case "entropy":
+		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
+		return Entropy(threshold, routeID), nil
+	case "pow":
+		difficulty, _ := strconv.Atoi(cfg["difficulty"])
+		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
+		secret := cfg["secret"]
+		return Pow(difficulty, threshold, secret, routeID), nil
 	case "policy":
 		return f.createPolicy(cfg)
 	case "xfcc":

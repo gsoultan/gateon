@@ -21,6 +21,7 @@ import {
   Tooltip,
   Code,
   CopyButton,
+  TagsInput,
 } from "@mantine/core";
 import {
   IconInfoCircle,
@@ -40,6 +41,7 @@ import {
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
 import { GeneralSettingsCard } from "../components/settings/GeneralSettingsCard";
 import { GeoIPSettingsCard } from "../components/settings/GeoIPSettingsCard";
+import { SecurityAdvancedSettingsCard } from "../components/settings/SecurityAdvancedSettingsCard";
 import { PresetsCard } from "../components/settings/PresetsCard";
 import { AppearanceCard } from "../components/settings/AppearanceCard";
 import { usePermissions } from "../hooks/usePermissions";
@@ -1805,6 +1807,12 @@ export default function SettingsPage() {
         onChange={(geoip) => setConfig({ ...config, geoip })}
         onSave={saveGatewayConfig}
         saving={saving}
+        disabled={formDisabled}
+      />
+
+      <SecurityAdvancedSettingsCard
+        config={config}
+        onChange={setConfig}
         disabled={formDisabled}
       />
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"sync"
 
@@ -276,6 +277,38 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
 	chain = append(chain, middleware.Recovery(), middleware.AccessLog(routeLabel), middleware.Metrics(routeLabel), middleware.Debugger(globalStore))
+
+	// Advanced Security Middlewares
+	if globalStore != nil {
+		if gcfg := globalStore.Get(context.Background()); gcfg != nil && gcfg.SecurityAdvanced != nil {
+			adv := gcfg.SecurityAdvanced
+			// Tarpit should be early to slow down attackers before processing
+			if adv.Tarpit != nil && adv.Tarpit.Enabled {
+				chain = append(chain, middleware.Tarpit(
+					time.Duration(adv.Tarpit.DelayBaseMs)*time.Millisecond,
+					time.Duration(adv.Tarpit.DelayMaxMs)*time.Millisecond,
+					adv.Tarpit.ScoreThreshold,
+				))
+			}
+			// PoW challenge
+			if adv.Pow != nil && adv.Pow.Enabled {
+				chain = append(chain, middleware.Pow(int(adv.Pow.Difficulty), adv.Pow.ScoreThreshold, adv.Pow.Secret, routeLabel))
+			}
+			// Deception
+			if adv.Deception != nil && adv.Deception.Enabled {
+				chain = append(chain, middleware.Deception(middleware.DeceptionConfig{
+					HoneypotPaths:        adv.Deception.HoneypotPaths,
+					InjectInvisibleLinks: adv.Deception.InjectInvisibleLinks,
+					InvisibleLinkPaths:   adv.Deception.InvisibleLinkPaths,
+					RouteID:              routeLabel,
+				}))
+			}
+			// Entropy
+			if adv.Entropy != nil && adv.Entropy.Enabled {
+				chain = append(chain, middleware.Entropy(adv.Entropy.Threshold, routeLabel))
+			}
+		}
+	}
 
 	// Resolve and append user-defined middlewares from the registry
 	for _, mid := range rt.Middlewares {

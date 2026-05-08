@@ -378,6 +378,46 @@ export type GlobalConfig = {
   ebpf?: EbpfConfig;
   management?: ManagementConfig;
   geoip?: GeoIPConfig;
+  security_advanced?: SecurityAdvancedConfig;
+};
+
+export type SecurityAdvancedConfig = {
+  deception?: DeceptionConfig;
+  tarpit?: TarpitConfig;
+  entropy?: EntropyConfig;
+  behavioral?: BehavioralConfig;
+  pow?: PowConfig;
+};
+
+export type DeceptionConfig = {
+  enabled: boolean;
+  honeypot_paths: string[];
+  inject_invisible_links: boolean;
+  invisible_link_paths: string[];
+};
+
+export type TarpitConfig = {
+  enabled: boolean;
+  delay_base_ms: number;
+  delay_max_ms: number;
+  score_threshold: number;
+};
+
+export type EntropyConfig = {
+  enabled: boolean;
+  threshold: number;
+};
+
+export type BehavioralConfig = {
+  enabled: boolean;
+  enable_impossible_travel: boolean;
+  enable_sequence_validation: boolean;
+};
+
+export type PowConfig = {
+  enabled: boolean;
+  difficulty: number;
+  score_threshold: number;
 };
 
 export type ManagementConfig = {
