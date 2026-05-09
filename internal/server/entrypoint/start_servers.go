@@ -159,10 +159,10 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		deps.ShutdownRegistry.Register(server.Shutdown)
 	}
 
-	logger.L.Info().Str("addr", addr).Msg("Secure Management Entrypoint started")
+	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
 	wg.Go(func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.L.Error().Err(err).Msg("Management server failed")
+			logger.L.LogError("Management server failed", "error", err)
 		}
 	})
 }
@@ -177,7 +177,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 		l, err = net.Listen("tcp", addr)
 	}
 	if err != nil {
-		logger.L.Error().Err(err).Str("addr", addr).Msg("TCP listen failed")
+		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
 		return
 	}
 	if shutdownReg != nil {
@@ -221,15 +221,15 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 }
 
 func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
-	logger.L.Info().Str("addr", addr).Msg("starting UDP entrypoint")
+	logger.L.LogInfo("starting UDP entrypoint", "addr", addr)
 	laddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		logger.L.Error().Err(err).Str("addr", addr).Msg("UDP resolve failed")
+		logger.L.LogError("UDP resolve failed", "error", err, "addr", addr)
 		return
 	}
 	conn, err := net.ListenUDP("udp", laddr)
 	if err != nil {
-		logger.L.Error().Err(err).Str("addr", addr).Msg("UDP listen failed")
+		logger.L.LogError("UDP listen failed", "error", err, "addr", addr)
 		return
 	}
 	if shutdownReg != nil {

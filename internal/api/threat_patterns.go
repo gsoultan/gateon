@@ -86,7 +86,7 @@ func LoadPatterns(path string) {
 	compiledPatterns.commandInjection = regexp.MustCompile(patterns.CommandInjection)
 	compiledPatterns.protoPollution = regexp.MustCompile(patterns.ProtoPollution)
 
-	logger.L.Info().Msg("Security threat patterns loaded")
+	logger.L.LogInfo("Security threat patterns loaded")
 }
 
 func GetCompiledPatterns() (p struct {

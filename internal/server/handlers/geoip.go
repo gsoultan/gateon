@@ -62,11 +62,11 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 		}
 
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": destPath})
-		logger.L.Info().Str("path", destPath).Msg("geoip database uploaded")
+		logger.L.LogInfo("geoip database uploaded", "path", destPath)
 
 		// Reload the database
 		if err := telemetry.InitGeoIP(destPath); err != nil {
-			logger.L.Error().Err(err).Msg("failed to reload GeoIP database after upload")
+			logger.L.LogError("failed to reload GeoIP database after upload", "error", err)
 		}
 	})
 

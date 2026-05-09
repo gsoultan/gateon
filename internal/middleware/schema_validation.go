@@ -19,7 +19,7 @@ func SchemaValidation(cfg SchemaValidationConfig) Middleware {
 	compiler := jsonschema.NewCompiler()
 	schema, err := compiler.Compile([]byte(cfg.Schema))
 	if err != nil {
-		logger.L.Error().Err(err).Msg("failed to compile JSON schema")
+		logger.L.LogError("failed to compile JSON schema", "error", err)
 	}
 
 	return func(next http.Handler) http.Handler {

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/domain/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -13,7 +13,7 @@ type l4Invalidator interface {
 	InvalidateForRoute(rt *gateonv1.Route)
 }
 
-// serverProxyInvalidator implements domain.ProxyInvalidator.
+// serverProxyInvalidator implements proxy.Invalidator.
 // Server observes domain events and invalidates proxy + L4 cache (Observer pattern).
 type serverProxyInvalidator struct {
 	server     *Server
@@ -22,11 +22,11 @@ type serverProxyInvalidator struct {
 }
 
 // NewServerProxyInvalidator creates a ProxyInvalidator that delegates to Server.
-func NewServerProxyInvalidator(s *Server, l4Resolver l4Invalidator, routeStore config.RouteStore) domain.ProxyInvalidator {
+func NewServerProxyInvalidator(s *Server, l4Resolver l4Invalidator, routeStore config.RouteStore) proxy.Invalidator {
 	return &serverProxyInvalidator{server: s, l4Resolver: l4Resolver, routeStore: routeStore}
 }
 
-// InvalidateRoute implements domain.ProxyInvalidator.
+// InvalidateRoute implements proxy.Invalidator.
 func (p *serverProxyInvalidator) InvalidateRoute(id string) {
 	p.server.InvalidateRouteProxy(id)
 	if p.l4Resolver != nil && p.routeStore != nil {
@@ -36,7 +36,7 @@ func (p *serverProxyInvalidator) InvalidateRoute(id string) {
 	}
 }
 
-// InvalidateRoutes implements domain.ProxyInvalidator.
+// InvalidateRoutes implements proxy.Invalidator.
 func (p *serverProxyInvalidator) InvalidateRoutes(strategy func(*gateonv1.Route) bool) {
 	p.server.InvalidateRouteProxies(strategy)
 	if p.l4Resolver != nil && p.routeStore != nil {
@@ -48,7 +48,7 @@ func (p *serverProxyInvalidator) InvalidateRoutes(strategy func(*gateonv1.Route)
 	}
 }
 
-// InvalidateTLS implements domain.ProxyInvalidator.
+// InvalidateTLS implements proxy.Invalidator.
 func (p *serverProxyInvalidator) InvalidateTLS() {
 	if p.server.TLSManager != nil {
 		p.server.TLSManager.UpdateConfig(BuildGtlsConfig(p.server))

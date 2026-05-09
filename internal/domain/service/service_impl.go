@@ -1,49 +1,54 @@
-package domain
+package service
 
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/domain/proxy"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// ServiceServiceImpl implements ServiceService.
-type ServiceServiceImpl struct {
+// serviceImpl implements Service.
+type serviceImpl struct {
 	store       config.ServiceStore
 	routeStore  config.RouteStore
-	invalidator ProxyInvalidator
+	invalidator proxy.Invalidator
+	logger      logger.Logger
 }
 
-// NewServiceService creates a ServiceService.
-func NewServiceService(store config.ServiceStore, routeStore config.RouteStore, invalidator ProxyInvalidator) ServiceService {
-	return &ServiceServiceImpl{store: store, routeStore: routeStore, invalidator: invalidator}
+// NewService creates a Service Service.
+func NewService(store config.ServiceStore, routeStore config.RouteStore, invalidator proxy.Invalidator, l logger.Logger) Service {
+	return &serviceImpl{store: store, routeStore: routeStore, invalidator: invalidator, logger: l}
 }
 
 // ListPaginated returns paginated services.
-func (s *ServiceServiceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Service, int32) {
+func (s *serviceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Service, int32) {
 	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
-func (s *ServiceServiceImpl) GetService(ctx context.Context, id string) (*gateonv1.Service, bool) {
+// GetService returns a service by ID.
+func (s *serviceImpl) GetService(ctx context.Context, id string) (*gateonv1.Service, bool) {
 	return s.store.Get(ctx, id)
 }
 
 // SaveService validates, assigns ID if needed, persists, and invalidates affected route proxies.
-func (s *ServiceServiceImpl) SaveService(ctx context.Context, svc *gateonv1.Service) error {
+func (s *serviceImpl) SaveService(ctx context.Context, svc *gateonv1.Service) error {
 	if svc.Id == "" {
 		svc.Id = uuid.NewString()
 	}
 	if err := s.store.Update(ctx, svc); err != nil {
-		return err
+		return fmt.Errorf("failed to update service: %w", err)
 	}
 	s.invalidator.InvalidateRoutes(func(rt *gateonv1.Route) bool { return rt.ServiceId == svc.Id })
 	return nil
 }
 
 // DeleteService removes the service, removes its references from routes, and invalidates affected route proxies.
-func (s *ServiceServiceImpl) DeleteService(ctx context.Context, id string) error {
+func (s *serviceImpl) DeleteService(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("missing service id")
 	}
@@ -55,13 +60,16 @@ func (s *ServiceServiceImpl) DeleteService(ctx context.Context, id string) error
 		if rt.ServiceId == id {
 			affectedIDs = append(affectedIDs, rt.Id)
 			rt.ServiceId = "" // Remove reference
-			_ = s.routeStore.Update(ctx, rt)
+			if err := s.routeStore.Update(ctx, rt); err != nil {
+				// Continue to next route even if one fails
+				continue
+			}
 		}
 	}
 
 	// 2. Delete the service itself
 	if err := s.store.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("failed to delete service: %w", err)
 	}
 
 	// 3. Invalidate proxies

@@ -81,7 +81,9 @@ export function Shell() {
   ];
 
   const securityLinks = [
+    { label: "Command Center", to: "/security-center", icon: IconShieldCheck },
     { label: "Insights", to: "/security", icon: IconShieldLock },
+    { label: "Audit Logs", to: "/audit-logs", icon: IconTimeline },
     { label: "Certificates", to: "/certificates", icon: IconCertificate },
     {
       label: "Client Authorities",

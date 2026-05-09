@@ -39,6 +39,8 @@ import {
   SchemaValidationConfigEditor,
   HoneypotConfigEditor,
   RequestIDConfigEditor,
+  FileSecurityConfigEditor,
+  OIDCConfigEditor,
 } from "./middleware-config";
 
 interface MiddlewareConfigEditorProps {
@@ -352,6 +354,12 @@ export function MiddlewareConfigEditor({
 
     case "waf":
       return <WAFConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "file_security":
+      return <FileSecurityConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "oidc":
+      return <OIDCConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "bot_management":
       return <BotManagementConfigEditor config={config} updateConfig={updateConfig} />;

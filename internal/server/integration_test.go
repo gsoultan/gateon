@@ -12,7 +12,11 @@ import (
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/domain/entrypoint"
+	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
+	"github.com/gsoultan/gateon/internal/domain/route"
+	"github.com/gsoultan/gateon/internal/domain/service"
+	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/pkg/l4"
@@ -26,11 +30,11 @@ func handlerDeps(s *Server) *handlers.Deps {
 	proxyInvalidator := NewServerProxyInvalidator(s, l4Resolver, s.RouteStore)
 	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ".")
 	return &handlers.Deps{
-		RouteService:   domain.NewRouteService(s.RouteStore, proxyInvalidator),
-		ServiceService: domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator),
-		EpService:      domain.NewEntryPointService(s.EpStore),
-		MwService:      domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}),
-		TLSOptService:  domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator),
+		RouteService:   route.NewService(s.RouteStore, proxyInvalidator, s.Logger),
+		ServiceService: service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger),
+		EpService:      entrypoint.NewService(s.EpStore, s.Logger),
+		MwService:      dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger),
+		TLSOptService:  dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger),
 		AuthManager:    s.AuthManager,
 		Version:        s.Version,
 		StartTime:      s.StartTime(),
@@ -63,11 +67,11 @@ func TestIntegration_ProxyRequest(t *testing.T) {
 		Id: "test-service", Name: "test-service",
 		WeightedTargets: []*gateonv1.Target{{Url: backend.URL, Weight: 1}},
 	}
-	_ = s.ServiceStore.Update(context.Background(), svc)
+	_ = s.ServiceStore.Update(t.Context(), svc)
 	rt := &gateonv1.Route{
 		Id: "test-route", ServiceId: svc.Id, Rule: "PathPrefix(`/test`)", Type: "http",
 	}
-	_ = s.RouteStore.Update(context.Background(), rt)
+	_ = s.RouteStore.Update(t.Context(), rt)
 
 	grpcServer := grpc.NewServer()
 	apiService := api.NewApiService(api.ApiServiceConfig{

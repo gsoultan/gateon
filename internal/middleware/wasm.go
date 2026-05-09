@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -55,7 +57,7 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, msgPtr, msgLen uint32) {
 			msg, _ := m.Memory().Read(msgPtr, msgLen)
-			logger.L.Info().Str("wasm", "log").Msg(string(msg))
+			logger.L.LogInfo(string(msg), "wasm", "log")
 		}).Export("log").
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, valPtr, valLen uint32) uint32 {
@@ -83,6 +85,25 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 			m.Memory().Write(valPtr, []byte(val))
 			return uint32(len(val))
 		}).Export("get_url").
+		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, typePtr, typeLen, detailsPtr, detailsLen uint32, score float64) {
+			r, ok := ctx.Value(wasmRequestContextKey).(*http.Request)
+			if !ok {
+				return
+			}
+			threatType, _ := m.Memory().Read(typePtr, typeLen)
+			details, _ := m.Memory().Read(detailsPtr, detailsLen)
+
+			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+				Type:       string(threatType),
+				SourceIP:   r.RemoteAddr,
+				Score:      score,
+				Details:    string(details),
+				Time:       time.Now(),
+				RouteID:    r.Header.Get("X-Gateon-Route-ID"),
+				RequestURI: r.RequestURI,
+			})
+		}).Export("record_threat").
 		Instantiate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate host module: %w", err)
@@ -103,7 +124,7 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 			ctx := context.WithValue(r.Context(), wasmRequestContextKey, r)
 			mod, err := mw.runtime.InstantiateModule(ctx, mw.module, wazero.NewModuleConfig())
 			if err != nil {
-				logger.L.Error().Err(err).Msg("failed to instantiate wasm module for request")
+				logger.L.LogError("failed to instantiate wasm module for request", "error", err)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -113,7 +134,7 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 			if handle != nil {
 				_, err := handle.Call(ctx)
 				if err != nil {
-					logger.L.Error().Err(err).Msg("failed to call wasm handle function")
+					logger.L.LogError("failed to call wasm handle function", "error", err)
 				}
 			}
 

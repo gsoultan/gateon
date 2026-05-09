@@ -104,20 +104,11 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
                 checked={isEnabled("wordpress")}
                 onChange={(e) => toggle("wordpress", e.currentTarget.checked)}
               />
-              {isEnabled("wordpress") && (
-                <TagsInput
-                  label="Allowed Admin IPs"
-                  description="Comma-separated list of IPs allowed to access /wp-admin"
-                  placeholder="1.2.3.4, 5.6.7.8"
-                  value={config.allowed_admin_ips ? config.allowed_admin_ips.split(",") : []}
-                  onChange={(v) => updateConfig("allowed_admin_ips", v.join(","))}
-                />
-              )}
             </Stack>
           </Group>
 
           <Divider label="Advanced Protections" labelPosition="center" />
-          <Group grow>
+          <Group grow align="start">
             <Stack gap="xs">
               <Switch
                 label="IP Reputation"
@@ -137,19 +128,37 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
                 checked={config.malware_detection === "true"}
                 onChange={(e) => updateConfig("malware_detection", e.currentTarget.checked ? "true" : "false")}
               />
-            </Stack>
-            <Stack gap="xs">
               <Switch
                 label="Ransomware Detection"
                 description="Detect ransomware file extension uploads"
                 checked={config.ransomware_detection === "true"}
                 onChange={(e) => updateConfig("ransomware_detection", e.currentTarget.checked ? "true" : "false")}
               />
+            </Stack>
+            <Stack gap="xs">
               <Switch
                 label="Data Loss Prevention (DLP)"
                 description="Detect sensitive data leakage (CC, SSN) in responses"
                 checked={config.dlp === "true"}
                 onChange={(e) => updateConfig("dlp", e.currentTarget.checked ? "true" : "false")}
+              />
+              <Switch
+                label="Behavioral Profiling"
+                description="Detect robotic patterns and path jumping"
+                checked={config.behavioral_profiling === "true"}
+                onChange={(e) => updateConfig("behavioral_profiling", e.currentTarget.checked ? "true" : "false")}
+              />
+              <Switch
+                label="Impossible Travel"
+                description="Detect logins from geographically impossible distances"
+                checked={config.impossible_travel === "true"}
+                onChange={(e) => updateConfig("impossible_travel", e.currentTarget.checked ? "true" : "false")}
+              />
+              <Switch
+                label="Device Posture Check"
+                description="Alert on fingerprint changes for same session"
+                checked={config.device_posture === "true"}
+                onChange={(e) => updateConfig("device_posture", e.currentTarget.checked ? "true" : "false")}
               />
             </Stack>
           </Group>
@@ -689,6 +698,114 @@ export function PolicyConfigEditor({ config, onChange }: { config: Record<string
       <Button variant="light" leftSection={<IconPlus size={14} />} onClick={addRule} style={{ alignSelf: 'flex-start' }}>
         Add Rule
       </Button>
+    </Stack>
+  );
+}
+
+export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) {
+  const isEnabled = (key: string) => config[key] === "true";
+  const toggle = (key: string, val: boolean) => updateConfig(key, val ? "true" : "false");
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
+  return (
+    <Stack gap="md">
+      <Switch
+        label="Enable ClamAV Scanning"
+        description="Stream file uploads to ClamAV for virus detection"
+        checked={isEnabled("enable_clamav")}
+        onChange={(e) => toggle("enable_clamav", e.currentTarget.checked)}
+      />
+      {isEnabled("enable_clamav") && (
+        <TextInput
+          label="ClamAV Address"
+          description="TCP or Unix socket address (e.g. tcp://localhost:3310)"
+          placeholder="tcp://localhost:3310"
+          value={config.clamav_addr || ""}
+          onChange={(e) => updateConfig("clamav_addr", e.currentTarget.value)}
+        />
+      )}
+      <Divider label="MIME Validation" labelPosition="center" />
+      <TagsInput
+        label="Allowed MIME Types"
+        description="Only allow these MIME types. If set, others are blocked."
+        placeholder="image/jpeg, image/png, application/pdf"
+        value={splitTags(config.allowed_mime_types)}
+        onChange={(val) => updateConfig("allowed_mime_types", joinTags(val))}
+        clearable
+      />
+      <TagsInput
+        label="Blocked MIME Types"
+        description="Always block these MIME types."
+        placeholder="application/x-msdownload, application/x-sh"
+        value={splitTags(config.blocked_mime_types)}
+        onChange={(val) => updateConfig("blocked_mime_types", joinTags(val))}
+        clearable
+      />
+      <NumberInput
+        label="Max File Size (bytes)"
+        description="Maximum allowed size for individual files. 0 = unlimited."
+        value={parseInt(config.max_file_size) || 0}
+        onChange={(val) => updateConfig("max_file_size", (val ?? 0).toString())}
+        min={0}
+      />
+      <Switch
+        label="Strict Magic Number Check"
+        description="Verify that file extension matches its magic number/content"
+        checked={config.strict_magic !== "false"}
+        onChange={(e) => updateConfig("strict_magic", e.currentTarget.checked ? "true" : "false")}
+      />
+    </Stack>
+  );
+}
+
+export function OIDCConfigEditor({ config, updateConfig }: EditorProps) {
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
+  return (
+    <Stack gap="md">
+      <TextInput
+        label="Issuer URL"
+        description="OIDC Provider discovery URL (e.g. https://accounts.google.com)"
+        placeholder="https://..."
+        value={config.issuer || ""}
+        onChange={(e) => updateConfig("issuer", e.currentTarget.value)}
+        required
+      />
+      <Group grow>
+        <TextInput
+          label="Client ID"
+          placeholder="your-client-id"
+          value={config.client_id || ""}
+          onChange={(e) => updateConfig("client_id", e.currentTarget.value)}
+          required
+        />
+        <TextInput
+          label="Client Secret"
+          placeholder="your-client-secret"
+          type="password"
+          value={config.client_secret || ""}
+          onChange={(e) => updateConfig("client_secret", e.currentTarget.value)}
+          required
+        />
+      </Group>
+      <TextInput
+        label="Redirect URL"
+        description="Callback URL (e.g. https://your-gateon/auth/callback)"
+        placeholder="https://..."
+        value={config.redirect_url || ""}
+        onChange={(e) => updateConfig("redirect_url", e.currentTarget.value)}
+        required
+      />
+      <TagsInput
+        label="Scopes"
+        description="OIDC Scopes to request"
+        placeholder="openid, profile, email"
+        value={splitTags(config.scopes)}
+        onChange={(val) => updateConfig("scopes", joinTags(val))}
+        clearable
+      />
     </Stack>
   );
 }

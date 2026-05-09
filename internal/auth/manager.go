@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/o1egl/paseto/v2"
 	"github.com/pquerna/otp/totp"
@@ -22,10 +23,11 @@ type Manager struct {
 	dialect      db.Dialect
 	paseto       *paseto.V2
 	symmetricKey []byte
+	logger       logger.Logger
 }
 
 // NewManager creates an auth manager using the given database URL.
-func NewManager(databaseURL, symmetricKey string) (*Manager, error) {
+func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, error) {
 	database, dialect, err := db.Open(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -41,6 +43,7 @@ func NewManager(databaseURL, symmetricKey string) (*Manager, error) {
 		dialect:      dialect,
 		paseto:       paseto.NewV2(),
 		symmetricKey: []byte(symmetricKey),
+		logger:       l,
 	}
 
 	return m, nil
@@ -139,7 +142,7 @@ func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.Us
 	var totalCount int
 	err := m.db.QueryRow(qCount, searchArg).Scan(&totalCount)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to count users: %w", err)
 	}
 
 	query := QueryListUsersBase
@@ -153,7 +156,7 @@ func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.Us
 
 	rows, err := m.db.Query(query, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to list users: %w", err)
 	}
 	defer rows.Close()
 
@@ -176,7 +179,7 @@ func (m *Manager) UpsertUser(u *gateonv1.User) error {
 	if u.Password != "" {
 		hashed, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to hash password: %w", err)
 		}
 		return m.upsertUserWithPassword(u.Id, u.Username, string(hashed), u.Role)
 	}
@@ -194,11 +197,17 @@ func (m *Manager) upsertSQLitePostgres(id, username, password, role string) erro
 	if password != "" {
 		q := m.dialect.Rebind(QueryInsertUserSQLitePostgresWithPassword)
 		_, err := m.db.Exec(q, id, username, password, role)
-		return err
+		if err != nil {
+			return fmt.Errorf("failed to upsert user with password (sqlite/postgres): %w", err)
+		}
+		return nil
 	}
 	q := m.dialect.Rebind(QueryInsertUserSQLitePostgresNoPassword)
 	_, err := m.db.Exec(q, id, username, "", role)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to upsert user without password (sqlite/postgres): %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) upsertMySQL(id, username, password, role string) error {
@@ -213,17 +222,23 @@ func (m *Manager) upsertMySQL(id, username, password, role string) error {
 func (m *Manager) ChangePassword(id, password string) error {
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to hash password: %w", err)
 	}
 	q := m.dialect.Rebind(QueryUpdatePassword)
 	_, err = m.db.Exec(q, string(hashed), id)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) DeleteUser(id string) error {
 	q := m.dialect.Rebind(QueryDeleteUser)
 	_, err := m.db.Exec(q, id)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) UpdateSymmetricKey(key string) {
@@ -334,12 +349,16 @@ func (m *Manager) handleFailedLogin(username string, currentAttempts int) {
 		lockedUntil = time.Now().Add(LockoutDuration)
 	}
 	q := m.dialect.Rebind(QueryIncrementFailedAttempts)
-	_, _ = m.db.Exec(q, lockedUntil, username)
+	if _, err := m.db.Exec(q, lockedUntil, username); err != nil {
+		m.logger.LogError("failed to increment failed login attempts", "error", err, "username", username)
+	}
 }
 
 func (m *Manager) resetFailedAttempts(username string) {
 	q := m.dialect.Rebind(QueryResetFailedAttempts)
-	_, _ = m.db.Exec(q, username)
+	if _, err := m.db.Exec(q, username); err != nil {
+		m.logger.LogError("failed to reset failed login attempts", "error", err, "username", username)
+	}
 }
 
 func (m *Manager) Close() error {

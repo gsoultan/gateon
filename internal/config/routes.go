@@ -37,7 +37,7 @@ func (r *RouteRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to read routes file")
+			logger.L.LogError("failed to read routes file", "error", err, "path", r.path)
 		}
 		return
 	}
@@ -45,12 +45,12 @@ func (r *RouteRegistry) load() {
 	var routes []*gateonv1.Route
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, &routes); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal routes yaml")
+			logger.L.LogError("failed to unmarshal routes yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, &routes); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal routes json")
+			logger.L.LogError("failed to unmarshal routes json", "error", err, "path", r.path)
 			return
 		}
 	}
@@ -58,7 +58,7 @@ func (r *RouteRegistry) load() {
 	for _, rt := range routes {
 		r.routes[rt.Id] = rt
 	}
-	logger.L.Info().Int("count", len(r.routes)).Str("path", r.path).Msg("loaded routes")
+	logger.L.LogInfo("loaded routes", "count", len(r.routes), "path", r.path)
 }
 
 func (r *RouteRegistry) saveLocked() error {

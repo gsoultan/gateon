@@ -8,6 +8,10 @@ import "gateon/v1/common.proto";
 
 message GetGlobalConfigRequest {}
 
+message GetGlobalConfigResponse {
+  GlobalConfig config = 1;
+}
+
 message UpdateGlobalConfigRequest {
   GlobalConfig config = 1;
 }
@@ -32,6 +36,39 @@ message GlobalConfig {
   GeoIPConfig geoip = 13;
   DebuggerConfig debugger = 14;
   SecurityAdvancedConfig security_advanced = 15;
+  AlertingConfig alerting = 16;
+  AuditConfig audit = 17;
+}
+
+message AlertingConfig {
+  bool enabled = 1;
+  repeated AlertDispatcher dispatchers = 2;
+  repeated AlertPlaybook playbooks = 3;
+}
+
+message AlertDispatcher {
+  string id = 1;
+  string name = 2;
+  string type = 3; // "slack", "discord", "webhook", "telegram"
+  string webhook_url = 4;
+  string slack_channel = 5;
+  string telegram_bot_token = 6;
+  string telegram_chat_id = 7;
+}
+
+message AlertPlaybook {
+  string id = 1;
+  string name = 2;
+  string event_type = 3; // "waf_threat", "high_anomaly", "impossible_travel", "auth_failure"
+  double threshold = 4;
+  repeated string dispatcher_ids = 5;
+  string action = 6; // "notify", "block", "challenge"
+}
+
+message AuditConfig {
+  bool enabled = 1;
+  bool sign_entries = 2;
+  string signature_key = 3;
 }
 
 message SecurityAdvancedConfig {
@@ -126,6 +163,8 @@ message ManagementConfig {
   bool enable_port_knocking = 9;
   // PortKnockingSequence is the sequence of ports to "knock" on to open management.
   repeated int32 port_knocking_sequence = 10;
+  // GitOps config for configuration synchronization
+  GitOpsConfig gitops = 11;
 
   reserved 5;
   reserved "host";
@@ -138,6 +177,16 @@ message CorsConfig {
   repeated string exposed_headers = 4;
   bool allow_credentials = 5;
   int32 max_age = 6;
+}
+
+message GitOpsConfig {
+  bool enabled = 1;
+  string repository_url = 2;
+  string branch = 3;
+  string path = 4;
+  int32 sync_interval_seconds = 5;
+  string ssh_private_key = 6;
+  string auth_token = 7;
 }
 
 message AIConfig {
@@ -226,4 +275,14 @@ message AuthConfig {
   string sqlite_path = 3;      // Deprecated: use database_config or database_url
   string database_url = 4;     // Fallback: sqlite:path, postgres://..., mysql://...
   DatabaseConfig database_config = 5;
+  OidcConfig oidc = 6;
+}
+
+message OidcConfig {
+  bool enabled = 1;
+  string issuer = 2;
+  string client_id = 3;
+  string client_secret = 4;
+  repeated string scopes = 5;
+  string redirect_url = 6;
 }

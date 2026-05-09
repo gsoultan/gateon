@@ -32,6 +32,7 @@ export { useRequestsPerSecond } from "./useRequestsPerSecond";
 export { useRouteStats } from "./useRouteStats";
 export { useRoutes } from "./useRoutes";
 export { useSecurityThreats } from "./useSecurityThreats";
+export { useReputations } from "./useReputations";
 export { useServices } from "./useServices";
 export { useTLSOptions } from "./useTLSOptions";
 export { useClientAuthorities } from "./useClientAuthorities";

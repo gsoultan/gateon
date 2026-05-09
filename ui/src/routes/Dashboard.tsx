@@ -28,6 +28,8 @@ import {
   IconWorld,
   IconAddressBook,
   IconDeviceDesktop,
+  IconShieldExclamation,
+  IconShieldOff,
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import {
@@ -423,20 +425,6 @@ export default function Dashboard() {
 
   const trafficMetrics = [
     {
-      label: "Total Requests",
-      value: formatCompact(totalRequests),
-      icon: IconTransferIn,
-      color: "indigo" as const,
-      description: "Cumulative requests since startup",
-    },
-    {
-      label: "Total Bandwidth",
-      value: formatBytes(totalBandwidthBytes),
-      icon: IconTransferIn,
-      color: "blue" as const,
-      description: "Cumulative ingress + egress bytes",
-    },
-    {
       label: "Requests / Day",
       value: formatCompact(requestsToday),
       icon: IconActivity,
@@ -451,30 +439,25 @@ export default function Dashboard() {
       description: "Total bandwidth in the last 24h",
     },
     {
-      label: "Total Errors",
-      value: formatCompact(totalErrors),
+      label: "Mitigated Threats",
+      value: formatCompact(metricsSnap?.middleware.mitigated_threats?.reduce((acc, val) => acc + val.value, 0) || 0),
+      icon: IconShieldExclamation,
+      color: "red" as const,
+      description: "Security threats blocked today",
+    },
+    {
+      label: "Active Threats",
+      value: formatCompact(metricsSnap?.active_suspicious_sessions || 0),
       icon: IconAlertCircle,
-      color: totalErrors > 0 ? ("red" as const) : ("gray" as const),
-      description: "Failed or error responses",
+      color: "orange" as const,
+      description: "Ongoing suspicious activities",
     },
     {
-      label: "Error Rate",
-      value: `${errorRate}%`,
-      icon: IconChartBar,
-      color:
-        parseFloat(errorRate) === 0
-          ? ("green" as const)
-          : parseFloat(errorRate) < 5
-            ? ("yellow" as const)
-            : ("red" as const),
-      description: "Errors / total requests",
-    },
-    {
-      label: "Requests/sec",
-      value: reqPerSec > 0 ? reqPerSec.toFixed(1) : "—",
-      icon: IconActivity,
-      color: "teal" as const,
-      description: "Current throughput (rolling)",
+      label: "eBPF Drops",
+      value: formatCompact(metricsSnap?.middleware.ebpf_dropped_packets?.reduce((acc, val) => acc + val.value, 0) || 0),
+      icon: IconShieldOff,
+      color: "violet" as const,
+      description: "Packets dropped by kernel",
     },
   ];
 

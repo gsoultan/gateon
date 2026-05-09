@@ -46,10 +46,7 @@ func updateCertExpiry(certs []CertInfo) {
 	for _, ci := range certs {
 		cert, err := tls.LoadX509KeyPair(ci.CertFile, ci.KeyFile)
 		if err != nil {
-			logger.L.Warn().
-				Err(err).
-				Str("cert_file", ci.CertFile).
-				Msg("tls_monitor: failed to load certificate")
+			logger.L.LogWarn("tls_monitor: failed to load certificate", "error", err, "cert_file", ci.CertFile)
 			continue
 		}
 
@@ -59,10 +56,7 @@ func updateCertExpiry(certs []CertInfo) {
 
 		leaf, err := x509.ParseCertificate(cert.Certificate[0])
 		if err != nil {
-			logger.L.Warn().
-				Err(err).
-				Str("cert_file", ci.CertFile).
-				Msg("tls_monitor: failed to parse certificate")
+			logger.L.LogWarn("tls_monitor: failed to parse certificate", "error", err, "cert_file", ci.CertFile)
 			continue
 		}
 

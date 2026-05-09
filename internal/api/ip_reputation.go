@@ -83,7 +83,7 @@ func (s *IPReputationStore) update(ctx context.Context) {
 
 	for _, url := range s.config.FeedUrls {
 		if err := s.fetchFeed(ctx, url, newIPs, &newNets); err != nil {
-			logger.L.Error().Err(err).Str("url", url).Msg("failed to fetch IP reputation feed")
+			logger.L.LogError("failed to fetch IP reputation feed", "error", err, "url", url)
 		}
 	}
 

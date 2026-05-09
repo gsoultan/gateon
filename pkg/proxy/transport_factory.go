@@ -105,10 +105,9 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 
 	proxyProtocolEnabled := state.proxyProtocolEnabled
 	if proxyProtocolEnabled && (scheme == "h2" || scheme == "h2c" || scheme == "h3") {
-		logger.L.Warn().
-			Str("target", state.url).
-			Str("scheme", scheme).
-			Msg("proxy protocol is only supported for HTTP/1 backends; disabling for this target")
+		logger.L.LogWarn("proxy protocol is only supported for HTTP/1 backends; disabling for this target",
+			"target", state.url,
+			"scheme", scheme)
 		proxyProtocolEnabled = false
 	}
 

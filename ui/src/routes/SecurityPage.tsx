@@ -32,6 +32,7 @@ import { useSecurityThreats } from "../hooks/useGateon";
 import type { Anomaly } from "../types/gateon";
 import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
+import { ReputationMonitor } from "../components/ReputationMonitor";
 
 const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
   const color =
@@ -156,6 +157,43 @@ export default function SecurityPage() {
           <Title order={3} mt="xs">
             {mitigatedIpsCount} IPs
           </Title>
+        </Paper>
+      </SimpleGrid>
+
+      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
+        <ReputationMonitor />
+        <Paper withBorder p="md" radius="md">
+           <Group mb="md">
+              <ThemeIcon variant="light" color="teal" size="lg">
+                <IconShieldCheck size={20} />
+              </ThemeIcon>
+              <Stack gap={0}>
+                <Text fw={700}>System Compliance</Text>
+                <Text size="xs" c="dimmed">Security standards and automated mitigations</Text>
+              </Stack>
+           </Group>
+           <Stack gap="xs">
+             <Group justify="space-between">
+               <Text size="sm">eBPF XDP Offloading</Text>
+               <Badge variant="dot" color="teal">Active</Badge>
+             </Group>
+             <Group justify="space-between">
+               <Text size="sm">Behavioral Profiling</Text>
+               <Badge variant="dot" color="teal">Active</Badge>
+             </Group>
+             <Group justify="space-between">
+               <Text size="sm">Zero Trust Identity</Text>
+               <Badge variant="dot" color="teal">Active</Badge>
+             </Group>
+             <Group justify="space-between">
+               <Text size="sm">Active Deception (Honeypots)</Text>
+               <Badge variant="dot" color="teal">Active</Badge>
+             </Group>
+             <Group justify="space-between">
+               <Text size="sm">ClamAV Scanning</Text>
+               <Badge variant="dot" color="orange">Pending Config</Badge>
+             </Group>
+           </Stack>
         </Paper>
       </SimpleGrid>
 

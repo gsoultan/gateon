@@ -2,33 +2,146 @@ package logger
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog"
 )
 
-// Logger defines the minimal logging interface for dependency injection (Dependency Inversion).
-// Implementations can be swapped for testing or alternative backends.
+// Logger defines the minimal logging interface for dependency injection.
 type Logger interface {
-	Info() *zerolog.Event
-	Error() *zerolog.Event
-	Debug() *zerolog.Event
-	Fatal() *zerolog.Event
+	LogDebug(msg string, args ...any)
+	LogInfo(msg string, args ...any)
+	LogWarn(msg string, args ...any)
+	LogError(msg string, args ...any)
 }
 
-// zerologAdapter adapts *zerolog.Logger to Logger (zerolog uses pointer receivers).
-type zerologAdapter struct{ *zerolog.Logger }
-
 // L is the global logger instance.
-var L zerolog.Logger
+var L *SlogShim = &SlogShim{l: slog.Default()}
 
-// Default returns the global logger as Logger interface (for injection).
+// Default returns the global logger.
 func Default() Logger {
-	return &zerologAdapter{&L}
+	if L == nil {
+		return &SlogShim{l: slog.Default()}
+	}
+	return L
+}
+
+type SlogShim struct {
+	l *slog.Logger
+}
+
+func (s *SlogShim) Write(p []byte) (n int, err error) {
+	if s == nil || s.l == nil {
+		slog.Info(string(p))
+		return len(p), nil
+	}
+	s.l.Info(string(p))
+	return len(p), nil
+}
+
+// Zerolog-compatible methods
+func (s *SlogShim) Info() *Event {
+	if s == nil || s.l == nil {
+		return &Event{l: slog.Default(), level: slog.LevelInfo}
+	}
+	return &Event{l: s.l, level: slog.LevelInfo}
+}
+func (s *SlogShim) Error() *Event {
+	if s == nil || s.l == nil {
+		return &Event{l: slog.Default(), level: slog.LevelError}
+	}
+	return &Event{l: s.l, level: slog.LevelError}
+}
+func (s *SlogShim) Debug() *Event {
+	if s == nil || s.l == nil {
+		return &Event{l: slog.Default(), level: slog.LevelDebug}
+	}
+	return &Event{l: s.l, level: slog.LevelDebug}
+}
+func (s *SlogShim) Warn() *Event {
+	if s == nil || s.l == nil {
+		return &Event{l: slog.Default(), level: slog.LevelWarn}
+	}
+	return &Event{l: s.l, level: slog.LevelWarn}
+}
+func (s *SlogShim) Fatal() *Event {
+	if s == nil || s.l == nil {
+		return &Event{l: slog.Default(), level: slog.LevelError, isFatal: true}
+	}
+	return &Event{l: s.l, level: slog.LevelError, isFatal: true}
+}
+
+type Event struct {
+	l       *slog.Logger
+	level   slog.Level
+	args    []any
+	isFatal bool
+}
+
+func (e *Event) Str(k, v string) *Event               { e.args = append(e.args, k, v); return e }
+func (e *Event) Int(k string, v int) *Event           { e.args = append(e.args, k, v); return e }
+func (e *Event) Int32(k string, v int32) *Event       { e.args = append(e.args, k, v); return e }
+func (e *Event) Int64(k string, v int64) *Event       { e.args = append(e.args, k, v); return e }
+func (e *Event) Float64(k string, v float64) *Event   { e.args = append(e.args, k, v); return e }
+func (e *Event) Bool(k string, v bool) *Event         { e.args = append(e.args, k, v); return e }
+func (e *Event) Err(err error) *Event                 { e.args = append(e.args, "error", err); return e }
+func (e *Event) Interface(k string, v any) *Event     { e.args = append(e.args, k, v); return e }
+func (e *Event) Strs(k string, v []string) *Event     { e.args = append(e.args, k, v); return e }
+func (e *Event) Dur(k string, v time.Duration) *Event { e.args = append(e.args, k, v); return e }
+
+func (e *Event) Msg(msg string) {
+	if e == nil || e.l == nil {
+		return
+	}
+	e.l.Log(context.Background(), e.level, msg, e.args...)
+	if e.isFatal {
+		os.Exit(1)
+	}
+}
+
+func (e *Event) Msgf(format string, v ...any) {
+	if e == nil || e.l == nil {
+		return
+	}
+	e.l.Log(context.Background(), e.level, fmt.Sprintf(format, v...), e.args...)
+	if e.isFatal {
+		os.Exit(1)
+	}
+}
+
+// Now for the Logger interface (DI)
+func (s *SlogShim) LogInfo(msg string, args ...any) {
+	if s == nil || s.l == nil {
+		slog.Info(msg, args...)
+		return
+	}
+	s.l.Info(msg, args...)
+}
+func (s *SlogShim) LogError(msg string, args ...any) {
+	if s == nil || s.l == nil {
+		slog.Error(msg, args...)
+		return
+	}
+	s.l.Error(msg, args...)
+}
+func (s *SlogShim) LogWarn(msg string, args ...any) {
+	if s == nil || s.l == nil {
+		slog.Warn(msg, args...)
+		return
+	}
+	s.l.Warn(msg, args...)
+}
+func (s *SlogShim) LogDebug(msg string, args ...any) {
+	if s == nil || s.l == nil {
+		slog.Debug(msg, args...)
+		return
+	}
+	s.l.Debug(msg, args...)
 }
 
 type LogBroadcast struct {
@@ -49,7 +162,6 @@ func (lb *LogBroadcast) Subscribe() (chan string, []string) {
 	defer lb.mu.Unlock()
 	ch := make(chan string, 100)
 	lb.subscribers[ch] = struct{}{}
-	// Return a copy of the history
 	hist := make([]string, len(lb.history))
 	copy(hist, lb.history)
 	return ch, hist
@@ -66,15 +178,10 @@ func (lb *LogBroadcast) Write(p []byte) (n int, err error) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 	msg := string(p)
-
-	// Add to history (newest first for UI, but let's keep it chronologically in buffer)
-	// UI does `[event.data, ...prev]` so newest is at start.
-	// Let's store newest at end of buffer.
 	lb.history = append(lb.history, msg)
 	if len(lb.history) > lb.maxHistory {
 		lb.history = lb.history[1:]
 	}
-
 	for ch := range lb.subscribers {
 		select {
 		case ch <- msg:
@@ -84,8 +191,6 @@ func (lb *LogBroadcast) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// FilteredHandshakeWriter wraps an io.Writer and filters out TLS handshake EOF errors.
-// These are common from probes or clients that disconnect abruptly during handshake.
 type FilteredHandshakeWriter struct {
 	Out     io.Writer
 	OnError func(remoteAddr, err string)
@@ -95,7 +200,6 @@ func (w *FilteredHandshakeWriter) Write(p []byte) (n int, err error) {
 	if bytes.Contains(p, []byte("http: TLS handshake error")) {
 		msg := string(p)
 		if bytes.Contains(p, []byte("EOF")) {
-			// Report it to diagnostics even if we filter it from logs
 			if w.OnError != nil {
 				w.OnError("", msg)
 			}
@@ -108,37 +212,46 @@ func (w *FilteredHandshakeWriter) Write(p []byte) (n int, err error) {
 	return w.Out.Write(p)
 }
 
-// NewFilteredHandshakeLogger returns a log.Logger that filters out TLS handshake EOF errors.
 func NewFilteredHandshakeLogger(out io.Writer, onError func(string, string)) *log.Logger {
 	return log.New(&FilteredHandshakeWriter{Out: out, OnError: onError}, "", 0)
 }
 
 func Init(prod bool) error {
-	zerolog.TimeFieldFormat = time.RFC3339
-
-	var output io.Writer
-	if prod {
-		output = os.Stdout
-	} else {
-		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05"}
-	}
-
-	// Use multi-writer to send logs to stdout and our broadcaster
-	multi := zerolog.MultiLevelWriter(output, Broadcaster)
-
-	level := zerolog.InfoLevel
+	level := slog.LevelInfo
 	if !prod {
-		level = zerolog.DebugLevel
+		level = slog.LevelDebug
 	}
-
-	L = zerolog.New(multi).With().Timestamp().Logger().Level(level)
+	opts := &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey && !a.Value.Time().IsZero() {
+				a.Value = slog.StringValue(a.Value.Time().Format(time.RFC3339))
+			}
+			return a
+		},
+	}
+	var handler slog.Handler
+	if prod {
+		handler = slog.NewJSONHandler(io.MultiWriter(os.Stdout, Broadcaster), opts)
+	} else {
+		handler = slog.NewTextHandler(io.MultiWriter(os.Stdout, Broadcaster), opts)
+	}
+	L = &SlogShim{l: slog.New(handler)}
+	slog.SetDefault(L.l)
 	return nil
 }
 
-func Sync() {
-	// zerolog doesn't have a Sync method like zap, but we keep it for compatibility
-}
+func Sync() {}
 
 func IsProd() bool {
 	return os.Getenv("ENV") == "production"
+}
+
+func Fatal(msg string, args ...any) {
+	if L != nil && L.l != nil {
+		L.l.Error(msg, args...)
+	} else {
+		slog.Error(msg, args...)
+	}
+	os.Exit(1)
 }

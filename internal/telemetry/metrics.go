@@ -1,18 +1,52 @@
 package telemetry
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
 )
+
+// StartEBpFPollLoop starts a background worker to poll eBPF stats and update Prometheus metrics.
+func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
+	if manager == nil {
+		return
+	}
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	logger.L.LogInfo("eBPF metrics polling loop started")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			stats, err := manager.GetMapStats()
+			if err != nil {
+				logger.L.LogError("failed to get eBPF map stats", "error", err)
+				continue
+			}
+
+			ActiveShunnedEntitiesTotal.WithLabelValues("ip").Set(float64(stats.ShunnedIPsCount))
+
+			for reason, count := range stats.DroppedPackets {
+				EbpfDroppedPacketsTotal.WithLabelValues(reason).Add(float64(count))
+			}
+		}
+	}
+}
 
 // --- Counters ---
 
@@ -118,6 +152,24 @@ var MiddlewareBotManagementTotal = promauto.NewCounterVec(prometheus.CounterOpts
 	Help: "Total bot management challenge outcomes.",
 }, []string{"route", "outcome"})
 
+// MitigatedThreatsTotal counts mitigated threats by category and severity.
+var MitigatedThreatsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_mitigated_threats_total",
+	Help: "Total number of mitigated threats by category and severity.",
+}, []string{"category", "severity", "action"})
+
+// BotMitigationTotal counts bot mitigation by specific signal.
+var BotMitigationTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_bot_mitigation_total",
+	Help: "Total bot mitigation events by signal.",
+}, []string{"signal"})
+
+// EbpfDroppedPacketsTotal counts packets dropped at the eBPF/XDP level.
+var EbpfDroppedPacketsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_ebpf_dropped_packets_total",
+	Help: "Total number of packets dropped by eBPF/XDP.",
+}, []string{"reason"})
+
 // MiddlewareGeoIPBlockedTotal counts GeoIP blocks by country.
 var MiddlewareGeoIPBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_geoip_blocked_total",
@@ -182,6 +234,33 @@ var ConfigReloadsTotal = promauto.NewCounter(prometheus.CounterOpts{
 var ProxyCacheInvalidationsTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "gateon_proxy_cache_invalidations_total",
 	Help: "Total proxy cache invalidation events.",
+})
+
+// --- Gauges ---
+
+// ActiveSuspiciousSessionsTotal tracks the number of active suspicious client sessions.
+var ActiveSuspiciousSessionsTotal = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "gateon_active_suspicious_sessions_total",
+	Help: "Number of active client sessions with a low reputation score.",
+})
+
+// ActiveShunnedEntitiesTotal tracks the number of entities currently in the eBPF/XDP blocklists.
+var ActiveShunnedEntitiesTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "gateon_active_shunned_entities_total",
+	Help: "Total number of entries currently in the eBPF/XDP blocklists.",
+}, []string{"type"})
+
+// ActiveAnomalyScore tracks current anomaly scores across all active clients.
+var ActiveAnomalyScore = promauto.NewHistogram(prometheus.HistogramOpts{
+	Name:    "gateon_active_anomaly_score",
+	Help:    "Histogram of current anomaly scores across all active clients.",
+	Buckets: []float64{0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
+})
+
+// ActiveUnverifiedClientsTotal tracks the number of clients currently in a challenge state.
+var ActiveUnverifiedClientsTotal = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "gateon_active_unverified_clients_total",
+	Help: "Number of clients currently in the JS Challenge or Captcha state.",
 })
 
 // --- Histograms ---

@@ -14,6 +14,21 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
+// AlertingHandler is a function type for alerting integration.
+type AlertingHandler func(SecurityThreat)
+
+var (
+	onThreatAlert AlertingHandler
+	alertMu       sync.RWMutex
+)
+
+// SetAlertingHandler registers a callback for security threats.
+func SetAlertingHandler(h AlertingHandler) {
+	alertMu.Lock()
+	onThreatAlert = h
+	alertMu.Unlock()
+}
+
 // Persistent store for path metrics with retention control.
 // Design goals:
 // - Append/increment aggregated rows per (day, host, path)
@@ -70,6 +85,10 @@ type SecurityThreat struct {
 	JA4         string
 	RouteID     string
 	RequestURI  string
+	Category    string
+	Severity    string
+	ASN         string
+	ActionTaken string
 }
 
 type pathStatsStore struct {
@@ -166,7 +185,7 @@ func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -184,7 +203,7 @@ func (s *pathStatsStore) loop() {
 		if len(batch) > 0 {
 			tx, err := s.db.Begin()
 			if err != nil {
-				logger.Default().Error().Err(err).Msg("telemetry: begin transaction failed")
+				logger.Default().LogError("telemetry: begin transaction failed", "error", err)
 			} else {
 				pathStmt, _ := s.upsertStmt(tx)
 				domainStmt, _ := s.domainUpsertStmt(tx)
@@ -196,14 +215,14 @@ func (s *pathStatsStore) loop() {
 							// Use 30-minute buckets: hour*2 + (minute/30) -> 0-47
 							bucket := inc.atTime.UTC().Hour()*2 + inc.atTime.UTC().Minute()/30
 							if _, err := domainStmt.Exec(day, bucket, inc.host, 1, inc.latS, inc.bytesTotal); err != nil {
-								logger.Default().Error().Err(err).Msg("domain stats: upsert failed")
+								logger.Default().LogError("domain stats: upsert failed", "error", err)
 							}
 						}
 					} else {
 						if pathStmt != nil {
 							day := inc.atTime.UTC().Format("2006-01-02")
 							if _, err := pathStmt.Exec(day, inc.host, inc.path, 1, inc.latS, inc.bytesTotal); err != nil {
-								logger.Default().Error().Err(err).Msg("path stats: upsert failed")
+								logger.Default().LogError("path stats: upsert failed", "error", err)
 							}
 						}
 					}
@@ -222,12 +241,12 @@ func (s *pathStatsStore) loop() {
 		if len(traceBatch) > 0 {
 			tx, err := s.db.Begin()
 			if err != nil {
-				logger.Default().Error().Err(err).Msg("traces: begin transaction failed")
+				logger.Default().LogError("traces: begin transaction failed", "error", err)
 			} else {
 				if stmt, err := s.traceInsertStmt(tx); err == nil {
 					for _, tr := range traceBatch {
 						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.Fingerprint, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI, tr.JA3, tr.RequestHeaders, tr.RequestBody, tr.ResponseHeaders, tr.ResponseBody, tr.JA4); err != nil {
-							logger.Default().Error().Err(err).Msg("traces: insert failed")
+							logger.Default().LogError("traces: insert failed", "error", err)
 						}
 					}
 					stmt.Close()
@@ -242,12 +261,12 @@ func (s *pathStatsStore) loop() {
 		if len(threatBatch) > 0 {
 			tx, err := s.db.Begin()
 			if err != nil {
-				logger.Default().Error().Err(err).Msg("threats: begin transaction failed")
+				logger.Default().LogError("threats: begin transaction failed", "error", err)
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI); err != nil {
-							logger.Default().Error().Err(err).Msg("threats: insert failed")
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken); err != nil {
+							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
 					stmt.Close()
@@ -306,12 +325,12 @@ func (s *pathStatsStore) prune() {
 		cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
 		q := s.dialect.Rebind(QueryPrunePathStats)
 		if _, err := s.db.ExecContext(ctx, q, cutoff); err != nil {
-			logger.Default().Error().Err(err).Msg("path stats: prune failed")
+			logger.Default().LogError("path stats: prune failed", "error", err)
 		}
 
 		qDomain := s.dialect.Rebind(QueryPruneDomainStats)
 		if _, err := s.db.ExecContext(ctx, qDomain, cutoff); err != nil {
-			logger.Default().Error().Err(err).Msg("domain stats: prune failed")
+			logger.Default().LogError("domain stats: prune failed", "error", err)
 		}
 	}
 
@@ -324,7 +343,7 @@ func (s *pathStatsStore) prune() {
 		cutoffTime := time.Now().AddDate(0, 0, -accessDays)
 		qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
 		if _, err := s.db.ExecContext(ctx, qTraces, cutoffTime); err != nil {
-			logger.Default().Error().Err(err).Msg("traces: prune failed")
+			logger.Default().LogError("traces: prune failed", "error", err)
 		}
 	}
 
@@ -337,7 +356,7 @@ func (s *pathStatsStore) prune() {
 		cutoffTime := time.Now().AddDate(0, 0, -threatDays)
 		qThreats := s.dialect.Rebind("DELETE FROM security_threats WHERE timestamp < ?")
 		if _, err := s.db.ExecContext(ctx, qThreats, cutoffTime); err != nil {
-			logger.Default().Error().Err(err).Msg("security_threats: prune failed")
+			logger.Default().LogError("security_threats: prune failed", "error", err)
 		}
 	}
 
@@ -476,6 +495,17 @@ func RecordSecurityThreat(t SecurityThreat) {
 		store.scoreCache.Add(t.SourceIP, score)
 	}
 
+	if t.Fingerprint != "" {
+		DecreaseReputation(t.Fingerprint, t.Score/2) // Penalty is half the threat score
+	}
+
+	alertMu.RLock()
+	h := onThreatAlert
+	alertMu.RUnlock()
+	if h != nil {
+		h(t)
+	}
+
 	select {
 	case store.threatInCh <- t:
 	default:
@@ -508,7 +538,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3, ja4, request_headers, request_body, response_headers, response_body FROM traces ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
-		logger.Default().Error().Err(err).Msg("traces: query failed")
+		logger.Default().LogError("traces: query failed", "error", err)
 		return nil
 	}
 	defer rows.Close()
@@ -517,7 +547,7 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 		var tr TraceRecord
 		var reqHeaders, reqBody, respHeaders, respBody sql.NullString
 		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &reqHeaders, &reqBody, &respHeaders, &respBody); err != nil {
-			logger.Default().Error().Err(err).Msg("traces: scan failed")
+			logger.Default().LogError("traces: scan failed", "error", err)
 			continue
 		}
 		tr.RequestHeaders = reqHeaders.String
@@ -542,7 +572,7 @@ func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 	q := store.dialect.Rebind(QueryGetPathStatsWin)
 	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
-		logger.Default().Error().Err(err).Msg("path stats: DB query failed, falling back to in-memory stats")
+		logger.Default().LogError("path stats: DB query failed, falling back to in-memory stats", "error", err)
 		return getInMemoryPathStats()
 	}
 	defer rows.Close()
@@ -553,7 +583,7 @@ func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 		var lsum float64
 		var bsum int64
 		if err := rows.Scan(&host, &p, &rc, &lsum, &bsum); err != nil {
-			logger.Default().Error().Err(err).Msg("path stats: scan row failed")
+			logger.Default().LogError("path stats: scan row failed", "error", err)
 			continue
 		}
 		avg := 0.0
@@ -584,7 +614,7 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	q := store.dialect.Rebind(QueryGetDomainStatsWin)
 	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
-		logger.Default().Error().Err(err).Msg("domain stats: query failed")
+		logger.Default().LogError("domain stats: query failed", "error", err)
 		return nil
 	}
 	defer rows.Close()
@@ -637,7 +667,7 @@ func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 	q := store.dialect.Rebind(QueryGetTrafficHistory)
 	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
-		logger.Default().Error().Err(err).Msg("traffic history: query failed")
+		logger.Default().LogError("traffic history: query failed", "error", err)
 		return nil
 	}
 	defer rows.Close()
@@ -673,7 +703,7 @@ func GetDomainStatsHourly(day string, hour int) []DomainStats {
 	q := store.dialect.Rebind(QueryGetDomainStatsHourly)
 	rows, err := store.db.Query(q, day, hour)
 	if err != nil {
-		logger.Default().Error().Err(err).Msg("domain stats: hourly query failed")
+		logger.Default().LogError("domain stats: hourly query failed", "error", err)
 		return nil
 	}
 	defer rows.Close()
@@ -716,18 +746,18 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri FROM security_threats ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken FROM security_threats ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
-		logger.Default().Error().Err(err).Msg("threats: query failed")
+		logger.Default().LogError("threats: query failed", "error", err)
 		return nil
 	}
 	defer rows.Close()
 	res := make([]SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
 		var th SecurityThreat
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI); err != nil {
-			logger.Default().Error().Err(err).Msg("threats: scan failed")
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken); err != nil {
+			logger.Default().LogError("threats: scan failed", "error", err)
 			continue
 		}
 		res = append(res, th)

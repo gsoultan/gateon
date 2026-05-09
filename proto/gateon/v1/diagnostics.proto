@@ -41,6 +41,20 @@ message ListSecurityThreatsResponse {
   repeated Anomaly threats = 1;
 }
 
+message ListReputationsRequest {
+  int32 limit = 1;
+}
+
+message ListReputationsResponse {
+  repeated Reputation reputations = 1;
+}
+
+message Reputation {
+  string fingerprint = 1;
+  double score = 2;
+  string last_event = 3;
+}
+
 message DependencyHealth {
   string name = 1;
   bool healthy = 2;

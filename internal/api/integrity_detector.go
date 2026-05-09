@@ -22,7 +22,7 @@ func init() {
 		return
 	}
 	originalChecksum, _ = calculateChecksum(exePath)
-	logger.L.Info().Str("checksum", originalChecksum).Msg("Initial system integrity checksum calculated")
+	logger.L.LogInfo("Initial system integrity checksum calculated", "checksum", originalChecksum)
 }
 
 // IntegrityDetector monitors the Gateon binary for unauthorized modifications.

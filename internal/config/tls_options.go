@@ -37,7 +37,7 @@ func (r *TLSOptionRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to read tls options file")
+			logger.L.LogError("failed to read tls options file", "error", err, "path", r.path)
 		}
 		return
 	}
@@ -45,12 +45,12 @@ func (r *TLSOptionRegistry) load() {
 	var options []*gateonv1.TLSOption
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, &options); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal tls options yaml")
+			logger.L.LogError("failed to unmarshal tls options yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, &options); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal tls options json")
+			logger.L.LogError("failed to unmarshal tls options json", "error", err, "path", r.path)
 			return
 		}
 	}
@@ -58,7 +58,7 @@ func (r *TLSOptionRegistry) load() {
 	for _, opt := range options {
 		r.options[opt.Id] = opt
 	}
-	logger.L.Info().Int("count", len(r.options)).Str("path", r.path).Msg("loaded tls options")
+	logger.L.LogInfo("loaded tls options", "count", len(r.options), "path", r.path)
 }
 
 func (r *TLSOptionRegistry) saveLocked() error {

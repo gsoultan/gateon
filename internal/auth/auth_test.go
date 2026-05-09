@@ -6,14 +6,58 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
+
+func TestAuthenticate(t *testing.T) {
+	dbPath := "test_auth_table.db"
+	defer os.Remove(dbPath)
+
+	_ = logger.Init(false)
+	m, err := NewManager(dbPath, "12345678901234567890123456789012", logger.Default())
+	if err != nil {
+		t.Fatalf("failed to create manager: %v", err)
+	}
+	defer m.Close()
+
+	// Seed user
+	user := &gateonv1.User{
+		Username: "testuser",
+		Password: "password123",
+		Role:     RoleOperator,
+	}
+	if err := m.UpsertUser(user); err != nil {
+		t.Fatalf("failed to seed user: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		username string
+		password string
+		wantErr  error
+	}{
+		{"Valid login", "testuser", "password123", nil},
+		{"Invalid password", "testuser", "wrong", ErrInvalidCredentials},
+		{"Invalid user", "nonexistent", "password", ErrInvalidCredentials},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := m.Authenticate(tt.username, tt.password)
+			if err != tt.wantErr {
+				t.Errorf("Authenticate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
 
 func TestAccountLockout(t *testing.T) {
 	dbPath := "test_auth.db"
 	defer os.Remove(dbPath)
 
-	m, err := NewManager(dbPath, "12345678901234567890123456789012")
+	_ = logger.Init(false)
+	m, err := NewManager(dbPath, "12345678901234567890123456789012", logger.Default())
 	if err != nil {
 		t.Fatalf("failed to create manager: %v", err)
 	}

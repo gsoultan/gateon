@@ -80,12 +80,11 @@ func Recovery() Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
-					logger.L.Error().
-						Interface("panic", err).
-						Str("path", r.URL.Path).
-						Str("method", r.Method).
-						Str("stack", string(debug.Stack())).
-						Msg("handler panic recovered")
+					logger.L.LogError("handler panic recovered",
+						"panic", err,
+						"path", r.URL.Path,
+						"method", r.Method,
+						"stack", string(debug.Stack()))
 					w.WriteHeader(http.StatusInternalServerError)
 				}
 			}()

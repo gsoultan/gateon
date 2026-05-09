@@ -38,28 +38,27 @@ func (m *HAManager) Start(ctx context.Context) {
 		return
 	}
 
-	logger.L.Info().
-		Int32("vrid", m.config.VirtualRouterId).
-		Int32("priority", m.config.Priority).
-		Strs("vips", m.config.VirtualIps).
-		Str("interface", m.config.Interface).
-		Msg("High Availability Manager started")
+	logger.L.LogInfo("High Availability Manager started",
+		"vrid", m.config.VirtualRouterId,
+		"priority", m.config.Priority,
+		"vips", m.config.VirtualIps,
+		"interface", m.config.Interface)
 
 	// Set up UDP listener for heartbeats (VRRP uses 224.0.0.18, but we use a simpler UDP port for ease of deployment)
 	// Default port: 8946
 	addr, err := net.ResolveUDPAddr("udp", "224.0.0.18:8946")
 	if err != nil {
-		logger.L.Error().Err(err).Msg("Failed to resolve VRRP multicast address")
+		logger.L.LogError("Failed to resolve VRRP multicast address", "error", err)
 		return
 	}
 
 	conn, err := net.ListenMulticastUDP("udp", nil, addr)
 	if err != nil {
 		// Fallback to unicast if multicast fails (e.g., in some cloud envs)
-		logger.L.Warn().Err(err).Msg("Multicast failed, falling back to unicast listener on 8946")
+		logger.L.LogWarn("Multicast failed, falling back to unicast listener on 8946", "error", err)
 		conn, err = net.ListenUDP("udp", &net.UDPAddr{Port: 8946})
 		if err != nil {
-			logger.L.Error().Err(err).Msg("Failed to start HA heartbeat listener")
+			logger.L.LogError("Failed to start HA heartbeat listener", "error", err)
 			return
 		}
 	}
@@ -85,7 +84,7 @@ func (m *HAManager) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.L.Info().Msg("HA Manager stopping, releasing resources")
+			logger.L.LogInfo("HA Manager stopping, releasing resources")
 			m.releaseVIPs()
 			return
 		case <-ticker.C:
@@ -123,7 +122,7 @@ func (m *HAManager) listenLoop(ctx context.Context) {
 			m.lastSeen = time.Now()
 			m.masterSeen = true
 			if m.active {
-				logger.L.Info().Str("peer", addr.String()).Int32("peer_prio", priority).Msg("Higher priority peer detected, yielding MASTER status")
+				logger.L.LogInfo("Higher priority peer detected, yielding MASTER status", "peer", addr.String(), "peer_prio", priority)
 				m.releaseVIPs()
 			}
 		} else if priority == m.config.Priority {
@@ -148,7 +147,7 @@ func (m *HAManager) step(ctx context.Context) {
 	// If we haven't seen a master for 3 intervals, we become master
 	if time.Since(m.lastSeen) > 3*interval {
 		if !m.active {
-			logger.L.Info().Msg("No master detected, transitioning to MASTER state")
+			logger.L.LogInfo("No master detected, transitioning to MASTER state")
 			m.acquireVIPs()
 			m.active = true
 		}
@@ -182,12 +181,12 @@ func (m *HAManager) sendAdvert() {
 
 func (m *HAManager) acquireVIPs() {
 	if runtime.GOOS != "linux" {
-		logger.L.Info().Msg("VIP management (ip addr) is skipped on non-Linux OS")
+		logger.L.LogInfo("VIP management (ip addr) is skipped on non-Linux OS")
 		return
 	}
 
 	if m.config.Interface == "" {
-		logger.L.Warn().Msg("No interface specified for HA VIPs")
+		logger.L.LogWarn("No interface specified for HA VIPs")
 		return
 	}
 
@@ -195,9 +194,9 @@ func (m *HAManager) acquireVIPs() {
 		// Example: ip addr add 192.168.1.100/24 dev eth0
 		cmd := exec.Command("ip", "addr", "add", vip, "dev", m.config.Interface)
 		if err := cmd.Run(); err != nil {
-			logger.L.Error().Err(err).Str("vip", vip).Msg("Failed to add VIP to interface")
+			logger.L.LogError("Failed to add VIP to interface", "error", err, "vip", vip)
 		} else {
-			logger.L.Info().Str("vip", vip).Msg("Successfully acquired VIP")
+			logger.L.LogInfo("Successfully acquired VIP", "vip", vip)
 		}
 	}
 }
@@ -210,9 +209,9 @@ func (m *HAManager) releaseVIPs() {
 	for _, vip := range m.config.VirtualIps {
 		cmd := exec.Command("ip", "addr", "del", vip, "dev", m.config.Interface)
 		if err := cmd.Run(); err != nil {
-			logger.L.Error().Err(err).Str("vip", vip).Msg("Failed to release VIP")
+			logger.L.LogError("Failed to release VIP", "error", err, "vip", vip)
 		} else {
-			logger.L.Info().Str("vip", vip).Msg("Successfully released VIP")
+			logger.L.LogInfo("Successfully released VIP", "vip", vip)
 		}
 	}
 	m.active = false

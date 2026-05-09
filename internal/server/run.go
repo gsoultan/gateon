@@ -9,7 +9,12 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/domain/canary"
+	dentrypoint "github.com/gsoultan/gateon/internal/domain/entrypoint"
+	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
+	"github.com/gsoultan/gateon/internal/domain/route"
+	"github.com/gsoultan/gateon/internal/domain/service"
+	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
@@ -55,13 +60,13 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		EbpfManager:        s.EbpfManager,
 		WafUpdater:         s.WafUpdater.(*middleware.WAFUpdater),
 	})
-	routeService := domain.NewRouteService(s.RouteStore, proxyInvalidator)
-	serviceService := domain.NewServiceService(s.ServiceStore, s.RouteStore, proxyInvalidator)
-	epService := domain.NewEntryPointService(s.EpStore)
+	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
+	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)
+	epService := dentrypoint.NewService(s.EpStore, s.Logger)
 	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ".")
-	mwService := domain.NewMiddlewareServiceWithOptions(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{})
-	tlsOptService := domain.NewTLSOptionService(s.TLSOptStore, s.RouteStore, proxyInvalidator)
-	canaryService := domain.NewCanaryService(serviceService)
+	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger)
+	tlsOptService := dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger)
+	canaryService := canary.NewService(serviceService, s.Logger)
 	aiService := ai.NewAIService(s.GlobalStore, s.RouteStore, s.ServiceStore, s.MwStore, s.EpStore)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
@@ -107,7 +112,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	mgmtCors := BuildManagementCORS(mgmtConfig)
 	tlsConfig, err := s.TLSManager.GetTLSConfig()
 	if err != nil {
-		logger.L.Fatal().Err(err).Msg("failed to initialize tls")
+		logger.Fatal("failed to initialize tls", "error", err)
 	}
 	// When global TLS is not explicitly enabled but at least one entrypoint
 	// has TLS turned on, create a minimal TLS config so that SNI can
@@ -117,7 +122,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 			MinVersion: tls.VersionTLS12,
 			NextProtos: []string{"h2", "http/1.1"},
 		}
-		logger.L.Info().Msg("created base TLS config for entrypoint-level TLS (global TLS not enabled)")
+		logger.L.LogInfo("created base TLS config for entrypoint-level TLS (global TLS not enabled)")
 	}
 	SetupSNI(tlsConfig, s.TLSManager, SNIDeps{
 		RouteStore:  s.RouteStore,
@@ -136,7 +141,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	certInfos := collectCertInfos(ctx, s, s.TLSManager)
 	telemetry.StartTLSCertMonitor(certInfos, metricsStop)
 
-	logger.L.Info().Str("port", s.Port).Msg("Gateon API Gateway started")
+	logger.L.LogInfo("Gateon API Gateway started", "port", s.Port)
 
 	wg.Go(func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -152,7 +157,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	<-ctx.Done()
-	logger.L.Info().Msg("shutting down gracefully")
+	logger.L.LogInfo("shutting down gracefully")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer cancel()
 	shutdownReg.ShutdownAll(shutdownCtx)
@@ -164,7 +169,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 	close(metricsStop)
 	wg.Wait()
-	logger.L.Info().Msg("shutdown complete")
+	logger.L.LogInfo("shutdown complete")
 }
 
 // collectCertInfos gathers TLS certificate info from global TLS config and TLS Manager for expiry monitoring.

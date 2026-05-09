@@ -1,0 +1,37 @@
+package api
+
+import (
+	"context"
+	"time"
+
+	"github.com/gsoultan/gateon/internal/audit"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
+
+func (s *ApiService) ListAuditLogs(ctx context.Context, req *gateonv1.ListAuditLogsRequest) (*gateonv1.ListAuditLogsResponse, error) {
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 100
+	}
+
+	logs, err := audit.GetLogs(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	protoLogs := make([]*gateonv1.AuditLog, 0, len(logs))
+	for _, l := range logs {
+		protoLogs = append(protoLogs, &gateonv1.AuditLog{
+			Id:        l.ID,
+			UserId:    l.UserID,
+			Action:    l.Action,
+			Resource:  l.Resource,
+			Details:   l.Details,
+			Timestamp: l.Timestamp.Format(time.RFC3339),
+			IpAddress: l.IPAddress,
+			Signature: l.Signature,
+		})
+	}
+
+	return &gateonv1.ListAuditLogsResponse{Logs: protoLogs}, nil
+}

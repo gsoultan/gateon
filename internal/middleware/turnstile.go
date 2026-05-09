@@ -67,7 +67,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			if token == "" {
 				telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
 				http.Error(w, "Turnstile token required", http.StatusBadRequest)
-				logger.L.Debug().Str("path", r.URL.Path).Msg("turnstile: missing token")
+				logger.L.LogDebug("turnstile: missing token", "path", r.URL.Path)
 				return
 			}
 
@@ -80,7 +80,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, turnstileVerifyURL, bytes.NewBufferString(form.Encode()))
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
-				logger.L.Error().Err(err).Msg("turnstile: create request failed")
+				logger.L.LogError("turnstile: create request failed", "error", err)
 				return
 			}
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -88,7 +88,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			resp, err := client.Do(req)
 			if err != nil {
 				http.Error(w, "verification service unavailable", http.StatusBadGateway)
-				logger.L.Error().Err(err).Msg("turnstile: verify request failed")
+				logger.L.LogError("turnstile: verify request failed", "error", err)
 				return
 			}
 			defer resp.Body.Close()
@@ -99,18 +99,17 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 				http.Error(w, "verification failed", http.StatusBadRequest)
-				logger.L.Warn().Err(err).Msg("turnstile: decode response failed")
+				logger.L.LogWarn("turnstile: decode response failed", "error", err)
 				return
 			}
 
 			if !result.Success {
 				telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
 				http.Error(w, fmt.Sprintf("Turnstile verification failed: %v", result.ErrorCodes), http.StatusBadRequest)
-				logger.L.Debug().
-					Strs("error_codes", result.ErrorCodes).
-					Str("path", r.URL.Path).
-					Str("ip", remoteIP).
-					Msg("turnstile: verification failed")
+				logger.L.LogDebug("turnstile: verification failed",
+					"error_codes", result.ErrorCodes,
+					"path", r.URL.Path,
+					"ip", remoteIP)
 				return
 			}
 

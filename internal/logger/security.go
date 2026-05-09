@@ -8,28 +8,28 @@ import (
 
 // SecurityEvent logs a security-relevant event for audit and monitoring.
 func SecurityEvent(event string, r *http.Request, reason string) {
-	L.Warn().
-		Str("event", event).
-		Str("request_id", request.GetID(r)).
-		Str("ip", clientIP(r)).
-		Str("path", r.URL.Path).
-		Str("reason", reason).
-		Msg("security event")
+	L.LogWarn("security event",
+		"event", event,
+		"request_id", request.GetID(r),
+		"ip", clientIP(r),
+		"path", r.URL.Path,
+		"reason", reason,
+	)
 }
 
 // RBACPermissionDenied logs an RBAC denial for audit.
 func RBACPermissionDenied(r *http.Request, userID, role, action, resource string) {
-	L.Warn().
-		Str("event", "rbac_permission_denied").
-		Str("request_id", request.GetID(r)).
-		Str("ip", clientIP(r)).
-		Str("path", r.URL.Path).
-		Str("method", r.Method).
-		Str("user_id", userID).
-		Str("role", role).
-		Str("action", action).
-		Str("resource", resource).
-		Msg("RBAC permission denied")
+	L.LogWarn("RBAC permission denied",
+		"event", "rbac_permission_denied",
+		"request_id", request.GetID(r),
+		"ip", clientIP(r),
+		"path", r.URL.Path,
+		"method", r.Method,
+		"user_id", userID,
+		"role", role,
+		"action", action,
+		"resource", resource,
+	)
 }
 
 func clientIP(r *http.Request) string {

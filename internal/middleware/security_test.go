@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gsoultan/gateon/internal/ebpf"
 )
 
 func TestWAF_AuditLogAndBodyLimits(t *testing.T) {
@@ -51,6 +53,9 @@ func (m *mockEbpfManager) UpdateManagementWhitelist(ips []string) error  { retur
 func (m *mockEbpfManager) SetPortKnockingSequence(seq []int32) error     { return nil }
 func (m *mockEbpfManager) Start(ctx context.Context)                     {}
 func (m *mockEbpfManager) UpdateLoadBalancerBackends(ips []string) error { return nil }
+func (m *mockEbpfManager) ShunJA3(ja3Md5 [16]byte) error                 { return nil }
+func (m *mockEbpfManager) UnshunJA3(ja3Md5 [16]byte) error               { return nil }
+func (m *mockEbpfManager) GetMapStats() (ebpf.MapStats, error)           { return ebpf.MapStats{}, nil }
 
 func TestWAF_Shunning(t *testing.T) {
 	mockEbpf := &mockEbpfManager{}

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
+
+message AuditLog {
+  string id = 1;
+  string user_id = 2;
+  string action = 3;
+  string resource = 4;
+  string details = 5;
+  string timestamp = 6;
+  string ip_address = 7;
+  string signature = 8;
+}
+
+message ListAuditLogsRequest {
+  int32 limit = 1;
+}
+
+message ListAuditLogsResponse {
+  repeated AuditLog logs = 1;
+}

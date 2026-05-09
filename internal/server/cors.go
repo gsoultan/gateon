@@ -64,7 +64,7 @@ func BuildManagementCORS(cfg *gateonv1.ManagementConfig) *cors.Cors {
 		for _, o := range origins {
 			if o == "*" {
 				allowCreds = false
-				logger.L.Warn().Msg("CORS: AllowCredentials disabled when origins include *")
+				logger.L.LogWarn("CORS: AllowCredentials disabled when origins include *")
 				break
 			}
 		}

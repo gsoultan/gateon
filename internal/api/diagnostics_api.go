@@ -328,9 +328,9 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 
 	if s.EbpfManager != nil {
 		if err := s.EbpfManager.ShunIP(sourceIP); err != nil {
-			logger.L.Error().Err(err).Str("ip", sourceIP).Msg("Failed to shun IP at XDP level")
+			logger.L.LogError("Failed to shun IP at XDP level", "error", err, "ip", sourceIP)
 		} else {
-			logger.L.Info().Str("ip", sourceIP).Msg("IP shunned at XDP level for DDoS mitigation")
+			logger.L.LogInfo("IP shunned at XDP level for DDoS mitigation", "ip", sourceIP)
 		}
 	}
 
@@ -427,6 +427,36 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 		res = append(res, a)
 	}
 	return &gateonv1.ListSecurityThreatsResponse{Threats: res}, nil
+}
+
+func (s *ApiService) ListReputations(ctx context.Context, req *gateonv1.ListReputationsRequest) (*gateonv1.ListReputationsResponse, error) {
+	reps := telemetry.GetAllReputations()
+	res := make([]*gateonv1.Reputation, 0, len(reps))
+
+	// Sort by score (ascending) to show problematic ones first
+	slices.SortFunc(reps, func(a, b telemetry.ReputationRecord) int {
+		if a.Score < b.Score {
+			return -1
+		}
+		if a.Score > b.Score {
+			return 1
+		}
+		return 0
+	})
+
+	limit := int(req.GetLimit())
+	if limit > 0 && len(reps) > limit {
+		reps = reps[:limit]
+	}
+
+	for _, r := range reps {
+		res = append(res, &gateonv1.Reputation{
+			Fingerprint: r.Fingerprint,
+			Score:       r.Score,
+			LastEvent:   r.LastEvent.Format(time.RFC3339),
+		})
+	}
+	return &gateonv1.ListReputationsResponse{Reputations: res}, nil
 }
 
 func (s *ApiService) applyBlockCountryRecommendation(ctx context.Context, countryCode string) (*gateonv1.ApplyRecommendationResponse, error) {

@@ -11,6 +11,8 @@ import (
 	"syscall"
 
 	"github.com/gsoultan/gateon/cmd/gateon/inits"
+	"github.com/gsoultan/gateon/internal/alerting"
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/ebpf"
@@ -80,7 +82,7 @@ func main() {
 	if err == nil {
 		defer func() {
 			if err := shutdown(context.Background()); err != nil {
-				logger.L.Error().Err(err).Msg("failed to shutdown tracer")
+				logger.L.LogError("failed to shutdown tracer", "error", err)
 			}
 		}()
 	}
@@ -90,24 +92,39 @@ func main() {
 
 	initTelemetry(globalReg, ctx)
 
+	if gc := globalReg.Get(ctx); gc != nil {
+		alerting.Init(gc.Alerting)
+		telemetry.SetAlertingHandler(alerting.HandleThreat)
+		databaseURL := db.AuthDatabaseURL(gc.Auth)
+		if err := audit.Init(gc.Audit, databaseURL); err != nil {
+			logger.L.LogError("failed to init audit manager", "error", err)
+		}
+	}
+
 	var ebpfManager ebpf.Manager
 	var wafUpdater *middleware.WAFUpdater
+	var gitOpsManager *config.GitOpsManager
+
 	if gc := globalReg.Get(context.Background()); gc != nil {
+		if gc.Management != nil && gc.Management.Gitops != nil && gc.Management.Gitops.Enabled {
+			gitOpsManager = config.NewGitOpsManager(gc.Management.Gitops, globalReg)
+			gitOpsManager.Start(ctx)
+		}
 		if gc.Ha != nil && gc.Ha.Enabled {
 			haManager := ha.NewHAManager(gc.Ha)
 			go haManager.Start(context.Background()) // It will stop when ctx is cancelled in Run
 		}
-		if gc.AnomalyDetection != nil && gc.AnomalyDetection.Enabled {
-			ad, err := telemetry.NewAnomalyDetector(gc.AnomalyDetection)
-			if err != nil {
-				logger.L.Error().Err(err).Msg("failed to init anomaly detector")
-			} else {
-				go ad.Start(context.Background())
-			}
-		}
 		if gc.Ebpf != nil && gc.Ebpf.Enabled {
 			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
 			go ebpfManager.Start(context.Background())
+		}
+		if gc.AnomalyDetection != nil && gc.AnomalyDetection.Enabled {
+			ad, err := telemetry.NewAnomalyDetector(gc.AnomalyDetection, ebpfManager)
+			if err != nil {
+				logger.L.LogError("failed to init anomaly detector", "error", err)
+			} else {
+				go ad.Start(context.Background())
+			}
 		}
 		wafUpdater = middleware.NewWAFUpdater(globalReg, ".")
 		if gc.Waf != nil && gc.Waf.AutoUpdateRules {
@@ -117,6 +134,7 @@ func main() {
 
 	port := getPort()
 	s, err := server.NewServer(
+		server.WithLogger(logger.Default()),
 		server.WithGlobalRegistry(globalReg),
 		server.WithAuthManager(authManager),
 		server.WithEbpfManager(ebpfManager),
@@ -130,11 +148,11 @@ func main() {
 		server.WithTLSOptionRegistry(config.NewTLSOptionRegistry(getEnvDefault("TLS_OPTIONS_FILE", "tls_options.json"))),
 	)
 	if err != nil {
-		logger.L.Fatal().Err(err).Msg("failed to create server")
+		logger.Fatal("failed to create server", "error", err)
 	}
 	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
 		s.RedisClient = redis.NewClient(redisAddr)
-		logger.L.Info().Str("addr", redisAddr).Msg("redis client initialized")
+		logger.L.LogInfo("redis client initialized", "addr", redisAddr)
 	}
 
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
@@ -146,15 +164,15 @@ func main() {
 }
 
 func buildUIAssets(uiPath *string) {
-	logger.L.Info().Msg("building UI assets...")
+	logger.L.LogInfo("building UI assets...")
 	cmd := exec.Command("go", "generate", "./internal/ui")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.L.Error().Err(err).Msg("error building UI")
+		logger.L.LogError("error building UI", "error", err)
 		os.Exit(1)
 	}
-	logger.L.Info().Msg("UI build complete.")
+	logger.L.LogInfo("UI build complete.")
 	if *uiPath == "" {
 		*uiPath = "internal/ui/dist"
 	}
@@ -178,7 +196,7 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 	if err := telemetry.InitGeoIP(dbPath); err == nil {
 		request.RegisterCountryResolver(&telemetry.GeoIPResolver{})
 	} else {
-		logger.L.Warn().Err(err).Msg("failed to initialize GeoIP background resolver")
+		logger.L.LogWarn("failed to initialize GeoIP background resolver", "error", err)
 	}
 
 	// Start GeoIP worker
@@ -200,7 +218,7 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 			}
 		}
 		if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
-			logger.L.Error().Err(err).Str("database_url", databaseURL).Msg("failed to init path stats store")
+			logger.L.LogError("failed to init path stats store", "error", err, "database_url", databaseURL)
 		}
 	}
 }
@@ -208,22 +226,22 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 func startK8sController(ctx context.Context, s *server.Server) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		logger.L.Error().Err(err).Msg("failed to get k8s in-cluster config")
+		logger.L.LogError("failed to get k8s in-cluster config", "error", err)
 		return
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		logger.L.Error().Err(err).Msg("failed to create k8s clientset")
+		logger.L.LogError("failed to create k8s clientset", "error", err)
 		return
 	}
 	gwClient, err := gatewayclient.NewForConfig(config)
 	if err != nil {
-		logger.L.Error().Err(err).Msg("failed to create gateway clientset")
+		logger.L.LogError("failed to create gateway clientset", "error", err)
 		return
 	}
 	ctrl := k8s.NewController(clientset, gwClient, s.RouteStore, s.ServiceStore)
 	go ctrl.Run(ctx.Done())
-	logger.L.Info().Msg("Kubernetes Controller (Ingress + Gateway API) started")
+	logger.L.LogInfo("Kubernetes Controller (Ingress + Gateway API) started")
 }
 
 func getPort() string {
@@ -235,7 +253,7 @@ func getPort() string {
 
 func getUIHandler(uiPath string) http.Handler {
 	if uiPath != "" {
-		logger.L.Info().Str("path", uiPath).Msg("serving UI assets from disk")
+		logger.L.LogInfo("serving UI assets from disk", "path", uiPath)
 		return ui.StaticHandler(os.DirFS(uiPath), ".")
 	}
 	return ui.Handler()

@@ -42,6 +42,8 @@ import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
 import { GeneralSettingsCard } from "../components/settings/GeneralSettingsCard";
 import { GeoIPSettingsCard } from "../components/settings/GeoIPSettingsCard";
 import { SecurityAdvancedSettingsCard } from "../components/settings/SecurityAdvancedSettingsCard";
+import { AlertingSettingsCard } from "../components/settings/AlertingSettingsCard";
+import { AuditSettingsCard } from "../components/settings/AuditSettingsCard";
 import { PresetsCard } from "../components/settings/PresetsCard";
 import { AppearanceCard } from "../components/settings/AppearanceCard";
 import { usePermissions } from "../hooks/usePermissions";
@@ -1869,6 +1871,32 @@ export default function SettingsPage() {
         onChange={setConfig}
         disabled={formDisabled}
       />
+
+      <AlertingSettingsCard
+        config={config}
+        onChange={setConfig}
+        disabled={formDisabled}
+      />
+
+      <AuditSettingsCard
+        config={config}
+        onChange={setConfig}
+        disabled={formDisabled}
+      />
+
+      {canEditGlobal && (
+        <Paper withBorder p="md" radius="md" style={{ position: 'sticky', bottom: 20, zIndex: 10, boxShadow: 'var(--mantine-shadow-lg)' }}>
+          <Group justify="space-between">
+            <div>
+              <Text fw={600}>Unsaved Changes</Text>
+              <Text size="xs" c="dimmed">You have modified the global configuration. Save to apply changes.</Text>
+            </div>
+            <Button onClick={saveGatewayConfig} loading={saving} leftSection={<IconCheck size={16} />}>
+              Save Global Configuration
+            </Button>
+          </Group>
+        </Paper>
+      )}
 
       <AppearanceCard colorScheme={colorScheme} setColorScheme={setColorScheme} />
     </Stack>

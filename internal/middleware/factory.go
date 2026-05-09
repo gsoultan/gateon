@@ -102,6 +102,8 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return f.createForwardAuth(cfg)
 	case "waf":
 		return f.createWAF(cfg)
+	case "oidc":
+		return f.createOIDCProxy(cfg)
 	case "graphql_firewall":
 		return f.createGraphQLFirewall(cfg)
 	case "bot_management":
@@ -122,6 +124,9 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 			InjectInvisibleLinks: parseBoolStrict(cfg["inject_invisible_links"], false),
 			InvisibleLinkPaths:   parseListStrict(cfg["invisible_link_paths"]),
 			RouteID:              routeID,
+			EnableTrollResponse:  parseBoolStrict(cfg["enable_troll_response"], false),
+			CanaryHeader:         cfg["canary_header"],
+			CanaryToken:          cfg["canary_token"],
 		}), nil
 	case "tarpit":
 		baseDelay, _ := time.ParseDuration(cfg["base_delay"])
@@ -169,4 +174,16 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 		AllowCredentials: allowCredentials,
 		MaxAge:           maxAge,
 	}), nil
+}
+
+func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
+	scopes := parseListStrict(cfg["scopes"])
+	return OIDCProxy(OIDCProxyConfig{
+		Issuer:       cfg["issuer"],
+		ClientID:     cfg["client_id"],
+		ClientSecret: cfg["client_secret"],
+		RedirectURL:  cfg["redirect_url"],
+		Scopes:       scopes,
+		RouteID:      cfg["_route_id"],
+	})
 }

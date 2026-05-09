@@ -44,9 +44,9 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 		databaseURL := db.AuthDatabaseURL(gc.Auth)
 		if databaseURL != "" {
 			var err error
-			authManager, err = auth.NewManager(databaseURL, gc.Auth.PasetoSecret)
+			authManager, err = auth.NewManager(databaseURL, gc.Auth.PasetoSecret, logger.Default())
 			if err != nil {
-				logger.L.Fatal().Err(err).Msg("failed to initialize auth manager")
+				logger.Fatal("failed to initialize auth manager", "error", err)
 			}
 		}
 		if gc.Otel != nil && gc.Otel.Endpoint != "" {

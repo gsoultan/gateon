@@ -38,12 +38,11 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 	isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
 	if !isMgmt {
 		if rt := router.SelectRoute(r, s.RouteStore.List(r.Context())); rt != nil {
-			logger.L.Info().
-				Str("flow_step", "route_match").
-				Str("request_id", request.GetID(r)).
-				Str("route", cmp.Or(rt.Name, rt.Id)).
-				Str("rule", rt.Rule).
-				Msg("Route matched")
+			logger.L.LogInfo("Route matched",
+				"flow_step", "route_match",
+				"request_id", request.GetID(r),
+				"route", cmp.Or(rt.Name, rt.Id),
+				"rule", rt.Rule)
 			if rt.Tls != nil && r.TLS == nil {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("HTTPS required"))

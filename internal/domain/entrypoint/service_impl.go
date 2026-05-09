@@ -1,4 +1,4 @@
-package domain
+package entrypoint
 
 import (
 	"context"
@@ -7,30 +7,33 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// EntryPointServiceImpl implements EntryPointService.
-type EntryPointServiceImpl struct {
-	store config.EntryPointStore
+// serviceImpl implements Service.
+type serviceImpl struct {
+	store  config.EntryPointStore
+	logger logger.Logger
 }
 
-// NewEntryPointService creates an EntryPointService.
-func NewEntryPointService(store config.EntryPointStore) EntryPointService {
-	return &EntryPointServiceImpl{store: store}
+// NewService creates an EntryPoint Service.
+func NewService(store config.EntryPointStore, l logger.Logger) Service {
+	return &serviceImpl{store: store, logger: l}
 }
 
 // ListPaginated returns paginated entrypoints.
-func (s *EntryPointServiceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.EntryPoint, int32) {
+func (s *serviceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.EntryPoint, int32) {
 	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
-func (s *EntryPointServiceImpl) GetEntryPoint(ctx context.Context, id string) (*gateonv1.EntryPoint, bool) {
+// GetEntryPoint returns a single entrypoint by ID.
+func (s *serviceImpl) GetEntryPoint(ctx context.Context, id string) (*gateonv1.EntryPoint, bool) {
 	return s.store.Get(ctx, id)
 }
 
 // SaveEntryPoint validates, assigns ID if needed, infers type, and persists.
-func (s *EntryPointServiceImpl) SaveEntryPoint(ctx context.Context, ep *gateonv1.EntryPoint) error {
+func (s *serviceImpl) SaveEntryPoint(ctx context.Context, ep *gateonv1.EntryPoint) error {
 	if ep.Address == "" {
 		return errors.New("missing address")
 	}
@@ -42,7 +45,7 @@ func (s *EntryPointServiceImpl) SaveEntryPoint(ctx context.Context, ep *gateonv1
 }
 
 // DeleteEntryPoint removes the entrypoint.
-func (s *EntryPointServiceImpl) DeleteEntryPoint(ctx context.Context, id string) error {
+func (s *serviceImpl) DeleteEntryPoint(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("missing entrypoint id")
 	}

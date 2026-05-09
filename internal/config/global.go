@@ -79,24 +79,24 @@ func (r *GlobalRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to read global config file")
+			logger.L.LogError("failed to read global config file", "error", err, "path", r.path)
 		}
 		return
 	}
 
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, r.config); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal global config yaml")
+			logger.L.LogError("failed to unmarshal global config yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, r.config); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal global config json")
+			logger.L.LogError("failed to unmarshal global config json", "error", err, "path", r.path)
 			return
 		}
 	}
 	decryptSensitiveFields(r.config)
-	logger.L.Info().Str("path", r.path).Msg("loaded global config")
+	logger.L.LogInfo("loaded global config", "path", r.path)
 }
 
 func (r *GlobalRegistry) saveLocked() error {

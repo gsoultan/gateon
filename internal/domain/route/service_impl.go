@@ -1,4 +1,4 @@
-package domain
+package route
 
 import (
 	"context"
@@ -7,32 +7,35 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/domain/proxy"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// RouteServiceImpl implements RouteService.
-type RouteServiceImpl struct {
+// serviceImpl implements Service.
+type serviceImpl struct {
 	store       config.RouteStore
-	invalidator ProxyInvalidator
+	invalidator proxy.Invalidator
+	logger      logger.Logger
 }
 
-// NewRouteService creates a RouteService.
-func NewRouteService(store config.RouteStore, invalidator ProxyInvalidator) RouteService {
-	return &RouteServiceImpl{store: store, invalidator: invalidator}
+// NewService creates a Route Service.
+func NewService(store config.RouteStore, invalidator proxy.Invalidator, l logger.Logger) Service {
+	return &serviceImpl{store: store, invalidator: invalidator, logger: l}
 }
 
 // ListPaginated returns paginated routes.
-func (s *RouteServiceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *config.RouteFilter) ([]*gateonv1.Route, int32) {
+func (s *serviceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *config.RouteFilter) ([]*gateonv1.Route, int32) {
 	return s.store.ListPaginated(ctx, page, pageSize, search, filter)
 }
 
 // GetRoute returns a single route by ID.
-func (s *RouteServiceImpl) GetRoute(ctx context.Context, id string) (*gateonv1.Route, bool) {
+func (s *serviceImpl) GetRoute(ctx context.Context, id string) (*gateonv1.Route, bool) {
 	return s.store.Get(ctx, id)
 }
 
 // SaveRoute validates, assigns ID if needed, persists, and invalidates proxy.
-func (s *RouteServiceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
+func (s *serviceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 	if rt.ServiceId == "" {
 		return errors.New("missing service_id")
 	}
@@ -51,7 +54,7 @@ func (s *RouteServiceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) er
 }
 
 // DeleteRoute removes the route and invalidates its proxy.
-func (s *RouteServiceImpl) DeleteRoute(ctx context.Context, id string) error {
+func (s *serviceImpl) DeleteRoute(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("missing route id")
 	}

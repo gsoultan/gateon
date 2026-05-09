@@ -111,7 +111,7 @@ func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 				BackendType:  "http",
 			}
 			if err := c.serviceStore.Update(ctx, svc); err != nil {
-				logger.L.Error().Err(err).Str("service_id", serviceID).Msg("failed to sync k8s service")
+				logger.L.LogError("failed to sync k8s service", "error", err, "service_id", serviceID)
 				continue
 			}
 
@@ -145,7 +145,7 @@ func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 			}
 
 			if err := c.routeStore.Update(ctx, route); err != nil {
-				logger.L.Error().Err(err).Str("route", route.Name).Msg("failed to sync k8s route")
+				logger.L.LogError("failed to sync k8s route", "error", err, "route", route.Name)
 			}
 		}
 	}

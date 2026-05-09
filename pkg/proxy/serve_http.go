@@ -62,11 +62,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ProxyHandler) logRequest(r *http.Request, targetURL string) {
-	logger.L.Debug().
-		Str("flow_step", "service_dispatch").
-		Str("request_id", request.GetID(r)).
-		Str("target", targetURL).
-		Msg("Forwarding to service target")
+	logger.L.LogDebug("Forwarding to service target",
+		"flow_step", "service_dispatch",
+		"request_id", request.GetID(r),
+		"target", targetURL)
 }
 
 func (h *ProxyHandler) decrementActiveConn(state *targetState) {
