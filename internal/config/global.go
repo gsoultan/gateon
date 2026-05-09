@@ -53,6 +53,16 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 				MaxCaptures: 1000,
 				MaxBodySize: 1024 * 64, // 64KB
 			},
+			SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
+				Deception:    &gateonv1.DeceptionConfig{},
+				Tarpit:       &gateonv1.TarpitConfig{},
+				Entropy:      &gateonv1.EntropyConfig{},
+				Behavioral:   &gateonv1.BehavioralConfig{},
+				Pow:          &gateonv1.PowConfig{Secret: "changeme"},
+				IpReputation: &gateonv1.IPReputationConfig{},
+			},
+			Alerting: &gateonv1.AlertingConfig{},
+			Audit:    &gateonv1.AuditConfig{},
 		},
 		path: path,
 	}
@@ -133,6 +143,9 @@ func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
 	if c.Geoip != nil {
 		c.Geoip.MaxmindLicenseKey = ResolveSecret(c.Geoip.MaxmindLicenseKey)
 	}
+	if c.SecurityAdvanced != nil && c.SecurityAdvanced.Pow != nil {
+		c.SecurityAdvanced.Pow.Secret = ResolveSecret(c.SecurityAdvanced.Pow.Secret)
+	}
 }
 
 func encryptSensitiveFields(c *gateonv1.GlobalConfig) {
@@ -148,6 +161,9 @@ func encryptSensitiveFields(c *gateonv1.GlobalConfig) {
 	}
 	if c.Geoip != nil {
 		c.Geoip.MaxmindLicenseKey = EncryptIfKeySet(c.Geoip.MaxmindLicenseKey)
+	}
+	if c.SecurityAdvanced != nil && c.SecurityAdvanced.Pow != nil {
+		c.SecurityAdvanced.Pow.Secret = EncryptIfKeySet(c.SecurityAdvanced.Pow.Secret)
 	}
 }
 

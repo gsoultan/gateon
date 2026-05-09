@@ -93,7 +93,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   label="Honeypot Paths"
                   description="Accessing these paths triggers an immediate block."
                   placeholder="/.env, /wp-admin, /_backup"
-                  value={security.deception.honeypot_paths || []}
+                  value={security.deception?.honeypot_paths || []}
                   onChange={(val) => updateSection("deception", { honeypot_paths: val })}
                   disabled={disabled}
                 />
@@ -103,16 +103,16 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text size="xs" c="dimmed">Inject hidden links into HTML responses to trap automated crawlers.</Text>
                   </Stack>
                   <Switch
-                    checked={security.deception.inject_invisible_links}
+                    checked={security.deception?.inject_invisible_links}
                     onChange={(e) => updateSection("deception", { inject_invisible_links: e.currentTarget.checked })}
                     disabled={disabled}
                   />
                 </Group>
-                {security.deception.inject_invisible_links && (
+                {security.deception?.inject_invisible_links && (
                   <TagsInput
                     label="Invisible Link Paths"
                     placeholder="/system-config, /hidden-admin"
-                    value={security.deception.invisible_link_paths || []}
+                    value={security.deception?.invisible_link_paths || []}
                     onChange={(val) => updateSection("deception", { invisible_link_paths: val })}
                     disabled={disabled}
                   />
@@ -140,14 +140,14 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                 <Stack gap="sm">
                   <NumberInput
                     label="Base Delay (ms)"
-                    value={security.tarpit.delay_base_ms}
+                    value={security.tarpit?.delay_base_ms}
                     onChange={(val) => updateSection("tarpit", { delay_base_ms: val })}
                     disabled={disabled}
                     min={0}
                   />
                   <NumberInput
                     label="Max Delay (ms)"
-                    value={security.tarpit.delay_max_ms}
+                    value={security.tarpit?.delay_max_ms}
                     onChange={(val) => updateSection("tarpit", { delay_max_ms: val })}
                     disabled={disabled}
                     min={0}
@@ -155,7 +155,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   <NumberInput
                     label="Score Threshold"
                     description="Start tarpitting when IP threat score exceeds this value."
-                    value={security.tarpit.score_threshold}
+                    value={security.tarpit?.score_threshold}
                     onChange={(val) => updateSection("tarpit", { score_threshold: val })}
                     disabled={disabled}
                     decimalScale={1}
@@ -183,7 +183,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   <NumberInput
                     label="Difficulty"
                     description="Number of leading zeros required (higher = harder for bots)."
-                    value={security.pow.difficulty}
+                    value={security.pow?.difficulty}
                     onChange={(val) => updateSection("pow", { difficulty: val })}
                     disabled={disabled}
                     min={1}
@@ -192,7 +192,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   <NumberInput
                     label="Score Threshold"
                     description="Serve challenge when IP threat score exceeds this value."
-                    value={security.pow.score_threshold}
+                    value={security.pow?.score_threshold}
                     onChange={(val) => updateSection("pow", { score_threshold: val })}
                     disabled={disabled}
                     decimalScale={1}
@@ -200,7 +200,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   <TextInput
                     label="PoW Secret"
                     description="Secret key used to sign challenge tokens."
-                    value={security.pow.secret}
+                    value={security.pow?.secret}
                     onChange={(e) => updateSection("pow", { secret: e.currentTarget.value })}
                     disabled={disabled}
                     type="password"
@@ -234,7 +234,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                 <NumberInput
                   label="Entropy Threshold"
                   description="Alert if payload Shannon entropy exceeds this (typical: 5.0 - 6.5)."
-                  value={security.entropy.threshold}
+                  value={security.entropy?.threshold}
                   onChange={(val) => updateSection("entropy", { threshold: val })}
                   disabled={disabled}
                   decimalScale={2}
@@ -263,7 +263,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text size="sm">Impossible Travel Detection</Text>
                     <Switch
                       size="sm"
-                      checked={security.behavioral.enable_impossible_travel}
+                      checked={security.behavioral?.enable_impossible_travel}
                       onChange={(e) => updateSection("behavioral", { enable_impossible_travel: e.currentTarget.checked })}
                       disabled={disabled}
                     />
@@ -272,7 +272,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text size="sm">Sequence Validation</Text>
                     <Switch
                       size="sm"
-                      checked={security.behavioral.enable_sequence_validation}
+                      checked={security.behavioral?.enable_sequence_validation}
                       onChange={(e) => updateSection("behavioral", { enable_sequence_validation: e.currentTarget.checked })}
                       disabled={disabled}
                     />
@@ -301,13 +301,13 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     label="Feed URLs"
                     description="URLs to plaintext IP/CIDR blocklists"
                     placeholder="https://feeds.example.com/bad-ips.txt"
-                    value={security.ip_reputation.feed_urls || []}
+                    value={security.ip_reputation?.feed_urls || []}
                     onChange={(val) => updateSection("ip_reputation", { feed_urls: val })}
                     disabled={disabled}
                   />
                   <NumberInput
                     label="Update Interval (Hours)"
-                    value={security.ip_reputation.update_interval_hours || 24}
+                    value={security.ip_reputation?.update_interval_hours || 24}
                     onChange={(val) => updateSection("ip_reputation", { update_interval_hours: val })}
                     disabled={disabled}
                     min={1}
@@ -315,7 +315,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   <NumberInput
                     label="Block Threshold"
                     description="Score to block (0.0 to 1.0)"
-                    value={security.ip_reputation.block_threshold || 0.5}
+                    value={security.ip_reputation?.block_threshold || 0.5}
                     onChange={(val) => updateSection("ip_reputation", { block_threshold: val })}
                     disabled={disabled}
                     step={0.1}
