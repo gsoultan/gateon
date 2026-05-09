@@ -37,7 +37,7 @@ func (r *ServiceRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to read services file")
+			logger.L.LogError("failed to read services file", "error", err, "path", r.path)
 		}
 		return
 	}
@@ -45,12 +45,12 @@ func (r *ServiceRegistry) load() {
 	var services []*gateonv1.Service
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, &services); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal services yaml")
+			logger.L.LogError("failed to unmarshal services yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, &services); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal services json")
+			logger.L.LogError("failed to unmarshal services json", "error", err, "path", r.path)
 			return
 		}
 	}
@@ -58,7 +58,7 @@ func (r *ServiceRegistry) load() {
 	for _, s := range services {
 		r.services[s.Id] = s
 	}
-	logger.L.Info().Int("count", len(r.services)).Str("path", r.path).Msg("loaded services")
+	logger.L.LogInfo("loaded services", "count", len(r.services), "path", r.path)
 }
 
 func (r *ServiceRegistry) saveLocked() error {

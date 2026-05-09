@@ -6,9 +6,9 @@ import (
 
 // LimitStats holds rejection counts for rate limit, inflight, and buffering.
 type LimitStats struct {
-	RateLimitRejected   map[string]uint64 `json:"rate_limit_rejected"`
-	InflightRejected    map[string]uint64 `json:"inflight_rejected"`
-	BufferingRejected   map[string]uint64 `json:"buffering_rejected"`
+	RateLimitRejected map[string]uint64 `json:"rate_limit_rejected"`
+	InflightRejected  map[string]uint64 `json:"inflight_rejected"`
+	BufferingRejected map[string]uint64 `json:"buffering_rejected"`
 }
 
 var (
@@ -58,4 +58,3 @@ func GetLimitStats() LimitStats {
 		},
 	}
 }
-

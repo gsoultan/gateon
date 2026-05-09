@@ -84,13 +84,13 @@ func (b *ProxyHandlerBuilder) resolveService() {
 func (b *ProxyHandlerBuilder) buildTransport() {
 	tlsCfg, err := gtls.CreateTLSClientConfig(b.tlsClientConfig)
 	if err != nil {
-		logger.L.Warn().Err(err).Msg("failed to create tls client config; using insecure fallback")
+		logger.L.LogWarn("failed to create tls client config; using insecure fallback", "error", err)
 		tlsCfg = &tls.Config{InsecureSkipVerify: true}
 	}
 	b.tlsConfig = tlsCfg
 	selector, err := newTLSClientIdentitySelector(b.tlsClientConfig)
 	if err != nil {
-		logger.L.Warn().Err(err).Msg("failed to load one or more dynamic tls client identities")
+		logger.L.LogWarn("failed to load one or more dynamic tls client identities", "error", err)
 	}
 	b.transportFactory = newBackendTransportFactory(tlsCfg, b.transportConfig, selector)
 

@@ -37,7 +37,7 @@ func (r *MiddlewareRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to read middlewares file")
+			logger.L.LogError("failed to read middlewares file", "error", err, "path", r.path)
 		}
 		return
 	}
@@ -45,12 +45,12 @@ func (r *MiddlewareRegistry) load() {
 	var middlewares []*gateonv1.Middleware
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, &middlewares); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal middlewares yaml")
+			logger.L.LogError("failed to unmarshal middlewares yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, &middlewares); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal middlewares json")
+			logger.L.LogError("failed to unmarshal middlewares json", "error", err, "path", r.path)
 			return
 		}
 	}
@@ -58,7 +58,7 @@ func (r *MiddlewareRegistry) load() {
 	for _, m := range middlewares {
 		r.middlewares[m.Id] = m
 	}
-	logger.L.Info().Int("count", len(r.middlewares)).Str("path", r.path).Msg("loaded middlewares")
+	logger.L.LogInfo("loaded middlewares", "count", len(r.middlewares), "path", r.path)
 }
 
 func (r *MiddlewareRegistry) saveLocked() error {

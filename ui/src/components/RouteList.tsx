@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useOptimistic, useTransition } from "react";
 import {
   Card,
   Title,
@@ -69,7 +69,13 @@ export default function RouteList({
     status: statusFilter !== "all" ? statusFilter : undefined,
   });
 
-  const routes = data?.routes || [];
+  const [isPending, startTransition] = useTransition();
+  const [optimisticRoutes, deleteOptimisticRoute] = useOptimistic(
+    data?.routes || [],
+    (state, id: string) => state.filter((r) => r.id !== id)
+  );
+
+  const routes = optimisticRoutes;
   const totalCount = data?.total_count ?? 0;
 
   if (isLoading)
@@ -420,7 +426,14 @@ export default function RouteList({
                           <Menu.Item
                             leftSection={<IconTrash size={14} />}
                             color="red"
-                            onClick={() => onDelete?.(route.id)}
+                            onClick={() => {
+                              if (onDelete) {
+                                startTransition(() => {
+                                  deleteOptimisticRoute(route.id);
+                                });
+                                onDelete(route.id);
+                              }
+                            }}
                           >
                             Delete
                           </Menu.Item>

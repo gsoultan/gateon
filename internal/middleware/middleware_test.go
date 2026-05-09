@@ -25,46 +25,71 @@ func TestJWTValidator(t *testing.T) {
 
 	handler := v.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		claims := r.Context().Value(UserContextKey).(jwt.MapClaims)
+		claims, ok := r.Context().Value(UserContextKey).(jwt.MapClaims)
+		if !ok {
+			t.Error("missing claims in context")
+			return
+		}
 		if claims["sub"] != "user123" {
 			t.Errorf("expected sub user123, got %v", claims["sub"])
 		}
 	}))
 
-	// 1. Valid Token
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"iss": "gateon",
-		"aud": "api",
-		"sub": "user123",
-		"exp": time.Now().Add(time.Hour).Unix(),
-	})
-	tokenString, _ := token.SignedString(secret)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "Bearer "+tokenString)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rr.Code)
+	// Helper to sign tokens
+	sign := func(claims jwt.MapClaims) string {
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		s, _ := token.SignedString(secret)
+		return s
 	}
 
-	// 2. Expired Token
-	expiredToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"iss": "gateon",
-		"aud": "api",
-		"sub": "user123",
-		"exp": time.Now().Add(-time.Hour).Unix(),
-	})
-	expiredTokenString, _ := expiredToken.SignedString(secret)
+	tests := []struct {
+		name       string
+		token      string
+		expectCode int
+	}{
+		{
+			"Valid Token",
+			sign(jwt.MapClaims{
+				"iss": "gateon",
+				"aud": "api",
+				"sub": "user123",
+				"exp": time.Now().Add(time.Hour).Unix(),
+			}),
+			http.StatusOK,
+		},
+		{
+			"Expired Token",
+			sign(jwt.MapClaims{
+				"iss": "gateon",
+				"aud": "api",
+				"sub": "user123",
+				"exp": time.Now().Add(-time.Hour).Unix(),
+			}),
+			http.StatusUnauthorized,
+		},
+		{
+			"Invalid Issuer",
+			sign(jwt.MapClaims{
+				"iss": "wrong",
+				"aud": "api",
+				"sub": "user123",
+				"exp": time.Now().Add(time.Hour).Unix(),
+			}),
+			http.StatusUnauthorized,
+		},
+	}
 
-	req = httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "Bearer "+expiredTokenString)
-	rr = httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Header.Set("Authorization", "Bearer "+tt.token)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("expected status 401 for expired token, got %d", rr.Code)
+			if rr.Code != tt.expectCode {
+				t.Errorf("%s: expected status %d, got %d", tt.name, tt.expectCode, rr.Code)
+			}
+		})
 	}
 }
 

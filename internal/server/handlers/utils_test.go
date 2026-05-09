@@ -54,11 +54,11 @@ func TestDecodeRequestBody(t *testing.T) {
 
 func TestParsePagination(t *testing.T) {
 	tests := []struct {
-		name           string
-		url            string
-		wantPage       int32
-		wantPageSize   int32
-		wantSearch     string
+		name         string
+		url          string
+		wantPage     int32
+		wantPageSize int32
+		wantSearch   string
 	}{
 		{"empty", "/v1/routes", 0, 0, ""},
 		{"with params", "/v1/routes?page=2&page_size=50&search=foo", 2, 50, "foo"},
@@ -76,4 +76,3 @@ func TestParsePagination(t *testing.T) {
 		})
 	}
 }
-

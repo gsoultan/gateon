@@ -30,6 +30,20 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10000);
+    __type(key, __u8[16]); // JA3 MD5 Hash
+    __type(value, __u32);
+} ja3_blocklist SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65536);
+    __type(key, __u32);   // IPv4 address
+    __type(value, __u32); // State: 0=None, 1=SYN_SENT, 2=ESTABLISHED
+} tcp_conntrack SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u32);   // IPv4 address (Management Whitelist)
     __type(value, __u32); 
@@ -83,6 +97,25 @@ struct {
     __type(value, struct ebpf_config);
 } global_ebpf_config SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 16);
+    __type(key, __u32);
+    __type(value, __u64);
+} drop_stats SEC(".maps");
+
+#define DROP_REASON_SHUNNED_IP 1
+#define DROP_REASON_BLOCKED_COUNTRY 2
+#define DROP_REASON_INVALID_PORT_KNOCK 3
+#define DROP_REASON_RATE_LIMITED 4
+
+static __always_inline void count_drop(__u32 reason) {
+    __u64 *count = bpf_map_lookup_elem(&drop_stats, &reason);
+    if (count) {
+        *count += 1;
+    }
+}
+
 static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *eth) {
     void *data_end = (void *)(long)ctx->data_end;
     struct iphdr *iph = (void *)(eth + 1);
@@ -95,7 +128,29 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
     // 1. IP Shunning (DDoS Mitigation)
     __u32 *shunned = bpf_map_lookup_elem(&shunned_ips, &src_ip);
     if (shunned) {
+        count_drop(DROP_REASON_SHUNNED_IP);
         return XDP_DROP;
+    }
+
+    // 2. TCP State Anomaly & SYN Flood Protection
+    if (iph->protocol == IPPROTO_TCP) {
+        struct tcphdr *tcph = (void *)(iph + 1);
+        if ((void *)(tcph + 1) <= data_end) {
+            if (tcph->syn && !tcph->ack) {
+                // Tracking SYN starts. If already has a SYN state without ACK, could be a flood.
+                __u32 *state = bpf_map_lookup_elem(&tcp_conntrack, &src_ip);
+                if (state && *state == 1) {
+                    // Possible SYN flood from this IP
+                    return XDP_DROP;
+                }
+                __u32 syn_state = 1;
+                bpf_map_update_elem(&tcp_conntrack, &src_ip, &syn_state, BPF_ANY);
+            } else {
+                // On any other packet from this IP, we clear the SYN state for simplicity
+                // In a full conntrack we'd track ESTABLISHED
+                bpf_map_delete_elem(&tcp_conntrack, &src_ip);
+            }
+        }
     }
 
     // 2. Management Protection

@@ -72,7 +72,7 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		destPath := filepath.Join(certsDir, filename)
 		dst, err := os.Create(destPath)
 		if err != nil {
-			logger.L.Error().Err(err).Str("path", destPath).Msg("failed to create certificate file")
+			logger.L.LogError("failed to create certificate file", "error", err, "path", destPath)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -84,7 +84,7 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		// Return relative path for use in config, e.g. "certs/filename"
 		relPath := filepath.Join("certs", filename)
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": relPath})
-		logger.L.Info().Str("path", destPath).Msg("certificate uploaded")
+		logger.L.LogInfo("certificate uploaded", "path", destPath)
 	})
 
 	mux.HandleFunc("POST /v1/certs/paste", func(w http.ResponseWriter, r *http.Request) {
@@ -116,14 +116,14 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 
 		destPath := filepath.Join(certsDir, filename)
 		if err := os.WriteFile(destPath, []byte(req.Content), 0644); err != nil {
-			logger.L.Error().Err(err).Str("path", destPath).Msg("failed to save pasted certificate")
+			logger.L.LogError("failed to save pasted certificate", "error", err, "path", destPath)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		relPath := filepath.Join("certs", filename)
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": relPath})
-		logger.L.Info().Str("path", destPath).Msg("certificate pasted and saved")
+		logger.L.LogInfo("certificate pasted and saved", "path", destPath)
 	})
 }
 

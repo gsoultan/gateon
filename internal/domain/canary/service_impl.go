@@ -1,26 +1,28 @@
-package domain
+package canary
 
 import (
 	"context"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// CanaryServiceImpl handles automated traffic shifting (Canary) for a service.
-type CanaryServiceImpl struct {
-	svcService ServiceService
+// serviceImpl handles automated traffic shifting (Canary) for a service.
+type serviceImpl struct {
+	svcService service.Service
+	logger     logger.Logger
 }
 
-// NewCanaryService creates a new CanaryService.
-func NewCanaryService(svcService ServiceService) CanaryService {
-	return &CanaryServiceImpl{svcService: svcService}
+// NewService creates a new Canary Service.
+func NewService(svcService service.Service, l logger.Logger) Service {
+	return &serviceImpl{svcService: svcService, logger: l}
 }
 
 // StartCanary starts a background task to gradually shift traffic to target weights.
-func (cs *CanaryServiceImpl) StartCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) (string, error) {
+func (cs *serviceImpl) StartCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) (string, error) {
 	taskID := uuid.NewString()
 
 	// Use background context for the long-running task to survive the API request
@@ -29,12 +31,11 @@ func (cs *CanaryServiceImpl) StartCanary(ctx context.Context, req *gateonv1.Star
 	return taskID, nil
 }
 
-func (cs *CanaryServiceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) {
-	logger.L.Info().
-		Str("service_id", req.ServiceId).
-		Int32("duration", req.DurationMinutes).
-		Int32("steps", req.Steps).
-		Msg("Starting Canary deployment task")
+func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) {
+	cs.logger.LogInfo("Starting Canary deployment task",
+		"service_id", req.ServiceId,
+		"duration", req.DurationMinutes,
+		"steps", req.Steps)
 
 	if req.Steps <= 0 {
 		req.Steps = 10
@@ -48,7 +49,7 @@ func (cs *CanaryServiceImpl) runCanary(ctx context.Context, req *gateonv1.StartC
 	// Get initial service state
 	svc, ok := cs.svcService.GetService(ctx, req.ServiceId)
 	if !ok {
-		logger.L.Error().Str("service_id", req.ServiceId).Msg("Canary failed: service not found")
+		cs.logger.LogError("Canary failed: service not found", "service_id", req.ServiceId)
 		return
 	}
 
@@ -66,7 +67,7 @@ func (cs *CanaryServiceImpl) runCanary(ctx context.Context, req *gateonv1.StartC
 		// Refresh service state to ensure we don't overwrite other changes
 		currentSvc, ok := cs.svcService.GetService(ctx, req.ServiceId)
 		if !ok {
-			logger.L.Error().Str("service_id", req.ServiceId).Msg("Canary aborted: service deleted during deployment")
+			cs.logger.LogError("Canary aborted: service deleted during deployment", "service_id", req.ServiceId)
 			return
 		}
 
@@ -92,15 +93,14 @@ func (cs *CanaryServiceImpl) runCanary(ctx context.Context, req *gateonv1.StartC
 		}
 
 		if err := cs.svcService.SaveService(ctx, currentSvc); err != nil {
-			logger.L.Error().Err(err).Str("service_id", req.ServiceId).Msg("Canary failed to update weights")
+			cs.logger.LogError("Canary failed to update weights", "error", err, "service_id", req.ServiceId)
 			return
 		}
 
-		logger.L.Info().
-			Str("service_id", req.ServiceId).
-			Float64("progress_percent", progress*100).
-			Msg("Canary deployment in progress")
+		cs.logger.LogInfo("Canary deployment in progress",
+			"service_id", req.ServiceId,
+			"progress_percent", progress*100)
 	}
 
-	logger.L.Info().Str("service_id", req.ServiceId).Msg("Canary deployment completed successfully")
+	cs.logger.LogInfo("Canary deployment completed successfully", "service_id", req.ServiceId)
 }

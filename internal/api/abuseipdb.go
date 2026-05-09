@@ -69,7 +69,7 @@ func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == 429 {
-			logger.L.Warn().Msg("AbuseIPDB rate limit exceeded")
+			logger.L.LogWarn("AbuseIPDB rate limit exceeded")
 		}
 		return 0, fmt.Errorf("AbuseIPDB returned status %d", resp.StatusCode)
 	}

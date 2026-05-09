@@ -23,6 +23,9 @@ type DeceptionConfig struct {
 	InjectInvisibleLinks bool
 	InvisibleLinkPaths   []string
 	RouteID              string
+	EnableTrollResponse  bool
+	CanaryHeader         string // attractive-looking header name
+	CanaryToken          string // attractive-looking header value
 }
 
 // Deception middleware provides path honeypots and invisible link injection.
@@ -31,22 +34,51 @@ func Deception(cfg DeceptionConfig) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 
-			// Check for honeypot path access
-			for _, trap := range cfg.HoneypotPaths {
-				if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
-					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID)
-					http.Error(w, "Forbidden", http.StatusForbidden)
+			// 1. Check for Canary Token reuse
+			if cfg.CanaryHeader != "" && cfg.CanaryToken != "" {
+				if r.Header.Get(cfg.CanaryHeader) == cfg.CanaryToken {
+					recordAdvancedThreat(r, "canary_token_reused", 100, "Attacker reused injected canary header: "+cfg.CanaryHeader, cfg.RouteID)
+					if cfg.EnableTrollResponse {
+						serveTrollResponse(w)
+					} else {
+						http.Error(w, "Forbidden", http.StatusForbidden)
+					}
 					return
 				}
 			}
 
-			// Check for invisible link access
+			// 2. Check for honeypot path access
+			for _, trap := range cfg.HoneypotPaths {
+				if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
+					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID)
+					if cfg.EnableTrollResponse {
+						serveTrollResponse(w)
+					} else {
+						http.Error(w, "Forbidden", http.StatusForbidden)
+					}
+					return
+				}
+			}
+
+			// 3. Check for invisible link access
 			for _, link := range cfg.InvisibleLinkPaths {
 				if link != "" && path == link {
 					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID)
-					http.Error(w, "Forbidden", http.StatusForbidden)
+					if cfg.EnableTrollResponse {
+						serveTrollResponse(w)
+					} else {
+						http.Error(w, "Forbidden", http.StatusForbidden)
+					}
 					return
 				}
+			}
+
+			// 4. Inject Canary Header into outbound request (to be attractive to attackers sniffing)
+			if cfg.CanaryHeader != "" && cfg.CanaryToken != "" {
+				// We don't want to break the backend, so this is mostly for the response if possible.
+				// But the recommendation says "Inject a fake, attractive-looking header".
+				// Let's inject it into the response headers instead so the attacker sees it.
+				w.Header().Set(cfg.CanaryHeader, cfg.CanaryToken)
 			}
 
 			if !cfg.InjectInvisibleLinks || len(cfg.InvisibleLinkPaths) == 0 {
@@ -285,6 +317,29 @@ func serveChallengePage(w http.ResponseWriter, ip string, difficulty int) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusForbidden)
 	_, _ = w.Write([]byte(html))
+}
+
+func serveTrollResponse(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+
+	// Send an infinite stream of random-looking data
+	// Using a static buffer to avoid allocations in the loop
+	buf := make([]byte, 4096)
+	for i := range buf {
+		buf[i] = byte(i % 256)
+	}
+
+	for {
+		if _, err := w.Write(buf); err != nil {
+			return // Connection closed by client or other error
+		}
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(100 * time.Millisecond) // Slow it down a bit to "hang" the tool longer
+	}
 }
 
 func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string) {

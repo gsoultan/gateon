@@ -4,7 +4,12 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
-	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/domain/canary"
+	"github.com/gsoultan/gateon/internal/domain/entrypoint"
+	"github.com/gsoultan/gateon/internal/domain/middleware"
+	"github.com/gsoultan/gateon/internal/domain/route"
+	"github.com/gsoultan/gateon/internal/domain/service"
+	"github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -14,12 +19,12 @@ type RouteStatsProvider func(routeID string) []proxy.TargetStats
 
 // Deps holds dependencies for REST API handlers (avoids importing server package).
 type Deps struct {
-	RouteService       domain.RouteService
-	ServiceService     domain.ServiceService
-	EpService          domain.EntryPointService
-	MwService          domain.MiddlewareService
-	TLSOptService      domain.TLSOptionService
-	CanaryService      domain.CanaryService
+	RouteService       route.Service
+	ServiceService     service.Service
+	EpService          entrypoint.Service
+	MwService          middleware.Service
+	TLSOptService      tls.Service
+	CanaryService      canary.Service
 	AuthManager        auth.Service
 	Version            string
 	StartTime          time.Time

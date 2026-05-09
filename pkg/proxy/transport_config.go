@@ -5,9 +5,9 @@ import "time"
 // TransportConfig tunes HTTP transport connection pooling for high-throughput backends.
 // Use explicit values; zero values use production defaults.
 type TransportConfig struct {
-	MaxIdleConns          int           // 0 = DefaultMaxIdleConns
-	MaxIdleConnsPerHost   int           // 0 = DefaultMaxIdleConnsPerHost
-	IdleConnTimeout       time.Duration // 0 = DefaultIdleConnTimeout
+	MaxIdleConns        int           // 0 = DefaultMaxIdleConns
+	MaxIdleConnsPerHost int           // 0 = DefaultMaxIdleConnsPerHost
+	IdleConnTimeout     time.Duration // 0 = DefaultIdleConnTimeout
 }
 
 const (

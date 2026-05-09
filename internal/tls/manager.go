@@ -136,7 +136,7 @@ func (m *Manager) validateCertificate(cert *tls.Certificate, caData []byte, cert
 
 	leaf, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
-		logger.L.Warn().Err(err).Str("file", certFile).Msg("Failed to parse certificate for validation")
+		logger.L.LogWarn("Failed to parse certificate for validation", "error", err, "file", certFile)
 		res.Valid = false
 		res.Warnings = append(res.Warnings, fmt.Sprintf("failed to parse certificate: %v", err))
 		return res
@@ -156,7 +156,7 @@ func (m *Manager) checkRSAKeySize(leaf *x509.Certificate, certFile string, res *
 			bits := pub.Size() * 8
 			if bits < 2048 {
 				msg := fmt.Sprintf("Insecure RSA key size (%d bits) detected. RSA keys should be at least 2048 bits for TLS 1.3 compatibility.", bits)
-				logger.L.Warn().Str("file", certFile).Int("bits", bits).Msg(msg)
+				logger.L.LogWarn(msg, "file", certFile, "bits", bits)
 				res.Warnings = append(res.Warnings, msg)
 			}
 		}
@@ -166,7 +166,7 @@ func (m *Manager) checkRSAKeySize(leaf *x509.Certificate, certFile string, res *
 func (m *Manager) checkSHA1(leaf *x509.Certificate, certFile string, res *gateonv1.CertificateValidation) {
 	if leaf.SignatureAlgorithm == x509.SHA1WithRSA || leaf.SignatureAlgorithm == x509.DSAWithSHA1 || leaf.SignatureAlgorithm == x509.ECDSAWithSHA1 {
 		msg := fmt.Sprintf("Deprecated SHA-1 signature algorithm (%s) detected.", leaf.SignatureAlgorithm.String())
-		logger.L.Warn().Str("file", certFile).Str("algo", leaf.SignatureAlgorithm.String()).Msg(msg)
+		logger.L.LogWarn(msg, "file", certFile, "algo", leaf.SignatureAlgorithm.String())
 		res.Warnings = append(res.Warnings, msg)
 	}
 }
@@ -184,7 +184,7 @@ func (m *Manager) checkAlgorithmMismatch(leaf *x509.Certificate, caData []byte, 
 				ca, err := x509.ParseCertificate(block.Bytes)
 				if err == nil && leaf.PublicKeyAlgorithm != ca.PublicKeyAlgorithm {
 					msg := fmt.Sprintf("Algorithm mismatch: certificate uses %s, but CA uses %s. This will cause handshake failures.", leaf.PublicKeyAlgorithm.String(), ca.PublicKeyAlgorithm.String())
-					logger.L.Warn().Str("cert_file", certFile).Str("ca_file", caFile).Msg(msg)
+					logger.L.LogWarn(msg, "cert_file", certFile, "ca_file", caFile)
 					res.Warnings = append(res.Warnings, msg)
 					break
 				}
@@ -215,7 +215,7 @@ func (m *Manager) addCipherSuiteRecommendations(leaf *x509.Certificate, certFile
 
 	if certType != "" {
 		res.RecommendedCiphers = recommended
-		logger.L.Info().Str("file", certFile).Str("cert_type", certType).Strs("recommended_ciphers", recommended).Msg("Cipher suite recommendations added.")
+		logger.L.LogInfo("Cipher suite recommendations added.", "file", certFile, "cert_type", certType, "recommended_ciphers", recommended)
 	}
 }
 
@@ -372,7 +372,7 @@ func (m *Manager) applyAcmeTLSConfig(baseConfig *tls.Config) (*tls.Config, error
 func (m *Manager) applyExtraTLSConfig(tlsConfig *tls.Config) error {
 	minVer := ParseTLSVersion(m.config.MinVersion, tls.VersionTLS12)
 	if minVer != 0 && minVer < tls.VersionTLS12 {
-		logger.L.Warn().Str("version", m.config.MinVersion).Msg("Insecure TLS version configured.")
+		logger.L.LogWarn("Insecure TLS version configured.", "version", m.config.MinVersion)
 	}
 	tlsConfig.MinVersion = minVer
 	tlsConfig.MaxVersion = ParseTLSVersion(m.config.MaxVersion, 0)

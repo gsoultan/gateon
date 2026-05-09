@@ -25,7 +25,7 @@ const theme = createTheme({
   fontFamilyMonospace: 'JetBrains Mono, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   headings: {
     fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-    fontWeight: '700',
+    fontWeight: '800',
   },
   defaultRadius: 'md',
   white: '#fff',
@@ -55,6 +55,26 @@ const theme = createTheme({
       '#0c0d21',
       '#01010a',
     ],
+  },
+  components: {
+    Card: {
+      defaultProps: {
+        radius: "md",
+        withBorder: true,
+      },
+    },
+    Button: {
+      defaultProps: {
+        radius: "md",
+        fw: 600,
+      },
+    },
+    Paper: {
+      defaultProps: {
+        radius: "md",
+        withBorder: true,
+      },
+    },
   },
   shadows: {
     xs: '0 1px 2px rgba(0, 0, 0, 0.05)',

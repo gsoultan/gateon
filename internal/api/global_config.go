@@ -3,15 +3,17 @@ package api
 import (
 	"context"
 
+	"github.com/gsoultan/gateon/internal/alerting"
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalConfigRequest) (*gateonv1.GlobalConfig, error) {
+func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalConfigRequest) (*gateonv1.GetGlobalConfigResponse, error) {
 	if s.Globals == nil {
-		return &gateonv1.GlobalConfig{}, nil
+		return &gateonv1.GetGlobalConfigResponse{Config: &gateonv1.GlobalConfig{}}, nil
 	}
-	return s.Globals.Get(ctx), nil
+	return &gateonv1.GetGlobalConfigResponse{Config: s.Globals.Get(ctx)}, nil
 }
 
 func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.UpdateGlobalConfigRequest) (*gateonv1.UpdateGlobalConfigResponse, error) {
@@ -21,6 +23,14 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
+	}
+
+	// Trigger reconfigurations
+	if req.Config.Alerting != nil {
+		alerting.UpdateConfig(req.Config.Alerting)
+	}
+	if req.Config.Audit != nil {
+		audit.UpdateConfig(req.Config.Audit)
 	}
 
 	// Update telemetry retention if log config is present

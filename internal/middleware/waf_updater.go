@@ -81,15 +81,15 @@ func (u *WAFUpdater) PerformUpdate(force bool) error {
 		return nil
 	}
 
-	logger.L.Info().Str("url", rulesUrl).Msg("Updating WAF rules...")
+	logger.L.LogInfo("Updating WAF rules...", "url", rulesUrl)
 
 	if err := u.downloadAndExtract(rulesUrl, rulesDir); err != nil {
-		logger.L.Error().Err(err).Msg("Failed to update WAF rules")
+		logger.L.LogError("Failed to update WAF rules", "error", err)
 		return err
 	}
 
 	_ = os.WriteFile(statusFile, []byte(time.Now().Format(time.RFC3339)), 0644)
-	logger.L.Info().Msg("WAF rules updated successfully")
+	logger.L.LogInfo("WAF rules updated successfully")
 
 	// Invalidate cache to apply new rules
 	InvalidateWAFCache()

@@ -58,12 +58,3 @@ func GenerateFingerprint(r *http.Request) *ClientFingerprint {
 		Attributes: attrs,
 	}
 }
-
-// TrackBehavior stores and analyzes sequences of requests from a fingerprint.
-// This is a stub for the "Normal Usage Profiles" requirement.
-func TrackBehavior(fingerprint string, path string) {
-	// In a real implementation, this would update a Redis/DB store with:
-	// - Path sequence (e.g., /login -> /dashboard -> /profile)
-	// - Timing between requests
-	// - Unusual spikes in specific sequences
-}

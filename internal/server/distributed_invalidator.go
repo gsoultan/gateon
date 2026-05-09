@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/redis"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -20,13 +20,13 @@ type InvalidationMessage struct {
 }
 
 type distributedProxyInvalidator struct {
-	local  domain.ProxyInvalidator
+	local  proxy.Invalidator
 	redis  redis.Client
 	nodeID string
 }
 
 // NewDistributedProxyInvalidator wraps a local invalidator and broadcasts events via Redis.
-func NewDistributedProxyInvalidator(local domain.ProxyInvalidator, redis redis.Client) domain.ProxyInvalidator {
+func NewDistributedProxyInvalidator(local proxy.Invalidator, redis redis.Client) proxy.Invalidator {
 	nodeID, _ := os.Hostname()
 	if nodeID == "" {
 		nodeID = "unknown"
@@ -63,7 +63,7 @@ func (i *distributedProxyInvalidator) InvalidateTLS() {
 }
 
 // StartListener listens for invalidation events from other nodes.
-func StartInvalidationListener(ctx context.Context, local domain.ProxyInvalidator, redisClient redis.Client) {
+func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, redisClient redis.Client) {
 	if redisClient == nil {
 		return
 	}
@@ -72,7 +72,7 @@ func StartInvalidationListener(ctx context.Context, local domain.ProxyInvalidato
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()
-	logger.L.Info().Msg("Distributed config invalidation listener started")
+	logger.L.LogInfo("Distributed config invalidation listener started")
 
 	for {
 		select {
@@ -86,16 +86,15 @@ func StartInvalidationListener(ctx context.Context, local domain.ProxyInvalidato
 			if inv.NodeID == nodeID {
 				continue // Skip self-broadcast
 			}
-
 			switch inv.Type {
 			case "route":
-				logger.L.Debug().Str("route_id", inv.ID).Str("from", inv.NodeID).Msg("Received remote route invalidation")
+				logger.L.LogDebug("Received remote route invalidation", "route_id", inv.ID, "from", inv.NodeID)
 				local.InvalidateRoute(inv.ID)
 			case "all":
-				logger.L.Debug().Str("from", inv.NodeID).Msg("Received remote global invalidation")
+				logger.L.LogDebug("Received remote global invalidation", "from", inv.NodeID)
 				local.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 			case "tls":
-				logger.L.Debug().Str("from", inv.NodeID).Msg("Received remote TLS invalidation")
+				logger.L.LogDebug("Received remote TLS invalidation", "from", inv.NodeID)
 				local.InvalidateTLS()
 			}
 		}

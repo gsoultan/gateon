@@ -407,6 +407,39 @@ export type GlobalConfig = {
   management?: ManagementConfig;
   geoip?: GeoIPConfig;
   security_advanced?: SecurityAdvancedConfig;
+  alerting?: AlertingConfig;
+  audit?: AuditConfig;
+};
+
+export type AlertingConfig = {
+  enabled: boolean;
+  dispatchers: AlertDispatcher[];
+  playbooks: AlertPlaybook[];
+};
+
+export type AlertDispatcher = {
+  id: string;
+  name: string;
+  type: string;
+  webhook_url?: string;
+  slack_channel?: string;
+  telegram_bot_token?: string;
+  telegram_chat_id?: string;
+};
+
+export type AlertPlaybook = {
+  id: string;
+  name: string;
+  event_type: string;
+  threshold: number;
+  dispatcher_ids: string[];
+  action: string;
+};
+
+export type AuditConfig = {
+  enabled: boolean;
+  sign_entries: boolean;
+  signature_key?: string;
 };
 
 export type SecurityAdvancedConfig = {
@@ -610,6 +643,12 @@ export type Anomaly = {
   route_id?: string;
   request_uri?: string;
   mitigated?: boolean;
+};
+
+export type Reputation = {
+  fingerprint: string;
+  score: number;
+  last_event: string;
 };
 
 export type DependencyHealth = {

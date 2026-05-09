@@ -29,7 +29,7 @@ func (v *OpenApiValidator) Middleware(next http.Handler) http.Handler {
 		// 2. Check for unexpected query parameters
 		// 3. Check content type
 
-		logger.L.Debug().Str("path", r.URL.Path).Msg("Performing OpenAPI schema validation")
+		logger.L.LogDebug("Performing OpenAPI schema validation", "path", r.URL.Path)
 
 		// If validation fails and Strict is true, block the request
 		// For now, we just pass through but log any potential violations

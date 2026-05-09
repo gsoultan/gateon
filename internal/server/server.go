@@ -7,6 +7,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/redis"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 )
@@ -25,6 +26,7 @@ type Server struct {
 	RedisClient  redis.Client
 	TLSManager   gtls.TLSManager
 	WafUpdater   interface{} // middleware.WAFUpdater (interface to avoid cyclic import)
+	Logger       logger.Logger
 	Port         string
 	Version      string
 	startTime    time.Time

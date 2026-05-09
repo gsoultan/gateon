@@ -131,9 +131,18 @@ func NewQPSRateLimiter(requestsPerSec, burst int) *LocalRateLimiter {
 	return NewRateLimiter(rate.Limit(requestsPerSec), burst)
 }
 
-func (rl *LocalRateLimiter) getLimiter(key string) *rate.Limiter {
+func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Limiter {
 	now := time.Now().Unix()
 	s := rl.getShard(key)
+
+	// Adjust base rate and burst based on reputation (0-100)
+	// At 100 reputation, they get 100% of the limit.
+	// At 10 reputation, they get 10% of the limit.
+	adjRate := rl.rate * rate.Limit(reputation/100.0)
+	adjBurst := int(float64(rl.burst) * (reputation / 100.0))
+	if adjBurst < 1 {
+		adjBurst = 1
+	}
 
 	s.mu.RLock()
 	entry, exists := s.limiters[key]
@@ -141,6 +150,11 @@ func (rl *LocalRateLimiter) getLimiter(key string) *rate.Limiter {
 
 	if exists {
 		entry.lastAccess.Store(now)
+		// Update limits if they changed significantly
+		if entry.limiter.Limit() != adjRate {
+			entry.limiter.SetLimit(adjRate)
+			entry.limiter.SetBurst(adjBurst)
+		}
 		return entry.limiter
 	}
 
@@ -150,8 +164,13 @@ func (rl *LocalRateLimiter) getLimiter(key string) *rate.Limiter {
 	// Double-check after acquiring write lock
 	entry, exists = s.limiters[key]
 	if !exists {
-		entry = &rateLimiterEntry{limiter: rate.NewLimiter(rl.rate, rl.burst)}
+		entry = &rateLimiterEntry{limiter: rate.NewLimiter(adjRate, adjBurst)}
 		s.limiters[key] = entry
+	} else {
+		if entry.limiter.Limit() != adjRate {
+			entry.limiter.SetLimit(adjRate)
+			entry.limiter.SetBurst(adjBurst)
+		}
 	}
 	entry.lastAccess.Store(now)
 
@@ -172,7 +191,11 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				return
 			}
 
-			limiter := rl.getLimiter(key)
+			// Adaptive Rate Limiting based on Reputation
+			fp := telemetry.GenerateFingerprint(r)
+			reputation := telemetry.GetReputation(fp.Hash)
+
+			limiter := rl.getLimiter(key, reputation)
 			if !limiter.Allow() {
 				if !ShouldSkipMetrics(r) {
 					routeID := GetRouteName(r)
@@ -249,7 +272,15 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				return
 			}
 
-			if int(count.Val()) > rl.rate+rl.burst {
+			// Adaptive logic for Redis
+			fp := telemetry.GenerateFingerprint(r)
+			reputation := telemetry.GetReputation(fp.Hash)
+			adjLimit := int(float64(rl.rate+rl.burst) * (reputation / 100.0))
+			if adjLimit < 1 {
+				adjLimit = 1
+			}
+
+			if int(count.Val()) > adjLimit {
 				if !ShouldSkipMetrics(r) {
 					routeID := GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("redis").Inc()

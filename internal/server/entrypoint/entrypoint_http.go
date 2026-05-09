@@ -90,9 +90,9 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 			})
 		}
 		wg.Go(func() {
-			logger.L.Info().Str("addr", addr).Msg("starting HTTP/3 (QUIC) entrypoint")
+			logger.L.LogInfo("starting HTTP/3 (QUIC) entrypoint", "addr", addr)
 			if err := h3Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.Error().Err(err).Str("addr", addr).Msg("HTTP/3 server failed")
+				logger.L.LogError("HTTP/3 server failed", "error", err, "addr", addr)
 			}
 		})
 	}
@@ -134,14 +134,14 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	}
 	if hasTCP {
 		if epTLSConfig != nil {
-			logger.L.Info().Str("addr", addr).Str("type", ep.Type.String()).Msg("starting HTTPS entrypoint")
+			logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", ep.Type.String())
 			if err := server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.Error().Err(err).Str("addr", addr).Msg("HTTPS server failed")
+				logger.L.LogError("HTTPS server failed", "error", err, "addr", addr)
 			}
 		} else {
-			logger.L.Info().Str("addr", addr).Str("type", ep.Type.String()).Msg("starting HTTP entrypoint")
+			logger.L.LogInfo("starting HTTP entrypoint", "addr", addr, "type", ep.Type.String())
 			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.Error().Err(err).Str("addr", addr).Msg("HTTP server failed")
+				logger.L.LogError("HTTP server failed", "error", err, "addr", addr)
 			}
 		}
 	}
@@ -170,13 +170,12 @@ func injectEntryPointID(epID, epLabel string, isMgmt bool, next http.Handler) ht
 
 		// Log arrival for proxy traffic only
 		if !isMgmt && !middleware.IsInternalPath(r.URL.Path) {
-			logger.L.Info().
-				Str("flow_step", "entrypoint_arrival").
-				Str("request_id", request.GetID(r)).
-				Str("entrypoint", epID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Msg("Proxy request received")
+			logger.L.LogInfo("Proxy request received",
+				"flow_step", "entrypoint_arrival",
+				"request_id", request.GetID(r),
+				"entrypoint", epID,
+				"method", r.Method,
+				"path", r.URL.Path)
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

@@ -249,14 +249,13 @@ SecAuditLog "%s"
 
 	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
 		ruleID := strconv.Itoa(mr.Rule().ID())
-		logger.L.Warn().
-			Str("event", "waf_match").
-			Str("rule_id", ruleID).
-			Str("client_ip", mr.ClientIPAddress()).
-			Str("uri", mr.URI()).
-			Str("severity", mr.Rule().Severity().String()).
-			Str("message", mr.ErrorLog()).
-			Msg("WAF matched rule")
+		logger.L.LogWarn("WAF matched rule",
+			"event", "waf_match",
+			"rule_id", ruleID,
+			"client_ip", mr.ClientIPAddress(),
+			"uri", mr.URI(),
+			"severity", mr.Rule().Severity().String(),
+			"message", mr.ErrorLog())
 
 		// IPS feature: automatically shun IPs that trigger critical security rules
 		if mr.Rule().Severity() <= types.RuleSeverityCritical && cfg.EbpfManager != nil {
@@ -331,6 +330,32 @@ func (t *txWrapper) Close() error {
 		ruleID := strconv.Itoa(it.RuleID)
 		telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(t.routeID, ruleID).Inc()
 		telemetry.RequestFailuresTotal.WithLabelValues(t.routeID, "waf:"+ruleID).Inc()
+
+		// Record granular mitigated threat metrics
+		category := "unknown"
+		severity := "unknown"
+		for _, rule := range t.MatchedRules() {
+			if rule.Rule().ID() == it.RuleID {
+				severity = strings.ToLower(rule.Rule().Severity().String())
+				for _, tag := range rule.Rule().Tags() {
+					if strings.Contains(tag, "sqli") {
+						category = "sqli"
+					} else if strings.Contains(tag, "xss") {
+						category = "xss"
+					} else if strings.Contains(tag, "rce") {
+						category = "rce"
+					} else if strings.Contains(tag, "lfi") {
+						category = "lfi"
+					} else if strings.Contains(tag, "scanner") {
+						category = "bot"
+					} else if strings.Contains(tag, "wordpress") || strings.Contains(tag, "wp_scan") {
+						category = "wp_scan"
+					}
+				}
+				break
+			}
+		}
+		telemetry.MitigatedThreatsTotal.WithLabelValues(category, severity, "blocked").Inc()
 	}
 	return t.Transaction.Close()
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -57,7 +58,7 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 			}
 		}
 
-		mgr, err := auth.NewManager(databaseURL, req.PasetoSecret)
+		mgr, err := auth.NewManager(databaseURL, req.PasetoSecret, logger.Default())
 		if err != nil {
 			return &gateonv1.SetupResponse{Success: false, Error: "failed to initialize auth manager: " + err.Error()}, nil
 		}

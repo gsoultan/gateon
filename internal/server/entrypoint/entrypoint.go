@@ -54,7 +54,7 @@ func (r *ShutdownRegistry) ShutdownAll(ctx context.Context) {
 	r.mu.Unlock()
 	for _, fn := range list {
 		if err := fn(ctx); err != nil {
-			logger.L.Debug().Err(err).Msg("shutdown callback error")
+			logger.L.LogDebug("shutdown callback error", "error", err)
 		}
 	}
 }

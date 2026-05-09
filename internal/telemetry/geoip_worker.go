@@ -33,7 +33,7 @@ func runGeoIPUpdate(cfg *gateonv1.GlobalConfig) {
 	}
 
 	if cfg.Geoip.MaxmindLicenseKey == "" {
-		logger.L.Debug().Msg("skipping GeoIP auto-update: no MaxMind license key provided")
+		logger.L.LogDebug("skipping GeoIP auto-update: no MaxMind license key provided")
 		return
 	}
 
@@ -50,16 +50,16 @@ func runGeoIPUpdate(cfg *gateonv1.GlobalConfig) {
 			interval = 30 * 24 * time.Hour
 		}
 		if time.Since(info.ModTime()) < interval {
-			logger.L.Debug().Msg("GeoIP database is up to date")
+			logger.L.LogDebug("GeoIP database is up to date")
 			return
 		}
 	}
 
-	logger.L.Info().Msg("starting GeoIP database auto-update")
+	logger.L.LogInfo("starting GeoIP database auto-update")
 	if err := DownloadGeoIP(cfg.Geoip.MaxmindLicenseKey); err != nil {
-		logger.L.Error().Err(err).Msg("failed to auto-update GeoIP database")
+		logger.L.LogError("failed to auto-update GeoIP database", "error", err)
 	} else {
-		logger.L.Info().Msg("GeoIP database auto-update successful")
+		logger.L.LogInfo("GeoIP database auto-update successful")
 	}
 }
 

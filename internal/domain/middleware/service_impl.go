@@ -1,4 +1,4 @@
-package domain
+package middleware
 
 import (
 	"context"
@@ -6,45 +6,45 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/domain/proxy"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// MiddlewareServiceImpl implements MiddlewareService.
-type MiddlewareServiceImpl struct {
+// serviceImpl implements Service.
+type serviceImpl struct {
 	store               config.MiddlewareStore
 	routeStore          config.RouteStore
-	invalidator         ProxyInvalidator
-	validator           MiddlewareConfigValidator
+	invalidator         proxy.Invalidator
+	validator           ConfigValidator
 	wafCacheInvalidator WAFCacheInvalidator
+	logger              logger.Logger
 }
 
-// NewMiddlewareService creates a MiddlewareService.
-func NewMiddlewareService(store config.MiddlewareStore, routeStore config.RouteStore, invalidator ProxyInvalidator, validator MiddlewareConfigValidator) MiddlewareService {
-	return NewMiddlewareServiceWithOptions(store, routeStore, invalidator, validator, nil)
-}
-
-// NewMiddlewareServiceWithOptions creates a MiddlewareService with optional WAF cache invalidation.
-func NewMiddlewareServiceWithOptions(store config.MiddlewareStore, routeStore config.RouteStore, invalidator ProxyInvalidator, validator MiddlewareConfigValidator, wafCacheInvalidator WAFCacheInvalidator) MiddlewareService {
-	return &MiddlewareServiceImpl{
+// NewService creates a Middleware Service.
+func NewService(store config.MiddlewareStore, routeStore config.RouteStore, invalidator proxy.Invalidator, validator ConfigValidator, wafCacheInvalidator WAFCacheInvalidator, l logger.Logger) Service {
+	return &serviceImpl{
 		store:               store,
 		routeStore:          routeStore,
 		invalidator:         invalidator,
 		validator:           validator,
 		wafCacheInvalidator: wafCacheInvalidator,
+		logger:              l,
 	}
 }
 
 // ListPaginated returns paginated middlewares.
-func (s *MiddlewareServiceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Middleware, int32) {
+func (s *serviceImpl) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Middleware, int32) {
 	return s.store.ListPaginated(ctx, page, pageSize, search)
 }
 
-func (s *MiddlewareServiceImpl) GetMiddleware(ctx context.Context, id string) (*gateonv1.Middleware, bool) {
+// GetMiddleware returns a single middleware by ID.
+func (s *serviceImpl) GetMiddleware(ctx context.Context, id string) (*gateonv1.Middleware, bool) {
 	return s.store.Get(ctx, id)
 }
 
 // SaveMiddleware validates, assigns ID if needed, persists, and invalidates affected route proxies.
-func (s *MiddlewareServiceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1.Middleware) error {
+func (s *serviceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1.Middleware) error {
 	if s.validator != nil {
 		if err := s.validator.Validate(mw); err != nil {
 			return err
@@ -71,7 +71,7 @@ func (s *MiddlewareServiceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1
 }
 
 // DeleteMiddleware removes the middleware, removes its references from routes, and invalidates affected route proxies.
-func (s *MiddlewareServiceImpl) DeleteMiddleware(ctx context.Context, id string) error {
+func (s *serviceImpl) DeleteMiddleware(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("missing middleware id")
 	}
@@ -94,7 +94,8 @@ func (s *MiddlewareServiceImpl) DeleteMiddleware(ctx context.Context, id string)
 			affectedRouteIDs = append(affectedRouteIDs, rt.Id)
 			rt.Middlewares = newMws
 			if err := s.routeStore.Update(ctx, rt); err != nil {
-				// We log and continue, as failing here might leave things in inconsistent state
+				// Continue to next route even if one fails
+				continue
 			}
 		}
 	}
@@ -116,7 +117,7 @@ func (s *MiddlewareServiceImpl) DeleteMiddleware(ctx context.Context, id string)
 }
 
 // RoutesUsingMiddleware returns routes that reference the given middleware ID.
-func (s *MiddlewareServiceImpl) RoutesUsingMiddleware(ctx context.Context, middlewareID string) []*gateonv1.Route {
+func (s *serviceImpl) RoutesUsingMiddleware(ctx context.Context, middlewareID string) []*gateonv1.Route {
 	if middlewareID == "" {
 		return nil
 	}

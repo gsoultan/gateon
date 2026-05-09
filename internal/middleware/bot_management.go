@@ -44,16 +44,21 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				if !checkBrowserIntegrity(r) {
 					logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
 					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "integrity_failed").Inc()
+					telemetry.BotMitigationTotal.WithLabelValues("integrity_fail").Inc()
+					telemetry.MitigatedThreatsTotal.WithLabelValues("bot", "medium", "blocked").Inc()
 
 					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
-						ID:         fmt.Sprintf("bot-integrity-%s-%s", cfg.RouteID, clientIP),
-						Type:       "bot_detected",
-						SourceIP:   clientIP,
-						Score:      40,
-						Details:    "Failed browser integrity check (Sec-Fetch headers)",
-						Time:       time.Now(),
-						RouteID:    cfg.RouteID,
-						RequestURI: r.URL.RequestURI(),
+						ID:          fmt.Sprintf("bot-integrity-%s-%s", cfg.RouteID, clientIP),
+						Type:        "bot_detected",
+						SourceIP:    clientIP,
+						Score:       40,
+						Details:     "Failed browser integrity check (Sec-Fetch headers)",
+						Time:        time.Now(),
+						RouteID:     cfg.RouteID,
+						RequestURI:  r.URL.RequestURI(),
+						Category:    "bot",
+						Severity:    "medium",
+						ActionTaken: "blocked",
 					})
 
 					http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
@@ -75,6 +80,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				token := r.FormValue("token")
 				if verifyChallengeToken(token, cfg.SecretKey, r.UserAgent(), clientIP) {
 					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_solved").Inc()
+					telemetry.ActiveUnverifiedClientsTotal.Dec()
 					http.SetCookie(w, &http.Cookie{
 						Name:     ChallengeCookieName,
 						Value:    token,
@@ -86,15 +92,21 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 					return
 				}
 				telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_failed").Inc()
+				telemetry.BotMitigationTotal.WithLabelValues("js_challenge_fail").Inc()
+				telemetry.MitigatedThreatsTotal.WithLabelValues("bot", "high", "blocked").Inc()
+				telemetry.ActiveUnverifiedClientsTotal.Dec()
 				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
-					ID:         fmt.Sprintf("bot-challenge-fail-%s-%s", cfg.RouteID, clientIP),
-					Type:       "bot_detected",
-					SourceIP:   clientIP,
-					Score:      60,
-					Details:    "Failed JavaScript challenge submission",
-					Time:       time.Now(),
-					RouteID:    cfg.RouteID,
-					RequestURI: r.URL.RequestURI(),
+					ID:          fmt.Sprintf("bot-challenge-fail-%s-%s", cfg.RouteID, clientIP),
+					Type:        "bot_detected",
+					SourceIP:    clientIP,
+					Score:       60,
+					Details:     "Failed JavaScript challenge submission",
+					Time:        time.Now(),
+					RouteID:     cfg.RouteID,
+					RequestURI:  r.URL.RequestURI(),
+					Category:    "bot",
+					Severity:    "high",
+					ActionTaken: "blocked",
 				})
 			}
 
@@ -109,6 +121,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 			// 4. Serve JS Challenge
 			if cfg.EnableJSChallenge {
 				telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_served").Inc()
+				telemetry.ActiveUnverifiedClientsTotal.Inc()
 				serveJSChallenge(w, r)
 				return
 			}

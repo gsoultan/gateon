@@ -51,6 +51,9 @@ export type MiddlewareMetrics = {
   retries_failure: number;
   config_reloads: number;
   cache_invalidations: number;
+  mitigated_threats: LabeledCount[] | null;
+  bot_mitigations: LabeledCount[] | null;
+  ebpf_dropped_packets: LabeledCount[] | null;
 };
 
 export type TLSCertMetric = {
@@ -120,6 +123,10 @@ export type MetricsSnapshot = {
   domain_metrics: DomainMetric[] | null;
   hourly_domain_metrics: DomainStats[] | null;
   traffic_history: TrafficSample[] | null;
+  active_suspicious_sessions: number;
+  active_unverified_clients: number;
+  active_shunned_entities: LabeledCount[] | null;
+  active_anomaly_score_average: number;
   system: SystemMetrics;
 };
 

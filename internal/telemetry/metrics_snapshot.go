@@ -46,6 +46,12 @@ type MetricsSnapshot struct {
 	// Traffic history for charts (last 24-48 hours)
 	TrafficHistory []TrafficSample `json:"traffic_history"`
 
+	// Active threats
+	ActiveSuspiciousSessions  float64        `json:"active_suspicious_sessions"`
+	ActiveUnverifiedClients   float64        `json:"active_unverified_clients"`
+	ActiveShunnedEntities     []LabeledCount `json:"active_shunned_entities"`
+	ActiveAnomalyScoreAverage float64        `json:"active_anomaly_score_average"`
+
 	// System-level gauges.
 	System SystemMetrics `json:"system"`
 }
@@ -101,6 +107,9 @@ type MiddlewareMetrics struct {
 	RetriesFailure     float64        `json:"retries_failure"`
 	ConfigReloads      float64        `json:"config_reloads"`
 	CacheInvalidations float64        `json:"cache_invalidations"`
+	MitigatedThreats   []LabeledCount `json:"mitigated_threats"`
+	BotMitigations     []LabeledCount `json:"bot_mitigations"`
+	EbpfDroppedPackets []LabeledCount `json:"ebpf_dropped_packets"`
 }
 
 // LabeledCount is a metric value with a descriptive label.
@@ -186,6 +195,24 @@ func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
 	snap.HourlyDomainMetrics = GetDomainStatsWindow(context.Background(), 1)
 	snap.TrafficHistory = GetSystemTrafficHistory(context.Background(), CurrentRetentionDays())
 	snap.System = buildSystemMetrics(idx)
+
+	// Build active threat metrics
+	snap.ActiveSuspiciousSessions = gaugeValue(idx, "gateon_active_suspicious_sessions_total")
+	snap.ActiveUnverifiedClients = gaugeValue(idx, "gateon_active_unverified_clients_total")
+	snap.ActiveShunnedEntities = collectLabeledCounts(idx, "gateon_active_shunned_entities_total", "type")
+
+	if fam, ok := idx["gateon_active_anomaly_score"]; ok {
+		var sum float64
+		var count uint64
+		for _, m := range fam.GetMetric() {
+			h := m.GetHistogram()
+			sum += h.GetSampleSum()
+			count += h.GetSampleCount()
+		}
+		if count > 0 {
+			snap.ActiveAnomalyScoreAverage = sum / float64(count)
+		}
+	}
 
 	return snap, nil
 }
@@ -383,6 +410,10 @@ func buildMiddlewareMetrics(idx map[string]*dto.MetricFamily) MiddlewareMetrics 
 
 	mm.GeoIPBlocked = collectLabeledCounts(idx, "gateon_middleware_geoip_blocked_total", "country")
 	mm.HMACFailures = sumCounter(idx, "gateon_middleware_hmac_failures_total", nil)
+
+	mm.MitigatedThreats = collectLabeledCounts(idx, "gateon_mitigated_threats_total", "category")
+	mm.BotMitigations = collectLabeledCounts(idx, "gateon_bot_mitigation_total", "signal")
+	mm.EbpfDroppedPackets = collectLabeledCounts(idx, "gateon_ebpf_dropped_packets_total", "reason")
 
 	if fam, ok := idx["gateon_retries_total"]; ok {
 		for _, m := range fam.GetMetric() {

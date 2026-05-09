@@ -52,15 +52,14 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 
 			if sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0) {
 				duration := time.Since(start)
-				logger.L.Info().
-					Str("host", origHost).
-					Str("method", origMethod).
-					Str("path", origPath).
-					Str("remote_addr", remoteAddr).
-					Int("status", sw.Status).
-					Dur("latency", duration).
-					Str("route", routeID).
-					Msg("access log")
+				logger.L.LogInfo("access log",
+					"host", origHost,
+					"method", origMethod,
+					"path", origPath,
+					"remote_addr", remoteAddr,
+					"status", sw.Status,
+					"latency", duration,
+					"route", routeID)
 			}
 		})
 	}
@@ -149,6 +148,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			if gc := config.GetGlobalConfig(); gc != nil && gc.AnomalyDetection != nil && gc.AnomalyDetection.EnableBehavioralFingerprinting {
 				fp := telemetry.GenerateFingerprint(r)
 				fingerprint = fp.Hash
+				telemetry.TrackBehavior(fingerprint, r)
 			}
 
 			status := getStatusString(sw.Status)

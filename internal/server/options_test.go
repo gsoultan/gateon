@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 // TestWithAuthManager_NilDoesNotCreateNonNilInterface is a regression test for the bug where
@@ -22,7 +23,7 @@ func TestWithAuthManager_NilDoesNotCreateNonNilInterface(t *testing.T) {
 	})
 
 	t.Run("non-nil manager sets AuthManager correctly", func(t *testing.T) {
-		mgr, err := auth.NewManager("sqlite::memory:", "test-secret-key-32-bytes-minimum!")
+		mgr, err := auth.NewManager("sqlite::memory:", "test-secret-key-32-bytes-minimum!", logger.Default())
 		if err != nil {
 			t.Fatalf("auth.NewManager: %v", err)
 		}

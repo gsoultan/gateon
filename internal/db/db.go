@@ -7,10 +7,10 @@ import (
 
 // Driver names for database/sql.
 const (
-	DriverSQLite    = "sqlite"
-	DriverPostgres  = "postgres"
-	DriverMySQL     = "mysql"
-	DriverMariaDB   = "mysql" // MariaDB uses the MySQL driver
+	DriverSQLite   = "sqlite"
+	DriverPostgres = "postgres"
+	DriverMySQL    = "mysql"
+	DriverMariaDB  = "mysql" // MariaDB uses the MySQL driver
 )
 
 // Dialect describes database-specific behavior.

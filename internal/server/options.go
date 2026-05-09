@@ -4,6 +4,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/logger"
 	redigo "github.com/redis/go-redis/v9"
 )
 
@@ -104,6 +105,14 @@ func WithVersion(v string) ServerOption {
 func WithWafUpdater(u interface{}) ServerOption {
 	return func(s *Server) error {
 		s.WafUpdater = u
+		return nil
+	}
+}
+
+// WithLogger sets the logger.
+func WithLogger(l logger.Logger) ServerOption {
+	return func(s *Server) error {
+		s.Logger = l
 		return nil
 	}
 }

@@ -5,7 +5,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/domain"
+	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -23,7 +23,7 @@ type ApiService struct {
 	Middlewares        config.MiddlewareStore
 	TLSOptions         config.TLSOptionStore
 	Auth               auth.Service
-	Invalidator        domain.ProxyInvalidator
+	Invalidator        proxy.Invalidator
 	TLSManager         gtls.TLSManager
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager

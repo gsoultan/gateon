@@ -156,8 +156,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		data, _ := ProtojsonOptions().Marshal(resp)
-		_, _ = w.Write(data)
+		data, err := ProtojsonOptions().Marshal(resp)
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, "failed to marshal response")
+			return
+		}
+		if _, err := w.Write(data); err != nil {
+			logger.L.LogError("failed to write response", "error", err)
+		}
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -174,8 +180,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		data, _ := ProtojsonOptions().Marshal(resp)
-		_, _ = w.Write(data)
+		data, err := ProtojsonOptions().Marshal(resp)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to marshal response")
+			return
+		}
+		if _, err := w.Write(data); err != nil {
+			logger.L.LogError("failed to write response", "error", err)
+		}
 	})
 	// Test DB connection endpoint for first-run wizard
 	type testDBReq struct {
@@ -279,11 +291,19 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		resp, err := svc.Setup(r.Context(), &req)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+				logger.L.LogError("failed to encode error response", "error", err)
+			}
 			return
 		}
-		data, _ := ProtojsonOptions().Marshal(resp)
-		_, _ = w.Write(data)
+		data, err := ProtojsonOptions().Marshal(resp)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to marshal response")
+			return
+		}
+		if _, err := w.Write(data); err != nil {
+			logger.L.LogError("failed to write response", "error", err)
+		}
 	})
 	mux.HandleFunc("POST /v1/auth/2fa/setup", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -311,8 +331,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		data, _ := ProtojsonOptions().Marshal(resp)
-		_, _ = w.Write(data)
+		data, err := ProtojsonOptions().Marshal(resp)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to marshal response")
+			return
+		}
+		if _, err := w.Write(data); err != nil {
+			logger.L.LogError("failed to write response", "error", err)
+		}
 	})
 	mux.HandleFunc("POST /v1/auth/2fa/verify", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

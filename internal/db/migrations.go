@@ -546,4 +546,82 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(24, "create_audit_logs_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `CREATE TABLE IF NOT EXISTS audit_logs (
+				id VARCHAR(36) PRIMARY KEY,
+				user_id TEXT NOT NULL,
+				action TEXT NOT NULL,
+				resource TEXT NOT NULL,
+				details TEXT NOT NULL,
+				timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+				ip_address TEXT NOT NULL,
+				signature TEXT NOT NULL DEFAULT ''
+			);`
+		case DriverMySQL:
+			query = `CREATE TABLE IF NOT EXISTS audit_logs (
+				id VARCHAR(36) PRIMARY KEY,
+				user_id TEXT NOT NULL,
+				action TEXT NOT NULL,
+				resource TEXT NOT NULL,
+				details TEXT NOT NULL,
+				timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				ip_address TEXT NOT NULL,
+				signature TEXT NOT NULL DEFAULT ''
+			);`
+		default: // sqlite
+			query = `CREATE TABLE IF NOT EXISTS audit_logs (
+				id TEXT PRIMARY KEY,
+				user_id TEXT NOT NULL,
+				action TEXT NOT NULL,
+				resource TEXT NOT NULL,
+				details TEXT NOT NULL,
+				timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+				ip_address TEXT NOT NULL,
+				signature TEXT NOT NULL DEFAULT ''
+			);`
+		}
+		_, err := db.Exec(query)
+		return err
+	})
+
+	Register(25, "enhance_security_threats_table", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS severity TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS asn TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS action_taken TEXT NOT NULL DEFAULT '';`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS category VARCHAR(50) NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS asn VARCHAR(100) NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS action_taken VARCHAR(50) NOT NULL DEFAULT '';`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN category TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN severity TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN asn TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE security_threats ADD COLUMN action_taken TEXT NOT NULL DEFAULT '';`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

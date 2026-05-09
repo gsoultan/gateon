@@ -37,7 +37,7 @@ func (r *EntryPointRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to read entrypoints file")
+			logger.L.LogError("failed to read entrypoints file", "error", err, "path", r.path)
 		}
 		return
 	}
@@ -45,12 +45,12 @@ func (r *EntryPointRegistry) load() {
 	var entryPoints []*gateonv1.EntryPoint
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, &entryPoints); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal entrypoints yaml")
+			logger.L.LogError("failed to unmarshal entrypoints yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, &entryPoints); err != nil {
-			logger.L.Error().Err(err).Str("path", r.path).Msg("failed to unmarshal entrypoints json")
+			logger.L.LogError("failed to unmarshal entrypoints json", "error", err, "path", r.path)
 			return
 		}
 	}
@@ -58,7 +58,7 @@ func (r *EntryPointRegistry) load() {
 	for _, ep := range entryPoints {
 		r.entryPoints[ep.Id] = ep
 	}
-	logger.L.Info().Int("count", len(r.entryPoints)).Str("path", r.path).Msg("loaded entrypoints")
+	logger.L.LogInfo("loaded entrypoints", "count", len(r.entryPoints), "path", r.path)
 }
 
 func (r *EntryPointRegistry) saveLocked() error {
