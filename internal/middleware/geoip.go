@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
@@ -85,6 +86,18 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 
 			if denied {
 				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues(activeRouteID, country).Inc()
+				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+					Type:        "geoip_block",
+					SourceIP:    clientIP,
+					Score:       50,
+					Details:     fmt.Sprintf("Request from denied country: %s", country),
+					Time:        time.Now(),
+					RouteID:     activeRouteID,
+					RequestURI:  r.URL.RequestURI(),
+					Category:    "geofencing",
+					Severity:    "medium",
+					ActionTaken: "blocked",
+				})
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.LogDebug("geoip: request denied by country",
 					"ip", clientIP,
@@ -94,6 +107,18 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 
 			if len(allowSet) > 0 && !allowed {
 				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues(activeRouteID, country).Inc()
+				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+					Type:        "geoip_block",
+					SourceIP:    clientIP,
+					Score:       50,
+					Details:     fmt.Sprintf("Request from country not in allow list: %s", country),
+					Time:        time.Now(),
+					RouteID:     activeRouteID,
+					RequestURI:  r.URL.RequestURI(),
+					Category:    "geofencing",
+					Severity:    "medium",
+					ActionTaken: "blocked",
+				})
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.LogDebug("geoip: request not in allow list",
 					"ip", clientIP,

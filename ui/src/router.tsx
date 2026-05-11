@@ -37,6 +37,7 @@ const TracesPage = lazy(() => import("./routes/TracesPage"));
 const MetricsPage = lazy(() => import("./routes/MetricsPage"));
 const DiagnosticsPage = lazy(() => import("./routes/DiagnosticsPage"));
 const AuditLogsPage = lazy(() => import("./routes/AuditLogsPage"));
+const MitigatedAttacksPage = lazy(() => import("./routes/MitigatedAttacksPage"));
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -248,6 +249,12 @@ const auditLogsRoute = createRoute({
   component: () => <AuditLogsPage />,
 });
 
+const mitigatedAttacksRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/mitigated-attacks",
+  component: () => <MitigatedAttacksPage />,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
@@ -274,6 +281,7 @@ const routeTree = rootRoute.addChildren([
     metricsRoute,
     diagnosticsRoute,
     auditLogsRoute,
+    mitigatedAttacksRoute,
   ]),
 ]);
 

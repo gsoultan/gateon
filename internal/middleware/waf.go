@@ -262,16 +262,37 @@ SecAuditLog "%s"
 			_ = cfg.EbpfManager.ShunIP(mr.ClientIPAddress())
 		}
 
+		severity := strings.ToLower(mr.Rule().Severity().String())
+		category := "general"
+		for _, tag := range mr.Rule().Tags() {
+			if strings.Contains(tag, "sqli") {
+				category = "sqli"
+			} else if strings.Contains(tag, "xss") {
+				category = "xss"
+			} else if strings.Contains(tag, "rce") {
+				category = "rce"
+			} else if strings.Contains(tag, "lfi") {
+				category = "lfi"
+			} else if strings.Contains(tag, "scanner") {
+				category = "bot"
+			} else if strings.Contains(tag, "protocol") {
+				category = "protocol"
+			}
+		}
+
 		// Record security threat for telemetry and UI
 		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
-			ID:         fmt.Sprintf("waf-%d-%s", mr.Rule().ID(), mr.TransactionID()),
-			Type:       "waf_block",
-			SourceIP:   mr.ClientIPAddress(),
-			Score:      float64(100 - (int(mr.Rule().Severity()) * 10)),
-			Details:    fmt.Sprintf("WAF Rule %s: %s", ruleID, mr.ErrorLog()),
-			Time:       time.Now(),
-			RouteID:    cfg.RouteID,
-			RequestURI: mr.URI(),
+			ID:          fmt.Sprintf("waf-%d-%s", mr.Rule().ID(), mr.TransactionID()),
+			Type:        "waf_block",
+			SourceIP:    mr.ClientIPAddress(),
+			Score:       float64(100 - (int(mr.Rule().Severity()) * 10)),
+			Details:     fmt.Sprintf("WAF Rule %s: %s", ruleID, mr.ErrorLog()),
+			Time:        time.Now(),
+			RouteID:     cfg.RouteID,
+			RequestURI:  mr.URI(),
+			Category:    category,
+			Severity:    severity,
+			ActionTaken: "blocked",
 		})
 	})
 
