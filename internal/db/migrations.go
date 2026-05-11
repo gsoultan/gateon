@@ -624,4 +624,18 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(26, "add_indices_to_telemetry_tables", func(db *sql.DB, dialect Dialect) error {
+		queries := []string{
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_timestamp ON security_threats(timestamp);`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_path ON traces(path);`,
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

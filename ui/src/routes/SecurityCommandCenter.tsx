@@ -1,5 +1,5 @@
 import React from 'react';
-import { Container, Grid, Card, Text, Title, Group, Stack, Progress, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Switch, Divider, Table, TextInput, Box } from '@mantine/core';
+import { Container, Grid, Card, Text, Title, Group, Stack, Progress, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Switch, Divider, Table, TextInput, Box, Paper } from '@mantine/core';
 import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff } from '@tabler/icons-react';
 import { useSecurityThreats, useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
 import { ReputationMonitor } from '../components/ReputationMonitor';

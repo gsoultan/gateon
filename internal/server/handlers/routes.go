@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -49,6 +52,15 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "save", "route", "Saved route: "+rt.Id, request.GetClientIP(r, true))
+
 		WriteProtoResponse(w, http.StatusOK, &rt)
 	})
 	mux.HandleFunc("DELETE /v1/routes/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +76,15 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete route")
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "delete", "route", "Deleted route: "+id, request.GetClientIP(r, true))
+
 		w.WriteHeader(http.StatusNoContent)
 	})
 }

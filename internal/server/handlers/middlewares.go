@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -115,6 +118,15 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "save", "middleware", "Saved middleware: "+mw.Id, request.GetClientIP(r, true))
+
 		WriteProtoResponse(w, http.StatusOK, &mw)
 	})
 	mux.HandleFunc("DELETE /v1/middlewares/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +142,15 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete middleware")
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "delete", "middleware", "Deleted middleware: "+id, request.GetClientIP(r, true))
+
 		w.WriteHeader(http.StatusNoContent)
 	})
 }

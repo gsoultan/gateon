@@ -3,7 +3,10 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -28,6 +31,15 @@ func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "save", "entrypoint", "Saved entrypoint: "+ep.Id, request.GetClientIP(r, true))
+
 		WriteProtoResponse(w, http.StatusOK, &ep)
 	})
 	mux.HandleFunc("DELETE /v1/entrypoints/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +55,15 @@ func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete entrypoint")
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "delete", "entrypoint", "Deleted entrypoint: "+id, request.GetClientIP(r, true))
+
 		w.WriteHeader(http.StatusNoContent)
 	})
 }

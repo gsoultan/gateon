@@ -18,7 +18,7 @@ interface AuditLog {
 
 export default function AuditLogsPage() {
   const [search, setSearch] = React.useState('');
-  const { data, isLoading, refetch, isFetching } = useQuery<AuditLog[]>({
+  const { data, isLoading, refetch, isFetching } = useQuery<{ logs: AuditLog[] }>({
     queryKey: ['audit-logs'],
     queryFn: async () => {
       const res = await apiFetch('/v1/audit/logs?limit=100');
@@ -27,7 +27,7 @@ export default function AuditLogsPage() {
     },
   });
 
-  const filteredLogs = data?.filter(log => 
+  const filteredLogs = data?.logs?.filter(log => 
     (log.action?.toLowerCase() || '').includes(search.toLowerCase()) ||
     (log.resource?.toLowerCase() || '').includes(search.toLowerCase()) ||
     (log.user_id?.toLowerCase() || '').includes(search.toLowerCase()) ||

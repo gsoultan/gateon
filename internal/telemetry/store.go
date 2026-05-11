@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -498,6 +499,9 @@ func RecordSecurityThreat(t SecurityThreat) {
 	if t.Fingerprint != "" {
 		DecreaseReputation(t.Fingerprint, t.Score/2) // Penalty is half the threat score
 	}
+
+	// Increment Prometheus counter
+	MitigatedThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium"), cmp.Or(t.ActionTaken, "blocked")).Inc()
 
 	alertMu.RLock()
 	h := onThreatAlert
