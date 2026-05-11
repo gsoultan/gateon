@@ -4,7 +4,10 @@ import (
 	"net/http"
 
 	"github.com/gsoultan/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -29,6 +32,15 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to save service")
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "save", "service", "Saved service: "+svc.Id, request.GetClientIP(r, true))
+
 		WriteProtoResponse(w, http.StatusOK, &svc)
 	})
 	mux.HandleFunc("POST /v1/services/canary", func(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +72,15 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to delete service")
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "delete", "service", "Deleted service: "+id, request.GetClientIP(r, true))
+
 		w.WriteHeader(http.StatusNoContent)
 	})
 

@@ -8,10 +8,12 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -78,6 +80,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to update global config")
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "update", "global_config", "Updated global configuration", request.GetClientIP(r, true))
 
 		// Apply settings that require immediate action
 		if conf.Log != nil && conf.Log.PathStatsRetentionDays > 0 {
@@ -381,10 +391,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidCredentials) {
 				logger.SecurityEvent("auth_failure", r, "invalid_credentials")
+				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.GetClientIP(r, true))
 			}
 			writeJSONError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
+
+		audit.Log(r.Context(), req.Username, "login", "auth", "User logged in", request.GetClientIP(r, true))
 
 		if !resp.TwoFactorRequired {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
@@ -429,6 +442,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "update", "user", "Updated user: "+req.Username, request.GetClientIP(r, true))
+
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
@@ -476,10 +498,24 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		userID := "system"
+		if claims != nil {
+			userID = claims.Username
+		}
+		audit.Log(r.Context(), userID, "delete", "user", "Deleted user ID: "+id, request.GetClientIP(r, true))
+
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("POST /v1/logout", func(w http.ResponseWriter, r *http.Request) {
+		// Audit Log
+		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		if claims != nil {
+			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.GetClientIP(r, true))
+		}
 		middleware.ClearSessionCookie(w, r.TLS != nil)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
