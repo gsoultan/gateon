@@ -10,6 +10,7 @@ import {
   Progress,
   ThemeIcon,
   Tooltip,
+  Skeleton,
 } from "@mantine/core";
 import {
   IconUserExclamation,
@@ -22,7 +23,30 @@ import { useReputations } from "../hooks/useReputations";
 export function ReputationMonitor() {
   const { data, isLoading } = useReputations(20);
 
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <Card withBorder radius="md" p="md">
+        <Group justify="space-between" mb="md">
+          <Group>
+            <Skeleton h={40} w={40} radius="md" />
+            <Stack gap={4}>
+              <Skeleton h={20} w={150} />
+              <Skeleton h={12} w={200} />
+            </Stack>
+          </Group>
+          <Skeleton h={20} w={60} radius="xl" />
+        </Group>
+        <Stack gap="xs">
+          <Skeleton h={40} />
+          <Skeleton h={40} />
+          <Skeleton h={40} />
+          <Skeleton h={40} />
+          <Skeleton h={40} />
+          <Skeleton h={40} />
+        </Stack>
+      </Card>
+    );
+  }
 
   const reputations = data?.reputations || [];
 
