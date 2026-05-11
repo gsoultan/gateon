@@ -32,6 +32,7 @@ import {
   IconActivity,
   IconCertificate,
   IconShieldLock,
+  IconShieldCheck,
   IconLockAccess,
   IconSettingsAutomation,
   IconRefresh,
