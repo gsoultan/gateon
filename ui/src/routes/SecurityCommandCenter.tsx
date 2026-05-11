@@ -1,5 +1,5 @@
 import React from 'react';
-import { Container, Grid, Card, Text, Title, Group, Stack, Progress, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Switch, Divider, Table, TextInput, Box, Paper } from '@mantine/core';
+import { Container, Grid, Card, Text, Title, Group, Stack, Progress, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Switch, Divider, Table, TextInput, Box } from '@mantine/core';
 import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff } from '@tabler/icons-react';
 import { useSecurityThreats, useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
 import { ReputationMonitor } from '../components/ReputationMonitor';
@@ -71,7 +71,7 @@ export default function SecurityCommandCenter() {
 
           <Grid.Col span={{ base: 12, md: 8 }}>
             <SimpleGrid cols={{ base: 1, sm: 2 }} verticalSpacing="md">
-              <Paper withBorder p="md" radius="md">
+              <Card withBorder p="md" radius="md">
                 <Group>
                   <ThemeIcon color="red" variant="light" size="lg">
                     <IconShieldExclamation size={20} />
@@ -81,8 +81,8 @@ export default function SecurityCommandCenter() {
                     <Text fw={700}>{metrics?.middleware.mitigated_threats?.reduce((acc, val) => acc + val.value, 0) || 0} Blocked Attacks</Text>
                   </Stack>
                 </Group>
-              </Paper>
-              <Paper withBorder p="md" radius="md">
+              </Card>
+              <Card withBorder p="md" radius="md">
                 <Group>
                   <ThemeIcon color="orange" variant="light" size="lg">
                     <IconAlertTriangle size={20} />
@@ -92,8 +92,8 @@ export default function SecurityCommandCenter() {
                     <Text fw={700}>{metrics?.active_suspicious_sessions || 0} Suspicious Sessions</Text>
                   </Stack>
                 </Group>
-              </Paper>
-              <Paper withBorder p="md" radius="md">
+              </Card>
+              <Card withBorder p="md" radius="md">
                 <Group>
                   <ThemeIcon color="blue" variant="light" size="lg">
                     <IconUserCheck size={20} />
@@ -103,8 +103,8 @@ export default function SecurityCommandCenter() {
                     <Text fw={700}>{metrics?.active_unverified_clients || 0} In Challenge State</Text>
                   </Stack>
                 </Group>
-              </Paper>
-              <Paper withBorder p="md" radius="md">
+              </Card>
+              <Card withBorder p="md" radius="md">
                 <Group>
                   <ThemeIcon color="violet" variant="light" size="lg">
                     <IconShieldOff size={20} />
@@ -114,7 +114,7 @@ export default function SecurityCommandCenter() {
                     <Text fw={700}>{metrics?.middleware.ebpf_dropped_packets?.reduce((acc, val) => acc + val.value, 0) || 0} L4/L7 Drops</Text>
                   </Stack>
                 </Group>
-              </Paper>
+              </Card>
             </SimpleGrid>
           </Grid.Col>
         </Grid>
@@ -137,7 +137,7 @@ export default function SecurityCommandCenter() {
             
             <Stack gap="xs">
               {globalConfig?.alerting?.playbooks?.map((pb) => (
-                <Paper key={pb.id} withBorder p="xs" radius="sm">
+                <Card key={pb.id} withBorder p="xs" radius="sm">
                   <Group justify="space-between">
                     <Stack gap={2}>
                       <Text size="sm" fw={600}>{pb.name}</Text>
@@ -149,7 +149,7 @@ export default function SecurityCommandCenter() {
                       {pb.action.toUpperCase()}
                     </Badge>
                   </Group>
-                </Paper>
+                </Card>
               ))}
               {(!globalConfig?.alerting?.playbooks || globalConfig.alerting.playbooks.length === 0) && (
                 <Text size="sm" c="dimmed" ta="center" py="xl">
@@ -216,6 +216,3 @@ export default function SecurityCommandCenter() {
   );
 }
 
-function Paper({ children, ...props }: any) {
-  return <Card withBorder p="md" radius="md" {...props}>{children}</Card>;
-}
