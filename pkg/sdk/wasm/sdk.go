@@ -1,3 +1,5 @@
+//go:build wasip1
+
 package wasm
 
 import (
@@ -33,10 +35,12 @@ func SetHeader(name, value string) {
 func GetHeader(name string) string {
 	nPtr, nLen := stringToPtr(name)
 	buf := make([]byte, 1024)
-	vLen := hostGetHeader(nPtr, nLen, uint32(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
+	ptr := uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+	vLen := hostGetHeader(nPtr, nLen, ptr, uint32(len(buf)))
 	if vLen > uint32(len(buf)) {
 		buf = make([]byte, vLen)
-		hostGetHeader(nPtr, nLen, uint32(uintptr(unsafe.Pointer(&buf[0]))), vLen)
+		ptr = uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+		hostGetHeader(nPtr, nLen, ptr, vLen)
 	}
 	return string(buf[:vLen])
 }
@@ -50,17 +54,25 @@ func Log(msg string) {
 // GetMethod returns the request method.
 func GetMethod() string {
 	buf := make([]byte, 16)
-	vLen := hostGetMethod(uint32(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
+	ptr := uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+	vLen := hostGetMethod(ptr, uint32(len(buf)))
+	if vLen > uint32(len(buf)) {
+		buf = make([]byte, vLen)
+		ptr = uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+		hostGetMethod(ptr, vLen)
+	}
 	return string(buf[:vLen])
 }
 
 // GetURL returns the request URL.
 func GetURL() string {
 	buf := make([]byte, 256)
-	vLen := hostGetURL(uint32(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
+	ptr := uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+	vLen := hostGetURL(ptr, uint32(len(buf)))
 	if vLen > uint32(len(buf)) {
 		buf = make([]byte, vLen)
-		hostGetURL(uint32(uintptr(unsafe.Pointer(&buf[0]))), vLen)
+		ptr = uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+		hostGetURL(ptr, vLen)
 	}
 	return string(buf[:vLen])
 }

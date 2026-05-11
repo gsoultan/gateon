@@ -643,6 +643,8 @@ export type Anomaly = {
   route_id?: string;
   request_uri?: string;
   mitigated?: boolean;
+  category?: string;
+  action_taken?: string;
 };
 
 export type Reputation = {

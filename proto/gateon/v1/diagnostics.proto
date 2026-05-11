@@ -31,6 +31,8 @@ message Anomaly {
   string route_id = 12;
   string request_uri = 13;
   bool mitigated = 14;
+  string category = 15;
+  string action_taken = 16;
 }
 
 message ListSecurityThreatsRequest {

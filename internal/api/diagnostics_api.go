@@ -420,6 +420,9 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 			Ja3:         t.JA3,
 			RouteId:     t.RouteID,
 			RequestUri:  t.RequestURI,
+			Category:    t.Category,
+			ActionTaken: t.ActionTaken,
+			Mitigated:   t.ActionTaken == "blocked" || t.ActionTaken == "challenged",
 		}
 		// Try to populate geo if available (though here we only have the IP)
 		// We can use the same helper as in security_threat_detector.go
