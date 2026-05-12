@@ -59,33 +59,6 @@ const theme = createTheme({
   components: {
     Card: {
       defaultProps: {
-        radius: "md",
-        withBorder: true,
-      },
-    },
-    Button: {
-      defaultProps: {
-        radius: "md",
-        fw: 600,
-      },
-    },
-    Paper: {
-      defaultProps: {
-        radius: "md",
-        withBorder: true,
-      },
-    },
-  },
-  shadows: {
-    xs: '0 1px 2px rgba(0, 0, 0, 0.05)',
-    sm: '0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06)',
-    md: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-    lg: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-    xl: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-  },
-  components: {
-    Card: {
-      defaultProps: {
         radius: 'md',
         withBorder: true,
         shadow: 'xs',
@@ -99,8 +72,9 @@ const theme = createTheme({
     },
     Button: {
       defaultProps: {
-        radius: 'sm',
+        radius: 'md',
         loaderProps: { type: 'bars' },
+        fw: 600,
       },
       styles: {
         root: {
@@ -111,6 +85,12 @@ const theme = createTheme({
           }
         }
       }
+    },
+    Paper: {
+      defaultProps: {
+        radius: "md",
+        withBorder: true,
+      },
     },
     TextInput: {
       defaultProps: {
@@ -146,29 +126,36 @@ const theme = createTheme({
       }
     }
   },
+  shadows: {
+    xs: '0 1px 2px rgba(0, 0, 0, 0.05)',
+    sm: '0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06)',
+    md: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+    lg: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+    xl: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+  },
 })
 
 function Root() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <MantineProvider
-        theme={theme}
-        defaultColorScheme="auto"
-        storageKey="gateon-color-scheme"
-      >
-        <Notifications position="top-right" zIndex={2000} />
-        <App />
-      </MantineProvider>
-    </QueryClientProvider>
+    <MantineProvider
+      theme={theme}
+      defaultColorScheme="auto"
+      storageKey="gateon-color-scheme"
+    >
+      <Notifications position="top-right" zIndex={2000} />
+      <App />
+    </MantineProvider>
   )
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ColorSchemeScript
-      defaultColorScheme="auto"
-      storageKey="gateon-color-scheme"
-    />
-    <Root />
+    <QueryClientProvider client={queryClient}>
+      <ColorSchemeScript
+        defaultColorScheme="auto"
+        storageKey="gateon-color-scheme"
+      />
+      <Root />
+    </QueryClientProvider>
   </React.StrictMode>,
 )
