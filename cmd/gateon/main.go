@@ -96,6 +96,7 @@ func main() {
 	var ebpfManager ebpf.Manager
 	var wafUpdater *middleware.WAFUpdater
 	var gitOpsManager *config.GitOpsManager
+	var clamavManager *security.ClamAVManager
 
 	if gc := globalReg.Get(ctx); gc != nil {
 		if gc.Ebpf != nil && gc.Ebpf.Enabled {
@@ -135,7 +136,7 @@ func main() {
 				go wafUpdater.Start(ctx)
 			}
 			if gc.Waf.Clamav != nil {
-				clamavManager := security.NewClamAVManager(gc.Waf.Clamav)
+				clamavManager = security.NewClamAVManager(gc.Waf.Clamav)
 				if err := clamavManager.Start(ctx); err != nil {
 					logger.L.LogError("failed to start ClamAV manager", "error", err)
 				}
@@ -150,6 +151,7 @@ func main() {
 		server.WithAuthManager(authManager),
 		server.WithEbpfManager(ebpfManager),
 		server.WithWafUpdater(wafUpdater),
+		server.WithClamAVManager(clamavManager),
 		server.WithPort(port),
 		server.WithVersion(version()),
 		server.WithRouteRegistry(config.NewRouteRegistry(getEnvDefault("ROUTES_FILE", "routes.json"))),

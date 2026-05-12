@@ -57,6 +57,26 @@ func (m *ClamAVManager) Stop() {
 	m.cron.Stop()
 }
 
+func (m *ClamAVManager) IsInstalled(ctx context.Context) bool {
+	if m.config == nil {
+		return false
+	}
+	switch m.config.InstallationMode {
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
+		if _, err := exec.LookPath("docker"); err != nil {
+			return false
+		}
+		cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "name=gateon-clamav", "--format", "{{.Names}}")
+		out, _ := cmd.Output()
+		return strings.Contains(string(out), "gateon-clamav")
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
+		_, err := exec.LookPath("clamd")
+		return err == nil
+	default:
+		return false
+	}
+}
+
 func (m *ClamAVManager) EnsureInstalled(ctx context.Context) error {
 	switch m.config.InstallationMode {
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:

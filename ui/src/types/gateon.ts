@@ -149,6 +149,7 @@ export type StatusResponse = {
   services_count: number;
   entry_points_count: number;
   middlewares_count: number;
+  clamav_installed?: boolean;
 };
 
 export type CertificateValidation = {

@@ -16,6 +16,7 @@ type GlobalAndAuthAPI interface {
 	GetGlobals() config.GlobalConfigStore
 	GetTLSManager() tls.TLSManager
 	GetEbpfManager() ebpf.Manager
+	GetClamAVStatus(ctx context.Context) bool
 	IsSetupRequired(ctx context.Context, req *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error)
 	Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error)
 	Login(ctx context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error)

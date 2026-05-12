@@ -134,7 +134,7 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
                       <DispatcherIcon type={d.type} />
                       <div>
                         <Text fw={600} size="sm">{d.name}</Text>
-                        <Text size="xs" c="dimmed">{d.type.toUpperCase()}</Text>
+                        <Text size="xs" c="dimmed">{(d.type || '').toUpperCase()}</Text>
                       </div>
                     </Group>
                     <Group gap={4}>

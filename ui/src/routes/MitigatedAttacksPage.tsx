@@ -17,6 +17,9 @@ import {
   Tooltip,
   TextInput,
   Select,
+  ActionIcon,
+  Button,
+  Modal,
 } from "@mantine/core";
 import {
   DonutChart,
@@ -25,14 +28,11 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import {
   IconShieldCheck,
-  IconShieldExclamation,
-  IconWorld,
   IconClock,
   IconAlertTriangle,
   IconSearch,
   IconFilter,
   IconBug,
-  IconLock,
   IconShieldOff,
 } from "@tabler/icons-react";
 import { useSecurityThreats, useRemoveMitigation } from "../hooks/useGateon";
@@ -50,7 +50,7 @@ const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
       : "blue";
   return (
     <Badge color={color} variant="filled" size="sm">
-      {severity.toUpperCase()}
+      {(severity || 'unknown').toUpperCase()}
     </Badge>
   );
 };

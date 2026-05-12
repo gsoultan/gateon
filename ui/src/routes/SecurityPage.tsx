@@ -45,7 +45,7 @@ const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
       : "blue";
   return (
     <Badge color={color} variant="filled" size="sm">
-      {severity.toUpperCase()}
+      {(severity || 'unknown').toUpperCase()}
     </Badge>
   );
 };

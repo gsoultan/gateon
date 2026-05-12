@@ -125,6 +125,14 @@ export default function SecurityCommandCenter() {
           </Grid>
         </Paper>
 
+        {globalConfig?.waf?.malware_detection && status && !status.clamav_installed && (
+          <Alert icon={<IconInfoCircle size="1rem" />} title="Malware Protection Degraded" color="red" variant="filled" radius="md">
+            Malware detection is enabled in your configuration, but the ClamAV service is not responding or not installed on this server.
+            Scanning of uploaded files is currently non-functional.
+            <Button variant="white" size="xs" ml="md" component={Link} to="/settings">Go to Settings</Button>
+          </Alert>
+        )}
+
         {/* Stats Overview */}
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
           <Card withBorder radius="md" p="md">
@@ -343,7 +351,7 @@ export default function SecurityCommandCenter() {
                         <Table.Tr key={a.id}>
                           <Table.Td>
                             <Stack gap={0}>
-                              <Text size="sm" fw={700}>{a.type.toUpperCase()}</Text>
+                              <Text size="sm" fw={700}>{(a.type || 'Unknown').toUpperCase()}</Text>
                               <Text size="xs" c="dimmed" maw={300} truncate="end">{a.details}</Text>
                             </Stack>
                           </Table.Td>
@@ -413,7 +421,7 @@ export default function SecurityCommandCenter() {
                               </Text>
                             </Stack>
                             <Badge size="sm" variant="light" color={pb.action === 'block' ? 'red' : 'blue'}>
-                              {pb.action.toUpperCase()}
+                              {(pb.action || 'notify').toUpperCase()}
                             </Badge>
                           </Group>
                         </Paper>
@@ -433,7 +441,7 @@ export default function SecurityCommandCenter() {
 }
 
 function getThreatColor(type: string) {
-  const t = type.toLowerCase();
+  const t = (type || '').toLowerCase();
   if (t.includes('waf') || t.includes('sqli') || t.includes('xss')) return 'red';
   if (t.includes('bot') || t.includes('scanner')) return 'orange';
   if (t.includes('geoip')) return 'blue';
@@ -443,7 +451,7 @@ function getThreatColor(type: string) {
 }
 
 function getSeverityColor(sev: string) {
-  const s = sev.toLowerCase();
+  const s = (sev || '').toLowerCase();
   if (s === 'critical' || s === 'high') return 'red';
   if (s === 'medium') return 'orange';
   if (s === 'low') return 'blue';

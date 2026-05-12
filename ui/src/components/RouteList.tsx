@@ -316,7 +316,7 @@ export default function RouteList({
                         variant="light"
                         color={route.type === "grpc" ? "blue" : route.type === "graphql" ? "violet" : "indigo"}
                       >
-                        {route.type.toUpperCase()}
+                        {(route.type || '').toUpperCase()}
                       </Badge>
                       {route.disabled && (
                         <Badge size="xs" variant="filled" color="gray">
@@ -350,9 +350,9 @@ export default function RouteList({
                         variant="light"
                         style={{ fontSize: 10, cursor: "help" }}
                       >
-                        {route.rule.length > 50
-                          ? route.rule.substring(0, 47) + "..."
-                          : route.rule}
+                        {(route.rule || '').length > 50
+                          ? (route.rule || '').substring(0, 47) + "..."
+                          : (route.rule || '')}
                       </Code>
                     </Tooltip>
                   </Table.Td>

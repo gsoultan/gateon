@@ -6,6 +6,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/tls"
 )
 
@@ -24,4 +25,5 @@ type ApiServiceConfig struct {
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager
 	WafUpdater         *middleware.WAFUpdater
+	ClamAVManager      *security.ClamAVManager
 }
