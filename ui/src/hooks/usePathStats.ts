@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "../queryClient";
 import { apiFetch } from "./api";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 import type { PathStats } from "../types/gateon";
@@ -13,5 +14,5 @@ export function usePathStats() {
       return res.json();
     },
     refetchInterval: refreshIntervalSec * 1000,
-  });
+  }, queryClient);
 }

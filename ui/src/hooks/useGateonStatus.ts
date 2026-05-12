@@ -1,10 +1,10 @@
 import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "../queryClient";
 import { apiFetch, getApiUrl } from "./api";
 import type { StatusResponse } from "../types/gateon";
 
 export function useGateonStatus() {
-  const queryClient = useQueryClient();
   const queryKey = ["status"];
 
   const query = useQuery<StatusResponse>({
@@ -14,7 +14,7 @@ export function useGateonStatus() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
-  });
+  }, queryClient);
 
   useEffect(() => {
     const url = getApiUrl("/v1/status/watch");

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "../queryClient";
 import { apiFetch } from "./api";
 import type { IsSetupRequiredResponse } from "../types/gateon";
 
@@ -11,5 +12,5 @@ export function useIsSetupRequired() {
       return res.json();
     },
     retry: false,
-  });
+  }, queryClient);
 }

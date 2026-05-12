@@ -7,8 +7,11 @@ import {
   isRedirect,
   Outlet,
   type Register,
+  createRootRouteWithContext,
 } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
+import { QueryClient } from "@tanstack/react-query";
+import { queryClient } from "./queryClient";
 import { Shell } from "./components/Shell";
 import { useAuthStore } from "./store/useAuthStore";
 import { apiFetch, restoreSessionFromCookie } from "./hooks/useGateon";
@@ -39,7 +42,9 @@ const DiagnosticsPage = lazy(() => import("./routes/DiagnosticsPage"));
 const AuditLogsPage = lazy(() => import("./routes/AuditLogsPage"));
 const MitigatedAttacksPage = lazy(() => import("./routes/MitigatedAttacksPage"));
 
-const rootRoute = createRootRoute({
+const rootRoute = createRootRouteWithContext<{
+  queryClient: QueryClient;
+}>()({
   component: () => (
     <Suspense fallback={null}>
       <Outlet />
@@ -285,7 +290,12 @@ const routeTree = rootRoute.addChildren([
   ]),
 ]);
 
-export const router = createRouter({ routeTree });
+export const router = createRouter({
+  routeTree,
+  context: {
+    queryClient,
+  },
+});
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -294,5 +304,9 @@ declare module "@tanstack/react-router" {
 }
 
 export function AppRouter() {
-  return <RouterProvider router={router} />;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  );
 }

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "../queryClient";
 import { apiFetch } from "./api";
 import type { GlobalConfig } from "../types/gateon";
 
@@ -10,5 +11,5 @@ export function useGateonConfig() {
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
-  });
+  }, queryClient);
 }
