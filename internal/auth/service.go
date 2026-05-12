@@ -20,4 +20,6 @@ type Service interface {
 	Setup2FA(id string) (string, string, []string, error)
 	Verify2FA(id, code string) (bool, string, *gateonv1.User, error)
 	Disable2FA(id string) error
+
+	Close() error
 }

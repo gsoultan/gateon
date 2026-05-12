@@ -62,3 +62,11 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 
 // StartTime returns when the server was created (for uptime).
 func (s *Server) StartTime() time.Time { return s.startTime }
+
+// Close closes all server resources.
+func (s *Server) Close() error {
+	if s.AuthManager != nil {
+		return s.AuthManager.Close()
+	}
+	return nil
+}

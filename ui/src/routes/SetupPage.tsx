@@ -177,7 +177,7 @@ export default function SetupPage() {
       admin_username: (value) => (value.length < 3 ? "Username too short" : null),
       admin_password: (val) => (val.length < 8 ? "Password must be at least 8 characters" : null),
       confirm_password: (val, values) => (val !== values.admin_password ? "Passwords do not match" : null),
-      paseto_secret: (val) => (val.length < 32 ? "Secret should be at least 32 characters" : null),
+      paseto_secret: (val) => (val.length !== 32 ? "Secret must be exactly 32 characters" : null),
       management_bind: (val) => (!val ? "Bind address is required" : null),
       management_port: (val) => (!val ? "Port is required" : null),
     },
@@ -437,7 +437,7 @@ export default function SetupPage() {
                     </Group>
                     <TextInput
                       label="PASETO Secret Key"
-                      placeholder="32 character secret"
+                      placeholder="Exactly 32 characters"
                       required
                       size="md"
                       ff="monospace"

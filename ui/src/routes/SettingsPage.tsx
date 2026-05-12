@@ -48,16 +48,17 @@ import {
 } from "@tabler/icons-react";
 import { notifications } from '@mantine/notifications';
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
-import { GeneralSettingsCard } from "../components/Settings/GeneralSettingsCard";
-import { GeoIPSettingsCard } from "../components/Settings/GeoIPSettingsCard";
-import { SecurityAdvancedSettingsCard } from "../components/Settings/SecurityAdvancedSettingsCard";
-import { AlertingSettingsCard } from "../components/Settings/AlertingSettingsCard";
-import { AuditSettingsCard } from "../components/Settings/AuditSettingsCard";
-import { PresetsCard } from "../components/Settings/PresetsCard";
-import { AppearanceCard } from "../components/Settings/AppearanceCard";
+import {
+  GeneralSettingsCard,
+  GeoIPSettingsCard,
+  SecurityAdvancedSettingsCard,
+  AlertingSettingsCard,
+  AuditSettingsCard,
+  PresetsCard,
+  AppearanceCard
+} from "../components/Settings";
 import { usePermissions } from "../hooks/usePermissions";
 import { useGateonStatus } from "../hooks/useGateonStatus";
-import { useAuthStore } from "../store/useAuthStore";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 import type { GlobalConfig, DatabaseConfig } from "../types/gateon";
 import { generateRandomString } from "../utils/random";
@@ -99,7 +100,7 @@ export default function SettingsPage() {
     redis: { enabled: false },
     otel: { enabled: false },
     log: { level: "info", development: true, format: "text" },
-    management: { bind: "0.0.0.0", port: "8080", allowed_ips: ["0.0.0.0/0", "::/0"], host: "" },
+    management: { bind: "0.0.0.0", port: "8080", allowed_ips: ["0.0.0.0/0", "::/0"] },
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -753,11 +754,14 @@ export default function SettingsPage() {
                 placeholder="admin.example.com"
                 description="If set, the management interface will only be accessible via this domain."
                 disabled={formDisabled}
-                value={config.management?.host || ""}
+                value={(config.management?.allowed_hosts || [])[0] || ""}
                 onChange={(e) =>
                   setConfig({
                     ...config,
-                    management: { ...(config.management || {}), host: e.currentTarget.value },
+                    management: {
+                      ...(config.management || {}),
+                      allowed_hosts: e.currentTarget.value ? [e.currentTarget.value] : [],
+                    },
                   })
                 }
                 radius="md"
@@ -986,7 +990,7 @@ export default function SettingsPage() {
                     }
                   />
                   <Box>
-                    <Text size="sm" fw={600} mb="xs" required>
+                    <Text size="sm" fw={600} mb="xs">
                       Database
                     </Text>
                     <Select

@@ -57,6 +57,14 @@ func (s *ApiService) GetClamAVStatus(ctx context.Context) bool {
 	return s.ClamAVManager.IsInstalled(ctx)
 }
 
+// Close closes the ApiService resources.
+func (s *ApiService) Close() error {
+	if s.Auth != nil {
+		return s.Auth.Close()
+	}
+	return nil
+}
+
 func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error) {
 	if s.ClamAVManager == nil {
 		return &gateonv1.InstallClamavResponse{Success: false, Message: "ClamAV manager not initialized"}, nil

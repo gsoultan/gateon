@@ -42,6 +42,10 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	if req == nil {
 		return &gateonv1.SetupResponse{Success: false, Error: "request is required"}, nil
 	}
+	// Paseto symmetric key MUST be exactly 32 bytes
+	if len(req.PasetoSecret) != 32 {
+		return &gateonv1.SetupResponse{Success: false, Error: "paseto secret must be exactly 32 characters"}, nil
+	}
 	// Check if setup is already done
 	setupReq, err := s.IsSetupRequired(ctx, &gateonv1.IsSetupRequiredRequest{})
 	if err == nil && !setupReq.Required {
