@@ -14,7 +14,7 @@ export function useDiagnostics() {
 
   useEffect(() => {
     const url = getApiUrl("/v1/diagnostics/watch");
-    const eventSource = new EventSource(url);
+    const eventSource = new EventSource(url, { withCredentials: true });
 
     eventSource.onmessage = (event) => {
       try {

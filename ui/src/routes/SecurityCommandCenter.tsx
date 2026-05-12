@@ -161,7 +161,7 @@ export default function SecurityCommandCenter() {
   const threatTypeData = React.useMemo(() => {
     if (!metrics?.security?.top_threat_types) return [];
     return metrics.security.top_threat_types.map(t => ({
-      name: t.label,
+      name: (t.label || '').toUpperCase(),
       value: t.value,
       color: getThreatColor(t.label)
     }));
@@ -421,6 +421,8 @@ export default function SecurityCommandCenter() {
                   withLabels
                   size={210}
                   thickness={30}
+                  paddingAngle={5}
+                  strokeWidth={2}
                   withTooltip
                   chartLabel={`${totalThreats} Total`}
                 />
@@ -429,7 +431,7 @@ export default function SecurityCommandCenter() {
                 {threatTypeData.slice(0, 3).map((item) => (
                   <Group key={item.name} justify="space-between">
                     <Group gap="xs">
-                      <Box w={10} h={10} style={{ borderRadius: '50%', backgroundColor: `var(--mantine-color-${item.color}-6)` }} />
+                      <Box w={10} h={10} style={{ borderRadius: '50%', backgroundColor: `var(--mantine-color-${item.color.split('.')[0]}-7)` }} />
                       <Text size="sm">{item.name}</Text>
                     </Group>
                     <Text size="sm" fw={700}>{item.value}</Text>
@@ -607,12 +609,12 @@ export default function SecurityCommandCenter() {
 
 function getThreatColor(type: string) {
   const t = (type || '').toLowerCase();
-  if (t.includes('waf') || t.includes('sqli') || t.includes('xss')) return 'red';
-  if (t.includes('bot') || t.includes('scanner')) return 'orange';
-  if (t.includes('geoip')) return 'blue';
-  if (t.includes('ddos') || t.includes('flood')) return 'grape';
-  if (t.includes('brute')) return 'yellow';
-  return 'cyan';
+  if (t.includes('waf') || t.includes('sqli') || t.includes('xss')) return 'red.7';
+  if (t.includes('bot') || t.includes('scanner')) return 'orange.7';
+  if (t.includes('geoip')) return 'blue.7';
+  if (t.includes('ddos') || t.includes('flood')) return 'grape.7';
+  if (t.includes('brute')) return 'yellow.7';
+  return 'cyan.7';
 }
 
 function getSeverityColor(sev: string) {

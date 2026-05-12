@@ -227,7 +227,6 @@ export default function TracesPage() {
                 <Table.Tr>
                   <Table.Th><Group gap={4}><IconFingerprint size={14} /> ID</Group></Table.Th>
                   <Table.Th>Method</Table.Th>
-                  <Table.Th>Operation</Table.Th>
                   <Table.Th>Service</Table.Th>
                   <Table.Th><Group gap={4}><IconRoute size={14} /> Source IP</Group></Table.Th>
                   <Table.Th>Path</Table.Th>
@@ -241,6 +240,7 @@ export default function TracesPage() {
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <Table.Tr key={i}>
+                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
                       <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
                       <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
                       <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
@@ -274,9 +274,6 @@ export default function TracesPage() {
                       <Badge variant="outline" color="blue" size="xs">
                         {trace.method || "-"}
                       </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text fw={600} size="sm">{trace.operation_name}</Text>
                     </Table.Td>
                     <Table.Td>
                       <Badge variant="dot" color="blue" size="sm">{trace.service_name}</Badge>
@@ -352,7 +349,7 @@ export default function TracesPage() {
                 )))}
                 {filteredTraces.length === 0 && !isLoading && (
                   <Table.Tr>
-                    <Table.Td colSpan={10}>
+                    <Table.Td colSpan={9}>
                       <Center py="xl">
                         <Stack align="center" gap="xs">
                           <IconSearch size={40} stroke={1.5} color="var(--mantine-color-dimmed)" />

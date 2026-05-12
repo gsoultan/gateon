@@ -95,7 +95,7 @@ export default function MitigatedAttacksPage() {
       stats[cat] = (stats[cat] || 0) + 1;
     });
     return Object.entries(stats).map(([name, value]) => ({
-      name,
+      name: name.toUpperCase(),
       value,
       color: getCategoryColor(name),
     }));
@@ -160,16 +160,18 @@ export default function MitigatedAttacksPage() {
       <SimpleGrid cols={{ base: 1, md: 3 }} spacing="lg">
         <Paper withBorder p="md" radius="md">
           <Stack align="center" gap="xs">
-            <Text size="xs" c="dimmed" fw={700}>ATTACKS BY CATEGORY</Text>
-            <Center h={200} w="100%">
+            <Text size="xs" c="dimmed" fw={700} style={{ letterSpacing: 1 }}>ATTACKS BY CATEGORY</Text>
+            <Center h={280} w="100%">
               {categoryStats.length > 0 ? (
                  <DonutChart 
                   data={categoryStats} 
                   withLabelsLine 
                   labelsType="percent" 
                   withLabels 
-                  size={180}
-                  thickness={25}
+                  size={200}
+                  thickness={30}
+                  paddingAngle={5}
+                  strokeWidth={2}
                   withTooltip
                   chartLabel={`${mitigatedAttacks.length} Total`}
                 />
@@ -181,15 +183,16 @@ export default function MitigatedAttacksPage() {
         </Paper>
 
         <Paper withBorder p="md" radius="md" style={{ gridColumn: "span 2" }}>
-          <Text size="xs" c="dimmed" fw={700} mb="md">MITIGATIONS OVER TIME (LAST 24H)</Text>
-          <Box h={200}>
+          <Text size="xs" c="dimmed" fw={700} mb="md" style={{ letterSpacing: 1 }}>MITIGATIONS OVER TIME (LAST 24H)</Text>
+          <Box h={280}>
              <BarChart
-              h={200}
+              h={280}
               data={timeSeriesStats}
               dataKey="time"
               series={[{ name: 'attacks', color: 'teal.6' }]}
               tickLine="none"
               gridAxis="xy"
+              radius={4}
             />
           </Box>
         </Paper>
@@ -368,12 +371,14 @@ export default function MitigatedAttacksPage() {
 
 function getCategoryColor(category: string): string {
   switch (category) {
-    case "sqli": return "red.6";
-    case "xss": return "orange.6";
-    case "rce": return "grape.6";
-    case "bot": return "indigo.6";
-    case "geoip_block": return "blue.6";
-    case "protocol": return "cyan.6";
-    default: return "gray.6";
+    case "sqli": return "red.7";
+    case "xss": return "orange.7";
+    case "rce": return "grape.7";
+    case "bot": return "indigo.7";
+    case "geoip_block": return "blue.7";
+    case "protocol": return "cyan.7";
+    case "lfi": return "pink.7";
+    case "general": return "teal.7";
+    default: return "gray.7";
   }
 }

@@ -24,7 +24,7 @@ export function useSecurityThreats(limit = 50) {
 
   useEffect(() => {
     const url = getApiUrl(`/v1/diag/security-threats/watch`);
-    const eventSource = new EventSource(url);
+    const eventSource = new EventSource(url, { withCredentials: true });
 
     eventSource.onmessage = (event) => {
       try {

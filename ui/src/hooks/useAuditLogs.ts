@@ -24,7 +24,7 @@ export function useAuditLogs(limit = 100) {
 
   useEffect(() => {
     const url = getApiUrl(`/v1/audit/logs/watch`);
-    const eventSource = new EventSource(url);
+    const eventSource = new EventSource(url, { withCredentials: true });
 
     eventSource.onmessage = (event) => {
       try {

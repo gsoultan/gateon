@@ -85,10 +85,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		SetSSEHeaders(w)
 
 		ch := audit.Subscribe()
 		if ch == nil {
@@ -224,10 +221,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		SetSSEHeaders(w)
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
