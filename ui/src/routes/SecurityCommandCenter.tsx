@@ -1,5 +1,5 @@
 import React from 'react';
-import { Container, Grid, Card, Text, Title, Group, Stack, Progress, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Switch, Divider, Table, TextInput, Box, Paper, Avatar, RingProgress, Center, Loader } from '@mantine/core';
+import { Container, Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Table, Box, Paper, Avatar, RingProgress, Center, Alert } from '@mantine/core';
 import { DonutChart, LineChart, BarChart } from '@mantine/charts';
 import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff, IconArrowUpRight, IconArrowDownRight, IconInfoCircle, IconMapPin, IconClock, IconX } from '@tabler/icons-react';
 import { useSecurityThreats, useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
@@ -243,7 +243,7 @@ export default function SecurityCommandCenter() {
                 </Stack>
                 <Badge variant="light">Last 24 Hours</Badge>
               </Group>
-              <Box h={300} style={{ minWidth: 0 }}>
+              <Box h={300} w="100%" style={{ minWidth: 0 }}>
                 <LineChart
                   h={300}
                   data={trendData}
@@ -260,7 +260,7 @@ export default function SecurityCommandCenter() {
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Card withBorder radius="md" style={{ height: '100%' }}>
               <Title order={4} mb="xl">Threat Distribution</Title>
-              <Center h={280} style={{ minWidth: 0 }}>
+              <Center h={280} w="100%" style={{ minWidth: 0 }}>
                 <DonutChart
                   data={threatTypeData}
                   withLabelsLine
@@ -318,7 +318,7 @@ export default function SecurityCommandCenter() {
 
               <Card withBorder radius="md">
                 <Title order={4} mb="md">Geographic Hotspots</Title>
-                <Box h={200} style={{ minWidth: 0 }}>
+                <Box h={200} w="100%" style={{ minWidth: 0 }}>
                   <BarChart
                     h={200}
                     data={countryData}
