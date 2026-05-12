@@ -87,3 +87,16 @@ func ParseRouteFilters(r *http.Request) *config.RouteFilter {
 	}
 	return f
 }
+
+// SetSSEHeaders sets the required headers for Server-Sent Events (SSE).
+// It sets standard SSE headers and security/performance best practices.
+// It DOES NOT set Access-Control-Allow-Origin, as this should be handled by middleware.
+func SetSSEHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	// Prevent browsers from MIME-sniffing the response away from text/event-stream
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Disable buffering in Nginx/other proxies for SSE
+	w.Header().Set("X-Accel-Buffering", "no")
+}

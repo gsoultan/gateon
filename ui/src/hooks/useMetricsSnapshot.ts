@@ -18,7 +18,7 @@ export function useMetricsSnapshot() {
 
   useEffect(() => {
     const url = getApiUrl("/v1/diag/metrics/watch");
-    const eventSource = new EventSource(url);
+    const eventSource = new EventSource(url, { withCredentials: true });
 
     eventSource.onmessage = (event) => {
       try {
