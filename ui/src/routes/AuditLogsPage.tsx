@@ -1,31 +1,12 @@
 import React from 'react';
 import { Container, Title, Text, Card, Table, Badge, Group, Stack, TextInput, ActionIcon, Tooltip, Paper } from '@mantine/core';
 import { IconSearch, IconRefresh, IconFingerprint, IconShieldCheck, IconShieldX } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '../hooks/useGateon';
+import { useAuditLogs } from '../hooks/useAuditLogs';
 import { format } from 'date-fns';
-
-interface AuditLog {
-  id: string;
-  user_id: string;
-  action: string;
-  resource: string;
-  details: string;
-  timestamp: string;
-  ip_address: string;
-  signature: string;
-}
 
 export default function AuditLogsPage() {
   const [search, setSearch] = React.useState('');
-  const { data, isLoading, refetch, isFetching } = useQuery<{ logs: AuditLog[] }>({
-    queryKey: ['audit-logs'],
-    queryFn: async () => {
-      const res = await apiFetch('/v1/audit/logs?limit=100');
-      if (!res.ok) throw new Error('Failed to fetch audit logs');
-      return res.json();
-    },
-  });
+  const { data, isLoading, refetch, isFetching } = useAuditLogs(100);
 
   const filteredLogs = data?.logs?.filter(log => 
     (log.action?.toLowerCase() || '').includes(search.toLowerCase()) ||

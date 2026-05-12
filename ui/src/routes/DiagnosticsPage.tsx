@@ -48,6 +48,7 @@ import {
   IconShieldExclamation,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
+import { useDiagnostics } from "../hooks/useDiagnostics";
 
 const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
   <Tooltip label={mw.error || `Type: ${mw.type}`}>
@@ -269,10 +270,10 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
 };
 
 const DiagnosticsPage: React.FC = () => {
-  const [data, setData] = useState<GetDiagnosticsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading: loading, error: queryError, refetch: fetchData } = useDiagnostics();
   const [applying, setApplying] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+
+  const error = queryError instanceof Error ? queryError.message : (queryError ? String(queryError) : null);
 
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
   const [visualizerOpened, setVisualizerOpened] = useState(false);
@@ -326,20 +327,6 @@ const DiagnosticsPage: React.FC = () => {
     return [...data.recent_tls_errors].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [data?.recent_tls_errors]);
 
-  const fetchData = async () => {
-    try {
-      if (!applying) { // Don't refresh while applying a fix to avoid UI jumps
-        const res = await getDiagnostics();
-        setData(res);
-        setError(null);
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to fetch diagnostics");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleApplyRecommendation = async (anomaly: Anomaly) => {
     const key = `${anomaly.type}-${anomaly.source}`;
     try {
@@ -372,12 +359,6 @@ const DiagnosticsPage: React.FC = () => {
       setApplying(null);
     }
   };
-
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 10000); // Refresh every 10s
-    return () => clearInterval(interval);
-  }, []);
 
   if (error && !data) {
     return (

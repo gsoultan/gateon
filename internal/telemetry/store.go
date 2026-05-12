@@ -22,7 +22,42 @@ type AlertingHandler func(*SecurityThreat)
 var (
 	onThreatAlert AlertingHandler
 	alertMu       sync.RWMutex
+
+	ThreatBroadcaster = &Broadcaster[SecurityThreat]{
+		subscribers: make(map[chan SecurityThreat]struct{}),
+	}
 )
+
+type Broadcaster[T any] struct {
+	mu          sync.RWMutex
+	subscribers map[chan T]struct{}
+}
+
+func (b *Broadcaster[T]) Subscribe() chan T {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := make(chan T, 10)
+	b.subscribers[ch] = struct{}{}
+	return ch
+}
+
+func (b *Broadcaster[T]) Unsubscribe(ch chan T) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.subscribers, ch)
+	close(ch)
+}
+
+func (b *Broadcaster[T]) Broadcast(data T) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for ch := range b.subscribers {
+		select {
+		case ch <- data:
+		default:
+		}
+	}
+}
 
 // SetAlertingHandler registers a callback for security threats.
 func SetAlertingHandler(h AlertingHandler) {
@@ -519,6 +554,8 @@ func RecordSecurityThreat(t SecurityThreat) {
 	if h != nil {
 		h(&t)
 	}
+
+	ThreatBroadcaster.Broadcast(t)
 
 	select {
 	case store.threatInCh <- t:

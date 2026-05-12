@@ -8,6 +8,9 @@ import type {
   GetCloudflareIPsResponse,
   TraceRouteResponse,
   RemoveMitigatedThreatResponse,
+  InstallClamavRequest,
+  InstallClamavResponse,
+  RunDeepScanResponse,
 } from "../types/gateon";
 
 export type PaginationParams = {
@@ -40,6 +43,16 @@ function buildQueryStringInternal(params?: PaginationParams | RouteListParams): 
 }
 
 export { buildQueryStringInternal as buildQueryString };
+
+export function getApiUrl(path: string): string {
+  const base = getApiBaseUrl();
+  const token = useAuthStore.getState().token;
+  const url = new URL(`${base}${path}`, window.location.origin);
+  if (token && token !== "__cookie__") {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
+}
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const base = getApiBaseUrl();
@@ -152,6 +165,24 @@ export async function traceRoute(ip: string): Promise<TraceRouteResponse> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ip }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function installClamav(req: InstallClamavRequest): Promise<InstallClamavResponse> {
+  const res = await apiFetch("/v1/security/clamav/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function runDeepScan(): Promise<RunDeepScanResponse> {
+  const res = await apiFetch("/v1/security/clamav/scan", {
+    method: "POST",
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

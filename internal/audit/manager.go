@@ -28,10 +28,42 @@ type AuditEntry struct {
 }
 
 type AuditManager struct {
-	mu      sync.RWMutex
-	config  *gateonv1.AuditConfig
-	db      *sql.DB
-	dialect db.Dialect
+	mu          sync.RWMutex
+	config      *gateonv1.AuditConfig
+	db          *sql.DB
+	dialect     db.Dialect
+	Broadcaster *Broadcaster
+}
+
+type Broadcaster struct {
+	mu          sync.RWMutex
+	subscribers map[chan AuditEntry]struct{}
+}
+
+func (b *Broadcaster) Subscribe() chan AuditEntry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := make(chan AuditEntry, 10)
+	b.subscribers[ch] = struct{}{}
+	return ch
+}
+
+func (b *Broadcaster) Unsubscribe(ch chan AuditEntry) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.subscribers, ch)
+	close(ch)
+}
+
+func (b *Broadcaster) Broadcast(data AuditEntry) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for ch := range b.subscribers {
+		select {
+		case ch <- data:
+		default:
+		}
+	}
 }
 
 var (
@@ -55,6 +87,9 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 			config:  cfg,
 			db:      database,
 			dialect: dialect,
+			Broadcaster: &Broadcaster{
+				subscribers: make(map[chan AuditEntry]struct{}),
+			},
 		}
 	})
 	return err
@@ -74,6 +109,20 @@ func Log(ctx context.Context, userID, action, resource, details, ip string) {
 		return
 	}
 	manager.log(ctx, userID, action, resource, details, ip)
+}
+
+func Subscribe() chan AuditEntry {
+	if manager == nil || manager.Broadcaster == nil {
+		return nil
+	}
+	return manager.Broadcaster.Subscribe()
+}
+
+func Unsubscribe(ch chan AuditEntry) {
+	if manager == nil || manager.Broadcaster == nil {
+		return
+	}
+	manager.Broadcaster.Unsubscribe(ch)
 }
 
 func (m *AuditManager) log(ctx context.Context, userID, action, resource, details, ip string) {
@@ -103,6 +152,10 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 	_, err := m.db.ExecContext(ctx, query, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature)
 	if err != nil {
 		logger.L.LogError("audit: failed to write log", "error", err)
+		return
+	}
+	if m.Broadcaster != nil {
+		m.Broadcaster.Broadcast(entry)
 	}
 }
 
