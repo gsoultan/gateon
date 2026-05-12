@@ -85,10 +85,13 @@ export default function SecurityCommandCenter() {
 
   const trendData = React.useMemo(() => {
     if (!metrics?.security?.attack_trend) return [];
-    return metrics.security.attack_trend.map(t => ({
-      date: format(new Date(t.ts), 'HH:mm'),
-      threats: t.requests
-    }));
+    return metrics.security.attack_trend.map(t => {
+      const date = new Date(t.ts);
+      return {
+        date: isNaN(date.getTime()) ? 'N/A' : format(date, 'HH:mm'),
+        threats: t.requests
+      };
+    });
   }, [metrics]);
 
   return (
@@ -240,7 +243,7 @@ export default function SecurityCommandCenter() {
                 </Stack>
                 <Badge variant="light">Last 24 Hours</Badge>
               </Group>
-              <Box h={300}>
+              <Box h={300} style={{ minWidth: 0 }}>
                 <LineChart
                   h={300}
                   data={trendData}
@@ -257,7 +260,7 @@ export default function SecurityCommandCenter() {
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Card withBorder radius="md" style={{ height: '100%' }}>
               <Title order={4} mb="xl">Threat Distribution</Title>
-              <Center h={280}>
+              <Center h={280} style={{ minWidth: 0 }}>
                 <DonutChart
                   data={threatTypeData}
                   withLabelsLine
@@ -315,15 +318,17 @@ export default function SecurityCommandCenter() {
 
               <Card withBorder radius="md">
                 <Title order={4} mb="md">Geographic Hotspots</Title>
-                <BarChart
-                  h={200}
-                  data={countryData}
-                  dataKey="country"
-                  series={[{ name: 'threats', color: 'blue.6' }]}
-                  orientation="vertical"
-                  gridAxis="none"
-                  yAxisProps={{ width: 40 }}
-                />
+                <Box h={200} style={{ minWidth: 0 }}>
+                  <BarChart
+                    h={200}
+                    data={countryData}
+                    dataKey="country"
+                    series={[{ name: 'threats', color: 'blue.6' }]}
+                    orientation="vertical"
+                    gridAxis="none"
+                    yAxisProps={{ width: 40 }}
+                  />
+                </Box>
               </Card>
             </Stack>
           </Grid.Col>
@@ -392,7 +397,12 @@ export default function SecurityCommandCenter() {
                             </Group>
                           </Table.Td>
                           <Table.Td>
-                            <Text size="xs" c="dimmed">{format(new Date(a.timestamp), 'HH:mm:ss')}</Text>
+                            <Text size="xs" c="dimmed">
+                              {(() => {
+                                const date = new Date(a.timestamp);
+                                return isNaN(date.getTime()) ? 'N/A' : format(date, 'HH:mm:ss');
+                              })()}
+                            </Text>
                           </Table.Td>
                         </Table.Tr>
                       ))}

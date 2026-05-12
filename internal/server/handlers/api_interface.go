@@ -28,6 +28,7 @@ type GlobalAndAuthAPI interface {
 	ApplyRecommendation(ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error)
 	TraceRoute(ctx context.Context, req *gateonv1.TraceRouteRequest) (*gateonv1.TraceRouteResponse, error)
 	ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error)
+	ListReputations(ctx context.Context, req *gateonv1.ListReputationsRequest) (*gateonv1.ListReputationsResponse, error)
 	RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error)
 	GetCloudflareIPs(ctx context.Context, req *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error)
 	TriggerWafUpdate(ctx context.Context, req *gateonv1.TriggerWafUpdateRequest) (*gateonv1.TriggerWafUpdateResponse, error)

@@ -212,7 +212,12 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
               <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
                 {anomaly.type.replace(/_/g, " ")}
               </Text>
-              <Text size="xs" c="dimmed">{new Date(anomaly.timestamp).toLocaleString()}</Text>
+              <Text size="xs" c="dimmed">
+                {(() => {
+                  const date = new Date(anomaly.timestamp);
+                  return isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+                })()}
+              </Text>
             </Stack>
           </Group>
           <Group gap="xs">
@@ -282,8 +287,10 @@ const DiagnosticsPage: React.FC = () => {
   const sortedAnomalies = useMemo(() => {
     if (!data?.anomalies) return [];
     return [...data.anomalies].sort((a, b) => {
-      const timeA = new Date(a.timestamp).getTime();
-      const timeB = new Date(b.timestamp).getTime();
+      const da = new Date(a.timestamp);
+      const db = new Date(b.timestamp);
+      const timeA = isNaN(da.getTime()) ? 0 : da.getTime();
+      const timeB = isNaN(db.getTime()) ? 0 : db.getTime();
       if (timeA !== timeB) return timeB - timeA;
       return a.type.localeCompare(b.type) || a.source.localeCompare(b.source);
     });
@@ -654,7 +661,10 @@ const DiagnosticsPage: React.FC = () => {
                         <Group gap={6}>
                           <IconClock size={12} color={theme.colors.gray[5]} />
                           <Text size="xs" c="dimmed" fw={700} ff="monospace">
-                            {new Date(err.timestamp).toLocaleTimeString()}
+                            {(() => {
+                              const date = new Date(err.timestamp);
+                              return isNaN(date.getTime()) ? 'N/A' : date.toLocaleTimeString();
+                            })()}
                           </Text>
                         </Group>
                         <Tooltip label={`ID: ${err.entrypoint_id}`}>

@@ -365,4 +365,24 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("GET /v1/security/reputations", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		limit := 20
+		if lStr := r.URL.Query().Get("limit"); lStr != "" {
+			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+		res, err := svc.ListReputations(r.Context(), &gateonv1.ListReputationsRequest{Limit: int32(limit)})
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := ProtojsonOptions().Marshal(res)
+		_, _ = w.Write(data)
+	})
 }

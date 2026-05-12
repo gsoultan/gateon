@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/audit"
@@ -60,6 +61,24 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("GET /v1/audit/logs", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		limit := 100
+		if lStr := r.URL.Query().Get("limit"); lStr != "" {
+			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+		logs, err := audit.GetLogs(r.Context(), limit)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"logs": logs})
 	})
 	handleUpdateGlobal := func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
