@@ -15,8 +15,14 @@ type AnomalyAnalysisEngine struct {
 
 func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *IPReputationStore) *AnomalyAnalysisEngine {
 	securityThreshold := 30.0
-	if config != nil && config.AnomalyDetection != nil {
-		securityThreshold = config.AnomalyDetection.SecurityThreatThreshold
+	var behavioral *gateonv1.BehavioralConfig
+	if config != nil {
+		if config.AnomalyDetection != nil {
+			securityThreshold = config.AnomalyDetection.SecurityThreatThreshold
+		}
+		if config.SecurityAdvanced != nil {
+			behavioral = config.SecurityAdvanced.Behavioral
+		}
 	}
 
 	var blockedCountries []string
@@ -26,7 +32,7 @@ func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *IPReput
 
 	return &AnomalyAnalysisEngine{
 		detectors: []AnomalyDetector{
-			&SecurityThreatDetector{Threshold: securityThreshold, Reputation: reputation},
+			&SecurityThreatDetector{Threshold: securityThreshold, Reputation: reputation, Config: behavioral},
 			&UnlistedRouteDetector{},
 			&ManagementDomainDetector{},
 			&SlowClientDetector{},
@@ -139,6 +145,15 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 			stats.Error4xx++
 		} else if strings.HasPrefix(tr.Status, "5") {
 			stats.Error5xx++
+		}
+
+		// Header Consistency Check
+		if tr.UserAgent != "" && strings.Contains(strings.ToLower(tr.UserAgent), "mozilla") {
+			// Real browsers usually send Accept-Language and Accept-Encoding
+			lowHeaders := strings.ToLower(tr.RequestHeaders)
+			if !strings.Contains(lowHeaders, "accept-language") || !strings.Contains(lowHeaders, "accept-encoding") {
+				stats.HeaderAnomaly++
+			}
 		}
 	}
 

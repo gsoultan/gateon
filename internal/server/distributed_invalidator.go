@@ -15,7 +15,7 @@ const InvalidationChannel = "gateon:config:invalidation"
 
 type InvalidationMessage struct {
 	Type   string `json:"type"` // "route", "all", "tls"
-	ID     string `json:"id,omitempty"`
+	ID     string `json:"id,omitzero"`
 	NodeID string `json:"node_id"`
 }
 

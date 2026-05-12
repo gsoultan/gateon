@@ -196,6 +196,17 @@ func (s *ApiService) getSystemInfo() *gateonv1.SystemInfo {
 
 	cfReachable, _ := isCloudflareReachable()
 
+	var ebpfStats *gateonv1.EbpfStats
+	if s.EbpfManager != nil {
+		if stats, err := s.EbpfManager.GetMapStats(); err == nil {
+			ebpfStats = &gateonv1.EbpfStats{
+				Enabled:         true,
+				ShunnedIpsCount: int32(stats.ShunnedIPsCount),
+				DroppedPackets:  stats.DroppedPackets,
+			}
+		}
+	}
+
 	return &gateonv1.SystemInfo{
 		PublicIp:            getPublicIP(),
 		CloudflareReachable: cfReachable,
@@ -204,6 +215,8 @@ func (s *ApiService) getSystemInfo() *gateonv1.SystemInfo {
 		MemoryUsage:         fmt.Sprintf("%.2f MB", float64(m.Alloc)/1024/1024),
 		CpuUsage:            fmt.Sprintf("%.1f%%", sysStats.CPUUsage),
 		Version:             s.Version,
+		Gossip:              telemetry.GetGossipStatus(),
+		Ebpf:                ebpfStats,
 	}
 }
 
@@ -307,14 +320,7 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 	routes := s.Routes.List(ctx)
 	updatedCount := 0
 	for _, rt := range routes {
-		alreadyBlocked := false
-		for _, m := range rt.Middlewares {
-			if m == mwID {
-				alreadyBlocked = true
-				break
-			}
-		}
-		if !alreadyBlocked {
+		if !slices.Contains(rt.Middlewares, mwID) {
 			rt.Middlewares = append(rt.Middlewares, mwID)
 			if err := s.Routes.Update(ctx, rt); err == nil {
 				updatedCount++
@@ -388,6 +394,53 @@ func (s *ApiService) applyFixShadowedRouteRecommendation(ctx context.Context, ro
 	}, nil
 }
 
+func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error) {
+	if req.Source == "" {
+		return &gateonv1.RemoveMitigatedThreatResponse{Success: false, Message: "Source IP is required"}, nil
+	}
+
+	sourceIP := req.Source
+	mwID := "block-ip-" + strings.ReplaceAll(sourceIP, ".", "-")
+	mwID = strings.ReplaceAll(mwID, ":", "-")
+
+	// 1. Remove from eBPF shunning if enabled
+	if s.EbpfManager != nil {
+		if err := s.EbpfManager.UnshunIP(sourceIP); err != nil {
+			logger.L.LogWarn("Failed to unshun IP at XDP level (might not be shunned)", "error", err, "ip", sourceIP)
+		} else {
+			logger.L.LogInfo("IP unshunned at XDP level", "ip", sourceIP)
+		}
+	}
+
+	// 2. Remove middleware from all routes
+	routes := s.Routes.List(ctx)
+	for _, rt := range routes {
+		oldLen := len(rt.Middlewares)
+		rt.Middlewares = slices.DeleteFunc(rt.Middlewares, func(m string) bool {
+			return m == mwID
+		})
+		if len(rt.Middlewares) != oldLen {
+			if err := s.Routes.Update(ctx, rt); err != nil {
+				logger.L.LogError("Failed to update route while removing mitigation", "error", err, "route", rt.Id)
+			}
+		}
+	}
+
+	// 3. Delete the middleware itself
+	if err := s.Middlewares.Delete(ctx, mwID); err != nil {
+		logger.L.LogWarn("Failed to delete mitigation middleware (might not exist)", "error", err, "mwID", mwID)
+	}
+
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
+	}
+
+	return &gateonv1.RemoveMitigatedThreatResponse{
+		Success: true,
+		Message: fmt.Sprintf("Mitigation for IP %s removed successfully.", sourceIP),
+	}, nil
+}
+
 func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error) {
 	// Trigger detection pass to ensure threats are up to date in the DB
 	// whenever the UI requests the latest list.
@@ -422,7 +475,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 			RequestUri:  t.RequestURI,
 			Category:    t.Category,
 			ActionTaken: t.ActionTaken,
-			Mitigated:   t.ActionTaken == "blocked" || t.ActionTaken == "challenged",
+			Mitigated:   t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned",
 		}
 		// Try to populate geo if available (though here we only have the IP)
 		// We can use the same helper as in security_threat_detector.go
@@ -454,9 +507,11 @@ func (s *ApiService) ListReputations(ctx context.Context, req *gateonv1.ListRepu
 
 	for _, r := range reps {
 		res = append(res, &gateonv1.Reputation{
-			Fingerprint: r.Fingerprint,
-			Score:       r.Score,
-			LastEvent:   r.LastEvent.Format(time.RFC3339),
+			Fingerprint:    r.Fingerprint,
+			Score:          r.Score,
+			LastEvent:      r.LastEvent.Format(time.RFC3339),
+			ViolationCount: int32(r.ViolationCount),
+			History:        r.History,
 		})
 	}
 	return &gateonv1.ListReputationsResponse{Reputations: res}, nil

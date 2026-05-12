@@ -120,9 +120,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return f.createHMAC(cfg)
 	case "deception":
 		return Deception(DeceptionConfig{
-			HoneypotPaths:        parseListStrict(cfg["honeypot_paths"]),
-			InjectInvisibleLinks: parseBoolStrict(cfg["inject_invisible_links"], false),
-			InvisibleLinkPaths:   parseListStrict(cfg["invisible_link_paths"]),
+			HoneypotPaths:        parseListStrict(cmp.Or(cfg["honeypot_paths"], cfg["paths"])),
+			InjectInvisibleLinks: parseBoolStrict(cmp.Or(cfg["inject_invisible_links"], "true"), true),
+			InvisibleLinkPaths:   parseListStrict(cmp.Or(cfg["invisible_link_paths"], cfg["honey_links"])),
+			HoneyForms:           parseListStrict(cfg["honey_forms"]),
 			RouteID:              routeID,
 			EnableTrollResponse:  parseBoolStrict(cfg["enable_troll_response"], false),
 			CanaryHeader:         cfg["canary_header"],
@@ -138,9 +139,14 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return Entropy(threshold, routeID), nil
 	case "pow":
 		difficulty, _ := strconv.Atoi(cfg["difficulty"])
+		if difficulty == 0 {
+			difficulty = 4
+		}
 		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
-		secret := cfg["secret"]
-		return Pow(difficulty, threshold, secret, routeID), nil
+		if threshold == 0 {
+			threshold = 20.0
+		}
+		return Pow(difficulty, threshold, cfg["secret"], routeID), nil
 	case "policy":
 		return f.createPolicy(cfg)
 	case "xfcc":
@@ -153,6 +159,14 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 			ResponseReplace:   cfg["response_replace"],
 			ContentTypeFilter: cfg["content_type"],
 		}), nil
+	case "file_security":
+		return f.createFileSecurity(cfg)
+	case "tls_binding":
+		cookieName := cfg["cookie_name"]
+		if cookieName == "" {
+			cookieName = "session"
+		}
+		return TlsBinding(cookieName), nil
 	case "wasm":
 		return Wasm(context.Background(), m.WasmBlob)
 	default:
@@ -186,4 +200,26 @@ func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
 		Scopes:       scopes,
 		RouteID:      cfg["_route_id"],
 	})
+}
+
+func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) {
+	maxFileSize, _ := strconv.ParseInt(cfg["max_file_size"], 10, 64)
+	clamavAddr := cfg["clamav_addr"]
+	if clamavAddr == "" && f.globalStore != nil {
+		if g := f.globalStore.Get(context.Background()); g != nil && g.Waf != nil {
+			if g.Waf.Clamav != nil && g.Waf.Clamav.ClamavAddr != "" {
+				clamavAddr = g.Waf.Clamav.ClamavAddr
+			} else {
+				clamavAddr = g.Waf.ClamavAddr
+			}
+		}
+	}
+
+	return FileSecurity(FileSecurityConfig{
+		EnableClamAV:     parseBoolStrict(cfg["enable_clamav"], false),
+		ClamAVAddr:       clamavAddr,
+		BlockedMimeTypes: parseListStrict(cfg["blocked_mime_types"]),
+		AllowedMimeTypes: parseListStrict(cfg["allowed_mime_types"]),
+		MaxFileSize:      maxFileSize,
+	}), nil
 }

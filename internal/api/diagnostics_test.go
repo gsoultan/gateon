@@ -157,21 +157,21 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 	}
 
 	// Add 19 more 404s for 5.6.7.8
-	for i := 0; i < 19; i++ {
+	for range 19 {
 		traces = append(traces, telemetry.TraceRecord{
 			SourceIP: "5.6.7.8", Status: "404 Not Found", Timestamp: now, Path: "/scan", DurationMs: 50,
 		})
 	}
 
 	// Slow client from IP 9.9.9.9 (6 requests, 6000ms avg)
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		traces = append(traces, telemetry.TraceRecord{
 			SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/", DurationMs: 6000,
 		})
 	}
 
 	// High traffic from 10.10.10.10 (201 requests)
-	for i := 0; i < 201; i++ {
+	for range 201 {
 		traces = append(traces, telemetry.TraceRecord{
 			SourceIP: "10.10.10.10", Status: "200 OK", Timestamp: now, Path: "/", DurationMs: 10,
 		})
@@ -195,7 +195,7 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 				foundBruteForce = true
 				assert.NotEmpty(t, a.Recommendation)
 			}
-		case "security_scan":
+		case "security_scan", "honeypot_hit":
 			if a.Source == "5.6.7.8" {
 				foundScanner = true
 				assert.NotEmpty(t, a.Recommendation)
@@ -231,7 +231,7 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 	traces := []telemetry.TraceRecord{}
 
 	// 1. Burst from IP 1.1.1.1 (40 requests in same 10s slot)
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		traces = append(traces, telemetry.TraceRecord{
 			SourceIP: "1.1.1.1", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET",
 		})
@@ -251,7 +251,7 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 	})
 
 	// 4. Unusual POST-only traffic from 5.5.5.5
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		traces = append(traces, telemetry.TraceRecord{
 			SourceIP: "5.5.5.5", Status: "200 OK", Timestamp: now, Path: "/api/submit", Method: "POST",
 		})
@@ -301,7 +301,7 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 	traces := []telemetry.TraceRecord{}
 
 	// 1. Targeted Brute Force on /login (IP 6.6.6.6)
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		traces = append(traces, telemetry.TraceRecord{
 			SourceIP: "6.6.6.6", Status: "401 Unauthorized", Timestamp: now, Path: "/login", Method: "POST",
 		})
@@ -427,6 +427,69 @@ func TestApplyRecommendation(t *testing.T) {
 		rt, _ := routeStore.Get(ctx, "rt-spec")
 		assert.Equal(t, int32(150), rt.Priority)
 	})
+}
+
+func TestRemoveMitigatedThreat(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	mwStore := config.NewMiddlewareRegistry(filepath.Join(tmpDir, "middlewares.json"))
+	routeStore := config.NewRouteRegistry(filepath.Join(tmpDir, "routes.json"))
+
+	s := NewApiService(ApiServiceConfig{
+		Middlewares: mwStore,
+		Routes:      routeStore,
+	})
+
+	ip := "1.2.3.4"
+	mwID := "block-ip-1-2-3-4"
+
+	// Setup initial state: IP is blocked
+	_ = mwStore.Update(ctx, &gateonv1.Middleware{
+		Id:   mwID,
+		Name: "Auto-Block: " + ip,
+		Type: "ipfilter",
+	})
+	_ = routeStore.Update(ctx, &gateonv1.Route{
+		Id:          "route1",
+		Middlewares: []string{mwID, "other-mw"},
+	})
+
+	// Perform removal
+	res, err := s.RemoveMitigatedThreat(ctx, &gateonv1.RemoveMitigatedThreatRequest{
+		Source: ip,
+	})
+	if err != nil {
+		t.Fatalf("RemoveMitigatedThreat failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("RemoveMitigatedThreat response indicates failure: %s", res.Message)
+	}
+
+	// Verify middleware is deleted
+	_, ok := mwStore.Get(ctx, mwID)
+	if ok {
+		t.Error("Middleware should have been deleted")
+	}
+
+	// Verify route is updated
+	rt, ok := routeStore.Get(ctx, "route1")
+	if !ok {
+		t.Fatal("Route should still exist")
+	}
+	found := false
+	for _, m := range rt.Middlewares {
+		if m == mwID {
+			found = true
+			break
+		}
+	}
+	if found {
+		t.Error("Middleware should have been removed from route")
+	}
+	if len(rt.Middlewares) != 1 || rt.Middlewares[0] != "other-mw" {
+		t.Errorf("Route middlewares should have been updated, got %v", rt.Middlewares)
+	}
 }
 
 func TestShadowedRouteDetection(t *testing.T) {

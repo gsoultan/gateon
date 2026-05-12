@@ -108,8 +108,8 @@ func getAuthClaims(r *http.Request) map[string]any {
 		if m, ok := val.(interface{ ToMap() map[string]any }); ok {
 			return m.ToMap()
 		}
-		// Fallback for jwt.MapClaims which is map[string]interface{}
-		if m, ok := val.(map[string]interface{}); ok {
+		// Fallback for jwt.MapClaims which is map[string]any
+		if m, ok := val.(map[string]any); ok {
 			return m
 		}
 	}

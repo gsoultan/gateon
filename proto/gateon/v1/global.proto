@@ -78,6 +78,7 @@ message SecurityAdvancedConfig {
   BehavioralConfig behavioral = 4;
   PowConfig pow = 5;
   IPReputationConfig ip_reputation = 6;
+  TlsBindingConfig tls_binding = 7;
 }
 
 message IPReputationConfig {
@@ -92,6 +93,15 @@ message DeceptionConfig {
   repeated string honeypot_paths = 2;
   bool inject_invisible_links = 3;
   repeated string invisible_link_paths = 4;
+  repeated string honey_forms = 5;
+  string canary_header = 6;
+  string canary_token = 7;
+  bool enable_troll_response = 8;
+}
+
+message TlsBindingConfig {
+  bool enabled = 1;
+  string cookie_name = 2;
 }
 
 message TarpitConfig {
@@ -228,6 +238,22 @@ message WafConfig {
   bool auto_update_rules = 27;
   int32 update_interval_hours = 28;
   string rules_url = 29;
+  string clamav_addr = 30; // Deprecated: use clamav.clamav_addr
+  ClamavConfig clamav = 31;
+}
+
+message ClamavConfig {
+  enum InstallationMode {
+    INSTALLATION_MODE_UNSPECIFIED = 0;
+    INSTALLATION_MODE_LOCAL = 1;
+    INSTALLATION_MODE_DOCKER = 2;
+  }
+  InstallationMode installation_mode = 1;
+  bool auto_install = 2;
+  string docker_image = 3;
+  string full_scan_schedule = 4; // Cron expression
+  bool low_resource_mode = 5;
+  string clamav_addr = 6;
 }
 
 message BotManagementConfig {
@@ -246,6 +272,10 @@ message HaConfig {
   repeated string virtual_ips = 5;
   int32 advert_int = 6;
   string auth_pass = 7;
+  bool enable_gossip = 8;
+  string gossip_bind_addr = 9;
+  int32 gossip_bind_port = 10;
+  repeated string gossip_peers = 11;
 }
 
 message AnomalyDetectionConfig {
@@ -267,6 +297,9 @@ message EbpfConfig {
   string interface = 4;
   bool xdp_ip_shunning = 5;
   bool xdp_load_balancing = 6;
+  bool enable_knocking = 7;
+  int32 mgmt_port = 8;
+  repeated int32 knocking_sequence = 9;
 }
 
 message AuthConfig {

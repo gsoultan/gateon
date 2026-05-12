@@ -148,7 +148,7 @@ func isBlockedMime(mime string, cfg FileSecurityConfig) bool {
 
 func isHighRiskMismatch(ext, magicExt string) bool {
 	highRiskExts := map[string]bool{
-		".exe": true, ".dll": true, ".so": true, ".sh": true, ".php": true, ".py": true,
+		".exe": true, ".dll": true, ".so": true, ".sh": true, ".php": true, ".py": true, ".elf": true,
 	}
 	// If magic says it's an executable but extension says it's an image/doc
 	if highRiskExts["."+magicExt] {

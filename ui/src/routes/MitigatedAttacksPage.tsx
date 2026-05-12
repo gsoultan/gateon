@@ -33,8 +33,9 @@ import {
   IconFilter,
   IconBug,
   IconLock,
+  IconShieldOff,
 } from "@tabler/icons-react";
-import { useSecurityThreats } from "../hooks/useGateon";
+import { useSecurityThreats, useRemoveMitigation } from "../hooks/useGateon";
 import type { Anomaly } from "../types/gateon";
 import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 
@@ -58,6 +59,11 @@ export default function MitigatedAttacksPage() {
   const { data, isLoading, error } = useSecurityThreats(1000); // Get more for better stats
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
+  
+  const [confirmOpened, { open: openConfirm, close: closeConfirm }] = useDisclosure(false);
+  const [ipToRemove, setIpToRemove] = useState<string | null>(null);
+  
+  const removeMitigation = useRemoveMitigation();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
 
@@ -226,8 +232,9 @@ export default function MitigatedAttacksPage() {
                   <Table.Th>Severity</Table.Th>
                   <Table.Th>Source IP</Table.Th>
                   <Table.Th>Target URI</Table.Th>
-                  <Table.Th>Action</Table.Th>
+                  <Table.Th>Status</Table.Th>
                   <Table.Th>Time</Table.Th>
+                  <Table.Th>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -286,6 +293,22 @@ export default function MitigatedAttacksPage() {
                           <Text size="xs">{new Date(attack.timestamp).toLocaleString()}</Text>
                         </Group>
                       </Table.Td>
+                      <Table.Td>
+                        <Tooltip label="Remove mitigation (Allow IP)">
+                          <ActionIcon 
+                            color="red" 
+                            variant="subtle" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIpToRemove(attack.source);
+                              openConfirm();
+                            }}
+                            loading={removeMitigation.isPending && ipToRemove === attack.source}
+                          >
+                            <IconShieldOff size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Table.Td>
                     </Table.Tr>
                   ))
                 )}
@@ -300,6 +323,40 @@ export default function MitigatedAttacksPage() {
         opened={opened}
         onClose={close}
       />
+
+      <Modal
+        opened={confirmOpened}
+        onClose={closeConfirm}
+        title={<Text fw={700}>Confirm Mitigation Removal</Text>}
+        centered
+        size="sm"
+      >
+        <Stack gap="md">
+          <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+            Are you sure you want to remove the mitigation for IP <b>{ipToRemove}</b>? 
+            This will allow the IP to access your services again.
+          </Alert>
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={closeConfirm}>Cancel</Button>
+            <Button 
+              color="red" 
+              onClick={() => {
+                if (ipToRemove) {
+                  removeMitigation.mutate(ipToRemove, {
+                    onSuccess: () => {
+                      closeConfirm();
+                      setIpToRemove(null);
+                    }
+                  });
+                }
+              }}
+              loading={removeMitigation.isPending}
+            >
+              Confirm Removal
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

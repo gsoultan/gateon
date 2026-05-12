@@ -49,5 +49,10 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool { return true })
 	}
 
+	// Update eBPF Port Knocking sequence
+	if s.EbpfManager != nil && req.Config.Ebpf != nil {
+		s.EbpfManager.SetPortKnockingSequence(req.Config.Ebpf.KnockingSequence)
+	}
+
 	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
 }

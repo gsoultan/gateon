@@ -116,6 +116,71 @@ static __always_inline void count_drop(__u32 reason) {
     }
 }
 
+#define MAX_KNOCK_STEPS 8
+#define KNOCK_TIMEOUT_NS 10000000000LL // 10 seconds
+
+static __always_inline int handle_port_knocking(struct xdp_md *ctx, struct iphdr *iph, struct tcphdr *tcph, struct ebpf_config *cfg) {
+    void *data_end = (void *)(long)ctx->data_end;
+    __u32 src_ip = iph->saddr;
+    __u16 dest_port = bpf_ntohs(tcph->dest);
+
+    // If knocking is disabled, pass
+    if (!cfg->enable_knocking) return XDP_PASS;
+
+    // Check if accessing target port (mgmt_port)
+    if (dest_port == cfg->mgmt_port) {
+        // If IP is already allowed (whitelisted or solved knock), pass
+        if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return XDP_PASS;
+        
+        count_drop(DROP_REASON_INVALID_PORT_KNOCK);
+        return XDP_DROP;
+    }
+
+    // Check if this port is part of the sequence
+    int i;
+    for (i = 0; i < MAX_KNOCK_STEPS; i++) {
+        __u32 step_idx = i;
+        __u32 *expected_port = bpf_map_lookup_elem(&knocking_config, &step_idx);
+        if (!expected_port || *expected_port == 0) break;
+
+        if (dest_port == *expected_port) {
+            __u32 *current_step = bpf_map_lookup_elem(&knocking_state, &src_ip);
+            __u64 now = bpf_ktime_get_ns();
+            
+            // We use rate_limit_map to track last knock time for timeout (reuse map or use a new one)
+            // For now, just focus on the sequence.
+            
+            if (!current_step) {
+                if (i == 0) {
+                    __u32 initial_step = 1;
+                    bpf_map_update_elem(&knocking_state, &src_ip, &initial_step, BPF_ANY);
+                    return XDP_DROP; // Consume knock
+                }
+            } else {
+                if (i == *current_step) {
+                    *current_step += 1;
+                    
+                    // Check if sequence complete
+                    __u32 next_step_idx = *current_step;
+                    __u32 *next_port = bpf_map_lookup_elem(&knocking_config, &next_step_idx);
+                    if (!next_port || *next_port == 0) {
+                        // Sequence complete! Add to whitelist for a limited time (or until manual removal)
+                        __u32 val = 1;
+                        bpf_map_update_elem(&mgmt_whitelist, &src_ip, &val, BPF_ANY);
+                        bpf_map_delete_elem(&knocking_state, &src_ip);
+                    }
+                    return XDP_DROP; // Consume knock
+                } else {
+                    // Wrong port in sequence, reset
+                    bpf_map_delete_elem(&knocking_state, &src_ip);
+                }
+            }
+        }
+    }
+
+    return XDP_PASS;
+}
+
 static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *eth) {
     void *data_end = (void *)(long)ctx->data_end;
     struct iphdr *iph = (void *)(eth + 1);
@@ -165,10 +230,11 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
                     if (cfg->enable_mgmt_whitelist) {
                         __u32 *allowed = bpf_map_lookup_elem(&mgmt_whitelist, &src_ip);
                         if (!allowed) {
-                            return XDP_DROP;
+                            return handle_port_knocking(ctx, iph, tcph, cfg);
                         }
+                    } else if (cfg->enable_knocking) {
+                         return handle_port_knocking(ctx, iph, tcph, cfg);
                     }
-                    // Port Knocking check could go here
                 }
             }
         }

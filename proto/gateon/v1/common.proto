@@ -118,6 +118,19 @@ message TlsClientConfig {
   repeated TlsClientIdentity cert_identities = 8;
 }
 
+message PowChallenge {
+  string challenge_id = 1;
+  string salt = 2;
+  int32 difficulty = 3;
+  string target = 4; // Required prefix or suffix for hash
+  string expires_at = 5;
+}
+
+message PowSolution {
+  string challenge_id = 1;
+  string nonce = 2;
+}
+
 enum TlsClientCertSelectionStrategy {
   TLS_CLIENT_CERT_SELECTION_STRATEGY_STATIC = 0;
   TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HOST = 1;

@@ -344,7 +344,24 @@ export type WafConfig = {
   auto_update_rules?: boolean;
   update_interval_hours?: number;
   rules_url?: string;
+  clamav_addr?: string;
+  clamav?: ClamavConfig;
 };
+
+export type ClamavConfig = {
+  installation_mode?: ClamavInstallationMode;
+  auto_install?: boolean;
+  docker_image?: string;
+  full_scan_schedule?: string;
+  low_resource_mode?: boolean;
+  clamav_addr?: string;
+};
+
+export enum ClamavInstallationMode {
+  INSTALLATION_MODE_UNSPECIFIED = 0,
+  INSTALLATION_MODE_LOCAL = 1,
+  INSTALLATION_MODE_DOCKER = 2,
+}
 
 export type BotManagementConfig = {
   enabled?: boolean;
@@ -362,6 +379,10 @@ export type HaConfig = {
   virtual_ips?: string[];
   advert_int?: number;
   auth_pass?: string;
+  enable_gossip?: boolean;
+  gossip_bind_addr?: string;
+  gossip_bind_port?: number;
+  gossip_peers?: string[];
 };
 
 export type AnomalyDetectionConfig = {
@@ -383,6 +404,9 @@ export type EbpfConfig = {
   interface?: string;
   xdp_ip_shunning?: boolean;
   xdp_load_balancing?: boolean;
+  enable_knocking?: boolean;
+  mgmt_port?: number;
+  knocking_sequence?: number[];
 };
 
 export interface GeoIPConfig {
@@ -449,6 +473,12 @@ export type SecurityAdvancedConfig = {
   behavioral?: BehavioralConfig;
   pow?: PowConfig;
   ip_reputation?: IPReputationConfig;
+  tls_binding?: TlsBindingConfig;
+};
+
+export type TlsBindingConfig = {
+  enabled: boolean;
+  cookie_name?: string;
 };
 
 export type IPReputationConfig = {
@@ -463,6 +493,10 @@ export type DeceptionConfig = {
   honeypot_paths: string[];
   inject_invisible_links: boolean;
   invisible_link_paths: string[];
+  honey_forms?: string[];
+  canary_header?: string;
+  canary_token?: string;
+  enable_troll_response?: boolean;
 };
 
 export type TarpitConfig = {
@@ -616,6 +650,14 @@ export type HandshakeError = {
   entrypoint_name: string;
 };
 
+export type GossipStatus = {
+  enabled: boolean;
+  members_count: number;
+  member_names: string[];
+  messages_sent: number;
+  messages_received: number;
+};
+
 export type SystemInfo = {
   public_ip: string;
   cloudflare_reachable: boolean;
@@ -624,6 +666,7 @@ export type SystemInfo = {
   memory_usage: string;
   cpu_usage: string;
   version: string;
+  gossip?: GossipStatus;
 };
 
 export type Anomaly = {
@@ -651,6 +694,8 @@ export type Reputation = {
   fingerprint: string;
   score: number;
   last_event: string;
+  violation_count: number;
+  history: string[];
 };
 
 export type DependencyHealth = {
@@ -685,4 +730,9 @@ export type TraceHop = {
 
 export type TraceRouteResponse = {
   hops: TraceHop[];
+};
+
+export type RemoveMitigatedThreatResponse = {
+  success: boolean;
+  message: string;
 };

@@ -300,12 +300,24 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 					HoneypotPaths:        adv.Deception.HoneypotPaths,
 					InjectInvisibleLinks: adv.Deception.InjectInvisibleLinks,
 					InvisibleLinkPaths:   adv.Deception.InvisibleLinkPaths,
+					HoneyForms:           adv.Deception.HoneyForms,
+					CanaryHeader:         adv.Deception.CanaryHeader,
+					CanaryToken:          adv.Deception.CanaryToken,
+					EnableTrollResponse:  adv.Deception.EnableTrollResponse,
 					RouteID:              routeLabel,
 				}))
 			}
 			// Entropy
 			if adv.Entropy != nil && adv.Entropy.Enabled {
 				chain = append(chain, middleware.Entropy(adv.Entropy.Threshold, routeLabel))
+			}
+			// TLS Binding
+			if adv.TlsBinding != nil && adv.TlsBinding.Enabled {
+				cookieName := adv.TlsBinding.CookieName
+				if cookieName == "" {
+					cookieName = "session"
+				}
+				chain = append(chain, middleware.TlsBinding(cookieName))
 			}
 		}
 	}

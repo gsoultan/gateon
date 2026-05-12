@@ -21,9 +21,14 @@ type SecurityThreatDetector struct {
 	Threshold    float64
 	ThreatClient *AbuseIPDBClient
 	Reputation   *IPReputationStore
+	Config       *gateonv1.BehavioralConfig
 }
 
 func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
+	if d.Config != nil && !d.Config.Enabled {
+		return nil
+	}
+
 	var anomalies []*gateonv1.Anomaly
 
 	threshold := d.Threshold
@@ -33,12 +38,17 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 
 	// 1. Coordinated scan detection
 	pathIPs := d.detectCoordinatedScans(data)
+	if d.Config == nil || d.Config.EnableSequenceValidation {
+		anomalies = append(anomalies, d.detectCoordinatedSequences(data)...)
+	}
 
 	// 2. Multi-IP attacks via fingerprinting
 	anomalies = append(anomalies, d.detectMultiIPAttacks(data, threshold)...)
 
 	// 3. Impossible Travel detection
-	anomalies = append(anomalies, d.detectImpossibleTravel(data)...)
+	if d.Config == nil || d.Config.EnableImpossibleTravel {
+		anomalies = append(anomalies, d.detectImpossibleTravel(data)...)
+	}
 
 	// 4. Per-IP analysis
 	for ip, stats := range data.IPStats {
@@ -70,6 +80,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		score += d.analyzePatterns(stats, pathIPs, &reasons, &primaryType)
 		score += d.analyzeHeaders(stats, &reasons)
 		score += d.analyzeBehavior(stats, &reasons)
+		score += d.analyzeDirectoryBusting(stats, &reasons)
 
 		// External Threat Intelligence
 		if d.ThreatClient != nil && (score > 0 || stats.TotalRequests > 10) {
@@ -82,6 +93,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		if score >= int(threshold) {
 			severity := d.calculateSeverity(score, threshold)
 			mitigated := d.isIPBlocked(ip, data.Middlewares)
+			recommendation := d.getAdaptiveRecommendation(score, primaryType)
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           primaryType,
@@ -89,13 +101,17 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 				Description:    fmt.Sprintf("Potential security threat from IP %s: %s", ip, strings.Join(reasons, ", ")),
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
 				Source:         ip,
-				Recommendation: "Review IP activity, consider blocking via firewall or middleware, and check backend logs for exploitation attempts.",
+				Recommendation: recommendation,
 				Mitigated:      mitigated,
 			}
 			populateAnomalyGeo(anomaly, ip)
 			anomalies = append(anomalies, anomaly)
 
 			// Persist to security_threats table
+			actionTaken := ""
+			if mitigated {
+				actionTaken = "blocked"
+			}
 			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 				Type:        primaryType,
 				SourceIP:    ip,
@@ -103,6 +119,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 				Score:       float64(score),
 				Details:     strings.Join(reasons, "; "),
 				Time:        stats.LastSeen,
+				ActionTaken: actionTaken,
 			})
 		}
 	}
@@ -121,6 +138,66 @@ func (d *SecurityThreatDetector) detectCoordinatedScans(data *DiagnosticData) ma
 		}
 	}
 	return pathIPs
+}
+
+func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData) []*gateonv1.Anomaly {
+	var anomalies []*gateonv1.Anomaly
+	if len(data.Traces) < 10 {
+		return nil
+	}
+
+	// 1. Build sequences per SourceIP
+	ipSequences := make(map[string][]string)
+	for _, tr := range data.Traces {
+		if tr.SourceIP == "" || tr.Path == "" {
+			continue
+		}
+		// Skip consecutive duplicate paths (e.g., polling)
+		seq := ipSequences[tr.SourceIP]
+		if len(seq) > 0 && seq[len(seq)-1] == tr.Path {
+			continue
+		}
+		ipSequences[tr.SourceIP] = append(seq, tr.Path)
+	}
+
+	// 2. Identify common sub-sequences (Signature)
+	// We look for signatures of length 3
+	signatureIPs := make(map[string]map[string]struct{})
+	for ip, seq := range ipSequences {
+		if len(seq) < 3 {
+			continue
+		}
+		for i := range len(seq) - 2 {
+			sig := strings.Join(seq[i:i+3], "->")
+			if _, ok := signatureIPs[sig]; !ok {
+				signatureIPs[sig] = make(map[string]struct{})
+			}
+			signatureIPs[sig][ip] = struct{}{}
+		}
+	}
+
+	// 3. Flag sequences used by multiple distinct IPs
+	for sig, ips := range signatureIPs {
+		if len(ips) >= 4 { // Threshold for coordinated attack
+			ipList := []string{}
+			for ip := range ips {
+				ipList = append(ipList, ip)
+			}
+			slices.Sort(ipList)
+
+			anomaly := &gateonv1.Anomaly{
+				Type:           "coordinated_attack",
+				Severity:       "high",
+				Description:    fmt.Sprintf("Coordinated behavior signature detected: %d distinct IPs followed the same request sequence: %s", len(ips), sig),
+				Timestamp:      time.Now().Format(time.RFC3339),
+				Source:         strings.Join(ipList, ", "),
+				Recommendation: "Multiple actors are following an identical path sequence. This is a strong indicator of a distributed botnet or automated attack. Recommend blocking all involved IPs and fingerprints.",
+			}
+			anomalies = append(anomalies, anomaly)
+		}
+	}
+
+	return anomalies
 }
 
 func (d *SecurityThreatDetector) detectImpossibleTravel(data *DiagnosticData) []*gateonv1.Anomaly {
@@ -143,7 +220,7 @@ func (d *SecurityThreatDetector) detectImpossibleTravel(data *DiagnosticData) []
 			return cmp.Compare(a.last.Unix(), b.last.Unix())
 		})
 
-		for i := 0; i < len(list)-1; i++ {
+		for i := range len(list) - 1 {
 			c1 := list[i]
 			c2 := list[i+1]
 			diff := c2.last.Sub(c1.last)
@@ -230,11 +307,22 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 	score := 0
 	matches := 0
 	coordinatedCount := 0
+	honeypotHits := 0
 	patterns := GetCompiledPatterns()
 
 	for path := range stats.UniquePaths {
 		lp := strings.ToLower(path)
 		pathMatched := false
+
+		// Check Honeypot Paths
+		for _, hp := range patterns.HoneypotPaths {
+			if lp == strings.ToLower(hp) {
+				score += 100 // Instant critical threat
+				honeypotHits++
+				pathMatched = true
+				break
+			}
+		}
 
 		if patterns.SuspiciousPath.MatchString(lp) {
 			score += 25
@@ -256,7 +344,12 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 		}
 	}
 
-	if matches > 0 {
+	if honeypotHits > 0 {
+		*reasons = append(*reasons, fmt.Sprintf("Access to %d honeypot/trap paths detected (guaranteed bot/malicious actor)", honeypotHits))
+		*primaryType = "honeypot_hit"
+	}
+
+	if matches > 0 && honeypotHits == 0 {
 		*reasons = append(*reasons, fmt.Sprintf("Access to %d suspicious paths/payloads", matches))
 		if *primaryType == "security_threat" {
 			*primaryType = "security_scan"
@@ -301,6 +394,11 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA4+: %d) from single IP", len(stats.JA4s)))
 	}
 
+	if stats.HeaderAnomaly > 5 {
+		score += 30
+		*reasons = append(*reasons, "Inconsistent HTTP headers for declared User-Agent (potential spoofing)")
+	}
+
 	return score
 }
 
@@ -313,6 +411,41 @@ func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]stri
 		}
 	}
 	return score
+}
+
+func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons *[]string) int {
+	if stats.Error404 < 10 {
+		return 0
+	}
+
+	// Group 404s by parent directory
+	dirs := make(map[string]int)
+	for path := range stats.UniquePaths {
+		// We don't have per-path status in IPStats directly, but we have PathErrors.
+		// Wait, PathErrors only tracks 401/403 according to ip_stats.go.
+		// Let's assume most unique paths hit by a scanner result in 404.
+		parts := strings.Split(path, "/")
+		if len(parts) > 2 {
+			dir := "/" + parts[1]
+			dirs[dir]++
+		}
+	}
+
+	maxBust := 0
+	suspiciousDir := ""
+	for dir, count := range dirs {
+		if count > maxBust {
+			maxBust = count
+			suspiciousDir = dir
+		}
+	}
+
+	if maxBust > 15 {
+		*reasons = append(*reasons, fmt.Sprintf("Directory busting detected in %s (%d unique paths)", suspiciousDir, maxBust))
+		return 50
+	}
+
+	return 0
 }
 
 func (d *SecurityThreatDetector) isIPBlocked(ip string, middlewares []*gateonv1.Middleware) bool {
@@ -342,6 +475,27 @@ func (d *SecurityThreatDetector) calculateSeverity(score int, threshold float64)
 	return "low"
 }
 
+func (d *SecurityThreatDetector) getAdaptiveRecommendation(score int, primaryType string) string {
+	if primaryType == "honeypot_hit" {
+		return "IMMEDIATE ACTION REQUIRED: Client hit a decoy path. High confidence of automated malicious intent. Recommend immediate IP ban."
+	}
+	if score > 150 {
+		return "CRITICAL THREAT: Multiple high-confidence attack signals. Recommend permanent blacklisting and audit of all recent requests from this actor."
+	}
+	switch primaryType {
+	case "brute_force_attempt":
+		return "MITIGATION: Potential credential stuffing or brute force. Implement progressive login delays, mandatory CAPTCHA, and notify affected users if applicable."
+	case "security_scan":
+		return "MITIGATION: Vulnerability scanning detected. Enable aggressive WAF rules and consider temporary IP throttling."
+	case "reputation_hit":
+		return "WARNING: IP has a known bad reputation in external databases. Monitor closely for suspicious payloads."
+	case "high_traffic":
+		return "ADAPTIVE: Unusual traffic volume. Apply rate limiting and check for potential L7 DDoS attempts."
+	default:
+		return "ADAPTIVE: Behavioral anomaly detected. Review logs and consider implementing a challenge (e.g., JS/Cookie challenge) to verify the client."
+	}
+}
+
 func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, threshold float64) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	for fp, stats := range data.FingerprintStats {
@@ -365,12 +519,17 @@ func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, thre
 			}
 			anomalies = append(anomalies, anomaly)
 
+			actionTaken := ""
+			if mitigated {
+				actionTaken = "blocked"
+			}
 			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 				Type:        "security_threat",
 				Fingerprint: fp,
 				Score:       threshold + 10,
 				Details:     fmt.Sprintf("Client fingerprint %s used across %d IPs", fp, len(stats.IPs)),
 				Time:        stats.LastSeen,
+				ActionTaken: actionTaken,
 			})
 		}
 	}

@@ -23,8 +23,8 @@ type OAuth2IntrospectionConfig struct {
 // oauth2IntrospectionResponse is the RFC 7662 introspection response.
 type oauth2IntrospectionResponse struct {
 	Active bool           `json:"active"`
-	Sub    string         `json:"sub,omitempty"`
-	Scope  string         `json:"scope,omitempty"`
+	Sub    string         `json:"sub,omitzero"`
+	Scope  string         `json:"scope,omitzero"`
 	Extras map[string]any `json:"-"`
 }
 

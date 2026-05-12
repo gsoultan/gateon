@@ -95,7 +95,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 
 			var result struct {
 				Success    bool     `json:"success"`
-				ErrorCodes []string `json:"error-codes,omitempty"`
+				ErrorCodes []string `json:"error-codes,omitzero"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 				http.Error(w, "verification failed", http.StatusBadRequest)

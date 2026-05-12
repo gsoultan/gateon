@@ -47,6 +47,10 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 			err = dberr
 			return
 		}
+		if migrateErr := db.Migrate(database, dialect); migrateErr != nil {
+			err = migrateErr
+			return
+		}
 		manager = &AuditManager{
 			config:  cfg,
 			db:      database,
