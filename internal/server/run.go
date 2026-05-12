@@ -178,6 +178,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 			_ = closer.Close()
 		}
 	}
+	s.Close()
 	close(metricsStop)
 	wg.Wait()
 	logger.L.LogInfo("shutdown complete")

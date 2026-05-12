@@ -674,6 +674,7 @@ export type SystemInfo = {
 };
 
 export type Anomaly = {
+  id?: string;
   type: string;
   severity: string;
   description: string;
@@ -763,4 +764,15 @@ export type DeepScanStatus = {
   last_scan: string;
   last_error: string;
   last_result: string;
+};
+
+export type AuditLog = {
+  id: string;
+  user_id: string;
+  action: string;
+  resource: string;
+  details: string;
+  timestamp: string;
+  ip_address: string;
+  signature: string;
 };
