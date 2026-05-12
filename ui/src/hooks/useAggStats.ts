@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "../queryClient";
 import { apiFetch } from "./api";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 
@@ -25,5 +26,5 @@ export function useAggStats() {
       return res.json();
     },
     refetchInterval: refreshIntervalSec * 1000,
-  });
+  }, queryClient);
 }
