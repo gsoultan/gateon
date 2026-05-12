@@ -128,6 +128,34 @@ export type MetricsSnapshot = {
   active_shunned_entities: LabeledCount[] | null;
   active_anomaly_score_average: number;
   system: SystemMetrics;
+  security: SecurityInsights;
+};
+
+export type SecurityInsights = {
+  top_threat_sources: LabeledCount[] | null;
+  top_threat_types: LabeledCount[] | null;
+  threats_by_country: LabeledCount[] | null;
+  attack_trend: TrafficSample[] | null;
+  recent_anomalies: SecurityThreat[] | null;
+};
+
+export type SecurityThreat = {
+  id: string;
+  type: string;
+  source_ip: string;
+  fingerprint: string;
+  score: number;
+  details: string;
+  timestamp: string;
+  ja3: string;
+  ja4: string;
+  route_id: string;
+  request_uri: string;
+  category: string;
+  severity: string;
+  asn: string;
+  action_taken: string;
+  country_code: string;
 };
 
 export type TrafficSample = {

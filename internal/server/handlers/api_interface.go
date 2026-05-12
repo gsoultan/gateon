@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -14,6 +15,7 @@ import (
 type GlobalAndAuthAPI interface {
 	GetGlobals() config.GlobalConfigStore
 	GetTLSManager() tls.TLSManager
+	GetEbpfManager() ebpf.Manager
 	IsSetupRequired(ctx context.Context, req *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error)
 	Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error)
 	Login(ctx context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error)

@@ -1,6 +1,6 @@
 package ebpf
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpf gateon_ebpf xdp_rate_limit.c -- -I../include
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpf gateon_ebpf bpf/xdp_rate_limit.c -- -I../include
 
 import (
 	"context"

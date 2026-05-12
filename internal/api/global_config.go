@@ -27,7 +27,7 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 
 	// Trigger reconfigurations
 	if req.Config.Alerting != nil {
-		alerting.UpdateConfig(req.Config.Alerting)
+		alerting.UpdateConfig(req.Config.Alerting, s.EbpfManager)
 	}
 	if req.Config.Audit != nil {
 		audit.UpdateConfig(req.Config.Audit)

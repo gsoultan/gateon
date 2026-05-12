@@ -12,8 +12,9 @@ import {
   Badge,
   Alert,
   FileButton,
+  TagsInput,
 } from "@mantine/core";
-import { IconDatabase, IconDownload, IconAlertCircle, IconCheck, IconUpload } from "@tabler/icons-react";
+import { IconDatabase, IconDownload, IconAlertCircle, IconCheck, IconUpload, IconWorld, IconLock, IconShieldCheck } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import type { GeoIPConfig } from "../../types/gateon";
@@ -250,6 +251,38 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
           >
             Update From MaxMind Now
           </Button>
+
+          <Divider label="Country Geofencing" labelPosition="center" />
+
+          <TagsInput
+            label="Blocked Countries"
+            description="ISO country codes to block (e.g. US, CN, RU). Case-insensitive."
+            placeholder="Enter country codes"
+            value={config.blocked_countries || []}
+            onChange={(val) => onChange({ ...config, blocked_countries: val })}
+            disabled={!config.enabled || disabled}
+            leftSection={<IconLock size={16} />}
+            splitChars={[",", " ", "|"]}
+          />
+
+          <TagsInput
+            label="Allowed Countries"
+            description="If set, ONLY these ISO country codes will be allowed. Leave empty to allow all (unless blocked above)."
+            placeholder="Enter country codes"
+            value={config.allowed_countries || []}
+            onChange={(val) => onChange({ ...config, allowed_countries: val })}
+            disabled={!config.enabled || disabled}
+            leftSection={<IconWorld size={16} />}
+            splitChars={[",", " ", "|"]}
+          />
+
+          <Switch
+            label="Enable XDP Geofencing"
+            description="Perform geofencing at the kernel level using eBPF/XDP for higher performance"
+            checked={config.xdp_geofencing}
+            onChange={(e) => onChange({ ...config, xdp_geofencing: e.currentTarget.checked })}
+            disabled={!config.enabled || disabled}
+          />
 
           {onSave && (
             <Group justify="flex-end" mt="md">

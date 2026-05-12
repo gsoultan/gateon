@@ -17,7 +17,7 @@ import (
 )
 
 // AlertingHandler is a function type for alerting integration.
-type AlertingHandler func(SecurityThreat)
+type AlertingHandler func(*SecurityThreat)
 
 var (
 	onThreatAlert AlertingHandler
@@ -91,6 +91,7 @@ type SecurityThreat struct {
 	Severity    string
 	ASN         string
 	ActionTaken string
+	CountryCode string
 }
 
 type pathStatsStore struct {
@@ -109,6 +110,7 @@ type pathStatsStore struct {
 	auditLogRetentionDays       atomic.Int32
 	pruning                     atomic.Bool
 	scoreCache                  *lru.ARCCache
+	unmitigatedCache            *lru.ARCCache
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -150,6 +152,9 @@ func initStore(databaseURL string, retentionDays int) error {
 	if cache, err := lru.NewARC(10000); err == nil {
 		st.scoreCache = cache
 	}
+	if cache, err := lru.NewARC(1000); err == nil {
+		st.unmitigatedCache = cache
+	}
 
 	if err := db.Migrate(database, dialect); err != nil {
 		_ = database.Close()
@@ -187,7 +192,7 @@ func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -267,7 +272,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode); err != nil {
 							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
@@ -488,6 +493,10 @@ func RecordSecurityThreat(t SecurityThreat) {
 		t.Time = time.Now()
 	}
 
+	if t.CountryCode == "" && t.SourceIP != "" {
+		t.CountryCode = ResolveCountry(t.SourceIP)
+	}
+
 	if store.scoreCache != nil {
 		current, ok := store.scoreCache.Get(t.SourceIP)
 		score := t.Score
@@ -508,7 +517,7 @@ func RecordSecurityThreat(t SecurityThreat) {
 	h := onThreatAlert
 	alertMu.RUnlock()
 	if h != nil {
-		h(t)
+		h(&t)
 	}
 
 	select {
@@ -530,6 +539,86 @@ func GetIPThreatScore(ip string) float64 {
 		return val.(float64)
 	}
 	return 0
+}
+
+// IsIPUnmitigated checks if an IP has been manually unmitigated by the user.
+func IsIPUnmitigated(ip string) bool {
+	if store == nil {
+		return false
+	}
+	if store.unmitigatedCache != nil {
+		if val, ok := store.unmitigatedCache.Get(ip); ok {
+			return val.(bool)
+		}
+	}
+
+	var status string
+	query := store.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
+	err := store.db.QueryRow(query, ip).Scan(&status)
+	if err != nil {
+		return false
+	}
+
+	unmitigated := status == "unmitigated"
+	if store.unmitigatedCache != nil {
+		store.unmitigatedCache.Add(ip, unmitigated)
+	}
+	return unmitigated
+}
+
+// MarkIPMitigated records that an IP has been mitigated.
+func MarkIPMitigated(ip string, reason string) {
+	if store == nil {
+		return
+	}
+	query := store.dialect.Rebind("INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, updated_at) VALUES (?, 'mitigated', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
+	if store.dialect.Driver == db.DriverMySQL {
+		query = "INSERT INTO ip_mitigations (ip, status, reason, mitigated_at) VALUES (?, 'mitigated', ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
+	}
+	now := time.Now()
+	_, err := store.db.Exec(query, ip, reason, now, reason, now)
+	if err != nil {
+		logger.Default().LogError("failed to mark IP as mitigated", "ip", ip, "error", err)
+	}
+	if store.unmitigatedCache != nil {
+		store.unmitigatedCache.Add(ip, false)
+	}
+}
+
+// MarkIPUnmitigated records that an IP has been manually unmitigated.
+func MarkIPUnmitigated(ip string) {
+	if store == nil {
+		return
+	}
+	query := store.dialect.Rebind("UPDATE ip_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE ip = ?")
+	_, err := store.db.Exec(query, ip)
+	if err != nil {
+		logger.Default().LogError("failed to mark IP as unmitigated", "ip", ip, "error", err)
+	}
+	if store.unmitigatedCache != nil {
+		store.unmitigatedCache.Add(ip, true)
+	}
+}
+
+// GetMitigatedIPs returns a list of currently mitigated IPs.
+func GetMitigatedIPs(ctx context.Context) []string {
+	if store == nil {
+		return nil
+	}
+	query := store.dialect.Rebind("SELECT ip FROM ip_mitigations WHERE status = 'mitigated'")
+	rows, err := store.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var ips []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err == nil {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
 }
 
 // GetTraces returns the last N traces from the store.
@@ -754,7 +843,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken FROM security_threats ORDER BY timestamp DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code FROM security_threats ORDER BY timestamp DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		logger.Default().LogError("threats: query failed", "error", err)
@@ -764,7 +853,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	res := make([]SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
 		var th SecurityThreat
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode); err != nil {
 			logger.Default().LogError("threats: scan failed", "error", err)
 			continue
 		}
@@ -791,4 +880,110 @@ func CurrentRetentionDays() int {
 		return 0
 	}
 	return int(store.retentionDays.Load())
+}
+
+// GetTopThreatSources returns the most frequent attacking IP addresses.
+func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
+	if store == nil {
+		return nil
+	}
+	query := store.dialect.Rebind("SELECT source_ip, COUNT(*) as cnt FROM security_threats GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
+	rows, err := store.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var res []LabeledCount
+	for rows.Next() {
+		var label string
+		var count float64
+		if err := rows.Scan(&label, &count); err == nil {
+			res = append(res, LabeledCount{Label: label, Value: count})
+		}
+	}
+	return res
+}
+
+// GetTopThreatTypes returns the most frequent types of security threats.
+func GetTopThreatTypes(ctx context.Context, limit int) []LabeledCount {
+	if store == nil {
+		return nil
+	}
+	query := store.dialect.Rebind("SELECT type, COUNT(*) as cnt FROM security_threats GROUP BY type ORDER BY cnt DESC LIMIT ?")
+	rows, err := store.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var res []LabeledCount
+	for rows.Next() {
+		var label string
+		var count float64
+		if err := rows.Scan(&label, &count); err == nil {
+			res = append(res, LabeledCount{Label: label, Value: count})
+		}
+	}
+	return res
+}
+
+// GetThreatsByCountry returns the distribution of threats by country.
+func GetThreatsByCountry(ctx context.Context, limit int) []LabeledCount {
+	if store == nil {
+		return nil
+	}
+	query := store.dialect.Rebind("SELECT country_code, COUNT(*) as cnt FROM security_threats WHERE country_code != '' GROUP BY country_code ORDER BY cnt DESC LIMIT ?")
+	rows, err := store.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var res []LabeledCount
+	for rows.Next() {
+		var label string
+		var count float64
+		if err := rows.Scan(&label, &count); err == nil {
+			res = append(res, LabeledCount{Label: label, Value: count})
+		}
+	}
+	return res
+}
+
+// GetAttackTrend returns a time-series of security threat counts.
+func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
+	if store == nil {
+		return nil
+	}
+	if days <= 0 {
+		days = 1
+	}
+	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	// Group by day and hour for trend
+	var query string
+	if store.dialect.Driver == db.DriverPostgres || store.dialect.Driver == "pgx" {
+		query = "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD') as day, EXTRACT(HOUR FROM timestamp) as hr, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY day, hr ORDER BY day ASC, hr ASC"
+	} else {
+		query = "SELECT strftime('%Y-%m-%d', timestamp) as day, (strftime('%H', timestamp)) as hr, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY day, hr ORDER BY day ASC, hr ASC"
+	}
+
+	rows, err := store.db.QueryContext(ctx, store.dialect.Rebind(query), cutoff)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var res []TrafficSample
+	for rows.Next() {
+		var day string
+		var hr int
+		var count uint64
+		if err := rows.Scan(&day, &hr, &count); err == nil {
+			t, _ := time.Parse("2006-01-02", day)
+			t = t.Add(time.Duration(hr) * time.Hour)
+			res = append(res, TrafficSample{
+				Timestamp: t.UnixMilli(),
+				Requests:  count, // Reusing Requests field for threat count
+			})
+		}
+	}
+	return res
 }

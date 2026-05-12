@@ -93,20 +93,23 @@ func main() {
 
 	initTelemetry(globalReg, ctx)
 
+	var ebpfManager ebpf.Manager
+	var wafUpdater *middleware.WAFUpdater
+	var gitOpsManager *config.GitOpsManager
+
 	if gc := globalReg.Get(ctx); gc != nil {
-		alerting.Init(gc.Alerting)
+		if gc.Ebpf != nil && gc.Ebpf.Enabled {
+			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
+			go ebpfManager.Start(context.Background())
+		}
+
+		alerting.Init(gc.Alerting, ebpfManager)
 		telemetry.SetAlertingHandler(alerting.HandleThreat)
 		databaseURL := db.AuthDatabaseURL(gc.Auth)
 		if err := audit.Init(gc.Audit, databaseURL); err != nil {
 			logger.L.LogError("failed to init audit manager", "error", err)
 		}
-	}
 
-	var ebpfManager ebpf.Manager
-	var wafUpdater *middleware.WAFUpdater
-	var gitOpsManager *config.GitOpsManager
-
-	if gc := globalReg.Get(context.Background()); gc != nil {
 		if gc.Management != nil && gc.Management.Gitops != nil && gc.Management.Gitops.Enabled {
 			gitOpsManager = config.NewGitOpsManager(gc.Management.Gitops, globalReg)
 			gitOpsManager.Start(ctx)
@@ -117,10 +120,6 @@ func main() {
 			if err := telemetry.InitGossip(gc.Ha); err != nil {
 				logger.L.LogError("failed to init gossip reputation sync", "error", err)
 			}
-		}
-		if gc.Ebpf != nil && gc.Ebpf.Enabled {
-			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
-			go ebpfManager.Start(context.Background())
 		}
 		if gc.AnomalyDetection != nil && gc.AnomalyDetection.Enabled {
 			ad, err := telemetry.NewAnomalyDetector(gc.AnomalyDetection, ebpfManager)

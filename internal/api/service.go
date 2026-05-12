@@ -41,6 +41,11 @@ func (s *ApiService) GetTLSManager() gtls.TLSManager {
 	return s.TLSManager
 }
 
+// GetEbpfManager returns the eBPF manager.
+func (s *ApiService) GetEbpfManager() ebpf.Manager {
+	return s.EbpfManager
+}
+
 // NewApiService creates an ApiService from config (Factory pattern).
 func NewApiService(cfg ApiServiceConfig) *ApiService {
 	s := &ApiService{
