@@ -107,6 +107,21 @@ export default function SecurityCommandCenter() {
               <Card withBorder p="md" radius="md">
                 <Group>
                   <ThemeIcon color="violet" variant="light" size="lg">
+                    <IconWorld size={20} />
+                  </ThemeIcon>
+                  <Stack gap={0}>
+                    <Text size="xs" c="dimmed" fw={700}>CLUSTER SYNC</Text>
+                    <Text fw={700}>
+                      {status?.system_info.gossip?.enabled 
+                        ? `${status.system_info.gossip.members_count} Nodes Synced` 
+                        : 'Stand-alone Mode'}
+                    </Text>
+                  </Stack>
+                </Group>
+              </Card>
+              <Card withBorder p="md" radius="md">
+                <Group>
+                  <ThemeIcon color="blue" variant="light" size="lg">
                     <IconShieldOff size={20} />
                   </ThemeIcon>
                   <Stack gap={0}>

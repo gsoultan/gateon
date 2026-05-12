@@ -4,9 +4,13 @@ package ebpf
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"net"
 	"runtime"
+	"sync"
 
+	"github.com/cilium/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -15,6 +19,8 @@ import (
 // Supports XDP (eXpress Data Path) for early packet dropping/rate limiting.
 type EbpfManager struct {
 	config *gateonv1.EbpfConfig
+	mu     sync.RWMutex
+	maps   map[string]*ebpf.Map
 }
 
 type MapStats struct {
@@ -111,46 +117,173 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 	*/
 }
 
+func ipToUint32(ipStr string) (uint32, error) {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return 0, fmt.Errorf("invalid IP: %s", ipStr)
+	}
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return 0, fmt.Errorf("only IPv4 is supported in eBPF for now: %s", ipStr)
+	}
+	// XDP/IP headers are in network byte order (Big Endian)
+	return binary.BigEndian.Uint32(ipv4), nil
+}
+
 // ShunIP adds an IP to the XDP blocklist.
 func (m *EbpfManager) ShunIP(ip string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	shunnedMap, ok := m.maps["shunned_ips"]
+	if !ok {
+		return fmt.Errorf("shunned_ips map not loaded")
+	}
+
+	ipUint, err := ipToUint32(ip)
+	if err != nil {
+		return err
+	}
+
 	logger.L.LogInfo("Shunning IP at XDP level", "ip", ip)
-	// Implementation would use bpf_map_update_elem on shunned_ips map
-	return nil
+	reason := uint32(1) // General reason
+	return shunnedMap.Update(ipUint, reason, ebpf.UpdateAny)
 }
 
 // UnshunIP removes an IP from the XDP blocklist.
 func (m *EbpfManager) UnshunIP(ip string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	shunnedMap, ok := m.maps["shunned_ips"]
+	if !ok {
+		return fmt.Errorf("shunned_ips map not loaded")
+	}
+
+	ipUint, err := ipToUint32(ip)
+	if err != nil {
+		return err
+	}
+
 	logger.L.LogInfo("Unshunning IP at XDP level", "ip", ip)
-	// Implementation would use bpf_map_delete_elem on shunned_ips map
-	return nil
+	return shunnedMap.Delete(ipUint)
 }
 
-// BlockCountry adds a country code to the XDP blocklist.
+// BlockCountry adds a country code (converted to a numeric ID) to the XDP blocklist.
 func (m *EbpfManager) BlockCountry(countryCode string) error {
-	logger.L.LogInfo("Blocking country at XDP level", "country", countryCode)
-	// Implementation would update a country_block_map
-	return nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	blockMap, ok := m.maps["country_block_map"]
+	if !ok {
+		return fmt.Errorf("country_block_map not loaded")
+	}
+
+	// Simple hash for country code to 32-bit ID
+	var id uint32
+	if len(countryCode) >= 2 {
+		id = uint32(countryCode[0])<<8 | uint32(countryCode[1])
+	}
+
+	logger.L.LogInfo("Blocking country at XDP level", "country", countryCode, "id", id)
+	val := uint32(1)
+	return blockMap.Update(id, val, ebpf.UpdateAny)
 }
 
 // UpdateManagementWhitelist updates the list of IPs allowed to access management port.
 func (m *EbpfManager) UpdateManagementWhitelist(ips []string) error {
-	logger.L.LogInfo("Updating management whitelist in eBPF", "ips", ips)
-	// Implementation would update management_whitelist_map
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	whitelistMap, ok := m.maps["mgmt_whitelist"]
+	if !ok {
+		return fmt.Errorf("mgmt_whitelist map not loaded")
+	}
+
+	// For a real production implementation, we'd diff and only update changes,
+	// or clear and refill if the list is small.
+	for _, ip := range ips {
+		ipUint, err := ipToUint32(ip)
+		if err != nil {
+			continue
+		}
+		_ = whitelistMap.Update(ipUint, uint32(1), ebpf.UpdateAny)
+	}
 	return nil
 }
 
 // SetPortKnockingSequence sets the required port sequence for management access.
 func (m *EbpfManager) SetPortKnockingSequence(seq []int32) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	configMap, ok := m.maps["knocking_config"]
+	if !ok {
+		return fmt.Errorf("knocking_config map not loaded")
+	}
+
 	logger.L.LogInfo("Setting port knocking sequence in eBPF", "sequence", seq)
-	// Implementation would update knocking_config_map
+	for i, port := range seq {
+		if i >= 8 { // MAX_KNOCK_STEPS in C
+			break
+		}
+		step := uint32(i)
+		p := uint32(port)
+		if err := configMap.Update(step, p, ebpf.UpdateAny); err != nil {
+			return err
+		}
+	}
+	// Zero out remaining steps if sequence is shorter than before
+	for i := len(seq); i < 8; i++ {
+		step := uint32(i)
+		_ = configMap.Update(step, uint32(0), ebpf.UpdateAny)
+	}
+
 	return nil
 }
 
 // UpdateLoadBalancerBackends updates the list of backends for XDP load balancing.
 func (m *EbpfManager) UpdateLoadBalancerBackends(ips []string) error {
-	logger.L.LogInfo("Updating XDP load balancer backends", "backends", ips)
-	// Implementation would update lb_backends and lb_backends_count maps
-	return nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	backendsMap, ok := m.maps["lb_backends"]
+	countMap, ok2 := m.maps["lb_backends_count"]
+	if !ok || !ok2 {
+		return fmt.Errorf("load balancer maps not loaded")
+	}
+
+	logger.L.LogInfo("Updating XDP load balancer backends", "count", len(ips))
+
+	type backend struct {
+		IP      uint32
+		EthAddr [6]uint8
+	}
+
+	for i, ipStr := range ips {
+		if i >= 64 { // max_entries in C
+			break
+		}
+		ipUint, err := ipToUint32(ipStr)
+		if err != nil {
+			continue
+		}
+
+		be := backend{
+			IP: ipUint,
+			// In a real scenario, we'd need the MAC address of the backend.
+			// This might involve ARP or static config.
+			EthAddr: [6]uint8{0, 0, 0, 0, 0, 0},
+		}
+
+		_ = backendsMap.Update(uint32(i), be, ebpf.UpdateAny)
+	}
+
+	count := uint32(len(ips))
+	if count > 64 {
+		count = 64
+	}
+	return countMap.Update(uint32(0), count, ebpf.UpdateAny)
 }
 
 // ShunJA3 adds a JA3 fingerprint to the XDP blocklist.

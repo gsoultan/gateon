@@ -25,7 +25,7 @@ type Server struct {
 	EbpfManager  ebpf.Manager
 	RedisClient  redis.Client
 	TLSManager   gtls.TLSManager
-	WafUpdater   interface{} // middleware.WAFUpdater (interface to avoid cyclic import)
+	WafUpdater   any // middleware.WAFUpdater (interface to avoid cyclic import)
 	Logger       logger.Logger
 	Port         string
 	Version      string

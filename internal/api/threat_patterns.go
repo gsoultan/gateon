@@ -4,23 +4,25 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"slices"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
 type ThreatPatterns struct {
-	SuspiciousPath    string `json:"suspicious_path"`
-	SQLI              string `json:"sqli"`
-	XSS               string `json:"xss"`
-	Traversal         string `json:"traversal"`
-	RCE               string `json:"rce"`
-	SuspiciousAgent   string `json:"suspicious_agent"`
-	SuspiciousReferer string `json:"suspicious_referer"`
-	SSRF              string `json:"ssrf"`
-	NoSQLI            string `json:"nosqli"`
-	CommandInjection  string `json:"command_injection"`
-	ProtoPollution    string `json:"proto_pollution"`
+	SuspiciousPath    string   `json:"suspicious_path"`
+	SQLI              string   `json:"sqli"`
+	XSS               string   `json:"xss"`
+	Traversal         string   `json:"traversal"`
+	RCE               string   `json:"rce"`
+	SuspiciousAgent   string   `json:"suspicious_agent"`
+	SuspiciousReferer string   `json:"suspicious_referer"`
+	SSRF              string   `json:"ssrf"`
+	NoSQLI            string   `json:"nosqli"`
+	CommandInjection  string   `json:"command_injection"`
+	ProtoPollution    string   `json:"proto_pollution"`
+	HoneypotPaths     []string `json:"honeypot_paths"`
 }
 
 var (
@@ -36,6 +38,16 @@ var (
 		NoSQLI:            `(?i)(\$gt|\$ne|\$in|\$where|\$regex|\$expr|\$exists)`,
 		CommandInjection:  `(?i)(;|\d|\||&|\$\(|\x60)(?i)(cat|ls|id|whoami|pwd|uname|netstat|nc|bash|curl|wget|powershell|cmd|type|dir)`,
 		ProtoPollution:    `(?i)(__proto__|constructor\.prototype)`,
+		HoneypotPaths: []string{
+			"/admin/setup.php",
+			"/wp-content/plugins/wp-config.php",
+			"/.aws/credentials",
+			"/.env",
+			"/.git/config",
+			"/debug/vars",
+			"/server-status",
+			"/phpmyadmin/index.php",
+		},
 	}
 
 	activePatterns   ThreatPatterns
@@ -101,6 +113,7 @@ func GetCompiledPatterns() (p struct {
 	NoSQLI            *regexp.Regexp
 	CommandInjection  *regexp.Regexp
 	ProtoPollution    *regexp.Regexp
+	HoneypotPaths     []string
 }) {
 	compiledPatterns.RLock()
 	defer compiledPatterns.RUnlock()
@@ -116,5 +129,6 @@ func GetCompiledPatterns() (p struct {
 	p.NoSQLI = compiledPatterns.nosqlI
 	p.CommandInjection = compiledPatterns.commandInjection
 	p.ProtoPollution = compiledPatterns.protoPollution
+	p.HoneypotPaths = slices.Clone(activePatterns.HoneypotPaths)
 	return
 }

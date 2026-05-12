@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	lru "github.com/hashicorp/golang-lru"
@@ -497,7 +498,7 @@ func RecordSecurityThreat(t SecurityThreat) {
 	}
 
 	if t.Fingerprint != "" {
-		DecreaseReputation(t.Fingerprint, t.Score/2) // Penalty is half the threat score
+		DecreaseReputation(t.Fingerprint, t.Score/2, t.Type) // Penalty is half the threat score
 	}
 
 	// Increment Prometheus counter
@@ -515,6 +516,9 @@ func RecordSecurityThreat(t SecurityThreat) {
 	default:
 		// drop on backpressure
 	}
+
+	// Log to audit trail
+	audit.Log(context.Background(), "system", "security_threat", t.RequestURI, fmt.Sprintf("Type: %s, Severity: %s, Details: %s, Action: %s", t.Type, t.Severity, t.Details, t.ActionTaken), t.SourceIP)
 }
 
 // GetIPThreatScore returns the current security threat score for an IP.

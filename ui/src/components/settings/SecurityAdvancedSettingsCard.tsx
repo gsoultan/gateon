@@ -109,13 +109,50 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   />
                 </Group>
                 {security.deception?.inject_invisible_links && (
-                  <TagsInput
-                    label="Invisible Link Paths"
-                    placeholder="/system-config, /hidden-admin"
-                    value={security.deception?.invisible_link_paths || []}
-                    onChange={(val) => updateSection("deception", { invisible_link_paths: val })}
-                    disabled={disabled}
-                  />
+                  <>
+                    <TagsInput
+                      label="Invisible Link Paths"
+                      placeholder="/system-config, /hidden-admin"
+                      value={security.deception?.invisible_link_paths || []}
+                      onChange={(val) => updateSection("deception", { invisible_link_paths: val })}
+                      disabled={disabled}
+                    />
+                    <TagsInput
+                      label="Honey Forms (POST Targets)"
+                      description="Injected hidden forms that block clients if submitted."
+                      placeholder="/v1/admin/login, /debug/leak"
+                      value={security.deception?.honey_forms || []}
+                      onChange={(val) => updateSection("deception", { honey_forms: val })}
+                      disabled={disabled}
+                    />
+                    <SimpleGrid cols={2}>
+                      <TextInput
+                        label="Canary Header"
+                        description="Attractive-looking header injected into response."
+                        placeholder="X-Gateon-Internal-Debug"
+                        value={security.deception?.canary_header || ""}
+                        onChange={(e) => updateSection("deception", { canary_header: e.currentTarget.value })}
+                        disabled={disabled}
+                      />
+                      <TextInput
+                        label="Canary Token"
+                        description="The token to watch for in subsequent requests."
+                        placeholder="debug-mode-admin-true"
+                        value={security.deception?.canary_token || ""}
+                        onChange={(e) => updateSection("deception", { canary_token: e.currentTarget.value })}
+                        disabled={disabled}
+                      />
+                    </SimpleGrid>
+                    <Group justify="space-between">
+                      <Text size="sm">Enable Troll Response</Text>
+                      <Switch
+                        size="sm"
+                        checked={security.deception?.enable_troll_response}
+                        onChange={(e) => updateSection("deception", { enable_troll_response: e.currentTarget.checked })}
+                        disabled={disabled}
+                      />
+                    </Group>
+                  </>
                 )}
               </Stack>
             )}
@@ -286,44 +323,24 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
             <Stack gap="md">
               <Group justify="space-between">
                 <Group>
-                  <IconDatabaseSearch size={20} color="var(--mantine-color-blue-filled)" />
-                  <Text fw={500}>IP Reputation & Threat Feeds</Text>
+                  <IconShieldLock size={20} color="var(--mantine-color-indigo-filled)" />
+                  <Text fw={500}>TLS Session Binding</Text>
                 </Group>
                 <Switch
-                  checked={security.ip_reputation?.enabled}
-                  onChange={(e) => updateSection("ip_reputation", { enabled: e.currentTarget.checked })}
+                  checked={security.tls_binding?.enabled}
+                  onChange={(e) => updateSection("tls_binding", { enabled: e.currentTarget.checked })}
                   disabled={disabled}
                 />
               </Group>
-              {security.ip_reputation?.enabled && (
-                <Stack gap="sm">
-                  <TagsInput
-                    label="Feed URLs"
-                    description="URLs to plaintext IP/CIDR blocklists"
-                    placeholder="https://feeds.example.com/bad-ips.txt"
-                    value={security.ip_reputation?.feed_urls || []}
-                    onChange={(val) => updateSection("ip_reputation", { feed_urls: val })}
-                    disabled={disabled}
-                  />
-                  <NumberInput
-                    label="Update Interval (Hours)"
-                    value={security.ip_reputation?.update_interval_hours || 24}
-                    onChange={(val) => updateSection("ip_reputation", { update_interval_hours: val })}
-                    disabled={disabled}
-                    min={1}
-                  />
-                  <NumberInput
-                    label="Block Threshold"
-                    description="Score to block (0.0 to 1.0)"
-                    value={security.ip_reputation?.block_threshold || 0.5}
-                    onChange={(val) => updateSection("ip_reputation", { block_threshold: val })}
-                    disabled={disabled}
-                    step={0.1}
-                    min={0}
-                    max={1}
-                    decimalScale={2}
-                  />
-                </Stack>
+              {security.tls_binding?.enabled && (
+                <TextInput
+                  label="Cookie Name"
+                  description="The name of the session cookie to bind (e.g. session)."
+                  placeholder="session"
+                  value={security.tls_binding?.cookie_name || ""}
+                  onChange={(e) => updateSection("tls_binding", { cookie_name: e.currentTarget.value })}
+                  disabled={disabled}
+                />
               )}
             </Stack>
           </Paper>

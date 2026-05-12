@@ -80,13 +80,14 @@ export function ReputationMonitor() {
             <Table.Tr>
               <Table.Th>Fingerprint</Table.Th>
               <Table.Th>Trust Score</Table.Th>
+              <Table.Th>Violations</Table.Th>
               <Table.Th>Last Activity</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
             {reputations.length === 0 ? (
               <Table.Tr>
-                <Table.Td colSpan={3}>
+                <Table.Td colSpan={4}>
                   <Text ta="center" c="dimmed" py="xl">No active high-risk fingerprints tracked.</Text>
                 </Table.Td>
               </Table.Tr>
@@ -94,13 +95,13 @@ export function ReputationMonitor() {
               reputations.map((rep) => (
                 <Table.Tr key={rep.fingerprint}>
                   <Table.Td>
-                    <Tooltip label={rep.fingerprint}>
+                    <Tooltip label={rep.fingerprint} withArrow>
                       <Text ff="monospace" size="xs">
                         {rep.fingerprint.substring(0, 12)}...
                       </Text>
                     </Tooltip>
                   </Table.Td>
-                  <Table.Td style={{ minWidth: 200 }}>
+                  <Table.Td style={{ minWidth: 150 }}>
                     <Stack gap={4}>
                       <Group justify="space-between">
                         <Text size="xs" fw={700} c={getScoreColor(rep.score)}>
@@ -120,6 +121,26 @@ export function ReputationMonitor() {
                         animated={rep.score < 50}
                       />
                     </Stack>
+                  </Table.Td>
+                  <Table.Td>
+                    <Tooltip 
+                      multiline 
+                      w={220} 
+                      withArrow 
+                      label={
+                        rep.history && rep.history.length > 0 
+                          ? `Recent violations: ${rep.history.join(", ")}` 
+                          : "No recorded violation history"
+                      }
+                    >
+                      <Badge 
+                        variant="light" 
+                        color={rep.violation_count > 0 ? "red" : "gray"}
+                        size="sm"
+                      >
+                        {rep.violation_count}
+                      </Badge>
+                    </Tooltip>
                   </Table.Td>
                   <Table.Td>
                     <Text size="xs" c="dimmed">

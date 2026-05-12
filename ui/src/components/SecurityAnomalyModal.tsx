@@ -25,7 +25,11 @@ import {
   IconAlertCircle,
   IconCheck,
   IconMap2,
+  IconShieldOff,
+  IconAlertTriangle,
 } from "@tabler/icons-react";
+import { Modal as MantineModal, Button, Alert } from "@mantine/core";
+import { useRemoveMitigation } from "../hooks/useGateon";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
 
@@ -37,6 +41,9 @@ interface SecurityAnomalyModalProps {
 
 export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnomalyModalProps) {
   const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
+  const [confirmOpened, { open: openConfirm, close: closeConfirm }] = useDisclosure(false);
+  const removeMitigation = useRemoveMitigation();
+
   if (!anomaly) return null;
 
   const getSeverityColor = (severity: string) => {
@@ -85,6 +92,19 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
           <Text size="sm" mt="sm">
             {anomaly.description}
           </Text>
+
+          {anomaly.mitigated && (
+            <Button
+              mt="md"
+              variant="light"
+              color="red"
+              leftSection={<IconShieldOff size={16} />}
+              onClick={openConfirm}
+              fullWidth
+            >
+              Remove Mitigation / Allow IP
+            </Button>
+          )}
         </Paper>
 
         <Grid>
@@ -257,6 +277,39 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
         onClose={closeTrace}
         targetIp={anomaly.source}
       />
+
+      <MantineModal
+        opened={confirmOpened}
+        onClose={closeConfirm}
+        title={<Text fw={700}>Confirm Mitigation Removal</Text>}
+        centered
+        size="sm"
+        zIndex={1100}
+      >
+        <Stack gap="md">
+          <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+            Are you sure you want to remove the mitigation for IP <b>{anomaly.source}</b>? 
+            This will allow the IP to access your services again.
+          </Alert>
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={closeConfirm}>Cancel</Button>
+            <Button 
+              color="red" 
+              onClick={() => {
+                removeMitigation.mutate(anomaly.source, {
+                  onSuccess: () => {
+                    closeConfirm();
+                    onClose();
+                  }
+                });
+              }}
+              loading={removeMitigation.isPending}
+            >
+              Confirm Removal
+            </Button>
+          </Group>
+        </Stack>
+      </MantineModal>
     </Modal>
   );
 }

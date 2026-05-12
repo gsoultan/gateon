@@ -8,9 +8,9 @@ import (
 // ErrorBody is the standard JSON shape for API error responses.
 type ErrorBody struct {
 	Error     string `json:"error"`
-	Message   string `json:"message,omitempty"`
-	Code      string `json:"code,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
+	Message   string `json:"message,omitzero"`
+	Code      string `json:"code,omitzero"`
+	RequestID string `json:"request_id,omitzero"`
 }
 
 // WriteJSONError writes a JSON error response with the given status code and message.

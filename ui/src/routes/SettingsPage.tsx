@@ -1541,6 +1541,120 @@ export default function SettingsPage() {
                     disabled={formDisabled || !config.waf.auto_update_rules}
                   />
 
+                  <Divider label="ClamAV Anti-Malware" labelPosition="center" />
+                  <Group grow>
+                    <Select
+                      label="Installation Mode"
+                      data={[
+                        { value: '1', label: 'Local Installation' },
+                        { value: '2', label: 'Docker Container' },
+                      ]}
+                      value={config.waf.clamav?.installation_mode?.toString() || '2'}
+                      onChange={(val) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          clamav: {
+                            ...(config.waf!.clamav || {}),
+                            installation_mode: parseInt(val || '2')
+                          }
+                        }
+                      })}
+                      disabled={formDisabled || !config.waf.malware_detection}
+                    />
+                    <Switch
+                      label="Auto-Install/Manage"
+                      description="Let Gateon handle installation and lifecycle"
+                      checked={config.waf.clamav?.auto_install}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          clamav: {
+                            ...(config.waf!.clamav || {}),
+                            auto_install: e.currentTarget.checked
+                          }
+                        }
+                      })}
+                      disabled={formDisabled || !config.waf.malware_detection}
+                      mt="xl"
+                    />
+                  </Group>
+
+                  <Group grow>
+                    <TextInput
+                      label="ClamAV Address"
+                      description="Address of ClamAV daemon"
+                      placeholder="tcp://localhost:3310"
+                      value={config.waf.clamav?.clamav_addr || config.waf.clamav_addr || ""}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          clamav: {
+                            ...(config.waf!.clamav || {}),
+                            clamav_addr: e.currentTarget.value
+                          }
+                        }
+                      })}
+                      disabled={formDisabled || !config.waf.malware_detection}
+                    />
+                    <TextInput
+                      label="Full Scan Schedule"
+                      description="Cron expression for full system scans"
+                      placeholder="0 2 * * *"
+                      value={config.waf.clamav?.full_scan_schedule || ""}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          clamav: {
+                            ...(config.waf!.clamav || {}),
+                            full_scan_schedule: e.currentTarget.value
+                          }
+                        }
+                      })}
+                      disabled={formDisabled || !config.waf.malware_detection}
+                    />
+                  </Group>
+
+                  <Group grow>
+                    <Switch
+                      label="Low Resource Mode"
+                      description="Optimize for 1GB RAM / 2 Cores"
+                      checked={config.waf.clamav?.low_resource_mode}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        waf: {
+                          ...config.waf!,
+                          clamav: {
+                            ...(config.waf!.clamav || {}),
+                            low_resource_mode: e.currentTarget.checked
+                          }
+                        }
+                      })}
+                      disabled={formDisabled || !config.waf.malware_detection}
+                    />
+                    {config.waf.clamav?.installation_mode === 2 && (
+                      <TextInput
+                        label="Docker Image"
+                        value={config.waf.clamav?.docker_image || ""}
+                        placeholder="clamav/clamav:latest"
+                        onChange={(e) => setConfig({
+                          ...config,
+                          waf: {
+                            ...config.waf!,
+                            clamav: {
+                              ...(config.waf!.clamav || {}),
+                              docker_image: e.currentTarget.value
+                            }
+                          }
+                        })}
+                        disabled={formDisabled || !config.waf.malware_detection}
+                      />
+                    )}
+                  </Group>
+
                   <Button
                     variant="light"
                     color="blue"
@@ -1846,6 +1960,33 @@ export default function SettingsPage() {
                 onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, tc_filtering: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
+              <Divider label="Port Knocking" labelPosition="left" />
+              <Switch
+                label="Enable Port Knocking"
+                description="Hide management port until a secret sequence of knocks is received (XDP)."
+                checked={config.ebpf.enable_knocking || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, enable_knocking: e.currentTarget.checked}})}
+                disabled={formDisabled}
+              />
+              {config.ebpf.enable_knocking && (
+                <>
+                  <NumberInput
+                    label="Management Port to Hide"
+                    placeholder="8080"
+                    value={config.ebpf.mgmt_port || 8080}
+                    onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, mgmt_port: Number(val)}})}
+                    disabled={formDisabled}
+                  />
+                  <TagsInput
+                    label="Knocking Sequence (Ports)"
+                    description="The sequence of ports to knock (e.g. 7000, 8000, 9000)."
+                    placeholder="7000, 8000, 9000"
+                    value={(config.ebpf.knocking_sequence || []).map(String)}
+                    onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, knocking_sequence: val.map(Number)}})}
+                    disabled={formDisabled}
+                  />
+                </>
+              )}
               {canEditGlobal && (
                 <Group justify="flex-end" mt="md">
                   <Button onClick={saveGatewayConfig} loading={saving} size="sm">

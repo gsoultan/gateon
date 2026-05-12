@@ -261,39 +261,6 @@ SecAuditLog "%s"
 		if mr.Rule().Severity() <= types.RuleSeverityCritical && cfg.EbpfManager != nil {
 			_ = cfg.EbpfManager.ShunIP(mr.ClientIPAddress())
 		}
-
-		severity := strings.ToLower(mr.Rule().Severity().String())
-		category := "general"
-		for _, tag := range mr.Rule().Tags() {
-			if strings.Contains(tag, "sqli") {
-				category = "sqli"
-			} else if strings.Contains(tag, "xss") {
-				category = "xss"
-			} else if strings.Contains(tag, "rce") {
-				category = "rce"
-			} else if strings.Contains(tag, "lfi") {
-				category = "lfi"
-			} else if strings.Contains(tag, "scanner") {
-				category = "bot"
-			} else if strings.Contains(tag, "protocol") {
-				category = "protocol"
-			}
-		}
-
-		// Record security threat for telemetry and UI
-		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
-			ID:          fmt.Sprintf("waf-%d-%s", mr.Rule().ID(), mr.TransactionID()),
-			Type:        "waf_block",
-			SourceIP:    mr.ClientIPAddress(),
-			Score:       float64(100 - (int(mr.Rule().Severity()) * 10)),
-			Details:     fmt.Sprintf("WAF Rule %s: %s", ruleID, mr.ErrorLog()),
-			Time:        time.Now(),
-			RouteID:     cfg.RouteID,
-			RequestURI:  mr.URI(),
-			Category:    category,
-			Severity:    severity,
-			ActionTaken: "blocked",
-		})
 	})
 
 	waf, err := coraza.NewWAF(wafConfig)
@@ -352,31 +319,72 @@ func (t *txWrapper) Close() error {
 		telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(t.routeID, ruleID).Inc()
 		telemetry.RequestFailuresTotal.WithLabelValues(t.routeID, "waf:"+ruleID).Inc()
 
-		// Record granular mitigated threat metrics
-		category := "unknown"
-		severity := "unknown"
+		category := "general"
+		severity := "medium"
+		details := ""
+		clientIP := ""
+		uri := ""
 		for _, rule := range t.MatchedRules() {
+			if clientIP == "" {
+				clientIP = rule.ClientIPAddress()
+			}
+			if uri == "" {
+				uri = rule.URI()
+			}
+
+			// Always check all tags to find the best category
+			for _, tag := range rule.Rule().Tags() {
+				if strings.Contains(tag, "sqli") {
+					category = "sqli"
+				} else if strings.Contains(tag, "xss") {
+					category = "xss"
+				} else if strings.Contains(tag, "rce") || strings.Contains(tag, "php") || strings.Contains(tag, "injection") {
+					category = "rce"
+				} else if strings.Contains(tag, "lfi") {
+					category = "lfi"
+				} else if strings.Contains(tag, "scanner") || strings.Contains(tag, "bot") {
+					category = "bot"
+				} else if strings.Contains(tag, "protocol") {
+					category = "protocol"
+				} else if strings.Contains(tag, "wordpress") || strings.Contains(tag, "wp_scan") {
+					category = "wp_scan"
+				}
+			}
+
 			if rule.Rule().ID() == it.RuleID {
 				severity = strings.ToLower(rule.Rule().Severity().String())
-				for _, tag := range rule.Rule().Tags() {
-					if strings.Contains(tag, "sqli") {
-						category = "sqli"
-					} else if strings.Contains(tag, "xss") {
-						category = "xss"
-					} else if strings.Contains(tag, "rce") {
-						category = "rce"
-					} else if strings.Contains(tag, "lfi") {
-						category = "lfi"
-					} else if strings.Contains(tag, "scanner") {
-						category = "bot"
-					} else if strings.Contains(tag, "wordpress") || strings.Contains(tag, "wp_scan") {
-						category = "wp_scan"
-					}
-				}
-				break
+				details = rule.ErrorLog()
 			}
 		}
-		telemetry.MitigatedThreatsTotal.WithLabelValues(category, severity, "blocked").Inc()
+
+		if details == "" && len(t.MatchedRules()) > 0 {
+			// Fallback to last matched rule if the interrupting one isn't in matched rules
+			// (sometimes happens with evaluation rules)
+			last := t.MatchedRules()[len(t.MatchedRules())-1]
+			details = last.ErrorLog()
+			if clientIP == "" {
+				clientIP = last.ClientIPAddress()
+			}
+			if uri == "" {
+				uri = last.URI()
+			}
+		}
+
+		// Record security threat for telemetry and UI
+		// We use ActionTaken: "blocked" which will be picked up by the Mitigated Attacks page.
+		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+			ID:          fmt.Sprintf("waf-block-%s", t.ID()),
+			Type:        "waf_block",
+			SourceIP:    clientIP,
+			Score:       100, // Explicit block is a high priority threat
+			Details:     fmt.Sprintf("WAF blocked request (Rule %s): %s", ruleID, details),
+			Time:        time.Now(),
+			RouteID:     t.routeID,
+			RequestURI:  uri,
+			Category:    category,
+			Severity:    severity,
+			ActionTaken: "blocked",
+		})
 	}
 	return t.Transaction.Close()
 }

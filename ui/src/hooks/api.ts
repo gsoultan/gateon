@@ -7,6 +7,7 @@ import type {
   GetDiagnosticsResponse,
   GetCloudflareIPsResponse,
   TraceRouteResponse,
+  RemoveMitigatedThreatResponse,
 } from "../types/gateon";
 
 export type PaginationParams = {
@@ -125,6 +126,16 @@ export async function applyRecommendation(anomalyType: string, source: string): 
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ anomaly_type: anomalyType, source: source }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function removeMitigatedThreat(source: string): Promise<RemoveMitigatedThreatResponse> {
+  const res = await apiFetch("/v1/diagnostics/remove-mitigation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source: source }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

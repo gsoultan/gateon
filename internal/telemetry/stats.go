@@ -35,7 +35,7 @@ type TrafficSample struct {
 // DomainStats holds aggregated statistics for a domain.
 type DomainStats struct {
 	Domain       string  `json:"domain"`
-	Hour         int     `json:"hour,omitempty"`
+	Hour         int     `json:"hour,omitzero"`
 	RequestCount uint64  `json:"request_count"`
 	BytesTotal   uint64  `json:"bytes_total"`
 	LatencySum   float64 `json:"latency_sum_seconds"`

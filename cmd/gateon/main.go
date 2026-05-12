@@ -23,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/tui"
@@ -112,7 +113,10 @@ func main() {
 		}
 		if gc.Ha != nil && gc.Ha.Enabled {
 			haManager := ha.NewHAManager(gc.Ha)
-			go haManager.Start(context.Background()) // It will stop when ctx is cancelled in Run
+			go haManager.Start(context.Background())
+			if err := telemetry.InitGossip(gc.Ha); err != nil {
+				logger.L.LogError("failed to init gossip reputation sync", "error", err)
+			}
 		}
 		if gc.Ebpf != nil && gc.Ebpf.Enabled {
 			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
@@ -127,8 +131,16 @@ func main() {
 			}
 		}
 		wafUpdater = middleware.NewWAFUpdater(globalReg, ".")
-		if gc.Waf != nil && gc.Waf.AutoUpdateRules {
-			go wafUpdater.Start(ctx)
+		if gc.Waf != nil {
+			if gc.Waf.AutoUpdateRules {
+				go wafUpdater.Start(ctx)
+			}
+			if gc.Waf.Clamav != nil {
+				clamavManager := security.NewClamAVManager(gc.Waf.Clamav)
+				if err := clamavManager.Start(ctx); err != nil {
+					logger.L.LogError("failed to start ClamAV manager", "error", err)
+				}
+			}
 		}
 	}
 

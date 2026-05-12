@@ -102,7 +102,7 @@ func WithVersion(v string) ServerOption {
 }
 
 // WithWafUpdater sets the WAF updater.
-func WithWafUpdater(u interface{}) ServerOption {
+func WithWafUpdater(u any) ServerOption {
 	return func(s *Server) error {
 		s.WafUpdater = u
 		return nil

@@ -28,6 +28,8 @@ func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
 
 	logger.L.LogInfo("eBPF metrics polling loop started")
 
+	lastDropped := make(map[string]uint64)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -42,7 +44,14 @@ func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
 			ActiveShunnedEntitiesTotal.WithLabelValues("ip").Set(float64(stats.ShunnedIPsCount))
 
 			for reason, count := range stats.DroppedPackets {
-				EbpfDroppedPacketsTotal.WithLabelValues(reason).Add(float64(count))
+				if last, ok := lastDropped[reason]; ok {
+					if count > last {
+						EbpfDroppedPacketsTotal.WithLabelValues(reason).Add(float64(count - last))
+					}
+				} else if count > 0 {
+					EbpfDroppedPacketsTotal.WithLabelValues(reason).Add(float64(count))
+				}
+				lastDropped[reason] = count
 			}
 		}
 	}
@@ -460,6 +469,9 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 						SQLiteWALSize.WithLabelValues(dbFile).Set(float64(info.Size()))
 					}
 				}
+
+				// Reputation metrics
+				UpdateReputationMetrics()
 			case <-stop:
 				return
 			}

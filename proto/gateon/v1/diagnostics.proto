@@ -33,6 +33,22 @@ message Anomaly {
   bool mitigated = 14;
   string category = 15;
   string action_taken = 16;
+  bool cluster_synced = 17;
+}
+
+message GossipStatus {
+  bool enabled = 1;
+  int32 members_count = 2;
+  repeated string member_names = 3;
+  int64 messages_sent = 4;
+  int64 messages_received = 5;
+}
+
+message ReputationSyncPayload {
+  string fingerprint = 1;
+  double score = 2;
+  int32 violation_count = 3;
+  repeated string history = 4;
 }
 
 message ListSecurityThreatsRequest {
@@ -55,6 +71,8 @@ message Reputation {
   string fingerprint = 1;
   double score = 2;
   string last_event = 3;
+  int32 violation_count = 4;
+  repeated string history = 5;
 }
 
 message DependencyHealth {
@@ -70,6 +88,15 @@ message ApplyRecommendationRequest {
 }
 
 message ApplyRecommendationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RemoveMitigatedThreatRequest {
+  string source = 1;
+}
+
+message RemoveMitigatedThreatResponse {
   bool success = 1;
   string message = 2;
 }
@@ -156,4 +183,12 @@ message SystemInfo {
   string memory_usage = 5;
   string cpu_usage = 6;
   string version = 7;
+  GossipStatus gossip = 8;
+  EbpfStats ebpf = 9;
+}
+
+message EbpfStats {
+  bool enabled = 1;
+  int32 shunned_ips_count = 2;
+  map<string, uint64> dropped_packets = 3;
 }

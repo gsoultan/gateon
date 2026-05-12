@@ -28,13 +28,25 @@ var (
 func NewGlobalRegistry(path string) *GlobalRegistry {
 	reg := &GlobalRegistry{
 		config: &gateonv1.GlobalConfig{
-			Tls:              &gateonv1.TlsConfig{},
-			Redis:            &gateonv1.RedisConfig{},
-			Otel:             &gateonv1.OtelConfig{},
-			Log:              &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
-			Auth:             &gateonv1.AuthConfig{},
-			Transport:        &gateonv1.TransportConfig{},
-			Waf:              &gateonv1.WafConfig{Enabled: false, UseCrs: true, ParanoiaLevel: 1},
+			Tls:       &gateonv1.TlsConfig{},
+			Redis:     &gateonv1.RedisConfig{},
+			Otel:      &gateonv1.OtelConfig{},
+			Log:       &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
+			Auth:      &gateonv1.AuthConfig{},
+			Transport: &gateonv1.TransportConfig{},
+			Waf: &gateonv1.WafConfig{
+				Enabled:       false,
+				UseCrs:        true,
+				ParanoiaLevel: 1,
+				Clamav: &gateonv1.ClamavConfig{
+					InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER,
+					AutoInstall:      false,
+					DockerImage:      "clamav/clamav:latest",
+					FullScanSchedule: "0 2 * * *", // Daily at 2 AM
+					LowResourceMode:  true,
+					ClamavAddr:       "tcp://localhost:3310",
+				},
+			},
 			Ha:               &gateonv1.HaConfig{},
 			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{Sensitivity: 0.5, CheckIntervalSeconds: 60},
 			Ebpf:             &gateonv1.EbpfConfig{},

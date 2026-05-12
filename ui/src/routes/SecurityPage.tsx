@@ -28,7 +28,7 @@ import {
   IconLock,
   IconMap2,
 } from "@tabler/icons-react";
-import { useSecurityThreats } from "../hooks/useGateon";
+import { useSecurityThreats, useGateonConfig } from "../hooks/useGateon";
 import type { Anomaly } from "../types/gateon";
 import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
@@ -52,6 +52,7 @@ const SeverityBadge: React.FC<{ severity: string }> = ({ severity }) => {
 
 export default function SecurityPage() {
   const { data, isLoading, error } = useSecurityThreats(100);
+  const { data: config } = useGateonConfig();
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
   const [traceIp, setTraceIp] = useState<string>("");
@@ -175,23 +176,46 @@ export default function SecurityPage() {
            <Stack gap="xs">
              <Group justify="space-between">
                <Text size="sm">eBPF XDP Offloading</Text>
-               <Badge variant="dot" color="teal">Active</Badge>
+               <Badge variant="dot" color={config?.ebpf?.enabled ? "teal" : "gray"}>
+                 {config?.ebpf?.enabled ? "Active" : "Disabled"}
+               </Badge>
              </Group>
              <Group justify="space-between">
                <Text size="sm">Behavioral Profiling</Text>
-               <Badge variant="dot" color="teal">Active</Badge>
+               <Badge variant="dot" color={config?.security_advanced?.behavioral?.enabled ? "teal" : "gray"}>
+                 {config?.security_advanced?.behavioral?.enabled ? "Active" : "Disabled"}
+               </Badge>
              </Group>
              <Group justify="space-between">
                <Text size="sm">Zero Trust Identity</Text>
-               <Badge variant="dot" color="teal">Active</Badge>
+               <Badge variant="dot" color={config?.auth?.enabled ? "teal" : "gray"}>
+                 {config?.auth?.enabled ? "Active" : "Disabled"}
+               </Badge>
              </Group>
              <Group justify="space-between">
                <Text size="sm">Active Deception (Honeypots)</Text>
-               <Badge variant="dot" color="teal">Active</Badge>
+               <Badge variant="dot" color={config?.security_advanced?.deception?.enabled ? "teal" : "gray"}>
+                 {config?.security_advanced?.deception?.enabled ? "Active" : "Disabled"}
+               </Badge>
              </Group>
              <Group justify="space-between">
                <Text size="sm">ClamAV Scanning</Text>
-               <Badge variant="dot" color="orange">Pending Config</Badge>
+               <Badge
+                 variant="dot"
+                 color={
+                   config?.waf?.malware_detection
+                     ? (config?.waf?.clamav?.clamav_addr || config?.waf?.clamav_addr)
+                       ? "teal"
+                       : "orange"
+                     : "gray"
+                 }
+               >
+                 {config?.waf?.malware_detection
+                   ? (config?.waf?.clamav?.clamav_addr || config?.waf?.clamav_addr)
+                     ? `Active (${config?.waf?.clamav?.installation_mode === 1 ? 'Local' : 'Docker'})`
+                     : "Pending Config"
+                   : "Disabled"}
+               </Badge>
              </Group>
            </Stack>
         </Paper>

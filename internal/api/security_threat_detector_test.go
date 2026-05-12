@@ -68,8 +68,8 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 				{SourceIP: "5.5.5.5", Path: "/.aws/credentials", Method: "GET", Timestamp: now},
 			},
 			expectedAnom:   1,
-			expectedType:   "security_scan",
-			expectedReason: "suspicious paths/payloads",
+			expectedType:   "honeypot_hit",
+			expectedReason: "honeypot/trap paths",
 		},
 		{
 			name: "Log4Shell attempt",

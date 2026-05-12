@@ -72,6 +72,17 @@ func TrackBehavior(fingerprint string, r *http.Request) {
 					Score:       30,
 					Details:     "Robotic timing pattern detected (highly regular intervals)",
 					RequestURI:  path,
+					ActionTaken: "flagged",
+				})
+			}
+			if isHeartbeatPattern(state.IATs) {
+				RecordSecurityThreat(SecurityThreat{
+					Type:        "behavioral_anomaly",
+					Fingerprint: fingerprint,
+					Score:       40,
+					Details:     "Heartbeat pattern detected (regular long-interval polling)",
+					RequestURI:  path,
+					ActionTaken: "flagged",
 				})
 			}
 		}
@@ -91,6 +102,7 @@ func TrackBehavior(fingerprint string, r *http.Request) {
 			Score:       50,
 			Details:     "Suspicious path sequence detected (jump to sensitive area)",
 			RequestURI:  path,
+			ActionTaken: "flagged",
 		})
 	}
 
@@ -110,6 +122,7 @@ func TrackBehavior(fingerprint string, r *http.Request) {
 			Score:       40,
 			Details:     "Potential DGA hostname detected: " + hostname,
 			RequestURI:  path,
+			ActionTaken: "flagged",
 		})
 	}
 }
@@ -137,6 +150,38 @@ func isRoboticTiming(iats []time.Duration) bool {
 	if mean > 0 {
 		cv := stdDev / mean
 		return cv < 0.1
+	}
+	return false
+}
+
+func isHeartbeatPattern(iats []time.Duration) bool {
+	if len(iats) < 8 {
+		return false
+	}
+	// Check for consistent long-interval requests (e.g., every 30s or 60s)
+	// We look for low variance but higher mean than "bursty" robotic traffic.
+	var sum float64
+	for _, iat := range iats {
+		sum += iat.Seconds()
+	}
+	mean := sum / float64(len(iats))
+
+	if mean < 5.0 { // Heartbeats are usually slower than 5s
+		return false
+	}
+
+	var variance float64
+	for _, iat := range iats {
+		diff := iat.Seconds() - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(iats))
+	stdDev := math.Sqrt(variance)
+
+	if mean > 0 {
+		cv := stdDev / mean
+		// Very low CV (< 0.05) on slow requests is a strong indicator of a scheduled task/script
+		return cv < 0.05
 	}
 	return false
 }
