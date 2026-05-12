@@ -234,19 +234,6 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     disabled={disabled}
                     decimalScale={1}
                   />
-                  <TextInput
-                    label="PoW Secret"
-                    description="Secret key used to sign challenge tokens."
-                    value={security.pow?.secret}
-                    onChange={(e) => updateSection("pow", { secret: e.currentTarget.value })}
-                    disabled={disabled}
-                    type="password"
-                    rightSection={
-                      <ActionIcon variant="subtle" onClick={() => updateSection("pow", { secret: Math.random().toString(36).substring(2) })}>
-                        <IconRefresh size={16} />
-                      </ActionIcon>
-                    }
-                  />
                 </Stack>
               )}
             </Stack>
