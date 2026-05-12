@@ -1,3 +1,4 @@
+export { MiddlewareConfigEditor } from "./MiddlewareConfigEditor";
 export { KeyValueList } from "./KeyValueList";
 export { RatelimitConfigEditor } from "./RatelimitConfigEditor";
 export { AuthConfigEditor } from "./AuthConfigEditor";

@@ -13,25 +13,16 @@ import {
   IconCheck,
   IconCode,
 } from "@tabler/icons-react";
+import { KeyValueList } from "./KeyValueList";
+import { RatelimitConfigEditor } from "./RatelimitConfigEditor";
+import { AuthConfigEditor } from "./AuthConfigEditor";
+import { HeadersConfigEditor } from "./HeadersConfigEditor";
 import {
-  KeyValueList,
-  RatelimitConfigEditor,
-  AuthConfigEditor,
-  HeadersConfigEditor,
   WAFConfigEditor,
   TurnstileConfigEditor,
   GeoIPConfigEditor,
   HMACConfigEditor,
-  CacheConfigEditor,
-  BufferingConfigEditor,
-  InFlightReqConfigEditor,
-  RewriteConfigEditor,
-  CORSConfigEditor,
-  PrefixConfigEditor,
-  StripPrefixConfigEditor,
-  StripPrefixRegexConfigEditor,
-  ReplacePathConfigEditor,
-  ReplacePathRegexConfigEditor,
+  FileSecurityConfigEditor,
   XFCCConfigEditor,
   PolicyConfigEditor,
   IPFilterConfigEditor,
@@ -39,9 +30,22 @@ import {
   SchemaValidationConfigEditor,
   HoneypotConfigEditor,
   RequestIDConfigEditor,
-  FileSecurityConfigEditor,
   OIDCConfigEditor,
-} from "./middleware-config";
+} from "./SecurityConfigEditors";
+import {
+  BufferingConfigEditor,
+  InFlightReqConfigEditor,
+  CacheConfigEditor,
+} from "./TrafficConfigEditors";
+import {
+  RewriteConfigEditor,
+  CORSConfigEditor,
+  PrefixConfigEditor,
+  StripPrefixConfigEditor,
+  StripPrefixRegexConfigEditor,
+  ReplacePathConfigEditor,
+  ReplacePathRegexConfigEditor,
+} from "./MiscConfigEditors";
 
 interface MiddlewareConfigEditorProps {
   type: string;

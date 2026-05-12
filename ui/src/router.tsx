@@ -304,9 +304,5 @@ declare module "@tanstack/react-router" {
 }
 
 export function AppRouter() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
-  );
+  return <RouterProvider router={router} />;
 }
