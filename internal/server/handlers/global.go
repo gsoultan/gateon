@@ -96,8 +96,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if conf.Waf != nil {
 			middleware.InvalidateWAFCache()
 		}
-		if conf.Geoip != nil && conf.Geoip.Enabled && conf.Geoip.DbPath != "" {
-			_ = telemetry.InitGeoIP(conf.Geoip.DbPath)
+		if conf.Geoip != nil && conf.Geoip.Enabled {
+			if conf.Geoip.DbPath != "" {
+				_ = telemetry.InitGeoIP(conf.Geoip.DbPath)
+			}
+			if conf.Geoip.XdpGeofencing && svc.GetEbpfManager() != nil {
+				for _, country := range conf.Geoip.BlockedCountries {
+					_ = svc.GetEbpfManager().BlockCountry(country)
+				}
+			}
 		}
 
 		_ = json.NewEncoder(w).Encode(struct {

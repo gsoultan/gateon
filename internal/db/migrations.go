@@ -638,4 +638,47 @@ func init() {
 		}
 		return nil
 	})
+	Register(27, "add_country_code_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS country_code TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS country_code VARCHAR(10) NOT NULL DEFAULT '';`
+		default: // sqlite
+			query = `ALTER TABLE security_threats ADD COLUMN country_code TEXT NOT NULL DEFAULT '';`
+		}
+		if _, err := db.Exec(query); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
+
+	Register(28, "create_ip_mitigations_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite || dialect.Driver == DriverPostgres {
+			query = `CREATE TABLE IF NOT EXISTS ip_mitigations (
+				ip VARCHAR(50) PRIMARY KEY,
+				status VARCHAR(20) NOT NULL,
+				reason TEXT,
+				mitigated_at TIMESTAMP,
+				unmitigated_at TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`
+		} else { // MySQL
+			query = `CREATE TABLE IF NOT EXISTS ip_mitigations (
+				ip VARCHAR(50) PRIMARY KEY,
+				status VARCHAR(20) NOT NULL,
+				reason TEXT,
+				mitigated_at TIMESTAMP NULL,
+				unmitigated_at TIMESTAMP NULL,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+			);`
+		}
+		_, err := db.Exec(query)
+		return err
+	})
 }

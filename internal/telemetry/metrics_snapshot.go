@@ -54,6 +54,17 @@ type MetricsSnapshot struct {
 
 	// System-level gauges.
 	System SystemMetrics `json:"system"`
+
+	// Security insights
+	Security SecurityInsights `json:"security"`
+}
+
+type SecurityInsights struct {
+	TopThreatSources []LabeledCount   `json:"top_threat_sources"`
+	TopThreatTypes   []LabeledCount   `json:"top_threat_types"`
+	ThreatsByCountry []LabeledCount   `json:"threats_by_country"`
+	AttackTrend      []TrafficSample  `json:"attack_trend"`
+	RecentAnomalies  []SecurityThreat `json:"recent_anomalies"`
 }
 
 // GoldenSignals represents the four golden signals of monitoring.
@@ -195,6 +206,7 @@ func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
 	snap.HourlyDomainMetrics = GetDomainStatsWindow(context.Background(), 1)
 	snap.TrafficHistory = GetSystemTrafficHistory(context.Background(), CurrentRetentionDays())
 	snap.System = buildSystemMetrics(idx)
+	snap.Security = buildSecurityInsights(context.Background())
 
 	// Build active threat metrics
 	snap.ActiveSuspiciousSessions = gaugeValue(idx, "gateon_active_suspicious_sessions_total")
@@ -676,6 +688,16 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 		MemorySysBytes:   gaugeValue(idx, "gateon_memory_sys_bytes"),
 		CPUUsage:         gaugeValue(idx, "gateon_cpu_usage_percent"),
 		MemoryUsage:      gaugeValue(idx, "gateon_memory_usage_percent"),
+	}
+}
+
+func buildSecurityInsights(ctx context.Context) SecurityInsights {
+	return SecurityInsights{
+		TopThreatSources: GetTopThreatSources(ctx, 5),
+		TopThreatTypes:   GetTopThreatTypes(ctx, 5),
+		ThreatsByCountry: GetThreatsByCountry(ctx, 10),
+		AttackTrend:      GetAttackTrend(ctx, 7),
+		RecentAnomalies:  GetSecurityThreats(ctx, 10),
 	}
 }
 

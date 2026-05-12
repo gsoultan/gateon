@@ -415,6 +415,9 @@ export interface GeoIPConfig {
   maxmind_license_key?: string;
   auto_update?: boolean;
   update_interval_days?: number;
+  blocked_countries?: string[];
+  allowed_countries?: string[];
+  xdp_geofencing?: boolean;
 }
 
 export type GlobalConfig = {

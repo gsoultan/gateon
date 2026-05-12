@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -129,4 +130,83 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 			next.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+// GeoIPGlobal returns a middleware that blocks or allows requests globally based on the country.
+func GeoIPGlobal(globalStore config.GlobalConfigStore) Middleware {
+	return GeoIPGlobalWithResolver(globalStore, telemetry.ResolveCountry)
+}
+
+// GeoIPGlobalWithResolver is the internal implementation of GeoIPGlobal, allowing for dependency injection in tests.
+func GeoIPGlobalWithResolver(globalStore config.GlobalConfigStore, resolver func(string) string) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gc := globalStore.Get(r.Context())
+			if gc == nil || gc.Geoip == nil || !gc.Geoip.Enabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if IsCorsPreflight(r) || ShouldSkipMetrics(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			country := resolver(clientIP)
+
+			// Add country to context for other middlewares to use
+			r = r.WithContext(request.WithCountry(r.Context(), country))
+			if sw, ok := w.(*StatusResponseWriter); ok {
+				sw.Country = country
+			}
+
+			// 1. Check blocked countries (deny list)
+			for _, blocked := range gc.Geoip.BlockedCountries {
+				if strings.EqualFold(country, blocked) {
+					recordGlobalBlock(r, clientIP, country, "denied by global blocklist")
+					http.Error(w, "Forbidden", http.StatusForbidden)
+					return
+				}
+			}
+
+			// 2. Check allowed countries (allow list)
+			if len(gc.Geoip.AllowedCountries) > 0 {
+				allowed := false
+				for _, a := range gc.Geoip.AllowedCountries {
+					if strings.EqualFold(country, a) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					recordGlobalBlock(r, clientIP, country, "not in global allowlist")
+					http.Error(w, "Forbidden", http.StatusForbidden)
+					return
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func recordGlobalBlock(r *http.Request, clientIP, country, reason string) {
+	telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues("global", country).Inc()
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		Type:        "geoip_block",
+		SourceIP:    clientIP,
+		Score:       50,
+		Details:     fmt.Sprintf("Global Block: %s (Country: %s)", reason, country),
+		Time:        time.Now(),
+		RouteID:     "global",
+		RequestURI:  r.URL.RequestURI(),
+		Category:    "geofencing",
+		Severity:    "medium",
+		ActionTaken: "blocked",
+	})
+	logger.L.LogDebug("global geoip: request blocked",
+		"ip", clientIP,
+		"country", country,
+		"reason", reason)
 }

@@ -45,6 +45,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		middleware.Recovery(),
 		middleware.SecurityHeaders(),
 		middleware.HoneypotGlobal(deps.GlobalStore),
+		middleware.GeoIPGlobal(deps.GlobalStore),
 		middleware.Metrics("gateon-" + epLabel),
 	}
 	if ep.AccessLogEnabled {

@@ -1,4 +1,4 @@
-// +build ignore
+//go:build ignore
 
 #include <linux/bpf.h>
 #include <linux/if_ether.h>

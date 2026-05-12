@@ -143,6 +143,8 @@ message GeoIPConfig {
   int32 update_interval_days = 5;
   // BlockedCountries is a list of ISO country codes to block.
   repeated string blocked_countries = 6;
+  // AllowedCountries is a list of ISO country codes to allow.
+  repeated string allowed_countries = 8;
   // XdpGeofencing, if true, uses eBPF/XDP to block countries at the kernel level.
   bool xdp_geofencing = 7;
 }

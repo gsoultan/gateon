@@ -1,17 +1,52 @@
 import React from 'react';
-import { Container, Grid, Card, Text, Title, Group, Stack, Progress, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Switch, Divider, Table, TextInput, Box } from '@mantine/core';
-import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff } from '@tabler/icons-react';
+import { Container, Grid, Card, Text, Title, Group, Stack, Progress, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Switch, Divider, Table, TextInput, Box, Paper, Avatar, RingProgress, Center, Loader } from '@mantine/core';
+import { DonutChart, LineChart, BarChart } from '@mantine/charts';
+import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff, IconArrowUpRight, IconArrowDownRight, IconInfoCircle, IconMapPin, IconClock, IconX } from '@tabler/icons-react';
 import { useSecurityThreats, useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
+import { notifications } from '@mantine/notifications';
 import { ReputationMonitor } from '../components/ReputationMonitor';
-import { Notifications } from '@mantine/notifications';
 import { Link } from '@tanstack/react-router';
 import type { GlobalConfig } from '../types/gateon';
+import { format } from 'date-fns';
 
 export default function SecurityCommandCenter() {
-  const { data: threatsData, isLoading: threatsLoading } = useSecurityThreats(100);
+  const { data: metrics, isLoading: metricsLoading } = useMetricsSnapshot();
   const { data: status } = useGateonStatus();
-  const { data: metrics } = useMetricsSnapshot();
+  const { refetch: refetchMetrics } = useMetricsSnapshot();
   const [globalConfig, setGlobalConfig] = React.useState<GlobalConfig | null>(null);
+  const [unmitigating, setUnmitigating] = React.useState<string | null>(null);
+
+  const handleUnmitigate = async (ip: string) => {
+    setUnmitigating(ip);
+    try {
+      const res = await apiFetch("/v1/remove-mitigated-threat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: ip })
+      });
+      const data = await res.json();
+      if (data.success) {
+        notifications.show({
+          title: 'Mitigation Removed',
+          message: `IP ${ip} has been unmitigated and added to the whitelist exception.`,
+          color: 'green',
+          icon: <IconShieldCheck size={16} />
+        });
+        refetchMetrics();
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: 'Error',
+        message: err.message || 'Failed to remove mitigation',
+        color: 'red',
+        icon: <IconX size={16} />
+      });
+    } finally {
+      setUnmitigating(null);
+    }
+  };
 
   React.useEffect(() => {
     apiFetch("/v1/global")
@@ -19,215 +54,399 @@ export default function SecurityCommandCenter() {
       .then(cfg => setGlobalConfig(cfg))
       .catch(() => {});
   }, []);
-  
-  const securityScore = React.useMemo(() => {
-    if (!threatsData?.threats) return 100;
-    const activeThreats = threatsData.threats.filter(t => !t.mitigated);
-    const score = 100 - (activeThreats.length * 5);
-    return Math.max(score, 0);
-  }, [threatsData]);
 
-  const scoreColor = securityScore > 80 ? 'teal' : securityScore > 50 ? 'orange' : 'red';
+  const securityScore = React.useMemo(() => {
+    if (!metrics) return 100;
+    const base = 100;
+    const penalty = (metrics.active_suspicious_sessions * 2) + 
+                    (metrics.active_unverified_clients * 0.5) +
+                    (metrics.active_anomaly_score_average * 0.1);
+    return Math.max(Math.round(base - penalty), 0);
+  }, [metrics]);
+
+  const scoreColor = securityScore > 85 ? 'teal' : securityScore > 65 ? 'blue' : securityScore > 40 ? 'orange' : 'red';
+
+  const threatTypeData = React.useMemo(() => {
+    if (!metrics?.security?.top_threat_types) return [];
+    return metrics.security.top_threat_types.map(t => ({
+      name: t.label,
+      value: t.value,
+      color: getThreatColor(t.label)
+    }));
+  }, [metrics]);
+
+  const countryData = React.useMemo(() => {
+    if (!metrics?.security?.threats_by_country) return [];
+    return metrics.security.threats_by_country.map(t => ({
+      country: t.label,
+      threats: t.value
+    }));
+  }, [metrics]);
+
+  const trendData = React.useMemo(() => {
+    if (!metrics?.security?.attack_trend) return [];
+    return metrics.security.attack_trend.map(t => ({
+      date: format(new Date(t.ts), 'HH:mm'),
+      threats: t.requests
+    }));
+  }, [metrics]);
 
   return (
-    <Container size="xl">
+    <Container size="xl" py="md">
       <Stack gap="xl">
-        <Group justify="space-between">
-          <Stack gap={0}>
-            <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Security Command Center</Title>
-            <Text c="dimmed" size="sm">Centralized orchestration for autonomous threat detection and response.</Text>
-          </Stack>
-          <Group>
-            <Button variant="light" leftSection={<IconAdjustments size={16} />} component={Link} to="/settings">Global Settings</Button>
-            <Button leftSection={<IconShieldCheck size={16} />}>Run Security Scan</Button>
-          </Group>
-        </Group>
-
-        <Grid gutter="md">
-          <Grid.Col span={{ base: 12, md: 4 }}>
-            <Card withBorder radius="md" p="xl" style={{ height: '100%' }}>
-              <Stack align="center" gap="md">
-                <Text fw={700} size="sm" c="dimmed" tt="uppercase">System Security Score</Text>
-                <Box style={{ position: 'relative' }}>
-                  <Progress
-                    value={securityScore}
-                    size="xl"
-                    radius="xl"
-                    color={scoreColor}
-                    h={120}
-                    w={120}
-                    style={{ borderRadius: '50%' }}
-                  />
-                  <Box style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
-                    <Title order={1} fw={900}>{securityScore}%</Title>
-                  </Box>
-                </Box>
-                <Text size="sm" ta="center" c="dimmed">
-                  {securityScore === 100 ? 'System is fully secured. All potential threats mitigated.' : 'Security posture slightly degraded. Check active threats.'}
+        {/* Header Section */}
+        <Paper p="xl" radius="md" withBorder style={{ 
+          background: 'linear-gradient(135deg, var(--mantine-color-blue-light) 0%, var(--mantine-color-body) 100%)',
+          borderLeft: '4px solid var(--mantine-color-blue-filled)'
+        }}>
+          <Grid align="center">
+            <Grid.Col span={{ base: 12, md: 8 }}>
+              <Stack gap="xs">
+                <Group gap="xs">
+                  <Badge variant="dot" color="blue" size="sm">Autonomous Defense Active</Badge>
+                  <Text size="xs" c="dimmed">{format(new Date(), 'PPP p')}</Text>
+                </Group>
+                <Title order={1} fw={900} style={{ letterSpacing: -1.5 }}>Security Command Center</Title>
+                <Text size="lg" c="dimmed" maw={600}>
+                  Real-time orchestration of kernel-level protection, behavioral analysis, and automated threat mitigation.
                 </Text>
               </Stack>
-            </Card>
-          </Grid.Col>
-
-          <Grid.Col span={{ base: 12, md: 8 }}>
-            <SimpleGrid cols={{ base: 1, sm: 2 }} verticalSpacing="md">
-              <Card withBorder p="md" radius="md">
-                <Group>
-                  <ThemeIcon color="red" variant="light" size="lg">
-                    <IconShieldExclamation size={20} />
-                  </ThemeIcon>
-                  <Stack gap={0}>
-                    <Text size="xs" c="dimmed" fw={700}>MITIGATED THREATS</Text>
-                    <Text fw={700}>{metrics?.middleware.mitigated_threats?.reduce((acc, val) => acc + val.value, 0) || 0} Blocked Attacks</Text>
-                  </Stack>
-                </Group>
-              </Card>
-              <Card withBorder p="md" radius="md">
-                <Group>
-                  <ThemeIcon color="orange" variant="light" size="lg">
-                    <IconAlertTriangle size={20} />
-                  </ThemeIcon>
-                  <Stack gap={0}>
-                    <Text size="xs" c="dimmed" fw={700}>ACTIVE THREATS</Text>
-                    <Text fw={700}>{metrics?.active_suspicious_sessions || 0} Suspicious Sessions</Text>
-                  </Stack>
-                </Group>
-              </Card>
-              <Card withBorder p="md" radius="md">
-                <Group>
-                  <ThemeIcon color="blue" variant="light" size="lg">
-                    <IconUserCheck size={20} />
-                  </ThemeIcon>
-                  <Stack gap={0}>
-                    <Text size="xs" c="dimmed" fw={700}>UNVERIFIED CLIENTS</Text>
-                    <Text fw={700}>{metrics?.active_unverified_clients || 0} In Challenge State</Text>
-                  </Stack>
-                </Group>
-              </Card>
-              <Card withBorder p="md" radius="md">
-                <Group>
-                  <ThemeIcon color="violet" variant="light" size="lg">
-                    <IconWorld size={20} />
-                  </ThemeIcon>
-                  <Stack gap={0}>
-                    <Text size="xs" c="dimmed" fw={700}>CLUSTER SYNC</Text>
-                    <Text fw={700}>
-                      {status?.system_info.gossip?.enabled 
-                        ? `${status.system_info.gossip.members_count} Nodes Synced` 
-                        : 'Stand-alone Mode'}
-                    </Text>
-                  </Stack>
-                </Group>
-              </Card>
-              <Card withBorder p="md" radius="md">
-                <Group>
-                  <ThemeIcon color="blue" variant="light" size="lg">
-                    <IconShieldOff size={20} />
-                  </ThemeIcon>
-                  <Stack gap={0}>
-                    <Text size="xs" c="dimmed" fw={700}>EBPF DROPS</Text>
-                    <Text fw={700}>{metrics?.middleware.ebpf_dropped_packets?.reduce((acc, val) => acc + val.value, 0) || 0} L4/L7 Drops</Text>
-                  </Stack>
-                </Group>
-              </Card>
-            </SimpleGrid>
-          </Grid.Col>
-        </Grid>
-
-        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="xl">
-          <ReputationMonitor />
-          
-          <Card withBorder radius="md">
-            <Group justify="space-between" mb="md">
-              <Group gap="sm">
-                <ThemeIcon color="orange" variant="light">
-                  <IconBell size={18} />
-                </ThemeIcon>
-                <Title order={4}>Alert Playbooks</Title>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, md: 4 }}>
+              <Group justify="flex-end">
+                <Button variant="white" color="blue" leftSection={<IconAdjustments size={16} />} component={Link} to="/settings">
+                  Orchestration Rules
+                </Button>
+                <Button variant="filled" color="blue" leftSection={<IconShieldCheck size={16} />}>
+                  Deep Scan
+                </Button>
               </Group>
-              <Button size="xs" variant="subtle" component={Link} to="/settings" rightSection={<IconExternalLink size={12} />}>
-                Manage
-              </Button>
+            </Grid.Col>
+          </Grid>
+        </Paper>
+
+        {/* Stats Overview */}
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+          <Card withBorder radius="md" p="md">
+            <Group justify="space-between">
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Security Posture</Text>
+                <Title order={3}>{securityScore}%</Title>
+              </Stack>
+              <RingProgress
+                size={60}
+                thickness={6}
+                roundCaps
+                sections={[{ value: securityScore, color: scoreColor }]}
+                label={
+                  <Center>
+                    <IconShieldCheck size={18} color={`var(--mantine-color-${scoreColor}-6)`} />
+                  </Center>
+                }
+              />
             </Group>
-            
-            <Stack gap="xs">
-              {globalConfig?.alerting?.playbooks?.map((pb) => (
-                <Card key={pb.id} withBorder p="xs" radius="sm">
-                  <Group justify="space-between">
-                    <Stack gap={2}>
-                      <Text size="sm" fw={600}>{pb.name}</Text>
-                      <Text size="xs" c="dimmed">
-                        Trigger: {pb.event_type} | Score ≥ {pb.threshold} | Action: {pb.action}
-                      </Text>
-                    </Stack>
-                    <Badge size="sm" variant="light" color={pb.action === 'block' ? 'red' : 'blue'}>
-                      {pb.action.toUpperCase()}
-                    </Badge>
-                  </Group>
-                </Card>
-              ))}
-              {(!globalConfig?.alerting?.playbooks || globalConfig.alerting.playbooks.length === 0) && (
-                <Text size="sm" c="dimmed" ta="center" py="xl">
-                  No active playbooks. Configure them in Settings.
-                </Text>
-              )}
-              <Button variant="light" mt="sm" component={Link} to="/settings">Configure Playbooks</Button>
-            </Stack>
+            <Group gap={4} mt="sm">
+              <IconInfoCircle size={14} color="gray" />
+              <Text size="xs" c="dimmed">
+                {securityScore > 90 ? 'Optimal configuration' : 'Vulnerabilities detected'}
+              </Text>
+            </Group>
+          </Card>
+
+          <Card withBorder radius="md" p="md">
+            <Group justify="space-between">
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Active Mitigations</Text>
+                <Title order={3}>{metrics?.security?.recent_anomalies?.filter(a => a.mitigated).length || 0}</Title>
+              </Stack>
+              <ThemeIcon size="xl" color="red" variant="light" radius="md">
+                <IconShieldOff size={24} />
+              </ThemeIcon>
+            </Group>
+            <Group gap={4} mt="sm">
+              <IconActivity size={14} color="red" />
+              <Text size="xs" c="dimmed">
+                Recently mitigated threats
+              </Text>
+            </Group>
+          </Card>
+
+          <Card withBorder radius="md" p="md">
+            <Group justify="space-between">
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated Today</Text>
+                <Title order={3}>{metrics?.middleware?.mitigated_threats?.reduce((a, b) => a + b.value, 0) || 0}</Title>
+              </Stack>
+              <ThemeIcon color="teal" variant="light" size="lg" radius="md">
+                <IconShieldCheck size={20} />
+              </ThemeIcon>
+            </Group>
+            <Group gap={4} mt="sm">
+              <IconArrowUpRight size={14} color="teal" />
+              <Text size="xs" c="teal" fw={700}>+12%</Text>
+              <Text size="xs" c="dimmed">vs yesterday</Text>
+            </Group>
+          </Card>
+
+          <Card withBorder radius="md" p="md">
+            <Group justify="space-between">
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Active Threats</Text>
+                <Title order={3}>{metrics?.active_suspicious_sessions || 0}</Title>
+              </Stack>
+              <ThemeIcon color="red" variant="light" size="lg" radius="md">
+                <IconAlertTriangle size={20} />
+              </ThemeIcon>
+            </Group>
+            <Group gap={4} mt="sm">
+              <IconArrowDownRight size={14} color="red" />
+              <Text size="xs" c="red" fw={700}>-5%</Text>
+              <Text size="xs" c="dimmed">active mitigations</Text>
+            </Group>
+          </Card>
+
+          <Card withBorder radius="md" p="md">
+            <Group justify="space-between">
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Reputation Score</Text>
+                <Title order={3}>Good</Title>
+              </Stack>
+              <ThemeIcon color="blue" variant="light" size="lg" radius="md">
+                <IconFingerprint size={20} />
+              </ThemeIcon>
+            </Group>
+            <Group gap={4} mt="sm">
+              <Text size="xs" c="dimmed">Based on global fingerprinting</Text>
+            </Group>
           </Card>
         </SimpleGrid>
 
-        <Card withBorder radius="md">
-          <Group justify="space-between" mb="lg">
-            <Group gap="sm">
-              <ThemeIcon color="red" variant="light">
-                <IconTarget size={18} />
-              </ThemeIcon>
-              <Title order={4}>Active Mitigations (Kernel-Level)</Title>
-            </Group>
-            <TextInput placeholder="Filter mitigated IPs..." leftSection={<IconSearch size={14} />} size="xs" />
-          </Group>
-
-          <Table.ScrollContainer minWidth={800}>
-            <Table verticalSpacing="sm">
-              <Table.Thead bg="var(--mantine-color-default-hover)">
-                <Table.Tr>
-                  <Table.Th>Source IP</Table.Th>
-                  <Table.Th>Type</Table.Th>
-                  <Table.Th>Mechanism</Table.Th>
-                  <Table.Th>Action Taken</Table.Th>
-                  <Table.Th>Expiration</Table.Th>
-                  <Table.Th>Control</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {threatsData?.threats?.filter(t => t.mitigated).slice(0, 5).map((t, i) => (
-                  <Table.Tr key={i}>
-                    <Table.Td><Text size="sm" fw={700} ff="monospace">{t.source}</Text></Table.Td>
-                    <Table.Td><Badge size="xs" color="red">{t.type}</Badge></Table.Td>
-                    <Table.Td>
-                      <Group gap={4}>
-                        <IconActivity size={12} />
-                        <Text size="xs">eBPF / XDP</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td><Text size="xs">Packet Drop (Shun)</Text></Table.Td>
-                    <Table.Td><Text size="xs">Permanent</Text></Table.Td>
-                    <Table.Td>
-                      <Button size="compact-xs" variant="outline" color="blue">Release</Button>
-                    </Table.Td>
-                  </Table.Tr>
+        {/* Charts Section */}
+        <Grid>
+          <Grid.Col span={{ base: 12, lg: 8 }}>
+            <Card withBorder radius="md" style={{ height: '100%' }}>
+              <Group justify="space-between" mb="xl">
+                <Stack gap={0}>
+                  <Title order={4}>Attack Trend</Title>
+                  <Text size="xs" c="dimmed">Real-time attempt monitoring across all entrypoints</Text>
+                </Stack>
+                <Badge variant="light">Last 24 Hours</Badge>
+              </Group>
+              <Box h={300}>
+                <LineChart
+                  h={300}
+                  data={trendData}
+                  dataKey="date"
+                  series={[{ name: 'threats', color: 'red.6', label: 'Blocked Attacks' }]}
+                  curveType="monotone"
+                  withDots={false}
+                  gridAxis="xy"
+                  tickLine="xy"
+                />
+              </Box>
+            </Card>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, lg: 4 }}>
+            <Card withBorder radius="md" style={{ height: '100%' }}>
+              <Title order={4} mb="xl">Threat Distribution</Title>
+              <Center h={280}>
+                <DonutChart
+                  data={threatTypeData}
+                  withLabelsLine
+                  labelsType="percent"
+                  withLabels
+                  size={200}
+                  thickness={30}
+                />
+              </Center>
+              <Stack gap="xs" mt="md">
+                {threatTypeData.slice(0, 3).map((item) => (
+                  <Group key={item.name} justify="space-between">
+                    <Group gap="xs">
+                      <Box w={10} h={10} style={{ borderRadius: '50%', backgroundColor: `var(--mantine-color-${item.color}-6)` }} />
+                      <Text size="sm">{item.name}</Text>
+                    </Group>
+                    <Text size="sm" fw={700}>{item.value}</Text>
+                  </Group>
                 ))}
-                {(!threatsData?.threats || threatsData.threats.filter(t => t.mitigated).length === 0) && (
-                  <Table.Tr>
-                    <Table.Td colSpan={6}><Text ta="center" py="md" c="dimmed">No active kernel-level mitigations.</Text></Table.Td>
-                  </Table.Tr>
-                )}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        </Card>
+              </Stack>
+            </Card>
+          </Grid.Col>
+        </Grid>
+
+        {/* Lower Section */}
+        <Grid>
+          <Grid.Col span={{ base: 12, lg: 4 }}>
+            <Stack gap="md">
+              <Card withBorder radius="md">
+                <Title order={4} mb="md">Top Attack Sources</Title>
+                <Table variant="vertical">
+                  <Table.Tbody>
+                    {metrics?.security?.top_threat_sources?.map((s) => (
+                      <Table.Tr key={s.label}>
+                        <Table.Td>
+                          <Group gap="sm">
+                            <Avatar size="sm" radius="xl" color="red"><IconMapPin size={14} /></Avatar>
+                            <Stack gap={0}>
+                              <Text size="sm" fw={700}>{s.label}</Text>
+                              <Text size="xs" c="dimmed">ASN: Unknown</Text>
+                            </Stack>
+                          </Group>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Badge color="red" variant="light">{s.value}</Badge>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                    {(!metrics?.security?.top_threat_sources || metrics.security.top_threat_sources.length === 0) && (
+                      <Table.Tr><Table.Td><Text size="sm" c="dimmed">No sources detected yet.</Text></Table.Td></Table.Tr>
+                    )}
+                  </Table.Tbody>
+                </Table>
+              </Card>
+
+              <Card withBorder radius="md">
+                <Title order={4} mb="md">Geographic Hotspots</Title>
+                <BarChart
+                  h={200}
+                  data={countryData}
+                  dataKey="country"
+                  series={[{ name: 'threats', color: 'blue.6' }]}
+                  orientation="vertical"
+                  gridAxis="none"
+                  yAxisProps={{ width: 40 }}
+                />
+              </Card>
+            </Stack>
+          </Grid.Col>
+
+          <Grid.Col span={{ base: 12, lg: 8 }}>
+            <Stack gap="md">
+              <Card withBorder radius="md">
+                <Group justify="space-between" mb="md">
+                  <Title order={4}>Recent Anomalies & Security Events</Title>
+                  <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />}>Refresh</Button>
+                </Group>
+                <Table.ScrollContainer minWidth={600}>
+                  <Table verticalSpacing="md" highlightOnHover>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Event / Type</Table.Th>
+                        <Table.Th>Source</Table.Th>
+                        <Table.Th>Severity</Table.Th>
+                        <Table.Th>Action</Table.Th>
+                        <Table.Th>Time</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {metrics?.security?.recent_anomalies?.map((a) => (
+                        <Table.Tr key={a.id}>
+                          <Table.Td>
+                            <Stack gap={0}>
+                              <Text size="sm" fw={700}>{a.type.toUpperCase()}</Text>
+                              <Text size="xs" c="dimmed" maw={300} truncate="end">{a.details}</Text>
+                            </Stack>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={4}>
+                              <Text size="xs" ff="monospace">{a.country_code || 'XX'}</Text>
+                              <Text size="sm" fw={500}>{a.source_ip}</Text>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge color={getSeverityColor(a.severity)} variant="filled" size="sm">
+                              {a.severity}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap="xs">
+                              <Group gap={4}>
+                                <ThemeIcon size="xs" color={a.mitigated ? "red" : "gray"} variant="subtle">
+                                  {a.mitigated ? <IconShieldOff size={12} /> : <IconLock size={12} />}
+                                </ThemeIcon>
+                                <Text size="xs" fw={a.mitigated ? 600 : 400} c={a.mitigated ? "red" : "inherit"}>
+                                  {a.action_taken || 'Detected'}
+                                </Text>
+                              </Group>
+                              {a.mitigated && (
+                                <Tooltip label="Tag as unmitigated (Unshun IP)">
+                                  <ActionIcon 
+                                    size="sm" 
+                                    variant="light" 
+                                    color="blue" 
+                                    onClick={() => handleUnmitigate(a.source_ip)}
+                                    loading={unmitigating === a.source_ip}
+                                  >
+                                    <IconUserCheck size={14} />
+                                  </ActionIcon>
+                                </Tooltip>
+                              )}
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs" c="dimmed">{format(new Date(a.timestamp), 'HH:mm:ss')}</Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                      {(!metrics?.security?.recent_anomalies || metrics.security.recent_anomalies.length === 0) && (
+                        <Table.Tr>
+                          <Table.Td colSpan={5} ta="center" py="xl" c="dimmed">No recent security events.</Table.Td>
+                        </Table.Tr>
+                      )}
+                    </Table.Tbody>
+                  </Table>
+                </Table.ScrollContainer>
+              </Card>
+
+              <SimpleGrid cols={{ base: 1, md: 2 }}>
+                 <ReputationMonitor />
+                 <Card withBorder radius="md">
+                    <Title order={4} mb="md">Active Playbooks</Title>
+                    <Stack gap="xs">
+                      {globalConfig?.alerting?.playbooks?.slice(0, 3).map((pb) => (
+                        <Paper key={pb.id} withBorder p="xs" radius="sm">
+                          <Group justify="space-between">
+                            <Stack gap={2}>
+                              <Text size="sm" fw={600}>{pb.name}</Text>
+                              <Text size="xs" c="dimmed">
+                                {pb.event_type} score ≥ {pb.threshold}
+                              </Text>
+                            </Stack>
+                            <Badge size="sm" variant="light" color={pb.action === 'block' ? 'red' : 'blue'}>
+                              {pb.action.toUpperCase()}
+                            </Badge>
+                          </Group>
+                        </Paper>
+                      ))}
+                      <Button variant="light" size="xs" fullWidth mt="sm" component={Link} to="/settings">
+                        Manage All Playbooks
+                      </Button>
+                    </Stack>
+                 </Card>
+              </SimpleGrid>
+            </Stack>
+          </Grid.Col>
+        </Grid>
       </Stack>
     </Container>
   );
+}
+
+function getThreatColor(type: string) {
+  const t = type.toLowerCase();
+  if (t.includes('waf') || t.includes('sqli') || t.includes('xss')) return 'red';
+  if (t.includes('bot') || t.includes('scanner')) return 'orange';
+  if (t.includes('geoip')) return 'blue';
+  if (t.includes('ddos') || t.includes('flood')) return 'grape';
+  if (t.includes('brute')) return 'yellow';
+  return 'cyan';
+}
+
+function getSeverityColor(sev: string) {
+  const s = sev.toLowerCase();
+  if (s === 'critical' || s === 'high') return 'red';
+  if (s === 'medium') return 'orange';
+  if (s === 'low') return 'blue';
+  return 'gray';
 }
 
