@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -146,52 +147,122 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		return nil
 	}
 
-	// 1. Build sequences per SourceIP
-	ipSequences := make(map[string][]string)
+	// 1. Build sequences per SourceIP and collect metadata
+	type ipMetadata struct {
+		sequence []string
+		ua       string
+		ja3      string
+	}
+	ipData := make(map[string]*ipMetadata)
 	for _, tr := range data.Traces {
 		if tr.SourceIP == "" || tr.Path == "" {
 			continue
 		}
-		// Skip consecutive duplicate paths (e.g., polling)
-		seq := ipSequences[tr.SourceIP]
-		if len(seq) > 0 && seq[len(seq)-1] == tr.Path {
+		meta, ok := ipData[tr.SourceIP]
+		if !ok {
+			meta = &ipMetadata{ua: tr.UserAgent, ja3: tr.JA3}
+			ipData[tr.SourceIP] = meta
+		}
+		// Skip consecutive duplicate paths (polling)
+		if len(meta.sequence) > 0 && meta.sequence[len(meta.sequence)-1] == tr.Path {
 			continue
 		}
-		ipSequences[tr.SourceIP] = append(seq, tr.Path)
+		meta.sequence = append(meta.sequence, tr.Path)
 	}
 
-	// 2. Identify common sub-sequences (Signature)
-	// We look for signatures of length 3
-	signatureIPs := make(map[string]map[string]struct{})
-	for ip, seq := range ipSequences {
+	// 2. Identify common sub-sequences (Signature) and collect signals
+	type sigStats struct {
+		ips        map[string]struct{}
+		userAgents map[string]struct{}
+		ja3s       map[string]struct{}
+	}
+	signatureStats := make(map[string]*sigStats)
+	for ip, meta := range ipData {
+		seq := meta.sequence
 		if len(seq) < 3 {
 			continue
 		}
 		for i := range len(seq) - 2 {
 			sig := strings.Join(seq[i:i+3], "->")
-			if _, ok := signatureIPs[sig]; !ok {
-				signatureIPs[sig] = make(map[string]struct{})
+			stats, ok := signatureStats[sig]
+			if !ok {
+				stats = &sigStats{
+					ips:        make(map[string]struct{}),
+					userAgents: make(map[string]struct{}),
+					ja3s:       make(map[string]struct{}),
+				}
+				signatureStats[sig] = stats
 			}
-			signatureIPs[sig][ip] = struct{}{}
+			stats.ips[ip] = struct{}{}
+			if meta.ua != "" {
+				stats.userAgents[meta.ua] = struct{}{}
+			}
+			if meta.ja3 != "" {
+				stats.ja3s[meta.ja3] = struct{}{}
+			}
 		}
 	}
 
-	// 3. Flag sequences used by multiple distinct IPs
-	for sig, ips := range signatureIPs {
-		if len(ips) >= 4 { // Threshold for coordinated attack
-			ipList := []string{}
-			for ip := range ips {
-				ipList = append(ipList, ip)
+	patterns := GetCompiledPatterns()
+
+	// 3. Score and flag sequences
+	for sig, stats := range signatureStats {
+		ipCount := len(stats.ips)
+		if ipCount < 4 { // Minimum threshold to start considering it
+			continue
+		}
+
+		score := ipCount * 5
+		reasons := []string{fmt.Sprintf("%d distinct IPs", ipCount)}
+
+		// Signal: Identical User-Agent across multiple IPs
+		if len(stats.userAgents) == 1 {
+			score += 40
+			reasons = append(reasons, "identical User-Agent")
+		}
+
+		// Signal: Identical JA3 fingerprint across multiple IPs
+		if len(stats.ja3s) == 1 {
+			score += 40
+			reasons = append(reasons, "identical JA3 fingerprint")
+		}
+
+		// Signal: Suspicious paths in the sequence
+		suspiciousInSig := false
+		sigPaths := strings.Split(sig, "->")
+		for _, p := range sigPaths {
+			lp := strings.ToLower(p)
+			if patterns.SuspiciousPath.MatchString(lp) {
+				suspiciousInSig = true
+				break
 			}
+			// Check honeypots
+			for _, hp := range patterns.HoneypotPaths {
+				if lp == strings.ToLower(hp) {
+					score += 100
+					reasons = append(reasons, "contains honeypot path")
+					break
+				}
+			}
+		}
+		if suspiciousInSig {
+			score += 30
+			reasons = append(reasons, "contains suspicious paths")
+		}
+
+		// A "coordinated attack" needs high confidence (score >= 100)
+		// This avoids flagging 4 random users following the same common path (score 20)
+		if score >= 100 || (ipCount > 15 && score >= 70) {
+			ipList := slices.Collect(maps.Keys(stats.ips))
 			slices.Sort(ipList)
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           "coordinated_attack",
-				Severity:       "high",
-				Description:    fmt.Sprintf("Coordinated behavior signature detected: %d distinct IPs followed the same request sequence: %s", len(ips), sig),
+				Severity:       d.calculateSeverity(score, 40),
+				Description:    fmt.Sprintf("Coordinated behavior signature detected (%s): %d distinct IPs followed the same sequence: %s", strings.Join(reasons, ", "), ipCount, sig),
 				Timestamp:      time.Now().Format(time.RFC3339),
 				Source:         strings.Join(ipList, ", "),
-				Recommendation: "Multiple actors are following an identical path sequence. This is a strong indicator of a distributed botnet or automated attack. Recommend blocking all involved IPs and fingerprints.",
+				Recommendation: "Multiple actors are following an identical path sequence with highly similar fingerprints. This is a strong indicator of a distributed botnet. Recommend blocking all involved IPs and fingerprints.",
 			}
 			anomalies = append(anomalies, anomaly)
 		}

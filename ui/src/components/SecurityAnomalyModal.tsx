@@ -47,7 +47,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
   if (!anomaly) return null;
 
   const getSeverityColor = (severity: string) => {
-    switch (severity.toLowerCase()) {
+    switch ((severity || '').toLowerCase()) {
       case "critical":
         return "red";
       case "high":
@@ -83,10 +83,10 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
               <Text size="xs" c="dimmed" fw={700} tt="uppercase">
                 Incident Type
               </Text>
-              <Title order={4}>{anomaly.type.replace(/_/g, " ")}</Title>
+              <Title order={4}>{(anomaly.type || '').replace(/_/g, " ")}</Title>
             </Stack>
             <Badge size="lg" color={getSeverityColor(anomaly.severity)} variant="filled">
-              {anomaly.severity.toUpperCase()}
+              {(anomaly.severity || 'unknown').toUpperCase()}
             </Badge>
           </Group>
           <Text size="sm" mt="sm">

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -146,4 +147,67 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+
+	t.Run("Legitimate common sequence - False Positive", func(t *testing.T) {
+		detector := &SecurityThreatDetector{Threshold: 10}
+
+		var traces []telemetry.TraceRecord
+		for i := 1; i <= 4; i++ {
+			ip := fmt.Sprintf("192.168.1.%d", i)
+			traces = append(traces, telemetry.TraceRecord{SourceIP: ip, Path: "/", Method: "GET", Timestamp: now})
+			traces = append(traces, telemetry.TraceRecord{SourceIP: ip, Path: "/login", Method: "GET", Timestamp: now.Add(time.Second)})
+			traces = append(traces, telemetry.TraceRecord{SourceIP: ip, Path: "/dashboard", Method: "GET", Timestamp: now.Add(2 * time.Second)})
+		}
+		// Set different UAs to avoid triggering identical UA signal
+		for i := range traces {
+			traces[i].UserAgent = fmt.Sprintf("UA-%d", i/3)
+		}
+
+		data := &DiagnosticData{
+			Traces:  traces,
+			IPStats: make(map[string]*IPStats),
+		}
+
+		anomalies := detector.Detect(ctx, data)
+		coordinatedAnoms := 0
+		for _, a := range anomalies {
+			if a.Type == "coordinated_attack" {
+				coordinatedAnoms++
+			}
+		}
+		assert.Equal(t, 0, coordinatedAnoms, "Should NOT detect coordinated attack for legitimate sequence with different UAs")
+	})
+
+	t.Run("Actual coordinated attack - True Positive", func(t *testing.T) {
+		detector := &SecurityThreatDetector{Threshold: 10}
+
+		var traces []telemetry.TraceRecord
+		ua := "Bot-UA-1.0"
+		ja3 := "771,4865-4866-4867,0-23-65281-10-11-35-16-5-13-18-51-45-43-21,29-23-24,0"
+		for i := 1; i <= 4; i++ {
+			ip := fmt.Sprintf("10.0.0.%d", i)
+			traces = append(traces, telemetry.TraceRecord{SourceIP: ip, Path: "/wp-login.php", Method: "POST", Timestamp: now, UserAgent: ua, JA3: ja3})
+			traces = append(traces, telemetry.TraceRecord{SourceIP: ip, Path: "/xmlrpc.php", Method: "POST", Timestamp: now.Add(time.Millisecond), UserAgent: ua, JA3: ja3})
+			traces = append(traces, telemetry.TraceRecord{SourceIP: ip, Path: "/admin-ajax.php", Method: "POST", Timestamp: now.Add(2 * time.Millisecond), UserAgent: ua, JA3: ja3})
+		}
+
+		data := &DiagnosticData{
+			Traces:  traces,
+			IPStats: make(map[string]*IPStats),
+		}
+
+		anomalies := detector.Detect(ctx, data)
+		coordinatedAnoms := 0
+		for _, a := range anomalies {
+			if a.Type == "coordinated_attack" {
+				coordinatedAnoms++
+			}
+		}
+		assert.Equal(t, 1, coordinatedAnoms, "Should detect coordinated attack with same UA and JA3")
+	})
 }

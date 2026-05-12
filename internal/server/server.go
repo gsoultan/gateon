@@ -15,21 +15,22 @@ import (
 // Server is the main application container (Dependency Injection).
 // Composes config (stores), ProxyCache (runtime), and lifecycle.
 type Server struct {
-	RouteStore   config.RouteStore
-	ServiceStore config.ServiceStore
-	EpStore      config.EntryPointStore
-	MwStore      config.MiddlewareStore
-	TLSOptStore  config.TLSOptionStore
-	GlobalStore  config.GlobalConfigStore
-	AuthManager  auth.Service
-	EbpfManager  ebpf.Manager
-	RedisClient  redis.Client
-	TLSManager   gtls.TLSManager
-	WafUpdater   any // middleware.WAFUpdater (interface to avoid cyclic import)
-	Logger       logger.Logger
-	Port         string
-	Version      string
-	startTime    time.Time
+	RouteStore    config.RouteStore
+	ServiceStore  config.ServiceStore
+	EpStore       config.EntryPointStore
+	MwStore       config.MiddlewareStore
+	TLSOptStore   config.TLSOptionStore
+	GlobalStore   config.GlobalConfigStore
+	AuthManager   auth.Service
+	EbpfManager   ebpf.Manager
+	RedisClient   redis.Client
+	TLSManager    gtls.TLSManager
+	WafUpdater    any // middleware.WAFUpdater (interface to avoid cyclic import)
+	ClamAVManager any // security.ClamAVManager
+	Logger        logger.Logger
+	Port          string
+	Version       string
+	startTime     time.Time
 
 	cache     *ProxyCache
 	cacheOnce sync.Once

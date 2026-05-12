@@ -17,6 +17,7 @@ import (
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -45,6 +46,15 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		})
 	}
 	s.TLSManager = CreateTLSManager(s)
+	var wafUpdater *middleware.WAFUpdater
+	if s.WafUpdater != nil {
+		wafUpdater = s.WafUpdater.(*middleware.WAFUpdater)
+	}
+	var clamavManager *security.ClamAVManager
+	if s.ClamAVManager != nil {
+		clamavManager = s.ClamAVManager.(*security.ClamAVManager)
+	}
+
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Version:            s.Version,
 		Routes:             s.RouteStore,
@@ -58,7 +68,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		TLSManager:         s.TLSManager,
 		RouteStatsProvider: s.GetRouteStats,
 		EbpfManager:        s.EbpfManager,
-		WafUpdater:         s.WafUpdater.(*middleware.WAFUpdater),
+		WafUpdater:         wafUpdater,
+		ClamAVManager:      clamavManager,
 	})
 	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)

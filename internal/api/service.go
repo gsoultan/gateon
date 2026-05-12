@@ -8,6 +8,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/security"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -29,6 +30,7 @@ type ApiService struct {
 	EbpfManager        ebpf.Manager
 	WafUpdater         *middleware.WAFUpdater
 	IPReputation       *IPReputationStore
+	ClamAVManager      *security.ClamAVManager
 }
 
 // GetGlobals returns the global config store for REST handlers.
@@ -44,6 +46,14 @@ func (s *ApiService) GetTLSManager() gtls.TLSManager {
 // GetEbpfManager returns the eBPF manager.
 func (s *ApiService) GetEbpfManager() ebpf.Manager {
 	return s.EbpfManager
+}
+
+// GetClamAVStatus returns the ClamAV installation status.
+func (s *ApiService) GetClamAVStatus(ctx context.Context) bool {
+	if s.ClamAVManager == nil {
+		return false
+	}
+	return s.ClamAVManager.IsInstalled(ctx)
 }
 
 // NewApiService creates an ApiService from config (Factory pattern).
@@ -62,6 +72,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		RouteStatsProvider: cfg.RouteStatsProvider,
 		EbpfManager:        cfg.EbpfManager,
 		WafUpdater:         cfg.WafUpdater,
+		ClamAVManager:      cfg.ClamAVManager,
 	}
 
 	if cfg.Globals != nil {

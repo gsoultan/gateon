@@ -109,6 +109,14 @@ func WithWafUpdater(u any) ServerOption {
 	}
 }
 
+// WithClamAVManager sets the ClamAV manager.
+func WithClamAVManager(m any) ServerOption {
+	return func(s *Server) error {
+		s.ClamAVManager = m
+		return nil
+	}
+}
+
 // WithLogger sets the logger.
 func WithLogger(l logger.Logger) ServerOption {
 	return func(s *Server) error {

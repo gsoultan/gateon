@@ -161,6 +161,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			"services_count":       servicesCount,
 			"entry_points_count":   epsCount,
 			"middlewares_count":    mwsCount,
+			"clamav_installed":     svc.GetClamAVStatus(r.Context()),
 		})
 	})
 	mux.HandleFunc("POST /v1/waf/update", func(w http.ResponseWriter, r *http.Request) {

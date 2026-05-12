@@ -47,6 +47,7 @@ import { AuditSettingsCard } from "../components/settings/AuditSettingsCard";
 import { PresetsCard } from "../components/settings/PresetsCard";
 import { AppearanceCard } from "../components/settings/AppearanceCard";
 import { usePermissions } from "../hooks/usePermissions";
+import { useGateonStatus } from "../hooks/useGateonStatus";
 import { useAuthStore } from "../store/useAuthStore";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 import type { GlobalConfig, DatabaseConfig } from "../types/gateon";
@@ -67,6 +68,7 @@ function inferDriver(
 
 export default function SettingsPage() {
   const { canEditGlobal, canImportConfig, canExportConfig } = usePermissions();
+  const { data: status } = useGateonStatus();
   const formDisabled = !canEditGlobal;
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const apiUrl = useApiConfigStore((s) => s.apiUrl);
@@ -1542,6 +1544,12 @@ export default function SettingsPage() {
                   />
 
                   <Divider label="ClamAV Anti-Malware" labelPosition="center" />
+                  {config.waf?.malware_detection && status && !status.clamav_installed && (
+                    <Alert icon={<IconInfoCircle size="1rem" />} title="ClamAV Not Detected" color="red">
+                      Malware detection is enabled, but ClamAV is not installed or not running on the server.
+                      Please ensure ClamAV is installed locally or via Docker as configured below.
+                    </Alert>
+                  )}
                   <Group grow>
                     <Select
                       label="Installation Mode"
