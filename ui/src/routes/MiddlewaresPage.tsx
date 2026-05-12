@@ -35,7 +35,7 @@ import { notifications } from "@mantine/notifications";
 import type { Middleware } from "../types/gateon";
 import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
-import { MiddlewareConfigEditor } from "../components/MiddlewareConfigEditor";
+import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();

@@ -12,7 +12,7 @@ import {
   SegmentedControl,
   Grid,
 } from "@mantine/core";
-import type { Route } from "../types/gateon";
+import type { Route } from "../../types/gateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
@@ -24,14 +24,14 @@ import {
   useServices,
   apiFetch,
   getApiErrorMessage,
-} from "../hooks/useGateon";
+} from "../../hooks/useGateon";
 import {
   IconCheck,
   IconServer,
   IconShieldLock,
   IconRoute,
 } from "@tabler/icons-react";
-import { RoutingConfig, UpstreamConfig, PipelineConfig, RoutePreview } from "./route-form";
+import { RoutingConfig, UpstreamConfig, PipelineConfig, RoutePreview } from "./";
 
 export default function RouteForm({
   onSuccess,
