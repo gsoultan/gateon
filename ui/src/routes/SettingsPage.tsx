@@ -56,7 +56,7 @@ import {
   AuditSettingsCard,
   PresetsCard,
   AppearanceCard
-} from "../components/Settings";
+} from "../components/settings";
 import { usePermissions } from "../hooks/usePermissions";
 import { useGateonStatus } from "../hooks/useGateonStatus";
 import { useApiConfigStore } from "../store/useApiConfigStore";
