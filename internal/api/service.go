@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -54,6 +55,66 @@ func (s *ApiService) GetClamAVStatus(ctx context.Context) bool {
 		return false
 	}
 	return s.ClamAVManager.IsInstalled(ctx)
+}
+
+func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error) {
+	if s.ClamAVManager == nil {
+		return &gateonv1.InstallClamavResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
+	}
+
+	// Update global config with the new installation mode
+	gc := s.Globals.Get(ctx)
+	if gc.Waf == nil {
+		gc.Waf = &gateonv1.WafConfig{}
+	}
+	if gc.Waf.Clamav == nil {
+		gc.Waf.Clamav = &gateonv1.ClamavConfig{}
+	}
+	gc.Waf.Clamav.InstallationMode = req.Mode
+	if err := s.Globals.Update(ctx, gc); err != nil {
+		return &gateonv1.InstallClamavResponse{Success: false, Message: "Failed to update configuration: " + err.Error()}, nil
+	}
+
+	// Also update the manager's config directly to ensure it has the latest mode
+	// Note: In security.NewClamAVManager(gc.Waf.Clamav), it's a pointer,
+	// but if s.Globals.Update replaced the entire gc, we might need to be careful.
+	// However, s.Globals.Get returns the pointer to r.config.
+	// So updating gc.Waf.Clamav.InstallationMode above already updated it if it's the same pointer.
+
+	if err := s.ClamAVManager.EnsureInstalled(ctx); err != nil {
+		return &gateonv1.InstallClamavResponse{Success: false, Message: "Installation failed: " + err.Error()}, nil
+	}
+
+	return &gateonv1.InstallClamavResponse{Success: true, Message: "Installation started successfully"}, nil
+}
+
+func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanRequest) (*gateonv1.RunDeepScanResponse, error) {
+	if s.ClamAVManager == nil {
+		return &gateonv1.RunDeepScanResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
+	}
+
+	if !s.ClamAVManager.IsInstalled(ctx) {
+		return &gateonv1.RunDeepScanResponse{Success: false, Message: "ClamAV is not installed"}, nil
+	}
+
+	status := s.ClamAVManager.GetScanStatus()
+	if !status.IsRunning {
+		// Run scan in background as it can take a long time
+		go s.ClamAVManager.RunFullScan(context.Background())
+		// Refresh status to show it's now running
+		status = s.ClamAVManager.GetScanStatus()
+	}
+
+	return &gateonv1.RunDeepScanResponse{
+		Success: true,
+		Message: "Deep scan operation processed",
+		Status: &gateonv1.DeepScanStatus{
+			IsRunning:  status.IsRunning,
+			LastScan:   status.LastScan.Format(time.RFC3339),
+			LastError:  status.LastError,
+			LastResult: status.LastResult,
+		},
+	}, nil
 }
 
 // NewApiService creates an ApiService from config (Factory pattern).

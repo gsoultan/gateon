@@ -740,3 +740,27 @@ export type RemoveMitigatedThreatResponse = {
   success: boolean;
   message: string;
 };
+
+export type InstallClamavRequest = {
+  mode: ClamavInstallationMode;
+};
+
+export type InstallClamavResponse = {
+  success: boolean;
+  message: string;
+};
+
+export type RunDeepScanRequest = {};
+
+export type RunDeepScanResponse = {
+  success: boolean;
+  message: string;
+  status?: DeepScanStatus;
+};
+
+export type DeepScanStatus = {
+  is_running: boolean;
+  last_scan: string;
+  last_error: string;
+  last_result: string;
+};

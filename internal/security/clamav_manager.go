@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -13,9 +14,18 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+type ScanStatus struct {
+	IsRunning  bool      `json:"is_running"`
+	LastScan   time.Time `json:"last_scan"`
+	LastError  string    `json:"last_error"`
+	LastResult string    `json:"last_result"`
+}
+
 type ClamAVManager struct {
 	config *gateonv1.ClamavConfig
 	cron   *cron.Cron
+	status ScanStatus
+	mu     sync.Mutex
 }
 
 func NewClamAVManager(cfg *gateonv1.ClamavConfig) *ClamAVManager {
@@ -66,12 +76,19 @@ func (m *ClamAVManager) IsInstalled(ctx context.Context) bool {
 		if _, err := exec.LookPath("docker"); err != nil {
 			return false
 		}
-		cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "name=gateon-clamav", "--format", "{{.Names}}")
+		// Match exact name and only show running containers
+		cmd := exec.CommandContext(ctx, "docker", "ps", "--filter", "name=^/gateon-clamav$", "--format", "{{.Names}}")
 		out, _ := cmd.Output()
-		return strings.Contains(string(out), "gateon-clamav")
+		return strings.TrimSpace(string(out)) == "gateon-clamav"
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
-		_, err := exec.LookPath("clamd")
-		return err == nil
+		// Check for multiple possible binaries
+		binaries := []string{"clamd", "clamscan", "clamdscan"}
+		for _, bin := range binaries {
+			if _, err := exec.LookPath(bin); err == nil {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}
@@ -94,10 +111,10 @@ func (m *ClamAVManager) ensureDocker(ctx context.Context) error {
 		return fmt.Errorf("docker not found in PATH")
 	}
 
-	// Check if container already exists
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "name=gateon-clamav", "--format", "{{.Names}}")
+	// Check if container already exists (exact match)
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "name=^/gateon-clamav$", "--format", "{{.Names}}")
 	out, _ := cmd.Output()
-	if strings.Contains(string(out), "gateon-clamav") {
+	if strings.TrimSpace(string(out)) == "gateon-clamav" {
 		// Start it if it's stopped
 		return exec.CommandContext(ctx, "docker", "start", "gateon-clamav").Run()
 	}
@@ -131,13 +148,18 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 
 	var cmd *exec.Cmd
 	if _, err := exec.LookPath("apt-get"); err == nil {
-		cmd = exec.CommandContext(ctx, "apt-get", "update", ";", "apt-get", "install", "-y", "clamav-daemon")
+		// Update repository first
+		_ = exec.CommandContext(ctx, "apt-get", "update").Run()
+		cmd = exec.CommandContext(ctx, "apt-get", "install", "-y", "clamav-daemon", "clamav-freshclam")
 	} else if _, err := exec.LookPath("yum"); err == nil {
 		cmd = exec.CommandContext(ctx, "yum", "install", "-y", "clamav", "clamav-update")
 	} else if _, err := exec.LookPath("brew"); err == nil {
 		cmd = exec.CommandContext(ctx, "brew", "install", "clamav")
+	} else if _, err := exec.LookPath("apk"); err == nil {
+		_ = exec.CommandContext(ctx, "apk", "update").Run()
+		cmd = exec.CommandContext(ctx, "apk", "add", "clamav", "clamav-daemon", "freshclam")
 	} else {
-		return fmt.Errorf("no supported package manager found (apt, yum, brew)")
+		return fmt.Errorf("no supported package manager found (apt, yum, brew, apk)")
 	}
 
 	if err := cmd.Run(); err != nil {
@@ -157,30 +179,62 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	logger.L.LogInfo("tuning local ClamAV for low resource mode (logic to be implemented for specific OS)")
 }
 
+func (m *ClamAVManager) GetScanStatus() ScanStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.status
+}
+
 func (m *ClamAVManager) RunFullScan(ctx context.Context) {
+	m.mu.Lock()
+	if m.status.IsRunning {
+		m.mu.Unlock()
+		return
+	}
+	m.status.IsRunning = true
+	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		m.status.IsRunning = false
+		m.status.LastScan = time.Now()
+		m.mu.Unlock()
+	}()
+
 	logger.L.LogInfo("starting ClamAV full system scan")
 	start := time.Now()
-
-	// Use clamscan for full system scan (it's slower but doesn't require the daemon to be in memory if clamd is used for real-time)
-	// Actually, if clamd is running, we should use clamdscan.
 
 	binary := "clamscan"
 	if _, err := exec.LookPath("clamdscan"); err == nil {
 		binary = "clamdscan"
 	}
 
-	args := []string{"-r", "/"}
+	target := "/"
+	if runtime.GOOS == "windows" {
+		target = "C:\\"
+	}
+
+	args := []string{"-r", target}
 	if m.config.LowResourceMode {
 		// Try to run with lower priority
-		binary = "nice"
-		args = append([]string{"-n", "19", "clamscan", "-r", "/"}, args...)
+		if _, err := exec.LookPath("nice"); err == nil {
+			args = append([]string{"-n", "19", binary}, args...)
+			binary = "nice"
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	err := cmd.Run()
+
+	m.mu.Lock()
 	if err != nil {
+		m.status.LastError = err.Error()
+		m.status.LastResult = "Threats found or error occurred"
 		logger.L.LogError("ClamAV full scan completed with errors or threats found", "error", err, "duration", time.Since(start))
 	} else {
+		m.status.LastError = ""
+		m.status.LastResult = "Clean"
 		logger.L.LogInfo("ClamAV full scan completed successfully", "duration", time.Since(start))
 	}
+	m.mu.Unlock()
 }

@@ -22,6 +22,8 @@ import {
   Code,
   CopyButton,
   TagsInput,
+  Menu,
+  Loader,
 } from "@mantine/core";
 import {
   IconInfoCircle,
@@ -37,7 +39,14 @@ import {
   IconServer,
   IconActivity,
   IconCpu,
+  IconDownload,
+  IconBox,
+  IconChevronDown,
+  IconShieldCheck,
+  IconX,
+  IconAdjustments,
 } from "@tabler/icons-react";
+import { notifications } from '@mantine/notifications';
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
 import { GeneralSettingsCard } from "../components/settings/GeneralSettingsCard";
 import { GeoIPSettingsCard } from "../components/settings/GeoIPSettingsCard";
@@ -96,6 +105,38 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
   const [generalSavedOk, setGeneralSavedOk] = useState(false);
+  const [installing, setInstalling] = useState(false);
+
+  const handleInstall = async (mode: number) => {
+    setInstalling(true);
+    try {
+      const res = await apiFetch("/v1/security/clamav/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notifications.show({
+          title: 'Installation Started',
+          message: 'ClamAV installation has been initiated. This might take a few minutes.',
+          color: 'blue',
+          icon: <IconShieldCheck size={16} />
+        });
+      } else {
+        throw new Error(data.message || 'Failed to start installation');
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: 'Installation Failed',
+        message: err.message || 'Failed to start ClamAV installation',
+        color: 'red',
+        icon: <IconX size={16} />
+      });
+    } finally {
+      setInstalling(false);
+    }
+  };
 
   useEffect(() => {
     // Fetch current global config
@@ -1546,8 +1587,43 @@ export default function SettingsPage() {
                   <Divider label="ClamAV Anti-Malware" labelPosition="center" />
                   {config.waf?.malware_detection && status && !status.clamav_installed && (
                     <Alert icon={<IconInfoCircle size="1rem" />} title="ClamAV Not Detected" color="red">
-                      Malware detection is enabled, but ClamAV is not installed or not running on the server.
-                      Please ensure ClamAV is installed locally or via Docker as configured below.
+                      <Stack gap="xs">
+                        <Text size="sm">
+                          Malware detection is enabled, but ClamAV is not installed or not running on the server.
+                          Please ensure ClamAV is installed locally or via Docker as configured below.
+                        </Text>
+                        <Group gap="sm">
+                          <Menu shadow="md" width={200} position="bottom-start">
+                            <Menu.Target>
+                              <Button 
+                                variant="white" 
+                                size="xs" 
+                                leftSection={installing ? <Loader size={14} color="blue" /> : <IconDownload size={14} />}
+                                rightSection={<IconChevronDown size={14} />}
+                                disabled={installing}
+                              >
+                                Install Now
+                              </Button>
+                            </Menu.Target>
+
+                            <Menu.Dropdown>
+                              <Menu.Label>Choose Installation Mode</Menu.Label>
+                              <Menu.Item 
+                                leftSection={<IconAdjustments size={14} />} 
+                                onClick={() => handleInstall(1)}
+                              >
+                                Local Installation
+                              </Menu.Item>
+                              <Menu.Item 
+                                leftSection={<IconBox size={14} />} 
+                                onClick={() => handleInstall(2)}
+                              >
+                                Docker Container
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        </Group>
+                      </Stack>
                     </Alert>
                   )}
                   <Group grow>

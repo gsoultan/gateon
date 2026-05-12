@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"runtime"
@@ -79,6 +80,42 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"logs": logs})
+	})
+	mux.HandleFunc("GET /v1/audit/logs/watch", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		ch := audit.Subscribe()
+		if ch == nil {
+			http.Error(w, "Audit manager not initialized", http.StatusInternalServerError)
+			return
+		}
+		defer audit.Unsubscribe(ch)
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		for {
+			select {
+			case entry, ok := <-ch:
+				if !ok {
+					return
+				}
+				data, _ := json.Marshal(entry)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
 	})
 	handleUpdateGlobal := func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
@@ -182,6 +219,98 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			"middlewares_count":    mwsCount,
 			"clamav_installed":     svc.GetClamAVStatus(r.Context()),
 		})
+	})
+	mux.HandleFunc("GET /v1/status/watch", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				_, routesCount := d.RouteService.ListPaginated(r.Context(), 0, 0, "", nil)
+				_, servicesCount := d.ServiceService.ListPaginated(r.Context(), 0, 0, "")
+				_, epsCount := d.EpService.ListPaginated(r.Context(), 0, 0, "")
+				_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
+
+				var cpuUsage, memUsage float64
+				if snap, err := telemetry.CollectMetricsSnapshot(); err == nil {
+					cpuUsage = snap.System.CPUUsage
+					memUsage = snap.System.MemoryUsage
+				}
+
+				status := map[string]any{
+					"status":               "running",
+					"version":              d.Version,
+					"uptime":               time.Since(d.StartTime).Seconds(),
+					"memory_usage":         m.Alloc,
+					"cpu_usage":            cpuUsage,
+					"memory_usage_percent": memUsage,
+					"routes_count":         routesCount,
+					"services_count":       servicesCount,
+					"entry_points_count":   epsCount,
+					"middlewares_count":    mwsCount,
+					"clamav_installed":     svc.GetClamAVStatus(r.Context()),
+				}
+				data, _ := json.Marshal(status)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
+	})
+	mux.HandleFunc("POST /v1/security/clamav/install", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		var req gateonv1.InstallClamavRequest
+		body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBodySize))
+		if err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, "failed to read body")
+			return
+		}
+		if err := ProtojsonUnmarshalOptions().Unmarshal(body, &req); err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		resp, err := svc.InstallClamav(r.Context(), &req)
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("POST /v1/security/clamav/scan", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp, err := svc.RunDeepScan(r.Context(), &gateonv1.RunDeepScanRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("POST /v1/waf/update", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {

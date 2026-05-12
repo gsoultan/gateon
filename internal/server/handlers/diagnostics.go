@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -66,6 +67,39 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		w.Header().Set("Content-Type", "application/json")
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("GET /v1/diagnostics/watch", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				res, err := svc.GetDiagnostics(r.Context(), &gateonv1.GetDiagnosticsRequest{})
+				if err != nil {
+					return
+				}
+				data, _ := ProtojsonOptions().Marshal(res)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
 	})
 	mux.HandleFunc("POST /v1/diagnostics/recommendation", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
@@ -293,6 +327,39 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(snap)
 	})
+	mux.HandleFunc("GET /v1/diag/metrics/watch", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				snap, err := telemetry.CollectMetricsSnapshot()
+				if err != nil {
+					return
+				}
+				data, _ := json.Marshal(snap)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
+	})
 	mux.HandleFunc("POST /v1/diag/test-target", func(w http.ResponseWriter, r *http.Request) {
 		// Restrict to Admin only as this can be used for SSRF
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
@@ -364,6 +431,38 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		w.Header().Set("Content-Type", "application/json")
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("GET /v1/diag/security-threats/watch", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		ch := telemetry.ThreatBroadcaster.Subscribe()
+		defer telemetry.ThreatBroadcaster.Unsubscribe(ch)
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		for {
+			select {
+			case threat, ok := <-ch:
+				if !ok {
+					return
+				}
+				data, _ := json.Marshal(threat)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
 	})
 	mux.HandleFunc("GET /v1/security/reputations", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {

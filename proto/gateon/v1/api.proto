@@ -59,4 +59,30 @@ service ApiService {
   rpc ApplyRecommendation(ApplyRecommendationRequest) returns (ApplyRecommendationResponse);
   rpc TriggerWafUpdate(TriggerWafUpdateRequest) returns (TriggerWafUpdateResponse);
   rpc TraceRoute(TraceRouteRequest) returns (TraceRouteResponse);
+  rpc InstallClamav(InstallClamavRequest) returns (InstallClamavResponse);
+  rpc RunDeepScan(RunDeepScanRequest) returns (RunDeepScanResponse);
+}
+
+message RunDeepScanRequest {}
+
+message RunDeepScanResponse {
+  bool success = 1;
+  string message = 2;
+  DeepScanStatus status = 3;
+}
+
+message DeepScanStatus {
+  bool is_running = 1;
+  string last_scan = 2;
+  string last_error = 3;
+  string last_result = 4;
+}
+
+message InstallClamavRequest {
+  ClamavConfig.InstallationMode mode = 1;
+}
+
+message InstallClamavResponse {
+  bool success = 1;
+  string message = 2;
 }

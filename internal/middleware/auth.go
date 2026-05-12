@@ -263,7 +263,7 @@ func ExtractToken(r *http.Request) string {
 	if t := bearerToken(r); t != "" {
 		return t
 	}
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 		if t := r.URL.Query().Get("token"); t != "" {
 			return t
 		}

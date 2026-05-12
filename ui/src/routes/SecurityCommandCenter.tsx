@@ -1,12 +1,12 @@
 import React from 'react';
-import { Container, Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Table, Box, Paper, Avatar, RingProgress, Center, Alert } from '@mantine/core';
+import { Container, Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Table, Box, Paper, Avatar, RingProgress, Center, Alert, Menu, Loader } from '@mantine/core';
 import { DonutChart, LineChart, BarChart } from '@mantine/charts';
-import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff, IconArrowUpRight, IconArrowDownRight, IconInfoCircle, IconMapPin, IconClock, IconX } from '@tabler/icons-react';
+import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff, IconArrowUpRight, IconArrowDownRight, IconInfoCircle, IconMapPin, IconClock, IconX, IconDownload, IconBox, IconChevronDown } from '@tabler/icons-react';
 import { useSecurityThreats, useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
 import { ReputationMonitor } from '../components/ReputationMonitor';
 import { Link } from '@tanstack/react-router';
-import type { GlobalConfig } from '../types/gateon';
+import type { GlobalConfig, DeepScanStatus } from '../types/gateon';
 import { format } from 'date-fns';
 
 export default function SecurityCommandCenter() {
@@ -15,6 +15,98 @@ export default function SecurityCommandCenter() {
   const { refetch: refetchMetrics } = useMetricsSnapshot();
   const [globalConfig, setGlobalConfig] = React.useState<GlobalConfig | null>(null);
   const [unmitigating, setUnmitigating] = React.useState<string | null>(null);
+  const [installing, setInstalling] = React.useState(false);
+  const [scanning, setScanning] = React.useState(false);
+  const [scanStatus, setScanStatus] = React.useState<DeepScanStatus | null>(null);
+
+  const pollScanStatus = async () => {
+    try {
+      const res = await apiFetch("/v1/security/clamav/scan", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setScanStatus(data.status);
+        if (data.status?.is_running) {
+          setScanning(true);
+        } else {
+          setScanning(false);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to poll scan status", err);
+    }
+  };
+
+  React.useEffect(() => {
+    pollScanStatus();
+  }, []);
+
+  React.useEffect(() => {
+    let interval: any;
+    if (scanning) {
+      interval = setInterval(pollScanStatus, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [scanning]);
+
+  const handleDeepScan = async () => {
+    setScanning(true);
+    try {
+      const res = await apiFetch("/v1/security/clamav/scan", {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notifications.show({
+          title: 'Deep Scan Started',
+          message: 'A full system security scan has been initiated. You will be notified of any threats found.',
+          color: 'blue',
+          icon: <IconShieldCheck size={16} />
+        });
+      } else {
+        throw new Error(data.message || 'Failed to start deep scan');
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: 'Scan Failed',
+        message: err.message || 'Failed to start security scan',
+        color: 'red',
+        icon: <IconX size={16} />
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleInstall = async (mode: number) => {
+    setInstalling(true);
+    try {
+      const res = await apiFetch("/v1/security/clamav/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notifications.show({
+          title: 'Installation Started',
+          message: 'ClamAV installation has been initiated. This might take a few minutes.',
+          color: 'blue',
+          icon: <IconShieldCheck size={16} />
+        });
+      } else {
+        throw new Error(data.message || 'Failed to start installation');
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: 'Installation Failed',
+        message: err.message || 'Failed to start ClamAV installation',
+        color: 'red',
+        icon: <IconX size={16} />
+      });
+    } finally {
+      setInstalling(false);
+    }
+  };
 
   const handleUnmitigate = async (ip: string) => {
     setUnmitigating(ip);
@@ -124,9 +216,29 @@ export default function SecurityCommandCenter() {
                 <Button variant="white" color="blue" leftSection={<IconAdjustments size={16} />} component={Link} to="/settings">
                   Orchestration Rules
                 </Button>
-                <Button variant="filled" color="blue" leftSection={<IconShieldCheck size={16} />}>
-                  Deep Scan
-                </Button>
+                <Stack gap={2}>
+                  <Button 
+                    variant="filled" 
+                    color="blue" 
+                    leftSection={scanning ? <Loader size={16} color="white" /> : <IconShieldCheck size={16} />}
+                    onClick={handleDeepScan}
+                    disabled={scanning || !status?.clamav_installed}
+                  >
+                    {scanning ? 'Scanning...' : 'Deep Scan'}
+                  </Button>
+                  {scanStatus?.last_scan && !scanning && (
+                    <Stack gap={0}>
+                      <Text size="10px" c="dimmed" ta="right" fw={500}>
+                        Last scan: {format(new Date(scanStatus.last_scan), 'MMM d, HH:mm')}
+                      </Text>
+                      {scanStatus.last_result && scanStatus.last_result !== "Clean" && (
+                        <Text size="10px" c="red" ta="right" fw={700}>
+                          {scanStatus.last_result}
+                        </Text>
+                      )}
+                    </Stack>
+                  )}
+                </Stack>
               </Group>
             </Grid.Col>
           </Grid>
@@ -134,9 +246,46 @@ export default function SecurityCommandCenter() {
 
         {globalConfig?.waf?.malware_detection && status && !status.clamav_installed && (
           <Alert icon={<IconInfoCircle size="1rem" />} title="Malware Protection Degraded" color="red" variant="filled" radius="md">
-            Malware detection is enabled in your configuration, but the ClamAV service is not responding or not installed on this server.
-            Scanning of uploaded files is currently non-functional.
-            <Button variant="white" size="xs" ml="md" component={Link} to="/settings">Go to Settings</Button>
+            <Stack gap="xs">
+              <Text size="sm">
+                Malware detection is enabled in your configuration, but the ClamAV service is not responding or not installed on this server.
+                Scanning of uploaded files is currently non-functional.
+              </Text>
+              <Group gap="sm">
+                <Menu shadow="md" width={200} position="bottom-start">
+                  <Menu.Target>
+                    <Button 
+                      variant="white" 
+                      size="xs" 
+                      leftSection={installing ? <Loader size={14} color="blue" /> : <IconDownload size={14} />}
+                      rightSection={<IconChevronDown size={14} />}
+                      disabled={installing}
+                    >
+                      Install Now
+                    </Button>
+                  </Menu.Target>
+
+                  <Menu.Dropdown>
+                    <Menu.Label>Choose Installation Mode</Menu.Label>
+                    <Menu.Item 
+                      leftSection={<IconAdjustments size={14} />} 
+                      onClick={() => handleInstall(1)}
+                    >
+                      Local Installation
+                    </Menu.Item>
+                    <Menu.Item 
+                      leftSection={<IconBox size={14} />} 
+                      onClick={() => handleInstall(2)}
+                    >
+                      Docker Container
+                    </Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
+                <Button variant="outline" color="white" size="xs" component={Link} to="/settings">
+                  Go to Settings
+                </Button>
+              </Group>
+            </Stack>
           </Alert>
         )}
 
