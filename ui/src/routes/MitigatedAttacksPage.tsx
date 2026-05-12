@@ -13,6 +13,7 @@ import {
   SimpleGrid,
   Loader,
   Box,
+  Center,
   Alert,
   Tooltip,
   TextInput,
@@ -158,21 +159,25 @@ export default function MitigatedAttacksPage() {
 
       <SimpleGrid cols={{ base: 1, md: 3 }} spacing="lg">
         <Paper withBorder p="md" radius="md">
-          <Text size="xs" c="dimmed" fw={700} mb="md">ATTACKS BY CATEGORY</Text>
-          <Box h={200}>
-            {categoryStats.length > 0 ? (
-               <DonutChart 
-                data={categoryStats} 
-                withLabelsLine 
-                labelsType="percent" 
-                withLabels 
-                size={160}
-                thickness={20}
-              />
-            ) : (
-              <Text c="dimmed" ta="center" pt="xl">No data available</Text>
-            )}
-          </Box>
+          <Stack align="center" gap="xs">
+            <Text size="xs" c="dimmed" fw={700}>ATTACKS BY CATEGORY</Text>
+            <Center h={200} w="100%">
+              {categoryStats.length > 0 ? (
+                 <DonutChart 
+                  data={categoryStats} 
+                  withLabelsLine 
+                  labelsType="percent" 
+                  withLabels 
+                  size={180}
+                  thickness={25}
+                  withTooltip
+                  chartLabel={`${mitigatedAttacks.length} Total`}
+                />
+              ) : (
+                <Text c="dimmed" ta="center">No data available</Text>
+              )}
+            </Center>
+          </Stack>
         </Paper>
 
         <Paper withBorder p="md" radius="md" style={{ gridColumn: "span 2" }}>
