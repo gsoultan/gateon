@@ -144,7 +144,10 @@ export function ReputationMonitor() {
                   </Table.Td>
                   <Table.Td>
                     <Text size="xs" c="dimmed">
-                      {new Date(rep.last_event).toLocaleTimeString()}
+                      {(() => {
+                        const date = new Date(rep.last_event);
+                        return isNaN(date.getTime()) ? 'N/A' : date.toLocaleTimeString();
+                      })()}
                     </Text>
                   </Table.Td>
                 </Table.Tr>
