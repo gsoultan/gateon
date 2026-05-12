@@ -75,6 +75,10 @@ export default function SecurityCommandCenter() {
     }));
   }, [metrics]);
 
+  const totalThreats = React.useMemo(() => {
+    return threatTypeData.reduce((acc, curr) => acc + curr.value, 0);
+  }, [threatTypeData]);
+
   const countryData = React.useMemo(() => {
     if (!metrics?.security?.threats_by_country) return [];
     return metrics.security.threats_by_country.map(t => ({
@@ -259,15 +263,17 @@ export default function SecurityCommandCenter() {
           </Grid.Col>
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Card withBorder radius="md" style={{ height: '100%' }}>
-              <Title order={4} mb="xl">Threat Distribution</Title>
+              <Title order={4} mb="xl" ta="center">Threat Distribution</Title>
               <Center h={280} w="100%" style={{ minWidth: 0 }}>
                 <DonutChart
                   data={threatTypeData}
                   withLabelsLine
                   labelsType="percent"
                   withLabels
-                  size={200}
+                  size={210}
                   thickness={30}
+                  withTooltip
+                  chartLabel={`${totalThreats} Total`}
                 />
               </Center>
               <Stack gap="xs" mt="md">
