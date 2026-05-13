@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestGetDiagnostics_Enhanced(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 
 	// Mock stores
@@ -94,7 +93,7 @@ func TestGetDiagnostics_Enhanced(t *testing.T) {
 }
 
 func TestGetDiagnostics_ServiceDown(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 
 	epStore := config.NewEntryPointRegistry(filepath.Join(tmpDir, "entrypoints.json"))
@@ -133,7 +132,7 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 			SecurityThreatThreshold: 30.0,
 		},
 	}, nil)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	now := time.Now()
 
@@ -220,7 +219,7 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 }
 
 func TestSecurityThreatDetector_Advanced(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
 			SecurityThreatThreshold: 30.0,
@@ -290,7 +289,7 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 }
 
 func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
 			SecurityThreatThreshold: 30.0,
@@ -359,7 +358,7 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 }
 
 func TestApplyRecommendation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 
 	epStore := config.NewEntryPointRegistry(filepath.Join(tmpDir, "entrypoints.json"))
@@ -430,7 +429,7 @@ func TestApplyRecommendation(t *testing.T) {
 }
 
 func TestRemoveMitigatedThreat(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 
 	mwStore := config.NewMiddlewareRegistry(filepath.Join(tmpDir, "middlewares.json"))
@@ -498,7 +497,7 @@ func TestShadowedRouteDetection(t *testing.T) {
 			SecurityThreatThreshold: 30.0,
 		},
 	}, nil)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	data := &DiagnosticData{
 		Routes: []*gateonv1.Route{

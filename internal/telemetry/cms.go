@@ -35,7 +35,7 @@ func (c *CMSketch) Add(key string) {
 	defer c.mu.Unlock()
 
 	data := []byte(key)
-	for i := 0; i < c.depth; i++ {
+	for i := range c.depth {
 		hash := c.hash(data, i)
 		idx := int(hash % uint64(c.width))
 		c.counts[i][idx]++
@@ -49,7 +49,7 @@ func (c *CMSketch) Estimate(key string) uint32 {
 
 	data := []byte(key)
 	var min uint32 = 0xFFFFFFFF
-	for i := 0; i < c.depth; i++ {
+	for i := range c.depth {
 		hash := c.hash(data, i)
 		idx := int(hash % uint64(c.width))
 		count := c.counts[i][idx]
