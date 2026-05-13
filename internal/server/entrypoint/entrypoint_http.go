@@ -43,7 +43,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	chain := []middleware.Middleware{
 		middleware.RequestID(), // Added for global correlation
 		middleware.Recovery(),
-		middleware.SecurityHeaders(),
+		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HoneypotGlobal(deps.GlobalStore),
 		middleware.GeoIPGlobal(deps.GlobalStore),
 		middleware.Metrics("gateon-" + epLabel),

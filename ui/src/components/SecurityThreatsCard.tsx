@@ -93,7 +93,7 @@ export function SecurityThreatsCard() {
                   <Box style={{ overflow: "hidden", flex: 1 }}>
                     <Group gap="xs" wrap="nowrap">
                       <Text size="xs" fw={700} truncate style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        {threat.type.replace(/_/g, ' ')}
+                        {threat.type?.replace(/_/g, ' ') || 'UNKNOWN THREAT'}
                       </Text>
                       {threat.mitigated && (
                         <Badge color="teal" variant="light" size="xs">Mitigated</Badge>

@@ -25,8 +25,6 @@ export function RatelimitConfigEditor({ config, onChange }: RatelimitConfigEdito
           onChange={(val) => updateConfig("burst", val.toString())}
           min={0}
         />
-      </Group>
-      <Group grow>
         <Select
           label="Storage"
           data={[
@@ -36,23 +34,21 @@ export function RatelimitConfigEditor({ config, onChange }: RatelimitConfigEdito
           value={config.storage || "local"}
           onChange={(val) => updateConfig("storage", val || "local")}
         />
+      </Group>
+      <Group grow align="start">
+        <Select
+          label="Limit Strategy"
+          description="How to identify clients for rate limiting."
+          data={[
+            { label: "Client IP", value: "ip" },
+            { label: "Tenant ID (Requires Auth)", value: "tenant" },
+            { label: "JA4H Fingerprint (Recommended)", value: "ja4h" },
+            { label: "Detailed Fingerprint (Strict)", value: "fingerprint" },
+          ]}
+          value={config.strategy || (config.per_tenant === "true" ? "tenant" : "ip")}
+          onChange={(val) => updateConfig("strategy", val || "ip")}
+        />
         <Stack gap="xs">
-          <Switch
-            label="Per IP Address"
-            description="Limit per client IP"
-            checked={config.per_ip === "true"}
-            onChange={(e) =>
-              updateConfig("per_ip", e.currentTarget.checked ? "true" : "false")
-            }
-          />
-          <Switch
-            label="Per Tenant"
-            description="Limit per tenant (requires auth middleware upstream)"
-            checked={config.per_tenant === "true"}
-            onChange={(e) =>
-              updateConfig("per_tenant", e.currentTarget.checked ? "true" : "false")
-            }
-          />
           <Switch
             label="Trust Cloudflare Headers"
             description="Use CF-Connecting-IP when behind Cloudflare."

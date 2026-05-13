@@ -4,6 +4,7 @@ package ebpf
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -39,6 +40,8 @@ type Manager interface {
 	UpdateLoadBalancerBackends(ips []string) error
 	ShunJA3(ja3Md5 [16]byte) error
 	UnshunJA3(ja3Md5 [16]byte) error
+	ShunJA4(ja4Fingerprint string) error // New: JA4 support
+	BlocklistCuckoo(ip string) error     // New: Cuckoo Filter support
 	GetMapStats() (MapStats, error)
 }
 
@@ -298,6 +301,42 @@ func (m *EbpfManager) UnshunJA3(ja3Md5 [16]byte) error {
 	logger.L.LogInfo("Unshunning JA3 fingerprint at XDP level", "ja3", fmt.Sprintf("%x", ja3Md5))
 	// Implementation would use bpf_map_delete_elem on ja3_blocklist map
 	return nil
+}
+
+// ShunJA4 adds a JA4 fingerprint to the XDP blocklist.
+func (m *EbpfManager) ShunJA4(ja4Fingerprint string) error {
+	logger.L.LogInfo("Shunning JA4 fingerprint at XDP level", "ja4", ja4Fingerprint)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ja4Map, ok := m.maps["ja4_blocklist"]
+	if !ok {
+		return fmt.Errorf("ja4_blocklist map not loaded")
+	}
+
+	// JA4 is a string, we hash it to 32 bytes for the map key
+	h := sha256.Sum256([]byte(ja4Fingerprint))
+	return ja4Map.Update(h, uint32(1), ebpf.UpdateAny)
+}
+
+// BlocklistCuckoo adds an IP to the high-performance Cuckoo Filter in eBPF.
+func (m *EbpfManager) BlocklistCuckoo(ip string) error {
+	logger.L.LogInfo("Adding IP to eBPF Cuckoo Filter blocklist", "ip", ip)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cuckooMap, ok := m.maps["cuckoo_filter"]
+	if !ok {
+		// Fallback to standard shunning if map not found (legacy BPF)
+		return m.ShunIP(ip)
+	}
+
+	ipUint, err := ipToUint32(ip)
+	if err != nil {
+		return err
+	}
+
+	return cuckooMap.Update(ipUint, uint32(1), ebpf.UpdateAny)
 }
 
 // GetMapStats returns statistics from eBPF maps.

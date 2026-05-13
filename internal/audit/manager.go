@@ -17,14 +17,15 @@ import (
 )
 
 type AuditEntry struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Action    string    `json:"action"`
-	Resource  string    `json:"resource"`
-	Details   string    `json:"details"`
-	Timestamp time.Time `json:"timestamp"`
-	IPAddress string    `json:"ip_address"`
-	Signature string    `json:"signature"`
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id"`
+	Action       string    `json:"action"`
+	Resource     string    `json:"resource"`
+	Details      string    `json:"details"`
+	Timestamp    time.Time `json:"timestamp"`
+	IPAddress    string    `json:"ip_address"`
+	Signature    string    `json:"signature"`
+	PreviousHash string    `json:"previous_hash"`
 }
 
 type AuditManager struct {
@@ -33,6 +34,8 @@ type AuditManager struct {
 	db          *sql.DB
 	dialect     db.Dialect
 	Broadcaster *Broadcaster
+	lastHash    string
+	currentKey  string
 }
 
 type Broadcaster struct {
@@ -91,8 +94,18 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 				subscribers: make(map[chan AuditEntry]struct{}),
 			},
 		}
+		manager.loadLastHash()
 	})
 	return err
+}
+
+func (m *AuditManager) loadLastHash() {
+	query := m.dialect.Rebind("SELECT signature FROM audit_logs ORDER BY timestamp DESC LIMIT 1")
+	var lastHash string
+	err := m.db.QueryRow(query).Scan(&lastHash)
+	if err == nil {
+		m.lastHash = lastHash
+	}
 }
 
 func UpdateConfig(cfg *gateonv1.AuditConfig) {
@@ -126,41 +139,62 @@ func Unsubscribe(ch chan AuditEntry) {
 }
 
 func (m *AuditManager) log(ctx context.Context, userID, action, resource, details, ip string) {
-	m.mu.RLock()
+	m.mu.Lock()
 	cfg := m.config
-	m.mu.RUnlock()
+	lastHash := m.lastHash
+	currentKey := m.currentKey
+	m.mu.Unlock()
 
 	if cfg != nil && !cfg.Enabled {
 		return
 	}
 
 	entry := AuditEntry{
-		ID:        uuid.NewString(),
-		UserID:    userID,
-		Action:    action,
-		Resource:  resource,
-		Details:   details,
-		Timestamp: time.Now(),
-		IPAddress: ip,
+		ID:           uuid.NewString(),
+		UserID:       userID,
+		Action:       action,
+		Resource:     resource,
+		Details:      details,
+		Timestamp:    time.Now(),
+		IPAddress:    ip,
+		PreviousHash: lastHash,
 	}
 
 	if cfg != nil && cfg.SignEntries && cfg.SignatureKey != "" {
-		entry.Signature = m.sign(entry, cfg.SignatureKey)
+		if currentKey == "" {
+			currentKey = cfg.SignatureKey
+		}
+		entry.Signature = m.sign(entry, currentKey)
+
+		// Rotate key for forward integrity
+		nextKey := m.deriveNextKey(currentKey, entry.Signature)
+
+		m.mu.Lock()
+		m.lastHash = entry.Signature
+		m.currentKey = nextKey
+		m.mu.Unlock()
 	}
 
-	query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-	_, err := m.db.ExecContext(ctx, query, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature)
+	query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	_, err := m.db.ExecContext(ctx, query, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
 	if err != nil {
 		logger.L.LogError("audit: failed to write log", "error", err)
 		return
 	}
+	// Broadcast to real-time subscribers (for Command Center etc)
 	if m.Broadcaster != nil {
 		m.Broadcaster.Broadcast(entry)
 	}
 }
 
+func (m *AuditManager) deriveNextKey(currentKey, hash string) string {
+	h := hmac.New(sha256.New, []byte(currentKey))
+	h.Write([]byte(hash))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func (m *AuditManager) sign(entry AuditEntry, key string) string {
-	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%s", entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp.Unix(), entry.IPAddress)
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%s|%s", entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp.Unix(), entry.IPAddress, entry.PreviousHash)
 	h := hmac.New(sha256.New, []byte(key))
 	h.Write([]byte(payload))
 	return hex.EncodeToString(h.Sum(nil))
@@ -170,7 +204,7 @@ func GetLogs(ctx context.Context, limit int) ([]AuditEntry, error) {
 	if manager == nil {
 		return nil, fmt.Errorf("audit manager not initialized")
 	}
-	query := manager.dialect.Rebind("SELECT id, user_id, action, resource, details, timestamp, ip_address, signature FROM audit_logs ORDER BY timestamp DESC LIMIT ?")
+	query := manager.dialect.Rebind("SELECT id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash FROM audit_logs ORDER BY timestamp DESC LIMIT ?")
 	rows, err := manager.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil, err
@@ -180,7 +214,7 @@ func GetLogs(ctx context.Context, limit int) ([]AuditEntry, error) {
 	var logs []AuditEntry
 	for rows.Next() {
 		var e AuditEntry
-		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.Details, &e.Timestamp, &e.IPAddress, &e.Signature); err != nil {
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.Details, &e.Timestamp, &e.IPAddress, &e.Signature, &e.PreviousHash); err != nil {
 			continue
 		}
 		logs = append(logs, e)

@@ -37,6 +37,20 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10000);
+    __type(key, __u8[32]); // JA4 Fingerprint Hash
+    __type(value, __u32);
+} ja4_blocklist SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1000000);
+    __type(key, __u32);   // IPv4 address
+    __type(value, __u32); // High-performance blocklist
+} cuckoo_filter SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 65536);
     __type(key, __u32);   // IPv4 address
     __type(value, __u32); // State: 0=None, 1=SYN_SENT, 2=ESTABLISHED

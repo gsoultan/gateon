@@ -187,6 +187,8 @@ export default function MitigatedAttacksPage() {
           <Box h={280}>
              <BarChart
               h={280}
+              minWidth={0}
+              minHeight={0}
               data={timeSeriesStats}
               dataKey="time"
               series={[{ name: 'attacks', color: 'teal.6' }]}

@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/art"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -226,6 +227,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
 
 			telemetry.RequestsByIPTotal.WithLabelValues(clientIP).Inc()
+			telemetry.GetAggregator().RecordRequest(clientIP, sw.Status)
 			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "in").Add(float64(reqInSize + 256))
 			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
 
@@ -281,28 +283,33 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 // ipFilterData holds pre-parsed IP filter rules optimized for lookups.
 type ipFilterData struct {
 	exactAllow map[string]struct{}
-	cidrAllow  []*net.IPNet
+	treeAllow  *art.Tree
 	exactDeny  map[string]struct{}
-	cidrDeny   []*net.IPNet
+	treeDeny   *art.Tree
 }
 
 func newIPFilterData(allowList, denyList []string) *ipFilterData {
 	d := &ipFilterData{
 		exactAllow: make(map[string]struct{}),
+		treeAllow:  art.NewTree(),
 		exactDeny:  make(map[string]struct{}),
+		treeDeny:   art.NewTree(),
 	}
 	for _, r := range allowList {
-		if _, ipnet, err := net.ParseCIDR(r); err == nil {
-			d.cidrAllow = append(d.cidrAllow, ipnet)
+		if strings.Contains(r, "/") {
+			_ = d.treeAllow.InsertCIDR(r)
 		} else {
 			d.exactAllow[r] = struct{}{}
+			// Also insert into tree for consistency
+			_ = d.treeAllow.InsertCIDR(r + "/32")
 		}
 	}
 	for _, r := range denyList {
-		if _, ipnet, err := net.ParseCIDR(r); err == nil {
-			d.cidrDeny = append(d.cidrDeny, ipnet)
+		if strings.Contains(r, "/") {
+			_ = d.treeDeny.InsertCIDR(r)
 		} else {
 			d.exactDeny[r] = struct{}{}
+			_ = d.treeDeny.InsertCIDR(r + "/32")
 		}
 	}
 	return d
@@ -313,33 +320,17 @@ func (d *ipFilterData) matches(clientIP string) bool {
 	if _, ok := d.exactDeny[clientIP]; ok {
 		return true
 	}
-	ip := net.ParseIP(clientIP)
-	if ip != nil {
-		for _, rule := range d.cidrDeny {
-			if rule.Contains(ip) {
-				return true
-			}
-		}
-	}
-	return false
+	return d.treeDeny.Contains(clientIP)
 }
 
 func (d *ipFilterData) allowed(clientIP string) bool {
-	if len(d.exactAllow) == 0 && len(d.cidrAllow) == 0 {
+	if len(d.exactAllow) == 0 && d.treeAllow.IsEmpty() {
 		return true
 	}
 	if _, ok := d.exactAllow[clientIP]; ok {
 		return true
 	}
-	ip := net.ParseIP(clientIP)
-	if ip != nil {
-		for _, rule := range d.cidrAllow {
-			if rule.Contains(ip) {
-				return true
-			}
-		}
-	}
-	return false
+	return d.treeAllow.Contains(clientIP)
 }
 
 // IPFilterWithClientIP returns a middleware that filters requests by IP address using the given clientIP resolver.

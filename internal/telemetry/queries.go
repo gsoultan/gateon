@@ -58,6 +58,9 @@ const (
 		FROM domain_stats
 		WHERE day = ?`
 
+	QueryGetActiveThreatsToday = `SELECT COUNT(*) FROM security_threats
+		WHERE timestamp >= ? AND action_taken NOT IN ('blocked', 'challenged', 'shunned')`
+
 	QueryGetTrafficHistory = `SELECT day, hour, SUM(req_count), SUM(bytes_total)
 		FROM domain_stats
 		WHERE day >= ?

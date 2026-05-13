@@ -206,7 +206,7 @@ export default function ServicesPage() {
                         </Table.Td>
                         <Table.Td>
                           <Text size="xs" fw={600} tt="capitalize">
-                            {s.load_balancer_policy.replace(/_/g, ' ')}
+                            {(s.load_balancer_policy || "").replace(/_/g, ' ')}
                           </Text>
                         </Table.Td>
                         <Table.Td>

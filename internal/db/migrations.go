@@ -681,4 +681,23 @@ func init() {
 		_, err := db.Exec(query)
 		return err
 	})
+
+	Register(29, "add_merkle_chain_to_audit_logs", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_hash TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_hash VARCHAR(255) NOT NULL DEFAULT '';`
+		default: // sqlite
+			query = `ALTER TABLE audit_logs ADD COLUMN previous_hash TEXT NOT NULL DEFAULT '';`
+		}
+		if _, err := db.Exec(query); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 }

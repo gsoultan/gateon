@@ -129,7 +129,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	handler := middleware.Chain(
 		middleware.RequestID(), // Added
 		middleware.Recovery(),
-		middleware.SecurityHeaders(),
+		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		func(next http.Handler) http.Handler { return deps.CORS.Handler(next) },
 		middleware.HostFilter(mgmtHost),
 		middleware.IPFilter(allowedIPs, nil),

@@ -211,7 +211,7 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
             </ThemeIcon>
             <Stack gap={0}>
               <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
-                {anomaly.type.replace(/_/g, " ")}
+                {(anomaly.type || "unknown").replace(/_/g, " ")}
               </Text>
               <Text size="xs" c="dimmed">
                 {(() => {
