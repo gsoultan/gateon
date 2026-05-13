@@ -61,6 +61,12 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				if _, ok := cfg["allowed_admin_ips"]; !ok && len(global.Waf.AllowedAdminIps) > 0 {
 					cfg["allowed_admin_ips"] = strings.Join(global.Waf.AllowedAdminIps, ",")
 				}
+				if _, ok := cfg["entropy_threshold"]; !ok && global.Waf.EntropyThreshold > 0 {
+					cfg["entropy_threshold"] = strconv.FormatFloat(global.Waf.EntropyThreshold, 'f', -1, 64)
+				}
+				if _, ok := cfg["disable_entropy"]; !ok {
+					cfg["disable_entropy"] = strconv.FormatBool(global.Waf.DisableEntropy)
+				}
 
 				if global.Waf.AutoUpdateRules {
 					rulesPath := filepath.Join(f.dataDir, "waf", "rules")

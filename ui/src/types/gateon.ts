@@ -347,6 +347,8 @@ export type WafConfig = {
   rules_url?: string;
   clamav_addr?: string;
   clamav?: ClamavConfig;
+  entropy_threshold?: number;
+  disable_entropy?: boolean;
 };
 
 export type ClamavConfig = {
