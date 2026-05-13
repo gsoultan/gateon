@@ -410,7 +410,7 @@ export default function UsersPage() {
         />
       )}
 
-      <Paper withBorder p="md" radius="md" bg="blue.0">
+      <Paper withBorder p="md" radius="md" bg="light-dark(var(--mantine-color-blue-0), var(--mantine-color-dark-8))">
         <Group gap="xs" align="flex-start" wrap="nowrap">
           <IconShieldLock
             size={20}
@@ -418,19 +418,19 @@ export default function UsersPage() {
             style={{ marginTop: 2 }}
           />
           <div>
-            <Text size="sm" fw={700} c="blue.9">
+            <Text size="sm" fw={700} c="light-dark(var(--mantine-color-blue-9), var(--mantine-color-blue-2))">
               Role Capabilities
             </Text>
             <Stack gap={4} mt={4}>
-              <Text size="xs" c="blue.8">
+              <Text size="xs" c="light-dark(var(--mantine-color-blue-8), var(--mantine-color-blue-3))">
                 • <b>Admin:</b> Full access including user management and system
                 configuration.
               </Text>
-              <Text size="xs" c="blue.8">
+              <Text size="xs" c="light-dark(var(--mantine-color-blue-8), var(--mantine-color-blue-3))">
                 • <b>Operator:</b> Can manage routes, services, and middleware
                 but cannot manage users.
               </Text>
-              <Text size="xs" c="blue.8">
+              <Text size="xs" c="light-dark(var(--mantine-color-blue-8), var(--mantine-color-blue-3))">
                 • <b>Viewer:</b> Read-only access to all dashboards and
                 configurations.
               </Text>

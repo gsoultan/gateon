@@ -9,6 +9,7 @@ export interface Trace {
   timestamp: string;
   status: string;
   path: string;
+  request_uri?: string;
   source_ip: string;
   user_agent?: string;
   method?: string;

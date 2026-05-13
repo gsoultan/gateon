@@ -1,6 +1,6 @@
 import React from 'react';
-import { Container, Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Table, Box, Paper, Avatar, RingProgress, Center, Alert, Menu, Loader, Transition } from '@mantine/core';
-import { DonutChart, LineChart, BarChart } from '@mantine/charts';
+import { Container, Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Table, Box, Paper, Avatar, RingProgress, Center, Alert, Menu, Loader, Transition, Pagination } from '@mantine/core';
+import { DonutChart, LineChart, BarChart, AreaChart } from '@mantine/charts';
 import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff, IconArrowUpRight, IconArrowDownRight, IconInfoCircle, IconMapPin, IconClock, IconX, IconDownload, IconBox, IconChevronDown } from '@tabler/icons-react';
 import { useSecurityThreats, useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
 import { useAnimateValue } from '../hooks/useAnimateValue';
@@ -16,7 +16,8 @@ const AnimatedTitle = ({ value, suffix = "" }: { value: number; suffix?: string 
 };
 
 export default function SecurityCommandCenter() {
-  const { data: metrics, isLoading: metricsLoading } = useMetricsSnapshot();
+  const [page, setPage] = React.useState(1);
+  const { data: metrics, isLoading: metricsLoading } = useMetricsSnapshot(10, page);
   const { data: status } = useGateonStatus();
   const { refetch: refetchMetrics } = useMetricsSnapshot();
   const [globalConfig, setGlobalConfig] = React.useState<GlobalConfig | null>(null);
@@ -24,6 +25,13 @@ export default function SecurityCommandCenter() {
   const [installing, setInstalling] = React.useState(false);
   const [scanning, setScanning] = React.useState(false);
   const [scanStatus, setScanStatus] = React.useState<DeepScanStatus | null>(null);
+  const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const [currentTime, setCurrentTime] = React.useState(new Date());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const pollScanStatus = async () => {
     try {
@@ -47,11 +55,18 @@ export default function SecurityCommandCenter() {
   }, []);
 
   React.useEffect(() => {
-    let interval: any;
     if (scanning) {
-      interval = setInterval(pollScanStatus, 5000);
+      pollIntervalRef.current = setInterval(pollScanStatus, 5000);
+    } else if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
   }, [scanning]);
 
   const handleDeepScan = async () => {
@@ -71,10 +86,10 @@ export default function SecurityCommandCenter() {
       } else {
         throw new Error(data.message || 'Failed to start deep scan');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       notifications.show({
         title: 'Scan Failed',
-        message: err.message || 'Failed to start security scan',
+        message: err instanceof Error ? err.message : 'Failed to start security scan',
         color: 'red',
         icon: <IconX size={16} />
       });
@@ -102,10 +117,10 @@ export default function SecurityCommandCenter() {
       } else {
         throw new Error(data.message || 'Failed to start installation');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       notifications.show({
         title: 'Installation Failed',
-        message: err.message || 'Failed to start ClamAV installation',
+        message: err instanceof Error ? err.message : 'Failed to start ClamAV installation',
         color: 'red',
         icon: <IconX size={16} />
       });
@@ -134,10 +149,10 @@ export default function SecurityCommandCenter() {
       } else {
         throw new Error(data.message);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       notifications.show({
         title: 'Error',
-        message: err.message || 'Failed to remove mitigation',
+        message: err instanceof Error ? err.message : 'Failed to remove mitigation',
         color: 'red',
         icon: <IconX size={16} />
       });
@@ -191,7 +206,8 @@ export default function SecurityCommandCenter() {
       const date = new Date(t.ts);
       return {
         date: isNaN(date.getTime()) ? 'N/A' : format(date, 'HH:mm'),
-        threats: t.requests
+        threats: t.requests,
+        fullDate: isNaN(date.getTime()) ? 'N/A' : format(date, 'MMM d, HH:mm')
       };
     });
   }, [metrics]);
@@ -209,7 +225,7 @@ export default function SecurityCommandCenter() {
               <Stack gap="xs">
                 <Group gap="xs">
                   <Badge variant="dot" color="blue" size="sm">Autonomous Defense Active</Badge>
-                  <Text size="xs" c="dimmed">{format(new Date(), 'PPP p')}</Text>
+                  <Text size="xs" c="dimmed">{format(currentTime, 'PPP p')}</Text>
                 </Group>
                 <Title order={1} fw={900} style={{ letterSpacing: -1.5 }}>Security Command Center</Title>
                 <Text size="lg" c="dimmed" maw={600}>
@@ -409,7 +425,7 @@ export default function SecurityCommandCenter() {
                       <Text size="sm" fw={500}>{step.label}</Text>
                       <Text size="sm" c="dimmed">{step.value.toLocaleString()}</Text>
                     </Group>
-                    <Paper h={8} radius="xl" bg="gray.1">
+                    <Paper h={8} radius="xl" bg="light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4))">
                       <Box 
                         h="100%" 
                         bg={step.color} 
@@ -471,10 +487,8 @@ export default function SecurityCommandCenter() {
                 <Badge variant="light">Last 24 Hours</Badge>
               </Group>
               <Box h={300} w="100%" style={{ minWidth: 0 }}>
-                <LineChart
+                <AreaChart
                   h={300}
-                  minWidth={0}
-                  minHeight={0}
                   data={trendData}
                   dataKey="date"
                   series={[{ name: 'threats', color: 'red.6', label: 'Blocked Attacks' }]}
@@ -482,6 +496,30 @@ export default function SecurityCommandCenter() {
                   withDots={false}
                   gridAxis="xy"
                   tickLine="xy"
+                  withGradient
+                  fillOpacity={0.2}
+                  withLegend
+                  legendProps={{ verticalAlign: 'top', height: 40 }}
+                  rechartsProps={{
+                    animationDuration: 1200,
+                  }}
+                  tooltipProps={{
+                    content: ({ label, payload }) => {
+                      if (!payload || payload.length === 0) return null;
+                      const item = trendData.find(d => d.date === label);
+                      return (
+                        <Paper withBorder p="xs" shadow="sm" radius="md">
+                          <Stack gap={4}>
+                            <Text size="xs" c="dimmed">{item?.fullDate || label}</Text>
+                            <Group gap="xs">
+                              <Box w={10} h={10} bg="red.6" style={{ borderRadius: '50%' }} />
+                              <Text fw={500} size="sm">Threats: {payload[0].value}</Text>
+                            </Group>
+                          </Stack>
+                        </Paper>
+                      );
+                    }
+                  }}
                 />
               </Box>
             </Card>
@@ -501,6 +539,11 @@ export default function SecurityCommandCenter() {
                   strokeWidth={2}
                   withTooltip
                   chartLabel={`${totalThreats} Total`}
+                  tooltipDataSource="segment"
+                  mx="auto"
+                  rechartsProps={{
+                    animationDuration: 1000,
+                  }}
                 />
               </Center>
               <Stack gap="xs" mt="md">
@@ -533,7 +576,7 @@ export default function SecurityCommandCenter() {
                             <Avatar size="sm" radius="xl" color="red"><IconMapPin size={14} /></Avatar>
                             <Stack gap={0}>
                               <Text size="sm" fw={700}>{s.label}</Text>
-                              <Text size="xs" c="dimmed">ASN: Unknown</Text>
+                              <Text size="xs" c="dimmed">ASN: {s.subtext || 'Unknown'}</Text>
                             </Stack>
                           </Group>
                         </Table.Td>
@@ -554,14 +597,18 @@ export default function SecurityCommandCenter() {
                 <Box h={200} w="100%" style={{ minWidth: 0 }}>
                   <BarChart
                     h={200}
-                    minWidth={0}
-                    minHeight={0}
                     data={countryData}
                     dataKey="country"
-                    series={[{ name: 'threats', color: 'blue.6' }]}
+                    series={[{ name: 'threats', color: 'blue.6', label: 'Attacks' }]}
                     orientation="vertical"
                     gridAxis="none"
-                    yAxisProps={{ width: 40 }}
+                    yAxisProps={{ width: 60 }}
+                    withTooltip
+                    cursor="pointer"
+                    barProps={{ radius: [0, 4, 4, 0] }}
+                    rechartsProps={{
+                      animationDuration: 1000,
+                    }}
                   />
                 </Box>
               </Card>
@@ -580,7 +627,7 @@ export default function SecurityCommandCenter() {
                     <Table.Thead>
                       <Table.Tr>
                         <Table.Th>Event / Type</Table.Th>
-                        <Table.Th>Source</Table.Th>
+                        <Table.Th>Source IP</Table.Th>
                         <Table.Th>Severity</Table.Th>
                         <Table.Th>Action</Table.Th>
                         <Table.Th>Time</Table.Th>
@@ -591,14 +638,14 @@ export default function SecurityCommandCenter() {
                         <Table.Tr key={a.id}>
                           <Table.Td>
                             <Stack gap={0}>
-                              <Text size="sm" fw={700}>{(a.type || 'Unknown').toUpperCase()}</Text>
+                              <Text size="sm" fw={700}>{(a.type || 'Unknown').replace(/_/g, ' ').toUpperCase()}</Text>
                               <Text size="xs" c="dimmed" maw={300} truncate="end">{a.details}</Text>
                             </Stack>
                           </Table.Td>
                           <Table.Td>
                             <Group gap={4}>
-                              <Text size="xs" ff="monospace">{a.country_code || 'XX'}</Text>
-                              <Text size="sm" fw={500}>{a.source_ip}</Text>
+                              <Badge size="xs" variant="outline">{a.country_code || 'XX'}</Badge>
+                              <Text size="sm" fw={500} ff="monospace">{a.source_ip}</Text>
                             </Group>
                           </Table.Td>
                           <Table.Td>
@@ -649,6 +696,18 @@ export default function SecurityCommandCenter() {
                     </Table.Tbody>
                   </Table>
                 </Table.ScrollContainer>
+                {metrics?.security?.total_anomalies && metrics.security.total_anomalies > 10 && (
+                  <Group justify="center" mt="md" pb="md">
+                    <Pagination 
+                      total={Math.ceil(metrics.security.total_anomalies / 10)} 
+                      value={page} 
+                      onChange={setPage} 
+                      size="sm"
+                      radius="md"
+                      withEdges
+                    />
+                  </Group>
+                )}
               </Card>
 
               <SimpleGrid cols={{ base: 1, md: 2 }}>

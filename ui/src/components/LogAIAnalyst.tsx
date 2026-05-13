@@ -72,7 +72,7 @@ export function LogAIAnalyst({ logs, opened, onClose }: LogAIAnalystProps) {
           anomalies.
         </Text>
 
-        <Paper withBorder p="xs" bg="gray.0">
+        <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
           <Text size="xs" fw={700} mb={4}>Context (Recent Logs):</Text>
           <ScrollArea h={100}>
             <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>
@@ -101,7 +101,7 @@ export function LogAIAnalyst({ logs, opened, onClose }: LogAIAnalystProps) {
         )}
 
         {analysis && (
-          <Paper withBorder p="md" radius="md" bg="blue.0">
+          <Paper withBorder p="md" radius="md" bg="light-dark(var(--mantine-color-blue-0), var(--mantine-color-dark-8))">
             <Stack gap="xs">
               <Text fw={600} size="sm">Analysis & Recommendations:</Text>
               <Text size="sm">{analysis}</Text>

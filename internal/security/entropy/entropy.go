@@ -15,11 +15,10 @@ func Calculate(data string) float64 {
 
 	// Use a fixed size array for better performance with ASCII/UTF-8 bytes
 	var counts [256]int
-	total := 0
-	for i := 0; i < len(data); i++ {
+	for i := range len(data) {
 		counts[data[i]]++
-		total++
 	}
+	total := len(data)
 
 	var entropy float64
 	for _, count := range counts {

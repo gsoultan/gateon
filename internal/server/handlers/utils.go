@@ -9,15 +9,16 @@ import (
 	"strconv"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/httputil"
 	"google.golang.org/protobuf/proto"
 )
 
-// WriteHTTPError writes a plain text error response.
+// WriteHTTPError writes a JSON error response.
 func WriteHTTPError(w http.ResponseWriter, statusCode int, message string) {
 	if message == "" {
 		message = http.StatusText(statusCode)
 	}
-	http.Error(w, message, statusCode)
+	httputil.WriteJSONError(w, statusCode, message, "")
 }
 
 // WriteJSON writes v as JSON with Content-Type application/json.

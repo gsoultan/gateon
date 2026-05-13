@@ -17,7 +17,7 @@ func registerAIHandlers(mux *http.ServeMux, d *Deps) {
 
 		resp, err := d.AIService.AnalyzeConfig(r.Context(), &req)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
@@ -33,13 +33,13 @@ func registerAIHandlers(mux *http.ServeMux, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.AnalyzeLogsRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid request")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid request")
 			return
 		}
 
 		resp, err := d.AIService.AnalyzeLogs(r.Context(), &req)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
@@ -55,13 +55,13 @@ func registerAIHandlers(mux *http.ServeMux, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.ChatWithAIRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid request")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid request")
 			return
 		}
 
 		resp, err := d.AIService.ChatWithAI(r.Context(), &req)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 

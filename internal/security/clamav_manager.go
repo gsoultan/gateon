@@ -151,6 +151,7 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 
 	// Check if clamd is already installed
 	if _, err := exec.LookPath("clamd"); err == nil {
+		_ = m.ensureDatabase(ctx)
 		return nil
 	}
 
@@ -192,7 +193,9 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 	}
 
 	// Ensure database exists, otherwise clamscan will fail with status 2
-	m.ensureDatabase(ctx)
+	if err := m.ensureDatabase(ctx); err != nil {
+		logger.L.LogWarn("could not ensure ClamAV database", "error", err)
+	}
 
 	if m.config.LowResourceMode {
 		m.tuneLocalClamav()
@@ -207,11 +210,13 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	logger.L.LogInfo("tuning local ClamAV for low resource mode (logic to be implemented for specific OS)")
 }
 
-func (m *ClamAVManager) ensureDatabase(ctx context.Context) {
+func (m *ClamAVManager) ensureDatabase(ctx context.Context) error {
 	// Check common database locations
 	dbPaths := []string{
 		"/var/lib/clamav/main.cvd",
 		"/var/lib/clamav/main.cld",
+		"/var/lib/clamav/daily.cvd",
+		"/var/lib/clamav/daily.cld",
 		"/usr/local/share/clamav/main.cvd",
 		"/usr/local/share/clamav/main.cld",
 	}
@@ -229,15 +234,17 @@ func (m *ClamAVManager) ensureDatabase(ctx context.Context) {
 		if _, err := exec.LookPath("freshclam"); err == nil {
 			// This might take a while, but we run it in background or at least try it once.
 			// We use a shorter timeout for the initial check to not block too long.
-			freshCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			freshCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 			defer cancel()
 			if out, err := exec.CommandContext(freshCtx, "freshclam").CombinedOutput(); err != nil {
-				logger.L.LogWarn("initial freshclam failed", "error", err, "output", string(out))
-			} else {
-				logger.L.LogInfo("ClamAV database updated successfully")
+				return fmt.Errorf("initial freshclam failed: %w (output: %s)", err, string(out))
 			}
+			logger.L.LogInfo("ClamAV database updated successfully")
+		} else {
+			return errors.New("freshclam not found, cannot download ClamAV database")
 		}
 	}
+	return nil
 }
 
 func (m *ClamAVManager) GetScanStatus() ScanStatus {
@@ -264,6 +271,18 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 
 	logger.L.LogInfo("starting ClamAV full system scan")
 	start := time.Now()
+
+	// Ensure database is available before scanning
+	if m.config.InstallationMode == gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL {
+		if err := m.ensureDatabase(ctx); err != nil {
+			logger.L.LogError("ClamAV database not available, aborting scan", "error", err)
+			m.mu.Lock()
+			m.status.LastError = err.Error()
+			m.status.LastResult = "Database missing"
+			m.mu.Unlock()
+			return
+		}
+	}
 
 	binary := "clamscan"
 	hasClamdscan := false

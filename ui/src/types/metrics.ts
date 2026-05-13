@@ -31,6 +31,7 @@ export type RouteMetric = {
 export type LabeledCount = {
   label: string;
   value: number;
+  subtext?: string;
 };
 
 export type MiddlewareMetrics = {
@@ -137,6 +138,7 @@ export type SecurityInsights = {
   threats_by_country: LabeledCount[] | null;
   attack_trend: TrafficSample[] | null;
   recent_anomalies: SecurityThreat[] | null;
+  total_anomalies: number;
   active_threats: number;
   heavy_hitters: string[] | null;
   global_threat_score: number;
