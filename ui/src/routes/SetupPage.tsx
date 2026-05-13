@@ -618,7 +618,7 @@ export default function SetupPage() {
                       <Text size="sm" c="dimmed">
                         Review your configuration. global.json will be created when you confirm.
                       </Text>
-                      <Paper p="md" withBorder radius="md" bg="gray.0">
+                      <Paper p="md" withBorder radius="md" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                         <Stack gap="xs">
                           <Group gap="xs">
                             <Text size="xs" fw={600} c="dimmed">Username:</Text>

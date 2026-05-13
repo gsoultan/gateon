@@ -94,46 +94,46 @@ type increment struct {
 }
 
 type TraceRecord struct {
-	ID              string
-	OperationName   string
-	ServiceName     string
-	DurationMs      float64
-	Timestamp       time.Time
-	Status          string
-	Path            string
-	SourceIP        string
-	Fingerprint     string
-	CountryCode     string
-	UserAgent       string
-	Method          string
-	Referer         string
-	RequestURI      string
-	JA3             string
-	RequestHeaders  string
-	RequestBody     string
-	ResponseHeaders string
-	ResponseBody    string
-	JA4             string
+	ID              string    `json:"id"`
+	OperationName   string    `json:"operation_name"`
+	ServiceName     string    `json:"service_name"`
+	DurationMs      float64   `json:"duration_ms"`
+	Timestamp       time.Time `json:"timestamp"`
+	Status          string    `json:"status"`
+	Path            string    `json:"path"`
+	SourceIP        string    `json:"source_ip"`
+	Fingerprint     string    `json:"fingerprint"`
+	CountryCode     string    `json:"country_code"`
+	UserAgent       string    `json:"user_agent"`
+	Method          string    `json:"method"`
+	Referer         string    `json:"referer"`
+	RequestURI      string    `json:"request_uri"`
+	JA3             string    `json:"ja3"`
+	RequestHeaders  string    `json:"request_headers"`
+	RequestBody     string    `json:"request_body"`
+	ResponseHeaders string    `json:"response_headers"`
+	ResponseBody    string    `json:"response_body"`
+	JA4             string    `json:"ja4"`
 }
 
 type SecurityThreat struct {
-	ID          string
-	Type        string
-	SourceIP    string
-	Fingerprint string
-	Score       float64
-	Details     string
-	Time        time.Time
-	JA3         string
-	JA4         string
-	RouteID     string
-	RequestURI  string
-	Category    string
-	Severity    string
-	ASN         string
-	ActionTaken string
-	CountryCode string `json:"country_code"`
-	Mitigated   bool   `json:"mitigated"`
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	SourceIP    string    `json:"source_ip"`
+	Fingerprint string    `json:"fingerprint"`
+	Score       float64   `json:"score"`
+	Details     string    `json:"details"`
+	Time        time.Time `json:"timestamp"`
+	JA3         string    `json:"ja3"`
+	JA4         string    `json:"ja4"`
+	RouteID     string    `json:"route_id"`
+	RequestURI  string    `json:"request_uri"`
+	Category    string    `json:"category"`
+	Severity    string    `json:"severity"`
+	ASN         string    `json:"asn"`
+	ActionTaken string    `json:"action_taken"`
+	CountryCode string    `json:"country_code"`
+	Mitigated   bool      `json:"mitigated"`
 }
 
 type pathStatsStore struct {
@@ -696,8 +696,12 @@ func RecordSecurityThreat(t SecurityThreat) {
 		store.scoreCache.Add(t.SourceIP, score)
 	}
 
-	if t.Fingerprint != "" {
-		DecreaseReputation(t.Fingerprint, t.Score/2, t.Type) // Penalty is half the threat score
+	repID := t.Fingerprint
+	if repID == "" {
+		repID = t.SourceIP
+	}
+	if repID != "" {
+		DecreaseReputation(repID, t.Score/2, t.Type) // Penalty is half the threat score
 	}
 
 	// Increment Prometheus counter
@@ -1027,8 +1031,8 @@ func GetActiveThreatsToday() uint64 {
 	return store.baselineActiveToday.Load() + store.currentActiveToday.Load()
 }
 
-// GetSecurityThreats returns the last N security threats from the store.
-func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
+// GetSecurityThreats returns a paged list of security threats from the store.
+func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat {
 	if store == nil {
 		return nil
 	}
@@ -1038,8 +1042,11 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code FROM security_threats ORDER BY timestamp DESC LIMIT ?")
-	rows, err := store.db.QueryContext(ctx, query, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	rows, err := store.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logger.Default().LogError("threats: query failed", "error", err)
 		return nil
@@ -1056,6 +1063,20 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 		res = append(res, th)
 	}
 	return res
+}
+
+// CountSecurityThreats returns the total number of security threats in the store.
+func CountSecurityThreats(ctx context.Context) int64 {
+	if store == nil {
+		return 0
+	}
+	var count int64
+	query := store.dialect.Rebind("SELECT COUNT(*) FROM security_threats")
+	err := store.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 func IsStoreEnabled() bool {
@@ -1083,7 +1104,7 @@ func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
 	if store == nil {
 		return nil
 	}
-	query := store.dialect.Rebind("SELECT source_ip, COUNT(*) as cnt FROM security_threats GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT source_ip, MAX(asn), COUNT(*) as cnt FROM security_threats GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil
@@ -1092,9 +1113,10 @@ func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
 	var res []LabeledCount
 	for rows.Next() {
 		var label string
+		var asn string
 		var count float64
-		if err := rows.Scan(&label, &count); err == nil {
-			res = append(res, LabeledCount{Label: label, Value: count})
+		if err := rows.Scan(&label, &asn, &count); err == nil {
+			res = append(res, LabeledCount{Label: label, Value: count, Subtext: asn})
 		}
 	}
 	return res
@@ -1153,12 +1175,12 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 		days = 1
 	}
 	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
-	// Group by day and hour for trend
+	// Group by hour for trend
 	var query string
 	if store.dialect.Driver == db.DriverPostgres || store.dialect.Driver == "pgx" {
-		query = "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD') as day, EXTRACT(HOUR FROM timestamp) as hr, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY day, hr ORDER BY day ASC, hr ASC"
+		query = "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD HH24:00:00') as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
 	} else {
-		query = "SELECT strftime('%Y-%m-%d', timestamp) as day, (strftime('%H', timestamp)) as hr, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY day, hr ORDER BY day ASC, hr ASC"
+		query = "SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
 	}
 
 	rows, err := store.db.QueryContext(ctx, store.dialect.Rebind(query), cutoff)
@@ -1169,12 +1191,14 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 
 	var res []TrafficSample
 	for rows.Next() {
-		var day string
-		var hr int
+		var bucket string
 		var count uint64
-		if err := rows.Scan(&day, &hr, &count); err == nil {
-			t, _ := time.Parse("2006-01-02", day)
-			t = t.Add(time.Duration(hr) * time.Hour)
+		if err := rows.Scan(&bucket, &count); err == nil {
+			t, err := time.Parse("2006-01-02 15:04:05", bucket)
+			if err != nil {
+				// try alternative format if Parse fails
+				t, _ = time.Parse("2006-01-02 15:04", bucket)
+			}
 			res = append(res, TrafficSample{
 				Timestamp: t.UnixMilli(),
 				Requests:  count, // Reusing Requests field for threat count

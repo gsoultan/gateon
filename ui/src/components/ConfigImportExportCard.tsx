@@ -145,7 +145,7 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
         </Group>
 
         {dryRunDiff && (
-          <Paper withBorder p="md" radius="md" bg="gray.0">
+          <Paper withBorder p="md" radius="md" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
             <Stack gap="xs">
               <Group justify="space-between">
                 <Text fw={600} size="sm">Import Preview (Dry Run)</Text>

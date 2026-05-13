@@ -451,7 +451,8 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 	if limit <= 0 {
 		limit = 50
 	}
-	threats := telemetry.GetSecurityThreats(ctx, limit)
+	offset := int(req.GetOffset())
+	threats := telemetry.GetSecurityThreats(ctx, limit, offset)
 	res := make([]*gateonv1.Anomaly, 0, len(threats))
 	for _, t := range threats {
 		severity := "low"

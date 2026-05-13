@@ -31,13 +31,7 @@ func decodeGlobalConfig(body []byte, conf *gateonv1.GlobalConfig) error {
 	return nil
 }
 
-// writeJSONError writes a JSON error object and status code.
-func writeJSONError(w http.ResponseWriter, statusCode int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
+// registerGlobalHandlers registers global configuration and utility handlers.
 func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/global", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
@@ -75,7 +69,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		logs, err := audit.GetLogs(r.Context(), limit)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -173,7 +167,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/me", func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
 		if !ok || claims == nil {
-			writeJSONError(w, http.StatusUnauthorized, "not authenticated")
+			WriteHTTPError(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -198,7 +192,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
 
 		var cpuUsage, memUsage float64
-		if snap, err := telemetry.CollectMetricsSnapshot(); err == nil {
+		if snap, err := telemetry.CollectMetricsSnapshot(50, 0); err == nil {
 			cpuUsage = snap.System.CPUUsage
 			memUsage = snap.System.MemoryUsage
 		}
@@ -243,7 +237,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
 
 				var cpuUsage, memUsage float64
-				if snap, err := telemetry.CollectMetricsSnapshot(); err == nil {
+				if snap, err := telemetry.CollectMetricsSnapshot(50, 0); err == nil {
 					cpuUsage = snap.System.CPUUsage
 					memUsage = snap.System.MemoryUsage
 				}
@@ -337,12 +331,12 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		resp, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{})
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		data, err := ProtojsonOptions().Marshal(resp)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to marshal response")
+			WriteHTTPError(w, http.StatusInternalServerError, "failed to marshal response")
 			return
 		}
 		if _, err := w.Write(data); err != nil {
@@ -358,14 +352,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		// Only allow test-db during setup
 		setupReq, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{})
 		if err == nil && !setupReq.Required {
-			writeJSONError(w, http.StatusForbidden, "test-db is only allowed during initial setup")
+			WriteHTTPError(w, http.StatusForbidden, "test-db is only allowed during initial setup")
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		var body testDBReq
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 		dsn := body.DatabaseUrl
@@ -373,12 +367,12 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			dsn = db.BuildURLFromConfig(body.DatabaseConfig)
 		}
 		if dsn == "" {
-			writeJSONError(w, http.StatusBadRequest, "missing database configuration")
+			WriteHTTPError(w, http.StatusBadRequest, "missing database configuration")
 			return
 		}
 		conn, _, err := db.Open(dsn)
 		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, "connection failed: "+err.Error())
+			WriteHTTPError(w, http.StatusBadRequest, "connection failed: "+err.Error())
 			return
 		}
 		_ = conn.Close()
@@ -400,8 +394,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		var body setupBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 
@@ -412,12 +405,12 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				dsn = db.BuildURLFromConfig(body.DatabaseConfig)
 			}
 			if dsn == "" {
-				writeJSONError(w, http.StatusBadRequest, "invalid database configuration")
+				WriteHTTPError(w, http.StatusBadRequest, "invalid database configuration")
 				return
 			}
 			conn, _, err := db.Open(dsn)
 			if err != nil {
-				writeJSONError(w, http.StatusBadRequest, "failed to connect to database: "+err.Error())
+				WriteHTTPError(w, http.StatusBadRequest, "failed to connect to database: "+err.Error())
 				return
 			}
 			_ = conn.Close()
@@ -436,7 +429,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				gc.Auth.SqlitePath = ""
 			}
 			if err := svc.GetGlobals().Update(r.Context(), gc); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "failed to persist database settings")
+				WriteHTTPError(w, http.StatusInternalServerError, "failed to persist database settings")
 				return
 			}
 		}
@@ -450,15 +443,12 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		resp, err := svc.Setup(r.Context(), &req)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
-				logger.L.LogError("failed to encode error response", "error", err)
-			}
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		data, err := ProtojsonOptions().Marshal(resp)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to marshal response")
+			WriteHTTPError(w, http.StatusInternalServerError, "failed to marshal response")
 			return
 		}
 		if _, err := w.Write(data); err != nil {
@@ -469,31 +459,31 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.Setup2FARequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 
 		// Verify permission (admin or self)
 		claimsVal := r.Context().Value(middleware.UserContextKey)
 		if claimsVal == nil {
-			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			WriteHTTPError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
 			if claims.ID != req.Id && !auth.Allowed(claims.Role, auth.ActionWrite, auth.ResourceUsers) {
-				writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+				WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
 				return
 			}
 		}
 
 		resp, err := svc.Setup2FA(r.Context(), &req)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		data, err := ProtojsonOptions().Marshal(resp)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to marshal response")
+			WriteHTTPError(w, http.StatusInternalServerError, "failed to marshal response")
 			return
 		}
 		if _, err := w.Write(data); err != nil {
@@ -504,7 +494,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.Verify2FARequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 
@@ -518,7 +508,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.Verify2FA(r.Context(), &req)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
@@ -534,7 +524,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.LoginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 		resp, err := svc.Login(r.Context(), &req)
@@ -543,7 +533,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				logger.SecurityEvent("auth_failure", r, "invalid_credentials")
 				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.GetClientIP(r, true))
 			}
-			writeJSONError(w, http.StatusUnauthorized, err.Error())
+			WriteHTTPError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
 
@@ -567,7 +557,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			Page: page, PageSize: pageSize, Search: search,
 		})
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -580,16 +570,16 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.User
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 		if !auth.ValidRole(req.Role) {
-			writeJSONError(w, http.StatusBadRequest, "invalid role: must be admin, operator, or viewer")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid role: must be admin, operator, or viewer")
 			return
 		}
 		resp, err := svc.UpdateUser(r.Context(), &gateonv1.UpdateUserRequest{User: &req})
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
@@ -608,11 +598,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.ChangePasswordRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid json")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
 		if req.Id == "" || req.Password == "" {
-			writeJSONError(w, http.StatusBadRequest, "id and password are required")
+			WriteHTTPError(w, http.StatusBadRequest, "id and password are required")
 			return
 		}
 
@@ -623,7 +613,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				isAdmin := auth.Allowed(claims.Role, auth.ActionWrite, auth.ResourceUsers)
 				isSelf := claims.ID == req.Id
 				if !isAdmin && !isSelf {
-					writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+					WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
 					return
 				}
 			}
@@ -631,7 +621,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.ChangePassword(r.Context(), &req)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -645,7 +635,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		id := r.PathValue("id")
 		resp, err := svc.DeleteUser(r.Context(), &gateonv1.DeleteUserRequest{Id: id})
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 

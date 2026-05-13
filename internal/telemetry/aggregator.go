@@ -73,7 +73,7 @@ func (a *LocalMetricsAggregator) Start(ctx context.Context) {
 }
 
 func (a *LocalMetricsAggregator) takeSnapshot() {
-	snap, err := CollectMetricsSnapshot()
+	snap, err := CollectMetricsSnapshot(10, 0)
 	if err != nil {
 		logger.L.LogError("failed to collect metrics snapshot for aggregator", "error", err)
 		return

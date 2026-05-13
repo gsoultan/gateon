@@ -97,7 +97,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 				_ = ad.ebpfManager.ShunIP(s.IP)
 				RecordSecurityThreat(SecurityThreat{
 					ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
-					Type:        "anomaly_detected",
+					Type:        "brute_force_attempt",
 					SourceIP:    s.IP,
 					Score:       rate * 100,
 					Details:     fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate),
@@ -109,7 +109,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 			} else {
 				RecordSecurityThreat(SecurityThreat{
 					ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
-					Type:        "anomaly_detected",
+					Type:        "brute_force_attempt",
 					SourceIP:    s.IP,
 					Score:       rate * 100,
 					Details:     fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate),
@@ -136,7 +136,7 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 				_ = ad.ebpfManager.ShunIP(s.IP)
 				RecordSecurityThreat(SecurityThreat{
 					ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
-					Type:        "anomaly_detected",
+					Type:        "exploit_scan",
 					SourceIP:    s.IP,
 					Score:       math.Min(100, s.WafBlocks*10),
 					Details:     fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks),
@@ -148,7 +148,7 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 			} else {
 				RecordSecurityThreat(SecurityThreat{
 					ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
-					Type:        "anomaly_detected",
+					Type:        "exploit_scan",
 					SourceIP:    s.IP,
 					Score:       math.Min(100, s.WafBlocks*5),
 					Details:     fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks),
@@ -193,7 +193,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-error-rate-%d", now.Unix()),
-				Type:        "anomaly_detected",
+				Type:        "error_rate_spike",
 				Score:       math.Min(100, ratio*20),
 				Details:     fmt.Sprintf("Error rate spike: %.2f%% (baseline %.2f%%)", errorRate*100, baselineRate*100),
 				Time:        now,
@@ -225,7 +225,7 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-latency-%d", now.Unix()),
-				Type:        "anomaly_detected",
+				Type:        "latency_spike",
 				Score:       math.Min(100, ratio*25),
 				Details:     fmt.Sprintf("High latency spike: %.2fs (baseline %.2fs)", currentP99, baselineP99),
 				Time:        now,

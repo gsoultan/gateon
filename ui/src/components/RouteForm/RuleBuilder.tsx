@@ -294,7 +294,7 @@ export function RuleBuilder({
       )}
 
       {conditions.length === 0 ? (
-        <Paper p="md" withBorder radius="md" bg="gray.0">
+        <Paper p="md" withBorder radius="md" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
           <Text size="sm" c="dimmed" ta="center">
             No conditions yet. Click "Add condition" to build your match rule.
           </Text>
@@ -325,11 +325,11 @@ export function RuleBuilder({
       )}
 
       {generatedRule && (
-        <Paper p="xs" withBorder radius="md" bg="dark.8">
+        <Paper p="xs" withBorder radius="md" bg="light-dark(var(--mantine-color-dark-8), var(--mantine-color-dark-9))">
           <Text size="xs" c="dimmed" mb={4}>
             Generated rule
           </Text>
-          <Text size="xs" ff="monospace" c="gray.3" style={{ wordBreak: "break-all" }}>
+          <Text size="xs" ff="monospace" c="dimmed" style={{ wordBreak: "break-all" }}>
             {generatedRule}
           </Text>
         </Paper>

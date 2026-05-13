@@ -276,7 +276,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 
 		// Get system metrics from latest snapshot
 		var cpuUsage, memUsage float64
-		if snap, err := telemetry.CollectMetricsSnapshot(); err == nil {
+		if snap, err := telemetry.CollectMetricsSnapshot(50, 0); err == nil {
 			cpuUsage = snap.System.CPUUsage
 			memUsage = snap.System.MemoryUsage
 		}
@@ -315,14 +315,29 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
 			return
 		}
-		snap, err := telemetry.CollectMetricsSnapshot()
+		limit := 50
+		if lStr := r.URL.Query().Get("limit"); lStr != "" {
+			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+		offset := 0
+		if oStr := r.URL.Query().Get("offset"); oStr != "" {
+			if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+				offset = o
+			}
+		} else if pStr := r.URL.Query().Get("page"); pStr != "" {
+			if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+				offset = (p - 1) * limit
+			}
+		}
+
+		snap, err := telemetry.CollectMetricsSnapshot(limit, offset)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(snap)
+		WriteJSON(w, http.StatusOK, snap)
 	})
 	mux.HandleFunc("GET /v1/diag/metrics/watch", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
@@ -342,7 +357,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		for {
 			select {
 			case <-ticker.C:
-				snap, err := telemetry.CollectMetricsSnapshot()
+				snap, err := telemetry.CollectMetricsSnapshot(50, 0)
 				if err != nil {
 					return
 				}
@@ -375,12 +390,12 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		// SSRF prevention: validate URL
 		u, err := url.Parse(req.Target)
 		if err != nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") {
-			writeJSONError(w, http.StatusBadRequest, "invalid target url")
+			WriteHTTPError(w, http.StatusBadRequest, "invalid target url")
 			return
 		}
 		// Basic SSRF: reject loopback
 		if u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1" {
-			writeJSONError(w, http.StatusBadRequest, "access to localhost is forbidden")
+			WriteHTTPError(w, http.StatusBadRequest, "access to localhost is forbidden")
 			return
 		}
 
