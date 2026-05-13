@@ -242,6 +242,8 @@ message WafConfig {
   string rules_url = 29;
   string clamav_addr = 30; // Deprecated: use clamav.clamav_addr
   ClamavConfig clamav = 31;
+  double entropy_threshold = 32;
+  bool disable_entropy = 33;
 }
 
 message ClamavConfig {

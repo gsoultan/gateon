@@ -50,10 +50,12 @@ type WAFConfig struct {
 	EnableRansomwareDetection bool
 	EnableDLP                 bool
 	AnomalyThreshold          int
-	RequestBodyLimit          int    // Maximum request body size in bytes
-	ResponseBodyLimit         int    // Maximum response body size in bytes
-	AuditLogPath              string // Path to audit log file
-	AuditLogRelevantOnly      bool   // Only log relevant transactions
+	EntropyThreshold          float64 // Threshold for Shannon entropy check (default 5.8)
+	DisableEntropy            bool    // If true, skip fast-path entropy check
+	RequestBodyLimit          int     // Maximum request body size in bytes
+	ResponseBodyLimit         int     // Maximum response body size in bytes
+	AuditLogPath              string  // Path to audit log file
+	AuditLogRelevantOnly      bool    // Only log relevant transactions
 	EbpfManager               ebpf.Manager
 	AllowedAdminIps           []string // IPs allowed to access WP admin
 	RulesPath                 string   // Path to external WAF rules (CRS)
@@ -301,12 +303,23 @@ SecAuditLog "%s"
 			}
 
 			// Check entropy of common fields to detect shellcode/obfuscation
-			for _, vals := range r.Header {
-				for _, val := range vals {
-					if len(val) > 32 && entropy.IsSuspicious(val, 5.0) {
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_entropy").Inc()
-						http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
-						return
+			if !cfg.DisableEntropy {
+				threshold := cfg.EntropyThreshold
+				if threshold <= 0 {
+					threshold = 5.8
+				}
+				for key, vals := range r.Header {
+					if isSafeHeader(key) {
+						continue
+					}
+					for _, val := range vals {
+						// Increase min length to 64 and threshold to 5.8 to reduce false positives.
+						// High entropy in unknown headers is still suspicious.
+						if len(val) > 64 && entropy.IsSuspicious(val, threshold) {
+							telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_entropy").Inc()
+							http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
+							return
+						}
 					}
 				}
 			}
@@ -318,6 +331,26 @@ SecAuditLog "%s"
 			wafHandler.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+func isSafeHeader(name string) bool {
+	name = strings.ToLower(name)
+	switch {
+	case name == "authorization", name == "cookie", name == "set-cookie",
+		name == "x-csrf-token", name == "x-xsrf-token",
+		name == "sec-websocket-key", name == "sec-websocket-accept",
+		name == "x-api-key", name == "x-auth-token",
+		name == "x-gateon-fingerprint", name == "x-request-id",
+		name == "x-correlation-id":
+		return true
+	case strings.HasPrefix(name, "x-amz-"),
+		strings.HasPrefix(name, "x-goog-"),
+		strings.HasPrefix(name, "x-apple-"),
+		strings.HasPrefix(name, "x-ms-"),
+		strings.HasPrefix(name, "grpc-"):
+		return true
+	}
+	return false
 }
 
 type wafWrapper struct {
@@ -472,6 +505,16 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		}
 	}
 
+	anomalyThreshold := intVal(cfg["anomaly_threshold"])
+	entropyThreshold := 5.8
+	if v, ok := cfg["entropy_threshold"]; ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			entropyThreshold = f
+		}
+	}
+	disableEntropy := strings.TrimSpace(strings.ToLower(cfg["disable_entropy"])) == "true" ||
+		strings.TrimSpace(strings.ToLower(cfg["disable_entropy"])) == "1"
+
 	return WAFConfig{
 		UseCRS:                    useCRS,
 		ParanoiaLevel:             pl,
@@ -494,7 +537,9 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		EnableMalwareDetection:    strings.TrimSpace(strings.ToLower(cfg["malware_detection"])) == "true",
 		EnableRansomwareDetection: strings.TrimSpace(strings.ToLower(cfg["ransomware_detection"])) == "true",
 		EnableDLP:                 strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
-		AnomalyThreshold:          intVal(cfg["anomaly_threshold"]),
+		AnomalyThreshold:          anomalyThreshold,
+		EntropyThreshold:          entropyThreshold,
+		DisableEntropy:            disableEntropy,
 		RequestBodyLimit:          intVal(cfg["request_body_limit"]),
 		ResponseBodyLimit:         intVal(cfg["response_body_limit"]),
 		AuditLogPath:              strings.TrimSpace(cfg["audit_log_path"]),

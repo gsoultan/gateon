@@ -164,6 +164,38 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
             </Stack>
           </Group>
 
+          <Divider label="Fast-Path Entropy" labelPosition="center" />
+          <Group grow align="start">
+            <Stack gap="xs">
+              <Switch
+                label="Enable Entropy Check"
+                description="Fast-path detection of obfuscated payloads (shellcode/malware)"
+                checked={config.disable_entropy !== "true"}
+                onChange={(e) =>
+                  updateConfig(
+                    "disable_entropy",
+                    e.currentTarget.checked ? "false" : "true"
+                  )
+                }
+              />
+            </Stack>
+            <Stack gap="xs">
+              <NumberInput
+                label="Entropy Threshold"
+                description="Threshold for entropy check (0.0-8.0). Default: 5.8"
+                decimalScale={1}
+                step={0.1}
+                value={parseFloat(config.entropy_threshold) || 5.8}
+                onChange={(val) =>
+                  updateConfig("entropy_threshold", (val ?? 5.8).toString())
+                }
+                min={0}
+                max={8}
+                disabled={config.disable_entropy === "true"}
+              />
+            </Stack>
+          </Group>
+
           <Divider label="CRS Settings" labelPosition="center" />
           <Group grow>
             <NumberInput
