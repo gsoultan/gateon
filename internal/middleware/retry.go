@@ -22,7 +22,7 @@ func Retry(cfg RetryConfig) Middleware {
 			if attempts <= 0 {
 				attempts = 1
 			}
-			for i := 0; i < attempts; i++ {
+			for range attempts {
 				next.ServeHTTP(w, r)
 				break // Single attempt until body buffering and response inspection are implemented
 			}

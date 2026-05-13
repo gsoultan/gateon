@@ -7,11 +7,11 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/syncutil"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -68,10 +68,8 @@ func TestIntegration_TCPInspection(t *testing.T) {
 		AccessLogEnabled: false,
 	}
 	deps := mockDepsForInspection(t)
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg := &syncutil.WaitGroup{}
+	wg.Go(func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -79,7 +77,7 @@ func TestIntegration_TCPInspection(t *testing.T) {
 			}
 			go handleTCPConnWithInspection(conn, ep, deps, nil)
 		}
-	}()
+	})
 
 	t.Run("HTTP_request_routed_to_HTTP_handler", func(t *testing.T) {
 		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
