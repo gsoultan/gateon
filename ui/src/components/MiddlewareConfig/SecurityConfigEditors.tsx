@@ -7,6 +7,7 @@ import {
   Group,
   Text,
   Button,
+  Select,
   FileButton,
   ActionIcon,
   Divider,
@@ -805,6 +806,26 @@ export function OIDCConfigEditor({ config, updateConfig }: EditorProps) {
         value={splitTags(config.scopes)}
         onChange={(val) => updateConfig("scopes", joinTags(val))}
         clearable
+      />
+    </Stack>
+  );
+}
+
+export function SecurityHeadersConfigEditor({ config, updateConfig }: EditorProps) {
+  return (
+    <Stack gap="md">
+      <Select
+        label="Security Headers Preset"
+        description="Recommended applies HSTS (1y), NoSniff, SameOrigin FrameOptions. Strict adds CSP and DENY FrameOptions."
+        placeholder="Select preset"
+        data={[
+          { value: "recommended", label: "Recommended" },
+          { value: "strict", label: "Strict (Maximum Security)" },
+          { value: "none", label: "None" },
+        ]}
+        value={config.preset || "recommended"}
+        onChange={(val) => updateConfig("preset", val || "recommended")}
+        allowDeselect={false}
       />
     </Stack>
   );

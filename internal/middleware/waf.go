@@ -17,6 +17,8 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/entropy"
+	"github.com/gsoultan/gateon/internal/security/scanner"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -56,6 +58,15 @@ type WAFConfig struct {
 	AllowedAdminIps           []string // IPs allowed to access WP admin
 	RulesPath                 string   // Path to external WAF rules (CRS)
 }
+
+var (
+	fastScanner = scanner.NewScanner([]string{
+		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ",
+		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(",
+		"/etc/passwd", "/bin/sh", "cmd.exe", "/proc/self/", "/windows/system32",
+		"<?php", "base64_decode", "shell_exec", "system(",
+	})
+)
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
 func WAF(cfg WAFConfig) (Middleware, error) {
@@ -280,9 +291,30 @@ SecAuditLog "%s"
 			if cfg.TrustCloudflare {
 				r.RemoteAddr = request.GetClientIP(r, true)
 			}
-			// We can't easily pass routeID to ErrorCallback because it's set at WAF creation.
-			// But we can record it here if we use a different approach.
-			// For now, let's at least skip the whole WAF for internal traffic if ShouldSkipMetrics is true.
+
+			// Deterministic Fast Path: Aho-Corasick & Entropy
+			// We check URI and Headers for known signatures before entering the heavy WAF engine.
+			if fastScanner.Scan(r.RequestURI) {
+				telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+				http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+				return
+			}
+
+			// Check entropy of common fields to detect shellcode/obfuscation
+			for _, vals := range r.Header {
+				for _, val := range vals {
+					if len(val) > 32 && entropy.IsSuspicious(val, 5.0) {
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_entropy").Inc()
+						http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
+						return
+					}
+				}
+			}
+
+			// Deterministic Trace Correlation
+			traceID := telemetry.GenerateJA4H(r) // Use JA4H as a deterministic trace correlation component if OTel is missing
+			r.Header.Set("X-Gateon-Fingerprint", traceID)
+
 			wafHandler.ServeHTTP(w, r)
 		})
 	}, nil
@@ -368,6 +400,10 @@ func (t *txWrapper) Close() error {
 			if uri == "" {
 				uri = last.URI()
 			}
+		}
+
+		if clientIP != "" {
+			telemetry.GetAggregator().RecordWAFBlock(clientIP)
 		}
 
 		// Record security threat for telemetry and UI

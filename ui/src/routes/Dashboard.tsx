@@ -447,7 +447,7 @@ export default function Dashboard() {
     },
     {
       label: "Active Threats",
-      value: formatCompact(metricsSnap?.active_suspicious_sessions || 0),
+      value: formatCompact(metricsSnap?.security?.active_threats || 0),
       icon: IconAlertCircle,
       color: "orange" as const,
       description: "Ongoing suspicious activities",
@@ -565,6 +565,7 @@ export default function Dashboard() {
                 <BarChart
                   h={180}
                   minWidth={0}
+                  minHeight={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -618,6 +619,7 @@ export default function Dashboard() {
                 <BarChart
                   h={180}
                   minWidth={0}
+                  minHeight={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -817,6 +819,7 @@ export default function Dashboard() {
           <BarChart
             h={240}
             minWidth={0}
+            minHeight={0}
             data={hourlyTrafficData}
             dataKey="hour"
             withLegend={false}
@@ -866,6 +869,7 @@ export default function Dashboard() {
             <LineChart
               h={260}
               minWidth={0}
+              minHeight={0}
               data={hourlyBandwidthData}
               dataKey="hour"
               withLegend

@@ -60,11 +60,14 @@ type MetricsSnapshot struct {
 }
 
 type SecurityInsights struct {
-	TopThreatSources []LabeledCount   `json:"top_threat_sources"`
-	TopThreatTypes   []LabeledCount   `json:"top_threat_types"`
-	ThreatsByCountry []LabeledCount   `json:"threats_by_country"`
-	AttackTrend      []TrafficSample  `json:"attack_trend"`
-	RecentAnomalies  []SecurityThreat `json:"recent_anomalies"`
+	TopThreatSources  []LabeledCount   `json:"top_threat_sources"`
+	TopThreatTypes    []LabeledCount   `json:"top_threat_types"`
+	ThreatsByCountry  []LabeledCount   `json:"threats_by_country"`
+	AttackTrend       []TrafficSample  `json:"attack_trend"`
+	RecentAnomalies   []SecurityThreat `json:"recent_anomalies"`
+	ActiveThreats     int              `json:"active_threats"`
+	HeavyHitters      []string         `json:"heavy_hitters"`
+	GlobalThreatScore float64          `json:"global_threat_score"`
 }
 
 // GoldenSignals represents the four golden signals of monitoring.
@@ -183,6 +186,7 @@ type SystemMetrics struct {
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
 func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
+	UpdateReputationMetrics()
 	families, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		return nil, err
@@ -206,7 +210,7 @@ func CollectMetricsSnapshot() (*MetricsSnapshot, error) {
 	snap.HourlyDomainMetrics = GetDomainStatsWindow(context.Background(), 1)
 	snap.TrafficHistory = GetSystemTrafficHistory(context.Background(), CurrentRetentionDays())
 	snap.System = buildSystemMetrics(idx)
-	snap.Security = buildSecurityInsights(context.Background())
+	snap.Security = buildSecurityInsights(context.Background(), idx)
 
 	// Build active threat metrics
 	snap.ActiveSuspiciousSessions = gaugeValue(idx, "gateon_active_suspicious_sessions_total")
@@ -691,13 +695,19 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	}
 }
 
-func buildSecurityInsights(ctx context.Context) SecurityInsights {
+func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily) SecurityInsights {
+	threats := GetSecurityThreats(ctx, 50)
+	activeCount := int(GetActiveThreatsToday())
+
 	return SecurityInsights{
-		TopThreatSources: GetTopThreatSources(ctx, 5),
-		TopThreatTypes:   GetTopThreatTypes(ctx, 5),
-		ThreatsByCountry: GetThreatsByCountry(ctx, 10),
-		AttackTrend:      GetAttackTrend(ctx, 7),
-		RecentAnomalies:  GetSecurityThreats(ctx, 10),
+		TopThreatSources:  GetTopThreatSources(ctx, 5),
+		TopThreatTypes:    GetTopThreatTypes(ctx, 5),
+		ThreatsByCountry:  GetThreatsByCountry(ctx, 10),
+		AttackTrend:       GetAttackTrend(ctx, 7),
+		RecentAnomalies:   threats,
+		ActiveThreats:     activeCount,
+		HeavyHitters:      GlobalHHH.GetHeavyHitters(100), // Threshold of 100 requests
+		GlobalThreatScore: float64(GlobalCMS.Estimate("global")),
 	}
 }
 

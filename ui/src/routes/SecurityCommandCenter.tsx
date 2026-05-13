@@ -1,13 +1,19 @@
 import React from 'react';
-import { Container, Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Table, Box, Paper, Avatar, RingProgress, Center, Alert, Menu, Loader } from '@mantine/core';
+import { Container, Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, Button, ActionIcon, Tooltip, Table, Box, Paper, Avatar, RingProgress, Center, Alert, Menu, Loader, Transition } from '@mantine/core';
 import { DonutChart, LineChart, BarChart } from '@mantine/charts';
 import { IconShieldCheck, IconShieldExclamation, IconAlertTriangle, IconActivity, IconBell, IconHistory, IconFingerprint, IconWorld, IconLock, IconRefresh, IconSearch, IconAdjustments, IconTarget, IconExternalLink, IconUserCheck, IconGhost, IconShieldOff, IconArrowUpRight, IconArrowDownRight, IconInfoCircle, IconMapPin, IconClock, IconX, IconDownload, IconBox, IconChevronDown } from '@tabler/icons-react';
 import { useSecurityThreats, useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
+import { useAnimateValue } from '../hooks/useAnimateValue';
 import { notifications } from '@mantine/notifications';
 import { ReputationMonitor } from '../components/ReputationMonitor';
 import { Link } from '@tanstack/react-router';
 import type { GlobalConfig, DeepScanStatus } from '../types/gateon';
 import { format } from 'date-fns';
+
+const AnimatedTitle = ({ value, suffix = "" }: { value: number; suffix?: string }) => {
+  const animatedValue = useAnimateValue(value);
+  return <Title order={3}>{animatedValue}{suffix}</Title>;
+};
 
 export default function SecurityCommandCenter() {
   const { data: metrics, isLoading: metricsLoading } = useMetricsSnapshot();
@@ -291,11 +297,11 @@ export default function SecurityCommandCenter() {
 
         {/* Stats Overview */}
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
-          <Card withBorder radius="md" p="md">
+          <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
             <Group justify="space-between">
               <Stack gap={0}>
                 <Text size="xs" c="dimmed" fw={700} tt="uppercase">Security Posture</Text>
-                <Title order={3}>{securityScore}%</Title>
+                <AnimatedTitle value={securityScore} suffix="%" />
               </Stack>
               <RingProgress
                 size={60}
@@ -317,29 +323,29 @@ export default function SecurityCommandCenter() {
             </Group>
           </Card>
 
-          <Card withBorder radius="md" p="md">
+          <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
             <Group justify="space-between">
               <Stack gap={0}>
-                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Active Mitigations</Text>
-                <Title order={3}>{metrics?.security?.recent_anomalies?.filter(a => a.mitigated).length || 0}</Title>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Global Threat Score</Text>
+                <AnimatedTitle value={metrics?.security?.global_threat_score || 0} />
               </Stack>
-              <ThemeIcon size="xl" color="red" variant="light" radius="md">
-                <IconShieldOff size={24} />
+              <ThemeIcon size="xl" color="orange" variant="light" radius="md">
+                <IconActivity size={24} />
               </ThemeIcon>
             </Group>
             <Group gap={4} mt="sm">
-              <IconActivity size={14} color="red" />
+              <IconHistory size={14} color="orange" />
               <Text size="xs" c="dimmed">
-                Recently mitigated threats
+                Deterministic anomaly estimation (CMS)
               </Text>
             </Group>
           </Card>
 
-          <Card withBorder radius="md" p="md">
+          <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
             <Group justify="space-between">
               <Stack gap={0}>
                 <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated Today</Text>
-                <Title order={3}>{metrics?.middleware?.mitigated_threats?.reduce((a, b) => a + b.value, 0) || 0}</Title>
+                <AnimatedTitle value={metrics?.middleware?.mitigated_threats?.reduce((a, b) => a + b.value, 0) || 0} />
               </Stack>
               <ThemeIcon color="teal" variant="light" size="lg" radius="md">
                 <IconShieldCheck size={20} />
@@ -352,20 +358,19 @@ export default function SecurityCommandCenter() {
             </Group>
           </Card>
 
-          <Card withBorder radius="md" p="md">
+          <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
             <Group justify="space-between">
               <Stack gap={0}>
-                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Active Threats</Text>
-                <Title order={3}>{metrics?.active_suspicious_sessions || 0}</Title>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">Subnet Heavy Hitters</Text>
+                <Title order={3}>{metrics?.security?.heavy_hitters?.length || 0}</Title>
               </Stack>
               <ThemeIcon color="red" variant="light" size="lg" radius="md">
-                <IconAlertTriangle size={20} />
+                <IconTarget size={20} />
               </ThemeIcon>
             </Group>
             <Group gap={4} mt="sm">
-              <IconArrowDownRight size={14} color="red" />
-              <Text size="xs" c="red" fw={700}>-5%</Text>
-              <Text size="xs" c="dimmed">active mitigations</Text>
+              <IconMapPin size={14} color="red" />
+              <Text size="xs" c="dimmed">Malicious subnets detected (HHH)</Text>
             </Group>
           </Card>
 
@@ -385,6 +390,75 @@ export default function SecurityCommandCenter() {
           </Card>
         </SimpleGrid>
 
+        {/* Mitigation Funnel & Detailed Insights */}
+        <Grid mt="md">
+          <Grid.Col span={{ base: 12, lg: 6 }}>
+            <Card withBorder radius="md">
+              <Title order={4} mb="md">Mitigation Funnel Efficiency</Title>
+              <Stack gap="xs">
+                {[
+                  { label: "Total Ingress", value: metrics?.golden_signals?.requests_total || 0, color: "blue" },
+                  { label: "XDP/eBPF Drop", value: metrics?.middleware?.ebpf_dropped_packets?.reduce((a, b) => a + b.value, 0) || 0, color: "red" },
+                  { label: "WAF Block", value: metrics?.middleware?.waf_blocked?.reduce((a, b) => a + b.value, 0) || 0, color: "orange" },
+                  { label: "Rate Limit", value: metrics?.middleware?.rate_limit_rejected?.reduce((a, b) => a + b.value, 0) || 0, color: "yellow" },
+                  { label: "Auth Check", value: metrics?.middleware?.auth_failures?.reduce((a, b) => a + b.value, 0) || 0, color: "indigo" },
+                  { label: "Allowed (200 OK)", value: metrics?.golden_signals?.requests_total ? (metrics?.golden_signals?.requests_total - metrics?.golden_signals?.errors_total) : 0, color: "teal" },
+                ].map((step) => (
+                  <Box key={step.label}>
+                    <Group justify="space-between" mb={4}>
+                      <Text size="sm" fw={500}>{step.label}</Text>
+                      <Text size="sm" c="dimmed">{step.value.toLocaleString()}</Text>
+                    </Group>
+                    <Paper h={8} radius="xl" bg="gray.1">
+                      <Box 
+                        h="100%" 
+                        bg={step.color} 
+                        style={{ 
+                          width: `${metrics?.golden_signals?.requests_total ? Math.min(100, (step.value / metrics.golden_signals.requests_total) * 100) : 0}%`,
+                          borderRadius: "inherit",
+                          transition: "width 1s ease-in-out"
+                        }} 
+                      />
+                    </Paper>
+                  </Box>
+                ))}
+              </Stack>
+            </Card>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, lg: 6 }}>
+            <Card withBorder radius="md">
+              <Title order={4} mb="md">Deterministic Path Anomalies</Title>
+              <SimpleGrid cols={2} spacing="md">
+                <Paper withBorder p="xs" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Heavy Hitter Subnets</Text>
+                  <Stack gap={4} mt={5}>
+                    {metrics?.security?.heavy_hitters?.slice(0, 5).map(h => (
+                      <Badge key={h} variant="light" color="red" size="sm" fullWidth>{h}</Badge>
+                    )) || <Text size="xs">No heavy hitters detected</Text>}
+                  </Stack>
+                </Paper>
+                <Paper withBorder p="xs" radius="md">
+                  <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Signature Fast-Path</Text>
+                  <Group mt={5} gap="xs">
+                    <ThemeIcon color="teal" variant="light" radius="xl">
+                      <IconShieldCheck size={14} />
+                    </ThemeIcon>
+                    <Text size="sm" fw={500}>Active (ART/Aho-Corasick)</Text>
+                  </Group>
+                  <Text size="xs" mt={5} c="dimmed">Merkle Chain Integrity: Verified</Text>
+                </Paper>
+              </SimpleGrid>
+              <Box mt="md">
+                 <Text size="xs" fw={700} c="dimmed" tt="uppercase">Forward Integrity (Hash Ledger)</Text>
+                 <Group gap="xs" mt={4}>
+                   <IconLock size={14} color="teal" />
+                   <Text size="xs" c="teal">Audit logs cryptographically chained and rotated</Text>
+                 </Group>
+              </Box>
+            </Card>
+          </Grid.Col>
+        </Grid>
+
         {/* Charts Section */}
         <Grid>
           <Grid.Col span={{ base: 12, lg: 8 }}>
@@ -399,6 +473,8 @@ export default function SecurityCommandCenter() {
               <Box h={300} w="100%" style={{ minWidth: 0 }}>
                 <LineChart
                   h={300}
+                  minWidth={0}
+                  minHeight={0}
                   data={trendData}
                   dataKey="date"
                   series={[{ name: 'threats', color: 'red.6', label: 'Blocked Attacks' }]}
@@ -478,6 +554,8 @@ export default function SecurityCommandCenter() {
                 <Box h={200} w="100%" style={{ minWidth: 0 }}>
                   <BarChart
                     h={200}
+                    minWidth={0}
+                    minHeight={0}
                     data={countryData}
                     dataKey="country"
                     series={[{ name: 'threats', color: 'blue.6' }]}

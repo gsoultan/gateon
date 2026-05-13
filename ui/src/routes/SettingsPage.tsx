@@ -1926,7 +1926,6 @@ export default function SettingsPage() {
                   ...config,
                   anomaly_detection: {
                     ...(config.anomaly_detection || {
-                      prometheus_url: "http://localhost:9090",
                       check_interval_seconds: 60,
                       sensitivity: 0.5,
                     }),
@@ -1938,18 +1937,11 @@ export default function SettingsPage() {
             />
           </Group>
           <Text size="sm" c="dimmed">
-            Monitor traffic patterns via Prometheus and detect anomalies in real-time.
+            Monitor traffic patterns in-process and detect anomalies in real-time.
           </Text>
 
           {config.anomaly_detection?.enabled && (
             <Stack gap="sm">
-              <TextInput
-                label="Prometheus URL"
-                placeholder="http://prometheus:9090"
-                value={config.anomaly_detection.prometheus_url || ""}
-                onChange={(e) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, prometheus_url: e.currentTarget.value}})}
-                disabled={formDisabled}
-              />
               <Group grow>
                 <NumberInput
                   label="Check Interval (s)"

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"aidanwoods.dev/go-paseto"
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/o1egl/paseto/v2"
 	"github.com/pquerna/otp/totp"
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
@@ -21,8 +21,7 @@ import (
 type Manager struct {
 	db           *sql.DB
 	dialect      db.Dialect
-	paseto       *paseto.V2
-	symmetricKey []byte
+	symmetricKey paseto.V4SymmetricKey
 	logger       logger.Logger
 }
 
@@ -38,11 +37,21 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	// PASETO v4 local keys must be 32 bytes
+	keyBytes := []byte(symmetricKey)
+	if len(keyBytes) < 32 {
+		// Pad or return error
+		return nil, fmt.Errorf("PASETO v4 symmetric key must be at least 32 bytes")
+	}
+	key, err := paseto.V4SymmetricKeyFromBytes(keyBytes[:32])
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PASETO v4 key: %w", err)
+	}
+
 	m := &Manager{
 		db:           database,
 		dialect:      dialect,
-		paseto:       paseto.NewV2(),
-		symmetricKey: []byte(symmetricKey),
+		symmetricKey: key,
 		logger:       l,
 	}
 
@@ -100,40 +109,60 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 }
 
 func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error) {
+	token := paseto.NewToken()
 	now := time.Now()
 	exp := now.Add(24 * time.Hour)
 
-	claims := Claims{
-		ID:         user.Id,
-		Username:   user.Username,
-		Role:       user.Role,
-		IssuedAt:   now,
-		Expiration: exp,
-		NotBefore:  now,
-	}
+	token.SetExpiration(exp)
+	token.SetIssuedAt(now)
+	token.SetNotBefore(now)
+	token.SetSubject(user.Id)
+	token.SetString("id", user.Id)
+	token.SetString("username", user.Username)
+	token.SetString("role", user.Role)
 
-	token, err := m.paseto.Encrypt(m.symmetricKey, claims, nil)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to encrypt token: %w", err)
-	}
+	encrypted := token.V4Encrypt(m.symmetricKey, nil)
 
 	user.Password = ""
 	user.TwoFactorSecret = "" // Don't leak secret
-	return token, user, nil
+	return encrypted, user, nil
 }
 
 func (m *Manager) VerifyToken(token string) (any, error) {
-	var claims Claims
-	err := m.paseto.Decrypt(token, m.symmetricKey, &claims, nil)
+	parser := paseto.NewParser()
+	parsedToken, err := parser.ParseV4Local(m.symmetricKey, token, nil)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
+	}
+
+	claims := &Claims{}
+	if val, err := parsedToken.GetString("id"); err == nil {
+		claims.ID = val
+	}
+	if val, err := parsedToken.GetString("username"); err == nil {
+		claims.Username = val
+	}
+	if val, err := parsedToken.GetString("role"); err == nil {
+		claims.Role = val
+	}
+	if val, err := parsedToken.GetExpiration(); err == nil {
+		claims.Expiration = val
+	}
+	if val, err := parsedToken.GetIssuedAt(); err == nil {
+		claims.IssuedAt = val
+	}
+	if val, err := parsedToken.GetNotBefore(); err == nil {
+		claims.NotBefore = val
+	}
+	if val, err := parsedToken.GetSubject(); err == nil {
+		claims.Subject = val
 	}
 
 	if err := claims.Validate(); err != nil {
 		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
 
-	return &claims, nil
+	return claims, nil
 }
 
 func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.User, int32, error) {
@@ -242,7 +271,14 @@ func (m *Manager) DeleteUser(id string) error {
 }
 
 func (m *Manager) UpdateSymmetricKey(key string) {
-	m.symmetricKey = []byte(key)
+	keyBytes := []byte(key)
+	if len(keyBytes) < 32 {
+		return
+	}
+	k, err := paseto.V4SymmetricKeyFromBytes(keyBytes[:32])
+	if err == nil {
+		m.symmetricKey = k
+	}
 }
 
 func (m *Manager) Setup2FA(id string) (string, string, []string, error) {

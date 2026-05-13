@@ -4,11 +4,17 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/pebble"
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/db"
@@ -126,11 +132,13 @@ type SecurityThreat struct {
 	Severity    string
 	ASN         string
 	ActionTaken string
-	CountryCode string
+	CountryCode string `json:"country_code"`
+	Mitigated   bool   `json:"mitigated"`
 }
 
 type pathStatsStore struct {
 	db                          *sql.DB
+	pebble                      *pebble.DB
 	dialect                     db.Dialect
 	inCh                        chan increment
 	traceInCh                   chan TraceRecord
@@ -146,6 +154,16 @@ type pathStatsStore struct {
 	pruning                     atomic.Bool
 	scoreCache                  *lru.ARCCache
 	unmitigatedCache            *lru.ARCCache
+
+	// Real-time daily counters
+	baselineReqToday    atomic.Uint64
+	baselineBytesToday  atomic.Uint64
+	baselineActiveToday atomic.Uint64
+	currentReqToday     atomic.Uint64
+	currentBytesToday   atomic.Uint64
+	currentActiveToday  atomic.Uint64
+	lastResetDay        string
+	resetMu             sync.Mutex
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -174,8 +192,25 @@ func initStore(databaseURL string, retentionDays int) error {
 		}
 	}
 
+	// Initialize Pebble for traces
+	pebbleDir := "telemetry_pebble"
+	if dialect.Driver == db.DriverSQLite {
+		// Place Pebble next to SQLite db if it's a file
+		if !filepath.IsAbs(databaseURL) && !strings.Contains(databaseURL, "://") {
+			pebbleDir = filepath.Join(filepath.Dir(databaseURL), "telemetry_pebble")
+		}
+	}
+	_ = os.MkdirAll(pebbleDir, 0755)
+
+	pdb, err := pebble.Open(pebbleDir, &pebble.Options{})
+	if err != nil {
+		_ = database.Close()
+		return fmt.Errorf("open pebble: %w", err)
+	}
+
 	st := &pathStatsStore{
 		db:         database,
+		pebble:     pdb,
 		dialect:    dialect,
 		inCh:       make(chan increment, 4096),
 		traceInCh:  make(chan TraceRecord, 4096),
@@ -192,14 +227,125 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 
 	if err := db.Migrate(database, dialect); err != nil {
+		_ = pdb.Close()
 		_ = database.Close()
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	// Migration: Move existing traces from SQL to Pebble if table exists
+	go st.migrateTracesToPebble()
+
 	st.wg.Go(st.loop)
+	st.wg.Go(st.dailyResetLoop)
 
 	store = st
 	return nil
+}
+
+func (s *pathStatsStore) migrateTracesToPebble() {
+	// Check if traces table has data
+	var count int
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM traces").Scan(&count)
+	if count == 0 {
+		return
+	}
+
+	logger.Default().LogInfo("telemetry: migrating existing traces to Pebble", "count", count)
+
+	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, user_agent, method, referer, request_uri, ja3, ja4, request_headers, request_body, response_headers, response_body FROM traces")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	batch := s.pebble.NewBatch()
+	n := 0
+	for rows.Next() {
+		var tr TraceRecord
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody); err != nil {
+			continue
+		}
+
+		key := makeTraceKey(tr.Timestamp, tr.ID)
+		val, _ := json.Marshal(tr)
+		_ = batch.Set(key, val, pebble.NoSync)
+
+		n++
+		if n%1000 == 0 {
+			_ = batch.Commit(pebble.Sync)
+			batch = s.pebble.NewBatch()
+		}
+	}
+	_ = batch.Commit(pebble.Sync)
+
+	logger.Default().LogInfo("telemetry: migration complete, dropping SQL traces table", "migrated", n)
+	_, _ = s.db.Exec("DROP TABLE traces")
+}
+
+func makeTraceKey(ts time.Time, id string) []byte {
+	k := make([]byte, 8+len(id)+1)
+	binary.BigEndian.PutUint64(k[0:8], uint64(ts.UnixNano()))
+	k[8] = ':'
+	copy(k[9:], id)
+	return k
+}
+
+func (s *pathStatsStore) dailyResetLoop() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	// Initial sync
+	s.syncDailyBaselines()
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			now := time.Now().UTC()
+			day := now.Format("2006-01-02")
+
+			s.resetMu.Lock()
+			if s.lastResetDay != "" && s.lastResetDay != day {
+				// Day changed!
+				s.syncDailyBaselines()
+			}
+			s.lastResetDay = day
+			s.resetMu.Unlock()
+		}
+	}
+}
+
+func (s *pathStatsStore) syncDailyBaselines() {
+	now := time.Now().UTC()
+	day := now.Format("2006-01-02")
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	// Traffic baselines
+	q := s.dialect.Rebind(QueryGetTotalTrafficToday)
+	var rc, bsum sql.NullInt64
+	err := s.db.QueryRow(q, day).Scan(&rc, &bsum)
+	if err != nil {
+		s.baselineReqToday.Store(0)
+		s.baselineBytesToday.Store(0)
+	} else {
+		s.baselineReqToday.Store(uint64(rc.Int64))
+		s.baselineBytesToday.Store(uint64(bsum.Int64))
+	}
+
+	// Active threats baseline
+	qThreats := s.dialect.Rebind(QueryGetActiveThreatsToday)
+	var activeCount int64
+	err = s.db.QueryRow(qThreats, startOfDay.Unix()).Scan(&activeCount)
+	if err != nil {
+		s.baselineActiveToday.Store(0)
+	} else {
+		s.baselineActiveToday.Store(uint64(activeCount))
+	}
+
+	s.currentReqToday.Store(0)
+	s.currentBytesToday.Store(0)
+	s.currentActiveToday.Store(0)
 }
 
 func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
@@ -281,21 +427,18 @@ func (s *pathStatsStore) loop() {
 		}
 
 		if len(traceBatch) > 0 {
-			tx, err := s.db.Begin()
-			if err != nil {
-				logger.Default().LogError("traces: begin transaction failed", "error", err)
-			} else {
-				if stmt, err := s.traceInsertStmt(tx); err == nil {
-					for _, tr := range traceBatch {
-						if _, err := stmt.Exec(tr.ID, tr.OperationName, tr.ServiceName, tr.DurationMs, tr.Timestamp, tr.Status, tr.Path, tr.SourceIP, tr.Fingerprint, tr.CountryCode, tr.UserAgent, tr.Method, tr.Referer, tr.RequestURI, tr.JA3, tr.RequestHeaders, tr.RequestBody, tr.ResponseHeaders, tr.ResponseBody, tr.JA4); err != nil {
-							logger.Default().LogError("traces: insert failed", "error", err)
-						}
-					}
-					stmt.Close()
-					_ = tx.Commit()
-				} else {
-					_ = tx.Rollback()
-				}
+			batch := s.pebble.NewBatch()
+			for _, tr := range traceBatch {
+				key := makeTraceKey(tr.Timestamp, tr.ID)
+				// Check for duplicates in a simple way for recent records if needed,
+				// but for Pebble, Set just overwrites.
+				// However, if we want strict ID uniqueness across all time, we'd need to check existence.
+				// For access logs, the combination of timestamp (nano) and ID is extremely likely to be unique.
+				val, _ := json.Marshal(tr)
+				_ = batch.Set(key, val, pebble.NoSync)
+			}
+			if err := batch.Commit(pebble.Sync); err != nil {
+				logger.Default().LogError("pebble: trace batch commit failed", "error", err)
 			}
 			traceBatch = traceBatch[:0]
 		}
@@ -383,9 +526,12 @@ func (s *pathStatsStore) prune() {
 	}
 	if accessDays > 0 {
 		cutoffTime := time.Now().AddDate(0, 0, -accessDays)
-		qTraces := s.dialect.Rebind("DELETE FROM traces WHERE timestamp < ?")
-		if _, err := s.db.ExecContext(ctx, qTraces, cutoffTime); err != nil {
-			logger.Default().LogError("traces: prune failed", "error", err)
+		startKey := make([]byte, 8) // All zeros
+		endKey := make([]byte, 8)
+		binary.BigEndian.PutUint64(endKey, uint64(cutoffTime.UnixNano()))
+
+		if err := s.pebble.DeleteRange(startKey, endKey, pebble.Sync); err != nil {
+			logger.Default().LogError("pebble: prune failed", "error", err)
 		}
 	}
 
@@ -433,6 +579,7 @@ func ClosePathStatsStore(ctx context.Context) error {
 		case <-c:
 		case <-ctx.Done():
 		}
+		_ = s.pebble.Close()
 		return s.db.Close()
 	}
 	return nil
@@ -466,6 +613,7 @@ func recordToStore(host, path string, latencySeconds float64, bytesTotal uint64,
 	}
 	select {
 	case store.inCh <- increment{host: host, path: path, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: false}:
+		// No need to update currentReqToday here as it's done in recordDomainToStore for total traffic
 	default:
 		// drop on backpressure to protect the request path
 	}
@@ -478,6 +626,8 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 	}
 	select {
 	case store.inCh <- increment{host: domain, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: true}:
+		store.currentReqToday.Add(1)
+		store.currentBytesToday.Add(bytesTotal)
 	default:
 		// drop on backpressure
 	}
@@ -528,6 +678,11 @@ func RecordSecurityThreat(t SecurityThreat) {
 		t.Time = time.Now()
 	}
 
+	if t.ActionTaken == "" {
+		t.ActionTaken = "detected"
+	}
+	t.Mitigated = t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned"
+
 	if t.CountryCode == "" && t.SourceIP != "" {
 		t.CountryCode = ResolveCountry(t.SourceIP)
 	}
@@ -546,7 +701,12 @@ func RecordSecurityThreat(t SecurityThreat) {
 	}
 
 	// Increment Prometheus counter
-	MitigatedThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium"), cmp.Or(t.ActionTaken, "blocked")).Inc()
+	if t.Mitigated {
+		MitigatedThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium"), cmp.Or(t.ActionTaken, "blocked")).Inc()
+	} else {
+		ActiveThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium")).Inc()
+		store.currentActiveToday.Add(1)
+	}
 
 	alertMu.RLock()
 	h := onThreatAlert
@@ -660,7 +820,7 @@ func GetMitigatedIPs(ctx context.Context) []string {
 
 // GetTraces returns the last N traces from the store.
 func GetTraces(ctx context.Context, limit int) []TraceRecord {
-	if store == nil {
+	if store == nil || store.pebble == nil {
 		return nil
 	}
 	if limit <= 0 {
@@ -669,26 +829,23 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-	query := store.dialect.Rebind("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, country_code, user_agent, method, referer, request_uri, ja3, ja4, request_headers, request_body, response_headers, response_body FROM traces ORDER BY timestamp DESC LIMIT ?")
-	rows, err := store.db.QueryContext(ctx, query, limit)
-	if err != nil {
-		logger.Default().LogError("traces: query failed", "error", err)
-		return nil
-	}
-	defer rows.Close()
+
+	iter, _ := store.pebble.NewIter(&pebble.IterOptions{})
+	defer iter.Close()
+
 	res := make([]TraceRecord, 0, min(limit, 100))
-	for rows.Next() {
+	seen := make(map[string]struct{})
+
+	// Start from the end (most recent)
+	for ok := iter.Last(); ok && len(res) < limit; ok = iter.Prev() {
 		var tr TraceRecord
-		var reqHeaders, reqBody, respHeaders, respBody sql.NullString
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &reqHeaders, &reqBody, &respHeaders, &respBody); err != nil {
-			logger.Default().LogError("traces: scan failed", "error", err)
-			continue
+		if err := json.Unmarshal(iter.Value(), &tr); err == nil {
+			if _, ok := seen[tr.ID]; ok {
+				continue
+			}
+			seen[tr.ID] = struct{}{}
+			res = append(res, tr)
 		}
-		tr.RequestHeaders = reqHeaders.String
-		tr.RequestBody = reqBody.String
-		tr.ResponseHeaders = respHeaders.String
-		tr.ResponseBody = respBody.String
-		res = append(res, tr)
 	}
 	return res
 }
@@ -782,14 +939,8 @@ func GetSystemTrafficToday(ctx context.Context) (uint64, uint64) {
 	if store == nil {
 		return 0, 0
 	}
-	day := time.Now().UTC().Format("2006-01-02")
-	q := store.dialect.Rebind(QueryGetTotalTrafficToday)
-	var rc, bsum sql.NullInt64
-	err := store.db.QueryRowContext(ctx, q, day).Scan(&rc, &bsum)
-	if err != nil {
-		return 0, 0
-	}
-	return uint64(rc.Int64), uint64(bsum.Int64)
+	return store.baselineReqToday.Load() + store.currentReqToday.Load(),
+		store.baselineBytesToday.Load() + store.currentBytesToday.Load()
 }
 
 // GetSystemTrafficHistory returns traffic samples for the last N days.
@@ -868,7 +1019,14 @@ func GetDomainStatsHourly(day string, hour int) []DomainStats {
 	return stats
 }
 
-// IsStoreEnabled returns true if the persistent store is active.
+// GetActiveThreatsToday returns the count of active threats for the current day.
+func GetActiveThreatsToday() uint64 {
+	if store == nil {
+		return 0
+	}
+	return store.baselineActiveToday.Load() + store.currentActiveToday.Load()
+}
+
 // GetSecurityThreats returns the last N security threats from the store.
 func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 	if store == nil {
@@ -894,6 +1052,7 @@ func GetSecurityThreats(ctx context.Context, limit int) []SecurityThreat {
 			logger.Default().LogError("threats: scan failed", "error", err)
 			continue
 		}
+		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
 		res = append(res, th)
 	}
 	return res

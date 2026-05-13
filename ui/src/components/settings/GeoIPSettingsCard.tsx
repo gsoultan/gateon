@@ -12,13 +12,15 @@ import {
   Badge,
   Alert,
   FileButton,
-  TagsInput,
+  MultiSelect,
 } from "@mantine/core";
 import { IconDatabase, IconDownload, IconAlertCircle, IconCheck, IconUpload, IconWorld, IconLock, IconShieldCheck } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import type { GeoIPConfig } from "../../types/gateon";
 import { apiFetch } from "../../hooks/useGateon";
+import { COUNTRIES } from "../../utils/countries";
+import { getCountryFlag } from "../../utils/format";
 
 interface GeoIPStatus {
   exists: boolean;
@@ -254,26 +256,48 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
 
           <Divider label="Country Geofencing" labelPosition="center" />
 
-          <TagsInput
+          <MultiSelect
             label="Blocked Countries"
-            description="ISO country codes to block (e.g. US, CN, RU). Case-insensitive."
-            placeholder="Enter country codes"
+            description="Select countries to block. Request from these countries will be denied."
+            placeholder="Select countries"
+            data={COUNTRIES}
             value={config.blocked_countries || []}
             onChange={(val) => onChange({ ...config, blocked_countries: val })}
             disabled={!config.enabled || disabled}
             leftSection={<IconLock size={16} />}
-            splitChars={[",", " ", "|"]}
+            searchable
+            nothingFoundMessage="No countries found"
+            maxDropdownHeight={300}
+            renderOption={({ option }) => (
+              <Group gap="xs">
+                <Text size="sm">{getCountryFlag(option.value)}</Text>
+                <Text size="sm">{option.label}</Text>
+                <Text size="xs" c="dimmed" ml="auto">{option.value}</Text>
+              </Group>
+            )}
+            hidePickedOptions
           />
 
-          <TagsInput
+          <MultiSelect
             label="Allowed Countries"
-            description="If set, ONLY these ISO country codes will be allowed. Leave empty to allow all (unless blocked above)."
-            placeholder="Enter country codes"
+            description="If set, ONLY these countries will be allowed. Leave empty to allow all (unless blocked above)."
+            placeholder="Select countries"
+            data={COUNTRIES}
             value={config.allowed_countries || []}
             onChange={(val) => onChange({ ...config, allowed_countries: val })}
             disabled={!config.enabled || disabled}
             leftSection={<IconWorld size={16} />}
-            splitChars={[",", " ", "|"]}
+            searchable
+            nothingFoundMessage="No countries found"
+            maxDropdownHeight={300}
+            renderOption={({ option }) => (
+              <Group gap="xs">
+                <Text size="sm">{getCountryFlag(option.value)}</Text>
+                <Text size="sm">{option.label}</Text>
+                <Text size="xs" c="dimmed" ml="auto">{option.value}</Text>
+              </Group>
+            )}
+            hidePickedOptions
           />
 
           <Switch

@@ -2,7 +2,9 @@ package security
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -16,9 +18,9 @@ import (
 
 type ScanStatus struct {
 	IsRunning  bool      `json:"is_running"`
-	LastScan   time.Time `json:"last_scan"`
-	LastError  string    `json:"last_error"`
-	LastResult string    `json:"last_result"`
+	LastScan   time.Time `json:"last_scan,omitzero"`
+	LastError  string    `json:"last_error,omitzero"`
+	LastResult string    `json:"last_result,omitzero"`
 }
 
 type ClamAVManager struct {
@@ -113,10 +115,13 @@ func (m *ClamAVManager) ensureDocker(ctx context.Context) error {
 
 	// Check if container already exists (exact match)
 	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "name=^/gateon-clamav$", "--format", "{{.Names}}")
-	out, _ := cmd.Output()
-	if strings.TrimSpace(string(out)) == "gateon-clamav" {
+	out, err := cmd.CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) == "gateon-clamav" {
 		// Start it if it's stopped
-		return exec.CommandContext(ctx, "docker", "start", "gateon-clamav").Run()
+		if startOut, err := exec.CommandContext(ctx, "docker", "start", "gateon-clamav").CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to start existing ClamAV container: %w (output: %s)", err, strings.TrimSpace(string(startOut)))
+		}
+		return nil
 	}
 
 	// Pull and run
@@ -133,7 +138,10 @@ func (m *ClamAVManager) ensureDocker(ctx context.Context) error {
 	}
 	args = append(args, image)
 
-	return exec.CommandContext(ctx, "docker", args...).Run()
+	if runOut, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to run ClamAV container: %w (output: %s)", err, strings.TrimSpace(string(runOut)))
+	}
+	return nil
 }
 
 func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
@@ -149,22 +157,42 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 	var cmd *exec.Cmd
 	if _, err := exec.LookPath("apt-get"); err == nil {
 		// Update repository first
-		_ = exec.CommandContext(ctx, "apt-get", "update").Run()
+		updateCmd := exec.CommandContext(ctx, "apt-get", "update")
+		updateCmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+		if out, err := updateCmd.CombinedOutput(); err != nil {
+			logger.L.LogWarn("apt-get update failed", "error", err, "output", string(out))
+		}
+
 		cmd = exec.CommandContext(ctx, "apt-get", "install", "-y", "clamav-daemon", "clamav-freshclam")
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 	} else if _, err := exec.LookPath("yum"); err == nil {
 		cmd = exec.CommandContext(ctx, "yum", "install", "-y", "clamav", "clamav-update")
 	} else if _, err := exec.LookPath("brew"); err == nil {
 		cmd = exec.CommandContext(ctx, "brew", "install", "clamav")
 	} else if _, err := exec.LookPath("apk"); err == nil {
-		_ = exec.CommandContext(ctx, "apk", "update").Run()
+		updateCmd := exec.CommandContext(ctx, "apk", "update")
+		if out, err := updateCmd.CombinedOutput(); err != nil {
+			logger.L.LogWarn("apk update failed", "error", err, "output", string(out))
+		}
 		cmd = exec.CommandContext(ctx, "apk", "add", "clamav", "clamav-daemon", "freshclam")
 	} else {
 		return fmt.Errorf("no supported package manager found (apt, yum, brew, apk)")
 	}
 
-	if err := cmd.Run(); err != nil {
-		return err
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("installation failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
+
+	// Try to enable and start services if systemctl is available
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		// We don't return error here because the installation itself succeeded,
+		// and some environments might not have systemd even if systemctl is present (rare but possible).
+		_ = exec.CommandContext(ctx, "systemctl", "enable", "--now", "clamav-daemon").Run()
+		_ = exec.CommandContext(ctx, "systemctl", "enable", "--now", "clamav-freshclam").Run()
+	}
+
+	// Ensure database exists, otherwise clamscan will fail with status 2
+	m.ensureDatabase(ctx)
 
 	if m.config.LowResourceMode {
 		m.tuneLocalClamav()
@@ -177,6 +205,39 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	// Implementation would involve editing /etc/clamav/clamd.conf
 	// For now, we'll just log that we would tune it.
 	logger.L.LogInfo("tuning local ClamAV for low resource mode (logic to be implemented for specific OS)")
+}
+
+func (m *ClamAVManager) ensureDatabase(ctx context.Context) {
+	// Check common database locations
+	dbPaths := []string{
+		"/var/lib/clamav/main.cvd",
+		"/var/lib/clamav/main.cld",
+		"/usr/local/share/clamav/main.cvd",
+		"/usr/local/share/clamav/main.cld",
+	}
+
+	found := false
+	for _, path := range dbPaths {
+		if _, err := os.Stat(path); err == nil {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		logger.L.LogInfo("ClamAV database not found, running freshclam...")
+		if _, err := exec.LookPath("freshclam"); err == nil {
+			// This might take a while, but we run it in background or at least try it once.
+			// We use a shorter timeout for the initial check to not block too long.
+			freshCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+			if out, err := exec.CommandContext(freshCtx, "freshclam").CombinedOutput(); err != nil {
+				logger.L.LogWarn("initial freshclam failed", "error", err, "output", string(out))
+			} else {
+				logger.L.LogInfo("ClamAV database updated successfully")
+			}
+		}
+	}
 }
 
 func (m *ClamAVManager) GetScanStatus() ScanStatus {
@@ -205,8 +266,10 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 	start := time.Now()
 
 	binary := "clamscan"
+	hasClamdscan := false
 	if _, err := exec.LookPath("clamdscan"); err == nil {
 		binary = "clamdscan"
+		hasClamdscan = true
 	}
 
 	target := "/"
@@ -215,22 +278,53 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 	}
 
 	args := []string{"-r", target}
+	fullArgs := args
+	execBinary := binary
+
 	if m.config.LowResourceMode {
 		// Try to run with lower priority
 		if _, err := exec.LookPath("nice"); err == nil {
-			args = append([]string{"-n", "19", binary}, args...)
-			binary = "nice"
+			fullArgs = append([]string{"-n", "19", binary}, args...)
+			execBinary = "nice"
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, binary, args...)
-	err := cmd.Run()
+	cmd := exec.CommandContext(ctx, execBinary, fullArgs...)
+	out, err := cmd.CombinedOutput()
+
+	// If clamdscan failed with error, try falling back to clamscan
+	if err != nil && hasClamdscan && binary == "clamdscan" {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 2 {
+			if _, errScan := exec.LookPath("clamscan"); errScan == nil {
+				logger.L.LogInfo("clamdscan failed (possibly daemon not running), falling back to clamscan")
+				binary = "clamscan"
+				execBinary = binary
+				fullArgs = args
+				if m.config.LowResourceMode {
+					if _, errNice := exec.LookPath("nice"); errNice == nil {
+						fullArgs = append([]string{"-n", "19", binary}, args...)
+						execBinary = "nice"
+					}
+				}
+				cmd = exec.CommandContext(ctx, execBinary, fullArgs...)
+				out, err = cmd.CombinedOutput()
+			}
+		}
+	}
 
 	m.mu.Lock()
 	if err != nil {
-		m.status.LastError = err.Error()
-		m.status.LastResult = "Threats found or error occurred"
-		logger.L.LogError("ClamAV full scan completed with errors or threats found", "error", err, "duration", time.Since(start))
+		// clamscan returns 1 if viruses are found, 2 if an error occurred
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
+			m.status.LastError = ""
+			m.status.LastResult = "Threats found"
+			logger.L.LogWarn("ClamAV full scan found threats", "duration", time.Since(start))
+		} else {
+			output := strings.TrimSpace(string(out))
+			m.status.LastError = fmt.Sprintf("%v: %s", err, output)
+			m.status.LastResult = "Error occurred"
+			logger.L.LogError("ClamAV full scan failed", "error", err, "output", output, "duration", time.Since(start))
+		}
 	} else {
 		m.status.LastError = ""
 		m.status.LastResult = "Clean"

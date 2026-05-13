@@ -167,6 +167,8 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 			cookieName = "session"
 		}
 		return TlsBinding(cookieName), nil
+	case "security_headers":
+		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
 	case "wasm":
 		return Wasm(context.Background(), m.WasmBlob)
 	default:

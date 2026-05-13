@@ -31,6 +31,7 @@ import {
   HoneypotConfigEditor,
   RequestIDConfigEditor,
   OIDCConfigEditor,
+  SecurityHeadersConfigEditor,
 } from "./SecurityConfigEditors";
 import {
   BufferingConfigEditor,
@@ -364,6 +365,9 @@ export function MiddlewareConfigEditor({
 
     case "oidc":
       return <OIDCConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "security_headers":
+      return <SecurityHeadersConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "bot_management":
       return <BotManagementConfigEditor config={config} updateConfig={updateConfig} />;

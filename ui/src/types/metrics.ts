@@ -137,6 +137,9 @@ export type SecurityInsights = {
   threats_by_country: LabeledCount[] | null;
   attack_trend: TrafficSample[] | null;
   recent_anomalies: SecurityThreat[] | null;
+  active_threats: number;
+  heavy_hitters: string[] | null;
+  global_threat_score: number;
 };
 
 export type SecurityThreat = {
@@ -156,6 +159,7 @@ export type SecurityThreat = {
   asn: string;
   action_taken: string;
   country_code: string;
+  mitigated: boolean;
 };
 
 export type TrafficSample = {

@@ -143,56 +143,89 @@ export default function LoginPage() {
   return (
     <Box style={{ height: "100vh", overflow: "hidden" }}>
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0} style={{ height: "100%" }}>
-        {/* Left Side: Animation & Branding */}
+        {/* Left Side: Branding & Features */}
         <Box
-          className="bg-gradient-to-br from-indigo-900 via-blue-900 to-slate-900"
+          className="bg-slate-950 relative overflow-hidden"
           visibleFrom="md"
-          style={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", padding: "40px", color: "white", position: "relative", overflow: "hidden" }}
+          style={{ 
+            height: "100%", 
+            display: "flex", 
+            flexDirection: "column", 
+            justifyContent: "center", 
+            padding: "60px",
+            color: "white" 
+          }}
         >
-          {/* Decorative elements */}
-          <Box style={{ position: "absolute", top: "-10%", left: "-10%", width: "40%", height: "40%", background: "radial-gradient(circle, rgba(99,102,241,0.15) 0%, rgba(0,0,0,0) 70%)", borderRadius: "50%" }} />
-          <Box style={{ position: "absolute", bottom: "-10%", right: "-10%", width: "60%", height: "60%", background: "radial-gradient(circle, rgba(59,130,246,0.1) 0%, rgba(0,0,0,0) 70%)", borderRadius: "50%" }} />
+          {/* Animated Background Elements */}
+          <Box 
+            className="absolute -top-[10%] -left-[10%] w-[60%] h-[60%] rounded-full blur-[120px] opacity-20 bg-indigo-600 animate-pulse" 
+            style={{ animationDuration: '10s' }}
+          />
+          <Box 
+            className="absolute -bottom-[15%] -right-[10%] w-[70%] h-[70%] rounded-full blur-[140px] opacity-10 bg-blue-500 animate-pulse"
+            style={{ animationDuration: '15s' }}
+          />
+          <Box 
+            className="absolute top-1/4 left-1/2 w-[40%] h-[40%] rounded-full blur-[100px] opacity-10 bg-purple-600"
+          />
 
-          <Stack gap="xl" style={{ position: "relative", zIndex: 1 }}>
-            <Group>
-              <Box className="animate-pulse">
-                <IconActivity size={48} color="white" />
+          <Stack gap={40} style={{ position: "relative", zIndex: 1 }}>
+            <Group align="center" gap="md">
+              <Box className="bg-white/10 p-3 rounded-2xl backdrop-blur-md border border-white/20 shadow-xl">
+                <IconActivity size={40} className="text-indigo-400" />
               </Box>
-              <Title order={1} fw={900} style={{ fontSize: rem(48), letterSpacing: -2, color: "white" }}>
-                GATEON
-              </Title>
+              <Box>
+                <Title order={1} fw={900} style={{ fontSize: rem(42), letterSpacing: -1.5, lineHeight: 1 }}>
+                  GATEON
+                </Title>
+                <Text size="xs" fw={700} className="tracking-[0.2em] text-indigo-400/80 uppercase">
+                  Enterprise Proxy
+                </Text>
+              </Box>
             </Group>
 
-            <Box mt="xl">
-              <Title order={2} fw={700} mb="xs">
-                Cloud-Native API Gateway
+            <Box>
+              <Title order={2} fw={800} mb="md" style={{ fontSize: rem(36), lineHeight: 1.2 }}>
+                The next generation of <br />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-blue-400">
+                  API management.
+                </span>
               </Title>
-              <Text size="lg" c="gray.3" maw={500}>
-                A high-performance, modular reverse proxy and load balancer built for modern infrastructure.
+              <Text size="lg" c="gray.4" maw={480} style={{ lineHeight: 1.6 }}>
+                Secure, scale, and monitor your infrastructure with our lightning-fast, 
+                cloud-native gateway. Designed for modern DevOps teams.
               </Text>
             </Box>
 
-            <Stack gap="md" mt="xl">
+            <Stack gap="lg">
               {features.map((feature, index) => (
                 <Box
                   key={index}
-                  p="md"
+                  p="lg"
+                  className="group"
                   style={{
-                    borderRadius: "12px",
-                    background: index === activeFeature ? "rgba(255, 255, 255, 0.1)" : "transparent",
-                    transition: "all 0.4s ease",
-                    transform: index === activeFeature ? "translateX(10px)" : "none",
-                    opacity: index === activeFeature ? 1 : 0.6,
-                    borderLeft: index === activeFeature ? "4px solid white" : "4px solid transparent",
+                    borderRadius: "16px",
+                    background: index === activeFeature ? "rgba(255, 255, 255, 0.05)" : "transparent",
+                    border: index === activeFeature ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid transparent",
+                    backdropFilter: index === activeFeature ? "blur(10px)" : "none",
+                    transition: "all 0.5s cubic-bezier(0.4, 0, 0.2, 1)",
+                    transform: index === activeFeature ? "translateX(12px)" : "none",
+                    opacity: index === activeFeature ? 1 : 0.4,
                   }}
                 >
-                  <Group>
-                    <ThemeIcon color="white" variant="light" size="lg">
+                  <Group align="flex-start" wrap="nowrap">
+                    <ThemeIcon 
+                      variant="gradient" 
+                      gradient={{ from: 'indigo', to: 'blue' }}
+                      size={44}
+                      radius="md"
+                      className="shadow-lg shadow-indigo-500/20"
+                    >
                       {feature.icon}
                     </ThemeIcon>
                     <Box>
-                      <Text fw={700} color="white">{feature.title}</Text>
-                      <Text size="sm" color="gray.4">{feature.description}</Text>
+                      <Text fw={700} size="lg" color="white" mb={4}>{feature.title}</Text>
+                      <Text size="sm" color="gray.4" style={{ lineHeight: 1.5 }}>{feature.description}</Text>
                     </Box>
                   </Group>
                 </Box>
@@ -200,108 +233,170 @@ export default function LoginPage() {
             </Stack>
           </Stack>
 
-          <Box mt="auto" pt="xl">
-            <Text size="xs" color="gray.5">
-              &copy; {new Date().getFullYear()} Gateon. Professional Grade Networking.
-            </Text>
+          <Box mt="auto" pt={40} style={{ position: "relative", zIndex: 1 }}>
+            <Group justify="space-between" className="border-t border-white/10 pt-6">
+              <Text size="xs" color="gray.5">
+                &copy; {new Date().getFullYear()} Gateon Systems. All rights reserved.
+              </Text>
+              <Group gap="xs">
+                <Text size="xs" className="text-gray-500 hover:text-gray-300 cursor-pointer transition-colors">Documentation</Text>
+                <Box className="w-1 h-1 rounded-full bg-gray-700" />
+                <Text size="xs" className="text-gray-500 hover:text-gray-300 cursor-pointer transition-colors">Support</Text>
+              </Group>
+            </Group>
           </Box>
         </Box>
 
         {/* Right Side: Sign-in Form */}
         <Box
+          className="bg-white dark:bg-slate-950"
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             padding: "40px",
-            background: "var(--mantine-color-body)",
           }}
         >
-          <Box maw={400} w="100%">
-            <Paper radius="md" p={0}>
-              <Box mb={40}>
-                <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-                  {step === "login" ? "Welcome back" : "Second-step security"}
-                </Title>
-                <Text c="dimmed" size="sm" mt={5}>
-                  {step === "login" 
-                    ? "Enter your credentials to manage your gateway"
-                    : "Enter the 6-digit code from your authenticator app"}
-                </Text>
+          <Box maw={420} w="100%">
+            <Box mb={50}>
+              <Box hiddenFrom="md" mb={30}>
+                 <Group gap="xs">
+                    <IconActivity size={32} className="text-indigo-600" />
+                    <Title order={3} fw={900} className="tracking-tight">GATEON</Title>
+                 </Group>
               </Box>
+              <Title order={2} fw={900} style={{ fontSize: rem(32), letterSpacing: -1 }}>
+                {step === "login" ? "Sign In" : "Verify Identity"}
+              </Title>
+              <Text c="dimmed" size="md" mt={8}>
+                {step === "login" 
+                  ? "Welcome back! Please enter your details."
+                  : "We've sent a code to your registered device."}
+              </Text>
+            </Box>
 
-              {error && (
-                <Alert
-                  icon={<IconAlertCircle size="1.1rem" />}
-                  title={step === "login" ? "Authentication Failed" : "Verification Failed"}
-                  color="red"
-                  variant="filled"
-                  radius="md"
-                  mb="xl"
-                >
-                  {error}
-                </Alert>
-              )}
+            {error && (
+              <Alert
+                icon={<IconAlertCircle size="1.1rem" />}
+                color="red"
+                variant="light"
+                radius="lg"
+                mb="xl"
+                className="border border-red-100 dark:border-red-900/30"
+              >
+                {error}
+              </Alert>
+            )}
 
-              {step === "login" ? (
-                <form onSubmit={form.onSubmit(handleSubmit)}>
-                  <Stack gap="md">
-                    <TextInput
-                      label="Username"
-                      placeholder="admin"
-                      required
-                      size="md"
-                      leftSection={<IconUser size={rem(18)} stroke={1.5} />}
-                      {...form.getInputProps("username")}
-                    />
-                    <PasswordInput
-                      label="Password"
-                      placeholder="Your password"
-                      required
-                      size="md"
-                      leftSection={<IconLock size={rem(18)} stroke={1.5} />}
-                      {...form.getInputProps("password")}
-                    />
-                    <Button
-                      fullWidth
-                      mt="lg"
-                      type="submit"
-                      loading={loading}
-                      size="md"
-                      radius="md"
-                      className="bg-indigo-600 hover:bg-indigo-700 transition-colors"
-                    >
-                      Sign in to Dashboard
-                    </Button>
-                  </Stack>
-                </form>
-              ) : (
-                <Stack gap="md">
+            {step === "login" ? (
+              <form onSubmit={form.onSubmit(handleSubmit)}>
+                <Stack gap="xl">
                   <TextInput
-                    label="Verification Code"
-                    placeholder="000000"
+                    label="Username"
+                    placeholder="Enter your username"
                     required
-                    size="md"
-                    value={tfaCode}
-                    onChange={(e) => setTfaCode(e.currentTarget.value)}
-                    autoFocus
+                    size="lg"
+                    radius="lg"
+                    leftSection={<IconUser size={20} stroke={1.5} className="text-gray-400" />}
+                    {...form.getInputProps("username")}
+                    styles={{
+                      input: {
+                        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                        '&:focus': {
+                          borderColor: 'var(--mantine-color-indigo-filled)',
+                        }
+                      },
+                      label: {
+                        marginBottom: 8,
+                        fontWeight: 600
+                      }
+                    }}
                   />
+                  <Box>
+                    <Group justify="space-between" mb={8}>
+                       <Text size="sm" fw={600} component="label">Password</Text>
+                       <Text size="xs" fw={600} className="text-indigo-600 hover:text-indigo-700 cursor-pointer">
+                         Forgot password?
+                       </Text>
+                    </Group>
+                    <PasswordInput
+                      placeholder="••••••••"
+                      required
+                      size="lg"
+                      radius="lg"
+                      leftSection={<IconLock size={20} stroke={1.5} className="text-gray-400" />}
+                      {...form.getInputProps("password")}
+                      styles={{
+                        input: {
+                          transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                          '&:focus': {
+                            borderColor: 'var(--mantine-color-indigo-filled)',
+                          }
+                        }
+                      }}
+                    />
+                  </Box>
+
                   <Button
                     fullWidth
-                    mt="lg"
-                    onClick={handle2FAVerify}
+                    type="submit"
                     loading={loading}
-                    size="md"
-                    radius="md"
+                    size="lg"
+                    radius="lg"
+                    className="bg-indigo-600 hover:bg-indigo-700 transition-all duration-200 shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
+                    style={{ height: rem(54) }}
                   >
-                    Verify & Sign in
-                  </Button>
-                  <Button variant="subtle" fullWidth onClick={() => setStep("login")}>
-                    Back to login
+                    Continue to Dashboard
                   </Button>
                 </Stack>
-              )}
-            </Paper>
+              </form>
+            ) : (
+              <Stack gap="xl">
+                <TextInput
+                  label="Verification Code"
+                  placeholder="000 000"
+                  required
+                  size="lg"
+                  radius="lg"
+                  value={tfaCode}
+                  onChange={(e) => setTfaCode(e.currentTarget.value)}
+                  autoFocus
+                  className="text-center tracking-[0.5em] font-mono"
+                  styles={{
+                    input: {
+                      textAlign: 'center',
+                      fontSize: rem(24),
+                      letterSpacing: rem(8),
+                      fontWeight: 700
+                    },
+                    label: {
+                      marginBottom: 8,
+                      fontWeight: 600
+                    }
+                  }}
+                />
+                <Button
+                  fullWidth
+                  onClick={handle2FAVerify}
+                  loading={loading}
+                  size="lg"
+                  radius="lg"
+                  className="bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
+                  style={{ height: rem(54) }}
+                >
+                  Verify & Sign in
+                </Button>
+                <Button variant="subtle" color="gray" fullWidth onClick={() => setStep("login")} radius="lg">
+                  Back to login
+                </Button>
+              </Stack>
+            )}
+
+            <Box mt={60} className="text-center">
+               <Text size="xs" color="dimmed">
+                 Trusted by thousands of developers worldwide.
+               </Text>
+            </Box>
           </Box>
         </Box>
       </SimpleGrid>

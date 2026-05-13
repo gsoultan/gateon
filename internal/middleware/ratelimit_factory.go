@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/gsoultan/gateon/internal/request"
 	xrate "golang.org/x/time/rate"
 )
@@ -26,9 +28,23 @@ func (f *Factory) createRateLimit(cfg map[string]string) (Middleware, error) {
 	}
 
 	trust := request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"])
-	keyFunc := PerIPWithTrust(trust)
-	if perTenant {
-		return limiter.Handler(PerTenant), nil
+	strategy := cfg["strategy"]
+	var keyFunc func(*http.Request) string
+
+	switch strategy {
+	case "tenant":
+		keyFunc = PerTenant
+	case "ja4h":
+		keyFunc = PerJA4H
+	case "fingerprint":
+		keyFunc = PerFingerprint
+	default:
+		keyFunc = PerIPWithTrust(trust)
 	}
+
+	if perTenant { // compatibility for older configs
+		keyFunc = PerTenant
+	}
+
 	return limiter.Handler(keyFunc), nil
 }

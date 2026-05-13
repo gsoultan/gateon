@@ -191,6 +191,10 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				return
 			}
 
+			// Global deterministic metrics (CMS & HHH)
+			telemetry.GlobalCMS.Add(key)
+			telemetry.GlobalHHH.Add(key)
+
 			// Adaptive Rate Limiting based on Reputation
 			fp := telemetry.GenerateFingerprint(r)
 			reputation := telemetry.GetReputation(fp.Hash)
@@ -240,6 +244,10 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				next.ServeHTTP(w, r)
 				return
 			}
+
+			// Global deterministic metrics (CMS & HHH)
+			telemetry.GlobalCMS.Add(key)
+			telemetry.GlobalHHH.Add(key)
 
 			// Sliding window implementation using a Redis Sorted Set
 			// Every request is a member with current timestamp as score
@@ -316,4 +324,14 @@ func PerTenant(r *http.Request) string {
 		return tid
 	}
 	return ""
+}
+
+// PerJA4H returns the JA4H fingerprint of the request.
+func PerJA4H(r *http.Request) string {
+	return telemetry.GenerateJA4H(r)
+}
+
+// PerFingerprint returns the detailed client fingerprint hash.
+func PerFingerprint(r *http.Request) string {
+	return telemetry.GenerateFingerprint(r).Hash
 }

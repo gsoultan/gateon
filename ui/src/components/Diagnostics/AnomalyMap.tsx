@@ -73,7 +73,7 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies, onTrace }) => {
                     <ThemeIcon variant="light" color={a.severity.toLowerCase() === 'critical' ? 'red' : a.severity.toLowerCase() === 'high' ? 'orange' : 'yellow'} size="xs">
                       {getIcon(a.type)}
                     </ThemeIcon>
-                    <Text fw={700} size="xs" style={{ textTransform: "uppercase" }}>{a.type.replace(/_/g, " ")}</Text>
+                    <Text fw={700} size="xs" style={{ textTransform: "uppercase" }}>{(a.type || "unknown").replace(/_/g, " ")}</Text>
                   </Group>
                   <Text size="xs" maw={200}>{a.description}</Text>
                   <Group justify="space-between">

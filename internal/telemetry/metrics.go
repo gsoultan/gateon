@@ -17,13 +17,18 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
+var (
+	GlobalCMS = NewCMSketch(2048, 4)
+	GlobalHHH = NewHHHCounter()
+)
+
 // StartEBpFPollLoop starts a background worker to poll eBPF stats and update Prometheus metrics.
 func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
 	if manager == nil {
 		return
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	logger.L.LogInfo("eBPF metrics polling loop started")
@@ -160,6 +165,12 @@ var MiddlewareBotManagementTotal = promauto.NewCounterVec(prometheus.CounterOpts
 	Name: "gateon_middleware_bot_management_total",
 	Help: "Total bot management challenge outcomes.",
 }, []string{"route", "outcome"})
+
+// ActiveThreatsTotal counts detected but not yet mitigated threats.
+var ActiveThreatsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_active_threats_total",
+	Help: "Total number of active (detected but not mitigated) threats.",
+}, []string{"category", "severity"})
 
 // MitigatedThreatsTotal counts mitigated threats by category and severity.
 var MitigatedThreatsTotal = promauto.NewCounterVec(prometheus.CounterOpts{

@@ -2,9 +2,8 @@ version: 2
 
 project_name: gateon
 
-before:
-  hooks:
-    - go mod download
+gomod:
+  proxy: true
 
 builds:
   - id: gateon
@@ -15,7 +14,6 @@ builds:
       - GOGC=off
     flags:
       - -trimpath
-      - -pgo=auto
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
@@ -23,27 +21,18 @@ builds:
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
-
-# gomod:
-#   proxy: true
 
 archives:
   - id: default
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
     files:
       - LICENSE
       - README.md
-      - packaging/gateon-service.xml
     wrap_in_directory: true
 
 nfpms:
@@ -75,7 +64,7 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  use: github
+  use: git
   sort: asc
   filters:
     exclude:
