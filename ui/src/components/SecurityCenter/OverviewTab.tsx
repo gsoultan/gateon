@@ -1,5 +1,21 @@
 import React, { useState } from 'react';
-import { Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, RingProgress, Center, Paper, Box, Table, Button } from '@mantine/core';
+import { 
+  Grid, 
+  Card, 
+  Text, 
+  Title, 
+  Group, 
+  Stack, 
+  Badge, 
+  ThemeIcon, 
+  SimpleGrid, 
+  RingProgress, 
+  Center, 
+  Paper, 
+  Box, 
+  Table, 
+  Button 
+} from '@mantine/core';
 import { DonutChart } from '@mantine/charts';
 import { IconShieldCheck, IconActivity, IconHistory, IconFingerprint, IconArrowUpRight, IconRefresh, IconClock } from '@tabler/icons-react';
 import { format } from 'date-fns';
@@ -159,7 +175,7 @@ export function OverviewTab({
                     <Text size="sm" fw={500}>{step.label}</Text>
                     <Text size="sm" c="dimmed">{step.value.toLocaleString()}</Text>
                   </Group>
-                  <Paper h={8} radius="xl" bg="light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4))">
+                  <Box h={8} style={{ borderRadius: '100px', overflow: 'hidden' }} bg="light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4))">
                     <Box 
                       h="100%" 
                       bg={step.color} 
@@ -169,7 +185,7 @@ export function OverviewTab({
                         transition: "width 1s ease-in-out"
                       }} 
                     />
-                  </Paper>
+                  </Box>
                 </Box>
               ))}
             </Stack>
@@ -178,7 +194,7 @@ export function OverviewTab({
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Card withBorder radius="md" h="100%">
             <Title order={4} mb="md">Threat Distribution</Title>
-            <Box h={200} w="100%" style={{ minWidth: 0 }}>
+            <Box h={200} w="100%" style={{ minWidth: 0, minHeight: 200 }}>
               <DonutChart
                 h={200}
                 thickness={20}

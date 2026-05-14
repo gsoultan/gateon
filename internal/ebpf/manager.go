@@ -10,6 +10,7 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -20,9 +21,10 @@ import (
 // EbpfManager handles loading and attaching eBPF programs for performance offloading.
 // Supports XDP (eXpress Data Path) for early packet dropping/rate limiting.
 type EbpfManager struct {
-	config *gateonv1.EbpfConfig
-	mu     sync.RWMutex
-	maps   map[string]*ebpf.Map
+	config       *gateonv1.EbpfConfig
+	mu           sync.RWMutex
+	maps         map[string]*ebpf.Map
+	shunnedCount atomic.Int64
 }
 
 type MapStats struct {
@@ -49,7 +51,10 @@ type Manager interface {
 
 // NewEbpfManager creates a new eBPF manager.
 func NewEbpfManager(conf *gateonv1.EbpfConfig) *EbpfManager {
-	return &EbpfManager{config: conf}
+	return &EbpfManager{
+		config: conf,
+		maps:   make(map[string]*ebpf.Map),
+	}
 }
 
 // Start initiates the eBPF subsystem loading.
@@ -152,7 +157,11 @@ func (m *EbpfManager) ShunIP(ip string) error {
 
 	logger.L.LogInfo("Shunning IP at XDP level", "ip", ip)
 	reason := uint32(1) // General reason
-	return shunnedMap.Update(ipUint, reason, ebpf.UpdateAny)
+	err = shunnedMap.Update(ipUint, reason, ebpf.UpdateAny)
+	if err == nil {
+		m.shunnedCount.Add(1)
+	}
+	return err
 }
 
 // UnshunIP removes an IP from the XDP blocklist.
@@ -171,7 +180,11 @@ func (m *EbpfManager) UnshunIP(ip string) error {
 	}
 
 	logger.L.LogInfo("Unshunning IP at XDP level", "ip", ip)
-	return shunnedMap.Delete(ipUint)
+	err = shunnedMap.Delete(ipUint)
+	if err == nil {
+		m.shunnedCount.Add(-1)
+	}
+	return err
 }
 
 // BlockCountry adds a country code (converted to a numeric ID) to the XDP blocklist.
@@ -361,20 +374,42 @@ func (m *EbpfManager) BlocklistCuckoo(ip string) error {
 	return cuckooMap.Update(ipUint, uint32(1), ebpf.UpdateAny)
 }
 
+var dropReasons = map[uint32]string{
+	1: "shunned_ip",
+	2: "blocked_country",
+	3: "invalid_port_knock",
+	4: "rate_limited",
+}
+
 // GetMapStats returns statistics from eBPF maps.
 func (m *EbpfManager) GetMapStats() (MapStats, error) {
 	if runtime.GOOS != "linux" {
 		return MapStats{}, nil
 	}
-	// Implementation would iterate over maps to collect stats
-	return MapStats{
-		ShunnedIPsCount: 0,
-		DroppedPackets: map[string]uint64{
-			"shunned_ip":         0,
-			"blocked_country":    0,
-			"invalid_port_knock": 0,
-		},
-	}, nil
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	stats := MapStats{
+		ShunnedIPsCount: int(m.shunnedCount.Load()),
+		DroppedPackets:  make(map[string]uint64),
+	}
+
+	if dropStatsMap, ok := m.maps["drop_stats"]; ok {
+		for id, name := range dropReasons {
+			var values []uint64
+			// PERCPU maps return a slice of values (one per CPU)
+			if err := dropStatsMap.Lookup(id, &values); err == nil {
+				var total uint64
+				for _, v := range values {
+					total += v
+				}
+				stats.DroppedPackets[name] = total
+			}
+		}
+	}
+
+	return stats, nil
 }
 
 func (m *EbpfManager) loadTC(ctx context.Context) {
