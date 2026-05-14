@@ -1,14 +1,18 @@
-import React, { useMemo } from 'react';
-import { Grid, Card, Title, Text, Stack, SimpleGrid, Box, Table, Avatar, Badge, ThemeIcon } from '@mantine/core';
+import { Grid, Card, Title, Text, Stack, SimpleGrid, Box, Table, Avatar, Badge, ThemeIcon, Group, Paper } from '@mantine/core';
 import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
-import { IconMapPin, IconActivity, IconTarget, IconChartBar } from '@tabler/icons-react';
-import { format } from 'date-fns';
+import { IconMapPin, IconActivity, IconTarget } from '@tabler/icons-react';
+import type { MetricsSnapshot, TrafficSample, LabeledCount, DonutChartDataItem } from '../../types/metrics';
+
+interface CountryData {
+  country: string;
+  threats: number;
+}
 
 interface AnalyticsTabProps {
-  metrics: any;
-  trendData: any[];
-  countryData: any[];
-  threatTypeData: any[];
+  metrics: MetricsSnapshot | null;
+  trendData: TrafficSample[];
+  countryData: CountryData[];
+  threatTypeData: DonutChartDataItem[];
   totalThreats: number;
 }
 
@@ -29,7 +33,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
           <AreaChart
             h={300}
             data={trendData}
-            dataKey="date"
+            dataKey="ts"
             series={[{ name: 'threats', color: 'red.6', label: 'Threats Detected' }]}
             curveType="monotone"
             withDots={false}
@@ -76,15 +80,20 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                 />
               </Box>
               <Stack gap="xs" justify="center">
-                {threatTypeData.map((item) => (
-                  <Group key={item.name} justify="space-between">
-                    <Group gap="xs">
-                      <Box w={10} h={10} style={{ borderRadius: '50%', backgroundColor: `var(--mantine-color-${item.color.split('.')[0]}-7)` }} />
-                      <Text size="xs" fw={500}>{item.name}</Text>
+                {threatTypeData.map((item) => {
+                  const colorParts = item.color.split('.');
+                  const baseColor = colorParts[0];
+                  const shade = colorParts[1] || '7';
+                  return (
+                    <Group key={item.name} justify="space-between">
+                      <Group gap="xs">
+                        <Box w={10} h={10} style={{ borderRadius: '50%', backgroundColor: `var(--mantine-color-${baseColor}-${shade})` }} />
+                        <Text size="xs" fw={500}>{item.name}</Text>
+                      </Group>
+                      <Text size="xs" fw={700}>{item.value}</Text>
                     </Group>
-                    <Text size="xs" fw={700}>{item.value}</Text>
-                  </Group>
-                ))}
+                  );
+                })}
               </Stack>
             </SimpleGrid>
           </Card>
@@ -95,9 +104,9 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Card withBorder radius="md">
           <Title order={4} mb="md">Top Attack Sources</Title>
           <Table.ScrollContainer minWidth={300}>
-            <Table variant="vertical">
+            <Table>
               <Table.Tbody>
-                {metrics?.security?.top_threat_sources?.map((s: any) => (
+                {metrics?.security?.top_threat_sources?.map((s: LabeledCount) => (
                   <Table.Tr key={s.label}>
                     <Table.Td>
                       <Group gap="sm">
@@ -143,9 +152,3 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
     </Stack>
   );
 }
-
-const Group = ({ children, justify, mb, mt, gap, wrap, align, grow, style }: any) => (
-  <Box style={{ display: 'flex', justifyContent: justify, marginBottom: mb, marginTop: mt, gap, flexWrap: wrap, alignItems: align, flexGrow: grow ? 1 : 0, ...style }}>
-    {children}
-  </Box>
-);

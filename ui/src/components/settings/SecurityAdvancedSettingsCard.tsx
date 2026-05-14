@@ -10,12 +10,9 @@ import {
   TextInput,
   Divider,
   ThemeIcon,
-  ActionIcon,
-  Tooltip,
   TagsInput,
   SimpleGrid,
   Paper,
-  Button,
 } from "@mantine/core";
 import {
   IconShieldLock,
@@ -24,9 +21,7 @@ import {
   IconActivity,
   IconBrain,
   IconLockSearch,
-  IconInfoCircle,
-  IconRefresh,
-  IconDatabaseSearch,
+
 } from "@tabler/icons-react";
 import type { GlobalConfig, SecurityAdvancedConfig } from "../../types/gateon";
 

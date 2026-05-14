@@ -169,3 +169,9 @@ export type TrafficSample = {
   requests: number;
   bytes: number;
 };
+
+export type DonutChartDataItem = {
+  name: string;
+  value: number;
+  color: string;
+};

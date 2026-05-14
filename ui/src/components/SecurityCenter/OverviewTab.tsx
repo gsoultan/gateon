@@ -1,14 +1,16 @@
-import React from 'react';
-import { Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, RingProgress, Center, Paper, Box, Avatar, Table, Button } from '@mantine/core';
+import React, { useState } from 'react';
+import { Grid, Card, Text, Title, Group, Stack, Badge, ThemeIcon, SimpleGrid, RingProgress, Center, Paper, Box, Table, Button } from '@mantine/core';
 import { DonutChart } from '@mantine/charts';
-import { IconShieldCheck, IconActivity, IconHistory, IconTarget, IconFingerprint, IconArrowUpRight, IconMapPin, IconShieldOff, IconLock, IconRefresh } from '@tabler/icons-react';
+import { IconShieldCheck, IconActivity, IconHistory, IconFingerprint, IconArrowUpRight, IconRefresh, IconClock } from '@tabler/icons-react';
 import { format } from 'date-fns';
 import { useAnimateValue } from '../../hooks/useAnimateValue';
 import { useDisclosure } from '@mantine/hooks';
 import { SecurityAnomalyModal } from '../SecurityAnomalyModal';
 import TraceVisualizer from '../Diagnostics/TraceVisualizer';
+import type { MetricsSnapshot, SecurityThreat, DonutChartDataItem } from '../../types/metrics';
+import type { Anomaly } from '../../types/gateon';
 
-import { getThreatColor, getSeverityColor } from '../../utils/security';
+import { getSeverityColor } from '../../utils/security';
 
 const AnimatedTitle = ({ value, suffix = "" }: { value: number; suffix?: string }) => {
   const animatedValue = useAnimateValue(value);
@@ -16,10 +18,10 @@ const AnimatedTitle = ({ value, suffix = "" }: { value: number; suffix?: string 
 };
 
 interface OverviewTabProps {
-  metrics: any;
+  metrics: MetricsSnapshot | null;
   securityScore: number;
   scoreColor: string;
-  threatTypeData: any[];
+  threatTypeData: DonutChartDataItem[];
   totalThreats: number;
 }
 
@@ -30,13 +32,32 @@ export function OverviewTab({
   threatTypeData, 
   totalThreats,
 }: OverviewTabProps) {
-  const [selectedAnomaly, setSelectedAnomaly] = React.useState<any>(null);
+  const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
-  const [traceIp, setTraceIp] = React.useState<string>("");
+  const [traceIp, setTraceIp] = useState<string>("");
   const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
 
-  const handleRowClick = (anomaly: any) => {
-    setSelectedAnomaly(anomaly);
+  const handleRowClick = (anomaly: SecurityThreat) => {
+    // Convert SecurityThreat to Anomaly for the modal if needed, or update modal to accept both
+    const mappedAnomaly: Anomaly = {
+      id: anomaly.id,
+      type: anomaly.type,
+      severity: anomaly.severity,
+      description: anomaly.details,
+      timestamp: anomaly.timestamp,
+      source: anomaly.source_ip,
+      recommendation: "Investigate source IP and associated traffic patterns.",
+      country_code: anomaly.country_code,
+      ja3: anomaly.ja3,
+      ja4: anomaly.ja4,
+      score: anomaly.score,
+      route_id: anomaly.route_id,
+      request_uri: anomaly.request_uri,
+      mitigated: anomaly.mitigated,
+      category: anomaly.category,
+      action_taken: anomaly.action_taken,
+    };
+    setSelectedAnomaly(mappedAnomaly);
     open();
   };
 
@@ -128,10 +149,10 @@ export function OverviewTab({
             <Stack gap="xs">
               {[
                 { label: "Total Ingress", value: metrics?.golden_signals?.requests_total || 0, color: "blue" },
-                { label: "XDP/eBPF Drop", value: metrics?.middleware?.ebpf_dropped_packets?.reduce((a: any, b: any) => a + b.value, 0) || 0, color: "red" },
-                { label: "WAF Block", value: metrics?.middleware?.waf_blocked?.reduce((a: any, b: any) => a + b.value, 0) || 0, color: "orange" },
-                { label: "Rate Limit", value: metrics?.middleware?.rate_limit_rejected?.reduce((a: any, b: any) => a + b.value, 0) || 0, color: "yellow" },
-                { label: "Allowed (200 OK)", value: metrics?.golden_signals?.requests_total ? (metrics?.golden_signals?.requests_total - metrics?.golden_signals?.errors_total) : 0, color: "teal" },
+                { label: "XDP/eBPF Drop", value: metrics?.middleware?.ebpf_dropped_packets?.reduce((a, b) => a + b.value, 0) || 0, color: "red" },
+                { label: "WAF Block", value: metrics?.middleware?.waf_blocked?.reduce((a, b) => a + b.value, 0) || 0, color: "orange" },
+                { label: "Rate Limit", value: metrics?.middleware?.rate_limit_rejected?.reduce((a, b) => a + b.value, 0) || 0, color: "yellow" },
+                { label: "Allowed (200 OK)", value: metrics?.golden_signals?.requests_total ? (metrics?.golden_signals?.requests_total - (metrics?.golden_signals?.errors_total || 0)) : 0, color: "teal" },
               ].map((step) => (
                 <Box key={step.label}>
                   <Group justify="space-between" mb={4}>
@@ -157,7 +178,7 @@ export function OverviewTab({
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Card withBorder radius="md" h="100%">
             <Title order={4} mb="md">Threat Distribution</Title>
-            <Box h={200} w="100%">
+            <Box h={200} w="100%" style={{ minWidth: 0 }}>
               <DonutChart
                 h={200}
                 thickness={20}
@@ -198,7 +219,7 @@ export function OverviewTab({
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {metrics?.security?.recent_anomalies?.slice(0, 5).map((a: any) => (
+              {metrics?.security?.recent_anomalies?.slice(0, 5).map((a: SecurityThreat) => (
                 <Table.Tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(a)}>
                   <Table.Td>
                     <Stack gap={0}>
@@ -244,9 +265,3 @@ export function OverviewTab({
     </Stack>
   );
 }
-
-const IconClock = ({ size, color }: { size: number; color: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-  </svg>
-);

@@ -1,4 +1,3 @@
-import React from "react";
 import {
   Modal,
   Stack,
@@ -14,6 +13,8 @@ import {
   Title,
   Tooltip,
   ActionIcon,
+  Button,
+  Alert,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -28,10 +29,10 @@ import {
   IconShieldOff,
   IconAlertTriangle,
 } from "@tabler/icons-react";
-import { Modal as MantineModal, Button, Alert } from "@mantine/core";
 import { useRemoveMitigation } from "../hooks/useGateon";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
+import { getSeverityColor } from "../utils/security";
 
 interface SecurityAnomalyModalProps {
   anomaly: Anomaly | null;
@@ -45,21 +46,6 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
   const removeMitigation = useRemoveMitigation();
 
   if (!anomaly) return null;
-
-  const getSeverityColor = (severity: string) => {
-    switch ((severity || '').toLowerCase()) {
-      case "critical":
-        return "red";
-      case "high":
-        return "orange";
-      case "medium":
-        return "yellow";
-      case "low":
-        return "blue";
-      default:
-        return "gray";
-    }
-  };
 
   return (
     <Modal
@@ -111,7 +97,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
           <Grid.Col span={{ base: 12, sm: 6 }}>
             <Stack gap="xs">
               <Group gap="xs">
-                <IconClock size={16} c="dimmed" />
+                <IconClock size={16} color="var(--mantine-color-dimmed)" />
                 <Text size="sm" fw={600}>
                   Timestamp
                 </Text>
@@ -124,7 +110,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
           <Grid.Col span={{ base: 12, sm: 6 }}>
             <Stack gap="xs">
               <Group gap="xs">
-                <IconWorld size={16} c="dimmed" />
+                <IconWorld size={16} color="var(--mantine-color-dimmed)" />
                 <Text size="sm" fw={600}>
                   Source IP
                 </Text>
@@ -166,7 +152,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
             <Grid.Col span={12}>
               <Stack gap="xs">
                 <Group gap="xs">
-                  <IconRoute size={16} c="dimmed" />
+                  <IconRoute size={16} color="var(--mantine-color-dimmed)" />
                   <Text size="sm" fw={600}>
                     Target Route
                   </Text>
@@ -195,7 +181,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
             <Grid.Col span={12}>
               <Stack gap="xs">
                 <Group gap="xs">
-                  <IconFingerprint size={16} c="dimmed" />
+                  <IconFingerprint size={16} color="var(--mantine-color-dimmed)" />
                   <Text size="sm" fw={600}>
                     TLS Fingerprints
                   </Text>
@@ -278,7 +264,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
         targetIp={anomaly.source}
       />
 
-      <MantineModal
+      <Modal
         opened={confirmOpened}
         onClose={closeConfirm}
         title={<Text fw={700}>Confirm Mitigation Removal</Text>}
@@ -309,7 +295,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
             </Button>
           </Group>
         </Stack>
-      </MantineModal>
+      </Modal>
     </Modal>
   );
 }

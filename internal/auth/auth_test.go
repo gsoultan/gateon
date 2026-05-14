@@ -73,7 +73,7 @@ func TestAccountLockout(t *testing.T) {
 	}
 
 	// Fail login MaxFailedAttempts times
-	for i := 0; i < MaxFailedAttempts; i++ {
+	for range MaxFailedAttempts {
 		_, _, err := m.Authenticate("admin", "wrong")
 		if err != ErrInvalidCredentials {
 			t.Errorf("expected ErrInvalidCredentials, got %v", err)

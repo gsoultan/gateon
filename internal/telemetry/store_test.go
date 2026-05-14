@@ -129,7 +129,7 @@ func TestSecurityTelemetryDailyReset(t *testing.T) {
 func TestGenerateIDUniqueness(t *testing.T) {
 	ids := make(map[string]bool)
 	// Real uniqueness test
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		id := request.GenerateID()
 		if ids[id] {
 			t.Errorf("Duplicate ID generated: %s", id)
