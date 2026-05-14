@@ -1018,19 +1018,19 @@ export default function MetricsPage() {
         <MetricsSkeleton />
       ) : data ? (
         <Stack gap="lg">
-          <GoldenSignalsSection gs={data.golden_signals} />
+          {data.golden_signals && <GoldenSignalsSection gs={data.golden_signals} />}
 
           <SimpleGrid cols={{ base: 1, md: 2 }}>
-            <LatencyPercentilesCard gs={data.golden_signals} />
-            <SystemMetricsSection sys={data.system} />
+            {data.golden_signals && <LatencyPercentilesCard gs={data.golden_signals} />}
+            {data.system && <SystemMetricsSection sys={data.system} />}
           </SimpleGrid>
 
           <RouteMetricsSection routes={data.route_metrics} />
-          <MiddlewareMetricsSection mw={data.middleware} />
+          {data.middleware && <MiddlewareMetricsSection mw={data.middleware} />}
 
           <SimpleGrid cols={{ base: 1, md: 2 }}>
-            <TLSCertificatesSection certs={data.tls_certificates} />
-            <TargetHealthSection targets={data.targets} />
+            {data.tls_certificates && <TLSCertificatesSection certs={data.tls_certificates} />}
+            {data.targets && <TargetHealthSection targets={data.targets} />}
           </SimpleGrid>
         </Stack>
       ) : null}

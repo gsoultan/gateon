@@ -194,9 +194,10 @@ export function OverviewTab({
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Card withBorder radius="md" h="100%">
             <Title order={4} mb="md">Threat Distribution</Title>
-            <Box h={200} w="100%" style={{ minWidth: 0, minHeight: 200 }}>
+            <Box h={200} w="100%" style={{ minWidth: 0 }}>
               <DonutChart
                 h={200}
+                minWidth={0}
                 thickness={20}
                 data={threatTypeData}
                 withTooltip

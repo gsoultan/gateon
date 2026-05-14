@@ -44,6 +44,7 @@ export const DistributionCard = memo(function DistributionCard({
         <Box mt="md">
           <BarChart
             h={180}
+            minWidth={0}
             data={data}
             dataKey="group"
             withLegend={false}

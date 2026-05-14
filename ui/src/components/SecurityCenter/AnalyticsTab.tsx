@@ -43,9 +43,10 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
             <IconActivity size={18} />
           </ThemeIcon>
         </Group>
-        <Box h={300} w="100%" style={{ minWidth: 0, minHeight: 300 }}>
+        <Box h={300} w="100%" style={{ minWidth: 0 }}>
           <AreaChart
             h={300}
+            minWidth={0}
             data={trendData}
             dataKey="ts"
             series={[{ name: 'threats', color: 'red.6', label: 'Threats Detected' }]}
@@ -65,9 +66,10 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Grid.Col span={{ base: 12, lg: 6 }}>
           <Card withBorder radius="md">
             <Title order={4} mb="md">Geographic Threat Distribution</Title>
-            <Box h={300} w="100%" style={{ minWidth: 0, minHeight: 300 }}>
+            <Box h={300} w="100%" style={{ minWidth: 0 }}>
               <BarChart
                 h={300}
+                minWidth={0}
                 data={countryData}
                 dataKey="country"
                 series={[{ name: 'threats', color: 'blue.6', label: 'Attacks' }]}
@@ -84,9 +86,10 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
           <Card withBorder radius="md">
             <Title order={4} mb="md">Threat Classification Analysis</Title>
             <SimpleGrid cols={2}>
-              <Box h={250} w="100%" style={{ minWidth: 0, minHeight: 250 }}>
+              <Box h={250} w="100%" style={{ minWidth: 0 }}>
                 <DonutChart
                   h={200}
+                  minWidth={0}
                   thickness={25}
                   data={threatTypeData}
                   withTooltip
