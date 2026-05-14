@@ -294,8 +294,8 @@ func (s *pathStatsStore) dailyResetLoop() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	// Initial sync
-	s.syncDailyBaselines()
+	// Initial sync - load baselines but don't reset current counters
+	s.syncDailyBaselines(false)
 
 	for {
 		select {
@@ -308,7 +308,7 @@ func (s *pathStatsStore) dailyResetLoop() {
 			s.resetMu.Lock()
 			if s.lastResetDay != "" && s.lastResetDay != day {
 				// Day changed!
-				s.syncDailyBaselines()
+				s.syncDailyBaselines(true)
 			}
 			s.lastResetDay = day
 			s.resetMu.Unlock()
@@ -316,7 +316,7 @@ func (s *pathStatsStore) dailyResetLoop() {
 	}
 }
 
-func (s *pathStatsStore) syncDailyBaselines() {
+func (s *pathStatsStore) syncDailyBaselines(resetCurrent bool) {
 	now := time.Now().UTC()
 	day := now.Format("2006-01-02")
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
@@ -343,9 +343,17 @@ func (s *pathStatsStore) syncDailyBaselines() {
 		s.baselineActiveToday.Store(uint64(activeCount))
 	}
 
+	if !resetCurrent {
+		return
+	}
+
 	s.currentReqToday.Store(0)
 	s.currentBytesToday.Store(0)
 	s.currentActiveToday.Store(0)
+
+	// Reset global telemetry structures for the new day
+	GlobalCMS.Clear()
+	GlobalHHH.Clear()
 }
 
 func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
@@ -702,6 +710,12 @@ func RecordSecurityThreat(t SecurityThreat) {
 	}
 	if repID != "" {
 		DecreaseReputation(repID, t.Score/2, t.Type) // Penalty is half the threat score
+	}
+
+	// Update global telemetry structures
+	GlobalCMS.AddWeighted("global", uint32(t.Score))
+	if t.SourceIP != "" {
+		GlobalHHH.Add(t.SourceIP)
 	}
 
 	// Increment Prometheus counter

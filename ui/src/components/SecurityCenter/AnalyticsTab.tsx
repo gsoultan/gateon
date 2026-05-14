@@ -25,7 +25,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
             <IconActivity size={18} />
           </ThemeIcon>
         </Group>
-        <Box h={300}>
+        <Box h={300} w="100%">
           <AreaChart
             h={300}
             data={trendData}
@@ -47,7 +47,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Grid.Col span={{ base: 12, lg: 6 }}>
           <Card withBorder radius="md">
             <Title order={4} mb="md">Geographic Threat Distribution</Title>
-            <Box h={300}>
+            <Box h={300} w="100%">
               <BarChart
                 h={300}
                 data={countryData}
@@ -66,9 +66,9 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
           <Card withBorder radius="md">
             <Title order={4} mb="md">Threat Classification Analysis</Title>
             <SimpleGrid cols={2}>
-              <Box h={250}>
+              <Box h={250} w="100%">
                 <DonutChart
-                  size={200}
+                  h={200}
                   thickness={25}
                   data={threatTypeData}
                   withTooltip

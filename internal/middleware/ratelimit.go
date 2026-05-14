@@ -191,10 +191,6 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				return
 			}
 
-			// Global deterministic metrics (CMS & HHH)
-			telemetry.GlobalCMS.Add(key)
-			telemetry.GlobalHHH.Add(key)
-
 			// Adaptive Rate Limiting based on Reputation
 			fp := telemetry.GenerateFingerprint(r)
 			reputation := telemetry.GetReputation(fp.Hash)
@@ -207,6 +203,21 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "local").Inc()
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:local").Inc()
 					telemetry.IncRateLimitRejected("local")
+
+					// Record as security threat
+					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+						SourceIP:    key,
+						Type:        "rate_limit",
+						Category:    "abuse",
+						Severity:    "medium",
+						Score:       10, // Default score for rate limit violation
+						Details:     fmt.Sprintf("Rate limit exceeded for key: %s", key),
+						ActionTaken: "blocked",
+						Time:        time.Now(),
+						RouteID:     routeID,
+						RequestURI:  r.RequestURI,
+						Mitigated:   true,
+					})
 				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests", "")
@@ -244,10 +255,6 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				next.ServeHTTP(w, r)
 				return
 			}
-
-			// Global deterministic metrics (CMS & HHH)
-			telemetry.GlobalCMS.Add(key)
-			telemetry.GlobalHHH.Add(key)
 
 			// Sliding window implementation using a Redis Sorted Set
 			// Every request is a member with current timestamp as score
@@ -295,6 +302,21 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "redis").Inc()
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:redis").Inc()
 					telemetry.IncRateLimitRejected("redis")
+
+					// Record as security threat
+					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+						SourceIP:    key,
+						Type:        "rate_limit",
+						Category:    "abuse",
+						Severity:    "medium",
+						Score:       10,
+						Details:     fmt.Sprintf("Rate limit exceeded for key: %s (distributed)", key),
+						ActionTaken: "blocked",
+						Time:        time.Now(),
+						RouteID:     routeID,
+						RequestURI:  r.RequestURI,
+						Mitigated:   true,
+					})
 				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests (distributed)", "")

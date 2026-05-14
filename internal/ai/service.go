@@ -50,40 +50,14 @@ func (s *AIService) AnalyzeConfig(ctx context.Context, req *gateonv1.AnalyzeConf
 	middlewares, _ := s.mwStore.ListPaginated(ctx, 0, 100, "")
 	entrypoints, _ := s.epStore.ListPaginated(ctx, 0, 100, "")
 
-	// Use local engine if AI is disabled or provider is local.
-	// This fulfills the requirement of having "smart" insights without necessarily using an external LLM.
-	if conf.Ai == nil || !conf.Ai.Enabled || conf.Ai.Provider == "local" || conf.Ai.Provider == "" {
-		engine := NewLocalInsightEngine(conf, routes, services, middlewares, entrypoints)
-		insights, summary := engine.Analyze(ctx)
-		return &gateonv1.AnalyzeConfigResponse{
-			Insights: insights,
-			Summary:  summary + " (Gateon Smart Engine)",
-		}, nil
-	}
-
-	// Redact sensitive configuration before sending to AI provider.
-	redactedGlobal := redactConfig(conf)
-
-	configJSON, _ := json.MarshalIndent(map[string]any{
-		"global":      redactedGlobal,
-		"routes":      routes,
-		"services":    services,
-		"middlewares": middlewares,
-		"entrypoints": entrypoints,
-	}, "", "  ")
-
-	prompt := fmt.Sprintf(`You are an expert API Gateway administrator for Gateon. 
-Analyze the following configuration and provide performance, security, and availability insights.
-Format your response as a JSON object with "summary" (string) and "insights" (array of objects with "title", "description", "severity", "category", "recommendation", "suggested_config").
-Severity must be "info", "warning", or "critical". Category must be "security", "performance", or "availability".
-If you suggest a configuration change, provide the JSON snippet in "suggested_config".
-
-Configuration:
-%s`, string(configJSON))
-
-	var resp gateonv1.AnalyzeConfigResponse
-	err := s.callLLM(ctx, prompt, &resp)
-	return &resp, err
+	// Gateon uses a deterministic Smart Engine for security analysis.
+	// This provides instant, reliable insights without external dependencies.
+	engine := NewLocalInsightEngine(conf, routes, services, middlewares, entrypoints)
+	insights, summary := engine.Analyze(ctx)
+	return &gateonv1.AnalyzeConfigResponse{
+		Insights: insights,
+		Summary:  summary,
+	}, nil
 }
 
 func redactConfig(conf *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
@@ -115,41 +89,8 @@ func redactConfig(conf *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
 
 // ChatWithAI allows interactive chat with the AI about the gateway.
 func (s *AIService) ChatWithAI(ctx context.Context, req *gateonv1.ChatWithAIRequest) (*gateonv1.ChatWithAIResponse, error) {
-	conf := s.globalStore.Get(ctx)
-	if conf.Ai == nil || !conf.Ai.Enabled || conf.Ai.Provider == "local" || conf.Ai.Provider == "" {
-		return &gateonv1.ChatWithAIResponse{
-			Reply: "Interactive AI Chat requires an external AI provider (OpenAI or Anthropic) to be configured and enabled. Currently, I am running in 'Local Smart Mode' which only supports configuration and log analysis.",
-		}, nil
-	}
-
-	// Redact sensitive configuration before sending to AI provider.
-	redactedGlobal := redactConfig(conf)
-	routes, _ := s.routeStore.ListPaginated(ctx, 0, 50, "", nil)
-	services, _ := s.serviceStore.ListPaginated(ctx, 0, 50, "")
-
-	configContext, _ := json.Marshal(map[string]any{
-		"global":   redactedGlobal,
-		"routes":   routes,
-		"services": services,
-	})
-
-	prompt := fmt.Sprintf(`Current Gateon Configuration: %s
-
-User Question: %s
-
-Provide a helpful answer based on Gateon gateway best practices and the current configuration.
-Format your response as a JSON object with a "summary" field containing your answer.`, string(configContext), req.Message)
-
-	var resp struct {
-		Summary string `json:"summary"`
-	}
-	err := s.callLLM(ctx, prompt, &resp)
-	if err != nil {
-		return nil, err
-	}
-
 	return &gateonv1.ChatWithAIResponse{
-		Reply: resp.Summary,
+		Reply: "Interactive AI Chat is currently disabled. Gateon uses a local deterministic Smart Engine for security and configuration analysis to ensure maximum privacy and performance.",
 	}, nil
 }
 
@@ -157,31 +98,13 @@ Format your response as a JSON object with a "summary" field containing your ans
 func (s *AIService) AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error) {
 	conf := s.globalStore.Get(ctx)
 
-	// Use local engine if AI is disabled or provider is local.
-	if conf.Ai == nil || !conf.Ai.Enabled || conf.Ai.Provider == "local" || conf.Ai.Provider == "" {
-		// For local log analysis, we don't need all config, but it doesn't hurt.
-		engine := NewLocalInsightEngine(conf, nil, nil, nil, nil)
-		analysis, insights := engine.AnalyzeLogs(req.Logs)
-		return &gateonv1.AnalyzeLogsResponse{
-			Analysis: analysis + " (Gateon Smart Engine)",
-			Insights: insights,
-		}, nil
-	}
-
-	logsJSON, _ := json.Marshal(req.Logs)
-	prompt := fmt.Sprintf(`Analyze the following Gateon gateway logs and provide insights on potential issues, security threats, or performance bottlenecks.
-Format your response as a JSON object with "analysis" (string) and "insights" (array of objects with "title", "description", "severity", "category", "recommendation").
-
-Logs:
-%s`, string(logsJSON))
-
-	var resp gateonv1.AnalyzeLogsResponse
-	err := s.callLLM(ctx, prompt, &resp)
-	if err != nil {
-		return nil, err
-	}
-
-	return &resp, nil
+	// Gateon uses a deterministic Smart Engine for log analysis.
+	engine := NewLocalInsightEngine(conf, nil, nil, nil, nil)
+	analysis, insights := engine.AnalyzeLogs(req.Logs)
+	return &gateonv1.AnalyzeLogsResponse{
+		Analysis: analysis,
+		Insights: insights,
+	}, nil
 }
 
 func (s *AIService) callLLM(ctx context.Context, prompt string, target any) error {
@@ -246,12 +169,14 @@ func (s *AIService) callOpenAI(ctx context.Context, conf *gateonv1.AIConfig, pro
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to call OpenAI: %w", err)
+		return fmt.Errorf("failed to call OpenAI at %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("OpenAI API returned status %d", resp.StatusCode)
+		var errResp map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("OpenAI API at %s returned status %d: %v", url, resp.StatusCode, errResp)
 	}
 
 	var result struct {
@@ -305,12 +230,14 @@ func (s *AIService) callAnthropic(ctx context.Context, conf *gateonv1.AIConfig, 
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to call Anthropic: %w", err)
+		return fmt.Errorf("failed to call Anthropic at %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Anthropic API returned status %d", resp.StatusCode)
+		var errResp map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return fmt.Errorf("Anthropic API at %s returned status %d: %v", url, resp.StatusCode, errResp)
 	}
 
 	var result struct {

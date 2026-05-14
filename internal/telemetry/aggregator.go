@@ -96,10 +96,9 @@ func (a *LocalMetricsAggregator) takeSnapshot() {
 	if len(a.buckets) > a.maxBuckets {
 		a.buckets = a.buckets[1:]
 	}
-	a.mu.Unlock()
 
 	// Update cached QPS (approximate from last bucket)
-	qps := a.GetRate("requests", 5*time.Minute)
+	qps := a.GetRateLocked("requests", 5*time.Minute)
 	a.cachedQPS.Store(uint64(qps))
 }
 
@@ -185,7 +184,10 @@ func (a *LocalMetricsAggregator) ResetIPStats() {
 func (a *LocalMetricsAggregator) GetRate(metric string, duration time.Duration) float64 {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	return a.GetRateLocked(metric, duration)
+}
 
+func (a *LocalMetricsAggregator) GetRateLocked(metric string, duration time.Duration) float64 {
 	if len(a.buckets) < 2 {
 		return 0
 	}

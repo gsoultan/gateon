@@ -49,7 +49,7 @@ export function AIAdvisoryTab() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch('/AnalyzeConfig', {
+      const res = await apiFetch('/v1/AnalyzeConfig', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ focus: 'security' }),

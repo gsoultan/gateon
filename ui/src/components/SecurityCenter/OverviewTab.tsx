@@ -157,16 +157,16 @@ export function OverviewTab({
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Card withBorder radius="md" h="100%">
             <Title order={4} mb="md">Threat Distribution</Title>
-            <Center h={200}>
+            <Box h={200} w="100%">
               <DonutChart
-                size={160}
+                h={200}
                 thickness={20}
                 data={threatTypeData}
                 withTooltip
                 chartLabel={`${totalThreats} Total`}
                 tooltipDataSource="segment"
               />
-            </Center>
+            </Box>
             <Stack gap="xs" mt="md">
               {threatTypeData.slice(0, 3).map((item) => (
                 <Group key={item.name} justify="space-between">
