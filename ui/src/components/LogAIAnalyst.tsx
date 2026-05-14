@@ -11,6 +11,7 @@ import {
   Loader,
 } from "@mantine/core";
 import { IconRobot, IconSparkles } from "@tabler/icons-react";
+import { apiFetch } from "../hooks/useGateon";
 
 interface LogAIAnalystProps {
   logs: string[];
@@ -26,26 +27,18 @@ export function LogAIAnalyst({ logs, opened, onClose }: LogAIAnalystProps) {
     setLoading(true);
     setAnalysis(null);
     try {
-      // Stub for AI analysis. In a real implementation, this would call an LLM API.
-      // We pass the last 10 logs for context.
-      const logContext = logs.slice(0, 10).join("\n");
+      const res = await apiFetch("/AnalyzeLogs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logs: logs.slice(0, 50) }),
+      });
       
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      
-      const hasErrors = logContext.includes("error") || logContext.includes("404") || logContext.includes("500");
-      
-      if (hasErrors) {
-        setAnalysis(
-          "I've detected some errors in your logs. It seems several requests returned a 404 or 500 status code. " +
-          "Recommendation: Check if the backend services are healthy and if the route rules match the expected paths. " +
-          "Also, verify if the 'upstream' targets are reachable from the Gateon instance."
-        );
-      } else {
-        setAnalysis(
-          "Traffic seems healthy. Latency is within normal bounds. No significant errors detected in the recent logs."
-        );
+      if (!res.ok) {
+        throw new Error(await res.text());
       }
+      
+      const data = await res.json();
+      setAnalysis(data.analysis);
     } catch (err) {
       setAnalysis("Failed to analyze logs. Please try again later.");
     } finally {
@@ -68,7 +61,7 @@ export function LogAIAnalyst({ logs, opened, onClose }: LogAIAnalystProps) {
     >
       <Stack gap="md">
         <Text size="sm">
-          The AI will analyze the last 10 logs to identify patterns, errors, or
+          The AI will analyze the last 50 logs to identify patterns, errors, or
           anomalies.
         </Text>
 
@@ -76,7 +69,7 @@ export function LogAIAnalyst({ logs, opened, onClose }: LogAIAnalystProps) {
           <Text size="xs" fw={700} mb={4}>Context (Recent Logs):</Text>
           <ScrollArea h={100}>
             <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>
-              {logs.slice(0, 10).join("\n")}
+              {logs.slice(0, 50).join("\n")}
             </Text>
           </ScrollArea>
         </Paper>

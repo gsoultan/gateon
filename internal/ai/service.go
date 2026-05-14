@@ -43,18 +43,26 @@ func NewAIService(globals config.GlobalConfigStore, routes config.RouteStore, se
 // AnalyzeConfig analyzes the current configuration and provides insights.
 func (s *AIService) AnalyzeConfig(ctx context.Context, req *gateonv1.AnalyzeConfigRequest) (*gateonv1.AnalyzeConfigResponse, error) {
 	conf := s.globalStore.Get(ctx)
-	if conf.Ai == nil || !conf.Ai.Enabled {
-		return nil, errors.New("AI service is not enabled in global configuration")
-	}
-
-	// Redact sensitive configuration before sending to AI provider.
-	redactedGlobal := redactConfig(conf)
 
 	// Gather configuration context.
 	routes, _ := s.routeStore.ListPaginated(ctx, 0, 100, "", nil)
 	services, _ := s.serviceStore.ListPaginated(ctx, 0, 100, "")
 	middlewares, _ := s.mwStore.ListPaginated(ctx, 0, 100, "")
 	entrypoints, _ := s.epStore.ListPaginated(ctx, 0, 100, "")
+
+	// Use local engine if AI is disabled or provider is local.
+	// This fulfills the requirement of having "smart" insights without necessarily using an external LLM.
+	if conf.Ai == nil || !conf.Ai.Enabled || conf.Ai.Provider == "local" || conf.Ai.Provider == "" {
+		engine := NewLocalInsightEngine(conf, routes, services, middlewares, entrypoints)
+		insights, summary := engine.Analyze(ctx)
+		return &gateonv1.AnalyzeConfigResponse{
+			Insights: insights,
+			Summary:  summary + " (Gateon Smart Engine)",
+		}, nil
+	}
+
+	// Redact sensitive configuration before sending to AI provider.
+	redactedGlobal := redactConfig(conf)
 
 	configJSON, _ := json.MarshalIndent(map[string]any{
 		"global":      redactedGlobal,
@@ -108,8 +116,10 @@ func redactConfig(conf *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
 // ChatWithAI allows interactive chat with the AI about the gateway.
 func (s *AIService) ChatWithAI(ctx context.Context, req *gateonv1.ChatWithAIRequest) (*gateonv1.ChatWithAIResponse, error) {
 	conf := s.globalStore.Get(ctx)
-	if conf.Ai == nil || !conf.Ai.Enabled {
-		return nil, errors.New("AI service is not enabled")
+	if conf.Ai == nil || !conf.Ai.Enabled || conf.Ai.Provider == "local" || conf.Ai.Provider == "" {
+		return &gateonv1.ChatWithAIResponse{
+			Reply: "Interactive AI Chat requires an external AI provider (OpenAI or Anthropic) to be configured and enabled. Currently, I am running in 'Local Smart Mode' which only supports configuration and log analysis.",
+		}, nil
 	}
 
 	// Redact sensitive configuration before sending to AI provider.
@@ -146,8 +156,16 @@ Format your response as a JSON object with a "summary" field containing your ans
 // AnalyzeLogs analyzes gateway logs for issues.
 func (s *AIService) AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error) {
 	conf := s.globalStore.Get(ctx)
-	if conf.Ai == nil || !conf.Ai.Enabled {
-		return nil, errors.New("AI service is not enabled")
+
+	// Use local engine if AI is disabled or provider is local.
+	if conf.Ai == nil || !conf.Ai.Enabled || conf.Ai.Provider == "local" || conf.Ai.Provider == "" {
+		// For local log analysis, we don't need all config, but it doesn't hurt.
+		engine := NewLocalInsightEngine(conf, nil, nil, nil, nil)
+		analysis, insights := engine.AnalyzeLogs(req.Logs)
+		return &gateonv1.AnalyzeLogsResponse{
+			Analysis: analysis + " (Gateon Smart Engine)",
+			Insights: insights,
+		}, nil
 	}
 
 	logsJSON, _ := json.Marshal(req.Logs)
