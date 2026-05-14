@@ -10,6 +10,7 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -38,6 +39,7 @@ type Manager interface {
 	UpdateManagementWhitelist(ips []string) error
 	SetPortKnockingSequence(seq []int32) error
 	UpdateLoadBalancerBackends(ips []string) error
+	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 	ShunJA3(ja3Md5 [16]byte) error
 	UnshunJA3(ja3Md5 [16]byte) error
 	ShunJA4(ja4Fingerprint string) error // New: JA4 support
@@ -287,6 +289,26 @@ func (m *EbpfManager) UpdateLoadBalancerBackends(ips []string) error {
 		count = 64
 	}
 	return countMap.Update(uint32(0), count, ebpf.UpdateAny)
+}
+
+// SetAdaptiveRateLimit sets a per-IP rate limit in nanoseconds.
+func (m *EbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
+	logger.L.LogInfo("Setting adaptive rate limit in eBPF", "ip", ip, "interval", interval)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	limitMap, ok := m.maps["adaptive_limits"]
+	if !ok {
+		return fmt.Errorf("adaptive_limits map not loaded")
+	}
+
+	ipUint, err := ipToUint32(ip)
+	if err != nil {
+		return err
+	}
+
+	ns := uint64(interval.Nanoseconds())
+	return limitMap.Update(ipUint, ns, ebpf.UpdateAny)
 }
 
 // ShunJA3 adds a JA3 fingerprint to the XDP blocklist.

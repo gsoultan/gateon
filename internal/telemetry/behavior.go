@@ -7,52 +7,83 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/security/entropy"
 	lru "github.com/hashicorp/golang-lru"
 )
 
 const (
 	maxSequenceLen = 10
 	maxIATsLen     = 10
+	behaviorShards = 16
 )
 
 type BehaviorState struct {
-	LastPath string
-	LastTime time.Time
-	Sequence []string
-	IATs     []time.Duration
+	LastPath    string
+	LastTime    time.Time
+	Sequence    []string
+	IATs        []time.Duration
+	StatusCodes []int
+}
+
+type behaviorShard struct {
+	cache *lru.ARCCache
+	mu    sync.Mutex
 }
 
 var (
-	behaviorCache *lru.ARCCache
-	behaviorMu    sync.Mutex
+	shards []*behaviorShard
 )
 
 func init() {
-	// Cache up to 10,000 unique fingerprints
-	cache, _ := lru.NewARC(10000)
-	behaviorCache = cache
+	shards = make([]*behaviorShard, behaviorShards)
+	for i := range behaviorShards {
+		cache, _ := lru.NewARC(10000 / behaviorShards)
+		shards[i] = &behaviorShard{
+			cache: cache,
+		}
+	}
+}
+
+func getShard(fingerprint string) *behaviorShard {
+	var hash uint32 = 2166136261
+	for i := range len(fingerprint) {
+		hash ^= uint32(fingerprint[i])
+		hash *= 16777619
+	}
+	return shards[hash%behaviorShards]
 }
 
 // TrackBehavior analyzes sequences and timing of requests from a fingerprint.
-func TrackBehavior(fingerprint string, r *http.Request) {
+func TrackBehavior(fingerprint string, r *http.Request, status int) {
 	if fingerprint == "" {
 		return
 	}
 
-	behaviorMu.Lock()
-	defer behaviorMu.Unlock()
+	shard := getShard(fingerprint)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
 	path := r.URL.Path
 	now := time.Now()
 
 	var state *BehaviorState
-	if val, ok := behaviorCache.Get(fingerprint); ok {
+	if val, ok := shard.cache.Get(fingerprint); ok {
 		state = val.(*BehaviorState)
 	} else {
 		state = &BehaviorState{
-			Sequence: make([]string, 0, maxSequenceLen),
-			IATs:     make([]time.Duration, 0, maxIATsLen),
+			Sequence:    make([]string, 0, maxSequenceLen),
+			IATs:        make([]time.Duration, 0, maxIATsLen),
+			StatusCodes: make([]int, 0, maxSequenceLen),
 		}
+	}
+
+	// Get global QPS to adjust sensitivity
+	agg := GetAggregator()
+	qps := agg.GetCachedQPS()
+	// highTrafficFactor reduces sensitivity when QPS is high (e.g. > 1000)
+	highTrafficFactor := 1.0
+	if qps > 1000 {
+		highTrafficFactor = 1.0 + (qps-1000)/1000.0
 	}
 
 	// Calculate IAT
@@ -65,33 +96,52 @@ func TrackBehavior(fingerprint string, r *http.Request) {
 
 		// Analyze IAT for robotic regularity (low variance)
 		if len(state.IATs) >= 5 {
-			if isRoboticTiming(state.IATs) {
+			if isRoboticTiming(state.IATs, highTrafficFactor) {
 				RecordSecurityThreat(SecurityThreat{
 					Type:        "behavioral_anomaly",
 					Fingerprint: fingerprint,
-					Score:       30,
+					Score:       30 / highTrafficFactor,
 					Details:     "Robotic timing pattern detected (highly regular intervals)",
 					RequestURI:  path,
 					ActionTaken: "flagged",
+					Severity:    "low",
 				})
 			}
-			if isHeartbeatPattern(state.IATs) {
+			if isHeartbeatPattern(state.IATs, highTrafficFactor) {
 				RecordSecurityThreat(SecurityThreat{
 					Type:        "behavioral_anomaly",
 					Fingerprint: fingerprint,
-					Score:       40,
+					Score:       40 / highTrafficFactor,
 					Details:     "Heartbeat pattern detected (regular long-interval polling)",
 					RequestURI:  path,
 					ActionTaken: "flagged",
+					Severity:    "medium",
 				})
 			}
 		}
 	}
 
-	// Update Sequence
+	// Update Sequence and Status
 	state.Sequence = append(state.Sequence, path)
 	if len(state.Sequence) > maxSequenceLen {
 		state.Sequence = state.Sequence[1:]
+	}
+	state.StatusCodes = append(state.StatusCodes, status)
+	if len(state.StatusCodes) > maxSequenceLen {
+		state.StatusCodes = state.StatusCodes[1:]
+	}
+
+	// Analyze for API Fuzzing / Scanning
+	if isFuzzing(state.StatusCodes, highTrafficFactor) {
+		RecordSecurityThreat(SecurityThreat{
+			Type:        "api_fuzzing",
+			Fingerprint: fingerprint,
+			Score:       60 / highTrafficFactor,
+			Details:     "High rate of 404/403 responses detected (potential fuzzing/scanning)",
+			RequestURI:  path,
+			ActionTaken: "flagged",
+			Severity:    "high",
+		})
 	}
 
 	// Analyze Sequence for jump-to-critical-path
@@ -103,12 +153,26 @@ func TrackBehavior(fingerprint string, r *http.Request) {
 			Details:     "Suspicious path sequence detected (jump to sensitive area)",
 			RequestURI:  path,
 			ActionTaken: "flagged",
+			Severity:    "medium",
+		})
+	}
+
+	// Analyze for Directory Traversal / Probe
+	if isProbePattern(path) {
+		RecordSecurityThreat(SecurityThreat{
+			Type:        "probe_detected",
+			Fingerprint: fingerprint,
+			Score:       70,
+			Details:     "Known exploit probe or directory traversal attempt: " + path,
+			RequestURI:  path,
+			ActionTaken: "flagged",
+			Severity:    "high",
 		})
 	}
 
 	state.LastPath = path
 	state.LastTime = now
-	behaviorCache.Add(fingerprint, state)
+	shard.cache.Add(fingerprint, state)
 
 	// Entropy-based DGA detection on Hostname
 	hostname := r.Host
@@ -127,7 +191,7 @@ func TrackBehavior(fingerprint string, r *http.Request) {
 	}
 }
 
-func isRoboticTiming(iats []time.Duration) bool {
+func isRoboticTiming(iats []time.Duration, factor float64) bool {
 	if len(iats) < 2 {
 		return false
 	}
@@ -149,12 +213,13 @@ func isRoboticTiming(iats []time.Duration) bool {
 	// Real human traffic usually has CV > 0.5. Bots/Scripts often have CV < 0.1.
 	if mean > 0 {
 		cv := stdDev / mean
-		return cv < 0.1
+		// Reduce sensitivity under high traffic by lowering the CV threshold
+		return cv < (0.1 / factor)
 	}
 	return false
 }
 
-func isHeartbeatPattern(iats []time.Duration) bool {
+func isHeartbeatPattern(iats []time.Duration, factor float64) bool {
 	if len(iats) < 8 {
 		return false
 	}
@@ -181,7 +246,43 @@ func isHeartbeatPattern(iats []time.Duration) bool {
 	if mean > 0 {
 		cv := stdDev / mean
 		// Very low CV (< 0.05) on slow requests is a strong indicator of a scheduled task/script
-		return cv < 0.05
+		return cv < (0.05 / factor)
+	}
+	return false
+}
+
+func isFuzzing(codes []int, factor float64) bool {
+	if len(codes) < 5 {
+		return false
+	}
+	badCount := 0
+	for _, c := range codes {
+		if c == 404 || c == 403 || c == 401 {
+			badCount++
+		}
+	}
+	// If more than 60% of recent requests are errors, it's likely fuzzing.
+	// We increase the required threshold under high traffic to avoid false positives from broken clients.
+	threshold := 0.6 * factor
+	if threshold > 0.95 {
+		threshold = 0.95
+	}
+	return float64(badCount)/float64(len(codes)) > threshold
+}
+
+func isProbePattern(path string) bool {
+	path = strings.ToLower(path)
+	probes := []string{
+		"../", "/etc/passwd", "/.git", "/.env", "/.ssh",
+		"wp-admin", "wp-login", "wp-content",
+		"phpmyadmin", "config.php", "web.config",
+		"autodiscover.xml", "owa", ".aws/credentials",
+		".well-known/security.txt", // sometimes probes look for this to find vuln disclosure info
+	}
+	for _, p := range probes {
+		if strings.Contains(path, p) {
+			return true
+		}
 	}
 	return false
 }
@@ -231,25 +332,8 @@ func isDGAPattern(hostname string) bool {
 		return false
 	}
 
-	entropy := CalculateShannonEntropy(subdomain)
+	entropyScore := entropy.CalculateString(subdomain)
 	// Randomly generated strings usually have higher entropy.
 	// For English text it's usually 3.5-4.5. Random strings are often > 4.5.
-	return entropy > 4.2
-}
-
-func CalculateShannonEntropy(s string) float64 {
-	if len(s) == 0 {
-		return 0
-	}
-	counts := make(map[rune]int)
-	for _, r := range s {
-		counts[r]++
-	}
-	var entropy float64
-	invLen := 1.0 / float64(len(s))
-	for _, count := range counts {
-		p := float64(count) * invLen
-		entropy -= p * math.Log2(p)
-	}
-	return entropy
+	return entropyScore > 4.2
 }

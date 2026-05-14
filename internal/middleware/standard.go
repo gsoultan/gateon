@@ -149,7 +149,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			if gc := config.GetGlobalConfig(); gc != nil && gc.AnomalyDetection != nil && gc.AnomalyDetection.EnableBehavioralFingerprinting {
 				fp := telemetry.GenerateFingerprint(r)
 				fingerprint = fp.Hash
-				telemetry.TrackBehavior(fingerprint, r)
+				telemetry.TrackBehavior(fingerprint, r, sw.Status)
 			}
 
 			status := getStatusString(sw.Status)

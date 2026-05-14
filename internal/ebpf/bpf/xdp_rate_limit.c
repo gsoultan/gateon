@@ -23,6 +23,13 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u32);   // IP
+    __type(value, __u64); // Min interval in nanoseconds
+} adaptive_limits SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 65536);
     __type(key, __u32);   // IPv4 address
     __type(value, __u32); // Drop reason or just a flag
@@ -211,6 +218,13 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
         return XDP_DROP;
     }
 
+    // 1b. Cuckoo Filter (High-performance blocklist)
+    __u32 *cuckoo = bpf_map_lookup_elem(&cuckoo_filter, &src_ip);
+    if (cuckoo) {
+        count_drop(DROP_REASON_SHUNNED_IP);
+        return XDP_DROP;
+    }
+
     // 2. TCP State Anomaly & SYN Flood Protection
     if (iph->protocol == IPPROTO_TCP) {
         struct tcphdr *tcph = (void *)(iph + 1);
@@ -254,11 +268,19 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
         }
     }
 
-    // 3. Rate Limiting
+    // 3. Rate Limiting (Adaptive)
     __u64 now = bpf_ktime_get_ns();
+    __u64 min_interval = 1000000; // 1ms default (1000 pps)
+
+    __u64 *custom_limit = bpf_map_lookup_elem(&adaptive_limits, &src_ip);
+    if (custom_limit) {
+        min_interval = *custom_limit;
+    }
+
     __u64 *last_seen = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
     if (last_seen) {
-        if (now - *last_seen < 1000000) { // 1ms
+        if (now - *last_seen < min_interval) {
+            count_drop(DROP_REASON_RATE_LIMITED);
             return XDP_DROP;
         }
     }

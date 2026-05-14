@@ -32,9 +32,9 @@ func isPublicAuthPath(path string) bool {
 		isHealthPath(path)
 }
 
-// isHealthPath returns true for /healthz or /readyz.
+// isHealthPath returns true for /healthz, /readyz, or gRPC health check.
 func isHealthPath(path string) bool {
-	return path == "/healthz" || path == "/readyz"
+	return path == "/healthz" || path == "/readyz" || path == "/grpc.health.v1.Health/Check"
 }
 
 // handleLoginWithRateLimit applies login rate limiting if configured, then serves internal.

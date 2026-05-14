@@ -35,14 +35,36 @@ type Reputation struct {
 	History        []string // Brief history of violation types
 }
 
+const (
+	reputationShards = 16
+)
+
+type reputationShard struct {
+	cache *lru.ARCCache
+	mu    sync.RWMutex
+}
+
 var (
-	reputationCache *lru.ARCCache
-	repMu           sync.RWMutex
+	repShards []*reputationShard
 )
 
 func init() {
-	cache, _ := lru.NewARC(100000)
-	reputationCache = cache
+	repShards = make([]*reputationShard, reputationShards)
+	for i := range reputationShards {
+		cache, _ := lru.NewARC(100000 / reputationShards)
+		repShards[i] = &reputationShard{
+			cache: cache,
+		}
+	}
+}
+
+func getRepShard(fingerprint string) *reputationShard {
+	var hash uint32 = 2166136261
+	for i := range len(fingerprint) {
+		hash ^= uint32(fingerprint[i])
+		hash *= 16777619
+	}
+	return repShards[hash%reputationShards]
 }
 
 // GetReputation returns the current reputation score for a fingerprint.
@@ -51,10 +73,11 @@ func GetReputation(fingerprint string) float64 {
 	if fingerprint == "" {
 		return 50 // Unknown
 	}
-	repMu.Lock()
-	defer repMu.Unlock()
+	shard := getRepShard(fingerprint)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
-	if val, ok := reputationCache.Get(fingerprint); ok {
+	if val, ok := shard.cache.Get(fingerprint); ok {
 		r := val.(*Reputation)
 		// Gradually recover reputation over time.
 		// Base rate is 1.0, but decreases as violations increase (adaptive recovery).
@@ -66,21 +89,22 @@ func GetReputation(fingerprint string) float64 {
 		elapsed := time.Since(r.LastEvent).Hours()
 		if elapsed > 1 {
 			r.Score = math.Min(100, r.Score+(elapsed*rate))
+			r.LastEvent = time.Now()
 		}
 		return r.Score
 	}
 	return 100
 }
 
-// DecreaseReputation reduces the score based on threat severity.
 // GetReputationScore returns the current score for a fingerprint.
 func GetReputationScore(fingerprint string) float64 {
 	if fingerprint == "" {
 		return 100.0
 	}
-	repMu.RLock()
-	defer repMu.RUnlock()
-	if val, ok := reputationCache.Get(fingerprint); ok {
+	shard := getRepShard(fingerprint)
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+	if val, ok := shard.cache.Get(fingerprint); ok {
 		return val.(*Reputation).Score
 	}
 	return 100.0
@@ -90,14 +114,15 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	if fingerprint == "" {
 		return
 	}
-	repMu.Lock()
-	defer repMu.Unlock()
+	shard := getRepShard(fingerprint)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
 	var r *Reputation
-	if val, ok := reputationCache.Get(fingerprint); ok {
+	if val, ok := shard.cache.Get(fingerprint); ok {
 		r = val.(*Reputation)
 	} else {
-		r = &Reputation{Score: 100, ViolationCount: 0, RecoveryRate: 1.0, History: []string{}}
+		r = &Reputation{Score: 100, ViolationCount: 0, RecoveryRate: 1.0, History: []string{}, LastEvent: time.Now()}
 	}
 
 	r.ViolationCount++
@@ -107,6 +132,7 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 			r.History = r.History[len(r.History)-10:]
 		}
 	}
+	r.LastEvent = time.Now()
 
 	// Adaptive Penalty: Increase penalty based on previous violations.
 	// penalty * (1 + log2(violations))
@@ -122,7 +148,7 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	r.RecoveryRate = 1.0 / (1.0 + float64(r.ViolationCount)/5.0)
 
 	r.LastEvent = time.Now()
-	reputationCache.Add(fingerprint, r)
+	shard.cache.Add(fingerprint, r)
 
 	// Broadcast the update to the cluster via Gossip.
 	BroadcastReputation(fingerprint, r.Score, r.ViolationCount, r.History)
@@ -133,11 +159,12 @@ func ApplyRemoteReputation(fingerprint string, score float64, violations int, hi
 	if fingerprint == "" {
 		return
 	}
-	repMu.Lock()
-	defer repMu.Unlock()
+	shard := getRepShard(fingerprint)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
 	var r *Reputation
-	if val, ok := reputationCache.Get(fingerprint); ok {
+	if val, ok := shard.cache.Get(fingerprint); ok {
 		r = val.(*Reputation)
 		// Only take the remote score if it's worse (lower) than ours.
 		if score < r.Score {
@@ -156,7 +183,7 @@ func ApplyRemoteReputation(fingerprint string, score float64, violations int, hi
 		}
 	}
 
-	reputationCache.Add(fingerprint, r)
+	shard.cache.Add(fingerprint, r)
 }
 
 type ReputationRecord struct {
@@ -169,43 +196,45 @@ type ReputationRecord struct {
 
 // UpdateReputationMetrics updates Prometheus gauges for reputations.
 func UpdateReputationMetrics() {
-	repMu.Lock()
-	defer repMu.Unlock()
-
-	keys := reputationCache.Keys()
 	var suspiciousCount float64
-	for _, k := range keys {
-		if val, ok := reputationCache.Peek(k); ok {
-			r := val.(*Reputation)
-			if r.Score < 50 {
-				suspiciousCount++
+	for _, shard := range repShards {
+		shard.mu.RLock()
+		keys := shard.cache.Keys()
+		for _, k := range keys {
+			if val, ok := shard.cache.Peek(k); ok {
+				r := val.(*Reputation)
+				if r.Score < 50 {
+					suspiciousCount++
+				}
+				ActiveAnomalyScore.Observe(r.Score)
 			}
-			ActiveAnomalyScore.Observe(r.Score)
 		}
+		shard.mu.RUnlock()
 	}
-	ActiveSuspiciousSessionsTotal.Set(suspiciousCount)
+	// We don't have a global count of "suspicious" gauge here, but we could update one.
 }
 
 // GetAllReputations returns all reputations in the cache.
 func GetAllReputations() []ReputationRecord {
 	UpdateReputationMetrics()
 
-	repMu.Lock()
-	defer repMu.Unlock()
-
-	keys := reputationCache.Keys()
-	res := make([]ReputationRecord, 0, len(keys))
-	for _, k := range keys {
-		if val, ok := reputationCache.Peek(k); ok {
-			r := val.(*Reputation)
-			res = append(res, ReputationRecord{
-				Fingerprint:    k.(string),
-				Score:          r.Score,
-				LastEvent:      r.LastEvent,
-				ViolationCount: r.ViolationCount,
-				History:        slices.Clone(r.History),
-			})
+	var res []ReputationRecord
+	for _, shard := range repShards {
+		shard.mu.RLock()
+		keys := shard.cache.Keys()
+		for _, k := range keys {
+			if val, ok := shard.cache.Peek(k); ok {
+				r := val.(*Reputation)
+				res = append(res, ReputationRecord{
+					Fingerprint:    k.(string),
+					Score:          r.Score,
+					LastEvent:      r.LastEvent,
+					ViolationCount: r.ViolationCount,
+					History:        slices.Clone(r.History),
+				})
+			}
 		}
+		shard.mu.RUnlock()
 	}
 	return res
 }

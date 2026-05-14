@@ -35,7 +35,8 @@ func GetRouteName(r *http.Request) string {
 // IsInternalPath returns true if the given path belongs to Gateon's internal API,
 // monitoring, or health-check system.
 func IsInternalPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz" || IsDashboardPath(path)
+	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz" ||
+		IsDashboardPath(path) || path == "/grpc.health.v1.Health/Check"
 }
 
 // IsDashboardPath returns true if the path is a Gateon dashboard gRPC-Web service.
