@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/entropy"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -42,7 +42,7 @@ func Entropy(threshold float64, routeID string) Middleware {
 				body, err := io.ReadAll(r.Body)
 				if err == nil {
 					r.Body = io.NopCloser(bytes.NewBuffer(body))
-					e := calculateEntropy(body)
+					e := entropy.Calculate(body)
 					if e > threshold {
 						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID)
 					}
@@ -51,25 +51,6 @@ func Entropy(threshold float64, routeID string) Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-func calculateEntropy(data []byte) float64 {
-	if len(data) == 0 {
-		return 0
-	}
-	counts := make([]int, 256)
-	for _, b := range data {
-		counts[b]++
-	}
-	var entropy float64
-	invLen := 1.0 / float64(len(data))
-	for _, count := range counts {
-		if count > 0 {
-			p := float64(count) * invLen
-			entropy -= p * math.Log2(p)
-		}
-	}
-	return entropy
 }
 
 func serveTrollResponse(w http.ResponseWriter) {

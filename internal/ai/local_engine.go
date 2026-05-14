@@ -121,6 +121,28 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 		})
 	}
 
+	// Check GeoIP
+	if e.globals.Geoip == nil || !e.globals.Geoip.Enabled {
+		insights = append(insights, &gateonv1.AIInsight{
+			Title:          "GeoIP protection is disabled",
+			Description:    "GeoIP-based filtering is not enabled. Enabling it allows you to block traffic from high-risk countries at the edge.",
+			Severity:       "info",
+			Category:       "security",
+			Recommendation: "Enable and configure GeoIP in the global settings.",
+		})
+	}
+
+	// Check Anomaly Detection
+	if e.globals.AnomalyDetection == nil || !e.globals.AnomalyDetection.Enabled {
+		insights = append(insights, &gateonv1.AIInsight{
+			Title:          "Anomaly detection is disabled",
+			Description:    "Real-time anomaly detection is disabled. This prevents the system from automatically identifying and mitigating behavioral threats like brute-force and exploit scanning.",
+			Severity:       "high",
+			Category:       "security",
+			Recommendation: "Enable anomaly detection in the global configuration.",
+		})
+	}
+
 	return insights
 }
 
@@ -182,6 +204,18 @@ func (e *LocalInsightEngine) analyzePerformance() []*gateonv1.AIInsight {
 			Severity:       "warning",
 			Category:       "performance",
 			Recommendation: "Apply rate limiting middlewares to your most frequently accessed routes.",
+		})
+	}
+
+	// Check eBPF
+	if e.globals.Ebpf == nil || !e.globals.Ebpf.Enabled {
+		insights = append(insights, &gateonv1.AIInsight{
+			Title:           "eBPF offloading is disabled",
+			Description:     "eBPF is not enabled. Enabling eBPF provides kernel-level protection against DDoS and significantly improves performance by offloading packet processing.",
+			Severity:        "info",
+			Category:        "performance",
+			Recommendation:  "Enable eBPF offloading in the global configuration.",
+			SuggestedConfig: `{"ebpf": {"enabled": true, "xdp_rate_limit": true, "xdp_ip_shunning": true}}`,
 		})
 	}
 

@@ -125,14 +125,25 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 
 func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Time) {
 	stats := ad.aggregator.GetIPStats(0)
-	threshold := 0.5 / ad.config.Sensitivity // blocks per check interval
+	// Base threshold: blocks per check interval.
+	// We also consider the ratio of blocks to total requests from that IP.
 	for _, s := range stats {
-		if s.WafBlocks > threshold {
+		if s.Requests == 0 {
+			continue
+		}
+		blockRate := s.WafBlocks / s.Requests
+		// High sensitivity: blockRate > 5% AND at least some absolute blocks
+		// Low sensitivity: blockRate > 20%
+		thresholdRate := 0.1 * (1.0 / ad.config.Sensitivity)
+		absoluteThreshold := 5.0 * (1.0 / ad.config.Sensitivity)
+
+		if (blockRate > thresholdRate && s.WafBlocks > absoluteThreshold) || s.WafBlocks > absoluteThreshold*10 {
 			logger.L.LogWarn("ANOMALY DETECTED: High rate of WAF blocks detected from IP",
 				"ip", s.IP,
-				"waf_blocks", s.WafBlocks)
+				"waf_blocks", s.WafBlocks,
+				"block_rate", fmt.Sprintf("%.2f%%", blockRate*100))
 
-			if ad.ebpfManager != nil && s.WafBlocks > threshold*5 {
+			if ad.ebpfManager != nil && blockRate > 0.5 && s.WafBlocks > absoluteThreshold*5 {
 				_ = ad.ebpfManager.ShunIP(s.IP)
 				RecordSecurityThreat(SecurityThreat{
 					ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),

@@ -65,8 +65,11 @@ var (
 	fastScanner = scanner.NewScanner([]string{
 		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ",
 		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(",
-		"/etc/passwd", "/bin/sh", "cmd.exe", "/proc/self/", "/windows/system32",
+		"/etc/passwd", "/etc/shadow", "/bin/sh", "cmd.exe", "/proc/self/", "/windows/system32",
 		"<?php", "base64_decode", "shell_exec", "system(",
+		"authorized_keys", "id_rsa", "id_dsa", ".ssh/",
+		"powershell", "curl http", "wget http", "python -c",
+		"nessustoken", "qualys-scan", "acunetix", "sqlmap",
 	})
 )
 
@@ -98,6 +101,17 @@ Include @crs-setup.conf.example
 			_, _ = fmt.Fprintf(&sb, `SecAction "id:900001,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d"
 `, cfg.AnomalyThreshold, cfg.AnomalyThreshold)
 		}
+
+		// Adaptive WAF: Reduce anomaly threshold for low reputation clients
+		sb.WriteString(`
+# Adaptive Anomaly Thresholds based on Gateon Reputation
+# If reputation < 80, threshold = 10 (Moderate)
+# If reputation < 50, threshold = 5 (Strict)
+# If reputation < 20, threshold = 2 (Critical/Paranoid)
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 80" "id:900010,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=10"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 50" "id:900011,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 20" "id:900012,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=2"
+`)
 
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
@@ -294,6 +308,11 @@ SecAuditLog "%s"
 				r.RemoteAddr = request.GetClientIP(r, true)
 			}
 
+			// Adaptive WAF: Adjust anomaly threshold based on client reputation
+			fingerprint := telemetry.GetFingerprint(r)
+			reputation := telemetry.GetReputationScore(fingerprint)
+			r.Header.Set("X-Gateon-Reputation", fmt.Sprintf("%.2f", reputation))
+
 			// Deterministic Fast Path: Aho-Corasick & Entropy
 			// We check URI and Headers for known signatures before entering the heavy WAF engine.
 			if fastScanner.Scan(r.RequestURI) {
@@ -308,6 +327,13 @@ SecAuditLog "%s"
 				if threshold <= 0 {
 					threshold = 5.8
 				}
+				// Adaptive Entropy: If reputation is high, increase threshold to reduce false positives
+				if reputation > 90 {
+					threshold += 0.5
+				} else if reputation < 20 {
+					threshold -= 0.5
+				}
+
 				for key, vals := range r.Header {
 					if isSafeHeader(key) {
 						continue

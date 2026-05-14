@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -36,6 +37,7 @@ type LocalMetricsAggregator struct {
 	ipStats *sync.Map // map[string]*IPStats
 
 	maxBuckets int
+	cachedQPS  atomic.Uint64
 }
 
 var (
@@ -94,6 +96,11 @@ func (a *LocalMetricsAggregator) takeSnapshot() {
 	if len(a.buckets) > a.maxBuckets {
 		a.buckets = a.buckets[1:]
 	}
+	a.mu.Unlock()
+
+	// Update cached QPS (approximate from last bucket)
+	qps := a.GetRate("requests", 5*time.Minute)
+	a.cachedQPS.Store(uint64(qps))
 }
 
 func (a *LocalMetricsAggregator) pruneIPs() {
@@ -249,4 +256,8 @@ func (a *LocalMetricsAggregator) GetP99Latency(duration time.Duration) float64 {
 		return 0
 	}
 	return sum / float64(count)
+}
+
+func (a *LocalMetricsAggregator) GetCachedQPS() float64 {
+	return float64(a.cachedQPS.Load())
 }

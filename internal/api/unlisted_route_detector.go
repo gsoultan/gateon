@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -26,7 +28,17 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 	}
 
 	for _, tr := range data.Traces {
-		if tr.ServiceName == "" || tr.ServiceName == "unknown" {
+		// Skip internal Gateon paths and health checks
+		if middleware.IsInternalPath(tr.Path) {
+			continue
+		}
+
+		// A route is considered "unlisted" if:
+		// 1. ServiceName is empty or "unknown"
+		// 2. ServiceName starts with "gateon-" (default entrypoint name) - meaning no user route matched.
+		isUnlisted := tr.ServiceName == "" || tr.ServiceName == "unknown" || strings.HasPrefix(tr.ServiceName, "gateon-")
+
+		if isUnlisted {
 			anomalyType := "unlisted_route"
 			severity := "medium"
 			description := fmt.Sprintf("Request to unlisted route/host: %s", tr.Path)
