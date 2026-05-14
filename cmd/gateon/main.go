@@ -108,6 +108,7 @@ func main() {
 		if gc.Ebpf != nil && gc.Ebpf.Enabled {
 			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
 			go ebpfManager.Start(ctx)
+			go telemetry.StartEBpFPollLoop(ctx, ebpfManager)
 		}
 
 		alerting.Init(gc.Alerting, ebpfManager)

@@ -1,4 +1,18 @@
-import { Grid, Card, Title, Text, Stack, SimpleGrid, Box, Table, Avatar, Badge, ThemeIcon, Group, Paper } from '@mantine/core';
+import { 
+  Grid, 
+  Card, 
+  Title, 
+  Text, 
+  Stack, 
+  SimpleGrid, 
+  Box, 
+  Table, 
+  Avatar, 
+  Badge, 
+  ThemeIcon, 
+  Group, 
+  Paper 
+} from '@mantine/core';
 import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
 import { IconMapPin, IconActivity, IconTarget } from '@tabler/icons-react';
 import type { MetricsSnapshot, TrafficSample, LabeledCount, DonutChartDataItem } from '../../types/metrics';
@@ -29,7 +43,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
             <IconActivity size={18} />
           </ThemeIcon>
         </Group>
-        <Box h={300} w="100%">
+        <Box h={300} w="100%" style={{ minWidth: 0, minHeight: 300 }}>
           <AreaChart
             h={300}
             data={trendData}
@@ -51,7 +65,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Grid.Col span={{ base: 12, lg: 6 }}>
           <Card withBorder radius="md">
             <Title order={4} mb="md">Geographic Threat Distribution</Title>
-            <Box h={300} w="100%">
+            <Box h={300} w="100%" style={{ minWidth: 0, minHeight: 300 }}>
               <BarChart
                 h={300}
                 data={countryData}
@@ -70,7 +84,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
           <Card withBorder radius="md">
             <Title order={4} mb="md">Threat Classification Analysis</Title>
             <SimpleGrid cols={2}>
-              <Box h={250} w="100%">
+              <Box h={250} w="100%" style={{ minWidth: 0, minHeight: 250 }}>
                 <DonutChart
                   h={200}
                   thickness={25}
@@ -131,7 +145,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
           <Title order={4} mb="md">Heaviest Hitters (Subnets)</Title>
           <Stack gap="sm">
             {metrics?.security?.heavy_hitters?.map((h: string) => (
-              <Paper key={h} withBorder p="xs" radius="sm" bg="var(--mantine-color-red-light)">
+              <Box key={h} p="xs" style={{ border: '1px solid var(--mantine-color-red-light)', borderRadius: 'var(--mantine-radius-sm)' }} bg="var(--mantine-color-red-light)">
                 <Group justify="space-between">
                   <Group gap="xs">
                     <ThemeIcon color="red" variant="subtle" size="sm">
@@ -141,7 +155,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                   </Group>
                   <Badge color="red" variant="filled">CRITICAL</Badge>
                 </Group>
-              </Paper>
+              </Box>
             ))}
             {(!metrics?.security?.heavy_hitters || metrics.security.heavy_hitters.length === 0) && (
               <Text size="sm" c="dimmed" ta="center" py="xl">No malicious subnets detected.</Text>
