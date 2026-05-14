@@ -39,7 +39,7 @@ func TestRoundRobinLB_SkipsDeadTargets(t *testing.T) {
 	lb.SetAlive("http://t3", false)
 
 	// All selections should return t2 (only alive target)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		s := lb.NextState()
 		if s == nil {
 			t.Fatalf("iteration %d: expected target, got nil", i)

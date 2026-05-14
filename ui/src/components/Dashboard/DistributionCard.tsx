@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Paper, Text, Group, Box, Badge } from "@mantine/core";
+import { Paper, Text, Group, Box, Badge, Center } from "@mantine/core";
 import { BarChart } from "@mantine/charts";
 
 interface DistributionDatum {
@@ -44,7 +44,6 @@ export const DistributionCard = memo(function DistributionCard({
         <Box mt="md">
           <BarChart
             h={180}
-            minWidth={0}
             data={data}
             dataKey="group"
             withLegend={false}
@@ -55,18 +54,11 @@ export const DistributionCard = memo(function DistributionCard({
           />
         </Box>
       ) : (
-        <Box
-          h={180}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
+        <Center h={180}>
           <Text size="sm" c="dimmed">
             No data available.
           </Text>
-        </Box>
+        </Center>
       )}
     </Paper>
   );

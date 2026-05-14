@@ -2,7 +2,6 @@ import {
   Group,
   Text,
   Tooltip,
-  Box,
   useMantineColorScheme,
 } from "@mantine/core";
 import {
@@ -86,26 +85,25 @@ export function GlobalHealthBar() {
       : "var(--mantine-color-gray-3)";
 
   return (
-    <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+    <Group gap={6} wrap="nowrap" className="shrink-0">
       {stats.map(({ icon: Icon, value, label, color }) => (
         <Tooltip key={label} label={label} openDelay={500}>
-          <Box
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "2px 10px",
-              borderRadius: "20px",
+          <Group
+            gap={6}
+            px={10}
+            justify="center"
+            wrap="nowrap"
+            className={`rounded-[20px] bg-[${bg}] border border-solid border-[${borderColor}] h-7`}
+            style={{ 
               backgroundColor: bg,
-              border: `1px solid ${borderColor}`,
-              height: 28,
+              borderColor: borderColor,
             }}
           >
             <Icon size={12} color={color} stroke={2.5} />
-            <Text size="xs" fw={700} lh={1} style={{ fontVariantNumeric: 'tabular-nums' }}>
+            <Text size="xs" fw={700} lh={1} className="tabular-nums">
               {value}
             </Text>
-          </Box>
+          </Group>
         </Tooltip>
       ))}
     </Group>

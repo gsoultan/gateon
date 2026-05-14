@@ -153,6 +153,19 @@ export default function Dashboard() {
   const previousPathStatsRef = useRef<Map<string, number> | null>(null);
   const [bandwidthDeltaHistory, setBandwidthDeltaHistory] = useState<BandwidthDeltaSample[]>([]);
 
+  const routeMatchers = useMemo(
+    () => buildRouteMatchers(routesResponse?.routes ?? []),
+    [routesResponse?.routes],
+  );
+
+  const serviceNameById = useMemo(
+    () =>
+      new Map(
+        (servicesResponse?.services ?? []).map((service) => [service.id, service.name]),
+      ),
+    [servicesResponse?.services],
+  );
+
   const trafficRangeBounds = useMemo(
     () =>
       resolveTrafficRangeBounds(
@@ -176,11 +189,6 @@ export default function Dashboard() {
     if (!pathStats || pathStats.length === 0) {
       return;
     }
-
-    const routeMatchers = buildRouteMatchers(routesResponse?.routes ?? []);
-    const serviceNameById = new Map(
-      (servicesResponse?.services ?? []).map((service) => [service.id, service.name]),
-    );
 
     const currentTotals = new Map<string, number>();
     for (const stat of pathStats) {
@@ -224,7 +232,7 @@ export default function Dashboard() {
       serviceBytes: Object.fromEntries(serviceBytes),
     };
     setBandwidthDeltaHistory((prev) => [...prev, sample].slice(-5000));
-  }, [pathStats, routesResponse?.routes, servicesResponse?.services]);
+  }, [pathStats, routeMatchers, serviceNameById]);
 
   const combinedTrafficHistory = useMemo(() => {
     const history = metricsSnap?.traffic_history ?? [];

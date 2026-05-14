@@ -63,7 +63,7 @@ func TestLoginRateLimit(t *testing.T) {
 			deps.LoginLimiter = middleware.NewRateLimiter(rate.Every(time.Minute/2), 2)
 			handler = CreateBaseHandler(uiHandler, deps, nil, http.NewServeMux())
 
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				req := httptest.NewRequest("POST", tt.path, nil)
 				req.RemoteAddr = "1.2.3.4:1234"
 				ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")

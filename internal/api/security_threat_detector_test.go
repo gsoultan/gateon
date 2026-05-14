@@ -45,7 +45,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 			name: "Brute force",
 			traces: func() []telemetry.TraceRecord {
 				var r []telemetry.TraceRecord
-				for i := 0; i < 15; i++ {
+				for range 15 {
 					r = append(r, telemetry.TraceRecord{SourceIP: "3.3.3.3", Path: "/login", Method: "POST", Status: "401 Unauthorized", Timestamp: now})
 				}
 				return r

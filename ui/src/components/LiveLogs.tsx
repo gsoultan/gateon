@@ -143,16 +143,12 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
 
   const formatLog = (log: string) => {
     try {
-      const parsed = JSON.parse(log);
-      const time = parsed.time
-        ? new Date(parsed.time).toLocaleTimeString()
-        : "";
-      const level = parsed.level ? parsed.level.toUpperCase() : "INFO";
-      const msg = parsed.message || "";
-      const rest = { ...parsed };
-      delete rest.time;
-      delete rest.level;
-      delete rest.message;
+      const parsed = JSON.parse(log) as Record<string, any>;
+      const { time, level, message, ...rest } = parsed;
+      
+      const formattedTime = time ? new Date(String(time)).toLocaleTimeString() : "";
+      const logLevel = level ? String(level).toUpperCase() : "INFO";
+      const msg = message || "";
 
       return (
         <Group gap="xs" align="flex-start" wrap="nowrap">
@@ -160,18 +156,18 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
             size="xs"
             c="dimmed"
             ff="monospace"
-            style={{ whiteSpace: "nowrap" }}
+            className="whitespace-nowrap"
           >
-            {time}
+            {formattedTime}
           </Text>
           <Badge
             size="xs"
             variant="light"
             color={getLogColor(log)}
             radius="sm"
-            style={{ minWidth: 50 }}
+            className="min-w-[50px]"
           >
-            {level}
+            {logLevel}
           </Badge>
           <Stack gap={0} flex={1}>
             <Text size="xs" fw={600} c="gray.3" ff="monospace">
@@ -182,7 +178,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
                 size="xs"
                 c="dimmed"
                 ff="monospace"
-                style={{ fontSize: 10 }}
+                className="text-[10px]"
               >
                 {JSON.stringify(rest)}
               </Text>
@@ -310,10 +306,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
           p={0}
           radius="md"
           bg="var(--mantine-color-black)"
-          style={{
-            border: "1px solid var(--mantine-color-default-border)",
-            overflow: "hidden",
-          }}
+          className="border-solid border-[var(--mantine-color-default-border)] overflow-hidden"
         >
           <ScrollArea h={height} offsetScrollbars scrollbarSize={8}>
             <Stack gap={4} p="xs">
@@ -334,9 +327,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
                 <Box
                   key={entry.id}
                   py={2}
-                  style={{
-                    borderBottom: "1px solid var(--mantine-color-dark-6)",
-                  }}
+                  className="border-b border-solid border-[var(--mantine-color-dark-6)]"
                 >
                   {formatLog(entry.raw)}
                 </Box>

@@ -14,60 +14,60 @@ import (
 // MetricsSnapshot holds a structured view of all Prometheus metrics for the UI.
 type MetricsSnapshot struct {
 	// Golden signals
-	GoldenSignals GoldenSignals `json:"golden_signals"`
+	GoldenSignals GoldenSignals `json:"golden_signals,omitzero"`
 
 	// Per-route request metrics broken down by status code.
-	RouteMetrics []RouteMetric `json:"route_metrics"`
+	RouteMetrics []RouteMetric `json:"route_metrics,omitzero"`
 
 	// Middleware counters (rate limit, WAF, cache, auth, compress, turnstile, geoip, hmac).
-	Middleware MiddlewareMetrics `json:"middleware"`
+	Middleware MiddlewareMetrics `json:"middleware,omitzero"`
 
 	// TLS certificate expiry information.
-	TLSCertificates []TLSCertMetric `json:"tls_certificates"`
+	TLSCertificates []TLSCertMetric `json:"tls_certificates,omitzero"`
 
 	// Target health and connection status.
-	Targets []TargetMetric `json:"targets"`
+	Targets []TargetMetric `json:"targets,omitzero"`
 
 	// IP-based metrics
-	IPMetrics []IPMetric `json:"ip_metrics"`
+	IPMetrics []IPMetric `json:"ip_metrics,omitzero"`
 
 	// Country-based metrics
-	CountryMetrics []CountryMetric `json:"country_metrics"`
+	CountryMetrics []CountryMetric `json:"country_metrics,omitzero"`
 
 	// Protocol-based metrics
-	ProtocolMetrics []LabeledCount `json:"protocol_metrics"`
+	ProtocolMetrics []LabeledCount `json:"protocol_metrics,omitzero"`
 
 	// Domain-based metrics
-	DomainMetrics []DomainMetric `json:"domain_metrics"`
+	DomainMetrics []DomainMetric `json:"domain_metrics,omitzero"`
 
 	// Hourly domain metrics (current hour)
-	HourlyDomainMetrics []DomainStats `json:"hourly_domain_metrics"`
+	HourlyDomainMetrics []DomainStats `json:"hourly_domain_metrics,omitzero"`
 
 	// Traffic history for charts (last 24-48 hours)
-	TrafficHistory []TrafficSample `json:"traffic_history"`
+	TrafficHistory []TrafficSample `json:"traffic_history,omitzero"`
 
 	// Active threats
 	ActiveSuspiciousSessions  float64        `json:"active_suspicious_sessions"`
 	ActiveUnverifiedClients   float64        `json:"active_unverified_clients"`
-	ActiveShunnedEntities     []LabeledCount `json:"active_shunned_entities"`
+	ActiveShunnedEntities     []LabeledCount `json:"active_shunned_entities,omitzero"`
 	ActiveAnomalyScoreAverage float64        `json:"active_anomaly_score_average"`
 
 	// System-level gauges.
-	System SystemMetrics `json:"system"`
+	System SystemMetrics `json:"system,omitzero"`
 
 	// Security insights
-	Security SecurityInsights `json:"security"`
+	Security SecurityInsights `json:"security,omitzero"`
 }
 
 type SecurityInsights struct {
-	TopThreatSources  []LabeledCount   `json:"top_threat_sources"`
-	TopThreatTypes    []LabeledCount   `json:"top_threat_types"`
-	ThreatsByCountry  []LabeledCount   `json:"threats_by_country"`
-	AttackTrend       []TrafficSample  `json:"attack_trend"`
-	RecentAnomalies   []SecurityThreat `json:"recent_anomalies"`
+	TopThreatSources  []LabeledCount   `json:"top_threat_sources,omitzero"`
+	TopThreatTypes    []LabeledCount   `json:"top_threat_types,omitzero"`
+	ThreatsByCountry  []LabeledCount   `json:"threats_by_country,omitzero"`
+	AttackTrend       []TrafficSample  `json:"attack_trend,omitzero"`
+	RecentAnomalies   []SecurityThreat `json:"recent_anomalies,omitzero"`
 	TotalAnomalies    int64            `json:"total_anomalies"`
 	ActiveThreats     int              `json:"active_threats"`
-	HeavyHitters      []string         `json:"heavy_hitters"`
+	HeavyHitters      []string         `json:"heavy_hitters,omitzero"`
 	GlobalThreatScore float64          `json:"global_threat_score"`
 }
 
@@ -99,32 +99,32 @@ type RouteMetric struct {
 	InFlight    float64            `json:"in_flight"`
 	BytesIn     float64            `json:"bytes_in"`
 	BytesOut    float64            `json:"bytes_out"`
-	StatusCodes map[string]float64 `json:"status_codes"`
-	Failures    []LabeledCount     `json:"failures"`
+	StatusCodes map[string]float64 `json:"status_codes,omitzero"`
+	Failures    []LabeledCount     `json:"failures,omitzero"`
 }
 
 // MiddlewareMetrics holds counters for all middleware instrumentation.
 type MiddlewareMetrics struct {
-	RateLimitRejected  []LabeledCount `json:"rate_limit_rejected"`
-	WAFBlocked         []LabeledCount `json:"waf_blocked"`
+	RateLimitRejected  []LabeledCount `json:"rate_limit_rejected,omitzero"`
+	WAFBlocked         []LabeledCount `json:"waf_blocked,omitzero"`
 	CacheHits          float64        `json:"cache_hits"`
 	CacheMisses        float64        `json:"cache_misses"`
 	CacheHitRate       float64        `json:"cache_hit_rate"`
-	AuthFailures       []LabeledCount `json:"auth_failures"`
+	AuthFailures       []LabeledCount `json:"auth_failures,omitzero"`
 	CompressBytesIn    float64        `json:"compress_bytes_in"`
 	CompressBytesOut   float64        `json:"compress_bytes_out"`
 	CompressionRatio   float64        `json:"compression_ratio"`
 	TurnstilePass      float64        `json:"turnstile_pass"`
 	TurnstileFail      float64        `json:"turnstile_fail"`
-	GeoIPBlocked       []LabeledCount `json:"geoip_blocked"`
+	GeoIPBlocked       []LabeledCount `json:"geoip_blocked,omitzero"`
 	HMACFailures       float64        `json:"hmac_failures"`
 	RetriesSuccess     float64        `json:"retries_success"`
 	RetriesFailure     float64        `json:"retries_failure"`
 	ConfigReloads      float64        `json:"config_reloads"`
 	CacheInvalidations float64        `json:"cache_invalidations"`
-	MitigatedThreats   []LabeledCount `json:"mitigated_threats"`
-	BotMitigations     []LabeledCount `json:"bot_mitigations"`
-	EbpfDroppedPackets []LabeledCount `json:"ebpf_dropped_packets"`
+	MitigatedThreats   []LabeledCount `json:"mitigated_threats,omitzero"`
+	BotMitigations     []LabeledCount `json:"bot_mitigations,omitzero"`
+	EbpfDroppedPackets []LabeledCount `json:"ebpf_dropped_packets,omitzero"`
 }
 
 // LabeledCount is a metric value with a descriptive label.

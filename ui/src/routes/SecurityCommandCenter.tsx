@@ -43,6 +43,7 @@ import { OverviewTab } from '../components/SecurityCenter/OverviewTab';
 import { ThreatExplorerTab } from '../components/SecurityCenter/ThreatExplorerTab';
 import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
+import { TimeDisplay } from '../components/TimeDisplay';
 import { getThreatColor, getSeverityColor } from '../utils/security';
 
 export default function SecurityCommandCenter() {
@@ -54,12 +55,6 @@ export default function SecurityCommandCenter() {
   const [scanning, setScanning] = React.useState(false);
   const [scanStatus, setScanStatus] = React.useState<DeepScanStatus | null>(null);
   const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const [currentTime, setCurrentTime] = React.useState(new Date());
-
-  React.useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
-    return () => clearInterval(timer);
-  }, []);
 
   const pollScanStatus = async () => {
     try {
@@ -213,7 +208,7 @@ export default function SecurityCommandCenter() {
               <Stack gap="xs">
                 <Group gap="xs">
                   <Badge variant="dot" color="blue" size="sm">Autonomous Defense Active</Badge>
-                  <Text size="xs" c="dimmed">{format(currentTime, 'PPP p')}</Text>
+                  <TimeDisplay />
                 </Group>
                 <Title order={1} fw={900} style={{ letterSpacing: -1.5 }}>Security Hub</Title>
                 <Text size="lg" c="dimmed" maw={600}>

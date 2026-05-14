@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/syncutil"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -145,7 +146,7 @@ type pathStatsStore struct {
 	threatInCh                  chan SecurityThreat
 	stopCh                      chan struct{}
 	stopped                     atomic.Bool
-	wg                          sync.WaitGroup
+	wg                          syncutil.WaitGroup
 	retentionDays               atomic.Int32
 	pathStatsRetentionDays      atomic.Int32
 	accessLogRetentionDays      atomic.Int32

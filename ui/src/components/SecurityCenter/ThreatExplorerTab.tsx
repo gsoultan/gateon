@@ -4,10 +4,8 @@ import {
   Group,
   Stack,
   Text,
-  Title,
   Badge,
   Table,
-  ScrollArea,
   TextInput,
   Select,
   ActionIcon,
@@ -15,15 +13,12 @@ import {
   Loader,
   Alert,
   Tooltip,
-  Paper,
-  Box,
+  Center,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
   IconSearch,
-  IconFilter,
   IconShieldCheck,
-  IconShieldOff,
   IconMap2,
   IconAlertTriangle,
   IconRefresh,
@@ -78,7 +73,7 @@ export function ThreatExplorerTab() {
 
   const categories = useMemo(() => {
     if (!data?.threats) return [];
-    const cats = new Set(data.threats.map((t) => t.category).filter(Boolean));
+    const cats = new Set(data.threats.map((t) => t.category).filter((c): c is string => !!c));
     return ["all", ...Array.from(cats)];
   }, [data?.threats]);
 
@@ -86,17 +81,18 @@ export function ThreatExplorerTab() {
     e.stopPropagation();
     setUnmitigating(ip);
     try {
-      await removeMitigation.mutateAsync({ source: ip });
+      await removeMitigation.mutateAsync(ip);
       notifications.show({
         title: 'Mitigation Removed',
         message: `IP ${ip} has been unmitigated.`,
         color: 'green',
       });
       refetch();
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to remove mitigation';
       notifications.show({
         title: 'Error',
-        message: err.message || 'Failed to remove mitigation',
+        message: message,
         color: 'red',
       });
     } finally {
@@ -265,9 +261,3 @@ export function ThreatExplorerTab() {
     </Stack>
   );
 }
-
-const Center = ({ children, py }: { children: React.ReactNode; py?: string }) => (
-  <Box style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }} py={py}>
-    {children}
-  </Box>
-);
