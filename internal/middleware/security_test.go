@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/ebpf"
 )
@@ -46,18 +47,19 @@ type mockEbpfManager struct {
 	shunnedIP string
 }
 
-func (m *mockEbpfManager) ShunIP(ip string) error                        { m.shunnedIP = ip; return nil }
-func (m *mockEbpfManager) UnshunIP(ip string) error                      { return nil }
-func (m *mockEbpfManager) BlockCountry(countryCode string) error         { return nil }
-func (m *mockEbpfManager) UpdateManagementWhitelist(ips []string) error  { return nil }
-func (m *mockEbpfManager) SetPortKnockingSequence(seq []int32) error     { return nil }
-func (m *mockEbpfManager) Start(ctx context.Context)                     {}
-func (m *mockEbpfManager) UpdateLoadBalancerBackends(ips []string) error { return nil }
-func (m *mockEbpfManager) ShunJA3(ja3Md5 [16]byte) error                 { return nil }
-func (m *mockEbpfManager) UnshunJA3(ja3Md5 [16]byte) error               { return nil }
-func (m *mockEbpfManager) ShunJA4(ja4Fingerprint string) error           { return nil }
-func (m *mockEbpfManager) BlocklistCuckoo(key string) error              { return nil }
-func (m *mockEbpfManager) GetMapStats() (ebpf.MapStats, error)           { return ebpf.MapStats{}, nil }
+func (m *mockEbpfManager) ShunIP(ip string) error                                       { m.shunnedIP = ip; return nil }
+func (m *mockEbpfManager) UnshunIP(ip string) error                                     { return nil }
+func (m *mockEbpfManager) BlockCountry(countryCode string) error                        { return nil }
+func (m *mockEbpfManager) UpdateManagementWhitelist(ips []string) error                 { return nil }
+func (m *mockEbpfManager) SetPortKnockingSequence(seq []int32) error                    { return nil }
+func (m *mockEbpfManager) Start(ctx context.Context)                                    {}
+func (m *mockEbpfManager) UpdateLoadBalancerBackends(ips []string) error                { return nil }
+func (m *mockEbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) error { return nil }
+func (m *mockEbpfManager) ShunJA3(ja3Md5 [16]byte) error                                { return nil }
+func (m *mockEbpfManager) UnshunJA3(ja3Md5 [16]byte) error                              { return nil }
+func (m *mockEbpfManager) ShunJA4(ja4Fingerprint string) error                          { return nil }
+func (m *mockEbpfManager) BlocklistCuckoo(key string) error                             { return nil }
+func (m *mockEbpfManager) GetMapStats() (ebpf.MapStats, error)                          { return ebpf.MapStats{}, nil }
 
 func TestWAF_Shunning(t *testing.T) {
 	mockEbpf := &mockEbpfManager{}
