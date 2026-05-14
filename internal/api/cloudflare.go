@@ -47,9 +47,13 @@ func (s *ApiService) GetCloudflareIPs(ctx context.Context, _ *gateonv1.GetCloudf
 	}, nil
 }
 
-func getPublicIP() string {
+func getPublicIP(ctx context.Context) string {
 	client := http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("https://api.ipify.org")
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.ipify.org", nil)
+	if err != nil {
+		return "unknown"
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "unknown"
 	}

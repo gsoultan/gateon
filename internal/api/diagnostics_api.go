@@ -47,8 +47,8 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 
 	diagEPs := s.buildEntryPointDiagnostics(entrypoints, epToRoutes, serviceMap, middlewareMap)
 	anomalies := s.detectAnomalies(ctx, routes)
-	systemInfo := s.getSystemInfo()
-	deps := s.checkDependencies()
+	systemInfo := s.getSystemInfo(ctx)
+	deps := s.checkDependencies(ctx)
 	diagErrors := s.getRecentTLSErrors(epNames)
 
 	return &gateonv1.GetDiagnosticsResponse{
@@ -188,7 +188,7 @@ func (s *ApiService) getManagementHosts(ctx context.Context) []string {
 	return mgmtHosts
 }
 
-func (s *ApiService) getSystemInfo() *gateonv1.SystemInfo {
+func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	sysStats := telemetry.GetSystemStats()
@@ -208,7 +208,7 @@ func (s *ApiService) getSystemInfo() *gateonv1.SystemInfo {
 	}
 
 	return &gateonv1.SystemInfo{
-		PublicIp:            getPublicIP(),
+		PublicIp:            getPublicIP(ctx),
 		CloudflareReachable: cfReachable,
 		Uptime:              uptime,
 		Goroutines:          int64(runtime.NumGoroutine()),
@@ -220,7 +220,7 @@ func (s *ApiService) getSystemInfo() *gateonv1.SystemInfo {
 	}
 }
 
-func (s *ApiService) checkDependencies() []*gateonv1.DependencyHealth {
+func (s *ApiService) checkDependencies(ctx context.Context) []*gateonv1.DependencyHealth {
 	cfReachable, cfLatency := isCloudflareReachable()
 	deps := []*gateonv1.DependencyHealth{
 		{
@@ -231,7 +231,7 @@ func (s *ApiService) checkDependencies() []*gateonv1.DependencyHealth {
 	}
 
 	dbStart := time.Now()
-	if err := telemetry.PingStore(); err != nil {
+	if err := telemetry.PingStore(ctx); err != nil {
 		deps = append(deps, &gateonv1.DependencyHealth{
 			Name: "Database", Healthy: false, Error: err.Error(),
 			LatencyMs: time.Since(dbStart).String(),
@@ -480,7 +480,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 		}
 		// Try to populate geo if available (though here we only have the IP)
 		// We can use the same helper as in security_threat_detector.go
-		populateAnomalyGeo(a, t.SourceIP)
+		populateAnomalyGeo(ctx, a, t.SourceIP)
 		res = append(res, a)
 	}
 	return &gateonv1.ListSecurityThreatsResponse{Threats: res}, nil

@@ -46,7 +46,7 @@ func (d *SlowClientDetector) Detect(ctx context.Context, data *DiagnosticData) [
 					Recommendation: "Check for network latency issues or potential Slowloris attack; adjust request timeouts.",
 					Mitigated:      mitigated,
 				}
-				populateAnomalyGeo(anomaly, ip)
+				populateAnomalyGeo(ctx, anomaly, ip)
 				anomalies = append(anomalies, anomaly)
 			}
 		}

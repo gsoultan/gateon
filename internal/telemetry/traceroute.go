@@ -14,7 +14,7 @@ func TraceRoute(ctx context.Context, targetIP string, serverIP string) ([]*gateo
 	var hops []*gateonv1.TraceHop
 
 	// 1. Server Hop (Source)
-	sCountry, sCity, sLat, sLon := ResolveIPInfo(serverIP)
+	sCountry, sCity, sLat, sLon := ResolveIPInfo(ctx, serverIP)
 	hops = append(hops, &gateonv1.TraceHop{
 		Hop:         1,
 		Ip:          serverIP,
@@ -26,7 +26,7 @@ func TraceRoute(ctx context.Context, targetIP string, serverIP string) ([]*gateo
 	})
 
 	// 2. Destination Hop (Target)
-	dCountry, dCity, dLat, dLon := ResolveIPInfo(targetIP)
+	dCountry, dCity, dLat, dLon := ResolveIPInfo(ctx, targetIP)
 
 	// If we don't have coordinates for destination, we can't really visualize it on map.
 	// But we'll still return it.

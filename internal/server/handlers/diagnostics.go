@@ -220,6 +220,10 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
 			return
 		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
 		if d.RouteStatsProvider == nil {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -232,7 +236,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		// RouteService is on api config, not Deps. Use RouteStatsProvider for each route.
 		// We need route IDs - get from route handler deps. Deps has RouteService via registerRouteHandlers.
 		// registerDiagnosticHandlers receives same d - Deps has RouteService.
-		routes, _ := d.RouteService.ListPaginated(context.Background(), 0, 500, "", nil)
+		routes, _ := d.RouteService.ListPaginated(ctx, 0, 500, "", nil)
 		var totalReqs, totalErrs, activeConn uint64
 		var openCircuits, halfOpenCircuits, healthyTargets, totalTargets int
 		for _, rt := range routes {
@@ -260,7 +264,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 				}
 			}
 		}
-		pathStats := telemetry.GetPathStats(r.Context())
+		pathStats := telemetry.GetPathStats(ctx)
 		var pathTotalReqs uint64
 		var pathTotalBandwidth uint64
 		for _, p := range pathStats {
@@ -276,7 +280,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 
 		// Get system metrics from latest snapshot
 		var cpuUsage, memUsage float64
-		if snap, err := telemetry.CollectMetricsSnapshot(50, 0); err == nil {
+		if snap, err := telemetry.CollectMetricsSnapshot(ctx, 50, 0); err == nil {
 			cpuUsage = snap.System.CPUUsage
 			memUsage = snap.System.MemoryUsage
 		}
@@ -332,7 +336,10 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			}
 		}
 
-		snap, err := telemetry.CollectMetricsSnapshot(limit, offset)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		snap, err := telemetry.CollectMetricsSnapshot(ctx, limit, offset)
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -357,7 +364,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		for {
 			select {
 			case <-ticker.C:
-				snap, err := telemetry.CollectMetricsSnapshot(50, 0)
+				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				snap, err := telemetry.CollectMetricsSnapshot(ctx, 50, 0)
+				cancel()
 				if err != nil {
 					return
 				}

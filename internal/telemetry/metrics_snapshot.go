@@ -187,7 +187,7 @@ type SystemMetrics struct {
 }
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
-func CollectMetricsSnapshot(limit, offset int) (*MetricsSnapshot, error) {
+func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
 	UpdateReputationMetrics()
 	families, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
@@ -200,7 +200,7 @@ func CollectMetricsSnapshot(limit, offset int) (*MetricsSnapshot, error) {
 	}
 
 	snap := &MetricsSnapshot{}
-	snap.GoldenSignals = buildGoldenSignals(idx)
+	snap.GoldenSignals = buildGoldenSignals(ctx, idx)
 	snap.RouteMetrics = buildRouteMetrics(idx)
 	snap.Middleware = buildMiddlewareMetrics(idx)
 	snap.TLSCertificates = buildTLSCertMetrics(idx)
@@ -209,10 +209,10 @@ func CollectMetricsSnapshot(limit, offset int) (*MetricsSnapshot, error) {
 	snap.CountryMetrics = buildCountryMetrics(idx)
 	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
 	snap.DomainMetrics = buildDomainMetrics(idx)
-	snap.HourlyDomainMetrics = GetDomainStatsWindow(context.Background(), 1)
-	snap.TrafficHistory = GetSystemTrafficHistory(context.Background(), CurrentRetentionDays())
+	snap.HourlyDomainMetrics = GetDomainStatsWindow(ctx, 1)
+	snap.TrafficHistory = GetSystemTrafficHistory(ctx, CurrentRetentionDays())
 	snap.System = buildSystemMetrics(idx)
-	snap.Security = buildSecurityInsights(context.Background(), idx, limit, offset)
+	snap.Security = buildSecurityInsights(ctx, idx, limit, offset)
 
 	// Build active threat metrics
 	snap.ActiveSuspiciousSessions = gaugeValue(idx, "gateon_active_suspicious_sessions_total")
@@ -235,7 +235,7 @@ func CollectMetricsSnapshot(limit, offset int) (*MetricsSnapshot, error) {
 	return snap, nil
 }
 
-func buildGoldenSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
+func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) GoldenSignals {
 	gs := GoldenSignals{}
 
 	isEP := func(m *dto.Metric) bool {
@@ -299,7 +299,7 @@ func buildGoldenSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
 	}
 
 	// Populate daily totals from store
-	reqToday, bytesToday := GetSystemTrafficToday(context.Background())
+	reqToday, bytesToday := GetSystemTrafficToday(ctx)
 	gs.RequestsToday = reqToday
 	gs.BytesToday = bytesToday
 

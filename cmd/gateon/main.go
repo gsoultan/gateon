@@ -8,15 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
 
-	"github.com/gsoultan/gateon/cmd/gateon/inits"
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/ha"
+	"github.com/gsoultan/gateon/internal/inits"
 	"github.com/gsoultan/gateon/internal/install"
 	"github.com/gsoultan/gateon/internal/k8s"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -38,6 +39,11 @@ func main() {
 	uiPath := flag.String("ui-path", "", "Path to UI assets (serves from disk instead of embed)")
 	buildUI := flag.Bool("build-ui", false, "Build UI assets before starting")
 	flag.Parse()
+
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
+		fmt.Fprintf(os.Stderr, "Error: Gateon must run as root on Linux\n")
+		os.Exit(1)
+	}
 
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {

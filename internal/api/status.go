@@ -93,7 +93,10 @@ func (s *ApiService) TraceRoute(ctx context.Context, req *gateonv1.TraceRouteReq
 		return nil, status.Error(codes.InvalidArgument, "IP address is required")
 	}
 
-	serverIP := getPublicIP()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	serverIP := getPublicIP(ctx)
 	hops, err := telemetry.TraceRoute(ctx, req.Ip, serverIP)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to perform traceroute: %v", err)

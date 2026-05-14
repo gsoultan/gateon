@@ -67,15 +67,15 @@ func (a *LocalMetricsAggregator) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			a.takeSnapshot()
+			a.takeSnapshot(ctx)
 		case <-pruneTicker.C:
 			a.pruneIPs()
 		}
 	}
 }
 
-func (a *LocalMetricsAggregator) takeSnapshot() {
-	snap, err := CollectMetricsSnapshot(10, 0)
+func (a *LocalMetricsAggregator) takeSnapshot(ctx context.Context) {
+	snap, err := CollectMetricsSnapshot(ctx, 10, 0)
 	if err != nil {
 		logger.L.LogError("failed to collect metrics snapshot for aggregator", "error", err)
 		return

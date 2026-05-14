@@ -37,7 +37,7 @@ func CheckZeroTrust(userID string, currentFingerprint string, ip string, r *http
 	zerotrustMu.Lock()
 	defer zerotrustMu.Unlock()
 
-	_, _, lat, lon := ResolveIPInfo(ip)
+	_, _, lat, lon := ResolveIPInfo(r.Context(), ip)
 	now := time.Now()
 
 	val, ok := userLocationCache.Get(userID)

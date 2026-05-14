@@ -69,6 +69,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=root
+Group=root
 ExecStart=%s
 Restart=on-failure
 RestartSec=5s
@@ -103,10 +105,16 @@ func installLinux(binPath string) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create config dir %s: %w", configDir, err)
 	}
+	// Ensure root ownership and correct permissions if it was previously owned by another user
+	_ = os.Chmod(configDir, 0o755)
+	_ = exec.Command("chown", "-R", "root:root", configDir).Run()
 
 	if err := os.MkdirAll(stateDir, 0o700); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create state dir %s: %w", stateDir, err)
 	}
+	// Ensure root ownership and correct permissions if it was previously owned by another user
+	_ = os.Chmod(stateDir, 0o700)
+	_ = exec.Command("chown", "-R", "root:root", stateDir).Run()
 
 	if err := runCmd(exec.Command("systemctl", "daemon-reload")); err != nil {
 		return err
@@ -114,7 +122,7 @@ func installLinux(binPath string) error {
 	if err := runCmd(exec.Command("systemctl", "enable", "gateon")); err != nil {
 		return err
 	}
-	if err := runCmd(exec.Command("systemctl", "start", "gateon")); err != nil {
+	if err := runCmd(exec.Command("systemctl", "restart", "gateon")); err != nil {
 		return err
 	}
 

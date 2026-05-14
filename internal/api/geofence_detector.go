@@ -27,7 +27,7 @@ func (d *GeofenceDetector) Detect(ctx context.Context, data *DiagnosticData) []*
 	}
 
 	for _, tr := range data.Traces {
-		country, _, _, _ := telemetry.ResolveIPInfo(tr.SourceIP)
+		country, _, _, _ := telemetry.ResolveIPInfo(ctx, tr.SourceIP)
 		if country != "" && blockedMap[country] {
 			mitigated := false
 			// Check if country is already blocked in middlewares (geoip)
@@ -70,7 +70,7 @@ func (d *GeofenceDetector) Detect(ctx context.Context, data *DiagnosticData) []*
 				Recommendation: fmt.Sprintf("Add %s to eBPF/XDP country block list for hardware-level mitigation.", country),
 				Mitigated:      mitigated,
 			}
-			populateAnomalyGeo(anomaly, tr.SourceIP)
+			populateAnomalyGeo(ctx, anomaly, tr.SourceIP)
 			anomalies = append(anomalies, anomaly)
 		}
 	}

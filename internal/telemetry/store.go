@@ -1098,11 +1098,11 @@ func IsStoreEnabled() bool {
 }
 
 // PingStore checks the health of the telemetry database.
-func PingStore() error {
+func PingStore(ctx context.Context) error {
 	if store == nil {
 		return fmt.Errorf("telemetry store not initialized")
 	}
-	return store.db.Ping()
+	return store.db.PingContext(ctx)
 }
 
 // CurrentRetentionDays returns the active retention configuration.
