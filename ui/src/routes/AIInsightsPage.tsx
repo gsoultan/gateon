@@ -12,6 +12,7 @@ import {
   ThemeIcon,
   Timeline,
   Divider,
+  Code,
 } from '@mantine/core';
 import {
   IconBrain,
@@ -30,6 +31,7 @@ interface AIInsight {
   severity: string;
   category: string;
   recommendation: string;
+  suggestedConfig?: string;
 }
 
 interface AIAnalysisResponse {
@@ -92,7 +94,9 @@ const AIInsightsPage: React.FC = () => {
         <div>
           <Title order={2}>AI Insights & Optimization</Title>
           <Text c="dimmed" size="sm">
-            LLM-powered analysis of your gateway configuration for security, performance, and best practices.
+            {data?.summary?.includes("Smart Engine")
+              ? "Deterministic rule-based analysis of your gateway configuration (Local Mode)."
+              : "LLM-powered analysis of your gateway configuration for security, performance, and best practices."}
           </Text>
         </div>
         <Button
@@ -166,6 +170,14 @@ const AIInsightsPage: React.FC = () => {
                         <Text size="sm">{insight.recommendation}</Text>
                       </div>
                     </Group>
+                    {insight.suggestedConfig && (
+                      <Stack gap={4}>
+                        <Text size="xs" fw={700} c="dimmed">Suggested Configuration:</Text>
+                        <Code block color="gray.2">
+                          {insight.suggestedConfig}
+                        </Code>
+                      </Stack>
+                    )}
                   </Stack>
                 </Card>
               </Timeline.Item>
