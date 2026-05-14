@@ -34,6 +34,9 @@ func CreateBaseHandler(
 	_ = grpcWeb // reserved for future gRPC-web routing in base handler
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Limit request body size to 10MB to prevent DoS via large payloads.
+		r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
+
 		epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
 
 		// On the management entrypoint, we do NOT serve user-defined proxy routes.
@@ -81,35 +84,42 @@ func CreateBaseHandler(
 			}
 			uiHandler.ServeHTTP(w, r)
 		})
-		// Limit concurrent requests to internal API (dashboard, /v1/*, /metrics) to prevent DoS.
-		internal := middleware.MaxConnections(500)(internalHandler)
+
+		// 1. Recovery from panics
+		// 2. Security Headers (Recommended preset)
+		// 3. Max Connections limit
+		finalInternal := middleware.Chain(
+			middleware.Recovery(),
+			middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
+			middleware.MaxConnections(500),
+		)(internalHandler)
 
 		gc := deps.GlobalReg.Get(r.Context())
 		// Management entrypoint ALWAYS requires auth checks for API paths,
 		// even if auth is disabled globally for the gateway's proxy traffic.
 		if needsAuth(gc, deps) || epID == "management" {
 			if !isAPIMetricsPath(r.URL.Path) {
-				internal.ServeHTTP(w, r)
+				finalInternal.ServeHTTP(w, r)
 				return
 			}
 			if isLoginPath(r.URL.Path) {
-				handleLoginWithRateLimit(w, r, internal, deps)
+				handleLoginWithRateLimit(w, r, finalInternal, deps)
 				return
 			}
 			if isPublicAuthPath(r.URL.Path) {
-				internal.ServeHTTP(w, r)
+				finalInternal.ServeHTTP(w, r)
 				return
 			}
 			if deps.Auth == nil {
 				// No auth service available yet (e.g. first run)
-				internal.ServeHTTP(w, r)
+				finalInternal.ServeHTTP(w, r)
 				return
 			}
 			// Require Authorization header; do not accept auth token in URL.
-			middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(internal).ServeHTTP(w, r)
+			middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal).ServeHTTP(w, r)
 			return
 		}
 
-		internal.ServeHTTP(w, r)
+		finalInternal.ServeHTTP(w, r)
 	})
 }

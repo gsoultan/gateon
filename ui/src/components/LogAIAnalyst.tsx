@@ -27,7 +27,7 @@ export function LogAIAnalyst({ logs, opened, onClose }: LogAIAnalystProps) {
     setLoading(true);
     setAnalysis(null);
     try {
-      const res = await apiFetch("/AnalyzeLogs", {
+      const res = await apiFetch("/v1/AnalyzeLogs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ logs: logs.slice(0, 50) }),

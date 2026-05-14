@@ -55,10 +55,10 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 		if e.globals.Management.Bind == "0.0.0.0" && !e.globals.Management.AllowPublicManagement {
 			insights = append(insights, &gateonv1.AIInsight{
 				Title:           "Management API exposed on all interfaces",
-				Description:     "The management API is bound to 0.0.0.0, which makes it accessible from any network interface. This is a security risk if not properly firewalled.",
+				Description:     "The management API is bound to 0.0.0.0, making it accessible from any network interface. This significantly increases the attack surface of your gateway control plane.",
 				Severity:        "critical",
 				Category:        "security",
-				Recommendation:  "Bind the management API to a specific internal IP (e.g., 127.0.0.1 or a private network IP).",
+				Recommendation:  "Bind the management API to a specific internal IP (e.g., 127.0.0.1 or a private network IP) to prevent unauthorized external access.",
 				SuggestedConfig: `{"management": {"bind": "127.0.0.1"}}`,
 			})
 		}
@@ -66,11 +66,15 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 
 	// Check Routes without Auth
 	unprotectedRoutes := 0
+	wildcardUnprotected := 0
 	for _, r := range e.routes {
+		if r.Disabled {
+			continue
+		}
 		hasAuth := false
 		for _, mwID := range r.Middlewares {
 			for _, mw := range e.middlewares {
-				if mw.Id == mwID && (mw.Type == "auth" || mw.Type == "jwt" || mw.Type == "paseto" || mw.Type == "oidc") {
+				if mw.Id == mwID && (mw.Type == "auth" || mw.Type == "jwt" || mw.Type == "paseto" || mw.Type == "oidc" || mw.Type == "forwardauth") {
 					hasAuth = true
 					break
 				}
@@ -81,16 +85,57 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 		}
 		if !hasAuth {
 			unprotectedRoutes++
+			if strings.Contains(r.Rule, "Host(`*`)") || r.Rule == "" {
+				wildcardUnprotected++
+			}
 		}
 	}
 
-	if unprotectedRoutes > 0 {
+	if wildcardUnprotected > 0 {
+		insights = append(insights, &gateonv1.AIInsight{
+			Title:          "Wildcard routes without authentication",
+			Description:    "You have routes that match any host but do not have authentication configured. This could allow unauthorized access to internal services or lead to open-proxy vulnerabilities.",
+			Severity:       "critical",
+			Category:       "security",
+			Recommendation: "Apply an authentication middleware to all wildcard routes or restrict the 'Host' rule to specific domains.",
+		})
+	} else if unprotectedRoutes > 0 {
 		insights = append(insights, &gateonv1.AIInsight{
 			Title:          "Unprotected routes detected",
-			Description:    fmt.Sprintf("Found %d routes that do not have any authentication middleware configured.", unprotectedRoutes),
+			Description:    fmt.Sprintf("Found %d active routes that do not have any authentication middleware configured.", unprotectedRoutes),
 			Severity:       "warning",
 			Category:       "security",
-			Recommendation: "Apply an authentication middleware (JWT, OIDC, or Basic Auth) to sensitive routes.",
+			Recommendation: "Apply an authentication middleware (JWT, OIDC, or Basic Auth) to sensitive routes to ensure only authorized users can access your backends.",
+		})
+	}
+
+	// Check for Security Headers
+	routesWithoutSecurityHeaders := 0
+	for _, r := range e.routes {
+		if r.Disabled {
+			continue
+		}
+		hasHeaders := false
+		for _, mwID := range r.Middlewares {
+			for _, mw := range e.middlewares {
+				if mw.Id == mwID && (mw.Type == "headers" || mw.Type == "security_headers") {
+					hasHeaders = true
+					break
+				}
+			}
+		}
+		if !hasHeaders {
+			routesWithoutSecurityHeaders++
+		}
+	}
+
+	if routesWithoutSecurityHeaders > 0 {
+		insights = append(insights, &gateonv1.AIInsight{
+			Title:          "Missing security headers",
+			Description:    fmt.Sprintf("%d routes are missing standard security headers (HSTS, CSP, X-Frame-Options, etc.). This makes clients vulnerable to XSS and clickjacking.", routesWithoutSecurityHeaders),
+			Severity:       "warning",
+			Category:       "security",
+			Recommendation: "Add a 'headers' middleware with recommended security presets and apply it to your web-facing routes.",
 		})
 	}
 
@@ -100,10 +145,10 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 		if minTls == "TLS1.0" || minTls == "TLS1.1" || minTls == "" {
 			insights = append(insights, &gateonv1.AIInsight{
 				Title:           "Insecure TLS version",
-				Description:     "Your configuration allows TLS 1.0 or 1.1, which are deprecated and considered insecure.",
-				Severity:        "warning",
+				Description:     "Your configuration allows TLS 1.0 or 1.1, which are deprecated and have known cryptographic vulnerabilities.",
+				Severity:        "high",
 				Category:        "security",
-				Recommendation:  "Set 'min_tls_version' to 'TLS1.2' or 'TLS1.3' in your TLS configuration.",
+				Recommendation:  "Enforce a minimum of 'TLS1.2' or 'TLS1.3' in your global TLS configuration to ensure strong encryption.",
 				SuggestedConfig: `{"tls": {"min_tls_version": "TLS1.2"}}`,
 			})
 		}
@@ -113,10 +158,10 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 	if e.globals.Waf == nil || !e.globals.Waf.Enabled {
 		insights = append(insights, &gateonv1.AIInsight{
 			Title:           "WAF is disabled",
-			Description:     "The Web Application Firewall (WAF) is disabled globally. This leaves your services vulnerable to common attacks like SQLi and XSS.",
+			Description:     "The Web Application Firewall (WAF) is disabled globally. Your services are not protected against common OWASP Top 10 threats like SQL injection and Cross-Site Scripting (XSS).",
 			Severity:        "high",
 			Category:        "security",
-			Recommendation:  "Enable the WAF in the global configuration.",
+			Recommendation:  "Enable the WAF in the global configuration and ensure it is in 'block' mode for production environments.",
 			SuggestedConfig: `{"waf": {"enabled": true}}`,
 		})
 	}
@@ -125,10 +170,10 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 	if e.globals.Geoip == nil || !e.globals.Geoip.Enabled {
 		insights = append(insights, &gateonv1.AIInsight{
 			Title:          "GeoIP protection is disabled",
-			Description:    "GeoIP-based filtering is not enabled. Enabling it allows you to block traffic from high-risk countries at the edge.",
+			Description:    "GeoIP-based filtering is not enabled. This prevents you from automatically blocking traffic from high-risk regions or restricting access to specific countries.",
 			Severity:       "info",
 			Category:       "security",
-			Recommendation: "Enable and configure GeoIP in the global settings.",
+			Recommendation: "Enable GeoIP in global settings and configure country-based access policies to reduce the attack surface.",
 		})
 	}
 
@@ -136,10 +181,10 @@ func (e *LocalInsightEngine) analyzeSecurity() []*gateonv1.AIInsight {
 	if e.globals.AnomalyDetection == nil || !e.globals.AnomalyDetection.Enabled {
 		insights = append(insights, &gateonv1.AIInsight{
 			Title:          "Anomaly detection is disabled",
-			Description:    "Real-time anomaly detection is disabled. This prevents the system from automatically identifying and mitigating behavioral threats like brute-force and exploit scanning.",
+			Description:    "Real-time anomaly detection is disabled. The system cannot automatically identify and mitigate behavioral threats like credential stuffing, brute-force, or automated scanning.",
 			Severity:       "high",
 			Category:       "security",
-			Recommendation: "Enable anomaly detection in the global configuration.",
+			Recommendation: "Enable anomaly detection in the global configuration to provide an extra layer of defense against intelligent automated attacks.",
 		})
 	}
 
@@ -150,39 +195,55 @@ func (e *LocalInsightEngine) analyzePerformance() []*gateonv1.AIInsight {
 	var insights []*gateonv1.AIInsight
 
 	// Check for Gzip/Compression
-	hasCompression := false
-	for _, mw := range e.middlewares {
-		if mw.Type == "compress" || mw.Type == "gzip" {
-			hasCompression = true
-			break
+	routesWithoutCompression := 0
+	for _, r := range e.routes {
+		if r.Disabled {
+			continue
+		}
+		hasCompression := false
+		for _, mwID := range r.Middlewares {
+			for _, mw := range e.middlewares {
+				if mw.Id == mwID && (mw.Type == "compress" || mw.Type == "gzip") {
+					hasCompression = true
+					break
+				}
+			}
+		}
+		if !hasCompression {
+			routesWithoutCompression++
 		}
 	}
 
-	if !hasCompression {
+	if routesWithoutCompression > 0 {
 		insights = append(insights, &gateonv1.AIInsight{
-			Title:          "Enable response compression",
-			Description:    "None of your middlewares provide response compression. This can lead to higher bandwidth usage and slower load times for clients.",
+			Title:          "Response compression missing",
+			Description:    fmt.Sprintf("%d active routes do not have response compression enabled. This leads to higher bandwidth consumption and slower perceived performance for end-users.", routesWithoutCompression),
 			Severity:       "info",
 			Category:       "performance",
-			Recommendation: "Add a 'compress' middleware and apply it to routes serving text-based content.",
+			Recommendation: "Apply 'compress' or 'gzip' middleware to routes serving text-based content (HTML, JS, CSS, JSON) to reduce payload size and improve load times.",
 		})
 	}
 
 	// Check Redis for Caching
 	if e.globals.Redis == nil || !e.globals.Redis.Enabled {
 		insights = append(insights, &gateonv1.AIInsight{
-			Title:           "Enable Redis for better performance",
-			Description:     "Redis is currently disabled. Enabling Redis allows for distributed rate limiting, caching, and better overall performance in a clustered environment.",
+			Title:           "Enable Redis for peak performance",
+			Description:     "Redis is currently disabled. Without Redis, Gateon uses local memory for rate limiting and caching, which is not synchronized across multiple instances and can lead to inconsistent behavior in clusters.",
 			Severity:        "info",
 			Category:        "performance",
-			Recommendation:  "Configure and enable Redis in the global settings.",
+			Recommendation:  "Configure and enable Redis in global settings to support distributed rate limiting, shared caching, and improved scalability.",
 			SuggestedConfig: `{"redis": {"enabled": true, "addr": "localhost:6379"}}`,
 		})
 	}
 
 	// Check for Rate Limiting
 	routesWithoutRateLimit := 0
+	activeRoutes := 0
 	for _, r := range e.routes {
+		if r.Disabled {
+			continue
+		}
+		activeRoutes++
 		hasRateLimit := false
 		for _, mwID := range r.Middlewares {
 			for _, mw := range e.middlewares {
@@ -197,24 +258,24 @@ func (e *LocalInsightEngine) analyzePerformance() []*gateonv1.AIInsight {
 		}
 	}
 
-	if routesWithoutRateLimit > len(e.routes)/2 {
+	if activeRoutes > 0 && routesWithoutRateLimit > activeRoutes/2 {
 		insights = append(insights, &gateonv1.AIInsight{
-			Title:          "Incomplete rate limiting coverage",
-			Description:    "More than half of your routes lack rate limiting. This increases the risk of resource exhaustion during traffic spikes.",
+			Title:          "Low rate limiting coverage",
+			Description:    "More than half of your active routes lack rate limiting. This exposes your upstream services to resource exhaustion and potential DDoS attacks.",
 			Severity:       "warning",
 			Category:       "performance",
-			Recommendation: "Apply rate limiting middlewares to your most frequently accessed routes.",
+			Recommendation: "Implement rate limiting on all public endpoints to protect your infrastructure from traffic spikes and abusive clients.",
 		})
 	}
 
 	// Check eBPF
 	if e.globals.Ebpf == nil || !e.globals.Ebpf.Enabled {
 		insights = append(insights, &gateonv1.AIInsight{
-			Title:           "eBPF offloading is disabled",
-			Description:     "eBPF is not enabled. Enabling eBPF provides kernel-level protection against DDoS and significantly improves performance by offloading packet processing.",
+			Title:           "eBPF packet offloading disabled",
+			Description:     "eBPF acceleration is not enabled. Enabling eBPF allows Gateon to process packets at the kernel level, providing near-line-rate performance and high-efficiency DDoS mitigation.",
 			Severity:        "info",
 			Category:        "performance",
-			Recommendation:  "Enable eBPF offloading in the global configuration.",
+			Recommendation:  "Enable eBPF offloading in global settings if your host kernel supports it to achieve maximum throughput and minimum latency.",
 			SuggestedConfig: `{"ebpf": {"enabled": true, "xdp_rate_limit": true, "xdp_ip_shunning": true}}`,
 		})
 	}
@@ -229,11 +290,11 @@ func (e *LocalInsightEngine) analyzeAvailability() []*gateonv1.AIInsight {
 	for _, s := range e.services {
 		if len(s.WeightedTargets) == 1 {
 			insights = append(insights, &gateonv1.AIInsight{
-				Title:          fmt.Sprintf("Single point of failure for service '%s'", s.Name),
-				Description:    fmt.Sprintf("Service '%s' has only one upstream server. If this server goes down, the service will be unavailable.", s.Name),
-				Severity:       "warning",
+				Title:          fmt.Sprintf("Single point of failure: service '%s'", s.Name),
+				Description:    fmt.Sprintf("The service '%s' has only one upstream target. If this target becomes unavailable, the entire service will go offline.", s.Name),
+				Severity:       "high",
 				Category:       "availability",
-				Recommendation: "Add at least one more upstream server for redundancy and enable load balancing.",
+				Recommendation: "Add at least one additional upstream target and enable load balancing to ensure high availability and fault tolerance.",
 			})
 		}
 	}
@@ -248,11 +309,11 @@ func (e *LocalInsightEngine) analyzeAvailability() []*gateonv1.AIInsight {
 
 	if servicesWithoutHealthChecks > 0 {
 		insights = append(insights, &gateonv1.AIInsight{
-			Title:          "Missing health checks",
-			Description:    fmt.Sprintf("%d services do not have health checks enabled. Gateon cannot automatically skip unhealthy upstreams for these services.", servicesWithoutHealthChecks),
-			Severity:       "info",
+			Title:          "Automatic health monitoring missing",
+			Description:    fmt.Sprintf("%d services do not have health checks configured. Gateon cannot automatically detect or bypass unhealthy upstream servers for these services.", servicesWithoutHealthChecks),
+			Severity:       "warning",
 			Category:       "availability",
-			Recommendation: "Configure health check endpoints for your services to improve resilience.",
+			Recommendation: "Configure HTTP or gRPC health checks for all services to enable automatic failover and proactive reliability management.",
 		})
 	}
 

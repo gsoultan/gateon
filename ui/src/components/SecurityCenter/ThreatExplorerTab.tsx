@@ -54,10 +54,14 @@ export function ThreatExplorerTab() {
     if (!data?.threats) return [];
     return data.threats
       .filter((t) => {
+        const source = t.source || "";
+        const description = t.description || "";
+        const type = t.type || "";
+
         const matchesSearch =
-          t.source.toLowerCase().includes(search.toLowerCase()) ||
-          t.description.toLowerCase().includes(search.toLowerCase()) ||
-          t.type.toLowerCase().includes(search.toLowerCase());
+          source.toLowerCase().includes(search.toLowerCase()) ||
+          description.toLowerCase().includes(search.toLowerCase()) ||
+          type.toLowerCase().includes(search.toLowerCase());
 
         const matchesCategory =
           categoryFilter === "all" || t.category === categoryFilter;

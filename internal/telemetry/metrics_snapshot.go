@@ -710,7 +710,7 @@ func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily
 		RecentAnomalies:   threats,
 		TotalAnomalies:    total,
 		ActiveThreats:     activeCount,
-		HeavyHitters:      GlobalHHH.GetHeavyHitters(100), // Threshold of 100 requests
+		HeavyHitters:      GlobalHHH.GetHeavyHitters(10), // Threshold of 10 threat events
 		GlobalThreatScore: float64(GlobalCMS.Estimate("global")),
 	}
 }

@@ -29,8 +29,13 @@ func NewCMSketch(width, depth int) *CMSketch {
 	}
 }
 
-// Add increments the count for the given key.
+// Add increments the count for the given key by 1.
 func (c *CMSketch) Add(key string) {
+	c.AddWeighted(key, 1)
+}
+
+// AddWeighted increments the count for the given key by the specified value.
+func (c *CMSketch) AddWeighted(key string, count uint32) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -38,7 +43,7 @@ func (c *CMSketch) Add(key string) {
 	for i := range c.depth {
 		hash := c.hash(data, i)
 		idx := int(hash % uint64(c.width))
-		c.counts[i][idx]++
+		c.counts[i][idx] += count
 	}
 }
 
