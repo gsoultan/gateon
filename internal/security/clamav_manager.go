@@ -57,10 +57,37 @@ func (m *ClamAVManager) Start(ctx context.Context) error {
 		if err != nil {
 			logger.L.LogError("invalid ClamAV scan schedule", "error", err, "schedule", m.config.FullScanSchedule)
 		} else {
-			m.cron.Start()
 			logger.L.LogInfo("scheduled ClamAV full scan", "schedule", m.config.FullScanSchedule)
 		}
 	}
+
+	if m.config.DatabaseUpdateSchedule != "" {
+		_, err := m.cron.AddFunc(m.config.DatabaseUpdateSchedule, func() {
+			if err := m.UpdateDatabase(context.Background()); err != nil {
+				logger.L.LogError("scheduled ClamAV database update failed", "error", err)
+			}
+		})
+		if err != nil {
+			logger.L.LogError("invalid ClamAV database update schedule", "error", err, "schedule", m.config.DatabaseUpdateSchedule)
+		} else {
+			logger.L.LogInfo("scheduled ClamAV database update", "schedule", m.config.DatabaseUpdateSchedule)
+		}
+	}
+
+	if m.config.AppUpdateSchedule != "" {
+		_, err := m.cron.AddFunc(m.config.AppUpdateSchedule, func() {
+			if err := m.UpdateApplication(context.Background()); err != nil {
+				logger.L.LogError("scheduled ClamAV application update failed", "error", err)
+			}
+		})
+		if err != nil {
+			logger.L.LogError("invalid ClamAV application update schedule", "error", err, "schedule", m.config.AppUpdateSchedule)
+		} else {
+			logger.L.LogInfo("scheduled ClamAV application update", "schedule", m.config.AppUpdateSchedule)
+		}
+	}
+
+	m.cron.Start()
 
 	return nil
 }
@@ -208,6 +235,85 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	// Implementation would involve editing /etc/clamav/clamd.conf
 	// For now, we'll just log that we would tune it.
 	logger.L.LogInfo("tuning local ClamAV for low resource mode (logic to be implemented for specific OS)")
+}
+
+func (m *ClamAVManager) UpdateDatabase(ctx context.Context) error {
+	logger.L.LogInfo("starting ClamAV database update")
+	switch m.config.InstallationMode {
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
+		// In docker, we can try to run freshclam inside the container
+		cmd := exec.CommandContext(ctx, "docker", "exec", "gateon-clamav", "freshclam")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("docker freshclam failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+		}
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
+		if _, err := exec.LookPath("freshclam"); err != nil {
+			return fmt.Errorf("freshclam not found in PATH")
+		}
+		cmd := exec.CommandContext(ctx, "freshclam")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("local freshclam failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+		}
+	default:
+		return fmt.Errorf("unsupported installation mode for database update")
+	}
+	logger.L.LogInfo("ClamAV database updated successfully")
+	return nil
+}
+
+func (m *ClamAVManager) UpdateApplication(ctx context.Context) error {
+	logger.L.LogInfo("starting ClamAV application update")
+	switch m.config.InstallationMode {
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
+		// Pull latest image and recreate container
+		image := m.config.DockerImage
+		if image == "" {
+			image = "clamav/clamav:latest"
+		}
+		logger.L.LogInfo("pulling latest ClamAV image", "image", image)
+		if out, err := exec.CommandContext(ctx, "docker", "pull", image).CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to pull image: %w (output: %s)", err, strings.TrimSpace(string(out)))
+		}
+
+		// Remove old container
+		logger.L.LogInfo("recreating ClamAV container")
+		_ = exec.CommandContext(ctx, "docker", "stop", "gateon-clamav").Run()
+		_ = exec.CommandContext(ctx, "docker", "rm", "gateon-clamav").Run()
+
+		return m.ensureDocker(ctx)
+
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
+		// Use package manager to update
+		var cmd *exec.Cmd
+		if _, err := exec.LookPath("apt-get"); err == nil {
+			cmd = exec.CommandContext(ctx, "apt-get", "install", "--only-upgrade", "-y", "clamav-daemon", "clamav-freshclam")
+			cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+		} else if _, err := exec.LookPath("yum"); err == nil {
+			cmd = exec.CommandContext(ctx, "yum", "update", "-y", "clamav", "clamav-update")
+		} else if _, err := exec.LookPath("brew"); err == nil {
+			cmd = exec.CommandContext(ctx, "brew", "upgrade", "clamav")
+		} else if _, err := exec.LookPath("apk"); err == nil {
+			cmd = exec.CommandContext(ctx, "apk", "add", "--upgrade", "clamav", "clamav-daemon", "freshclam")
+		} else {
+			return fmt.Errorf("no supported package manager found for update")
+		}
+
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("application update failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+		}
+
+		// Restart services if systemctl is available
+		if _, err := exec.LookPath("systemctl"); err == nil {
+			_ = exec.CommandContext(ctx, "systemctl", "restart", "clamav-daemon").Run()
+			_ = exec.CommandContext(ctx, "systemctl", "restart", "clamav-freshclam").Run()
+		}
+
+	default:
+		return fmt.Errorf("unsupported installation mode for application update")
+	}
+
+	logger.L.LogInfo("ClamAV application updated successfully")
+	return nil
 }
 
 func (m *ClamAVManager) ensureDatabase(ctx context.Context) error {

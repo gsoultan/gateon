@@ -48,7 +48,6 @@ import {
   IconBook2,
   IconNetwork,
   IconTimeline,
-  IconBrain,
   IconChartBar,
   IconStethoscope,
 } from "@tabler/icons-react";
@@ -70,7 +69,6 @@ export function Shell() {
 
   const coreLinks = [
     { label: "Dashboard", to: "/", icon: IconDashboard },
-    { label: "AI Insights", to: "/ai-insights", icon: IconBrain },
     { label: "Topology", to: "/topology", icon: IconNetwork },
     { label: "Traces", to: "/traces", icon: IconTimeline },
     { label: "Routes", to: "/routes", icon: IconRoute },
@@ -82,9 +80,7 @@ export function Shell() {
   ];
 
   const securityLinks = [
-    { label: "Command Center", to: "/security-center", icon: IconShieldCheck },
-    { label: "Mitigated Attacks", to: "/mitigated-attacks", icon: IconShieldCheck },
-    { label: "Insights", to: "/security", icon: IconShieldLock },
+    { label: "Security Hub", to: "/security-center", icon: IconShieldCheck },
     { label: "Audit Logs", to: "/audit-logs", icon: IconTimeline },
     { label: "Certificates", to: "/certificates", icon: IconCertificate },
     {
