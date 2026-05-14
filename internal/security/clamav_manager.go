@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -184,6 +185,9 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 
 	var cmd *exec.Cmd
 	if _, err := exec.LookPath("apt-get"); err == nil {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("auto-installation with apt-get requires root privileges. Please run Gateon as root or pre-install ClamAV")
+		}
 		// Update repository first
 		updateCmd := exec.CommandContext(ctx, "apt-get", "update")
 		updateCmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
@@ -194,10 +198,16 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 		cmd = exec.CommandContext(ctx, "apt-get", "install", "-y", "clamav-daemon", "clamav-freshclam")
 		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 	} else if _, err := exec.LookPath("yum"); err == nil {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("auto-installation with yum requires root privileges. Please run Gateon as root or pre-install ClamAV")
+		}
 		cmd = exec.CommandContext(ctx, "yum", "install", "-y", "clamav", "clamav-update")
 	} else if _, err := exec.LookPath("brew"); err == nil {
 		cmd = exec.CommandContext(ctx, "brew", "install", "clamav")
 	} else if _, err := exec.LookPath("apk"); err == nil {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("auto-installation with apk requires root privileges. Please run Gateon as root or pre-install ClamAV")
+		}
 		updateCmd := exec.CommandContext(ctx, "apk", "update")
 		if out, err := updateCmd.CombinedOutput(); err != nil {
 			logger.L.LogWarn("apk update failed", "error", err, "output", string(out))
@@ -208,7 +218,7 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 	}
 
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("installation failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+		return m.formatExecError("installation", err, out)
 	}
 
 	// Try to enable and start services if systemctl is available
@@ -232,9 +242,69 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 }
 
 func (m *ClamAVManager) tuneLocalClamav() {
-	// Implementation would involve editing /etc/clamav/clamd.conf
-	// For now, we'll just log that we would tune it.
-	logger.L.LogInfo("tuning local ClamAV for low resource mode (logic to be implemented for specific OS)")
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	confPaths := []string{"/etc/clamav/clamd.conf", "/etc/clamd.d/scan.conf", "/usr/local/etc/clamd.conf"}
+	var targetPath string
+	for _, p := range confPaths {
+		if _, err := os.Stat(p); err == nil {
+			targetPath = p
+			break
+		}
+	}
+
+	if targetPath == "" {
+		return
+	}
+
+	logger.L.LogInfo("tuning local ClamAV for low resource mode", "path", targetPath)
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		logger.L.LogWarn("could not read ClamAV config", "path", targetPath, "error", err)
+		return
+	}
+
+	lines := strings.Split(string(data), "\n")
+	settings := map[string]string{
+		"ConcurrentScan":           "no",
+		"MaxThreads":               "2",
+		"MaxConnectionQueueLength": "5",
+		"OnAccessMaxFileSize":      "5M",
+	}
+
+	modified := false
+	for key, val := range settings {
+		found := false
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, key+" ") || trimmed == key {
+				lines[i] = fmt.Sprintf("%s %s", key, val)
+				found = true
+				modified = true
+				break
+			}
+		}
+		if !found {
+			lines = append(lines, fmt.Sprintf("%s %s", key, val))
+			modified = true
+		}
+	}
+
+	if modified {
+		err = os.WriteFile(targetPath, []byte(strings.Join(lines, "\n")), 0644)
+		if err != nil {
+			logger.L.LogWarn("could not write ClamAV config", "path", targetPath, "error", err)
+		} else {
+			logger.L.LogInfo("ClamAV configuration updated for low resource mode")
+			// Try to restart clamd if it's running
+			if _, err := exec.LookPath("systemctl"); err == nil {
+				_ = exec.Command("systemctl", "restart", "clamav-daemon").Run()
+			}
+		}
+	}
 }
 
 func (m *ClamAVManager) UpdateDatabase(ctx context.Context) error {
@@ -244,7 +314,7 @@ func (m *ClamAVManager) UpdateDatabase(ctx context.Context) error {
 		// In docker, we can try to run freshclam inside the container
 		cmd := exec.CommandContext(ctx, "docker", "exec", "gateon-clamav", "freshclam")
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("docker freshclam failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+			return m.formatExecError("docker freshclam", err, out)
 		}
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
 		if _, err := exec.LookPath("freshclam"); err != nil {
@@ -252,7 +322,7 @@ func (m *ClamAVManager) UpdateDatabase(ctx context.Context) error {
 		}
 		cmd := exec.CommandContext(ctx, "freshclam")
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("local freshclam failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+			return m.formatExecError("local freshclam", err, out)
 		}
 	default:
 		return fmt.Errorf("unsupported installation mode for database update")
@@ -272,7 +342,7 @@ func (m *ClamAVManager) UpdateApplication(ctx context.Context) error {
 		}
 		logger.L.LogInfo("pulling latest ClamAV image", "image", image)
 		if out, err := exec.CommandContext(ctx, "docker", "pull", image).CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to pull image: %w (output: %s)", err, strings.TrimSpace(string(out)))
+			return m.formatExecError("docker pull", err, out)
 		}
 
 		// Remove old container
@@ -299,7 +369,7 @@ func (m *ClamAVManager) UpdateApplication(ctx context.Context) error {
 		}
 
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("application update failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+			return m.formatExecError("application update", err, out)
 		}
 
 		// Restart services if systemctl is available
@@ -343,7 +413,7 @@ func (m *ClamAVManager) ensureDatabase(ctx context.Context) error {
 			freshCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 			defer cancel()
 			if out, err := exec.CommandContext(freshCtx, "freshclam").CombinedOutput(); err != nil {
-				return fmt.Errorf("initial freshclam failed: %w (output: %s)", err, string(out))
+				return m.formatExecError("initial freshclam", err, out)
 			}
 			logger.L.LogInfo("ClamAV database updated successfully")
 		} else {
@@ -359,12 +429,44 @@ func (m *ClamAVManager) GetScanStatus() ScanStatus {
 	return m.status
 }
 
+func (m *ClamAVManager) isSystemOverloaded() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return false
+	}
+
+	fields := strings.Fields(string(data))
+	if len(fields) < 1 {
+		return false
+	}
+
+	load1, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return false
+	}
+
+	// If load is greater than 2x number of CPUs, we consider it overloaded for a background scan
+	return load1 > float64(runtime.NumCPU())*2.0
+}
+
 func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 	m.mu.Lock()
 	if m.status.IsRunning {
 		m.mu.Unlock()
 		return
 	}
+
+	// Avoid starting a full scan if system load is too high
+	if m.isSystemOverloaded() {
+		m.mu.Unlock()
+		logger.L.LogWarn("skipping ClamAV full scan due to high system load")
+		return
+	}
+
 	m.status.IsRunning = true
 	m.mu.Unlock()
 
@@ -407,8 +509,12 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 	execBinary := binary
 
 	if m.config.LowResourceMode {
-		// Try to run with lower priority
-		if _, err := exec.LookPath("nice"); err == nil {
+		// Try to run with lower priority (CPU and I/O)
+		if _, err := exec.LookPath("ionice"); err == nil {
+			// -c 3 is the idle class: only gets I/O time when no other program has requested disk I/O
+			fullArgs = append([]string{"-c", "3", "nice", "-n", "19", binary}, args...)
+			execBinary = "ionice"
+		} else if _, err := exec.LookPath("nice"); err == nil {
 			fullArgs = append([]string{"-n", "19", binary}, args...)
 			execBinary = "nice"
 		}
@@ -426,7 +532,10 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 				execBinary = binary
 				fullArgs = args
 				if m.config.LowResourceMode {
-					if _, errNice := exec.LookPath("nice"); errNice == nil {
+					if _, errIo := exec.LookPath("ionice"); errIo == nil {
+						fullArgs = append([]string{"-c", "3", "nice", "-n", "19", binary}, args...)
+						execBinary = "ionice"
+					} else if _, errNice := exec.LookPath("nice"); errNice == nil {
 						fullArgs = append([]string{"-n", "19", binary}, args...)
 						execBinary = "nice"
 					}
@@ -456,4 +565,22 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 		logger.L.LogInfo("ClamAV full scan completed successfully", "duration", time.Since(start))
 	}
 	m.mu.Unlock()
+}
+
+func (m *ClamAVManager) formatExecError(ctx string, err error, out []byte) error {
+	output := strings.TrimSpace(string(out))
+	lowerOut := strings.ToLower(output)
+	if strings.Contains(lowerOut, "read-only file system") {
+		return fmt.Errorf("%s failed: filesystem is read-only. Please pre-install ClamAV or use Docker mode", ctx)
+	}
+	if strings.Contains(lowerOut, "permission denied") || strings.Contains(lowerOut, "root privileges") || strings.Contains(lowerOut, "are you root?") {
+		return fmt.Errorf("%s failed: insufficient privileges. Please run Gateon as root or pre-install ClamAV", ctx)
+	}
+
+	// Truncate extremely long outputs
+	if len(output) > 1000 {
+		output = output[:1000] + "... (truncated)"
+	}
+
+	return fmt.Errorf("%s failed: %w (output: %s)", ctx, err, output)
 }

@@ -33,7 +33,8 @@ interface LiveLogsProps {
 }
 
 export default function LiveLogs({ height = 400 }: LiveLogsProps) {
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<{ id: string; raw: string }[]>([]);
+  const logIdCounter = useRef(0);
   const [connected, setConnected] = useState(false);
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(paused);
@@ -48,10 +49,17 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
 
   useEffect(() => {
     const base = apiUrl.replace(/\/$/, "");
-    const baseUrl = base.startsWith("http") ? base.replace(/^http/, "ws") : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${base}`;
-    
+    const baseUrl = base.startsWith("http")
+      ? base.replace(/^http/, "ws")
+      : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${
+          window.location.host
+        }${base}`;
+
     // Skip sending __cookie__ sentinel as query param; browser sends the HttpOnly cookie automatically.
-    const authParam = token && token !== "__cookie__" ? `?auth=${encodeURIComponent(token)}` : "";
+    const authParam =
+      token && token !== "__cookie__"
+        ? `?auth=${encodeURIComponent(token)}`
+        : "";
     const wsUrl = `${baseUrl}/v1/logs${authParam}`;
     const ws = new WebSocket(wsUrl);
 
@@ -60,7 +68,11 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     ws.onmessage = (event) => {
       if (!pausedRef.current) {
         setLogs((prev) => {
-          const newLogs = [event.data, ...prev];
+          const entry = {
+            id: `${Date.now()}-${logIdCounter.current++}`,
+            raw: event.data,
+          };
+          const newLogs = [entry, ...prev];
           return newLogs.slice(0, 100);
         });
       }
@@ -74,9 +86,9 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
       Array.from(
         new Set(
           logs
-            .map((log) => {
+            .map((entry) => {
               try {
-                const parsed = JSON.parse(log) as Record<string, unknown>;
+                const parsed = JSON.parse(entry.raw) as Record<string, unknown>;
                 return String(parsed.route ?? parsed.route_id ?? "").trim();
               } catch {
                 return "";
@@ -89,7 +101,8 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   );
 
   const filteredLogs = useMemo(() => {
-    return logs.filter((log) => {
+    return logs.filter((entry) => {
+      const log = entry.raw;
       if (search) {
         if (!log.toLowerCase().includes(search.toLowerCase())) return false;
       }
@@ -105,7 +118,9 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
             if (s !== statusFilter && !s.startsWith(statusFilter)) return false;
           }
           if (clientIpFilter) {
-            const ip = String(parsed.ip ?? parsed.remote_addr ?? parsed.client_ip ?? "").toLowerCase();
+            const ip = String(
+              parsed.ip ?? parsed.remote_addr ?? parsed.client_ip ?? "",
+            ).toLowerCase();
             if (!ip.includes(clientIpFilter.toLowerCase())) return false;
           }
         } catch {
@@ -315,22 +330,26 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
                     : "-- Waiting for incoming traffic --"}
                 </Text>
               )}
-              {filteredLogs.map((log, i) => (
+              {filteredLogs.map((entry) => (
                 <Box
-                  key={i}
+                  key={entry.id}
                   py={2}
                   style={{
                     borderBottom: "1px solid var(--mantine-color-dark-6)",
                   }}
                 >
-                  {formatLog(log)}
+                  {formatLog(entry.raw)}
                 </Box>
               ))}
             </Stack>
           </ScrollArea>
         </Paper>
       </Stack>
-      <LogAIAnalyst logs={logs} opened={aiOpened} onClose={closeAI} />
+      <LogAIAnalyst
+        logs={logs.map((e) => e.raw)}
+        opened={aiOpened}
+        onClose={closeAI}
+      />
     </Card>
   );
 }

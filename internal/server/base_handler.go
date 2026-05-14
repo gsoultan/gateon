@@ -33,6 +33,30 @@ func CreateBaseHandler(
 	handler := deps.ProxyHandler
 	_ = grpcWeb // reserved for future gRPC-web routing in base handler
 
+	internalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/gateon.v1.") ||
+			r.URL.Path == "/metrics" || r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		uiHandler.ServeHTTP(w, r)
+	})
+
+	// 1. Recovery from panics
+	// 2. Security Headers (Recommended preset)
+	// 3. Max Connections limit
+	// Pre-chain middlewares to avoid per-request allocations.
+	finalInternal := middleware.Chain(
+		middleware.Recovery(),
+		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
+		middleware.MaxConnections(500),
+	)(internalHandler)
+
+	var authInternal http.Handler
+	if deps.Auth != nil {
+		authInternal = middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Limit request body size to 10MB to prevent DoS via large payloads.
 		r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
@@ -76,24 +100,6 @@ func CreateBaseHandler(
 			}
 		}
 
-		internalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/gateon.v1.") ||
-				r.URL.Path == "/metrics" || r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
-				handler.ServeHTTP(w, r)
-				return
-			}
-			uiHandler.ServeHTTP(w, r)
-		})
-
-		// 1. Recovery from panics
-		// 2. Security Headers (Recommended preset)
-		// 3. Max Connections limit
-		finalInternal := middleware.Chain(
-			middleware.Recovery(),
-			middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
-			middleware.MaxConnections(500),
-		)(internalHandler)
-
 		gc := deps.GlobalReg.Get(r.Context())
 		// Management entrypoint ALWAYS requires auth checks for API paths,
 		// even if auth is disabled globally for the gateway's proxy traffic.
@@ -110,13 +116,13 @@ func CreateBaseHandler(
 				finalInternal.ServeHTTP(w, r)
 				return
 			}
-			if deps.Auth == nil {
+			if deps.Auth == nil || authInternal == nil {
 				// No auth service available yet (e.g. first run)
 				finalInternal.ServeHTTP(w, r)
 				return
 			}
 			// Require Authorization header; do not accept auth token in URL.
-			middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal).ServeHTTP(w, r)
+			authInternal.ServeHTTP(w, r)
 			return
 		}
 

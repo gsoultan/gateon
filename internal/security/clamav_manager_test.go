@@ -2,6 +2,8 @@ package security
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,4 +45,50 @@ func TestClamAVManagerConcurrency(t *testing.T) {
 	// It might have finished if it failed fast, but usually it takes a bit.
 	// In this environment it probably fails fast.
 	_ = status
+}
+
+func TestClamAVManagerOverload(t *testing.T) {
+	mgr := NewClamAVManager(&gateonv1.ClamavConfig{})
+	// This should not crash on any OS
+	overloaded := mgr.isSystemOverloaded()
+	t.Logf("System overloaded: %v", overloaded)
+}
+
+func TestFormatExecError(t *testing.T) {
+	mgr := NewClamAVManager(&gateonv1.ClamavConfig{})
+
+	tests := []struct {
+		name     string
+		err      error
+		output   string
+		contains string
+	}{
+		{
+			name:     "Read-only filesystem",
+			err:      errors.New("exit status 100"),
+			output:   "Could not open file ... (30: Read-only file system)",
+			contains: "filesystem is read-only",
+		},
+		{
+			name:     "Permission denied",
+			err:      errors.New("exit status 1"),
+			output:   "E: Could not open lock file /var/lib/dpkg/lock-frontend - open (13: Permission denied)\nE: Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), are you root?",
+			contains: "insufficient privileges",
+		},
+		{
+			name:     "General error",
+			err:      errors.New("exit status 1"),
+			output:   "some other error",
+			contains: "failed: exit status 1 (output: some other error)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mgr.formatExecError("test", tt.err, []byte(tt.output))
+			if !strings.Contains(got.Error(), tt.contains) {
+				t.Errorf("expected error containing %q, got %q", tt.contains, got.Error())
+			}
+		})
+	}
 }

@@ -15,6 +15,7 @@ const (
 	RouteNameContextKey    ContextKey = "route_name"
 	IsManagementContextKey ContextKey = "is_management"
 	DebugInfoContextKey    ContextKey = "debug_info"
+	FingerprintContextKey  ContextKey = "fingerprint"
 )
 
 type DebugInfo struct {

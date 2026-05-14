@@ -192,7 +192,7 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			}
 
 			// Adaptive Rate Limiting based on Reputation
-			fp := telemetry.GenerateFingerprint(r)
+			fp := telemetry.GetDetailedFingerprint(r)
 			reputation := telemetry.GetReputation(fp.Hash)
 
 			limiter := rl.getLimiter(key, reputation)
@@ -288,7 +288,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			}
 
 			// Adaptive logic for Redis
-			fp := telemetry.GenerateFingerprint(r)
+			fp := telemetry.GetDetailedFingerprint(r)
 			reputation := telemetry.GetReputation(fp.Hash)
 			adjLimit := int(float64(rl.rate+rl.burst) * (reputation / 100.0))
 			if adjLimit < 1 {
@@ -350,10 +350,10 @@ func PerTenant(r *http.Request) string {
 
 // PerJA4H returns the JA4H fingerprint of the request.
 func PerJA4H(r *http.Request) string {
-	return telemetry.GenerateJA4H(r)
+	return telemetry.GetCachedJA4H(r)
 }
 
 // PerFingerprint returns the detailed client fingerprint hash.
 func PerFingerprint(r *http.Request) string {
-	return telemetry.GenerateFingerprint(r).Hash
+	return telemetry.GetDetailedFingerprint(r).Hash
 }

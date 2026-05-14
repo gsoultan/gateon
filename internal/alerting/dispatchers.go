@@ -21,7 +21,7 @@ func NewSlackDispatcher(webhookURL, channel string) *SlackDispatcher {
 }
 
 func (d *SlackDispatcher) Send(ctx context.Context, threat telemetry.SecurityThreat) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"text": fmt.Sprintf("🚨 *Gateon Security Alert*\n*Type:* %s\n*Source IP:* %s\n*Score:* %.2f\n*Details:* %s\n*Route:* %s\n*URI:* %s",
 			threat.Type, threat.SourceIP, threat.Score, threat.Details, threat.RouteID, threat.RequestURI),
 	}
@@ -40,13 +40,13 @@ func NewDiscordDispatcher(webhookURL string) *DiscordDispatcher {
 }
 
 func (d *DiscordDispatcher) Send(ctx context.Context, threat telemetry.SecurityThreat) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"content": "🚨 **Gateon Security Alert**",
-		"embeds": []map[string]interface{}{
+		"embeds": []map[string]any{
 			{
 				"title": fmt.Sprintf("Threat Detected: %s", threat.Type),
 				"color": 15158332, // Red
-				"fields": []map[string]interface{}{
+				"fields": []map[string]any{
 					{"name": "Source IP", "value": threat.SourceIP, "inline": true},
 					{"name": "Score", "value": fmt.Sprintf("%.2f", threat.Score), "inline": true},
 					{"name": "Route", "value": threat.RouteID, "inline": true},
@@ -92,7 +92,7 @@ func (d *TelegramDispatcher) Send(ctx context.Context, threat telemetry.Security
 		"<b>URI:</b> %s",
 		threat.Type, threat.SourceIP, threat.Score, threat.Details, threat.RouteID, threat.RequestURI)
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"chat_id":    d.chatID,
 		"text":       text,
 		"parse_mode": "HTML",
@@ -101,7 +101,7 @@ func (d *TelegramDispatcher) Send(ctx context.Context, threat telemetry.Security
 	return sendWebhook(ctx, url, payload)
 }
 
-func sendWebhook(ctx context.Context, url string, payload interface{}) error {
+func sendWebhook(ctx context.Context, url string, payload any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err

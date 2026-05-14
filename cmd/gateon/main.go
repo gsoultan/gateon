@@ -101,7 +101,7 @@ func main() {
 	if gc := globalReg.Get(ctx); gc != nil {
 		if gc.Ebpf != nil && gc.Ebpf.Enabled {
 			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
-			go ebpfManager.Start(context.Background())
+			go ebpfManager.Start(ctx)
 		}
 
 		alerting.Init(gc.Alerting, ebpfManager)
@@ -117,7 +117,7 @@ func main() {
 		}
 		if gc.Ha != nil && gc.Ha.Enabled {
 			haManager := ha.NewHAManager(gc.Ha)
-			go haManager.Start(context.Background())
+			go haManager.Start(ctx)
 			if err := telemetry.InitGossip(gc.Ha); err != nil {
 				logger.L.LogError("failed to init gossip reputation sync", "error", err)
 			}
@@ -127,7 +127,7 @@ func main() {
 			if err != nil {
 				logger.L.LogError("failed to init anomaly detector", "error", err)
 			} else {
-				go ad.Start(context.Background())
+				go ad.Start(ctx)
 			}
 		}
 		wafUpdater = middleware.NewWAFUpdater(globalReg, ".")
