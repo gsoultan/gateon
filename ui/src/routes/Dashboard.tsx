@@ -470,7 +470,7 @@ export default function Dashboard() {
     },
     {
       label: "Mitigated Threats",
-      value: formatCompact(metricsSnap?.middleware.mitigated_threats?.reduce((acc, val) => acc + val.value, 0) || 0),
+      value: formatCompact(metricsSnap?.middleware?.mitigated_threats?.reduce((acc, val) => acc + val.value, 0) || 0),
       icon: IconShieldExclamation,
       color: "red" as const,
       description: "Security threats blocked today",
@@ -484,7 +484,7 @@ export default function Dashboard() {
     },
     {
       label: "eBPF Drops",
-      value: formatCompact(metricsSnap?.middleware.ebpf_dropped_packets?.reduce((acc, val) => acc + val.value, 0) || 0),
+      value: formatCompact(metricsSnap?.middleware?.ebpf_dropped_packets?.reduce((acc, val) => acc + val.value, 0) || 0),
       icon: IconShieldOff,
       color: "violet" as const,
       description: "Packets dropped by kernel",
@@ -595,7 +595,6 @@ export default function Dashboard() {
                 <BarChart
                   h={180}
                   minWidth={0}
-                  minHeight={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -649,7 +648,6 @@ export default function Dashboard() {
                 <BarChart
                   h={180}
                   minWidth={0}
-                  minHeight={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -849,7 +847,6 @@ export default function Dashboard() {
           <BarChart
             h={240}
             minWidth={0}
-            minHeight={0}
             data={hourlyTrafficData}
             dataKey="hour"
             withLegend={false}
@@ -899,7 +896,6 @@ export default function Dashboard() {
             <LineChart
               h={260}
               minWidth={0}
-              minHeight={0}
               data={hourlyBandwidthData}
               dataKey="hour"
               withLegend
