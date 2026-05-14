@@ -13,6 +13,7 @@ import {
   Timeline,
   Divider,
   Code,
+  Box,
 } from '@mantine/core';
 import {
   IconBrain,
@@ -23,7 +24,7 @@ import {
   IconCheck,
   IconRefresh,
 } from '@tabler/icons-react';
-import { apiFetch } from '../hooks/useGateon';
+import { apiFetch } from '../../hooks/useGateon';
 
 interface AIInsight {
   title: string;
@@ -39,7 +40,7 @@ interface AIAnalysisResponse {
   insights: AIInsight[];
 }
 
-const AIInsightsPage: React.FC = () => {
+export function AIAdvisoryTab() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<AIAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,14 +92,14 @@ const AIInsightsPage: React.FC = () => {
   return (
     <Stack gap="lg">
       <Group justify="space-between">
-        <div>
-          <Title order={2}>AI Insights & Optimization</Title>
+        <Stack gap={0}>
+          <Title order={4}>AI Security Advisory</Title>
           <Text c="dimmed" size="sm">
             {data?.summary?.includes("Smart Engine")
               ? "Deterministic rule-based analysis of your gateway configuration (Local Mode)."
-              : "LLM-powered analysis of your gateway configuration for security, performance, and best practices."}
+              : "LLM-powered analysis of your gateway configuration for security hardening."}
           </Text>
-        </div>
+        </Stack>
         <Button
           leftSection={<IconRefresh size={16} />}
           variant="light"
@@ -110,12 +111,12 @@ const AIInsightsPage: React.FC = () => {
       </Group>
 
       {loading && !data && (
-        <Group justify="center" py="xl">
+        <Box py="xl">
           <Stack align="center">
             <Loader size="lg" />
-            <Text>Gateon AI is analyzing your configuration...</Text>
+            <Text size="sm">Gateon AI is analyzing your configuration...</Text>
           </Stack>
-        </Group>
+        </Box>
       )}
 
       {error && (
@@ -132,7 +133,7 @@ const AIInsightsPage: React.FC = () => {
                 <IconBrain size={24} />
               </ThemeIcon>
               <div>
-                <Text fw={700} size="lg">Executive Summary</Text>
+                <Text fw={700} size="md">Executive Summary</Text>
                 <Text size="sm" mt={4}>
                   {data.summary}
                 </Text>
@@ -140,7 +141,7 @@ const AIInsightsPage: React.FC = () => {
             </Group>
           </Card>
 
-          <Title order={4} mt="md">Recommendations</Title>
+          <Title order={5} mt="md">Proactive Recommendations</Title>
 
           <Timeline active={-1} bulletSize={32} lineWidth={2}>
             {data.insights?.map((insight, index) => (
@@ -149,12 +150,9 @@ const AIInsightsPage: React.FC = () => {
                 bullet={getCategoryIcon(insight.category)}
                 title={
                   <Group gap="xs">
-                    <Text fw={600}>{insight.title}</Text>
+                    <Text fw={600} size="sm">{insight.title}</Text>
                     <Badge color={getSeverityColor(insight.severity)} variant="filled" size="xs">
                       {insight.severity}
-                    </Badge>
-                    <Badge variant="outline" size="xs">
-                      {insight.category}
                     </Badge>
                   </Group>
                 }
@@ -193,6 +191,4 @@ const AIInsightsPage: React.FC = () => {
       )}
     </Stack>
   );
-};
-
-export default AIInsightsPage;
+}

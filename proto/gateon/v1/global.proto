@@ -258,6 +258,8 @@ message ClamavConfig {
   string full_scan_schedule = 4; // Cron expression
   bool low_resource_mode = 5;
   string clamav_addr = 6;
+  string database_update_schedule = 7; // Cron expression
+  string app_update_schedule = 8;      // Cron expression
 }
 
 message BotManagementConfig {

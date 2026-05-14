@@ -17,7 +17,6 @@ import { useAuthStore } from "./store/useAuthStore";
 import { apiFetch, restoreSessionFromCookie } from "./hooks/useGateon";
 
 const Dashboard = lazy(() => import("./routes/Dashboard"));
-const AIInsightsPage = lazy(() => import("./routes/AIInsightsPage"));
 const RoutesPage = lazy(() => import("./routes/RoutesPage"));
 const ServicesPage = lazy(() => import("./routes/ServicesPage"));
 const LogsPage = lazy(() => import("./routes/LogsPage"));
@@ -34,13 +33,11 @@ const DocsPage = lazy(() => import("./routes/DocsPage"));
 const LoginPage = lazy(() => import("./routes/LoginPage"));
 const SetupPage = lazy(() => import("./routes/SetupPage"));
 const TopologyPage = lazy(() => import("./routes/TopologyPage"));
-const SecurityPage = lazy(() => import("./routes/SecurityPage"));
 const SecurityCommandCenter = lazy(() => import("./routes/SecurityCommandCenter"));
 const TracesPage = lazy(() => import("./routes/TracesPage"));
 const MetricsPage = lazy(() => import("./routes/MetricsPage"));
 const DiagnosticsPage = lazy(() => import("./routes/DiagnosticsPage"));
 const AuditLogsPage = lazy(() => import("./routes/AuditLogsPage"));
-const MitigatedAttacksPage = lazy(() => import("./routes/MitigatedAttacksPage"));
 
 const rootRoute = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -218,12 +215,6 @@ const topologyRoute = createRoute({
   component: () => <TopologyPage />,
 });
 
-const securityRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/security",
-  component: () => <SecurityPage />,
-});
-
 const securityCommandCenterRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/security-center",
@@ -254,18 +245,11 @@ const auditLogsRoute = createRoute({
   component: () => <AuditLogsPage />,
 });
 
-const mitigatedAttacksRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/mitigated-attacks",
-  component: () => <MitigatedAttacksPage />,
-});
-
 const routeTree = rootRoute.addChildren([
   loginRoute,
   setupRoute,
   authenticatedRoute.addChildren([
     indexRoute,
-    aiInsightsRoute,
     routesRoute,
     servicesRoute,
     logsRoute,
@@ -280,13 +264,11 @@ const routeTree = rootRoute.addChildren([
     settingsRoute,
     usersRoute,
     topologyRoute,
-    securityRoute,
     securityCommandCenterRoute,
     tracesRoute,
     metricsRoute,
     diagnosticsRoute,
     auditLogsRoute,
-    mitigatedAttacksRoute,
   ]),
 ]);
 
