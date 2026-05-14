@@ -94,7 +94,7 @@ func TestSecurityTelemetryUpdates(t *testing.T) {
 	}
 
 	// Verify snapshot reflects these values
-	snap, err := CollectMetricsSnapshot(10, 0)
+	snap, err := CollectMetricsSnapshot(t.Context(), 10, 0)
 	if err != nil {
 		t.Fatalf("CollectMetricsSnapshot error: %v", err)
 	}

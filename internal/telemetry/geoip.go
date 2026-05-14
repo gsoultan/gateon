@@ -3,6 +3,7 @@ package telemetry
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,7 +70,7 @@ func InitGeoIP(dbPath string) error {
 }
 
 // ResolveIPInfo resolves an IP address to country code, city name, latitude and longitude.
-func ResolveIPInfo(ipStr string) (country, city string, lat, lon float64) {
+func ResolveIPInfo(ctx context.Context, ipStr string) (country, city string, lat, lon float64) {
 	geoMu.RLock()
 	dbLoaded := geoDB != nil
 	if dbLoaded {
@@ -105,7 +106,7 @@ func ResolveIPInfo(ipStr string) (country, city string, lat, lon float64) {
 	// Fallback to public API if DB is missing or IP not found in DB
 	// Only for non-local IPs
 	if isPublicIP(ipStr) {
-		return resolveIPPublic(ipStr)
+		return resolveIPPublic(ctx, ipStr)
 	}
 
 	return "XX", "", 0, 0
@@ -122,7 +123,7 @@ func isPublicIP(ipStr string) bool {
 	return true
 }
 
-func resolveIPPublic(ipStr string) (country, city string, lat, lon float64) {
+func resolveIPPublic(ctx context.Context, ipStr string) (country, city string, lat, lon float64) {
 	cacheMu.RLock()
 	if info, ok := ipCache[ipStr]; ok {
 		cacheMu.RUnlock()
@@ -140,7 +141,7 @@ func resolveIPPublic(ipStr string) (country, city string, lat, lon float64) {
 	cacheMu.Unlock()
 
 	url := fmt.Sprintf("http://ip-api.com/json/%s", ipStr)
-	resp, err := httpGet(url, 2*time.Second) // Fixed call
+	resp, err := httpGet(ctx, url, 2*time.Second)
 	if err != nil {
 		return "XX", "", 0, 0
 	}
@@ -168,10 +169,14 @@ func resolveIPPublic(ipStr string) (country, city string, lat, lon float64) {
 	return info.CountryCode, info.City, info.Lat, info.Lon
 }
 
-// Wrapper for http.Get with timeout
-func httpGet(url string, timeout time.Duration) (*http.Response, error) {
+// Wrapper for http.Get with timeout and context
+func httpGet(ctx context.Context, url string, timeout time.Duration) (*http.Response, error) {
 	client := &http.Client{Timeout: timeout}
-	return client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
 }
 
 // ResolveCountry resolves an IP address to an ISO 3166-1 alpha-2 country code.

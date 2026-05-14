@@ -32,7 +32,7 @@ func TestCollectMetricsSnapshot(t *testing.T) {
 	MiddlewareCacheMissesTotal.WithLabelValues("test-route").Add(10)
 	MiddlewareRateLimitRejectedTotal.WithLabelValues("test-route", "ip").Add(3)
 
-	snap, err := CollectMetricsSnapshot(10, 0)
+	snap, err := CollectMetricsSnapshot(t.Context(), 10, 0)
 	if err != nil {
 		t.Fatalf("CollectMetricsSnapshot(10, 0) error: %v", err)
 	}

@@ -192,7 +192,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
 
 		var cpuUsage, memUsage float64
-		if snap, err := telemetry.CollectMetricsSnapshot(50, 0); err == nil {
+		if snap, err := telemetry.CollectMetricsSnapshot(r.Context(), 50, 0); err == nil {
 			cpuUsage = snap.System.CPUUsage
 			memUsage = snap.System.MemoryUsage
 		}
@@ -237,7 +237,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
 
 				var cpuUsage, memUsage float64
-				if snap, err := telemetry.CollectMetricsSnapshot(50, 0); err == nil {
+				if snap, err := telemetry.CollectMetricsSnapshot(r.Context(), 50, 0); err == nil {
 					cpuUsage = snap.System.CPUUsage
 					memUsage = snap.System.MemoryUsage
 				}

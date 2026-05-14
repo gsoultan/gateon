@@ -105,7 +105,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 				Recommendation: recommendation,
 				Mitigated:      mitigated,
 			}
-			populateAnomalyGeo(anomaly, ip)
+			populateAnomalyGeo(ctx, anomaly, ip)
 			anomalies = append(anomalies, anomaly)
 
 			// Persist to security_threats table

@@ -60,7 +60,7 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 				RequestUri:     tr.Path,
 				Recommendation: recommendation,
 			}
-			populateAnomalyGeo(anomaly, tr.SourceIP)
+			populateAnomalyGeo(ctx, anomaly, tr.SourceIP)
 			anomalies = append(anomalies, anomaly)
 		}
 	}
