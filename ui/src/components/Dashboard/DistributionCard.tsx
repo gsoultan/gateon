@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Paper, Text, Group, Box, Badge } from "@mantine/core";
 import { BarChart } from "@mantine/charts";
 
@@ -14,7 +15,7 @@ interface DistributionCardProps {
   color?: string;
 }
 
-export function DistributionCard({
+export const DistributionCard = memo(function DistributionCard({
   title,
   subtitle,
   data,
@@ -54,7 +55,14 @@ export function DistributionCard({
           />
         </Box>
       ) : (
-        <Box h={180} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Box
+          h={180}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <Text size="sm" c="dimmed">
             No data available.
           </Text>
@@ -62,4 +70,4 @@ export function DistributionCard({
       )}
     </Paper>
   );
-}
+});

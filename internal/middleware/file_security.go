@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dutchcoders/go-clamd"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -53,10 +54,28 @@ func FileSecurity(cfg FileSecurityConfig) Middleware {
 					continue
 				}
 
+				// 0. Size Validation
+				var partReader io.Reader = p
+				if cfg.MaxFileSize > 0 {
+					partReader = io.LimitReader(p, cfg.MaxFileSize+1)
+				}
+
 				// 1. Magic Number / MIME Validation
 				// Read first 261 bytes for filetype detection
 				head := make([]byte, 261)
-				n, _ := io.ReadFull(p, head)
+				n, err := io.ReadFull(partReader, head)
+				// If we got EOF and n < 261, it's fine, it's just a small file.
+				// If we got err and it's not EOF, it's a real error.
+				if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+					logger.L.LogError("Failed to read part head", "error", err)
+					continue
+				}
+
+				if int64(n) > cfg.MaxFileSize && cfg.MaxFileSize > 0 {
+					http.Error(w, "File too large", http.StatusRequestEntityTooLarge)
+					return
+				}
+
 				if n > 0 {
 					kind, _ := filetype.Match(head[:n])
 					mime := kind.MIME.Value
@@ -92,24 +111,72 @@ func FileSecurity(cfg FileSecurityConfig) Middleware {
 				// 2. ClamAV Scanning
 				if cfg.EnableClamAV && cfg.ClamAVAddr != "" {
 					// We need to combine the head and the rest of the stream
-					combined := io.MultiReader(strings.NewReader(string(head[:n])), p)
+					combined := io.MultiReader(strings.NewReader(string(head[:n])), partReader)
 
 					c := clamd.NewClamd(cfg.ClamAVAddr)
-					response, err := c.ScanStream(combined, make(chan bool))
+					abort := make(chan bool, 1)
+					response, err := c.ScanStream(combined, abort)
 					if err != nil {
-						logger.L.LogError("ClamAV scan failed", "error", err)
-						// Fail open or closed? Usually closed for security.
+						logger.L.LogError("ClamAV scan connection failed", "error", err)
+						http.Error(w, "Security scan unavailable", http.StatusInternalServerError)
+						return
+					}
+
+					var scanRes *clamd.ScanResult
+					var scanErr error
+
+					done := make(chan struct{})
+					go func() {
+						defer close(done)
+						for res := range response {
+							if res.Status == clamd.RES_FOUND {
+								scanRes = res
+								abort <- true // Found one, can stop scanning this file
+								return
+							}
+						}
+					}()
+
+					select {
+					case <-done:
+						// Scan completed
+					case <-time.After(2 * time.Minute):
+						select {
+						case abort <- true:
+						default:
+						}
+						scanErr = fmt.Errorf("scan timed out after 2m")
+					case <-r.Context().Done():
+						select {
+						case abort <- true:
+						default:
+						}
+						scanErr = r.Context().Err()
+					}
+
+					if scanErr != nil {
+						logger.L.LogError("ClamAV scan failed", "error", scanErr)
 						http.Error(w, "Security scan failed", http.StatusInternalServerError)
 						return
 					}
 
-					for s := range response {
-						if s.Status == clamd.RES_FOUND {
-							logger.L.LogWarn("Malware detected in upload",
-								"filename", p.FileName(),
-								"virus", s.Description,
-								"client_ip", r.RemoteAddr)
-							http.Error(w, fmt.Sprintf("Malware detected: %s", s.Description), http.StatusForbidden)
+					if scanRes != nil && scanRes.Status == clamd.RES_FOUND {
+						logger.L.LogWarn("Malware detected in upload",
+							"filename", p.FileName(),
+							"virus", scanRes.Description,
+							"client_ip", r.RemoteAddr)
+						http.Error(w, fmt.Sprintf("Malware detected: %s", scanRes.Description), http.StatusForbidden)
+						return
+					}
+
+					// If we were using a LimitedReader, we must check if there is more data
+					// to ensure the file wasn't just truncated and passed as clean.
+					if cfg.MaxFileSize > 0 {
+						// Try to read one more byte
+						tmp := make([]byte, 1)
+						nn, _ := partReader.Read(tmp)
+						if nn > 0 {
+							http.Error(w, "File too large", http.StatusRequestEntityTooLarge)
 							return
 						}
 					}

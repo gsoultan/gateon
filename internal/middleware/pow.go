@@ -28,7 +28,7 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 				return
 			}
 
-			fingerprint := telemetry.GetFingerprint(r)
+			fingerprint := telemetry.GetDetailedFingerprint(r).Hash
 			score := telemetry.GetReputationScore(fingerprint)
 
 			// If reputation is below threshold, require PoW.
@@ -60,7 +60,7 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 
 func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	salt := strconv.FormatInt(time.Now().UnixNano(), 36)
-	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), telemetry.GetFingerprint(r), salt)
+	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), telemetry.GetDetailedFingerprint(r).Hash, salt)
 
 	w.Header().Set("X-Gateon-Pow-ID", challengeID)
 	w.Header().Set(PowHeaderChallenge, salt)

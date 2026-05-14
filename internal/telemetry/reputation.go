@@ -7,13 +7,14 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 )
 
-// GetFingerprint returns a unique identifier for the client (JA3/JA4 or source IP).
-func GetFingerprint(r *http.Request) string {
+// GetIPFingerprint returns a unique identifier for the client (source IP).
+func GetIPFingerprint(r *http.Request) string {
 	// Simple IP extraction
 	ip := r.RemoteAddr
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
@@ -45,7 +46,8 @@ type reputationShard struct {
 }
 
 var (
-	repShards []*reputationShard
+	repShards         []*reputationShard
+	lastMetricsUpdate atomic.Int64 // Unix timestamp in seconds
 )
 
 func init() {
@@ -126,10 +128,11 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	}
 
 	r.ViolationCount++
+	// 10MB limit for reputation history to avoid unbounded memory growth.
 	if reason != "" {
 		r.History = append(r.History, reason)
-		if len(r.History) > 10 {
-			r.History = r.History[len(r.History)-10:]
+		if len(r.History) > 5 {
+			r.History = r.History[len(r.History)-5:]
 		}
 	}
 	r.LastEvent = time.Now()
@@ -196,22 +199,27 @@ type ReputationRecord struct {
 
 // UpdateReputationMetrics updates Prometheus gauges for reputations.
 func UpdateReputationMetrics() {
-	var suspiciousCount float64
+	// Rate limit metrics updates to once every 10 seconds to save CPU.
+	now := time.Now().Unix()
+	last := lastMetricsUpdate.Load()
+	if now-last < 10 {
+		return
+	}
+	if !lastMetricsUpdate.CompareAndSwap(last, now) {
+		return
+	}
+
 	for _, shard := range repShards {
 		shard.mu.RLock()
 		keys := shard.cache.Keys()
 		for _, k := range keys {
 			if val, ok := shard.cache.Peek(k); ok {
 				r := val.(*Reputation)
-				if r.Score < 50 {
-					suspiciousCount++
-				}
 				ActiveAnomalyScore.Observe(r.Score)
 			}
 		}
 		shard.mu.RUnlock()
 	}
-	// We don't have a global count of "suspicious" gauge here, but we could update one.
 }
 
 // GetAllReputations returns all reputations in the cache.

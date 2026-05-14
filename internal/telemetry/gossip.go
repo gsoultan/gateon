@@ -57,6 +57,10 @@ func (d *ReputationDelegate) MergeRemoteState(buf []byte, join bool) {
 func (d *ReputationDelegate) Enqueue(msg []byte) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	// Limit queue size to avoid memory exhaustion under heavy attack.
+	if len(d.messages) > 1000 {
+		d.messages = d.messages[1:]
+	}
 	d.messages = append(d.messages, msg)
 }
 

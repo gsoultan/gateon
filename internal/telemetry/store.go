@@ -98,7 +98,7 @@ type TraceRecord struct {
 	OperationName   string    `json:"operation_name"`
 	ServiceName     string    `json:"service_name"`
 	DurationMs      float64   `json:"duration_ms"`
-	Timestamp       time.Time `json:"timestamp"`
+	Timestamp       time.Time `json:"timestamp,omitzero"`
 	Status          string    `json:"status"`
 	Path            string    `json:"path"`
 	SourceIP        string    `json:"source_ip"`
@@ -123,7 +123,7 @@ type SecurityThreat struct {
 	Fingerprint string    `json:"fingerprint"`
 	Score       float64   `json:"score"`
 	Details     string    `json:"details"`
-	Time        time.Time `json:"timestamp"`
+	Time        time.Time `json:"timestamp,omitzero"`
 	JA3         string    `json:"ja3"`
 	JA4         string    `json:"ja4"`
 	RouteID     string    `json:"route_id"`

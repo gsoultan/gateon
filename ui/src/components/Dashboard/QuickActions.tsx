@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Paper, Text, SimpleGrid, UnstyledButton, Group, ThemeIcon, rem, Title } from "@mantine/core";
 import { 
   IconRoute, 
@@ -18,13 +19,24 @@ const actions = [
   { title: "System Settings", icon: IconSettings, color: "gray", to: "/settings" },
 ];
 
-export function QuickActions() {
+export const QuickActions = memo(function QuickActions() {
   const items = actions.map((item) => (
-    <UnstyledButton key={item.title} className={classes.item} component={Link} to={item.to}>
+    <UnstyledButton
+      key={item.title}
+      className={classes.item}
+      component={Link}
+      to={item.to}
+    >
       <ThemeIcon color={item.color} variant="light" size={42} radius="md">
         <item.icon style={{ width: rem(22), height: rem(22) }} stroke={1.5} />
       </ThemeIcon>
-      <Text size="xs" mt={8} fw={700} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+      <Text
+        size="xs"
+        mt={8}
+        fw={700}
+        c="dimmed"
+        style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
+      >
         {item.title}
       </Text>
     </UnstyledButton>
@@ -34,8 +46,12 @@ export function QuickActions() {
     <Paper withBorder radius="md" p="lg" shadow="xs">
       <Group justify="space-between" mb="lg">
         <div>
-          <Title order={5} fw={800} style={{ letterSpacing: -0.2 }}>Quick Actions</Title>
-          <Text size="xs" c="dimmed">Common management tasks</Text>
+          <Title order={5} fw={800} style={{ letterSpacing: -0.2 }}>
+            Quick Actions
+          </Title>
+          <Text size="xs" c="dimmed">
+            Common management tasks
+          </Text>
         </div>
       </Group>
       <SimpleGrid cols={3} spacing="md">
@@ -43,4 +59,4 @@ export function QuickActions() {
       </SimpleGrid>
     </Paper>
   );
-}
+});

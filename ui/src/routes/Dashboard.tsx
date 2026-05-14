@@ -223,7 +223,7 @@ export default function Dashboard() {
       routerBytes: Object.fromEntries(routerBytes),
       serviceBytes: Object.fromEntries(serviceBytes),
     };
-    setBandwidthDeltaHistory((prev) => [...prev, sample].slice(-100000));
+    setBandwidthDeltaHistory((prev) => [...prev, sample].slice(-5000));
   }, [pathStats, routesResponse?.routes, servicesResponse?.services]);
 
   const combinedTrafficHistory = useMemo(() => {
@@ -297,19 +297,30 @@ export default function Dashboard() {
   const groupedTrafficLoading = pathStatsLoading || routesLoading || servicesLoading;
   const groupedBandwidthLoading = groupedTrafficLoading;
 
-  const trafficByServiceData = buildTrafficByServiceData(
-    pathStats ?? [],
-    routesResponse?.routes ?? [],
-    servicesResponse?.services ?? [],
+  const trafficByServiceData = useMemo(
+    () =>
+      buildTrafficByServiceData(
+        pathStats ?? [],
+        routesResponse?.routes ?? [],
+        servicesResponse?.services ?? [],
+      ),
+    [pathStats, routesResponse?.routes, servicesResponse?.services],
   );
-  const bandwidthByServiceData = buildBandwidthByServiceData(
-    pathStats ?? [],
-    routesResponse?.routes ?? [],
-    servicesResponse?.services ?? [],
+  const bandwidthByServiceData = useMemo(
+    () =>
+      buildBandwidthByServiceData(
+        pathStats ?? [],
+        routesResponse?.routes ?? [],
+        servicesResponse?.services ?? [],
+      ),
+    [pathStats, routesResponse?.routes, servicesResponse?.services],
   );
-  const bandwidthByRouterData = buildBandwidthByRouterData(pathStats ?? [], routesResponse?.routes ?? []);
-  const trafficByPortData = buildTrafficByPortData(pathStats ?? []);
-  const trafficByPathData = buildTrafficByPathData(pathStats ?? []);
+  const bandwidthByRouterData = useMemo(
+    () => buildBandwidthByRouterData(pathStats ?? [], routesResponse?.routes ?? []),
+    [pathStats, routesResponse?.routes],
+  );
+  const trafficByPortData = useMemo(() => buildTrafficByPortData(pathStats ?? []), [pathStats]);
+  const trafficByPathData = useMemo(() => buildTrafficByPathData(pathStats ?? []), [pathStats]);
 
   const ipDistributionData = useMemo(() => {
     if (!metricsSnap?.ip_metrics) return [];
@@ -351,53 +362,64 @@ export default function Dashboard() {
       .map((m) => ({ group: m.domain, requests: m.bytes_in + m.bytes_out }));
   }, [metricsSnap]);
 
-  const groupedTrafficCharts = [
-    {
-      title: "By Service",
-      description: "Requests mapped to service routes",
-      color: "teal.6",
-      data: trafficByServiceData,
-    },
-    {
-      title: "By Port",
-      description: "Requests grouped by host port",
-      color: "orange.6",
-      data: trafficByPortData,
-    },
-    {
-      title: "By Path",
-      description: "Most requested route paths",
-      color: "grape.6",
-      data: trafficByPathData,
-    },
-    {
-      title: "By Domain",
-      description: "Requests by target domain",
-      color: "cyan.6",
-      data: domainDistributionData,
-    },
-  ];
+  const groupedTrafficCharts = useMemo(
+    () => [
+      {
+        title: "By Service",
+        description: "Requests mapped to service routes",
+        color: "teal.6",
+        data: trafficByServiceData,
+      },
+      {
+        title: "By Port",
+        description: "Requests grouped by host port",
+        color: "orange.6",
+        data: trafficByPortData,
+      },
+      {
+        title: "By Path",
+        description: "Most requested route paths",
+        color: "grape.6",
+        data: trafficByPathData,
+      },
+      {
+        title: "By Domain",
+        description: "Requests by target domain",
+        color: "cyan.6",
+        data: domainDistributionData,
+      },
+    ],
+    [
+      trafficByServiceData,
+      trafficByPortData,
+      trafficByPathData,
+      domainDistributionData,
+    ],
+  );
 
-  const groupedBandwidthCharts = [
-    {
-      title: "By Service",
-      description: "Bandwidth mapped to service routes",
-      color: "teal.6",
-      data: bandwidthByServiceData,
-    },
-    {
-      title: "By Router",
-      description: "Bandwidth mapped to router rules",
-      color: "orange.6",
-      data: bandwidthByRouterData,
-    },
-    {
-      title: "By Domain",
-      description: "Bandwidth by target domain",
-      color: "cyan.6",
-      data: domainBandwidthData,
-    },
-  ];
+  const groupedBandwidthCharts = useMemo(
+    () => [
+      {
+        title: "By Service",
+        description: "Bandwidth mapped to service routes",
+        color: "teal.6",
+        data: bandwidthByServiceData,
+      },
+      {
+        title: "By Router",
+        description: "Bandwidth mapped to router rules",
+        color: "orange.6",
+        data: bandwidthByRouterData,
+      },
+      {
+        title: "By Domain",
+        description: "Bandwidth by target domain",
+        color: "cyan.6",
+        data: domainBandwidthData,
+      },
+    ],
+    [bandwidthByServiceData, bandwidthByRouterData, domainBandwidthData],
+  );
 
   const ipBandwidthData = useMemo(() => {
     if (!metricsSnap?.ip_metrics) return [];

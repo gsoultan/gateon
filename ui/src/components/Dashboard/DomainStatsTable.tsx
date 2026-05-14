@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Table, Text, Paper, Box, Group, Badge, Title } from "@mantine/core";
 import { formatBytes } from "../../utils/format";
 
@@ -12,7 +13,9 @@ interface DomainStatsTableProps {
   metrics: HourlyDomainMetric[];
 }
 
-export function DomainStatsTable({ metrics }: DomainStatsTableProps) {
+export const DomainStatsTable = memo(function DomainStatsTable({
+  metrics,
+}: DomainStatsTableProps) {
   if (!metrics || metrics.length === 0) {
     return (
       <Paper p="md" radius="md" withBorder>
@@ -36,10 +39,22 @@ export function DomainStatsTable({ metrics }: DomainStatsTableProps) {
         </Badge>
       </Table.Td>
       <Table.Td>
-        <Text size="sm" fw={500}>{formatBytes(m.bytes_total)}</Text>
+        <Text size="sm" fw={500}>
+          {formatBytes(m.bytes_total)}
+        </Text>
       </Table.Td>
       <Table.Td>
-        <Text size="sm" fw={700} c={m.avg_latency_seconds > 1 ? "red" : m.avg_latency_seconds > 0.5 ? "orange" : "teal"}>
+        <Text
+          size="sm"
+          fw={700}
+          c={
+            m.avg_latency_seconds > 1
+              ? "red"
+              : m.avg_latency_seconds > 0.5
+                ? "orange"
+                : "teal"
+          }
+        >
           {m.avg_latency_seconds.toFixed(3)}s
         </Text>
       </Table.Td>
@@ -63,10 +78,42 @@ export function DomainStatsTable({ metrics }: DomainStatsTableProps) {
         <Table verticalSpacing="md" horizontalSpacing="md">
           <Table.Thead>
             <Table.Tr>
-              <Table.Th style={{ textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>Domain</Table.Th>
-              <Table.Th style={{ textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>Requests</Table.Th>
-              <Table.Th style={{ textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>Bandwidth</Table.Th>
-              <Table.Th style={{ textTransform: 'uppercase', fontSize: '10px', letterSpacing: '1px' }}>Avg Latency</Table.Th>
+              <Table.Th
+                style={{
+                  textTransform: "uppercase",
+                  fontSize: "10px",
+                  letterSpacing: "1px",
+                }}
+              >
+                Domain
+              </Table.Th>
+              <Table.Th
+                style={{
+                  textTransform: "uppercase",
+                  fontSize: "10px",
+                  letterSpacing: "1px",
+                }}
+              >
+                Requests
+              </Table.Th>
+              <Table.Th
+                style={{
+                  textTransform: "uppercase",
+                  fontSize: "10px",
+                  letterSpacing: "1px",
+                }}
+              >
+                Bandwidth
+              </Table.Th>
+              <Table.Th
+                style={{
+                  textTransform: "uppercase",
+                  fontSize: "10px",
+                  letterSpacing: "1px",
+                }}
+              >
+                Avg Latency
+              </Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>{rows}</Table.Tbody>
@@ -74,4 +121,4 @@ export function DomainStatsTable({ metrics }: DomainStatsTableProps) {
       </Table.ScrollContainer>
     </Paper>
   );
-}
+});

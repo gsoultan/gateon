@@ -309,7 +309,7 @@ SecAuditLog "%s"
 			}
 
 			// Adaptive WAF: Adjust anomaly threshold based on client reputation
-			fingerprint := telemetry.GetFingerprint(r)
+			fingerprint := telemetry.GetDetailedFingerprint(r).Hash
 			reputation := telemetry.GetReputationScore(fingerprint)
 			r.Header.Set("X-Gateon-Reputation", fmt.Sprintf("%.2f", reputation))
 
@@ -351,7 +351,7 @@ SecAuditLog "%s"
 			}
 
 			// Deterministic Trace Correlation
-			traceID := telemetry.GenerateJA4H(r) // Use JA4H as a deterministic trace correlation component if OTel is missing
+			traceID := telemetry.GetCachedJA4H(r) // Use JA4H as a deterministic trace correlation component if OTel is missing
 			r.Header.Set("X-Gateon-Fingerprint", traceID)
 
 			wafHandler.ServeHTTP(w, r)
