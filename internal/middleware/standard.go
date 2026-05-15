@@ -181,6 +181,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					id,
 					method+" "+origPath,
 					activeRouteID,
+					activeRouteID,
 					float64(duration.Nanoseconds())/1e6,
 					start,
 					status,
@@ -203,6 +204,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				telemetry.RecordTrace(
 					id,
 					method+" "+origPath,
+					activeRouteID,
 					activeRouteID,
 					float64(duration.Nanoseconds())/1e6,
 					start,

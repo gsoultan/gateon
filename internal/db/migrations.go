@@ -700,4 +700,46 @@ func init() {
 		}
 		return nil
 	})
+	Register(30, "add_payload_headers_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_headers TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_body TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS response_headers TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS response_body TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS user_agent TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS method TEXT;`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_headers LONGTEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_body LONGTEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS response_headers LONGTEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS response_body LONGTEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS user_agent TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS method VARCHAR(10);`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN request_headers TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN request_body TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN response_headers TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN response_body TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN user_agent TEXT;`,
+				`ALTER TABLE security_threats ADD COLUMN method TEXT;`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

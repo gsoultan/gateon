@@ -15,16 +15,22 @@ import {
 } from '@mantine/core';
 import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
 import { IconMapPin, IconActivity, IconTarget } from '@tabler/icons-react';
-import type { MetricsSnapshot, TrafficSample, LabeledCount, DonutChartDataItem } from '../../types/metrics';
+import type { MetricsSnapshot, TrafficSample, LabeledCount, DonutChartDataItem, HeavyHitter } from '../../types/metrics';
 
 interface CountryData {
   country: string;
   threats: number;
 }
 
+interface TrendData {
+  date: string;
+  threats: number;
+  fullDate: string;
+}
+
 interface AnalyticsTabProps {
   metrics: MetricsSnapshot | null;
-  trendData: TrafficSample[];
+  trendData: TrendData[];
   countryData: CountryData[];
   threatTypeData: DonutChartDataItem[];
   totalThreats: number;
@@ -48,7 +54,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
             h={300}
             minWidth={0}
             data={trendData}
-            dataKey="ts"
+            dataKey="date"
             series={[{ name: 'threats', color: 'red.6', label: 'Threats Detected' }]}
             curveType="monotone"
             withDots={false}
@@ -147,14 +153,17 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Card withBorder radius="md">
           <Title order={4} mb="md">Heaviest Hitters (Subnets)</Title>
           <Stack gap="sm">
-            {metrics?.security?.heavy_hitters?.map((h: string) => (
-              <Box key={h} p="xs" style={{ border: '1px solid var(--mantine-color-red-light)', borderRadius: 'var(--mantine-radius-sm)' }} bg="var(--mantine-color-red-light)">
+            {metrics?.security?.heavy_hitters?.map((h: HeavyHitter) => (
+              <Box key={h.network} p="xs" style={{ border: '1px solid var(--mantine-color-red-light)', borderRadius: 'var(--mantine-radius-sm)' }} bg="var(--mantine-color-red-light)">
                 <Group justify="space-between">
                   <Group gap="xs">
                     <ThemeIcon color="red" variant="subtle" size="sm">
                       <IconTarget size={14} />
                     </ThemeIcon>
-                    <Text size="sm" fw={700} ff="monospace">{h}</Text>
+                    <Stack gap={0}>
+                      <Text size="sm" fw={700} ff="monospace">{h.network}</Text>
+                      <Text size="xs" c="dimmed">{h.count} threats ({h.percentage.toFixed(1)}%)</Text>
+                    </Stack>
                   </Group>
                   <Badge color="red" variant="filled">CRITICAL</Badge>
                 </Group>

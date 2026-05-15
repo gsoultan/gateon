@@ -2,6 +2,8 @@ package api
 
 import (
 	"time"
+
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // IPStats holds aggregated metrics for a specific source IP.
@@ -24,4 +26,5 @@ type IPStats struct {
 	JA4s          map[string]int // Track JA4 fingerprints per IP
 	PathErrors    map[string]int // Track 401/403 errors per path
 	HeaderAnomaly int            // Count of requests with suspicious header combinations
+	LastTrace     *telemetry.TraceRecord
 }

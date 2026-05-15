@@ -113,7 +113,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			if mitigated {
 				actionTaken = "blocked"
 			}
-			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+			threat := telemetry.SecurityThreat{
 				Type:        primaryType,
 				SourceIP:    ip,
 				Fingerprint: fingerprint,
@@ -121,7 +121,20 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 				Details:     strings.Join(reasons, "; "),
 				Time:        stats.LastSeen,
 				ActionTaken: actionTaken,
-			})
+			}
+
+			if stats.LastTrace != nil {
+				threat.RequestHeaders = stats.LastTrace.RequestHeaders
+				threat.RequestBody = stats.LastTrace.RequestBody
+				threat.ResponseHeaders = stats.LastTrace.ResponseHeaders
+				threat.ResponseBody = stats.LastTrace.ResponseBody
+				threat.UserAgent = stats.LastTrace.UserAgent
+				threat.Method = stats.LastTrace.Method
+				threat.RouteID = stats.LastTrace.RouteID
+				threat.RequestURI = stats.LastTrace.Path
+			}
+
+			telemetry.RecordSecurityThreat(threat)
 		}
 	}
 	return anomalies
@@ -594,14 +607,28 @@ func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, thre
 			if mitigated {
 				actionTaken = "blocked"
 			}
-			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+			threat := telemetry.SecurityThreat{
 				Type:        "security_threat",
 				Fingerprint: fp,
 				Score:       threshold + 10,
 				Details:     fmt.Sprintf("Client fingerprint %s used across %d IPs", fp, len(stats.IPs)),
 				Time:        stats.LastSeen,
 				ActionTaken: actionTaken,
-			})
+			}
+
+			if stats.LastTrace != nil {
+				threat.RequestHeaders = stats.LastTrace.RequestHeaders
+				threat.RequestBody = stats.LastTrace.RequestBody
+				threat.ResponseHeaders = stats.LastTrace.ResponseHeaders
+				threat.ResponseBody = stats.LastTrace.ResponseBody
+				threat.UserAgent = stats.LastTrace.UserAgent
+				threat.Method = stats.LastTrace.Method
+				threat.SourceIP = stats.LastTrace.SourceIP
+				threat.RouteID = stats.LastTrace.RouteID
+				threat.RequestURI = stats.LastTrace.Path
+			}
+
+			telemetry.RecordSecurityThreat(threat)
 		}
 	}
 	return anomalies

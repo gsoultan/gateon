@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -47,6 +48,10 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 	// Pre-process traces for performance - single pass
 	data.IPStats = make(map[string]*IPStats)
 	data.FingerprintStats = make(map[string]*FingerprintStats)
+	routeMap := make(map[string]*gateonv1.Route)
+	for _, r := range data.Routes {
+		routeMap[r.Id] = r
+	}
 
 	// For burst detection
 	type ipTime struct {
@@ -77,6 +82,7 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		stats.TotalDuration += tr.DurationMs
 		if tr.Timestamp.After(stats.LastSeen) {
 			stats.LastSeen = tr.Timestamp
+			stats.LastTrace = &tr
 		}
 		stats.UniquePaths[tr.Path] = struct{}{}
 		if tr.UserAgent != "" {
@@ -125,6 +131,7 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 			}
 			if tr.Timestamp.After(fStats.LastSeen) {
 				fStats.LastSeen = tr.Timestamp
+				fStats.LastTrace = &tr
 			}
 			if strings.HasPrefix(tr.Status, "4") {
 				fStats.Error4xx++
@@ -132,7 +139,6 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 				fStats.Error5xx++
 			}
 		}
-
 		if strings.Contains(tr.Status, "401") {
 			stats.Error401++
 			stats.PathErrors[tr.Path]++
@@ -148,13 +154,7 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		}
 
 		// Header Consistency Check
-		if tr.UserAgent != "" && strings.Contains(strings.ToLower(tr.UserAgent), "mozilla") {
-			// Real browsers usually send Accept-Language and Accept-Encoding
-			lowHeaders := strings.ToLower(tr.RequestHeaders)
-			if !strings.Contains(lowHeaders, "accept-language") || !strings.Contains(lowHeaders, "accept-encoding") {
-				stats.HeaderAnomaly++
-			}
-		}
+		e.checkHeaderConsistency(tr, routeMap[tr.ServiceName], stats)
 	}
 
 	var allAnomalies []*gateonv1.Anomaly
@@ -162,4 +162,50 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		allAnomalies = append(allAnomalies, d.Detect(ctx, data)...)
 	}
 	return allAnomalies
+}
+
+func (e *AnomalyAnalysisEngine) checkHeaderConsistency(tr telemetry.TraceRecord, route *gateonv1.Route, stats *IPStats) {
+	if tr.RequestHeaders == "" {
+		return // Cannot check if headers were not recorded
+	}
+
+	ua := strings.ToLower(tr.UserAgent)
+	headers := strings.ToLower(tr.RequestHeaders)
+	isMozilla := strings.Contains(ua, "mozilla")
+
+	routeType := "http"
+	if route != nil {
+		routeType = strings.ToLower(route.Type)
+	}
+
+	if routeType == "grpc" {
+		// gRPC routes should have gRPC content-type
+		if !strings.Contains(headers, "application/grpc") {
+			// If it's a browser UA but no gRPC content-type on a gRPC route, it's very suspicious
+			if isMozilla {
+				stats.HeaderAnomaly++
+				return
+			}
+			// Regular gRPC clients should also have application/grpc
+			if tr.Method != "OPTIONS" && tr.Method != "GET" {
+				stats.HeaderAnomaly++
+			}
+		}
+
+		// If it's a browser UA on a gRPC route, it's generally suspicious unless it's gRPC-Web
+		if isMozilla && !strings.Contains(headers, "x-grpc-web") && !strings.Contains(headers, "grpc-timeout") {
+			stats.HeaderAnomaly++
+		}
+	} else {
+		// HTTP specific checks
+		if isMozilla {
+			// Real browsers send Accept, Accept-Language and Accept-Encoding
+			if !strings.Contains(headers, "accept-language") || !strings.Contains(headers, "accept-encoding") {
+				stats.HeaderAnomaly++
+			}
+			if !strings.Contains(headers, "accept") {
+				stats.HeaderAnomaly++
+			}
+		}
+	}
 }

@@ -140,8 +140,14 @@ export type SecurityInsights = {
   recent_anomalies: SecurityThreat[] | null;
   total_anomalies: number;
   active_threats: number;
-  heavy_hitters: string[] | null;
+  heavy_hitters: HeavyHitter[] | null;
   global_threat_score: number;
+};
+
+export type HeavyHitter = {
+  network: string;
+  count: number;
+  percentage: number;
 };
 
 export type SecurityThreat = {
@@ -162,6 +168,12 @@ export type SecurityThreat = {
   action_taken: string;
   country_code: string;
   mitigated: boolean;
+  request_headers?: string;
+  request_body?: string;
+  response_headers?: string;
+  response_body?: string;
+  user_agent?: string;
+  http_method?: string;
 };
 
 export type TrafficSample = {

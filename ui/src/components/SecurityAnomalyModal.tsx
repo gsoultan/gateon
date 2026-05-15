@@ -28,6 +28,9 @@ import {
   IconMap2,
   IconShieldOff,
   IconAlertTriangle,
+  IconDeviceLaptop,
+  IconDatabase,
+  IconNotes,
 } from "@tabler/icons-react";
 import { useRemoveMitigation } from "../hooks/useGateon";
 import type { Anomaly } from "../types/gateon";
@@ -211,7 +214,102 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
               </Stack>
             </Grid.Col>
           )}
+
+          {anomaly.user_agent && (
+            <Grid.Col span={12}>
+              <Stack gap="xs">
+                <Group gap="xs">
+                  <IconDeviceLaptop size={16} color="var(--mantine-color-dimmed)" />
+                  <Text size="sm" fw={600}>
+                    User Agent
+                  </Text>
+                </Group>
+                <Text size="xs" ml={26} c="dimmed" ff="monospace">
+                  {anomaly.user_agent}
+                </Text>
+              </Stack>
+            </Grid.Col>
+          )}
         </Grid>
+
+        {(anomaly.request_headers || anomaly.request_body) && (
+          <>
+            <Divider label="Request Details" labelPosition="center" />
+            <Stack gap="xs">
+              <Group gap="xs">
+                <Badge variant="light" color="blue" radius="sm">
+                  {anomaly.http_method || "GET"}
+                </Badge>
+                <Text size="xs" ff="monospace" c="dimmed" style={{ wordBreak: "break-all" }}>
+                  {anomaly.request_uri}
+                </Text>
+              </Group>
+
+              {anomaly.request_headers && (
+                <Stack gap={4}>
+                  <Group gap={4}>
+                    <IconNotes size={14} color="var(--mantine-color-dimmed)" />
+                    <Text size="xs" fw={700}>
+                      Request Headers
+                    </Text>
+                  </Group>
+                  <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
+                    {anomaly.request_headers}
+                  </Code>
+                </Stack>
+              )}
+
+              {anomaly.request_body && (
+                <Stack gap={4}>
+                  <Group gap={4}>
+                    <IconDatabase size={14} color="var(--mantine-color-dimmed)" />
+                    <Text size="xs" fw={700}>
+                      Request Payload
+                    </Text>
+                  </Group>
+                  <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
+                    {anomaly.request_body}
+                  </Code>
+                </Stack>
+              )}
+            </Stack>
+          </>
+        )}
+
+        {(anomaly.response_headers || anomaly.response_body) && (
+          <>
+            <Divider label="Response Details" labelPosition="center" />
+            <Stack gap="xs">
+              {anomaly.response_headers && (
+                <Stack gap={4}>
+                  <Group gap={4}>
+                    <IconNotes size={14} color="var(--mantine-color-dimmed)" />
+                    <Text size="xs" fw={700}>
+                      Response Headers
+                    </Text>
+                  </Group>
+                  <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
+                    {anomaly.response_headers}
+                  </Code>
+                </Stack>
+              )}
+
+              {anomaly.response_body && (
+                <Stack gap={4}>
+                  <Group gap={4}>
+                    <IconDatabase size={14} color="var(--mantine-color-dimmed)" />
+                    <Text size="xs" fw={700}>
+                      Response Body
+                    </Text>
+                  </Group>
+                  <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
+                    {anomaly.response_body}
+                  </Code>
+                </Stack>
+              )}
+            </Stack>
+          </>
+        )}
 
         <Divider />
 
