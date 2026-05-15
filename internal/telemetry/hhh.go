@@ -73,10 +73,10 @@ func (c *HHHCounter) GetHeavyHitters(threshold int) []HeavyHitter {
 	ipv4Levels := []int{32, 24, 16, 8}
 	ipv6Levels := []int{128, 64, 48, 32}
 
-	processLevels := func(levels []int) {
+	processLevels := func(levels []int, isV6 bool) {
 		for _, l := range levels {
 			for p, freq := range condFreq {
-				if p.Bits() != l {
+				if p.Bits() != l || p.Addr().Is6() != isV6 {
 					continue
 				}
 
@@ -113,8 +113,8 @@ func (c *HHHCounter) GetHeavyHitters(threshold int) []HeavyHitter {
 		}
 	}
 
-	processLevels(ipv4Levels)
-	processLevels(ipv6Levels)
+	processLevels(ipv4Levels, false)
+	processLevels(ipv6Levels, true)
 
 	// Sort by count descending
 	slices.SortFunc(hitters, func(a, b HeavyHitter) int {
