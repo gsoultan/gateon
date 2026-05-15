@@ -260,7 +260,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 
 	logger.Default().LogInfo("telemetry: migrating existing traces to Pebble", "count", count)
 
-	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, user_agent, method, referer, request_uri, ja3, ja4, request_headers, request_body, response_headers, response_body FROM traces")
+	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, '') FROM traces")
 	if err != nil {
 		return
 	}
@@ -1068,7 +1068,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat
 	if offset < 0 {
 		offset = 0
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, request_headers, request_body, response_headers, response_body, user_agent, method FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
 	rows, err := store.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logger.Default().LogError("threats: query failed", "error", err)
@@ -1127,7 +1127,7 @@ func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
 	if store == nil {
 		return nil
 	}
-	query := store.dialect.Rebind("SELECT source_ip, MAX(asn), COUNT(*) as cnt FROM security_threats GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
+	query := store.dialect.Rebind("SELECT source_ip, COALESCE(MAX(asn), ''), COUNT(*) as cnt FROM security_threats GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
 	rows, err := store.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil
