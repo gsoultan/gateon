@@ -695,6 +695,12 @@ export type Anomaly = {
   mitigated?: boolean;
   category?: string;
   action_taken?: string;
+  request_headers?: string;
+  request_body?: string;
+  response_headers?: string;
+  response_body?: string;
+  user_agent?: string;
+  http_method?: string;
 };
 
 export type Reputation = {

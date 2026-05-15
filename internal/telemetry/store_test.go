@@ -27,8 +27,8 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 	traceID := "test-trace-1"
 
 	// Record the same trace twice
-	RecordTrace(traceID, "GET /test", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "")
-	RecordTrace(traceID, "GET /test", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "")
+	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "")
+	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "")
 
 	// Flush is triggered every 1s or when batch is full (1024)
 	time.Sleep(1500 * time.Millisecond)
@@ -85,7 +85,7 @@ func TestSecurityTelemetryUpdates(t *testing.T) {
 	hitters := GlobalHHH.GetHeavyHitters(1)
 	found := false
 	for _, h := range hitters {
-		if strings.Contains(h, "1.2.3.4/32") || strings.Contains(h, "1.0.0.0/8") || strings.Contains(h, "1.2.0.0/16") || strings.Contains(h, "1.2.3.0/24") {
+		if strings.Contains(h.Network, "1.2.3.4/32") || strings.Contains(h.Network, "1.0.0.0/8") || strings.Contains(h.Network, "1.2.0.0/16") || strings.Contains(h.Network, "1.2.3.0/24") {
 			found = true
 		}
 	}

@@ -67,7 +67,7 @@ type SecurityInsights struct {
 	RecentAnomalies   []SecurityThreat `json:"recent_anomalies,omitzero"`
 	TotalAnomalies    int64            `json:"total_anomalies"`
 	ActiveThreats     int              `json:"active_threats"`
-	HeavyHitters      []string         `json:"heavy_hitters,omitzero"`
+	HeavyHitters      []HeavyHitter    `json:"heavy_hitters,omitzero"`
 	GlobalThreatScore float64          `json:"global_threat_score"`
 }
 

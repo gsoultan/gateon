@@ -98,7 +98,8 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 
 			// Manually populate IPStats as AnomalyAnalysisEngine would
 			ipStats := make(map[string]*IPStats)
-			for _, tr := range tt.traces {
+			for i := range tt.traces {
+				tr := &tt.traces[i]
 				stats, ok := ipStats[tr.SourceIP]
 				if !ok {
 					stats = &IPStats{
@@ -110,6 +111,10 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 					ipStats[tr.SourceIP] = stats
 				}
 				stats.TotalRequests++
+				if tr.Timestamp.After(stats.LastSeen) {
+					stats.LastSeen = tr.Timestamp
+					stats.LastTrace = tr
+				}
 				stats.UniquePaths[tr.Path] = struct{}{}
 				if tr.UserAgent != "" {
 					stats.UserAgents[tr.UserAgent] = struct{}{}

@@ -115,26 +115,33 @@ type TraceRecord struct {
 	ResponseHeaders string    `json:"response_headers"`
 	ResponseBody    string    `json:"response_body"`
 	JA4             string    `json:"ja4"`
+	RouteID         string    `json:"route_id"`
 }
 
 type SecurityThreat struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	SourceIP    string    `json:"source_ip"`
-	Fingerprint string    `json:"fingerprint"`
-	Score       float64   `json:"score"`
-	Details     string    `json:"details"`
-	Time        time.Time `json:"timestamp,omitzero"`
-	JA3         string    `json:"ja3"`
-	JA4         string    `json:"ja4"`
-	RouteID     string    `json:"route_id"`
-	RequestURI  string    `json:"request_uri"`
-	Category    string    `json:"category"`
-	Severity    string    `json:"severity"`
-	ASN         string    `json:"asn"`
-	ActionTaken string    `json:"action_taken"`
-	CountryCode string    `json:"country_code"`
-	Mitigated   bool      `json:"mitigated"`
+	ID              string    `json:"id"`
+	Type            string    `json:"type"`
+	SourceIP        string    `json:"source_ip"`
+	Fingerprint     string    `json:"fingerprint"`
+	Score           float64   `json:"score"`
+	Details         string    `json:"details"`
+	Time            time.Time `json:"timestamp,omitzero"`
+	JA3             string    `json:"ja3"`
+	JA4             string    `json:"ja4"`
+	RouteID         string    `json:"route_id"`
+	RequestURI      string    `json:"request_uri"`
+	Category        string    `json:"category"`
+	Severity        string    `json:"severity"`
+	ASN             string    `json:"asn"`
+	ActionTaken     string    `json:"action_taken"`
+	CountryCode     string    `json:"country_code"`
+	Mitigated       bool      `json:"mitigated"`
+	RequestHeaders  string    `json:"request_headers"`
+	RequestBody     string    `json:"request_body"`
+	ResponseHeaders string    `json:"response_headers"`
+	ResponseBody    string    `json:"response_body"`
+	UserAgent       string    `json:"user_agent"`
+	Method          string    `json:"method"`
 }
 
 type pathStatsStore struct {
@@ -382,7 +389,7 @@ func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, request_headers, request_body, response_headers, response_body, user_agent, method) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -459,7 +466,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method); err != nil {
 							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
@@ -643,7 +650,7 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
+func recordTraceToStore(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
 	if store == nil {
 		return
 	}
@@ -652,6 +659,7 @@ func recordTraceToStore(id, operationName, serviceName string, durationMs float6
 		ID:              id,
 		OperationName:   operationName,
 		ServiceName:     serviceName,
+		RouteID:         routeID,
 		DurationMs:      durationMs,
 		Timestamp:       timestamp,
 		Status:          status,
@@ -1060,7 +1068,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat
 	if offset < 0 {
 		offset = 0
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, request_headers, request_body, response_headers, response_body, user_agent, method FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
 	rows, err := store.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logger.Default().LogError("threats: query failed", "error", err)
@@ -1070,7 +1078,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat
 	res := make([]SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
 		var th SecurityThreat
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method); err != nil {
 			logger.Default().LogError("threats: scan failed", "error", err)
 			continue
 		}

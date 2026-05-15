@@ -34,6 +34,12 @@ message Anomaly {
   string category = 15;
   string action_taken = 16;
   bool cluster_synced = 17;
+  string request_headers = 18;
+  string request_body = 19;
+  string response_headers = 20;
+  string response_body = 21;
+  string user_agent = 22;
+  string http_method = 23;
 }
 
 message GossipStatus {

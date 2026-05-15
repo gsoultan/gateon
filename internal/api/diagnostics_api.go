@@ -465,18 +465,24 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 		}
 
 		a := &gateonv1.Anomaly{
-			Type:        t.Type,
-			Severity:    severity,
-			Description: t.Details,
-			Timestamp:   t.Time.Format(time.RFC3339),
-			Source:      t.SourceIP,
-			Score:       t.Score,
-			Ja3:         t.JA3,
-			RouteId:     t.RouteID,
-			RequestUri:  t.RequestURI,
-			Category:    t.Category,
-			ActionTaken: t.ActionTaken,
-			Mitigated:   t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned",
+			Type:            t.Type,
+			Severity:        severity,
+			Description:     t.Details,
+			Timestamp:       t.Time.Format(time.RFC3339),
+			Source:          t.SourceIP,
+			Score:           t.Score,
+			Ja3:             t.JA3,
+			RouteId:         t.RouteID,
+			RequestUri:      t.RequestURI,
+			Category:        t.Category,
+			ActionTaken:     t.ActionTaken,
+			Mitigated:       t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned",
+			RequestHeaders:  t.RequestHeaders,
+			RequestBody:     t.RequestBody,
+			ResponseHeaders: t.ResponseHeaders,
+			ResponseBody:    t.ResponseBody,
+			UserAgent:       t.UserAgent,
+			HttpMethod:      t.Method,
 		}
 		// Try to populate geo if available (though here we only have the IP)
 		// We can use the same helper as in security_threat_detector.go
