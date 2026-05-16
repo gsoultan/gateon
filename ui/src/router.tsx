@@ -125,11 +125,6 @@ const indexRoute = createRoute({
   component: () => <Dashboard />,
 });
 
-const aiInsightsRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/ai-insights",
-  component: () => <AIInsightsPage />,
-});
 
 const routesRoute = createRoute({
   getParentRoute: () => authenticatedRoute,

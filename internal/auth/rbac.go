@@ -1,5 +1,11 @@
 package auth
 
+import (
+	"context"
+
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
+
 // Action represents the type of operation.
 type Action string
 
@@ -23,9 +29,50 @@ const (
 	ResourceConfig      Resource = "config"
 )
 
+var globalConfigGetter interface {
+	Get(ctx context.Context) *gateonv1.GlobalConfig
+}
+
+func SetConfigGetter(getter interface {
+	Get(ctx context.Context) *gateonv1.GlobalConfig
+}) {
+	globalConfigGetter = getter
+}
+
 // Allowed returns whether the role can perform the action on the resource.
-// admin: full access; operator: read all, write config entities (no users/global); viewer: read only.
-func Allowed(role string, action Action, resource Resource) bool {
+// If dynamic RBAC is enabled in GlobalConfig, it uses those rules.
+// Otherwise, it falls back to hardcoded defaults.
+func Allowed(ctx context.Context, role string, action Action, resource Resource) bool {
+	if globalConfigGetter != nil {
+		cfg := globalConfigGetter.Get(ctx)
+		if cfg != nil && cfg.Rbac != nil && cfg.Rbac.Enabled {
+			return allowedDynamic(cfg.Rbac, role, action, resource)
+		}
+	}
+
+	return allowedHardcoded(role, action, resource)
+}
+
+func allowedDynamic(cfg *gateonv1.RBACConfig, role string, action Action, resource Resource) bool {
+	// Admin always has full access
+	if role == RoleAdmin {
+		return true
+	}
+
+	for _, p := range cfg.Roles {
+		if p.Role == role {
+			for _, perm := range p.Permissions {
+				if (perm.Resource == string(resource) || perm.Resource == "*") &&
+					(perm.Action == string(action) || perm.Action == "*") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func allowedHardcoded(role string, action Action, resource Resource) bool {
 	switch role {
 	case RoleAdmin:
 		return true

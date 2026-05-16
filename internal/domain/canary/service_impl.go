@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -53,6 +54,26 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 		return
 	}
 
+	// Deep copy initial service state for potential rollback
+	originalSvc := &gateonv1.Service{
+		Id:                  svc.Id,
+		Name:                svc.Name,
+		LoadBalancerPolicy:  svc.LoadBalancerPolicy,
+		HealthCheckPath:     svc.HealthCheckPath,
+		BackendType:         svc.BackendType,
+		DiscoveryUrl:        svc.DiscoveryUrl,
+		TlsClientConfig:     svc.TlsClientConfig,
+		HealthCheckPort:     svc.HealthCheckPort,
+		HealthCheckProtocol: svc.HealthCheckProtocol,
+		HealthCheckType:     svc.HealthCheckType,
+	}
+	for _, t := range svc.WeightedTargets {
+		originalSvc.WeightedTargets = append(originalSvc.WeightedTargets, &gateonv1.Target{
+			Url:    t.Url,
+			Weight: t.Weight,
+		})
+	}
+
 	// Store initial weights to interpolate from
 	initialWeights := make(map[string]int32)
 	for _, t := range svc.WeightedTargets {
@@ -61,6 +82,23 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 
 	for i := range int(req.Steps) {
 		time.Sleep(interval)
+
+		// Automated Canary Analysis: Evaluate metrics
+		metrics := telemetry.GetServiceGoldenSignals(ctx, req.ServiceId)
+		if (req.MaxErrorRate > 0 && float32(metrics.ErrorRate) > req.MaxErrorRate) ||
+			(req.MaxP99LatencyMs > 0 && metrics.P99LatencyMs > float64(req.MaxP99LatencyMs)) {
+			cs.logger.LogWarn("Canary aborted: safety thresholds exceeded. Rolling back.",
+				"service_id", req.ServiceId,
+				"error_rate", metrics.ErrorRate,
+				"max_error_rate", req.MaxErrorRate,
+				"p99_latency_ms", metrics.P99LatencyMs,
+				"max_p99_latency_ms", req.MaxP99LatencyMs)
+
+			if err := cs.svcService.SaveService(ctx, originalSvc); err != nil {
+				cs.logger.LogError("Canary rollback failed", "error", err, "service_id", req.ServiceId)
+			}
+			return
+		}
 
 		progress := float64(i+1) / float64(req.Steps)
 

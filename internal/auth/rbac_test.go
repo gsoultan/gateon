@@ -38,7 +38,7 @@ func TestAllowed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Allowed(tt.role, tt.action, tt.resource)
+			got := Allowed(t.Context(), tt.role, tt.action, tt.resource)
 			if got != tt.want {
 				t.Errorf("Allowed(%q, %q, %q) = %v, want %v",
 					tt.role, tt.action, tt.resource, got, tt.want)

@@ -879,5 +879,81 @@ func estimatePercentile(fam *dto.MetricFamily, q float64, filter func(*dto.Metri
 	if len(buckets) > 0 {
 		return buckets[len(buckets)-1].upperBound
 	}
+
 	return 0
+}
+
+// GetServiceGoldenSignals returns golden signals for a specific service.
+func GetServiceGoldenSignals(ctx context.Context, serviceID string) GoldenSignals {
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		return GoldenSignals{}
+	}
+
+	idx := make(map[string]*dto.MetricFamily, len(families))
+	for _, f := range families {
+		idx[f.GetName()] = f
+	}
+
+	isService := func(m *dto.Metric) bool {
+		return labelValue(m, "service") == serviceID
+	}
+
+	gs := GoldenSignals{}
+	gs.RequestsTotal = sumCounter(idx, "gateon_requests_total", isService)
+
+	// Errors = 5xx status codes
+	if fam, ok := idx["gateon_requests_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			if !isService(m) {
+				continue
+			}
+			sc := labelValue(m, "status_code")
+			if strings.HasPrefix(sc, "5") {
+				gs.ErrorsTotal += m.GetCounter().GetValue()
+			}
+		}
+	}
+	if gs.RequestsTotal > 0 {
+		gs.ErrorRate = (gs.ErrorsTotal / gs.RequestsTotal) * 100
+	}
+
+	// Latency from histogram
+	if fam, ok := idx["gateon_request_duration_seconds"]; ok {
+		var totalSum float64
+		var totalCount uint64
+		for _, m := range fam.GetMetric() {
+			if !isService(m) {
+				continue
+			}
+			h := m.GetHistogram()
+			totalSum += h.GetSampleSum()
+			totalCount += h.GetSampleCount()
+		}
+		if totalCount > 0 {
+			gs.AvgLatencyMs = (totalSum / float64(totalCount)) * 1000
+		}
+		gs.P50LatencyMs = estimatePercentile(fam, 0.50, isService) * 1000
+		gs.P95LatencyMs = estimatePercentile(fam, 0.95, isService) * 1000
+		gs.P99LatencyMs = estimatePercentile(fam, 0.99, isService) * 1000
+	}
+
+	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", isService)
+
+	if fam, ok := idx["gateon_request_bytes_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			if !isService(m) {
+				continue
+			}
+			dir := labelValue(m, "direction")
+			switch dir {
+			case "in":
+				gs.BytesInTotal += m.GetCounter().GetValue()
+			case "out":
+				gs.BytesOutTotal += m.GetCounter().GetValue()
+			}
+		}
+	}
+
+	return gs
 }

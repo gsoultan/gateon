@@ -23,7 +23,7 @@ func RequirePermission(w http.ResponseWriter, r *http.Request, action auth.Actio
 		_, _ = w.Write([]byte(`{"error":"permission denied"}`))
 		return false
 	}
-	if !auth.Allowed(claims.Role, action, resource) {
+	if !auth.Allowed(r.Context(), claims.Role, action, resource) {
 		logger.RBACPermissionDenied(r, claims.ID, claims.Role, string(action), string(resource))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)

@@ -28,7 +28,7 @@ func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier)
 			return false
 		}
 		// Only Admin and Operator can see logs
-		return auth.Allowed(claims.Role, auth.ActionRead, auth.ResourceGlobal)
+		return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceGlobal)
 	}
 
 	if verifier == nil {
@@ -50,7 +50,7 @@ func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier)
 	if !ok || claims == nil {
 		return false
 	}
-	return auth.Allowed(claims.Role, auth.ActionRead, auth.ResourceGlobal)
+	return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceGlobal)
 }
 
 func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {

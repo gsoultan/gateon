@@ -49,6 +49,8 @@ message StartCanaryRequest {
   repeated Target target_weights = 2;
   int32 duration_minutes = 3;
   int32 steps = 4;
+  float max_error_rate = 5;
+  int32 max_p99_latency_ms = 6;
 }
 
 message StartCanaryResponse {
