@@ -31,13 +31,14 @@ message GlobalConfig {
   HaConfig ha = 8;
   AnomalyDetectionConfig anomaly_detection = 9;
   EbpfConfig ebpf = 10;
-  AIConfig ai = 11;
+  reserved 11;
   ManagementConfig management = 12;
   GeoIPConfig geoip = 13;
   DebuggerConfig debugger = 14;
   SecurityAdvancedConfig security_advanced = 15;
   AlertingConfig alerting = 16;
   AuditConfig audit = 17;
+  RBACConfig rbac = 18;
 }
 
 message AlertingConfig {
@@ -201,12 +202,19 @@ message GitOpsConfig {
   string auth_token = 7;
 }
 
-message AIConfig {
+message RBACConfig {
   bool enabled = 1;
-  string provider = 2; // "openai", "anthropic"
-  string api_key = 3;
-  string model = 4;
-  string base_url = 5;
+  repeated RolePolicy roles = 2;
+}
+
+message RolePolicy {
+  string role = 1;
+  repeated Permission permissions = 2;
+}
+
+message Permission {
+  string resource = 1; // "routes", "services", etc.
+  string action = 2;   // "read", "write"
 }
 
 message WafConfig {

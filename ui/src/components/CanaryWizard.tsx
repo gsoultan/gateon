@@ -13,6 +13,8 @@ interface CanaryWizardProps {
 export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
   const [duration, setDuration] = useState<number | string>(5)
   const [steps, setSteps] = useState<number | string>(10)
+  const [maxErrorRate, setMaxErrorRate] = useState<number | string>(5)
+  const [maxP99Latency, setMaxP99Latency] = useState<number | string>(500)
   const [targetWeights, setTargetWeights] = useState<Target[]>(
     service.weighted_targets.map(t => ({ ...t }))
   )
@@ -32,7 +34,9 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
           service_id: service.id,
           target_weights: targetWeights,
           duration_minutes: Number(duration),
-          steps: Number(steps)
+          steps: Number(steps),
+          max_error_rate: Number(maxErrorRate),
+          max_p99_latency_ms: Number(maxP99Latency)
         })
       })
       if (!res.ok) throw new Error(await res.text())
@@ -111,7 +115,7 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
         <Title order={5}>2. Deployment Schedule</Title>
         <Group grow>
           <NumberInput
-            label="Total Duration (minutes)"
+            label="Total Duration (min)"
             min={1}
             value={duration}
             onChange={setDuration}
@@ -119,10 +123,33 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
           />
           <NumberInput
             label="Steps"
-            description="Number of weight updates"
             min={1}
             value={steps}
             onChange={setSteps}
+            radius="md"
+          />
+        </Group>
+      </Stack>
+
+      <Stack gap="xs">
+        <Title order={5}>3. Safety Guardrails (Auto-Rollback)</Title>
+        <Group grow>
+          <NumberInput
+            label="Max Error Rate (%)"
+            description="Abort if exceeds"
+            min={0}
+            max={100}
+            decimalScale={1}
+            value={maxErrorRate}
+            onChange={setMaxErrorRate}
+            radius="md"
+          />
+          <NumberInput
+            label="Max P99 Latency (ms)"
+            description="Abort if exceeds"
+            min={0}
+            value={maxP99Latency}
+            onChange={setMaxP99Latency}
             radius="md"
           />
         </Group>

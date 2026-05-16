@@ -13,6 +13,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
+	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/ebpf"
@@ -80,6 +81,7 @@ func main() {
 	defer logger.Sync()
 
 	globalReg, globalFile := initConfigRegistries()
+	auth.SetConfigGetter(globalReg)
 	authManager := inits.InitGlobalConfig(globalFile, globalReg)
 	if authManager != nil {
 		defer authManager.Close()

@@ -470,7 +470,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 		if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
-			if claims.ID != req.Id && !auth.Allowed(claims.Role, auth.ActionWrite, auth.ResourceUsers) {
+			if claims.ID != req.Id && !auth.Allowed(r.Context(), claims.Role, auth.ActionWrite, auth.ResourceUsers) {
 				WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
 				return
 			}
@@ -610,7 +610,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		claimsVal := r.Context().Value(middleware.UserContextKey)
 		if claimsVal != nil {
 			if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
-				isAdmin := auth.Allowed(claims.Role, auth.ActionWrite, auth.ResourceUsers)
+				isAdmin := auth.Allowed(r.Context(), claims.Role, auth.ActionWrite, auth.ResourceUsers)
 				isSelf := claims.ID == req.Id
 				if !isAdmin && !isSelf {
 					WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
