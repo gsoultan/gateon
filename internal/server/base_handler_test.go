@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -167,4 +169,66 @@ func TestCreateBaseHandler_Security(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBaseHandler_BodyLimit(t *testing.T) {
+	uiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	deps := BaseHandlerDeps{
+		ProxyHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+		RouteStore:   &mockRouteStore{},
+		GlobalReg: &mockGlobalReg{
+			config: &gateonv1.GlobalConfig{
+				Management: &gateonv1.ManagementConfig{
+					AllowPublicManagement: true,
+				},
+			},
+		},
+	}
+
+	handler := CreateBaseHandler(uiHandler, deps, nil, nil)
+
+	t.Run("UnderLimit", func(t *testing.T) {
+		body := bytes.Repeat([]byte("a"), 1024) // 1KB
+		req := httptest.NewRequest("POST", "/any", bytes.NewReader(body))
+		ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+	})
+
+	t.Run("GeoIP_OverDefaultLimit", func(t *testing.T) {
+		body := bytes.Repeat([]byte("a"), 11*1024*1024) // 11MB
+		req := httptest.NewRequest("POST", "/v1/geoip/upload", bytes.NewReader(body))
+		ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		// Should be 200 (or at least not 413)
+		if rr.Code == http.StatusRequestEntityTooLarge {
+			t.Errorf("expected not 413, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Other_OverDefaultLimit", func(t *testing.T) {
+		body := bytes.Repeat([]byte("a"), 11*1024*1024) // 11MB
+		req := httptest.NewRequest("POST", "/not-v1", bytes.NewReader(body))
+		ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("expected 413, got %d", rr.Code)
+		}
+	})
 }

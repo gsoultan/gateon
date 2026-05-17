@@ -58,8 +58,13 @@ func CreateBaseHandler(
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Limit request body size to 10MB to prevent DoS via large payloads.
-		r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
+		// Limit request body size to prevent DoS via large payloads.
+		// Default is 10MB, but GeoIP database uploads can be much larger.
+		limit := int64(10 * 1024 * 1024)
+		if r.URL.Path == "/v1/geoip/upload" {
+			limit = 512 * 1024 * 1024 // 512MB for GeoIP database
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 
 		epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
 

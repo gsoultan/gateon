@@ -83,6 +83,8 @@ func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesReq
 			RequestBody:     t.RequestBody,
 			ResponseHeaders: respHeaders,
 			ResponseBody:    t.ResponseBody,
+			Ja3:             t.JA3,
+			Ja4:             t.JA4,
 		})
 	}
 	return &gateonv1.ListTracesResponse{Traces: res}, nil

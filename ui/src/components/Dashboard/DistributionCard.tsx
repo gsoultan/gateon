@@ -52,6 +52,7 @@ export const DistributionCard = memo(function DistributionCard({
             tickLine="none"
             series={[{ name: "requests", color }]}
             valueFormatter={valueFormatter}
+            animationDuration={1200}
           />
         </Box>
       ) : (

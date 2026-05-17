@@ -201,6 +201,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					debug.ResponseBody,
 				)
 			} else {
+				reqHeadersJSON, _ := json.Marshal(flattenHeaders(r.Header, r.Trailer))
+				respHeadersJSON, _ := json.Marshal(flattenHeaders(sw.Header()))
+
 				telemetry.RecordTrace(
 					id,
 					method+" "+origPath,
@@ -219,6 +222,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					origHost+r.URL.RequestURI(),
 					ja3,
 					ja4,
+					string(reqHeadersJSON),
+					string(respHeadersJSON),
 				)
 			}
 
@@ -455,7 +460,7 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 				r.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 			}
 
-			reqHeaders, _ := json.Marshal(flattenHeaders(r.Header))
+			reqHeaders, _ := json.Marshal(flattenHeaders(r.Header, r.Trailer))
 
 			// Wrap ResponseWriter
 			rec := bodyRecorderPool.Get().(*bodyRecorder)
@@ -479,11 +484,18 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 	}
 }
 
-func flattenHeaders(h http.Header) map[string]string {
+func flattenHeaders(h http.Header, trailers ...http.Header) map[string]string {
 	m := make(map[string]string)
 	for k, v := range h {
 		if len(v) > 0 {
 			m[k] = strings.Join(v, ", ")
+		}
+	}
+	for _, t := range trailers {
+		for k, v := range t {
+			if len(v) > 0 {
+				m["Trailer-"+k] = strings.Join(v, ", ")
+			}
 		}
 	}
 	return m

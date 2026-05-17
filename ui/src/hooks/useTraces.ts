@@ -16,6 +16,10 @@ export interface Trace {
   referer?: string;
   ja3?: string;
   ja4?: string;
+  request_headers?: Record<string, string>;
+  request_body?: string;
+  response_headers?: Record<string, string>;
+  response_body?: string;
 }
 
 export function useTraces(limit: number = 100) {
