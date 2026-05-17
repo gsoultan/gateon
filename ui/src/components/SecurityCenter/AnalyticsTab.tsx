@@ -55,15 +55,21 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
             minWidth={0}
             data={trendData}
             dataKey="date"
-            series={[{ name: 'threats', color: 'red.6', label: 'Threats Detected' }]}
+            series={[{ name: 'threats', color: 'red.7', label: 'Threats Detected' }]}
             curveType="monotone"
-            withDots={false}
+            withDots
+            dotProps={{ r: 3, strokeWidth: 1 }}
+            activeDotProps={{ r: 5, strokeWidth: 2 }}
+            strokeWidth={2}
             withGradient
             gridAxis="xy"
             withXAxis
             withYAxis
             withTooltip
             tooltipAnimationDuration={200}
+            animationDuration={1200}
+            type="default"
+            connectNulls
           />
         </Box>
       </Card>
@@ -78,12 +84,13 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                 minWidth={0}
                 data={countryData}
                 dataKey="country"
-                series={[{ name: 'threats', color: 'blue.6', label: 'Attacks' }]}
+                series={[{ name: 'threats', color: 'blue.7', label: 'Attacks' }]}
                 orientation="vertical"
                 gridAxis="none"
                 yAxisProps={{ width: 80 }}
                 withTooltip
                 barProps={{ radius: [0, 4, 4, 0] }}
+                animationDuration={1200}
               />
             </Box>
           </Card>
@@ -100,6 +107,10 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                   data={threatTypeData}
                   withTooltip
                   chartLabel={`${totalThreats} Total`}
+                  strokeWidth={2}
+                  withPadding
+                  paddingAngle={4}
+                  animationDuration={1200}
                 />
               </Box>
               <Stack gap="xs" justify="center">

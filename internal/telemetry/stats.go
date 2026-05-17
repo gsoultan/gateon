@@ -116,8 +116,8 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4 string) {
-	recordTraceToStore(id, operationName, serviceName, routeID, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, "", "", "", "")
+func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, respHeaders string) {
+	recordTraceToStore(id, operationName, serviceName, routeID, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, "", respHeaders, "")
 }
 
 func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {

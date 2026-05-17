@@ -163,31 +163,59 @@ export function OverviewTab({
           <Card withBorder radius="md">
             <Title order={4} mb="md">Mitigation Funnel Efficiency</Title>
             <Stack gap="xs">
-              {[
-                { label: "Total Ingress", value: metrics?.golden_signals?.requests_total || 0, color: "blue" },
-                { label: "XDP/eBPF Drop", value: metrics?.middleware?.ebpf_dropped_packets?.reduce((a, b) => a + b.value, 0) || 0, color: "red" },
-                { label: "WAF Block", value: metrics?.middleware?.waf_blocked?.reduce((a, b) => a + b.value, 0) || 0, color: "orange" },
-                { label: "Rate Limit", value: metrics?.middleware?.rate_limit_rejected?.reduce((a, b) => a + b.value, 0) || 0, color: "yellow" },
-                { label: "Allowed (200 OK)", value: metrics?.golden_signals?.requests_total ? (metrics?.golden_signals?.requests_total - (metrics?.golden_signals?.errors_total || 0)) : 0, color: "teal" },
-              ].map((step) => (
-                <Box key={step.label}>
-                  <Group justify="space-between" mb={4}>
-                    <Text size="sm" fw={500}>{step.label}</Text>
-                    <Text size="sm" c="dimmed">{step.value.toLocaleString()}</Text>
-                  </Group>
-                  <Box h={8} style={{ borderRadius: '100px', overflow: 'hidden' }} bg="light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4))">
-                    <Box 
-                      h="100%" 
-                      bg={step.color} 
-                      style={{ 
-                        width: `${metrics?.golden_signals?.requests_total ? Math.min(100, (step.value / metrics.golden_signals.requests_total) * 100) : 0}%`,
-                        borderRadius: "inherit",
-                        transition: "width 1s ease-in-out"
-                      }} 
-                    />
+              {(() => {
+                const xdpDrops = metrics?.middleware?.ebpf_dropped_packets?.reduce((a, b) => a + b.value, 0) || 0;
+                const wafBlocks = metrics?.middleware?.waf_blocked?.reduce((a, b) => a + b.value, 0) || 0;
+                const rateLimits = metrics?.middleware?.rate_limit_rejected?.reduce((a, b) => a + b.value, 0) || 0;
+                const geoipBlocks = metrics?.middleware?.geoip_blocked?.reduce((a, b) => a + b.value, 0) || 0;
+                const authFailures = metrics?.middleware?.auth_failures?.reduce((a, b) => a + b.value, 0) || 0;
+                const turnstileFails = metrics?.middleware?.turnstile_fail || 0;
+                const hmacFailures = metrics?.middleware?.hmac_failures || 0;
+                const errors = metrics?.golden_signals?.errors_total || 0;
+                const requestsTotal = metrics?.golden_signals?.requests_total || 0;
+
+                const totalIngress = requestsTotal + xdpDrops;
+                // Calculate allowed traffic by subtracting all mitigations and errors from the requests that reached the server.
+                const allowed = Math.max(0, requestsTotal - wafBlocks - rateLimits - geoipBlocks - authFailures - turnstileFails - hmacFailures - errors);
+
+                const steps = [
+                  { label: "Total Ingress", value: totalIngress, color: "blue" },
+                  { label: "XDP/eBPF Drop", value: xdpDrops, color: "red" },
+                  { label: "WAF Block", value: wafBlocks, color: "orange" },
+                  { label: "Rate Limit", value: rateLimits, color: "yellow" },
+                ];
+
+                if (geoipBlocks > 0) steps.push({ label: "GeoIP Block", value: geoipBlocks, color: "indigo" });
+                if (authFailures > 0) steps.push({ label: "Auth Failures", value: authFailures, color: "cyan" });
+                if (turnstileFails > 0) steps.push({ label: "Turnstile Fail", value: turnstileFails, color: "violet" });
+                if (hmacFailures > 0) steps.push({ label: "HMAC Fail", value: hmacFailures, color: "gray" });
+                if (errors > 0) steps.push({ label: "Server Errors", value: errors, color: "pink" });
+
+                steps.push({ label: "Allowed (Passed)", value: allowed, color: "teal" });
+
+                return steps;
+              })().map((step, _, allSteps) => {
+                const totalValue = allSteps[0].value || 1;
+                return (
+                  <Box key={step.label}>
+                    <Group justify="space-between" mb={4}>
+                      <Text size="sm" fw={500}>{step.label}</Text>
+                      <Text size="sm" c="dimmed">{step.value.toLocaleString()}</Text>
+                    </Group>
+                    <Box h={8} style={{ borderRadius: '100px', overflow: 'hidden' }} bg="light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4))">
+                      <Box 
+                        h="100%" 
+                        bg={step.color} 
+                        style={{ 
+                          width: `${Math.min(100, (step.value / totalValue) * 100)}%`,
+                          borderRadius: "inherit",
+                          transition: "width 1s ease-in-out"
+                        }} 
+                      />
+                    </Box>
                   </Box>
-                </Box>
-              ))}
+                );
+              })}
             </Stack>
           </Card>
         </Grid.Col>
@@ -203,6 +231,10 @@ export function OverviewTab({
                 withTooltip
                 chartLabel={`${totalThreats} Total`}
                 tooltipDataSource="segment"
+                animationDuration={1200}
+                strokeWidth={2}
+                withPadding
+                paddingAngle={4}
               />
             </Box>
             <Stack gap="xs" mt="md">

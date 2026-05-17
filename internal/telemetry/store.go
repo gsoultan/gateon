@@ -1197,7 +1197,7 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 	if days <= 0 {
 		days = 1
 	}
-	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	cutoff := time.Now().Add(time.Duration(-days*24) * time.Hour).Format("2006-01-02 15:04:05")
 	// Group by hour for trend
 	var query string
 	if store.dialect.Driver == db.DriverPostgres || store.dialect.Driver == "pgx" {

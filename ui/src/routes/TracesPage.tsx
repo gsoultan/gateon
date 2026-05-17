@@ -537,6 +537,62 @@ export default function TracesPage() {
               <Text size="xs" fw={700} c="dimmed">TIMESTAMP</Text>
               <Text size="sm">{new Date(selectedTrace.timestamp).toLocaleString()}</Text>
             </Stack>
+
+            <Divider label="Metadata" labelPosition="center" />
+
+            {selectedTrace.request_headers && Object.keys(selectedTrace.request_headers).length > 0 && (
+              <Stack gap={4}>
+                <Text size="xs" fw={700} c="dimmed">REQUEST HEADERS</Text>
+                <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
+                  <Stack gap={2}>
+                    {Object.entries(selectedTrace.request_headers).map(([key, value]) => (
+                      <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
+                        <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
+                        <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
+                      </Group>
+                    ))}
+                  </Stack>
+                </Paper>
+              </Stack>
+            )}
+
+            {selectedTrace.request_body && (
+              <Stack gap={4}>
+                <Text size="xs" fw={700} c="dimmed">REQUEST BODY</Text>
+                <ScrollArea.Autosize maxHeight={200}>
+                  <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {selectedTrace.request_body}
+                  </Code>
+                </ScrollArea.Autosize>
+              </Stack>
+            )}
+
+            {selectedTrace.response_headers && Object.keys(selectedTrace.response_headers).length > 0 && (
+              <Stack gap={4}>
+                <Text size="xs" fw={700} c="dimmed">RESPONSE HEADERS</Text>
+                <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
+                  <Stack gap={2}>
+                    {Object.entries(selectedTrace.response_headers).map(([key, value]) => (
+                      <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
+                        <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
+                        <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
+                      </Group>
+                    ))}
+                  </Stack>
+                </Paper>
+              </Stack>
+            )}
+
+            {selectedTrace.response_body && (
+              <Stack gap={4}>
+                <Text size="xs" fw={700} c="dimmed">RESPONSE BODY</Text>
+                <ScrollArea.Autosize maxHeight={200}>
+                  <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {selectedTrace.response_body}
+                  </Code>
+                </ScrollArea.Autosize>
+              </Stack>
+            )}
           </Stack>
         )}
       </Modal>
