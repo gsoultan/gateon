@@ -39,6 +39,7 @@ func (d *ManagementDomainDetector) Detect(ctx context.Context, data *DiagnosticD
 					Timestamp:      tr.Timestamp.Format(time.RFC3339),
 					Source:         tr.SourceIP,
 					Recommendation: "Restrict management access to internal VPN or specific trusted IP addresses only.",
+					Mitigated:      data.IsIPMitigated(tr.SourceIP),
 				}
 				populateAnomalyGeo(ctx, anomaly, tr.SourceIP)
 				anomalies = append(anomalies, anomaly)

@@ -993,16 +993,29 @@ func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 			continue
 		}
 
-		// Convert day and bucket back to timestamp
-		t, _ := time.Parse("2006-01-02", day)
-		// bucket is half-hour index (0-47)
-		t = t.Add(time.Duration(bucket*30) * time.Minute)
+		t, err := time.Parse("2006-01-02", day)
+		if err != nil {
+			// Try robust parsing
+			if len(day) > 10 {
+				day = day[:10]
+			}
+			t, err = time.Parse("2006-01-02", day)
+		}
 
-		samples = append(samples, TrafficSample{
-			Timestamp: t.UnixMilli(),
-			Requests:  uint64(rc),
-			Bytes:     uint64(bsum),
-		})
+		if err == nil {
+			// bucket is half-hour index (0-47)
+			t = t.Add(time.Duration(bucket*30) * time.Minute)
+			samples = append(samples, TrafficSample{
+				Timestamp: t.UnixMilli(),
+				Requests:  uint64(rc),
+				Bytes:     uint64(bsum),
+			})
+		} else {
+			logger.Default().LogError("traffic history: failed to parse day", "day", day, "error", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		logger.Default().LogError("traffic history: rows error", "error", err)
 	}
 	return samples
 }
@@ -1138,9 +1151,11 @@ func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
 		var label string
 		var asn string
 		var count float64
-		if err := rows.Scan(&label, &asn, &count); err == nil {
-			res = append(res, LabeledCount{Label: label, Value: count, Subtext: asn})
+		if err := rows.Scan(&label, &asn, &count); err != nil {
+			logger.Default().LogError("top threat sources: scan failed", "error", err)
+			continue
 		}
+		res = append(res, LabeledCount{Label: label, Value: count, Subtext: asn})
 	}
 	return res
 }
@@ -1160,9 +1175,11 @@ func GetTopThreatTypes(ctx context.Context, limit int) []LabeledCount {
 	for rows.Next() {
 		var label string
 		var count float64
-		if err := rows.Scan(&label, &count); err == nil {
-			res = append(res, LabeledCount{Label: label, Value: count})
+		if err := rows.Scan(&label, &count); err != nil {
+			logger.Default().LogError("top threat types: scan failed", "error", err)
+			continue
 		}
+		res = append(res, LabeledCount{Label: label, Value: count})
 	}
 	return res
 }
@@ -1182,9 +1199,11 @@ func GetThreatsByCountry(ctx context.Context, limit int) []LabeledCount {
 	for rows.Next() {
 		var label string
 		var count float64
-		if err := rows.Scan(&label, &count); err == nil {
-			res = append(res, LabeledCount{Label: label, Value: count})
+		if err := rows.Scan(&label, &count); err != nil {
+			logger.Default().LogError("threats by country: scan failed", "error", err)
+			continue
 		}
+		res = append(res, LabeledCount{Label: label, Value: count})
 	}
 	return res
 }
@@ -1216,17 +1235,27 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 	for rows.Next() {
 		var bucket string
 		var count uint64
-		if err := rows.Scan(&bucket, &count); err == nil {
-			t, err := time.Parse("2006-01-02 15:04:05", bucket)
-			if err != nil {
-				// try alternative format if Parse fails
-				t, _ = time.Parse("2006-01-02 15:04", bucket)
-			}
-			res = append(res, TrafficSample{
-				Timestamp: t.UnixMilli(),
-				Requests:  count, // Reusing Requests field for threat count
-			})
+		if err := rows.Scan(&bucket, &count); err != nil {
+			logger.Default().LogError("attack trend: scan failed", "error", err)
+			continue
 		}
+		// Handle potential varying length from different DB drivers
+		if len(bucket) > 19 {
+			bucket = bucket[:19]
+		}
+		t, err := time.Parse("2006-01-02 15:04:05", bucket)
+		if err != nil {
+			// try alternative format if Parse fails
+			t, err = time.Parse("2006-01-02 15:04", bucket)
+			if err != nil {
+				logger.Default().LogError("attack trend: failed to parse bucket", "bucket", bucket, "error", err)
+				continue
+			}
+		}
+		res = append(res, TrafficSample{
+			Timestamp: t.UnixMilli(),
+			Requests:  count, // Reusing Requests field for threat count
+		})
 	}
 	return res
 }

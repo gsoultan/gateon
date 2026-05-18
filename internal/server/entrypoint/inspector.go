@@ -16,6 +16,12 @@ var http1Methods = [][]byte{
 	[]byte("TRACE "),
 }
 
+// SSH identification string prefix (RFC 4253).
+var sshPreface = []byte("SSH-2.0-")
+
+// RDP TPKT header (0x03 0x00).
+var rdpPreface = []byte{0x03, 0x00}
+
 // IsTCPAppHTTP reports whether the first bytes look like HTTP/1.1 or HTTP/2.
 // Used for connection-time inspection to route plaintext TCP.
 // b should have at least PeekSize bytes when available; fewer bytes are handled.
@@ -34,6 +40,16 @@ func IsTCPAppHTTP(b []byte) bool {
 		}
 	}
 	return false
+}
+
+// IsSSH reports whether the first bytes look like an SSH identification string.
+func IsSSH(b []byte) bool {
+	return len(b) >= 8 && bytes.Equal(b[:8], sshPreface)
+}
+
+// IsRDP reports whether the first bytes look like an RDP TPKT header.
+func IsRDP(b []byte) bool {
+	return len(b) >= 2 && bytes.Equal(b[:2], rdpPreface)
 }
 
 // IsUDPPacketQUIC reports whether the UDP payload looks like a QUIC long-header packet (HTTP/3).

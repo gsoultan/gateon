@@ -43,12 +43,14 @@ func CreateBaseHandler(
 	})
 
 	// 1. Recovery from panics
-	// 2. Security Headers (Recommended preset)
-	// 3. Max Connections limit
+	// 2. Security Headers (Recommended preset with CSP)
+	// 3. XSS Recognition (Lightweight monitoring)
+	// 4. Max Connections limit
 	// Pre-chain middlewares to avoid per-request allocations.
 	finalInternal := middleware.Chain(
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
+		middleware.XSSRecognition("gateon-management"),
 		middleware.MaxConnections(500),
 	)(internalHandler)
 

@@ -34,6 +34,47 @@ func TestIsTCPAppHTTP(t *testing.T) {
 	}
 }
 
+func TestIsSSH(t *testing.T) {
+	tests := []struct {
+		name string
+		b    []byte
+		want bool
+	}{
+		{"ssh", []byte("SSH-2.0-OpenSSH_8.2p1"), true},
+		{"ssh version 1", []byte("SSH-1.99-OpenSSH_8.2p1"), false},
+		{"random bytes", []byte{0x00, 0x01, 0x02}, false},
+		{"empty", nil, false},
+		{"short", []byte("SSH-2.0"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSSH(tt.b); got != tt.want {
+				t.Errorf("IsSSH(%q) = %v, want %v", tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsRDP(t *testing.T) {
+	tests := []struct {
+		name string
+		b    []byte
+		want bool
+	}{
+		{"rdp", []byte{0x03, 0x00, 0x00, 0x13}, true},
+		{"random bytes", []byte{0x00, 0x01, 0x02}, false},
+		{"empty", nil, false},
+		{"short", []byte{0x03}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsRDP(tt.b); got != tt.want {
+				t.Errorf("IsRDP(%v) = %v, want %v", tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsUDPPacketQUIC(t *testing.T) {
 	tests := []struct {
 		name string

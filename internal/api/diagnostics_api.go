@@ -47,6 +47,24 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 
 	diagEPs := s.buildEntryPointDiagnostics(entrypoints, epToRoutes, serviceMap, middlewareMap)
 	anomalies := s.detectAnomalies(ctx, routes)
+
+	// Add recently mitigated threats from database to ensure they show up in Diagnostics
+	// even if they are no longer producing traces (e.g. shunned at XDP level)
+	threats := telemetry.GetSecurityThreats(ctx, 50, 0)
+	seen := make(map[string]bool)
+	for _, a := range anomalies {
+		seen[a.Source+a.Type] = true
+	}
+
+	for _, t := range threats {
+		if t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned" {
+			if !seen[t.SourceIP+t.Type] {
+				anomalies = append(anomalies, s.threatToAnomaly(ctx, t))
+				seen[t.SourceIP+t.Type] = true
+			}
+		}
+	}
+
 	systemInfo := s.getSystemInfo(ctx)
 	deps := s.checkDependencies(ctx)
 	diagErrors := s.getRecentTLSErrors(epNames)
@@ -441,6 +459,40 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 	}, nil
 }
 
+func (s *ApiService) threatToAnomaly(ctx context.Context, t telemetry.SecurityThreat) *gateonv1.Anomaly {
+	severity := "low"
+	if t.Score >= 100 {
+		severity = "critical"
+	} else if t.Score >= 60 {
+		severity = "high"
+	} else if t.Score >= 30 {
+		severity = "medium"
+	}
+
+	a := &gateonv1.Anomaly{
+		Type:            t.Type,
+		Severity:        severity,
+		Description:     t.Details,
+		Timestamp:       t.Time.Format(time.RFC3339),
+		Source:          t.SourceIP,
+		Score:           t.Score,
+		Ja3:             t.JA3,
+		RouteId:         t.RouteID,
+		RequestUri:      t.RequestURI,
+		Category:        t.Category,
+		ActionTaken:     t.ActionTaken,
+		Mitigated:       t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned",
+		RequestHeaders:  t.RequestHeaders,
+		RequestBody:     t.RequestBody,
+		ResponseHeaders: t.ResponseHeaders,
+		ResponseBody:    t.ResponseBody,
+		UserAgent:       t.UserAgent,
+		HttpMethod:      t.Method,
+	}
+	populateAnomalyGeo(ctx, a, t.SourceIP)
+	return a
+}
+
 func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error) {
 	// Trigger detection pass to ensure threats are up to date in the DB
 	// whenever the UI requests the latest list.
@@ -455,39 +507,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 	threats := telemetry.GetSecurityThreats(ctx, limit, offset)
 	res := make([]*gateonv1.Anomaly, 0, len(threats))
 	for _, t := range threats {
-		severity := "low"
-		if t.Score >= 100 {
-			severity = "critical"
-		} else if t.Score >= 60 {
-			severity = "high"
-		} else if t.Score >= 30 {
-			severity = "medium"
-		}
-
-		a := &gateonv1.Anomaly{
-			Type:            t.Type,
-			Severity:        severity,
-			Description:     t.Details,
-			Timestamp:       t.Time.Format(time.RFC3339),
-			Source:          t.SourceIP,
-			Score:           t.Score,
-			Ja3:             t.JA3,
-			RouteId:         t.RouteID,
-			RequestUri:      t.RequestURI,
-			Category:        t.Category,
-			ActionTaken:     t.ActionTaken,
-			Mitigated:       t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned",
-			RequestHeaders:  t.RequestHeaders,
-			RequestBody:     t.RequestBody,
-			ResponseHeaders: t.ResponseHeaders,
-			ResponseBody:    t.ResponseBody,
-			UserAgent:       t.UserAgent,
-			HttpMethod:      t.Method,
-		}
-		// Try to populate geo if available (though here we only have the IP)
-		// We can use the same helper as in security_threat_detector.go
-		populateAnomalyGeo(ctx, a, t.SourceIP)
-		res = append(res, a)
+		res = append(res, s.threatToAnomaly(ctx, t))
 	}
 	return &gateonv1.ListSecurityThreatsResponse{Threats: res}, nil
 }

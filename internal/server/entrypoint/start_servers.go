@@ -204,7 +204,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 			} else {
 				var p TCPProxy
 				if deps.L4Resolver != nil {
-					p = deps.L4Resolver.ResolveTCP(ep)
+					p = deps.L4Resolver.ResolveTCP(ep, "")
 				}
 				wg.Go(func() {
 					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
@@ -264,13 +264,21 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 		return
 	}
 	peeked := peek[:n]
+	protocol := ""
 	if n > 0 && IsTCPAppHTTP(peeked) {
 		serveConnAsHTTP(conn, peeked, ep, deps)
 		return
 	}
+	if n > 0 && IsSSH(peeked) {
+		protocol = "ssh"
+		logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("SSH protocol detected on TCP entrypoint")
+	} else if n > 0 && IsRDP(peeked) {
+		protocol = "rdp"
+		logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("RDP protocol detected on TCP entrypoint")
+	}
 	var p TCPProxy
 	if deps.L4Resolver != nil {
-		p = deps.L4Resolver.ResolveTCP(ep)
+		p = deps.L4Resolver.ResolveTCP(ep, protocol)
 	}
 	if p != nil {
 		connWithPeek := newPeekedConn(conn, peeked)

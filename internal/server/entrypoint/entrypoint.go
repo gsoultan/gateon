@@ -73,7 +73,7 @@ type UDPProxy interface {
 // L4Resolver resolves L4 backends from Route -> Service. Nil for HTTP-only setups.
 // Returns interfaces so consumers depend on abstractions (DIP).
 type L4Resolver interface {
-	ResolveTCP(ep *gateonv1.EntryPoint) TCPProxy
+	ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy
 	ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy
 }
 
@@ -87,7 +87,9 @@ func WrapL4Resolver(r *l4.Resolver) L4Resolver {
 
 type l4ResolverAdapter struct{ r *l4.Resolver }
 
-func (a *l4ResolverAdapter) ResolveTCP(ep *gateonv1.EntryPoint) TCPProxy { return a.r.ResolveTCP(ep) }
+func (a *l4ResolverAdapter) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy {
+	return a.r.ResolveTCP(ep, protocol)
+}
 func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy { return a.r.ResolveUDP(ep) }
 
 // Deps holds dependencies needed to run entrypoints.

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -29,37 +28,7 @@ func (d *GeofenceDetector) Detect(ctx context.Context, data *DiagnosticData) []*
 	for _, tr := range data.Traces {
 		country, _, _, _ := telemetry.ResolveIPInfo(ctx, tr.SourceIP)
 		if country != "" && blockedMap[country] {
-			mitigated := false
-			// Check if country is already blocked in middlewares (geoip)
-			for _, mw := range data.Middlewares {
-				if mw.Type == "geoip" && mw.Config != nil {
-					if denyList, ok := mw.Config["deny_countries"]; ok {
-						for _, c := range strings.Split(denyList, ",") {
-							if strings.TrimSpace(c) == country {
-								mitigated = true
-								break
-							}
-						}
-					}
-					if !mitigated {
-						if allowList, ok := mw.Config["allow_countries"]; ok && allowList != "" {
-							allowed := false
-							for _, c := range strings.Split(allowList, ",") {
-								if strings.TrimSpace(c) == country {
-									allowed = true
-									break
-								}
-							}
-							if !allowed {
-								mitigated = true
-							}
-						}
-					}
-				}
-				if mitigated {
-					break
-				}
-			}
+			mitigated := data.IsCountryMitigated(country)
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           "geofence_violation",
