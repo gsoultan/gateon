@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -87,5 +89,73 @@ func recordAdvancedThreat(r *http.Request, ttype string, score float64, details 
 		Time:       time.Now(),
 		RouteID:    routeID,
 		RequestURI: r.URL.Path,
+		Category:   "xss", // Default to xss category for XSS threats
 	})
+}
+
+// XSSRecognition middleware scans request for common XSS patterns.
+// This provides lightweight recognition without full WAF overhead.
+func XSSRecognition(routeID string) Middleware {
+	keywords := []string{
+		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(",
+		"alert(", "prompt(", "confirm(", "<img", "<svg", "onerror",
+		"document.cookie", "window.location",
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			found := false
+			var details string
+
+			// Check query parameters
+			query, _ := url.QueryUnescape(r.URL.RawQuery)
+			query = strings.ToLower(query)
+			for _, k := range keywords {
+				if strings.Contains(query, k) {
+					found = true
+					details = fmt.Sprintf("XSS pattern '%s' found in query string", k)
+					break
+				}
+			}
+
+			// Check common headers
+			if !found {
+				for _, h := range []string{"User-Agent", "Referer", "X-Forwarded-For"} {
+					val := strings.ToLower(r.Header.Get(h))
+					for _, k := range keywords {
+						if strings.Contains(val, k) {
+							found = true
+							details = fmt.Sprintf("XSS pattern '%s' found in header %s", k, h)
+							break
+						}
+					}
+					if found {
+						break
+					}
+				}
+			}
+
+			// Check body if small
+			if !found && r.ContentLength > 0 && r.ContentLength < 64*1024 {
+				body, err := io.ReadAll(r.Body)
+				if err == nil {
+					r.Body = io.NopCloser(bytes.NewBuffer(body))
+					bodyLower := strings.ToLower(string(body))
+					for _, k := range keywords {
+						if strings.Contains(bodyLower, k) {
+							found = true
+							details = fmt.Sprintf("XSS pattern '%s' found in request body", k)
+							break
+						}
+					}
+				}
+			}
+
+			if found {
+				recordAdvancedThreat(r, "xss_detected", 50, details, routeID)
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }

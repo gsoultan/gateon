@@ -45,16 +45,29 @@ func NewResolver(routeStore config.RouteStore, serviceStore config.ServiceStore)
 	}
 }
 
-// SelectL4Route finds the best L4 route for the given entrypoint and type (tcp/udp).
-func SelectL4Route(ctx context.Context, epID string, routeType string, routeStore config.RouteStore) *gateonv1.Route {
+// SelectL4Route finds the best L4 route for the given entrypoint, type (tcp/udp), and optional protocol (ssh/rdp).
+func SelectL4Route(ctx context.Context, epID string, routeType string, protocol string, routeStore config.RouteStore) *gateonv1.Route {
 	rtLower := strings.ToLower(routeType)
+	protoLower := strings.ToLower(protocol)
 	routes := routeStore.List(ctx)
 	var best *gateonv1.Route
 	for _, rt := range routes {
 		if rt.Disabled || rt.ServiceId == "" {
 			continue
 		}
-		if strings.ToLower(rt.Type) != rtLower {
+		// Match by protocol if provided and route has a specific protocol type.
+		// If protocol is provided but route type is generic "tcp", we still match if it's the only one.
+		rtTypeLower := strings.ToLower(rt.Type)
+		if protoLower != "" && rtTypeLower == protoLower {
+			// Exact protocol match - highest priority
+			for _, e := range rt.Entrypoints {
+				if e == epID {
+					return rt // Return immediately for exact protocol match
+				}
+			}
+		}
+
+		if rtTypeLower != rtLower {
 			continue
 		}
 		for _, e := range rt.Entrypoints {
@@ -139,8 +152,9 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 }
 
 // ResolveTCP resolves the TCP backend pool for an L4 entrypoint from Route → Service.
-func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint) *TCPBackendPool {
-	cfg := r.resolveConfig(ep, "tcp")
+// An optional protocol (e.g. "ssh") can be provided for more specific routing.
+func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) *TCPBackendPool {
+	cfg := r.resolveConfig(ep, "tcp", protocol)
 	if cfg == nil || len(cfg.Backends) == 0 {
 		return nil
 	}
@@ -170,7 +184,7 @@ func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint) *TCPBackendPool {
 
 // ResolveUDP resolves the UDP proxy for an L4 entrypoint from Route → Service.
 func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) *UDPSessionProxy {
-	cfg := r.resolveConfig(ep, "udp")
+	cfg := r.resolveConfig(ep, "udp", "")
 	if cfg == nil || len(cfg.Backends) == 0 {
 		return nil
 	}
@@ -195,8 +209,8 @@ func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) *UDPSessionProxy {
 	return proxy
 }
 
-func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string) *L4Config {
-	rt := SelectL4Route(context.Background(), ep.Id, routeType, r.routeStore)
+func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, protocol string) *L4Config {
+	rt := SelectL4Route(context.Background(), ep.Id, routeType, protocol, r.routeStore)
 	if rt == nil {
 		return nil
 	}

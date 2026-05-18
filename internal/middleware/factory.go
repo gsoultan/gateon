@@ -108,6 +108,8 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return f.createGraphQLFirewall(cfg)
 	case "bot_management":
 		return f.createBotManagement(cfg)
+	case "xss_recognition":
+		return XSSRecognition(routeID), nil
 	case "schema_validation":
 		return SchemaValidation(SchemaValidationConfig{Schema: cfg["schema"]}), nil
 	case "honeypot":

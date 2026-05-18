@@ -93,7 +93,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 
 		if score >= int(threshold) {
 			severity := d.calculateSeverity(score, threshold)
-			mitigated := d.isIPBlocked(ip, data.Middlewares)
+			mitigated := data.IsIPMitigated(ip)
 			recommendation := d.getAdaptiveRecommendation(score, primaryType)
 
 			anomaly := &gateonv1.Anomaly{
@@ -532,22 +532,6 @@ func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons
 	return 0
 }
 
-func (d *SecurityThreatDetector) isIPBlocked(ip string, middlewares []*gateonv1.Middleware) bool {
-	for _, mw := range middlewares {
-		if mw.Type == "ipfilter" {
-			if denyList, ok := mw.Config["deny_list"]; ok {
-				ips := strings.Split(denyList, ",")
-				for _, blockedIP := range ips {
-					if strings.TrimSpace(blockedIP) == ip {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
 func (d *SecurityThreatDetector) calculateSeverity(score int, threshold float64) string {
 	if score >= int(threshold*4) {
 		return "critical"
@@ -586,7 +570,7 @@ func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, thre
 		if len(stats.IPs) > 3 {
 			mitigated := true
 			for ip := range stats.IPs {
-				if !d.isIPBlocked(ip, data.Middlewares) {
+				if !data.IsIPMitigated(ip) {
 					mitigated = false
 					break
 				}
