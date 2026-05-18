@@ -12,6 +12,7 @@ import (
 
 func TestClamAVManagerStatus(t *testing.T) {
 	mgr := NewClamAVManager(&gateonv1.ClamavConfig{})
+	mgr.isOverloaded = func() bool { return false }
 
 	status := mgr.GetScanStatus()
 	if status.IsRunning {
@@ -36,6 +37,7 @@ func TestClamAVManagerStatus(t *testing.T) {
 
 func TestClamAVManagerConcurrency(t *testing.T) {
 	mgr := NewClamAVManager(&gateonv1.ClamavConfig{})
+	mgr.isOverloaded = func() bool { return false }
 
 	// Simulating multiple calls
 	go mgr.RunFullScan(context.Background())

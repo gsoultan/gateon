@@ -25,17 +25,20 @@ type ScanStatus struct {
 }
 
 type ClamAVManager struct {
-	config *gateonv1.ClamavConfig
-	cron   *cron.Cron
-	status ScanStatus
-	mu     sync.Mutex
+	config       *gateonv1.ClamavConfig
+	cron         *cron.Cron
+	status       ScanStatus
+	mu           sync.Mutex
+	isOverloaded func() bool
 }
 
 func NewClamAVManager(cfg *gateonv1.ClamavConfig) *ClamAVManager {
-	return &ClamAVManager{
+	m := &ClamAVManager{
 		config: cfg,
 		cron:   cron.New(),
 	}
+	m.isOverloaded = m.isSystemOverloaded
+	return m
 }
 
 func (m *ClamAVManager) Start(ctx context.Context) error {
@@ -461,7 +464,9 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 	}
 
 	// Avoid starting a full scan if system load is too high
-	if m.isSystemOverloaded() {
+	if m.isOverloaded() {
+		m.status.LastScan = time.Now()
+		m.status.LastResult = "Skipped (High Load)"
 		m.mu.Unlock()
 		logger.L.LogWarn("skipping ClamAV full scan due to high system load")
 		return
