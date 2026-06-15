@@ -62,6 +62,7 @@ func StartServers(
 	limiter := entrypointRateLimiter()
 	deps := &Deps{
 		Port:             port,
+		EpStore:          epStore,
 		BaseHandler:      baseHandler,
 		Wrapped:          wrapped,
 		CORS:             mgmtCORS,

@@ -26,7 +26,56 @@ const (
 	quicKeepAlivePeriod       = 10 * time.Second
 	quicMaxIncomingStreams    = 1000
 	quicMaxIncomingUniStreams = 500
+
+	// defaultEntryPointTimeout is used when an entrypoint has no explicit
+	// read/write timeout configured.
+	defaultEntryPointTimeout = 15 * time.Second
 )
+
+// resolveEPTimeouts returns the current read and write timeouts for an
+// entrypoint, always reading the latest values from the store so that
+// configuration changes take effect immediately without a restart.
+// It falls back to the snapshot ep and finally to sane defaults.
+func resolveEPTimeouts(epID string, ep *gateonv1.EntryPoint, deps *Deps) (readTimeout, writeTimeout time.Duration) {
+	readMs, writeMs := int32(0), int32(0)
+	if ep != nil {
+		readMs, writeMs = ep.ReadTimeoutMs, ep.WriteTimeoutMs
+	}
+	if deps != nil && deps.EpStore != nil {
+		if latest, ok := deps.EpStore.Get(context.Background(), epID); ok && latest != nil {
+			readMs, writeMs = latest.ReadTimeoutMs, latest.WriteTimeoutMs
+		}
+	}
+	readTimeout = time.Duration(readMs) * time.Millisecond
+	writeTimeout = time.Duration(writeMs) * time.Millisecond
+	if readTimeout <= 0 {
+		readTimeout = defaultEntryPointTimeout
+	}
+	if writeTimeout <= 0 {
+		writeTimeout = defaultEntryPointTimeout
+	}
+	return readTimeout, writeTimeout
+}
+
+// dynamicTimeouts applies per-request read/write deadlines based on the live
+// entrypoint configuration. Because deadlines are set per request via
+// http.ResponseController (instead of baked into http.Server at startup),
+// updates to ReadTimeoutMs/WriteTimeoutMs take effect on the next request
+// without requiring a gateon restart.
+func dynamicTimeouts(ep *gateonv1.EntryPoint, deps *Deps, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
+		rc := http.NewResponseController(w)
+		now := time.Now()
+		if readTimeout > 0 {
+			_ = rc.SetReadDeadline(now.Add(readTimeout))
+		}
+		if writeTimeout > 0 {
+			_ = rc.SetWriteDeadline(now.Add(writeTimeout))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 type httpRunner struct{}
 
@@ -99,15 +148,16 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	}
 
 	server := &http.Server{
-		Addr:      addr,
-		Handler:   tcpHandler,
+		Addr: addr,
+		// Read/write timeouts are applied per request via dynamicTimeouts so
+		// configuration changes take effect immediately (no restart needed).
+		// They are intentionally left unset on the server here.
+		Handler:   dynamicTimeouts(ep, deps, tcpHandler),
 		TLSConfig: epTLSConfig,
 		ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
 			telemetry.GlobalDiagnostics.RecordTLSError(ep.Id, addr, err)
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       time.Duration(ep.ReadTimeoutMs) * time.Millisecond,
-		WriteTimeout:      time.Duration(ep.WriteTimeoutMs) * time.Millisecond,
 		IdleTimeout:       1 * time.Minute,
 		MaxHeaderBytes:    1 << 20, // 1MB
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
@@ -123,12 +173,6 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 				middleware.RemoveFingerprints(conn)
 			}
 		},
-	}
-	if server.ReadTimeout == 0 {
-		server.ReadTimeout = 15 * time.Second
-	}
-	if server.WriteTimeout == 0 {
-		server.WriteTimeout = 15 * time.Second
 	}
 	if deps.ShutdownRegistry != nil {
 		deps.ShutdownRegistry.Register(server.Shutdown)
