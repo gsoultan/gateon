@@ -117,14 +117,9 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 // peeked contains the bytes already read during inspection; they are replayed first.
 func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps *Deps) {
 	handler := deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps))
-	readTimeout := time.Duration(ep.ReadTimeoutMs) * time.Millisecond
-	writeTimeout := time.Duration(ep.WriteTimeoutMs) * time.Millisecond
-	if readTimeout == 0 {
-		readTimeout = 15 * time.Second
-	}
-	if writeTimeout == 0 {
-		writeTimeout = 15 * time.Second
-	}
+	// Read the latest timeouts from the store so config changes apply
+	// immediately to new connections without requiring a restart.
+	readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       readTimeout,

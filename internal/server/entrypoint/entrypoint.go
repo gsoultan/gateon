@@ -95,6 +95,7 @@ func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy { retur
 // Deps holds dependencies needed to run entrypoints.
 type Deps struct {
 	Port             string
+	EpStore          config.EntryPointStore
 	BaseHandler      http.Handler
 	Wrapped          GRPCWebHandler
 	CORS             CORSProvider // For management/internal
