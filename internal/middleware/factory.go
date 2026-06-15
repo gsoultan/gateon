@@ -11,6 +11,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/security/yara"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -219,11 +220,22 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 		}
 	}
 
+	scanTimeout, _ := time.ParseDuration(cfg["scan_timeout"])
+	maxConcurrentScans, _ := strconv.Atoi(cfg["max_concurrent_scans"])
+	maxScanBytes, _ := strconv.ParseInt(cfg["max_scan_bytes"], 10, 64)
+
 	return FileSecurity(FileSecurityConfig{
-		EnableClamAV:     parseBoolStrict(cfg["enable_clamav"], false),
-		ClamAVAddr:       clamavAddr,
-		BlockedMimeTypes: parseListStrict(cfg["blocked_mime_types"]),
-		AllowedMimeTypes: parseListStrict(cfg["allowed_mime_types"]),
-		MaxFileSize:      maxFileSize,
+		EnableClamAV:           parseBoolStrict(cfg["enable_clamav"], false),
+		ClamAVAddr:             clamavAddr,
+		BlockedMimeTypes:       parseListStrict(cfg["blocked_mime_types"]),
+		AllowedMimeTypes:       parseListStrict(cfg["allowed_mime_types"]),
+		MaxFileSize:            maxFileSize,
+		ScanTimeout:            scanTimeout,
+		FailOpen:               parseBoolStrict(cfg["fail_open"], false),
+		MaxConcurrentScans:     maxConcurrentScans,
+		MaxScanBytes:           maxScanBytes,
+		EnableSignatureScan:    parseBoolStrict(cfg["enable_signature_scan"], true),
+		SignatureRulesPath:     cfg["signature_rules_path"],
+		SignatureBlockSeverity: yara.Severity(cfg["signature_block_severity"]),
 	}), nil
 }

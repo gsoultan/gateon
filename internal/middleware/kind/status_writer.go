@@ -1,4 +1,4 @@
-package middleware
+package kind
 
 import (
 	"bufio"
@@ -29,7 +29,9 @@ func init() {
 	}
 }
 
-func getStatusString(code int) string {
+// StatusString returns the cached decimal string for an HTTP status code,
+// avoiding a per-call allocation for the common 100..599 range.
+func StatusString(code int) string {
 	if s, ok := statusCodes[code]; ok {
 		return s
 	}

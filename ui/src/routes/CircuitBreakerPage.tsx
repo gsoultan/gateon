@@ -23,11 +23,13 @@ import {
   IconHistory,
 } from "@tabler/icons-react";
 import { useRoutes, useAggStats, useCircuitBreakerEvents } from "../hooks/useGateon";
+import { useTableDensity } from "../hooks/useTableDensity";
 import { CircuitRow, type CircuitState } from "../components/CircuitRow";
 
 const PAGE_SIZE = 15;
 
 export default function CircuitBreakerPage() {
+  const density = useTableDensity();
   const [page, setPage] = useState(1);
   const { data, isLoading } = useRoutes({
     page: page - 1,
@@ -177,7 +179,7 @@ export default function CircuitBreakerPage() {
           </Center>
         ) : (
           <>
-            <Table verticalSpacing="md" withRowBorders highlightOnHover>
+            <Table {...density} withRowBorders highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Route</Table.Th>
@@ -231,7 +233,7 @@ export default function CircuitBreakerPage() {
             <Text c="dimmed">No circuit breaker events recorded yet.</Text>
           </Center>
         ) : (
-          <Table verticalSpacing="sm">
+          <Table {...density}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Time</Table.Th>

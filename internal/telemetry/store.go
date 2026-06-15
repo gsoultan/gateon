@@ -227,10 +227,10 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
 
-	if cache, err := lru.NewARC(10000); err == nil {
+	if cache, err := lru.NewARC(cacheSizeFromEnv(envScoreCacheSize, cacheNameScore, defaultScoreCacheSize)); err == nil {
 		st.scoreCache = cache
 	}
-	if cache, err := lru.NewARC(1000); err == nil {
+	if cache, err := lru.NewARC(cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, defaultUnmitigatedCacheSize)); err == nil {
 		st.unmitigatedCache = cache
 	}
 
@@ -517,60 +517,103 @@ func (s *pathStatsStore) prune() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	// 1. Path Stats & Domain Stats Retention
-	days := int(s.pathStatsRetentionDays.Load())
+	s.prunePathAndDomainStats(ctx)
+	s.pruneTraces()
+	s.pruneSecurityThreats(ctx)
+	s.pruneAuditLogs(ctx)
+
+	// Reclaim the disk space freed by the deletes above. Deleting rows/keys
+	// only marks them obsolete; without these steps SQLite and Pebble keep the
+	// on-disk footprint, defeating retention.
+	s.reclaimSQLDisk(ctx)
+}
+
+// effectiveRetention resolves a per-category retention to the global default
+// when the category-specific value is unset (<= 0).
+func (s *pathStatsStore) effectiveRetention(days int32) int {
+	d := int(days)
+	if d <= 0 {
+		d = int(s.retentionDays.Load())
+	}
+	return d
+}
+
+// prunePathAndDomainStats removes aggregated rows older than the retention window.
+func (s *pathStatsStore) prunePathAndDomainStats(ctx context.Context) {
+	days := s.effectiveRetention(s.pathStatsRetentionDays.Load())
 	if days <= 0 {
-		days = int(s.retentionDays.Load())
+		return
 	}
-	if days > 0 {
-		cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
-		q := s.dialect.Rebind(QueryPrunePathStats)
-		if _, err := s.db.ExecContext(ctx, q, cutoff); err != nil {
-			logger.Default().LogError("path stats: prune failed", "error", err)
-		}
+	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(QueryPrunePathStats), cutoff); err != nil {
+		logger.Default().LogError("path stats: prune failed", "error", err)
+	}
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(QueryPruneDomainStats), cutoff); err != nil {
+		logger.Default().LogError("domain stats: prune failed", "error", err)
+	}
+}
 
-		qDomain := s.dialect.Rebind(QueryPruneDomainStats)
-		if _, err := s.db.ExecContext(ctx, qDomain, cutoff); err != nil {
-			logger.Default().LogError("domain stats: prune failed", "error", err)
-		}
+// pruneTraces removes Pebble access-log entries older than the retention window
+// and compacts the freed key range so the deleted data is physically reclaimed.
+func (s *pathStatsStore) pruneTraces() {
+	days := s.effectiveRetention(s.accessLogRetentionDays.Load())
+	if days <= 0 {
+		return
 	}
+	cutoffTime := time.Now().AddDate(0, 0, -days)
+	startKey := make([]byte, 8) // All zeros
+	endKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(endKey, uint64(cutoffTime.UnixNano()))
 
-	// 2. Access Logs (Traces) Retention
-	accessDays := int(s.accessLogRetentionDays.Load())
-	if accessDays <= 0 {
-		accessDays = int(s.retentionDays.Load())
+	if err := s.pebble.DeleteRange(startKey, endKey, pebble.Sync); err != nil {
+		logger.Default().LogError("pebble: prune failed", "error", err)
+		return
 	}
-	if accessDays > 0 {
-		cutoffTime := time.Now().AddDate(0, 0, -accessDays)
-		startKey := make([]byte, 8) // All zeros
-		endKey := make([]byte, 8)
-		binary.BigEndian.PutUint64(endKey, uint64(cutoffTime.UnixNano()))
+	// DeleteRange only writes tombstones; compact the pruned range to actually
+	// reclaim disk space instead of waiting for an opportunistic compaction.
+	if err := s.pebble.Compact(startKey, endKey, true); err != nil {
+		logger.Default().LogError("pebble: compaction failed", "error", err)
+	}
+}
 
-		if err := s.pebble.DeleteRange(startKey, endKey, pebble.Sync); err != nil {
-			logger.Default().LogError("pebble: prune failed", "error", err)
-		}
+// pruneSecurityThreats removes recorded threats older than the retention window.
+func (s *pathStatsStore) pruneSecurityThreats(ctx context.Context) {
+	days := s.effectiveRetention(s.securityThreatRetentionDays.Load())
+	if days <= 0 {
+		return
 	}
+	cutoffTime := time.Now().AddDate(0, 0, -days)
+	q := s.dialect.Rebind("DELETE FROM security_threats WHERE timestamp < ?")
+	if _, err := s.db.ExecContext(ctx, q, cutoffTime); err != nil {
+		logger.Default().LogError("security_threats: prune failed", "error", err)
+	}
+}
 
-	// 3. Security Threats Retention
-	threatDays := int(s.securityThreatRetentionDays.Load())
-	if threatDays <= 0 {
-		threatDays = int(s.retentionDays.Load())
+// pruneAuditLogs removes audit rows older than the configured window when audit
+// retention is explicitly enabled.
+func (s *pathStatsStore) pruneAuditLogs(ctx context.Context) {
+	days := int(s.auditLogRetentionDays.Load())
+	if days <= 0 {
+		return
 	}
-	if threatDays > 0 {
-		cutoffTime := time.Now().AddDate(0, 0, -threatDays)
-		qThreats := s.dialect.Rebind("DELETE FROM security_threats WHERE timestamp < ?")
-		if _, err := s.db.ExecContext(ctx, qThreats, cutoffTime); err != nil {
-			logger.Default().LogError("security_threats: prune failed", "error", err)
-		}
-	}
+	cutoffTime := time.Now().AddDate(0, 0, -days)
+	q := s.dialect.Rebind("DELETE FROM audit_logs WHERE timestamp < ?")
+	_, _ = s.db.ExecContext(ctx, q, cutoffTime)
+}
 
-	// 4. Audit Logs (if any table exists)
-	auditDays := int(s.auditLogRetentionDays.Load())
-	if auditDays > 0 {
-		// Assuming an audit_logs table exists or will be added
-		cutoffTime := time.Now().AddDate(0, 0, -auditDays)
-		qAudit := s.dialect.Rebind("DELETE FROM audit_logs WHERE timestamp < ?")
-		_, _ = s.db.ExecContext(ctx, qAudit, cutoffTime)
+// reclaimSQLDisk returns the space freed by the SQLite deletes back to the OS.
+// It is a no-op for server databases (Postgres/MySQL) which manage their own
+// vacuuming. incremental_vacuum needs auto_vacuum=INCREMENTAL (set in
+// SQLitePragmas); the WAL checkpoint truncates the write-ahead log file.
+func (s *pathStatsStore) reclaimSQLDisk(ctx context.Context) {
+	if s.dialect.Driver != db.DriverSQLite {
+		return
+	}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA incremental_vacuum;"); err != nil {
+		logger.Default().LogError("sqlite: incremental_vacuum failed", "error", err)
+	}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE);"); err != nil {
+		logger.Default().LogError("sqlite: wal_checkpoint failed", "error", err)
 	}
 }
 

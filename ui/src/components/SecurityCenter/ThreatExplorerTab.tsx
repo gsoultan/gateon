@@ -25,6 +25,7 @@ import {
   IconUserCheck,
 } from "@tabler/icons-react";
 import { useSecurityThreats, useRemoveMitigation } from "../../hooks/useGateon";
+import { useTableDensity } from "../../hooks/useTableDensity";
 import { SecurityAnomalyModal } from "../SecurityAnomalyModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
 import type { Anomaly } from "../../types/gateon";
@@ -34,6 +35,7 @@ import { notifications } from "@mantine/notifications";
 
 export function ThreatExplorerTab() {
   const { data, isLoading, error, refetch } = useSecurityThreats(1000);
+  const density = useTableDensity();
   const removeMitigation = useRemoveMitigation();
   const [unmitigating, setUnmitigating] = useState<string | null>(null);
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
@@ -161,7 +163,7 @@ export function ThreatExplorerTab() {
         </Group>
 
         <Table.ScrollContainer minWidth={800}>
-          <Table verticalSpacing="sm" highlightOnHover>
+          <Table {...density} highlightOnHover>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Timestamp</Table.Th>

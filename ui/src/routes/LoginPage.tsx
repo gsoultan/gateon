@@ -16,7 +16,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   IconLock,
   IconUser,
@@ -36,6 +36,7 @@ export default function LoginPage() {
   const [step, setStep] = useState<"login" | "2fa">("login");
   const [tempUser, setTempUser] = useState<any>(null);
   const [tfaCode, setTfaCode] = useState("");
+  const tfaInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
 
@@ -63,6 +64,15 @@ export default function LoginPage() {
     }, 4000);
     return () => clearInterval(interval);
   }, []);
+
+  // Move focus to the verification code field when the 2FA step appears so
+  // keyboard and screen-reader users land on the only relevant input. This is
+  // an explicit, expected context change (preferred over the `autoFocus` prop).
+  useEffect(() => {
+    if (step === "2fa") {
+      tfaInputRef.current?.focus();
+    }
+  }, [step]);
 
   const form = useForm({
     initialValues: {
@@ -360,7 +370,7 @@ export default function LoginPage() {
                   radius="lg"
                   value={tfaCode}
                   onChange={(e) => setTfaCode(e.currentTarget.value)}
-                  autoFocus
+                  ref={tfaInputRef}
                   className="text-center tracking-[0.5em] font-mono"
                   styles={{
                     input: {

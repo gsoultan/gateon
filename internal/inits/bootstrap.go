@@ -30,7 +30,9 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 			if !hasAuthDatabase(gc.Auth) {
 				setDefaultSqliteConfig(gc.Auth)
 			}
-			_ = globalReg.Update(context.Background(), gc)
+			if err := globalReg.Update(context.Background(), gc); err != nil {
+				logger.L.LogError("failed to persist bootstrap auth defaults", "error", err)
+			}
 		}
 		if gc.Auth == nil {
 			gc.Auth = &gateonv1.AuthConfig{}
@@ -50,26 +52,34 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 			}
 		}
 		if gc.Otel != nil && gc.Otel.Endpoint != "" {
-			_ = os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", gc.Otel.Endpoint)
+			setEnv("OTEL_EXPORTER_OTLP_ENDPOINT", gc.Otel.Endpoint)
 		}
 		if gc.Redis != nil && gc.Redis.Addr != "" {
-			_ = os.Setenv("REDIS_ADDR", gc.Redis.Addr)
+			setEnv("REDIS_ADDR", gc.Redis.Addr)
 		}
 		if gc.Tls != nil {
-			_ = os.Setenv("GATEON_TLS_ENABLED", strconv.FormatBool(gc.Tls.Enabled))
-			_ = os.Setenv("GATEON_TLS_EMAIL", gc.Tls.Email)
+			setEnv("GATEON_TLS_ENABLED", strconv.FormatBool(gc.Tls.Enabled))
+			setEnv("GATEON_TLS_EMAIL", gc.Tls.Email)
 			if len(gc.Tls.Domains) > 0 {
-				_ = os.Setenv("GATEON_TLS_DOMAINS", strings.Join(gc.Tls.Domains, ","))
+				setEnv("GATEON_TLS_DOMAINS", strings.Join(gc.Tls.Domains, ","))
 			}
-			_ = os.Setenv("GATEON_TLS_MIN_VERSION", gc.Tls.MinTlsVersion)
-			_ = os.Setenv("GATEON_TLS_MAX_VERSION", gc.Tls.MaxTlsVersion)
-			_ = os.Setenv("GATEON_TLS_CLIENT_AUTH_TYPE", gc.Tls.ClientAuthType)
+			setEnv("GATEON_TLS_MIN_VERSION", gc.Tls.MinTlsVersion)
+			setEnv("GATEON_TLS_MAX_VERSION", gc.Tls.MaxTlsVersion)
+			setEnv("GATEON_TLS_CLIENT_AUTH_TYPE", gc.Tls.ClientAuthType)
 			if len(gc.Tls.CipherSuites) > 0 {
-				_ = os.Setenv("GATEON_TLS_CIPHER_SUITES", strings.Join(gc.Tls.CipherSuites, ","))
+				setEnv("GATEON_TLS_CIPHER_SUITES", strings.Join(gc.Tls.CipherSuites, ","))
 			}
 		}
 	}
 	return authManager
+}
+
+// setEnv sets an environment variable and logs (rather than silently ignoring)
+// any failure so a misconfigured environment surfaces in the logs.
+func setEnv(key, value string) {
+	if err := os.Setenv(key, value); err != nil {
+		logger.L.LogError("failed to set environment variable", "error", err, "key", key)
+	}
 }
 
 // hasAuthDatabase returns true if auth has any database configuration.

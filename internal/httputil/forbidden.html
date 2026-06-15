@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>403 — Access Forbidden · Gateon</title>
+<style>
+  :root {
+    --bg-0: #0b1020;
+    --bg-1: #111a33;
+    --accent-0: #8a6bff;
+    --accent-1: #2f7dff;
+    --text-0: #eef2ff;
+    --text-1: #9aa6c8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text-0);
+    background: radial-gradient(1200px 800px at 50% -10%, var(--bg-1), var(--bg-0) 60%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100%;
+    overflow: hidden;
+    position: relative;
+  }
+  /* Animated aurora blobs in the background */
+  .aurora {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.55;
+    z-index: 0;
+    animation: drift 16s ease-in-out infinite alternate;
+  }
+  .aurora.a {
+    width: 460px; height: 460px;
+    background: radial-gradient(circle, var(--accent-0), transparent 70%);
+    top: -120px; left: -80px;
+  }
+  .aurora.b {
+    width: 520px; height: 520px;
+    background: radial-gradient(circle, var(--accent-1), transparent 70%);
+    bottom: -160px; right: -120px;
+    animation-duration: 20s;
+    animation-delay: -4s;
+  }
+  @keyframes drift {
+    0%   { transform: translate(0, 0) scale(1); }
+    50%  { transform: translate(40px, 30px) scale(1.12); }
+    100% { transform: translate(-30px, -20px) scale(0.95); }
+  }
+
+  .card {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 48px 40px;
+    border-radius: 28px;
+    background: rgba(17, 26, 51, 0.55);
+    border: 1px solid rgba(138, 107, 255, 0.25);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    max-width: 540px;
+    width: calc(100% - 40px);
+    animation: rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(24px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .logo {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 18px;
+    animation: float 4s ease-in-out infinite;
+    filter: drop-shadow(0 12px 28px rgba(47, 125, 255, 0.45));
+  }
+  .logo svg { display: block; width: 100%; height: 100%; }
+  @keyframes float {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50%      { transform: translateY(-12px) rotate(-2deg); }
+  }
+  /* Pulsing ring around the logo */
+  .ring {
+    position: absolute;
+    top: 48px;
+    left: 50%;
+    width: 96px;
+    height: 96px;
+    margin-left: -48px;
+    border-radius: 28px;
+    border: 2px solid rgba(138, 107, 255, 0.6);
+    animation: pulse 2.6s ease-out infinite;
+    z-index: 0;
+  }
+  @keyframes pulse {
+    0%   { transform: scale(0.9); opacity: 0.8; }
+    70%  { transform: scale(1.6); opacity: 0; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+
+  .code {
+    font-size: 88px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    line-height: 1;
+    margin: 8px 0 6px;
+    background: linear-gradient(120deg, var(--accent-0), var(--accent-1), var(--accent-0));
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: shimmer 4s linear infinite;
+  }
+  @keyframes shimmer {
+    to { background-position: 200% center; }
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  p {
+    color: var(--text-1);
+    font-size: 15px;
+    line-height: 1.6;
+    margin: 0 auto;
+    max-width: 420px;
+  }
+  .reason {
+    margin-top: 18px;
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--text-0);
+    background: rgba(138, 107, 255, 0.16);
+    border: 1px solid rgba(138, 107, 255, 0.3);
+  }
+  .brand {
+    margin-top: 26px;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--text-1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .aurora, .logo, .code, .ring, .card { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="aurora a"></div>
+  <div class="aurora b"></div>
+  <main class="card" role="main">
+    <div class="ring" aria-hidden="true"></div>
+    <div class="logo" aria-hidden="true">
+      <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="gateonLogoGradient" x1="16" y1="12" x2="80" y2="84" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#8A6BFF" />
+            <stop offset="1" stop-color="#2F7DFF" />
+          </linearGradient>
+        </defs>
+        <rect x="8" y="8" width="80" height="80" rx="24" fill="url(#gateonLogoGradient)" />
+        <path d="M58.5 27H42C34.8203 27 29 32.8203 29 40V56C29 63.1797 34.8203 69 42 69H58.5C59.8807 69 61 67.8807 61 66.5C61 65.1193 59.8807 64 58.5 64H42C37.5817 64 34 60.4183 34 56V40C34 35.5817 37.5817 32 42 32H58.5C59.8807 32 61 30.8807 61 29.5C61 28.1193 59.8807 27 58.5 27Z" fill="white" />
+        <path d="M53 47H64.5C65.8807 47 67 48.1193 67 49.5C67 50.8807 65.8807 52 64.5 52H53C51.6193 52 50.5 50.8807 50.5 49.5C50.5 48.1193 51.6193 47 53 47Z" fill="white" />
+      </svg>
+    </div>
+    <div class="code">403</div>
+    <h1>Access Forbidden</h1>
+    <p>You don't have permission to access this resource. Your address or host is not on the allow-list for this gateway.</p>
+    <span class="reason">__REASON__</span>
+    <div class="brand">Gateon</div>
+  </main>
+</body>
+</html>

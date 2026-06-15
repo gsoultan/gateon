@@ -353,12 +353,12 @@ func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Requ
 			remoteAddr := clientIP(r)
 
 			if data.matches(remoteAddr) {
-				http.Error(w, "Forbidden", http.StatusForbidden)
+				httputil.WriteForbidden(w, r, "Forbidden")
 				return
 			}
 
 			if !data.allowed(remoteAddr) {
-				http.Error(w, "Forbidden", http.StatusForbidden)
+				httputil.WriteForbidden(w, r, "Forbidden")
 				return
 			}
 
@@ -391,7 +391,7 @@ func HostFilter(host string) Middleware {
 			h := httputil.StripPort(r.Host)
 
 			if !strings.EqualFold(h, host) {
-				http.Error(w, "Forbidden: Invalid Host", http.StatusForbidden)
+				httputil.WriteForbidden(w, r, "Forbidden: Invalid Host")
 				return
 			}
 			next.ServeHTTP(w, r)

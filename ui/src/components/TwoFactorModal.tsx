@@ -13,6 +13,7 @@ import {
   rem,
   Alert,
   SimpleGrid,
+  Paper,
 } from "@mantine/core";
 import { IconCheck, IconCopy, IconShieldCheck, IconInfoCircle } from "@tabler/icons-react";
 import { apiFetch } from "../hooks/useGateon";
@@ -147,7 +148,7 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
               value={code}
               onChange={(e) => setCode(e.currentTarget.value)}
               error={error}
-              autoFocus
+              data-autofocus
             />
             <Button onClick={verifyCode} loading={loading} fullWidth>
               Verify & Enable

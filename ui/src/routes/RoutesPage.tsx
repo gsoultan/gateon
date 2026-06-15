@@ -14,7 +14,7 @@ import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
-import type { Route } from "../types/gateon";
+import type { ListRoutesResponse, Route } from "../types/gateon";
 
 const RouteForm = lazy(() => import("../components/RouteForm"));
 const RouteList = lazy(() => import("../components/RouteList"));
@@ -77,16 +77,48 @@ export default function RoutesPage() {
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["routes"] });
-      notifications.show({ title: "Route Updated", message: "Pause/Resume applied.", color: "blue" });
+    // Optimistically flip `disabled` across every cached routes query so the
+    // pause/resume toggle feels instant, snapshotting the prior state so we can
+    // roll back if the server rejects the change.
+    onMutate: async (route: Route) => {
+      await queryClient.cancelQueries({ queryKey: ["routes"] });
+      const snapshots = queryClient.getQueriesData<ListRoutesResponse>({
+        queryKey: ["routes"],
+      });
+      queryClient.setQueriesData<ListRoutesResponse>(
+        { queryKey: ["routes"] },
+        (current) =>
+          current
+            ? {
+                ...current,
+                routes: current.routes.map((r) =>
+                  r.id === route.id ? { ...r, disabled: !route.disabled } : r,
+                ),
+              }
+            : current,
+      );
+      return { snapshots };
     },
-    onError: (err: unknown) => {
+    onSuccess: (_data, route) => {
+      notifications.show({
+        title: route.disabled ? "Route Resumed" : "Route Paused",
+        message: `"${route.name || route.id}" is now ${route.disabled ? "active" : "paused"}.`,
+        color: "blue",
+      });
+    },
+    onError: (err: unknown, _route, context) => {
+      // Restore the pre-mutation cache for every affected query.
+      context?.snapshots.forEach(([key, data]) => {
+        queryClient.setQueryData(key, data);
+      });
       notifications.show({
         title: "Error",
         message: getApiErrorMessage(err),
         color: "red",
       });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["routes"] });
     },
   });
 

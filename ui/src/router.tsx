@@ -13,7 +13,9 @@ import { lazy, Suspense } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { queryClient } from "./queryClient";
 import { Shell } from "./components/Shell";
+import { RouteErrorComponent, RouteFallback } from "./components/ErrorBoundary";
 import { useAuthStore } from "./store/useAuthStore";
+import { asSearchString } from "./hooks/useUrlFilters";
 import { apiFetch, restoreSessionFromCookie } from "./hooks/useGateon";
 
 const Dashboard = lazy(() => import("./routes/Dashboard"));
@@ -44,7 +46,7 @@ const rootRoute = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
   component: () => (
-    <Suspense fallback={null}>
+    <Suspense fallback={<RouteFallback />}>
       <Outlet />
     </Suspense>
   ),
@@ -226,6 +228,10 @@ const securityCommandCenterRoute = createRoute({
 const tracesRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/traces",
+  validateSearch: (search: Record<string, unknown>): { q?: string; route?: string } => ({
+    q: asSearchString(search.q),
+    route: asSearchString(search.route),
+  }),
   component: () => <TracesPage />,
 });
 
@@ -244,6 +250,9 @@ const diagnosticsRoute = createRoute({
 const auditLogsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/audit-logs",
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: asSearchString(search.q),
+  }),
   component: () => <AuditLogsPage />,
 });
 
@@ -280,6 +289,7 @@ export const router = createRouter({
   context: {
     queryClient,
   },
+  defaultErrorComponent: RouteErrorComponent,
 });
 
 declare module "@tanstack/react-router" {

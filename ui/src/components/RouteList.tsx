@@ -39,6 +39,7 @@ import {
   IconWorld,
 } from "@tabler/icons-react";
 import type { Route } from "../types/gateon";
+import { useTableDensity } from "../hooks/useTableDensity";
 
 export default function RouteList({
   limit,
@@ -62,6 +63,7 @@ export default function RouteList({
   const [pathFilter, setPathFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
   const pageSize = 10;
+  const density = useTableDensity();
 
   // Debounce the free-text inputs so we don't fire a request on every
   // keystroke. The input fields stay controlled by local state (so focus
@@ -234,8 +236,7 @@ export default function RouteList({
             loaderProps={{ size: "sm" }}
           />
           <Table
-            verticalSpacing="md"
-            horizontalSpacing="md"
+            {...density}
             withRowBorders
             highlightOnHover
             striped

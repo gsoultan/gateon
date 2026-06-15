@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Table, Text, Paper, Group, Box, Progress } from "@mantine/core";
 import { getCountryFlag, formatBytes } from "../../utils/format";
+import { useTableDensity } from "../../hooks/useTableDensity";
 
 interface CountryMetric {
   group: string;
@@ -23,6 +24,7 @@ export const CountryTrafficTable = memo(function CountryTrafficTable({
   totalRequests,
   isBandwidth = false,
 }: CountryTrafficTableProps) {
+  const density = useTableDensity();
   if (!data || data.length === 0) {
     return (
       <Paper p="md" radius="md" withBorder>
@@ -86,7 +88,7 @@ export const CountryTrafficTable = memo(function CountryTrafficTable({
       <Text size="xs" c="dimmed" mb="md">
         {subtitle}
       </Text>
-      <Table verticalSpacing="xs">
+      <Table {...density}>
         <Table.Tbody>{rows}</Table.Tbody>
       </Table>
     </Paper>

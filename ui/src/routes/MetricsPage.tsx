@@ -41,6 +41,7 @@ import {
   IconTransferIn,
 } from "@tabler/icons-react";
 import { useMetricsSnapshot } from "../hooks/useMetricsSnapshot";
+import { useTableDensity } from "../hooks/useTableDensity";
 import React, { useMemo, useState } from "react";
 import type {
   GoldenSignals,
@@ -269,6 +270,7 @@ function LatencyPercentilesCard({ gs }: { gs: GoldenSignals }) {
 }
 
 function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
+  const density = useTableDensity();
   const [routeFilter, setRouteFilter] = useState<string | null>(null);
 
   const sorted = useMemo(
@@ -344,7 +346,7 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
             </Text>
           ) : (
             <Table.ScrollContainer minWidth={700}>
-              <Table striped highlightOnHover>
+              <Table {...density} striped highlightOnHover>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Route</Table.Th>
@@ -797,6 +799,7 @@ function TLSCertificatesSection({ certs }: { certs: TLSCertMetric[] | null }) {
 }
 
 function TargetHealthSection({ targets }: { targets: TargetMetric[] | null }) {
+  const density = useTableDensity();
   if (!targets || targets.length === 0) {
     return (
       <Card shadow="sm" padding="lg" radius="lg" withBorder>
@@ -849,7 +852,7 @@ function TargetHealthSection({ targets }: { targets: TargetMetric[] | null }) {
         mb="md"
       />
       <Table.ScrollContainer minWidth={500}>
-        <Table striped highlightOnHover>
+        <Table {...density} striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Target</Table.Th>

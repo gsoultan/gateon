@@ -160,7 +160,9 @@ func (c *Controller) deleteIngress(ing *networkingv1.Ingress) {
 	routes := c.routeStore.List(ctx)
 	for _, r := range routes {
 		if strings.HasPrefix(r.Id, ingressID) {
-			_ = c.routeStore.Delete(ctx, r.Id)
+			if err := c.routeStore.Delete(ctx, r.Id); err != nil {
+				logger.L.LogError("failed to delete k8s ingress route", "error", err, "route", r.Id)
+			}
 		}
 	}
 }
@@ -213,7 +215,9 @@ func (c *Controller) syncHTTPRoute(hr *gatewayv1.HTTPRoute) {
 				DiscoveryUrl: fmt.Sprintf("dns:%s.%s.svc.cluster.local", string(ref.Name), hr.Namespace),
 				BackendType:  "http",
 			}
-			_ = c.serviceStore.Update(ctx, svc)
+			if err := c.serviceStore.Update(ctx, svc); err != nil {
+				logger.L.LogError("failed to sync k8s HTTPRoute service", "error", err, "service", svc.Name)
+			}
 
 			route := &gateonv1.Route{
 				Id:        routeID,
@@ -222,7 +226,9 @@ func (c *Controller) syncHTTPRoute(hr *gatewayv1.HTTPRoute) {
 				Type:      "http",
 				ServiceId: serviceID,
 			}
-			_ = c.routeStore.Update(ctx, route)
+			if err := c.routeStore.Update(ctx, route); err != nil {
+				logger.L.LogError("failed to sync k8s HTTPRoute route", "error", err, "route", route.Name)
+			}
 		}
 	}
 }
@@ -233,7 +239,9 @@ func (c *Controller) deleteHTTPRoute(hr *gatewayv1.HTTPRoute) {
 	routes := c.routeStore.List(ctx)
 	for _, r := range routes {
 		if strings.HasPrefix(r.Id, prefix) {
-			_ = c.routeStore.Delete(ctx, r.Id)
+			if err := c.routeStore.Delete(ctx, r.Id); err != nil {
+				logger.L.LogError("failed to delete k8s HTTPRoute route", "error", err, "route", r.Id)
+			}
 		}
 	}
 }

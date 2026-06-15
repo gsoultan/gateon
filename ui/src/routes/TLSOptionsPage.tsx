@@ -35,6 +35,7 @@ import { notifications } from "@mantine/notifications";
 import type { TLSOption } from "../types/gateon";
 import { useTLSOptions, apiFetch, getApiErrorMessage, useClientAuthorities } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
+import { useTableDensity } from "../hooks/useTableDensity";
 
 const TLS_VERSIONS = [
   { label: "TLS 1.0 (Insecure)", value: "TLS1.0" },
@@ -62,6 +63,7 @@ const CIPHER_SUITES = [
 
 export default function TLSOptionsPage() {
   const { canWrite } = usePermissions();
+  const density = useTableDensity();
   const queryClient = useQueryClient();
   const [opened, { open, close }] = useDisclosure(false);
   const [editingOption, setEditingOption] = useState<TLSOption | null>(null);
@@ -199,7 +201,7 @@ export default function TLSOptionsPage() {
 
       <Card withBorder padding={0} radius="lg" shadow="xs">
         <ScrollArea>
-          <Table verticalSpacing="md" horizontalSpacing="xl">
+          <Table {...density}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>ID / Name</Table.Th>

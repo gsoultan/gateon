@@ -226,7 +226,10 @@ func (m *Manager) ValidateCertificateFiles(certFile, keyFile, caFile string) (*g
 	}
 	var caData []byte
 	if caFile != "" {
-		caData, _ = os.ReadFile(config.ResolvePath(caFile))
+		caData, err = os.ReadFile(config.ResolvePath(caFile))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA file: %w", err)
+		}
 	}
 	return m.validateCertificate(&cert, caData, certFile, caFile), nil
 }

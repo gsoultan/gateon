@@ -50,6 +50,7 @@ import { DomainStatsTable } from "../components/Dashboard/DomainStatsTable";
 import { DistributionCard } from "../components/Dashboard/DistributionCard";
 import { CountryTrafficTable } from "../components/Dashboard/CountryTrafficTable";
 import { QuickActions } from "../components/Dashboard/QuickActions";
+import { OnboardingChecklist } from "../components/Dashboard/OnboardingChecklist";
 import {
   TOP_GROUP_LIMIT,
   HOUR_MS,
@@ -511,6 +512,8 @@ export default function Dashboard() {
           </Text>
         </div>
       </Group>
+
+      <OnboardingChecklist />
 
       <SimpleGrid cols={{ base: 1, md: 3 }} spacing="xl">
         <Box style={{ gridColumn: "span 2" }}>

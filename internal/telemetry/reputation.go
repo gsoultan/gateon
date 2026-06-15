@@ -51,9 +51,11 @@ var (
 )
 
 func init() {
+	size := cacheSizeFromEnv(envReputationCacheSize, cacheNameReputation, defaultReputationCacheSize)
+	perShard := max(size/reputationShards, 1)
 	repShards = make([]*reputationShard, reputationShards)
 	for i := range reputationShards {
-		cache, _ := lru.NewARC(100000 / reputationShards)
+		cache, _ := lru.NewARC(perShard)
 		repShards[i] = &reputationShard{
 			cache: cache,
 		}

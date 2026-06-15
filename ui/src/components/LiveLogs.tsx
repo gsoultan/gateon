@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useDeferredValue,
+  useCallback,
+} from "react";
 import {
   Card,
   Group,
@@ -32,6 +39,12 @@ interface LiveLogsProps {
   height?: number;
 }
 
+// MAX_LOGS bounds retained rows so the live stream cannot grow memory without
+// limit. FLUSH_INTERVAL_MS batches incoming WebSocket messages into a single
+// state update per tick, avoiding a re-render per message under high traffic.
+const MAX_LOGS = 100;
+const FLUSH_INTERVAL_MS = 300;
+
 export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const [logs, setLogs] = useState<{ id: string; raw: string }[]>([]);
   const logIdCounter = useRef(0);
@@ -46,6 +59,14 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   const apiUrl = useApiConfigStore((s) => s.apiUrl);
   const token = useAuthStore((s) => s.token);
   const [aiOpened, { open: openAI, close: closeAI }] = useDisclosure(false);
+
+  // Deferring the filter inputs keeps typing responsive: the (potentially heavy)
+  // re-filter over the log buffer runs against the deferred values, so keystrokes
+  // aren't blocked by the list re-render.
+  const deferredSearch = useDeferredValue(search);
+  const deferredRouteFilter = useDeferredValue(routeFilter);
+  const deferredStatusFilter = useDeferredValue(statusFilter);
+  const deferredClientIpFilter = useDeferredValue(clientIpFilter);
 
   useEffect(() => {
     const base = apiUrl.replace(/\/$/, "");
@@ -63,22 +84,34 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     const wsUrl = `${baseUrl}/v1/logs${authParam}`;
     const ws = new WebSocket(wsUrl);
 
+    // Buffer messages between flushes so a burst of WS frames coalesces into one
+    // React state update instead of one per frame (prevents live-stream jank).
+    const pending: { id: string; raw: string }[] = [];
+    const flush = () => {
+      if (pending.length === 0) return;
+      const batch = pending.splice(0, pending.length).reverse();
+      setLogs((prev) => [...batch, ...prev].slice(0, MAX_LOGS));
+    };
+    const flushTimer = setInterval(flush, FLUSH_INTERVAL_MS);
+
     ws.onopen = () => setConnected(true);
     ws.onclose = () => setConnected(false);
     ws.onmessage = (event) => {
-      if (!pausedRef.current) {
-        setLogs((prev) => {
-          const entry = {
-            id: `${Date.now()}-${logIdCounter.current++}`,
-            raw: event.data,
-          };
-          const newLogs = [entry, ...prev];
-          return newLogs.slice(0, 100);
-        });
+      if (pausedRef.current) return;
+      pending.push({
+        id: `${Date.now()}-${logIdCounter.current++}`,
+        raw: String(event.data),
+      });
+      // Cap the buffer too, so a flood while a tab is backgrounded stays bounded.
+      if (pending.length > MAX_LOGS) {
+        pending.splice(0, pending.length - MAX_LOGS);
       }
     };
 
-    return () => ws.close();
+    return () => {
+      clearInterval(flushTimer);
+      ws.close();
+    };
   }, [apiUrl, token]);
 
   const routeOptions = useMemo(
@@ -101,37 +134,46 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   );
 
   const filteredLogs = useMemo(() => {
+    const searchLower = deferredSearch.toLowerCase();
+    const ipLower = deferredClientIpFilter.toLowerCase();
     return logs.filter((entry) => {
       const log = entry.raw;
-      if (search) {
-        if (!log.toLowerCase().includes(search.toLowerCase())) return false;
+      if (deferredSearch) {
+        if (!log.toLowerCase().includes(searchLower)) return false;
       }
-      if (routeFilter || statusFilter || clientIpFilter) {
+      if (deferredRouteFilter || deferredStatusFilter || deferredClientIpFilter) {
         try {
           const parsed = JSON.parse(log) as Record<string, unknown>;
-          if (routeFilter) {
+          if (deferredRouteFilter) {
             const route = String(parsed.route ?? parsed.route_id ?? "").trim();
-            if (route !== routeFilter) return false;
+            if (route !== deferredRouteFilter) return false;
           }
-          if (statusFilter) {
+          if (deferredStatusFilter) {
             const s = String(parsed.status ?? "");
-            if (s !== statusFilter && !s.startsWith(statusFilter)) return false;
+            if (s !== deferredStatusFilter && !s.startsWith(deferredStatusFilter))
+              return false;
           }
-          if (clientIpFilter) {
+          if (deferredClientIpFilter) {
             const ip = String(
               parsed.ip ?? parsed.remote_addr ?? parsed.client_ip ?? "",
             ).toLowerCase();
-            if (!ip.includes(clientIpFilter.toLowerCase())) return false;
+            if (!ip.includes(ipLower)) return false;
           }
         } catch {
-          if (routeFilter || statusFilter || clientIpFilter) return false;
+          return false;
         }
       }
       return true;
     });
-  }, [logs, search, routeFilter, statusFilter, clientIpFilter]);
+  }, [
+    logs,
+    deferredSearch,
+    deferredRouteFilter,
+    deferredStatusFilter,
+    deferredClientIpFilter,
+  ]);
 
-  const getLogColor = (log: string) => {
+  const getLogColor = useCallback((log: string) => {
     if (log.includes('"level":"error"') || log.includes("ERROR"))
       return "red.4";
     if (log.includes('"level":"warn"') || log.includes("WARN"))
@@ -139,9 +181,9 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
     if (log.includes('"level":"debug"') || log.includes("DEBUG"))
       return "gray.5";
     return "blue.4";
-  };
+  }, []);
 
-  const formatLog = (log: string) => {
+  const formatLog = useCallback((log: string) => {
     try {
       const parsed = JSON.parse(log) as Record<string, any>;
       const { time, level, message, ...rest } = parsed;
@@ -198,7 +240,7 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
         </Text>
       );
     }
-  };
+  }, [getLogColor]);
 
   return (
     <Card shadow="xs" padding="lg" radius="lg" withBorder>

@@ -51,6 +51,9 @@ jobs:
       - name: Tidy modules
         run: go mod tidy
 
+      - name: Install Syft (SBOM generator)
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

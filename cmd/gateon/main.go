@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
 	"syscall"
 
 	"github.com/gsoultan/gateon/internal/alerting"
@@ -17,7 +16,6 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/ebpf"
-	"github.com/gsoultan/gateon/internal/ha"
 	"github.com/gsoultan/gateon/internal/inits"
 	"github.com/gsoultan/gateon/internal/install"
 	"github.com/gsoultan/gateon/internal/k8s"
@@ -40,11 +38,6 @@ func main() {
 	uiPath := flag.String("ui-path", "", "Path to UI assets (serves from disk instead of embed)")
 	buildUI := flag.Bool("build-ui", false, "Build UI assets before starting")
 	flag.Parse()
-
-	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
-		fmt.Fprintf(os.Stderr, "Error: Gateon must run as root on Linux\n")
-		os.Exit(1)
-	}
 
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
@@ -77,7 +70,10 @@ func main() {
 		buildUIAssets(uiPath)
 	}
 
-	_ = logger.Init(logger.IsProd())
+	if err := logger.Init(logger.IsProd()); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 	defer logger.Sync()
 
 	globalReg, globalFile := initConfigRegistries()
@@ -99,66 +95,68 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Opt-in runtime profiling (off unless GATEON_PPROF_ADDR is set).
+	startPprofServer(ctx)
+
 	initTelemetry(globalReg, ctx)
 
-	var ebpfManager ebpf.Manager
+	// The eBPF subsystem is driven through a Holder: an atomic indirection that
+	// every consumer (alerting, the request-path server, the metrics poll loop)
+	// references, so the security supervisor can hot-swap the underlying eBPF
+	// manager when Ebpf.Enabled toggles — without invalidating any captured
+	// pointer or forcing a restart. The supervisor's first reconcile applies the
+	// boot-time config (privilege gating, Start, poll loop).
+	ebpfHolder := ebpf.NewHolder(nil)
 	var wafUpdater *middleware.WAFUpdater
-	var gitOpsManager *config.GitOpsManager
 	var clamavManager *security.ClamAVManager
 
 	if gc := globalReg.Get(ctx); gc != nil {
-		if gc.Ebpf != nil && gc.Ebpf.Enabled {
-			ebpfManager = ebpf.NewEbpfManager(gc.Ebpf)
-			go ebpfManager.Start(ctx)
-			go telemetry.StartEBpFPollLoop(ctx, ebpfManager)
-		}
-
-		alerting.Init(gc.Alerting, ebpfManager)
+		alerting.Init(gc.Alerting, ebpfHolder)
 		telemetry.SetAlertingHandler(alerting.HandleThreat)
 		databaseURL := db.AuthDatabaseURL(gc.Auth)
 		if err := audit.Init(gc.Audit, databaseURL); err != nil {
 			logger.L.LogError("failed to init audit manager", "error", err)
 		}
 
-		if gc.Management != nil && gc.Management.Gitops != nil && gc.Management.Gitops.Enabled {
-			gitOpsManager = config.NewGitOpsManager(gc.Management.Gitops, globalReg)
-			gitOpsManager.Start(ctx)
-		}
 		if gc.Ha != nil && gc.Ha.Enabled {
-			haManager := ha.NewHAManager(gc.Ha)
-			go haManager.Start(ctx)
+			// Gossip reputation sync exposes no stop hook, so it stays boot-only.
 			if err := telemetry.InitGossip(gc.Ha); err != nil {
 				logger.L.LogError("failed to init gossip reputation sync", "error", err)
 			}
 		}
-		if gc.AnomalyDetection != nil && gc.AnomalyDetection.Enabled {
-			ad, err := telemetry.NewAnomalyDetector(gc.AnomalyDetection, ebpfManager)
-			if err != nil {
-				logger.L.LogError("failed to init anomaly detector", "error", err)
-			} else {
-				go ad.Start(ctx)
-			}
-		}
 		wafUpdater = middleware.NewWAFUpdater(globalReg, ".")
-		if gc.Waf != nil {
-			if gc.Waf.AutoUpdateRules {
-				go wafUpdater.Start(ctx)
-			}
-			if gc.Waf.Clamav != nil {
-				clamavManager = security.NewClamAVManager(gc.Waf.Clamav)
-				if err := clamavManager.Start(ctx); err != nil {
-					logger.L.LogError("failed to start ClamAV manager", "error", err)
-				}
-			}
-		}
+		// The WAF auto-update loop and ClamAV manager lifecycles are managed by the
+		// security supervisor below so toggling Waf.AutoUpdateRules / Waf.Clamav
+		// takes effect without a restart. The ClamAV manager is always created
+		// (even when initially disabled) so it can be reconfigured at runtime; the
+		// supervisor's first reconcile applies the boot-time config (cron + auto-install).
+		clamavManager = security.NewClamAVManager(gc.GetWaf().GetClamav())
 	}
+
+	// Manage hot-reloadable background security subsystems (anomaly detection,
+	// GitOps, HA, WAF rule auto-update). Toggling these in the config now takes
+	// effect without a restart. Pass a properly-nil interface when the updater
+	// was not created, so the supervisor's nil check works as intended.
+	var wafAuto wafAutoUpdater
+	if wafUpdater != nil {
+		wafAuto = wafUpdater
+	}
+	var clamavReconf clamavReconfigurer
+	if clamavManager != nil {
+		clamavReconf = clamavManager
+	}
+	newSecuritySupervisor(ctx, globalReg, ebpfHolder, wafAuto, clamavReconf).Run()
+
+	// Correlate recorded threats into MITRE-annotated incidents and (when
+	// configured via GATEON_SIEM_*) export them to an external SIEM.
+	startThreatPipeline(ctx, version())
 
 	port := getPort()
 	s, err := server.NewServer(
 		server.WithLogger(logger.Default()),
 		server.WithGlobalRegistry(globalReg),
 		server.WithAuthManager(authManager),
-		server.WithEbpfManager(ebpfManager),
+		server.WithEbpfManager(ebpfHolder),
 		server.WithWafUpdater(wafUpdater),
 		server.WithClamAVManager(clamavManager),
 		server.WithPort(port),

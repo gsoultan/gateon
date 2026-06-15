@@ -1,11 +1,13 @@
-import React from 'react';
 import { Container, Title, Text, Card, Table, Badge, Group, Stack, TextInput, ActionIcon, Tooltip, Paper } from '@mantine/core';
 import { IconSearch, IconRefresh, IconFingerprint, IconShieldCheck, IconShieldX } from '@tabler/icons-react';
 import { useAuditLogs } from '../hooks/useAuditLogs';
+import { useUrlFilters } from '../hooks/useUrlFilters';
 import { format } from 'date-fns';
 
 export default function AuditLogsPage() {
-  const [search, setSearch] = React.useState('');
+  // Filter state lives in the URL so a filtered audit view is shareable.
+  const [filters, setFilters] = useUrlFilters<{ q: string }>();
+  const search = filters.q ?? '';
   const { data, isLoading, refetch, isFetching } = useAuditLogs(100);
 
   const filteredLogs = data?.logs?.filter(log => 
@@ -43,7 +45,7 @@ export default function AuditLogsPage() {
             placeholder="Search audit logs..."
             leftSection={<IconSearch size={16} />}
             value={search}
-            onChange={(e) => setSearch(e.currentTarget.value)}
+            onChange={(e) => setFilters({ q: e.currentTarget.value })}
             mb="md"
           />
 

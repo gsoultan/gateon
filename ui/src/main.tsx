@@ -5,6 +5,8 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './queryClient'
 import { Notifications } from '@mantine/notifications'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { I18nProvider } from './i18n'
 import '@mantine/core/styles.css'
 import '@mantine/charts/styles.css'
 import '@mantine/notifications/styles.css'
@@ -135,9 +137,13 @@ function Root() {
       storageKey="gateon-color-scheme"
     >
       <Notifications position="top-right" zIndex={2000} />
-      <QueryClientProvider client={queryClient}>
-        <App />
-      </QueryClientProvider>
+      <ErrorBoundary>
+        <I18nProvider>
+          <QueryClientProvider client={queryClient}>
+            <App />
+          </QueryClientProvider>
+        </I18nProvider>
+      </ErrorBoundary>
     </MantineProvider>
   )
 }

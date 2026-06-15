@@ -29,6 +29,22 @@ func NewWAFUpdater(globalStore config.GlobalConfigStore, rulesPath string) *WAFU
 	}
 }
 
+// LastUpdated returns the timestamp of the last successful WAF rule update,
+// read from the persisted status file. The zero time means rules have never
+// been updated by the updater (e.g. bundled rules are still in use).
+func (u *WAFUpdater) LastUpdated() time.Time {
+	statusFile := filepath.Join(u.rulesPath, "last_update.txt")
+	data, err := os.ReadFile(statusFile) // #nosec G304 -- path derived from operator config
+	if err != nil {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
 // Start starts the periodic update process.
 func (u *WAFUpdater) Start(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Hour)
@@ -88,7 +104,9 @@ func (u *WAFUpdater) PerformUpdate(force bool) error {
 		return err
 	}
 
-	_ = os.WriteFile(statusFile, []byte(time.Now().Format(time.RFC3339)), 0644)
+	if err := os.WriteFile(statusFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
+		logger.L.LogError("failed to persist WAF rules update timestamp", "error", err, "file", statusFile)
+	}
 	logger.L.LogInfo("WAF rules updated successfully")
 
 	// Invalidate cache to apply new rules
@@ -151,8 +169,16 @@ func (u *WAFUpdater) unzip(src, dest string) error {
 
 		fpath := filepath.Join(dest, relPath)
 
+		// Guard against zip-slip: reject entries that resolve outside dest.
+		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			logger.L.LogError("skipping unsafe WAF rule archive entry", "entry", f.Name)
+			continue
+		}
+
 		if f.FileInfo().IsDir() {
-			_ = os.MkdirAll(fpath, os.ModePerm)
+			if err := os.MkdirAll(fpath, os.ModePerm); err != nil {
+				return err
+			}
 			continue
 		}
 
