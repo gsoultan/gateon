@@ -18,7 +18,11 @@ import {
   Center,
   Code,
   Tooltip,
+  LoadingOverlay,
+  Loader,
+  CloseButton,
 } from "@mantine/core";
+import { useDebouncedValue } from "@mantine/hooks";
 import { useRoutes } from "../hooks/useGateon";
 import { RouteStats } from "./RouteStats";
 import { RouteSparklineCell } from "./RouteSparklineCell";
@@ -59,13 +63,20 @@ export default function RouteList({
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
   const pageSize = 10;
 
-  const { data, isLoading } = useRoutes({
+  // Debounce the free-text inputs so we don't fire a request on every
+  // keystroke. The input fields stay controlled by local state (so focus
+  // is preserved) while the query only runs against the debounced values.
+  const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [debouncedHost] = useDebouncedValue(hostFilter, 300);
+  const [debouncedPath] = useDebouncedValue(pathFilter, 300);
+
+  const { data, isLoading, isFetching } = useRoutes({
     page: page - 1,
     page_size: limit || pageSize,
-    search: search || undefined,
+    search: debouncedSearch.trim() || undefined,
     type: typeFilter && typeFilter !== "all" ? typeFilter : undefined,
-    host: hostFilter.trim() || undefined,
-    path: pathFilter.trim() || undefined,
+    host: debouncedHost.trim() || undefined,
+    path: debouncedPath.trim() || undefined,
     status: statusFilter !== "all" ? statusFilter : undefined,
   });
 
@@ -107,7 +118,25 @@ export default function RouteList({
             <Group gap="xs" wrap="wrap">
               <TextInput
                 placeholder="Search ID, name, rule, service..."
-                leftSection={<IconSearch size={16} />}
+                leftSection={
+                  isFetching ? (
+                    <Loader size={14} />
+                  ) : (
+                    <IconSearch size={16} />
+                  )
+                }
+                rightSection={
+                  search ? (
+                    <CloseButton
+                      size="sm"
+                      aria-label="Clear search"
+                      onClick={() => {
+                        setSearch("");
+                        setPage(1);
+                      }}
+                    />
+                  ) : null
+                }
                 value={search}
                 onChange={(e) => {
                   setSearch(e.currentTarget.value);
@@ -120,6 +149,18 @@ export default function RouteList({
               <TextInput
                 placeholder="Host (e.g. api.example.com)"
                 leftSection={<IconWorld size={14} />}
+                rightSection={
+                  hostFilter ? (
+                    <CloseButton
+                      size="sm"
+                      aria-label="Clear host filter"
+                      onClick={() => {
+                        setHostFilter("");
+                        setPage(1);
+                      }}
+                    />
+                  ) : null
+                }
                 value={hostFilter}
                 onChange={(e) => {
                   setHostFilter(e.currentTarget.value);
@@ -130,6 +171,18 @@ export default function RouteList({
               />
               <TextInput
                 placeholder="Path (e.g. /api/v1)"
+                rightSection={
+                  pathFilter ? (
+                    <CloseButton
+                      size="sm"
+                      aria-label="Clear path filter"
+                      onClick={() => {
+                        setPathFilter("");
+                        setPage(1);
+                      }}
+                    />
+                  ) : null
+                }
                 value={pathFilter}
                 onChange={(e) => {
                   setPathFilter(e.currentTarget.value);
@@ -173,12 +226,20 @@ export default function RouteList({
           )}
         </Group>
 
-        <Box style={{ overflowX: "auto" }}>
+        <Box pos="relative" style={{ overflowX: "auto", borderRadius: "var(--mantine-radius-md)" }}>
+          <LoadingOverlay
+            visible={isFetching && !isLoading}
+            zIndex={5}
+            overlayProps={{ blur: 1, backgroundOpacity: 0.15 }}
+            loaderProps={{ size: "sm" }}
+          />
           <Table
             verticalSpacing="md"
             horizontalSpacing="md"
             withRowBorders
             highlightOnHover
+            striped
+            stickyHeader
           >
             <Table.Thead>
               <Table.Tr bg="var(--mantine-color-default-hover)">

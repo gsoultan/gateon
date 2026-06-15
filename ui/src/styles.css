@@ -33,3 +33,22 @@ body {
 .hover-bg-default:hover {
   background-color: var(--mantine-color-default-hover);
 }
+
+/*
+ * Tailwind's preflight applies `max-width: 100%` and `height: auto` to all
+ * `img`/`svg` elements, which collapses Leaflet's map tiles so the map never
+ * renders (appears as a blank background in both dark and light themes).
+ * Restore Leaflet's own image sizing so the map tiles display correctly.
+ */
+.leaflet-container img,
+.leaflet-container svg {
+  max-width: none !important;
+  max-height: none !important;
+  height: auto;
+}
+
+.leaflet-tile {
+  max-width: none !important;
+  width: 256px;
+  height: 256px;
+}

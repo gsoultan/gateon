@@ -21,6 +21,8 @@ import {
   ThemeIcon,
   Code,
   Tabs,
+  Pagination,
+  Center,
 } from "@mantine/core";
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
 import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
@@ -300,6 +302,30 @@ const DiagnosticsPage: React.FC = () => {
   const activeThreats = useMemo(() => sortedAnomalies.filter(a => !a.mitigated), [sortedAnomalies]);
   const mitigatedThreats = useMemo(() => sortedAnomalies.filter(a => a.mitigated), [sortedAnomalies]);
 
+  const THREATS_PER_PAGE = 6;
+  const [activePage, setActivePage] = useState(1);
+  const [mitigatedPage, setMitigatedPage] = useState(1);
+
+  const activeTotalPages = Math.max(1, Math.ceil(activeThreats.length / THREATS_PER_PAGE));
+  const mitigatedTotalPages = Math.max(1, Math.ceil(mitigatedThreats.length / THREATS_PER_PAGE));
+
+  // Clamp current pages when the underlying lists shrink (e.g. after refresh).
+  useEffect(() => {
+    setActivePage(p => Math.min(p, activeTotalPages));
+  }, [activeTotalPages]);
+  useEffect(() => {
+    setMitigatedPage(p => Math.min(p, mitigatedTotalPages));
+  }, [mitigatedTotalPages]);
+
+  const pagedActiveThreats = useMemo(
+    () => activeThreats.slice((activePage - 1) * THREATS_PER_PAGE, activePage * THREATS_PER_PAGE),
+    [activeThreats, activePage]
+  );
+  const pagedMitigatedThreats = useMemo(
+    () => mitigatedThreats.slice((mitigatedPage - 1) * THREATS_PER_PAGE, mitigatedPage * THREATS_PER_PAGE),
+    [mitigatedThreats, mitigatedPage]
+  );
+
   const getStats = (threats: Anomaly[]) => {
     return {
       critical: threats.filter(t => t.severity.toLowerCase() === "critical").length,
@@ -477,17 +503,31 @@ const DiagnosticsPage: React.FC = () => {
                   </SimpleGrid>
 
                   {activeThreats.length > 0 ? (
-                    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                      {activeThreats.map((a) => (
-                        <AnomalyCard 
-                          key={`${a.type}-${a.source}-${a.timestamp}`} 
-                          anomaly={a} 
-                          onApply={() => handleApplyRecommendation(a)}
-                          applying={applying === `${a.type}-${a.source}`}
-                          onTrace={openVisualizer}
-                        />
-                      ))}
-                    </SimpleGrid>
+                    <>
+                      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                        {pagedActiveThreats.map((a) => (
+                          <AnomalyCard 
+                            key={`${a.type}-${a.source}-${a.timestamp}`} 
+                            anomaly={a} 
+                            onApply={() => handleApplyRecommendation(a)}
+                            applying={applying === `${a.type}-${a.source}`}
+                            onTrace={openVisualizer}
+                          />
+                        ))}
+                      </SimpleGrid>
+                      {activeTotalPages > 1 && (
+                        <Center mt="xs">
+                          <Pagination
+                            total={activeTotalPages}
+                            value={activePage}
+                            onChange={setActivePage}
+                            color="red"
+                            size="sm"
+                            radius="md"
+                          />
+                        </Center>
+                      )}
+                    </>
                   ) : (
                     <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
                       <Stack align="center" gap="xs">
@@ -510,17 +550,31 @@ const DiagnosticsPage: React.FC = () => {
                   </SimpleGrid>
 
                   {mitigatedThreats.length > 0 ? (
-                    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                      {mitigatedThreats.map((a) => (
-                        <AnomalyCard 
-                          key={`${a.type}-${a.source}-${a.timestamp}`} 
-                          anomaly={a} 
-                          onApply={() => handleApplyRecommendation(a)}
-                          applying={applying === `${a.type}-${a.source}`}
-                          onTrace={openVisualizer}
-                        />
-                      ))}
-                    </SimpleGrid>
+                    <>
+                      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                        {pagedMitigatedThreats.map((a) => (
+                          <AnomalyCard 
+                            key={`${a.type}-${a.source}-${a.timestamp}`} 
+                            anomaly={a} 
+                            onApply={() => handleApplyRecommendation(a)}
+                            applying={applying === `${a.type}-${a.source}`}
+                            onTrace={openVisualizer}
+                          />
+                        ))}
+                      </SimpleGrid>
+                      {mitigatedTotalPages > 1 && (
+                        <Center mt="xs">
+                          <Pagination
+                            total={mitigatedTotalPages}
+                            value={mitigatedPage}
+                            onChange={setMitigatedPage}
+                            color="teal"
+                            size="sm"
+                            radius="md"
+                          />
+                        </Center>
+                      )}
+                    </>
                   ) : (
                     <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
                       <Stack align="center" gap="xs">
