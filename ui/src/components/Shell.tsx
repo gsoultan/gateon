@@ -15,11 +15,14 @@ import {
   Stack,
   Divider,
   Box,
+  Avatar,
+  UnstyledButton,
   useMantineColorScheme,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { useGateonStatus } from "../hooks/useGateon";
+import { apiFetch, useGateonStatus } from "../hooks/useGateon";
+import { queryClient } from "../queryClient";
 import { usePermissions } from "../hooks/usePermissions";
 import { GlobalHealthBar } from "./GlobalHealthBar";
 import { useAuthStore } from "../store/useAuthStore";
@@ -38,7 +41,6 @@ import {
   IconRefresh,
   IconUsers,
   IconAccessPoint,
-  IconPower,
   IconChevronLeft,
   IconChevronRight,
   IconSun,
@@ -50,6 +52,8 @@ import {
   IconTimeline,
   IconChartBar,
   IconStethoscope,
+  IconUser,
+  IconLogout,
 } from "@tabler/icons-react";
 
 export function Shell() {
@@ -267,17 +271,53 @@ export function Shell() {
           >
             Follow System
           </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+
+      <Menu shadow="md" width={220} position="bottom-end">
+        <Menu.Target>
+          <Tooltip label="Profile">
+            <UnstyledButton aria-label="Profile menu">
+              <Avatar color="blue" radius="xl" size={34}>
+                {user?.username?.charAt(0)?.toUpperCase() || (
+                  <IconUser size={18} />
+                )}
+              </Avatar>
+            </UnstyledButton>
+          </Tooltip>
+        </Menu.Target>
+        <Menu.Dropdown p={4}>
+          <Menu.Label>
+            {user?.username || "Account"}
+            {user?.role ? ` (${user.role})` : ""}
+          </Menu.Label>
+          <Menu.Item
+            leftSection={<IconUser size={16} stroke={1.5} />}
+            component={Link as any}
+            to="/profile"
+          >
+            Profile
+          </Menu.Item>
           <Menu.Divider />
-          <Menu.Label>Account</Menu.Label>
           <Menu.Item
             color="red"
-            leftSection={<IconPower size={16} stroke={1.5} />}
+            leftSection={<IconLogout size={16} stroke={1.5} />}
             onClick={() => {
-              logout();
-              void navigate({ to: "/login" });
+              void (async () => {
+                try {
+                  await apiFetch("/v1/logout", { method: "POST" });
+                } catch {
+                  // Ignore network errors; clear local session regardless.
+                } finally {
+                  // Drop cached, potentially sensitive data from this session.
+                  queryClient.clear();
+                  logout();
+                  void navigate({ to: "/login" });
+                }
+              })();
             }}
           >
-            Logout session
+            Sign out
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>

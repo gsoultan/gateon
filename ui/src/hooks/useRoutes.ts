@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, buildQueryString } from "./api";
 import type { RouteListParams } from "./api";
 import type { ListRoutesResponse } from "../types/gateon";
@@ -11,5 +11,10 @@ export function useRoutes(params?: RouteListParams) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
+    // Keep showing the previous page/results while a new query (e.g. a
+    // search keystroke) is in flight. This prevents the list from
+    // unmounting into a loading skeleton on every keystroke, which was
+    // causing the search inputs to lose focus.
+    placeholderData: keepPreviousData,
   });
 }
