@@ -66,8 +66,10 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			return
 		}
 		certsDir := filepath.Join(config.DataDir(), "certs")
-		if _, err := os.Stat(certsDir); os.IsNotExist(err) {
-			_ = os.MkdirAll(certsDir, 0755)
+		if err := os.MkdirAll(certsDir, 0755); err != nil {
+			logger.L.LogError("failed to create certificates directory", "error", err, "dir", certsDir)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		destPath := filepath.Join(certsDir, filename)
 		dst, err := os.Create(destPath)
@@ -110,8 +112,10 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 
 		filename := generateCertFilename(req.Content, req.Type)
 		certsDir := filepath.Join(config.DataDir(), "certs")
-		if _, err := os.Stat(certsDir); os.IsNotExist(err) {
-			_ = os.MkdirAll(certsDir, 0755)
+		if err := os.MkdirAll(certsDir, 0755); err != nil {
+			logger.L.LogError("failed to create certificates directory", "error", err, "dir", certsDir)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 
 		destPath := filepath.Join(certsDir, filename)

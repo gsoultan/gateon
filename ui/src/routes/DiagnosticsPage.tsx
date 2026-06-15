@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, lazy, Suspense } from "react";
 import {
   Card,
   Group,
@@ -23,10 +23,13 @@ import {
   Tabs,
   Pagination,
   Center,
+  Loader,
 } from "@mantine/core";
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
 import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
-import AnomalyMap from "../components/Diagnostics/AnomalyMap";
+// Lazy-loaded: AnomalyMap pulls in Leaflet (the heavy `viz-vendor` chunk), so it
+// is only fetched when the Diagnostics anomaly map is actually rendered.
+const AnomalyMap = lazy(() => import("../components/Diagnostics/AnomalyMap"));
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 import {
   IconActivity,
@@ -476,7 +479,9 @@ const DiagnosticsPage: React.FC = () => {
               <Badge variant="dot" color="indigo" size="lg">Autonomous Protection</Badge>
             </Group>
             
-            <AnomalyMap anomalies={sortedAnomalies} onTrace={openVisualizer} />
+            <Suspense fallback={<Loader size="sm" />}>
+              <AnomalyMap anomalies={sortedAnomalies} onTrace={openVisualizer} />
+            </Suspense>
 
             <Text size="sm" c="dimmed">
               Real-time heuristic analysis of traffic patterns and security events. 

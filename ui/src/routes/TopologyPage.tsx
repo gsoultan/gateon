@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import {
   Title,
   Text,
@@ -8,7 +9,12 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../hooks/useGateon";
 import { type Route, type Service, type EntryPoint, type Middleware } from "../types/gateon";
-import { TopologyGraph } from "../components/TopologyGraph";
+
+// Lazy-loaded: the graph pulls in @xyflow/react + dagre (the heavy `viz-vendor`
+// chunk), which we only want to fetch once this page actually renders the graph.
+const TopologyGraph = lazy(() =>
+  import("../components/TopologyGraph").then((m) => ({ default: m.TopologyGraph })),
+);
 
 export default function TopologyPage() {
   const { data: routes, isLoading: loadingRoutes } = useQuery<Route[]>({
@@ -86,12 +92,14 @@ export default function TopologyPage() {
       </Group>
 
       {entrypoints && routes && services && middlewares && (
-        <TopologyGraph
-          entrypoints={entrypoints}
-          routes={routes}
-          services={services}
-          middlewares={middlewares}
-        />
+        <Suspense fallback={<LoadingOverlay visible />}>
+          <TopologyGraph
+            entrypoints={entrypoints}
+            routes={routes}
+            services={services}
+            middlewares={middlewares}
+          />
+        </Suspense>
       )}
     </Stack>
   );

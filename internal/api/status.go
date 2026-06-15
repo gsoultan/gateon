@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
@@ -59,11 +60,15 @@ func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesReq
 	for _, t := range traces {
 		reqHeaders := make(map[string]string)
 		if t.RequestHeaders != "" {
-			_ = json.Unmarshal([]byte(t.RequestHeaders), &reqHeaders)
+			if err := json.Unmarshal([]byte(t.RequestHeaders), &reqHeaders); err != nil {
+				logger.L.LogDebug("failed to parse stored request headers", "error", err, "trace_id", t.ID)
+			}
 		}
 		respHeaders := make(map[string]string)
 		if t.ResponseHeaders != "" {
-			_ = json.Unmarshal([]byte(t.ResponseHeaders), &respHeaders)
+			if err := json.Unmarshal([]byte(t.ResponseHeaders), &respHeaders); err != nil {
+				logger.L.LogDebug("failed to parse stored response headers", "error", err, "trace_id", t.ID)
+			}
 		}
 
 		res = append(res, &gateonv1.Trace{

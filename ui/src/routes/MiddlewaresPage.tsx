@@ -35,10 +35,12 @@ import { notifications } from "@mantine/notifications";
 import type { Middleware } from "../types/gateon";
 import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
+import { useTableDensity } from "../hooks/useTableDensity";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
+  const density = useTableDensity();
   const queryClient = useQueryClient();
   const [opened, { open, close }] = useDisclosure(false);
   const [deleteTarget, setDeleteTarget] = useState<Middleware | null>(null);
@@ -169,7 +171,7 @@ export default function MiddlewaresPage() {
 
       <Card withBorder padding={0} radius="lg" shadow="xs">
         <ScrollArea>
-          <Table verticalSpacing="md" horizontalSpacing="xl">
+          <Table {...density}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>ID / Name</Table.Th>

@@ -53,6 +53,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	if s.ClamAVManager != nil {
 		clamavManager = s.ClamAVManager.(*security.ClamAVManager)
 	}
+	fimScanner := startFIM(ctx, &wg)
 
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Version:            s.Version,
@@ -98,6 +99,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
+		SecurityPosture:    newPostureProvider(s.Version, s.GlobalStore, clamavManager, wafUpdater, fimScanner),
 	})
 
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +145,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	telemetry.InitStartTime()
 	metricsStop := make(chan struct{})
 	telemetry.StartSystemMetricsCollector(metricsStop)
+	go telemetry.StartCacheMetricsLoop(ctx)
 
 	// Start TLS certificate expiry monitoring
 	certInfos := collectCertInfos(ctx, s, s.TLSManager)

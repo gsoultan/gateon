@@ -14,10 +14,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ConfigChangeFunc is invoked after a successful GlobalConfig update. It
+// receives deep clones of the previous and current configuration so listeners
+// can diff them safely without racing on the live config.
+type ConfigChangeFunc func(oldCfg, newCfg *gateonv1.GlobalConfig)
+
 type GlobalRegistry struct {
-	mu     sync.RWMutex
-	config *gateonv1.GlobalConfig
-	path   string
+	mu        sync.RWMutex
+	config    *gateonv1.GlobalConfig
+	path      string
+	listeners []ConfigChangeFunc
 }
 
 var (
@@ -185,11 +191,53 @@ func (r *GlobalRegistry) Get(ctx context.Context) *gateonv1.GlobalConfig {
 	return r.config
 }
 
-func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error {
+// Subscribe registers a listener that is notified after every successful
+// configuration update. Listeners are invoked synchronously (in registration
+// order) with clones of the old and new config, so they must not block for long
+// or call back into Update. Safe for concurrent use.
+func (r *GlobalRegistry) Subscribe(fn ConfigChangeFunc) {
+	if fn == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.listeners = append(r.listeners, fn)
+}
+
+func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error {
+	r.mu.Lock()
+	oldCfg := r.config
 	r.config = conf
-	return r.saveLocked()
+	if err := r.saveLocked(); err != nil {
+		r.config = oldCfg
+		r.mu.Unlock()
+		return err
+	}
+	listeners := make([]ConfigChangeFunc, len(r.listeners))
+	copy(listeners, r.listeners)
+	r.mu.Unlock()
+
+	r.notify(listeners, oldCfg, conf)
+	return nil
+}
+
+// notify invokes listeners outside the registry lock with defensive clones so a
+// misbehaving listener can neither deadlock the registry nor mutate live state.
+func (r *GlobalRegistry) notify(listeners []ConfigChangeFunc, oldCfg, newCfg *gateonv1.GlobalConfig) {
+	if len(listeners) == 0 {
+		return
+	}
+	oldClone := cloneConfig(oldCfg)
+	for _, fn := range listeners {
+		fn(oldClone, cloneConfig(newCfg))
+	}
+}
+
+func cloneConfig(c *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
+	if c == nil {
+		return nil
+	}
+	return proto.Clone(c).(*gateonv1.GlobalConfig)
 }
 
 // ConfigFileExists returns true if the global config file exists on disk.

@@ -1,149 +1,48 @@
 package middleware
 
-import (
-	"net/http"
-	"runtime/debug"
-	"strings"
+import "github.com/gsoultan/gateon/internal/middleware/kind"
 
-	"github.com/gsoultan/gateon/internal/logger"
+// The cycle-free core middleware primitives now live in the leaf package
+// internal/middleware/kind (ADR-0002, Stage 0). The transparent aliases below
+// keep the rest of package middleware and all external callers (which reference
+// middleware.Middleware, middleware.Chain, middleware.StatusResponseWriter, the
+// context keys, etc.) compiling unchanged while the per-concern subpackages are
+// migrated out in later stages.
+
+// Core types.
+type (
+	Middleware            = kind.Middleware
+	ContextKey            = kind.ContextKey
+	DebugInfo             = kind.DebugInfo
+	SecurityHeadersConfig = kind.SecurityHeadersConfig
+	StatusResponseWriter  = kind.StatusResponseWriter
+	ErrorsConfig          = kind.ErrorsConfig
 )
 
-type ContextKey string
-
+// Request-context keys.
 const (
-	EntryPointIDContextKey ContextKey = "entrypoint_id"
-	RouteNameContextKey    ContextKey = "route_name"
-	IsManagementContextKey ContextKey = "is_management"
-	DebugInfoContextKey    ContextKey = "debug_info"
-	FingerprintContextKey  ContextKey = "fingerprint"
+	EntryPointIDContextKey = kind.EntryPointIDContextKey
+	RouteNameContextKey    = kind.RouteNameContextKey
+	IsManagementContextKey = kind.IsManagementContextKey
+	DebugInfoContextKey    = kind.DebugInfoContextKey
+	FingerprintContextKey  = kind.FingerprintContextKey
 )
 
-type DebugInfo struct {
-	RequestHeaders  string
-	RequestBody     string
-	ResponseHeaders string
-	ResponseBody    string
-}
+// Core constructors, predicates, and the pooled status writer.
+var (
+	Chain                   = kind.Chain
+	Recovery                = kind.Recovery
+	SecurityHeaders         = kind.SecurityHeaders
+	Errors                  = kind.Errors
+	GetRouteName            = kind.GetRouteName
+	IsInternalPath          = kind.IsInternalPath
+	IsDashboardPath         = kind.IsDashboardPath
+	ShouldSkipMetrics       = kind.ShouldSkipMetrics
+	IsCorsPreflight         = kind.IsCorsPreflight
+	GetStatusResponseWriter = kind.GetStatusResponseWriter
+	PutStatusResponseWriter = kind.PutStatusResponseWriter
 
-// GetRouteName returns the route ID from the request context, or empty if not set.
-func GetRouteName(r *http.Request) string {
-	if val, ok := r.Context().Value(RouteNameContextKey).(string); ok {
-		return val
-	}
-	return ""
-}
-
-// IsInternalPath returns true if the given path belongs to Gateon's internal API,
-// monitoring, or health-check system.
-func IsInternalPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz" ||
-		IsDashboardPath(path) || path == "/grpc.health.v1.Health/Check"
-}
-
-// IsDashboardPath returns true if the path is a Gateon dashboard gRPC-Web service.
-func IsDashboardPath(path string) bool {
-	return strings.HasPrefix(path, "/gateon.v1.ApiService/") || strings.HasPrefix(path, "/gateon.v1.AIService/")
-}
-
-// ShouldSkipMetrics determines if Prometheus metrics recording should be skipped
-// for a given request. It skips metrics for the management entrypoint and internal
-// paths, unless it's a dedicated proxy route (non-gateon prefix).
-func ShouldSkipMetrics(r *http.Request) bool {
-	isMgmt, _ := r.Context().Value(IsManagementContextKey).(bool)
-	if isMgmt {
-		return true
-	}
-
-	routeID := GetRouteName(r)
-
-	// For infrastructure-level metrics (entrypoints starting with "gateon-"),
-	// skip recording for any internal paths to isolate proxy metrics.
-	if strings.HasPrefix(routeID, "gateon-") && IsInternalPath(r.URL.Path) {
-		return true
-	}
-
-	return false
-}
-
-// IsCorsPreflight returns true if the request is a CORS preflight request.
-func IsCorsPreflight(r *http.Request) bool {
-	return r.Method == http.MethodOptions &&
-		r.Header.Get("Origin") != "" &&
-		r.Header.Get("Access-Control-Request-Method") != ""
-}
-
-// Middleware defines a function that wraps an http.Handler.
-type Middleware func(http.Handler) http.Handler
-
-// Recovery returns a middleware that recovers from panics, logs the stack, and returns 500.
-// Prevents a single panicking handler from crashing the server.
-func Recovery() Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			defer func() {
-				if err := recover(); err != nil {
-					logger.L.LogError("handler panic recovered",
-						"panic", err,
-						"path", r.URL.Path,
-						"method", r.Method,
-						"stack", string(debug.Stack()))
-					w.WriteHeader(http.StatusInternalServerError)
-				}
-			}()
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// SecurityHeadersConfig defines presets for common security headers.
-type SecurityHeadersConfig struct {
-	Preset string // "recommended", "strict", "none"
-}
-
-// SecurityHeaders returns a middleware that adds standard security headers to all responses based on a preset.
-func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch cfg.Preset {
-			case "recommended":
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-				w.Header().Set("X-XSS-Protection", "0")
-				w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-				w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests;")
-				w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-				if r.TLS != nil {
-					w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-				}
-			case "strict":
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.Header().Set("X-Frame-Options", "DENY")
-				w.Header().Set("X-XSS-Protection", "0")
-				w.Header().Set("Referrer-Policy", "no-referrer")
-				w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests;")
-				w.Header().Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
-				if r.TLS != nil {
-					w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
-				}
-			default:
-				// Default legacy behavior if preset is empty or unknown
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-				w.Header().Set("X-XSS-Protection", "1; mode=block")
-				w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// Chain composes multiple middlewares into a single middleware.
-// The middlewares are executed in the order they are provided.
-func Chain(middlewares ...Middleware) Middleware {
-	return func(next http.Handler) http.Handler {
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			next = middlewares[i](next)
-		}
-		return next
-	}
-}
+	// getStatusString is kept as an unexported alias so internal callers
+	// (e.g. standard.go) continue to compile without importing kind directly.
+	getStatusString = kind.StatusString
+)

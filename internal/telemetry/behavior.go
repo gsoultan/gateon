@@ -35,9 +35,11 @@ var (
 )
 
 func init() {
+	size := cacheSizeFromEnv(envBehaviorCacheSize, cacheNameBehavior, defaultBehaviorCacheSize)
+	perShard := max(size/behaviorShards, 1)
 	shards = make([]*behaviorShard, behaviorShards)
 	for i := range behaviorShards {
-		cache, _ := lru.NewARC(10000 / behaviorShards)
+		cache, _ := lru.NewARC(perShard)
 		shards[i] = &behaviorShard{
 			cache: cache,
 		}

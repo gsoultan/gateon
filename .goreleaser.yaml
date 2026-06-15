@@ -62,6 +62,14 @@ snapshot:
 checksum:
   name_template: checksums.txt
 
+# Generate a CycloneDX SBOM for each released archive (requires syft on the
+# runner; the GoReleaser action image ships it). Attached as release artifacts.
+sboms:
+  - id: archive
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+
 changelog:
   use: git
   sort: asc

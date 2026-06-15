@@ -23,7 +23,9 @@ const (
 	QueryPrunePathStats = "DELETE FROM path_stats WHERE day < ?"
 
 	// SQLitePragmas enables WAL mode and NORMAL synchronous for SQLite (no-op for other drivers).
-	SQLitePragmas        = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;"
+	// auto_vacuum=INCREMENTAL lets prune() reclaim freed pages via PRAGMA
+	// incremental_vacuum instead of growing the DB file unbounded.
+	SQLitePragmas        = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA auto_vacuum=INCREMENTAL;"
 	QueryGetPathStatsWin = `SELECT host, path, SUM(req_count) AS rc, SUM(latency_sum_s) AS lsum, SUM(bytes_total) AS bsum
 		FROM path_stats
 		WHERE day >= ?

@@ -31,9 +31,14 @@ jobs:
       - name: Generate proto
         run: buf generate
 
+      - name: Install UI deps
+        run: bun install --cwd ui
+
+      - name: Lint UI (accessibility gate)
+        run: (cd ui && bun run lint)
+
       - name: Build UI
         run: |
-          bun install --cwd ui
           (cd ui && bun run build)
           go run ./scripts/sync_assets.go
 
@@ -45,3 +50,6 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Benchmarks (allocs/perf regression check)
+        run: go test -run '^$' -bench . -benchmem -benchtime 50000x ./pkg/proxy/ ./internal/telemetry/

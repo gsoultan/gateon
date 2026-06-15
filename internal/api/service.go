@@ -8,6 +8,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -83,15 +84,26 @@ func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallCla
 		return &gateonv1.InstallClamavResponse{Success: false, Message: "Failed to update configuration: " + err.Error()}, nil
 	}
 
-	// Also update the manager's config directly to ensure it has the latest mode
-	// Note: In security.NewClamAVManager(gc.Waf.Clamav), it's a pointer,
-	// but if s.Globals.Update replaced the entire gc, we might need to be careful.
-	// However, s.Globals.Get returns the pointer to r.config.
-	// So updating gc.Waf.Clamav.InstallationMode above already updated it if it's the same pointer.
+	// Apply the requested mode to the manager directly so it does not depend on
+	// the config-change supervisor wiring being present (e.g. in tests). This is
+	// idempotent with the supervisor's own reconcile.
+	s.ClamAVManager.Reconfigure(ctx, gc.Waf.Clamav)
 
-	if err := s.ClamAVManager.EnsureInstalled(ctx); err != nil {
-		return &gateonv1.InstallClamavResponse{Success: false, Message: "Installation failed: " + err.Error()}, nil
+	// Validate prerequisites synchronously so the operator gets an immediate,
+	// actionable error (missing Docker, no package manager, insufficient
+	// privileges) instead of a silent background failure.
+	if err := s.ClamAVManager.Preflight(); err != nil {
+		return &gateonv1.InstallClamavResponse{Success: false, Message: err.Error()}, nil
 	}
+
+	// The actual install (docker pull / apt install / freshclam DB download) can
+	// take several minutes — far longer than an HTTP request should block. Run it
+	// on a detached context so it is not cancelled when this request returns.
+	go func() {
+		if err := s.ClamAVManager.EnsureInstalled(context.Background()); err != nil {
+			logger.L.LogError("ClamAV background installation failed", "error", err)
+		}
+	}()
 
 	return &gateonv1.InstallClamavResponse{Success: true, Message: "Installation started successfully"}, nil
 }

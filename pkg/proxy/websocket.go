@@ -151,12 +151,20 @@ func (h *ProxyHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, ta
 
 	done := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(backendConn, clientConn)
+		copyWithPooledBuffer(backendConn, clientConn)
 		closeWrite(backendConn)
 		close(done)
 	}()
-	_, _ = io.Copy(clientConn, backendReader)
+	copyWithPooledBuffer(clientConn, backendReader)
 	<-done
+}
+
+// copyWithPooledBuffer streams src→dst reusing a buffer from the shared proxy
+// buffer pool, avoiding a fresh 32KB allocation per WebSocket tunnel direction.
+func copyWithPooledBuffer(dst io.Writer, src io.Reader) {
+	buf := bufferPool.Get()
+	defer bufferPool.Put(buf)
+	_, _ = io.CopyBuffer(dst, src, buf)
 }
 
 // closeWrite half-closes the connection so the peer receives EOF on read.

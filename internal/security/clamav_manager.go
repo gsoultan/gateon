@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -25,7 +26,7 @@ type ScanStatus struct {
 }
 
 type ClamAVManager struct {
-	config       *gateonv1.ClamavConfig
+	config       atomic.Pointer[gateonv1.ClamavConfig]
 	cron         *cron.Cron
 	status       ScanStatus
 	mu           sync.Mutex
@@ -34,19 +35,27 @@ type ClamAVManager struct {
 
 func NewClamAVManager(cfg *gateonv1.ClamavConfig) *ClamAVManager {
 	m := &ClamAVManager{
-		config: cfg,
-		cron:   cron.New(),
+		cron: cron.New(),
 	}
+	m.config.Store(cfg)
 	m.isOverloaded = m.isSystemOverloaded
 	return m
 }
 
+// cfg returns the current ClamAV configuration snapshot. It may be nil when
+// ClamAV is not configured. The pointer is swapped atomically by Reconfigure,
+// so each caller observes a consistent, immutable snapshot.
+func (m *ClamAVManager) cfg() *gateonv1.ClamavConfig {
+	return m.config.Load()
+}
+
 func (m *ClamAVManager) Start(ctx context.Context) error {
-	if m.config == nil {
+	c := m.cfg()
+	if c == nil {
 		return nil
 	}
 
-	if m.config.AutoInstall {
+	if c.AutoInstall {
 		go func() {
 			if err := m.EnsureInstalled(context.Background()); err != nil {
 				logger.L.LogError("failed to auto-install ClamAV", "error", err)
@@ -54,57 +63,94 @@ func (m *ClamAVManager) Start(ctx context.Context) error {
 		}()
 	}
 
-	if m.config.FullScanSchedule != "" {
-		_, err := m.cron.AddFunc(m.config.FullScanSchedule, func() {
+	m.mu.Lock()
+	m.addSchedulesLocked(c)
+	m.cron.Start()
+	m.mu.Unlock()
+
+	return nil
+}
+
+// addSchedulesLocked registers the configured cron jobs (full scan, database
+// and application updates) on the current cron instance. Callers must hold m.mu.
+func (m *ClamAVManager) addSchedulesLocked(c *gateonv1.ClamavConfig) {
+	if c.FullScanSchedule != "" {
+		_, err := m.cron.AddFunc(c.FullScanSchedule, func() {
 			m.RunFullScan(context.Background())
 		})
 		if err != nil {
-			logger.L.LogError("invalid ClamAV scan schedule", "error", err, "schedule", m.config.FullScanSchedule)
+			logger.L.LogError("invalid ClamAV scan schedule", "error", err, "schedule", c.FullScanSchedule)
 		} else {
-			logger.L.LogInfo("scheduled ClamAV full scan", "schedule", m.config.FullScanSchedule)
+			logger.L.LogInfo("scheduled ClamAV full scan", "schedule", c.FullScanSchedule)
 		}
 	}
 
-	if m.config.DatabaseUpdateSchedule != "" {
-		_, err := m.cron.AddFunc(m.config.DatabaseUpdateSchedule, func() {
+	if c.DatabaseUpdateSchedule != "" {
+		_, err := m.cron.AddFunc(c.DatabaseUpdateSchedule, func() {
 			if err := m.UpdateDatabase(context.Background()); err != nil {
 				logger.L.LogError("scheduled ClamAV database update failed", "error", err)
 			}
 		})
 		if err != nil {
-			logger.L.LogError("invalid ClamAV database update schedule", "error", err, "schedule", m.config.DatabaseUpdateSchedule)
+			logger.L.LogError("invalid ClamAV database update schedule", "error", err, "schedule", c.DatabaseUpdateSchedule)
 		} else {
-			logger.L.LogInfo("scheduled ClamAV database update", "schedule", m.config.DatabaseUpdateSchedule)
+			logger.L.LogInfo("scheduled ClamAV database update", "schedule", c.DatabaseUpdateSchedule)
 		}
 	}
 
-	if m.config.AppUpdateSchedule != "" {
-		_, err := m.cron.AddFunc(m.config.AppUpdateSchedule, func() {
+	if c.AppUpdateSchedule != "" {
+		_, err := m.cron.AddFunc(c.AppUpdateSchedule, func() {
 			if err := m.UpdateApplication(context.Background()); err != nil {
 				logger.L.LogError("scheduled ClamAV application update failed", "error", err)
 			}
 		})
 		if err != nil {
-			logger.L.LogError("invalid ClamAV application update schedule", "error", err, "schedule", m.config.AppUpdateSchedule)
+			logger.L.LogError("invalid ClamAV application update schedule", "error", err, "schedule", c.AppUpdateSchedule)
 		} else {
-			logger.L.LogInfo("scheduled ClamAV application update", "schedule", m.config.AppUpdateSchedule)
+			logger.L.LogInfo("scheduled ClamAV application update", "schedule", c.AppUpdateSchedule)
 		}
 	}
+}
 
+// Reconfigure atomically swaps the ClamAV configuration and rebuilds the
+// scheduled jobs so changes take effect at runtime without recreating the
+// manager or restarting the process. A nil cfg disables all scheduled jobs.
+// It is safe for concurrent use.
+func (m *ClamAVManager) Reconfigure(ctx context.Context, cfg *gateonv1.ClamavConfig) {
+	m.config.Store(cfg)
+
+	m.mu.Lock()
+	m.cron.Stop()
+	m.cron = cron.New()
+	if cfg != nil {
+		m.addSchedulesLocked(cfg)
+	}
 	m.cron.Start()
+	m.mu.Unlock()
 
-	return nil
+	if cfg != nil && cfg.AutoInstall {
+		go func() {
+			if err := m.EnsureInstalled(context.Background()); err != nil {
+				logger.L.LogError("failed to auto-install ClamAV", "error", err)
+			}
+		}()
+	}
+
+	logger.L.LogInfo("ClamAV manager reconfigured", "enabled", cfg != nil)
 }
 
 func (m *ClamAVManager) Stop() {
+	m.mu.Lock()
 	m.cron.Stop()
+	m.mu.Unlock()
 }
 
 func (m *ClamAVManager) IsInstalled(ctx context.Context) bool {
-	if m.config == nil {
+	c := m.cfg()
+	if c == nil {
 		return false
 	}
-	switch m.config.InstallationMode {
+	switch c.InstallationMode {
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
 		if _, err := exec.LookPath("docker"); err != nil {
 			return false
@@ -127,8 +173,68 @@ func (m *ClamAVManager) IsInstalled(ctx context.Context) bool {
 	}
 }
 
+// Preflight validates that the prerequisites for the configured installation
+// mode are satisfied without performing the (potentially multi-minute)
+// installation. It lets callers surface actionable errors synchronously before
+// kicking off a background install. A nil error means EnsureInstalled has a
+// realistic chance of succeeding.
+func (m *ClamAVManager) Preflight() error {
+	c := m.cfg()
+	if c == nil {
+		return errors.New("ClamAV is not configured")
+	}
+	switch c.InstallationMode {
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
+		if _, err := exec.LookPath("docker"); err != nil {
+			return errors.New("docker not found in PATH; install Docker or choose local installation mode")
+		}
+		return nil
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
+		if runtime.GOOS == "windows" {
+			return errors.New("local installation is not supported on Windows; use Docker mode")
+		}
+		// Already present: no package manager required.
+		for _, bin := range []string{"clamd", "clamscan", "clamdscan"} {
+			if _, err := exec.LookPath(bin); err == nil {
+				return nil
+			}
+		}
+		return m.preflightLocalPackageManager()
+	default:
+		return errors.New("unsupported installation mode")
+	}
+}
+
+// preflightLocalPackageManager verifies a supported package manager is present
+// and that the process has the privileges that manager requires.
+func (m *ClamAVManager) preflightLocalPackageManager() error {
+	managers := []struct {
+		bin       string
+		needsRoot bool
+	}{
+		{"apt-get", true},
+		{"yum", true},
+		{"brew", false},
+		{"apk", true},
+	}
+	for _, p := range managers {
+		if _, err := exec.LookPath(p.bin); err != nil {
+			continue
+		}
+		if p.needsRoot && os.Geteuid() != 0 {
+			return fmt.Errorf("auto-installation with %s requires root privileges; run Gateon as root or pre-install ClamAV", p.bin)
+		}
+		return nil
+	}
+	return errors.New("no supported package manager found (apt, yum, brew, apk); pre-install ClamAV or use Docker mode")
+}
+
 func (m *ClamAVManager) EnsureInstalled(ctx context.Context) error {
-	switch m.config.InstallationMode {
+	c := m.cfg()
+	if c == nil {
+		return nil
+	}
+	switch c.InstallationMode {
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
 		return m.ensureDocker(ctx)
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
@@ -156,13 +262,17 @@ func (m *ClamAVManager) ensureDocker(ctx context.Context) error {
 	}
 
 	// Pull and run
-	image := m.config.DockerImage
+	c := m.cfg()
+	image := ""
+	if c != nil {
+		image = c.DockerImage
+	}
 	if image == "" {
 		image = "clamav/clamav:latest"
 	}
 
 	args := []string{"run", "-d", "--name", "gateon-clamav", "-p", "3310:3310"}
-	if m.config.LowResourceMode {
+	if c != nil && c.LowResourceMode {
 		// Limit memory to 1GB and 0.5 CPU if possible (Docker limits)
 		// Note: ClamAV really needs ~1GB to even start.
 		args = append(args, "--memory=1g", "--cpus=0.5")
@@ -237,7 +347,7 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 		logger.L.LogWarn("could not ensure ClamAV database", "error", err)
 	}
 
-	if m.config.LowResourceMode {
+	if c := m.cfg(); c != nil && c.LowResourceMode {
 		m.tuneLocalClamav()
 	}
 
@@ -312,7 +422,11 @@ func (m *ClamAVManager) tuneLocalClamav() {
 
 func (m *ClamAVManager) UpdateDatabase(ctx context.Context) error {
 	logger.L.LogInfo("starting ClamAV database update")
-	switch m.config.InstallationMode {
+	c := m.cfg()
+	if c == nil {
+		return fmt.Errorf("ClamAV is not configured")
+	}
+	switch c.InstallationMode {
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
 		// In docker, we can try to run freshclam inside the container
 		cmd := exec.CommandContext(ctx, "docker", "exec", "gateon-clamav", "freshclam")
@@ -336,10 +450,14 @@ func (m *ClamAVManager) UpdateDatabase(ctx context.Context) error {
 
 func (m *ClamAVManager) UpdateApplication(ctx context.Context) error {
 	logger.L.LogInfo("starting ClamAV application update")
-	switch m.config.InstallationMode {
+	c := m.cfg()
+	if c == nil {
+		return fmt.Errorf("ClamAV is not configured")
+	}
+	switch c.InstallationMode {
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
 		// Pull latest image and recreate container
-		image := m.config.DockerImage
+		image := c.DockerImage
 		if image == "" {
 			image = "clamav/clamav:latest"
 		}
@@ -484,9 +602,11 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 
 	logger.L.LogInfo("starting ClamAV full system scan")
 	start := time.Now()
+	c := m.cfg()
+	lowResource := c != nil && c.LowResourceMode
 
 	// Ensure database is available before scanning
-	if m.config.InstallationMode == gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL {
+	if c != nil && c.InstallationMode == gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL {
 		if err := m.ensureDatabase(ctx); err != nil {
 			logger.L.LogError("ClamAV database not available, aborting scan", "error", err)
 			m.mu.Lock()
@@ -513,7 +633,7 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 	fullArgs := args
 	execBinary := binary
 
-	if m.config.LowResourceMode {
+	if lowResource {
 		// Try to run with lower priority (CPU and I/O)
 		if _, err := exec.LookPath("ionice"); err == nil {
 			// -c 3 is the idle class: only gets I/O time when no other program has requested disk I/O
@@ -536,7 +656,7 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 				binary = "clamscan"
 				execBinary = binary
 				fullArgs = args
-				if m.config.LowResourceMode {
+				if lowResource {
 					if _, errIo := exec.LookPath("ionice"); errIo == nil {
 						fullArgs = append([]string{"-c", "3", "nice", "-n", "19", binary}, args...)
 						execBinary = "ionice"

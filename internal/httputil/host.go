@@ -1,20 +1,24 @@
 package httputil
 
-import "strings"
+import (
+	"net"
+	"strings"
+)
 
 // StripPort removes the port part from a host string (e.g. "localhost:8080" -> "localhost").
-// It handles IPv6 addresses correctly (e.g. "[::1]:8080" -> "[::1]").
+// It handles IPv6 addresses correctly, returning the bare address without brackets
+// (e.g. "[::1]:8080" -> "::1" and "[::1]" -> "::1") so the result can be parsed by net.ParseIP.
 func StripPort(host string) string {
-	if idx := strings.LastIndexByte(host, ':'); idx != -1 {
-		// If it's IPv6 [::1]:8080, it has a ']' before the last ':'
-		if idx > 0 && host[idx-1] == ']' {
-			return host[:idx]
-		}
-		// If it's a simple host:port like localhost:8080
-		// Check if there are other colons before the last one (IPv6 without brackets)
-		if !strings.ContainsRune(host[:idx], ':') {
-			return host[:idx]
-		}
+	if host == "" {
+		return host
+	}
+	// Fast path: "host:port" or "[ipv6]:port" -> bare host without brackets.
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	// No port present. Strip surrounding brackets from a bare IPv6 literal (e.g. "[::1]").
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return host[1 : len(host)-1]
 	}
 	return host
 }

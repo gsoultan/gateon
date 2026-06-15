@@ -45,3 +45,12 @@ gateon.exe
 gateon_test.exe
 go.sum
 proto/gateon/v1/*.go
+
+# Test artifacts (SQLite scratch DBs)
+internal/telemetry/test_telemetry_audit.db
+internal/telemetry/test_telemetry_audit.db-shm
+internal/telemetry/test_telemetry_audit.db-wal
+test_traces.db
+test_traces.db-shm
+test_traces.db-wal
+internal/telemetry/telemetry_pebble/

@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Table, Text, Paper, Box, Group, Badge, Title } from "@mantine/core";
 import { formatBytes } from "../../utils/format";
+import { useTableDensity } from "../../hooks/useTableDensity";
 
 interface HourlyDomainMetric {
   domain: string;
@@ -16,6 +17,7 @@ interface DomainStatsTableProps {
 export const DomainStatsTable = memo(function DomainStatsTable({
   metrics,
 }: DomainStatsTableProps) {
+  const density = useTableDensity();
   if (!metrics || metrics.length === 0) {
     return (
       <Paper p="md" radius="md" withBorder>
@@ -75,7 +77,7 @@ export const DomainStatsTable = memo(function DomainStatsTable({
       </Group>
 
       <Table.ScrollContainer minWidth={500}>
-        <Table verticalSpacing="md" horizontalSpacing="md">
+        <Table {...density}>
           <Table.Thead>
             <Table.Tr>
               <Table.Th

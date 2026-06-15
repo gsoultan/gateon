@@ -35,6 +35,56 @@ body {
 }
 
 /*
+ * Accessibility: visible keyboard focus.
+ * Mantine relies on :focus-visible; ensure a clear, high-contrast focus ring
+ * for keyboard users without showing it on mouse clicks.
+ */
+:focus-visible {
+  outline: 2px solid var(--mantine-color-brand-5, #0073ea);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/*
+ * Skip-to-content link: visually hidden until focused, then revealed at the
+ * top-left so keyboard users can jump past the navigation to the main content.
+ */
+.skip-to-content {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 3000;
+  padding: 8px 16px;
+  border-radius: var(--mantine-radius-sm, 6px);
+  background-color: var(--mantine-color-brand-6, #0066d1);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 150ms ease;
+}
+
+.skip-to-content:focus,
+.skip-to-content:focus-visible {
+  transform: translateY(0);
+}
+
+/*
+ * Respect users who prefer reduced motion: disable non-essential animations
+ * and transitions across the app (Mantine transitions, our hover effects, etc.).
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
  * Tailwind's preflight applies `max-width: 100%` and `height: auto` to all
  * `img`/`svg` elements, which collapses Leaflet's map tiles so the map never
  * renders (appears as a blank background in both dark and light themes).

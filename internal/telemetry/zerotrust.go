@@ -23,8 +23,8 @@ var (
 )
 
 func init() {
-	// Cache up to 100,000 users
-	cache, _ := lru.NewARC(100000)
+	size := cacheSizeFromEnv(envZeroTrustCacheSize, cacheNameZeroTrust, defaultZeroTrustCacheSize)
+	cache, _ := lru.NewARC(size)
 	userLocationCache = cache
 }
 

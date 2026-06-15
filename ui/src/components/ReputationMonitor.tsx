@@ -19,9 +19,11 @@ import {
   IconActivity,
 } from "@tabler/icons-react";
 import { useReputations } from "../hooks/useReputations";
+import { useTableDensity } from "../hooks/useTableDensity";
 
 export function ReputationMonitor() {
   const { data, isLoading } = useReputations(20);
+  const density = useTableDensity();
 
   if (isLoading) {
     return (
@@ -75,7 +77,7 @@ export function ReputationMonitor() {
       </Group>
 
       <ScrollArea h={300}>
-        <Table verticalSpacing="xs">
+        <Table {...density}>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Fingerprint</Table.Th>

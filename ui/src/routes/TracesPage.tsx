@@ -43,6 +43,8 @@ import {
 import { useState, useMemo, useTransition } from "react";
 
 import { useTraces } from "../hooks/useGateon";
+import { useTableDensity } from "../hooks/useTableDensity";
+import { useUrlFilters } from "../hooks/useUrlFilters";
 import type { Trace } from "../hooks/useGateon";
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 
@@ -69,9 +71,15 @@ const getDurationColor = (duration: number) => {
 
 export default function TracesPage() {
   const { data: traces = [], isLoading, refetch } = useTraces();
-  const [search, setSearch] = useState("");
-  const [deferredSearch, setDeferredSearch] = useState("");
-  const [routeFilter, setRouteFilter] = useState<string | null>(null);
+  const density = useTableDensity();
+  // URL-synced filters make a filtered trace view bookmarkable/shareable; local
+  // state (seeded from the URL) keeps typing responsive while we mirror to the URL.
+  const [filters, setFilters] = useUrlFilters<{ q: string; route: string }>();
+  const [search, setSearch] = useState(filters.q ?? "");
+  const [deferredSearch, setDeferredSearch] = useState(filters.q ?? "");
+  const [routeFilter, setRouteFilter] = useState<string | null>(
+    filters.route ?? null,
+  );
   const [page, setPage] = useState(1);
   const [isPending, startTransition] = useTransition();
 
@@ -106,6 +114,7 @@ export default function TracesPage() {
   const handleSearchChange = (val: string) => {
     setSearch(val);
     setPage(1);
+    setFilters({ q: val });
     startTransition(() => {
       setDeferredSearch(val);
     });
@@ -191,6 +200,7 @@ export default function TracesPage() {
               onChange={(value) => {
                 setRouteFilter(value);
                 setPage(1);
+                setFilters({ route: value });
               }}
               searchable
               clearable
@@ -210,6 +220,7 @@ export default function TracesPage() {
               onClick={() => {
                 handleSearchChange("");
                 setRouteFilter(null);
+                setFilters({ q: undefined, route: undefined });
               }}
             >
               Clear filters
@@ -217,9 +228,9 @@ export default function TracesPage() {
           </Group>
 
           <ScrollArea>
-            <Table 
-              highlightOnHover 
-              verticalSpacing="sm" 
+            <Table
+              {...density}
+              highlightOnHover
               striped
               style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}
             >

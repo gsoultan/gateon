@@ -29,6 +29,7 @@ import {
   IconSearch,
 } from "@tabler/icons-react";
 import { useUsers, apiFetch } from "../hooks/useGateon";
+import { useTableDensity } from "../hooks/useTableDensity";
 import type { User } from "../types/gateon";
 import { useAuthStore } from "../store/useAuthStore";
 import { TwoFactorModal } from "../components/TwoFactorModal";
@@ -37,6 +38,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+  const density = useTableDensity();
   const { data, refetch, isLoading } = useUsers({
     page: page - 1,
     page_size: pageSize,
@@ -278,7 +280,7 @@ export default function UsersPage() {
       </Group>
 
       <Card withBorder padding="xl" radius="lg" shadow="xs">
-        <Table verticalSpacing="md">
+        <Table {...density}>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Username</Table.Th>

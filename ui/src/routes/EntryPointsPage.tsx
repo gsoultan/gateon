@@ -36,6 +36,7 @@ import {
 } from "@tabler/icons-react";
 import { useEntryPoints, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
+import { useTableDensity } from "../hooks/useTableDensity";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import { EntryPointForm } from "../components/EntryPointForm";
@@ -43,6 +44,7 @@ import type { EntryPoint } from "../types/gateon";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
+  const density = useTableDensity();
   const [opened, { open, close }] = useDisclosure(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -207,7 +209,7 @@ export default function EntryPointsPage() {
           />
 
           <Box style={{ overflowX: "auto" }}>
-            <Table verticalSpacing="md" highlightOnHover>
+            <Table {...density} highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>ID / Name</Table.Th>

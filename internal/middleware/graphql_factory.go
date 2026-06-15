@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 )
 
@@ -12,12 +13,16 @@ func (f *Factory) createGraphQLFirewall(cfg map[string]string) (Middleware, erro
 
 	fieldCosts := make(map[string]int)
 	if costsJson, ok := cfg["field_costs"]; ok {
-		_ = json.Unmarshal([]byte(costsJson), &fieldCosts)
+		if err := json.Unmarshal([]byte(costsJson), &fieldCosts); err != nil {
+			return nil, fmt.Errorf("graphql firewall: invalid field_costs JSON: %w", err)
+		}
 	}
 
 	fieldClaims := make(map[string]string)
 	if claimsJson, ok := cfg["field_claims"]; ok {
-		_ = json.Unmarshal([]byte(claimsJson), &fieldClaims)
+		if err := json.Unmarshal([]byte(claimsJson), &fieldClaims); err != nil {
+			return nil, fmt.Errorf("graphql firewall: invalid field_claims JSON: %w", err)
+		}
 	}
 
 	return GraphQLFirewall(GraphQLFirewallConfig{

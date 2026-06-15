@@ -28,4 +28,6 @@ type Deps struct {
 	Version            string
 	StartTime          time.Time
 	RouteStatsProvider RouteStatsProvider
+	// SecurityPosture, when set, supplies the report for GET /v1/security/posture.
+	SecurityPosture SecurityPostureProvider
 }

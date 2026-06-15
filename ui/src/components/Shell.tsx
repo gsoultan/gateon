@@ -26,6 +26,10 @@ import { queryClient } from "../queryClient";
 import { usePermissions } from "../hooks/usePermissions";
 import { GlobalHealthBar } from "./GlobalHealthBar";
 import { useAuthStore } from "../store/useAuthStore";
+import { usePreferencesStore } from "../store/usePreferencesStore";
+import { CommandPaletteProvider } from "./CommandPalette";
+import { CommandSearchButton } from "./CommandPalette/CommandSearchButton";
+import { ConnectionStatus } from "./ConnectionStatus";
 import {
   IconDashboard,
   IconRoute,
@@ -58,7 +62,9 @@ import {
 
 export function Shell() {
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure();
-  const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true);
+  const sidebarCollapsed = usePreferencesStore((state) => state.sidebarCollapsed);
+  const toggleDesktop = usePreferencesStore((state) => state.toggleSidebar);
+  const desktopOpened = !sidebarCollapsed;
   const location = useLocation();
   const { data: status, refetch, isFetching } = useGateonStatus();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
@@ -107,6 +113,7 @@ export function Shell() {
   ];
 
   return (
+    <CommandPaletteProvider>
     <AppShell
       header={{ height: 60 }}
       navbar={{
@@ -140,6 +147,9 @@ export function Shell() {
         },
       }}
     >
+      <a href="#main-content" className="skip-to-content">
+        Skip to main content
+      </a>
       <AppShell.Header>
         <Flex
           h="100%"
@@ -156,6 +166,7 @@ export function Shell() {
               onClick={toggleMobile}
               hiddenFrom="sm"
               size="sm"
+              aria-label="Toggle navigation menu"
             />
             <ActionIcon
               onClick={toggleDesktop}
@@ -163,6 +174,7 @@ export function Shell() {
               variant="subtle"
               color="gray"
               size="lg"
+              aria-label={desktopOpened ? "Collapse sidebar" : "Expand sidebar"}
             >
               {desktopOpened ? (
                 <IconChevronLeft size={18} />
@@ -191,23 +203,12 @@ export function Shell() {
             visibleFrom="sm"
             style={{ flex: 1, minWidth: 0, justifyContent: "flex-end" }}
           >
+            <CommandSearchButton />
             <Group visibleFrom="lg" style={{ flexShrink: 0 }}>
               <GlobalHealthBar />
             </Group>
             <Group gap={{ base: "xs", md: "sm" }} style={{ flexShrink: 0 }}>
-              <Stack gap={0} align="flex-end">
-                <Text size="xs" fw={700} c="dimmed" lh={1}>
-                  STATUS
-                </Text>
-                <Badge
-                  size="sm"
-                  color={status?.status === "running" ? "green" : "red"}
-                  variant="dot"
-                  styles={{ root: { border: 0 } }}
-                >
-                  {status?.status?.toUpperCase() || "OFFLINE"}
-                </Badge>
-              </Stack>
+              <ConnectionStatus />
 
               {user?.role && (
                 <Stack gap={0} align="flex-end" visibleFrom="md">
@@ -237,7 +238,7 @@ export function Shell() {
       <Menu shadow="md" width={220} position="bottom-end">
         <Menu.Target>
           <Tooltip label="Theme (Light / Dark / System)">
-            <ActionIcon variant="default" size="md" radius="md">
+            <ActionIcon variant="default" size="md" radius="md" aria-label="Change color scheme">
               {colorScheme === "auto" ? (
                 <IconDeviceDesktop size={18} />
               ) : colorScheme === "dark" ? (
@@ -328,6 +329,7 @@ export function Shell() {
                   size="md"
                   onClick={() => refetch()}
                   loading={isFetching}
+                  aria-label="Refresh status"
                 >
                   <IconRefresh size={18} />
                 </ActionIcon>
@@ -514,7 +516,7 @@ export function Shell() {
         </AppShell.Section>
       </AppShell.Navbar>
 
-      <AppShell.Main>
+      <AppShell.Main id="main-content">
         {isViewer && (
           <Alert
             mb="md"
@@ -540,5 +542,6 @@ export function Shell() {
         </Box>
       </AppShell.Main>
     </AppShell>
+    </CommandPaletteProvider>
   );
 }

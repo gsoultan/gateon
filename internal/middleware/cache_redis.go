@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/redis"
 	redigo "github.com/redis/go-redis/v9"
 )
@@ -61,7 +63,7 @@ func (r *redisCacheBackend) Set(ctx context.Context, key string, status int, hea
 	fullKey := cacheKeyPrefix + key
 	h := make(map[string][]string)
 	for k, vv := range headers {
-		h[k] = append([]string(nil), vv...)
+		h[k] = slices.Clone(vv)
 	}
 	bodyB64 := base64.StdEncoding.EncodeToString(body)
 	p := cachedPayload{Status: status, Headers: h, BodyB64: bodyB64}
@@ -69,5 +71,7 @@ func (r *redisCacheBackend) Set(ctx context.Context, key string, status int, hea
 	if err != nil {
 		return
 	}
-	_ = r.client.Set(ctx, fullKey, val, ttl).Err()
+	if err := r.client.Set(ctx, fullKey, val, ttl).Err(); err != nil {
+		logger.L.LogDebug("failed to write response to redis cache", "error", err, "key", fullKey)
+	}
 }

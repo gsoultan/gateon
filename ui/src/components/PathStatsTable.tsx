@@ -17,6 +17,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { IconActivity, IconSearch } from "@tabler/icons-react";
+import { useTableDensity } from "../hooks/useTableDensity";
 
 const PAGE_SIZE = 15;
 
@@ -27,6 +28,7 @@ export function PathStatsTable() {
   const [pathFilter, setPathFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [isPending, startTransition] = useTransition();
+  const density = useTableDensity();
 
   const pathOptions = useMemo(
     () =>
@@ -140,7 +142,7 @@ export function PathStatsTable() {
         </Group>
 
         <Box style={{ overflowX: "auto" }}>
-          <Table verticalSpacing="sm" horizontalSpacing="md" withRowBorders>
+          <Table {...density} withRowBorders>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Host</Table.Th>
