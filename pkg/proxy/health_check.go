@@ -101,7 +101,7 @@ func (h *ProxyHandler) checkGRPCHealth(ctx context.Context, targetURL string) bo
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(dialCtx, host, opts...)
+	conn, err := grpc.NewClient(host, opts...)
 	if err != nil {
 		return false
 	}

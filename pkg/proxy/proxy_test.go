@@ -9,9 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-
 	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -37,12 +34,15 @@ func TestProxyHandler_Protocols(t *testing.T) {
 			name:     "HTTP/2 Cleartext (h2c)",
 			protocol: "h2c",
 			setup: func() (*httptest.Server, string) {
-				h2s := &http2.Server{}
 				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write([]byte("h2c response"))
 				})
-				s := httptest.NewServer(h2c.NewHandler(handler, h2s))
+				s := httptest.NewUnstartedServer(handler)
+				protocols := new(http.Protocols)
+				protocols.SetUnencryptedHTTP2(true)
+				s.Config.Protocols = protocols
+				s.Start()
 				url := strings.Replace(s.URL, "http://", "h2c://", 1)
 				return s, url
 			},

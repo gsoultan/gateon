@@ -84,7 +84,7 @@ func Policy(cfg PolicyConfig) (Middleware, error) {
 					return
 				}
 
-				if out.Value().(bool) == false {
+				if !out.Value().(bool) {
 					msg := cr.msg
 					if msg == "" {
 						msg = "Access denied by policy"

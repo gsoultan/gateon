@@ -14,7 +14,6 @@ type Tree struct {
 }
 
 type node struct {
-	prefix   []byte
 	children map[byte]*node
 	isEnd    bool
 }

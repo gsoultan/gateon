@@ -199,9 +199,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 							if len(opt.CipherSuites) > 0 && newCfg.MinVersion <= tls.VersionTLS12 {
 								newCfg.CipherSuites = gtls.ParseCipherSuites(opt.CipherSuites)
 							}
-							if opt.PreferServerCipherSuites {
-								newCfg.PreferServerCipherSuites = true
-							}
+							// PreferServerCipherSuites is deprecated and ignored by the Go runtime since Go 1.18.
 							if len(opt.AlpnProtocols) > 0 {
 								newCfg.NextProtos = opt.AlpnProtocols
 							}

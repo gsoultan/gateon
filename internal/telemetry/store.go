@@ -411,14 +411,6 @@ func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 	return tx.Prepare(q)
 }
 
-func (s *pathStatsStore) traceInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	if s.dialect.Driver == db.DriverMySQL {
-		return tx.Prepare(QueryInsertTraceMySQL)
-	}
-	q := s.dialect.Rebind(QueryInsertTraceConflict)
-	return tx.Prepare(q)
-}
-
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, request_headers, request_body, response_headers, response_body, user_agent, method) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)

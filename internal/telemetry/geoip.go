@@ -46,7 +46,6 @@ var (
 	countryDB *geoip2.Reader // Optional GeoLite2-Country edition used as a fallback.
 	geoMu     sync.RWMutex
 	geoDBPath string
-	asnDBPath string
 
 	ipCache   = make(map[string]publicIPInfo)
 	cacheMu   sync.RWMutex
@@ -254,7 +253,6 @@ func InitGeoIPASN(dbPath string) error {
 	}
 
 	asnDB = db
-	asnDBPath = dbPath
 	return nil
 }
 

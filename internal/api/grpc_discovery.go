@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
+	reflectionv1 "google.golang.org/grpc/reflection/grpc_reflection_v1"
 )
 
 func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.DiscoverGrpcServicesRequest) (*gateonv1.DiscoverGrpcServicesResponse, error) {
@@ -59,20 +59,20 @@ func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.Dis
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(dialCtx, host, opts...)
+	conn, err := grpc.NewClient(host, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to %s: %w", host, err)
 	}
 	defer conn.Close()
 
-	client := grpc_reflection_v1alpha.NewServerReflectionClient(conn)
+	client := reflectionv1.NewServerReflectionClient(conn)
 	stream, err := client.ServerReflectionInfo(dialCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create reflection stream: %w", err)
 	}
 
-	if err := stream.Send(&grpc_reflection_v1alpha.ServerReflectionRequest{
-		MessageRequest: &grpc_reflection_v1alpha.ServerReflectionRequest_ListServices{
+	if err := stream.Send(&reflectionv1.ServerReflectionRequest{
+		MessageRequest: &reflectionv1.ServerReflectionRequest_ListServices{
 			ListServices: "*",
 		},
 	}); err != nil {

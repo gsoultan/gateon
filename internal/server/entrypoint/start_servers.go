@@ -298,11 +298,6 @@ func handleTCPProxyL4(client net.Conn, pool TCPProxy) {
 	pool.ProxyTCP(context.Background(), client)
 }
 
-func copyAndClose(dst net.Conn, src net.Conn) (int64, error) {
-	defer dst.Close()
-	return io.Copy(dst, src)
-}
-
 func handleUDPConn(conn *net.UDPConn) {
 	buf := make([]byte, 65535)
 	for {

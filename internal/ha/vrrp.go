@@ -21,7 +21,6 @@ type HAManager struct {
 	lastSeen   time.Time
 	mu         sync.RWMutex
 	udpConn    *net.UDPConn
-	selfIP     string
 	masterSeen bool
 }
 

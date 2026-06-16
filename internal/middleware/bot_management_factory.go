@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"strconv"
 )
 
@@ -15,7 +16,7 @@ func (f *Factory) createBotManagement(cfg map[string]string) (Middleware, error)
 	secret := cfg["secret_key"]
 	if secret == "" {
 		if f.globalStore != nil {
-			global := f.globalStore.Get(nil)
+			global := f.globalStore.Get(context.TODO())
 			if global != nil && global.Waf != nil && global.Waf.BotManagement != nil && global.Waf.BotManagement.SecretKey != "" {
 				secret = global.Waf.BotManagement.SecretKey
 			}

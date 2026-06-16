@@ -7,7 +7,8 @@ import (
 var bufferPool = &syncBufferPool{
 	pool: sync.Pool{
 		New: func() any {
-			return make([]byte, 32*1024)
+			b := make([]byte, 32*1024)
+			return &b
 		},
 	},
 }
@@ -17,13 +18,13 @@ type syncBufferPool struct {
 }
 
 func (p *syncBufferPool) Get() []byte {
-	b := p.pool.Get()
-	if b == nil {
+	bp, ok := p.pool.Get().(*[]byte)
+	if !ok || bp == nil {
 		return make([]byte, 32*1024)
 	}
-	return b.([]byte)
+	return *bp
 }
 
 func (p *syncBufferPool) Put(b []byte) {
-	p.pool.Put(b)
+	p.pool.Put(&b)
 }
