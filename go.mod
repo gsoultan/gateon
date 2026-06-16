@@ -2,7 +2,7 @@ module github.com/gsoultan/gateon
 
 go 1.26
 
-toolchain go1.26.3
+toolchain go1.26.4
 
 require (
 	aidanwoods.dev/go-paseto v1.6.0
@@ -17,7 +17,7 @@ require (
 	github.com/corazawaf/coraza/v3 v3.6.0
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
-	github.com/go-git/go-git/v5 v5.19.0
+	github.com/go-git/go-git/v5 v5.19.1
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/go-zookeeper/zk v1.0.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -37,7 +37,7 @@ require (
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.59.1
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/cors v1.11.1
