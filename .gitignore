@@ -36,7 +36,8 @@ tls_options.json
 .idea
 .vscode
 .DS_Store
-internal/ui/dist
+internal/ui/dist/*
+!internal/ui/dist/.gitkeep
 .junie
 ui/bun.lock
 ui/.bun-cache

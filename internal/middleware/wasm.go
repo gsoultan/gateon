@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -17,7 +16,6 @@ import (
 type wasmMiddleware struct {
 	runtime wazero.Runtime
 	module  wazero.CompiledModule
-	pool    sync.Pool
 }
 
 func Wasm(ctx context.Context, blob []byte) (Middleware, error) {

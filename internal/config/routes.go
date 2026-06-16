@@ -125,7 +125,7 @@ func (r *RouteRegistry) ListPaginated(ctx context.Context, page, pageSize int32,
 			continue
 		}
 		if filter != nil {
-			if filter.Type != "" && strings.ToLower(rt.Type) != strings.ToLower(filter.Type) {
+			if filter.Type != "" && !strings.EqualFold(rt.Type, filter.Type) {
 				continue
 			}
 			if filter.Host != "" {

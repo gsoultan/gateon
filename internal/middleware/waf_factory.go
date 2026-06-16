@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"maps"
@@ -17,7 +18,7 @@ var wafCache sync.Map
 func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 	globalDirectives := ""
 	if f.globalStore != nil {
-		global := f.globalStore.Get(nil)
+		global := f.globalStore.Get(context.TODO())
 		if global != nil && global.Waf != nil && global.Waf.Enabled {
 			globalDirectives = global.Waf.CustomDirectives
 
