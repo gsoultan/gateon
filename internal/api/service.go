@@ -108,6 +108,29 @@ func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallCla
 	return &gateonv1.InstallClamavResponse{Success: true, Message: "Installation started successfully"}, nil
 }
 
+func (s *ApiService) UninstallClamav(ctx context.Context, _ *gateonv1.UninstallClamavRequest) (*gateonv1.UninstallClamavResponse, error) {
+	if s.ClamAVManager == nil {
+		return &gateonv1.UninstallClamavResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
+	}
+
+	// Validate prerequisites synchronously so the operator gets an immediate,
+	// actionable error (missing Docker, no package manager, insufficient
+	// privileges) instead of a silent background failure.
+	if err := s.ClamAVManager.PreflightUninstall(); err != nil {
+		return &gateonv1.UninstallClamavResponse{Success: false, Message: err.Error()}, nil
+	}
+
+	// Removal (docker rm / apt remove) can take a while, so detach it from the
+	// request lifecycle on a background context just like installation.
+	go func() {
+		if err := s.ClamAVManager.Uninstall(context.Background()); err != nil {
+			logger.L.LogError("ClamAV background uninstallation failed", "error", err)
+		}
+	}()
+
+	return &gateonv1.UninstallClamavResponse{Success: true, Message: "Uninstallation started successfully"}, nil
+}
+
 func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanRequest) (*gateonv1.RunDeepScanResponse, error) {
 	if s.ClamAVManager == nil {
 		return &gateonv1.RunDeepScanResponse{Success: false, Message: "ClamAV manager not initialized"}, nil

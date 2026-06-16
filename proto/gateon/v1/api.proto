@@ -60,6 +60,7 @@ service ApiService {
   rpc TriggerWafUpdate(TriggerWafUpdateRequest) returns (TriggerWafUpdateResponse);
   rpc TraceRoute(TraceRouteRequest) returns (TraceRouteResponse);
   rpc InstallClamav(InstallClamavRequest) returns (InstallClamavResponse);
+  rpc UninstallClamav(UninstallClamavRequest) returns (UninstallClamavResponse);
   rpc RunDeepScan(RunDeepScanRequest) returns (RunDeepScanResponse);
 }
 
@@ -83,6 +84,13 @@ message InstallClamavRequest {
 }
 
 message InstallClamavResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UninstallClamavRequest {}
+
+message UninstallClamavResponse {
   bool success = 1;
   string message = 2;
 }

@@ -45,6 +45,7 @@ import {
   IconShieldCheck,
   IconX,
   IconAdjustments,
+  IconTrash,
 } from "@tabler/icons-react";
 import { notifications } from '@mantine/notifications';
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
@@ -107,6 +108,36 @@ export default function SettingsPage() {
   const [savedOk, setSavedOk] = useState(false);
   const [generalSavedOk, setGeneralSavedOk] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
+
+  const handleUninstall = async () => {
+    setUninstalling(true);
+    try {
+      const res = await apiFetch("/v1/security/clamav/uninstall", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notifications.show({
+          title: 'Uninstallation Started',
+          message: 'ClamAV removal has been initiated. This might take a few minutes.',
+          color: 'blue',
+          icon: <IconShieldCheck size={16} />
+        });
+      } else {
+        throw new Error(data.message || 'Failed to start uninstallation');
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: 'Uninstallation Failed',
+        message: err.message || 'Failed to start ClamAV uninstallation',
+        color: 'red',
+        icon: <IconX size={16} />
+      });
+    } finally {
+      setUninstalling(false);
+    }
+  };
 
   const handleInstall = async (mode: number) => {
     setInstalling(true);
@@ -1628,6 +1659,25 @@ export default function SettingsPage() {
                           </Menu>
                         </Group>
                       </Stack>
+                    </Alert>
+                  )}
+                  {status && status.clamav_installed && (
+                    <Alert icon={<IconShieldCheck size="1rem" />} title="ClamAV Installed" color="green">
+                      <Group justify="space-between" align="center">
+                        <Text size="sm">
+                          ClamAV is installed and managed by Gateon. You can remove it if it is no longer needed.
+                        </Text>
+                        <Button
+                          variant="white"
+                          color="red"
+                          size="xs"
+                          leftSection={uninstalling ? <Loader size={14} color="red" /> : <IconTrash size={14} />}
+                          disabled={uninstalling || formDisabled}
+                          onClick={handleUninstall}
+                        >
+                          Uninstall
+                        </Button>
+                      </Group>
                     </Alert>
                   )}
                   <Group grow>

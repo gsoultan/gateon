@@ -10,6 +10,7 @@ import type {
   RemoveMitigatedThreatResponse,
   InstallClamavRequest,
   InstallClamavResponse,
+  UninstallClamavResponse,
   RunDeepScanResponse,
 } from "../types/gateon";
 
@@ -175,6 +176,14 @@ export async function installClamav(req: InstallClamavRequest): Promise<InstallC
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function uninstallClamav(): Promise<UninstallClamavResponse> {
+  const res = await apiFetch("/v1/security/clamav/uninstall", {
+    method: "POST",
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

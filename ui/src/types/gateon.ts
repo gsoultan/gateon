@@ -415,6 +415,8 @@ export type EbpfConfig = {
 export interface GeoIPConfig {
   enabled?: boolean;
   db_path?: string;
+  asn_db_path?: string;
+  country_db_path?: string;
   maxmind_license_key?: string;
   auto_update?: boolean;
   update_interval_days?: number;
@@ -755,6 +757,13 @@ export type InstallClamavRequest = {
 };
 
 export type InstallClamavResponse = {
+  success: boolean;
+  message: string;
+};
+
+export type UninstallClamavRequest = {};
+
+export type UninstallClamavResponse = {
   success: boolean;
   message: string;
 };

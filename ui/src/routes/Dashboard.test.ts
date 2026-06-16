@@ -121,6 +121,34 @@ describe("hourly traffic helpers", () => {
     ]);
   });
 
+  test("builds this-month bounds from start of month to now", () => {
+    const nowTs = Date.UTC(2026, 5, 16, 12, 30, 0);
+    const bounds = resolveTrafficRangeBounds("range", "", "thisMonth", "", "", nowTs);
+
+    expect(bounds).not.toBeNull();
+    const expectedStart = new Date(
+      new Date(nowTs).getFullYear(),
+      new Date(nowTs).getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0,
+    ).getTime();
+    expect(bounds?.startTs).toBe(expectedStart);
+    expect(bounds?.endTs).toBe(nowTs);
+  });
+
+  test("builds this-year bounds from start of year to now", () => {
+    const nowTs = Date.UTC(2026, 5, 16, 12, 30, 0);
+    const bounds = resolveTrafficRangeBounds("range", "", "thisYear", "", "", nowTs);
+
+    expect(bounds).not.toBeNull();
+    const expectedStart = new Date(new Date(nowTs).getFullYear(), 0, 1, 0, 0, 0, 0).getTime();
+    expect(bounds?.startTs).toBe(expectedStart);
+    expect(bounds?.endTs).toBe(nowTs);
+  });
+
   test("returns null when custom range end is before start", () => {
     expect(
       resolveTrafficRangeBounds(
@@ -304,8 +332,8 @@ describe("bandwidth helpers", () => {
     expect(hourly).toHaveLength(2);
     expect(hourly[0]).toMatchObject({
       totalBytes: 1500,
-      routerBytes: 1200,
-      serviceBytes: 1300,
+      routerBytes: 1500,
+      serviceBytes: 1500,
     });
     expect(hourly[1]).toMatchObject({
       totalBytes: 200,

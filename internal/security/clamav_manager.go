@@ -229,6 +229,36 @@ func (m *ClamAVManager) preflightLocalPackageManager() error {
 	return errors.New("no supported package manager found (apt, yum, brew, apk); pre-install ClamAV or use Docker mode")
 }
 
+// PreflightUninstall validates that the prerequisites for removing ClamAV in
+// the configured mode are satisfied without performing the removal. It lets
+// callers surface actionable errors synchronously before kicking off a
+// background uninstall. When ClamAV is already absent the preflight succeeds so
+// uninstall remains idempotent.
+func (m *ClamAVManager) PreflightUninstall() error {
+	c := m.cfg()
+	if c == nil {
+		return errors.New("ClamAV is not configured")
+	}
+	switch c.InstallationMode {
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
+		if _, err := exec.LookPath("docker"); err != nil {
+			return errors.New("docker not found in PATH; cannot remove the ClamAV container")
+		}
+		return nil
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
+		if runtime.GOOS == "windows" {
+			return errors.New("local uninstall is not supported on Windows; use Docker mode")
+		}
+		// Nothing installed: removal is a no-op, so no package manager required.
+		if !m.IsInstalled(context.Background()) {
+			return nil
+		}
+		return m.preflightLocalPackageManager()
+	default:
+		return errors.New("unsupported installation mode")
+	}
+}
+
 func (m *ClamAVManager) EnsureInstalled(ctx context.Context) error {
 	c := m.cfg()
 	if c == nil {
@@ -242,6 +272,106 @@ func (m *ClamAVManager) EnsureInstalled(ctx context.Context) error {
 	default:
 		return nil
 	}
+}
+
+// Uninstall removes the ClamAV deployment that Gateon manages. It first stops
+// any scheduled jobs so no scan fires mid-removal, then tears down the
+// installation for the configured mode. The operation is idempotent: removing
+// something already gone is treated as success.
+func (m *ClamAVManager) Uninstall(ctx context.Context) error {
+	// Stop scheduled jobs so a scan/update cannot race the removal.
+	m.Stop()
+
+	c := m.cfg()
+	if c == nil {
+		return nil
+	}
+	switch c.InstallationMode {
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
+		return m.uninstallDocker(ctx)
+	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
+		return m.uninstallLocal(ctx)
+	default:
+		return nil
+	}
+}
+
+// uninstallDocker stops and removes the gateon-clamav container. It is a no-op
+// when the container does not exist so repeated calls are safe.
+func (m *ClamAVManager) uninstallDocker(ctx context.Context) error {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return fmt.Errorf("docker not found in PATH")
+	}
+
+	// Determine whether the container exists at all (running or stopped).
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", "name=^/gateon-clamav$", "--format", "{{.Names}}")
+	out, err := cmd.CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) != "gateon-clamav" {
+		// Nothing to remove.
+		return nil
+	}
+
+	// Force-remove handles both running and stopped containers in one call.
+	if rmOut, err := exec.CommandContext(ctx, "docker", "rm", "-f", "gateon-clamav").CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to remove ClamAV container: %w (output: %s)", err, strings.TrimSpace(string(rmOut)))
+	}
+	logger.L.LogInfo("ClamAV docker container removed")
+	return nil
+}
+
+// uninstallLocal stops the ClamAV services and removes the packages installed
+// by Gateon using the detected package manager. It is a no-op when ClamAV is
+// not present.
+func (m *ClamAVManager) uninstallLocal(ctx context.Context) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("local uninstall not supported on Windows, use Docker")
+	}
+
+	if !m.IsInstalled(ctx) {
+		return nil
+	}
+
+	// Stop and disable services before removing packages so no daemon lingers.
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		_ = exec.CommandContext(ctx, "systemctl", "disable", "--now", "clamav-daemon").Run()
+		_ = exec.CommandContext(ctx, "systemctl", "disable", "--now", "clamav-freshclam").Run()
+	}
+
+	var cmd *exec.Cmd
+	switch {
+	case lookPath("apt-get"):
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("removing packages with apt-get requires root privileges. Please run Gateon as root")
+		}
+		cmd = exec.CommandContext(ctx, "apt-get", "remove", "--purge", "-y", "clamav-daemon", "clamav-freshclam")
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+	case lookPath("yum"):
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("removing packages with yum requires root privileges. Please run Gateon as root")
+		}
+		cmd = exec.CommandContext(ctx, "yum", "remove", "-y", "clamav", "clamav-update")
+	case lookPath("brew"):
+		cmd = exec.CommandContext(ctx, "brew", "uninstall", "--force", "clamav")
+	case lookPath("apk"):
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("removing packages with apk requires root privileges. Please run Gateon as root")
+		}
+		cmd = exec.CommandContext(ctx, "apk", "del", "clamav", "clamav-daemon", "freshclam")
+	default:
+		return fmt.Errorf("no supported package manager found (apt, yum, brew, apk)")
+	}
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return m.formatExecError("uninstallation", err, out)
+	}
+	logger.L.LogInfo("ClamAV packages removed")
+	return nil
+}
+
+// lookPath reports whether the given executable is found in PATH.
+func lookPath(bin string) bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
 }
 
 func (m *ClamAVManager) ensureDocker(ctx context.Context) error {

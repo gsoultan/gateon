@@ -102,7 +102,7 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
     }
   };
 
-  const handleUpload = async (file: File | null) => {
+  const handleUpload = (edition: "city" | "asn" | "country") => async (file: File | null) => {
     if (!file) return;
 
     try {
@@ -123,7 +123,13 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
           color: "green",
           icon: <IconCheck size={16} />,
         });
-        onChange({ ...config, db_path: data.path });
+        if (edition === "asn") {
+          onChange({ ...config, asn_db_path: data.path });
+        } else if (edition === "country") {
+          onChange({ ...config, country_db_path: data.path });
+        } else {
+          onChange({ ...config, db_path: data.path });
+        }
         fetchStatus();
       } else {
         const msg = await resp.text();
@@ -199,7 +205,7 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
               disabled={!config.enabled || disabled}
               style={{ flex: 1 }}
             />
-            <FileButton onChange={handleUpload} accept=".mmdb">
+            <FileButton onChange={handleUpload("city")} accept=".mmdb">
               {(props) => (
                 <Button 
                   {...props} 
@@ -209,6 +215,56 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
                   disabled={!config.enabled || disabled}
                 >
                   Upload MMDB
+                </Button>
+              )}
+            </FileButton>
+          </Group>
+
+          <Group align="flex-end">
+            <TextInput
+              label="ASN Database Path"
+              placeholder="e.g. geoip/GeoLite2-ASN.mmdb"
+              description="Path to your MaxMind GeoLite2 ASN database. Required to show the ASN of attack sources in Security Hub."
+              value={config.asn_db_path || ""}
+              onChange={(e) => onChange({ ...config, asn_db_path: e.currentTarget.value })}
+              disabled={!config.enabled || disabled}
+              style={{ flex: 1 }}
+            />
+            <FileButton onChange={handleUpload("asn")} accept=".mmdb">
+              {(props) => (
+                <Button
+                  {...props}
+                  variant="outline"
+                  leftSection={<IconUpload size={16} />}
+                  loading={uploading}
+                  disabled={!config.enabled || disabled}
+                >
+                  Upload ASN MMDB
+                </Button>
+              )}
+            </FileButton>
+          </Group>
+
+          <Group align="flex-end">
+            <TextInput
+              label="Country Database Path"
+              placeholder="e.g. geoip/GeoLite2-Country.mmdb"
+              description="Optional path to your MaxMind GeoLite2 Country database (geolocation fallback)."
+              value={config.country_db_path || ""}
+              onChange={(e) => onChange({ ...config, country_db_path: e.currentTarget.value })}
+              disabled={!config.enabled || disabled}
+              style={{ flex: 1 }}
+            />
+            <FileButton onChange={handleUpload("country")} accept=".mmdb">
+              {(props) => (
+                <Button
+                  {...props}
+                  variant="outline"
+                  leftSection={<IconUpload size={16} />}
+                  loading={uploading}
+                  disabled={!config.enabled || disabled}
+                >
+                  Upload Country MMDB
                 </Button>
               )}
             </FileButton>

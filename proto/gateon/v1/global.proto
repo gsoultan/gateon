@@ -70,6 +70,11 @@ message AuditConfig {
   bool enabled = 1;
   bool sign_entries = 2;
   string signature_key = 3;
+  // Optional dedicated database for audit/logging storage. When unset, the
+  // auth/management database is reused. database_url takes precedence over
+  // database_config.
+  string database_url = 4;             // sqlite:path, postgres://..., mysql://...
+  DatabaseConfig database_config = 5;
 }
 
 message SecurityAdvancedConfig {
@@ -148,6 +153,13 @@ message GeoIPConfig {
   repeated string allowed_countries = 8;
   // XdpGeofencing, if true, uses eBPF/XDP to block countries at the kernel level.
   bool xdp_geofencing = 7;
+  // AsnDbPath is the path to the GeoLite2-ASN.mmdb database used to resolve the
+  // autonomous system (ASN) of attacking IPs. Optional; defaults to
+  // geoip/GeoLite2-ASN.mmdb when present.
+  string asn_db_path = 9;
+  // CountryDbPath is the path to the optional GeoLite2-Country.mmdb database
+  // used as an additional geolocation fallback.
+  string country_db_path = 10;
 }
 
 // ManagementConfig holds the configuration for the Gateon management server.

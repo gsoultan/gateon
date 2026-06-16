@@ -25,6 +25,21 @@ func AuthDatabaseURL(auth *gateonv1.AuthConfig) string {
 	return "gateon.db"
 }
 
+// AuditDatabaseURL returns the database URL used for audit/logging storage.
+// Prefers the dedicated audit database (database_config, then database_url);
+// when none is configured it falls back to the auth/management database.
+func AuditDatabaseURL(audit *gateonv1.AuditConfig, auth *gateonv1.AuthConfig) string {
+	if audit != nil {
+		if url := BuildURLFromConfig(audit.DatabaseConfig); url != "" {
+			return url
+		}
+		if audit.DatabaseUrl != "" {
+			return audit.DatabaseUrl
+		}
+	}
+	return AuthDatabaseURL(auth)
+}
+
 // BuildURLFromConfig builds a DSN from DatabaseConfig. Returns "" if cfg is nil or driver is sqlite with empty path.
 func BuildURLFromConfig(cfg *gateonv1.DatabaseConfig) string {
 	if cfg == nil || cfg.Driver == "" {

@@ -2,12 +2,14 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestTraceDuplicateInsertion(t *testing.T) {
@@ -172,6 +174,79 @@ func TestPruneRemovesExpiredStatsAndReclaimsDisk(t *testing.T) {
 	if kept != 1 {
 		t.Errorf("expected fresh path_stats row to be kept, got %d", kept)
 	}
+}
+
+func TestRestoreWAFBlockCounter(t *testing.T) {
+	// Own the singleton so persisted state is isolated to this test.
+	_ = ClosePathStatsStore(context.Background())
+
+	dbPath := filepath.Join(t.TempDir(), "waf_restore.db")
+	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
+		t.Fatalf("init store: %v", err)
+	}
+	defer ClosePathStatsStore(context.Background())
+
+	// Wait for the store loop to be ready.
+	time.Sleep(100 * time.Millisecond)
+
+	const route = "route-waf-restore"
+	const want = 3
+	for i := range want {
+		RecordSecurityThreat(SecurityThreat{
+			ID:          fmt.Sprintf("waf-restore-%d", i),
+			Type:        "waf_block",
+			SourceIP:    "9.9.9.9",
+			RouteID:     route,
+			Category:    "sqli",
+			Severity:    "high",
+			ActionTaken: "blocked",
+			Time:        time.Now(),
+		})
+	}
+
+	// Threats are persisted by the async batch flush (every ~1s).
+	time.Sleep(1500 * time.Millisecond)
+
+	// restoreWAFBlockCounter must replay the persisted blocks into the volatile
+	// Prometheus counter so the dashboard does not show 0 after a restart.
+	before := wafRestoredCounterValue(t, route)
+	store.restoreWAFBlockCounter()
+	after := wafRestoredCounterValue(t, route)
+
+	if got := after - before; got != want {
+		t.Errorf("restoreWAFBlockCounter: counter delta = %v, want %d", got, want)
+	}
+}
+
+// wafRestoredCounterValue reads the gateon_middleware_waf_blocked_total counter
+// for the given route and the "restored" rule_id label from the default
+// Prometheus registry.
+func wafRestoredCounterValue(t *testing.T, route string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, fam := range families {
+		if fam.GetName() != "gateon_middleware_waf_blocked_total" {
+			continue
+		}
+		for _, m := range fam.GetMetric() {
+			var gotRoute, gotRule string
+			for _, lbl := range m.GetLabel() {
+				switch lbl.GetName() {
+				case "route":
+					gotRoute = lbl.GetValue()
+				case "rule_id":
+					gotRule = lbl.GetValue()
+				}
+			}
+			if gotRoute == route && gotRule == "restored" {
+				return m.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
 }
 
 func TestGenerateIDUniqueness(t *testing.T) {

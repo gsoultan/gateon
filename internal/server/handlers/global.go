@@ -31,6 +31,24 @@ func decodeGlobalConfig(body []byte, conf *gateonv1.GlobalConfig) error {
 	return nil
 }
 
+// validateDatabase resolves a DSN from the provided URL/config and verifies a
+// connection can be established. databaseURL takes precedence over cfg.
+func validateDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) error {
+	dsn := databaseURL
+	if dsn == "" {
+		dsn = db.BuildURLFromConfig(cfg)
+	}
+	if dsn == "" {
+		return errors.New("invalid database configuration")
+	}
+	conn, _, err := db.Open(dsn)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	_ = conn.Close()
+	return nil
+}
+
 // registerGlobalHandlers registers global configuration and utility handlers.
 func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/global", func(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +305,19 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("POST /v1/security/clamav/uninstall", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp, err := svc.UninstallClamav(r.Context(), &gateonv1.UninstallClamavRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("POST /v1/security/clamav/scan", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
 			return
@@ -384,13 +415,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.Header().Set("Content-Type", "application/json")
 		// Accept extended payload including database settings for first-run wizard
 		type setupBody struct {
-			AdminUsername  string                   `json:"admin_username"`
-			AdminPassword  string                   `json:"admin_password"`
-			PasetoSecret   string                   `json:"paseto_secret"`
-			ManagementBind string                   `json:"management_bind"`
-			ManagementPort string                   `json:"management_port"`
-			DatabaseUrl    string                   `json:"database_url"`
-			DatabaseConfig *gateonv1.DatabaseConfig `json:"database_config"`
+			AdminUsername         string                   `json:"admin_username"`
+			AdminPassword         string                   `json:"admin_password"`
+			PasetoSecret          string                   `json:"paseto_secret"`
+			ManagementBind        string                   `json:"management_bind"`
+			ManagementPort        string                   `json:"management_port"`
+			DatabaseUrl           string                   `json:"database_url"`
+			DatabaseConfig        *gateonv1.DatabaseConfig `json:"database_config"`
+			LoggingDatabaseUrl    string                   `json:"logging_database_url"`
+			LoggingDatabaseConfig *gateonv1.DatabaseConfig `json:"logging_database_config"`
 		}
 		var body setupBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -398,35 +431,44 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 
-		// If DB settings are provided, validate connection and persist to globals before setup
-		if body.DatabaseUrl != "" || body.DatabaseConfig != nil {
-			dsn := body.DatabaseUrl
-			if dsn == "" {
-				dsn = db.BuildURLFromConfig(body.DatabaseConfig)
-			}
-			if dsn == "" {
-				WriteHTTPError(w, http.StatusBadRequest, "invalid database configuration")
-				return
-			}
-			conn, _, err := db.Open(dsn)
-			if err != nil {
-				WriteHTTPError(w, http.StatusBadRequest, "failed to connect to database: "+err.Error())
-				return
-			}
-			_ = conn.Close()
-			// Persist selected DB into global config
+		// If DB settings are provided, validate connections and persist to globals before setup.
+		hasManagementDB := body.DatabaseUrl != "" || body.DatabaseConfig != nil
+		hasLoggingDB := body.LoggingDatabaseUrl != "" || body.LoggingDatabaseConfig != nil
+		if hasManagementDB || hasLoggingDB {
 			gc := svc.GetGlobals().Get(r.Context())
-			if gc.Auth == nil {
-				gc.Auth = &gateonv1.AuthConfig{}
+			if hasManagementDB {
+				if err := validateDatabase(body.DatabaseUrl, body.DatabaseConfig); err != nil {
+					WriteHTTPError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				if gc.Auth == nil {
+					gc.Auth = &gateonv1.AuthConfig{}
+				}
+				if body.DatabaseUrl != "" {
+					gc.Auth.DatabaseUrl = body.DatabaseUrl
+					gc.Auth.DatabaseConfig = nil
+					gc.Auth.SqlitePath = ""
+				} else {
+					gc.Auth.DatabaseConfig = body.DatabaseConfig
+					gc.Auth.DatabaseUrl = ""
+					gc.Auth.SqlitePath = ""
+				}
 			}
-			if body.DatabaseUrl != "" {
-				gc.Auth.DatabaseUrl = body.DatabaseUrl
-				gc.Auth.DatabaseConfig = nil
-				gc.Auth.SqlitePath = ""
-			} else {
-				gc.Auth.DatabaseConfig = body.DatabaseConfig
-				gc.Auth.DatabaseUrl = ""
-				gc.Auth.SqlitePath = ""
+			if hasLoggingDB {
+				if err := validateDatabase(body.LoggingDatabaseUrl, body.LoggingDatabaseConfig); err != nil {
+					WriteHTTPError(w, http.StatusBadRequest, "logging database: "+err.Error())
+					return
+				}
+				if gc.Audit == nil {
+					gc.Audit = &gateonv1.AuditConfig{}
+				}
+				if body.LoggingDatabaseUrl != "" {
+					gc.Audit.DatabaseUrl = body.LoggingDatabaseUrl
+					gc.Audit.DatabaseConfig = nil
+				} else {
+					gc.Audit.DatabaseConfig = body.LoggingDatabaseConfig
+					gc.Audit.DatabaseUrl = ""
+				}
 			}
 			if err := svc.GetGlobals().Update(r.Context(), gc); err != nil {
 				WriteHTTPError(w, http.StatusInternalServerError, "failed to persist database settings")
@@ -508,7 +550,18 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.Verify2FA(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			switch {
+			case errors.Is(err, auth.ErrAccountLocked):
+				logger.SecurityEvent("auth_2fa_locked", r, "account_locked")
+				audit.Log(r.Context(), req.Id, "2fa_locked", "auth", "Account locked during 2FA", request.GetClientIP(r, true))
+				WriteHTTPError(w, http.StatusTooManyRequests, err.Error())
+			case errors.Is(err, auth.ErrInvalidTwoFactorCode):
+				logger.SecurityEvent("auth_2fa_failure", r, "invalid_2fa_code")
+				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.GetClientIP(r, true))
+				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+			default:
+				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			}
 			return
 		}
 
