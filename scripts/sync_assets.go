@@ -17,14 +17,43 @@ func main() {
 	}
 
 	fmt.Printf("Syncing assets from %s to %s...\n", src, dst)
-	// Clean destination directory first to remove stale assets (hashes changed)
-	_ = os.RemoveAll(dst)
-	err := copyDir(src, dst)
-	if err != nil {
+	// Clean destination directory first to remove stale assets (hashes changed),
+	// but preserve the tracked .gitkeep file so the working tree stays clean
+	// (otherwise tools like GoReleaser fail on a "dirty" git state in CI).
+	if err := cleanDir(dst); err != nil {
+		fmt.Printf("Error cleaning destination: %v\n", err)
+		os.Exit(1)
+	}
+	if err := copyDir(src, dst); err != nil {
 		fmt.Printf("Error syncing assets: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("Assets synced successfully.")
+}
+
+// gitKeep is the tracked placeholder that must survive a sync so the working
+// tree does not end up in a dirty state.
+const gitKeep = ".gitkeep"
+
+// cleanDir removes stale build artifacts from dst while preserving the tracked
+// .gitkeep file. The destination directory itself is (re)created if missing.
+func cleanDir(dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dst)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == gitKeep {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dst, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func copyDir(src, dst string) error {
