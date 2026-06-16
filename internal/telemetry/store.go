@@ -243,6 +243,10 @@ func initStore(databaseURL string, retentionDays int) error {
 	// Migration: Move existing traces from SQL to Pebble if table exists
 	go st.migrateTracesToPebble()
 
+	// Restore volatile security counters from persisted history so the
+	// dashboard reflects past activity instead of resetting to 0 on restart.
+	go st.restoreWAFBlockCounter()
+
 	st.wg.Go(st.loop)
 	st.wg.Go(st.dailyResetLoop)
 
@@ -341,10 +345,12 @@ func (s *pathStatsStore) syncDailyBaselines(resetCurrent bool) {
 		s.baselineBytesToday.Store(uint64(bsum.Int64))
 	}
 
-	// Active threats baseline
+	// Active threats baseline. security_threats.timestamp is a TIMESTAMP column
+	// persisted from a time.Time, so it must be compared against a datetime
+	// string (matching GetAttackTrend) rather than an integer Unix value.
 	qThreats := s.dialect.Rebind(QueryGetActiveThreatsToday)
 	var activeCount int64
-	err = s.db.QueryRow(qThreats, startOfDay.Unix()).Scan(&activeCount)
+	err = s.db.QueryRow(qThreats, startOfDay.Format(threatTimestampLayout)).Scan(&activeCount)
 	if err != nil {
 		s.baselineActiveToday.Store(0)
 	} else {
@@ -362,6 +368,31 @@ func (s *pathStatsStore) syncDailyBaselines(resetCurrent bool) {
 	// Reset global telemetry structures for the new day
 	GlobalCMS.Clear()
 	GlobalHHH.Clear()
+}
+
+// restoreWAFBlockCounter seeds the in-memory WAF block counter from persisted
+// security_threats so the "WAF Block" metric on the dashboard survives process
+// restarts instead of always starting at 0. Runs once at startup with a single
+// small grouped query (bounded memory and CPU).
+func (s *pathStatsStore) restoreWAFBlockCounter() {
+	q := s.dialect.Rebind(QueryGetWAFBlockCounts)
+	rows, err := s.db.Query(q)
+	if err != nil {
+		logger.Default().LogError("telemetry: restore WAF block counter failed", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var route string
+		var count int64
+		if err := rows.Scan(&route, &count); err != nil {
+			continue
+		}
+		if count > 0 {
+			MiddlewareWAFBlockedTotal.WithLabelValues(route, "restored").Add(float64(count))
+		}
+	}
 }
 
 func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
@@ -747,6 +778,10 @@ func RecordSecurityThreat(t SecurityThreat) {
 		t.CountryCode = ResolveCountry(t.SourceIP)
 	}
 
+	if t.ASN == "" && t.SourceIP != "" {
+		t.ASN = ResolveASN(t.SourceIP)
+	}
+
 	if store.scoreCache != nil {
 		current, ok := store.scoreCache.Get(t.SourceIP)
 		score := t.Score
@@ -1019,7 +1054,13 @@ func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 		return nil
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
-	q := store.dialect.Rebind(QueryGetTrafficHistory)
+	// For long spans collapse each day into a single bucket so the result set
+	// stays small (bounded memory and snapshot size).
+	query := QueryGetTrafficHistory
+	if days > trafficDailyAggregationThresholdDays {
+		query = QueryGetTrafficHistoryDaily
+	}
+	q := store.dialect.Rebind(query)
 	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
 		logger.Default().LogError("traffic history: query failed", "error", err)
@@ -1178,6 +1219,22 @@ func CurrentRetentionDays() int {
 	return int(store.retentionDays.Load())
 }
 
+// maxDashboardTrendWindowDays caps the dashboard trend window to one year so
+// that month/year filtering is supported while keeping the snapshot payload,
+// memory and query cost bounded regardless of the configured retention.
+const maxDashboardTrendWindowDays = 366
+
+// dashboardTrendWindowDays returns the span (in days) of history the dashboard
+// trend charts should cover: at least one day, at most one year, and never more
+// than the configured retention.
+func dashboardTrendWindowDays() int {
+	days := CurrentRetentionDays()
+	if days <= 0 {
+		days = 1
+	}
+	return min(days, maxDashboardTrendWindowDays)
+}
+
 // GetTopThreatSources returns the most frequent attacking IP addresses.
 func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
 	if store == nil {
@@ -1251,6 +1308,22 @@ func GetThreatsByCountry(ctx context.Context, limit int) []LabeledCount {
 	return res
 }
 
+// attackTrendBucketQuery builds the threat-count trend query, grouping by hour
+// for short spans and by day for longer ones to keep the result set bounded.
+func attackTrendBucketQuery(driver string, daily bool) string {
+	isPostgres := driver == db.DriverPostgres || driver == "pgx"
+	switch {
+	case isPostgres && daily:
+		return "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD 00:00:00') as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+	case isPostgres:
+		return "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD HH24:00:00') as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+	case daily:
+		return "SELECT strftime('%Y-%m-%d 00:00:00', timestamp) as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+	default:
+		return "SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+	}
+}
+
 // GetAttackTrend returns a time-series of security threat counts.
 func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 	if store == nil {
@@ -1259,14 +1332,8 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 	if days <= 0 {
 		days = 1
 	}
-	cutoff := time.Now().Add(time.Duration(-days*24) * time.Hour).Format("2006-01-02 15:04:05")
-	// Group by hour for trend
-	var query string
-	if store.dialect.Driver == db.DriverPostgres || store.dialect.Driver == "pgx" {
-		query = "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD HH24:00:00') as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
-	} else {
-		query = "SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
-	}
+	cutoff := time.Now().Add(time.Duration(-days*24) * time.Hour).Format(threatTimestampLayout)
+	query := attackTrendBucketQuery(store.dialect.Driver, days > attackTrendDailyThresholdDays)
 
 	rows, err := store.db.QueryContext(ctx, store.dialect.Rebind(query), cutoff)
 	if err != nil {

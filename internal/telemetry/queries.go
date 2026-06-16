@@ -1,5 +1,20 @@
 package telemetry
 
+// threatTimestampLayout is the datetime layout used to compare against the
+// security_threats.timestamp column, which is persisted from a time.Time.
+const threatTimestampLayout = "2006-01-02 15:04:05"
+
+// Aggregation thresholds keep query result sets small (bounded memory, storage
+// and bandwidth) when long spans are requested.
+const (
+	// trafficDailyAggregationThresholdDays switches traffic history from
+	// half-hour buckets to a single bucket per day for longer spans.
+	trafficDailyAggregationThresholdDays = 31
+	// attackTrendDailyThresholdDays switches the attack trend from hourly to
+	// daily buckets for longer spans.
+	attackTrendDailyThresholdDays = 7
+)
+
 // SQL queries for path stats. Dialect.Rebind replaces ? with $N (Postgres) as needed.
 const (
 	QueryUpsertPathStatsMySQL = `
@@ -63,11 +78,28 @@ const (
 	QueryGetActiveThreatsToday = `SELECT COUNT(*) FROM security_threats
 		WHERE timestamp >= ? AND action_taken NOT IN ('blocked', 'challenged', 'shunned')`
 
+	// QueryGetWAFBlockCounts returns the number of persisted WAF block events
+	// grouped by route. It is used at startup to restore the in-memory
+	// gateon_middleware_waf_blocked_total counter so the dashboard does not
+	// reset to 0 on every restart. The result set is tiny (one row per route).
+	QueryGetWAFBlockCounts = `SELECT COALESCE(route_id, ''), COUNT(*) FROM security_threats
+		WHERE type = 'waf_block'
+		GROUP BY route_id`
+
 	QueryGetTrafficHistory = `SELECT day, hour, SUM(req_count), SUM(bytes_total)
 		FROM domain_stats
 		WHERE day >= ?
 		GROUP BY day, hour
 		ORDER BY day ASC, hour ASC`
+
+	// QueryGetTrafficHistoryDaily collapses each day into a single bucket. It is
+	// used for long spans (month/year) so the snapshot stays small in memory and
+	// over the wire instead of returning up to 48 half-hour rows per day.
+	QueryGetTrafficHistoryDaily = `SELECT day, 0 AS bucket, SUM(req_count), SUM(bytes_total)
+		FROM domain_stats
+		WHERE day >= ?
+		GROUP BY day
+		ORDER BY day ASC`
 
 	QueryGetDomainStatsHourly = `SELECT domain, hour, req_count, latency_sum_s, bytes_total
 		FROM domain_stats

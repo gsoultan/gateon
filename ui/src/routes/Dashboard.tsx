@@ -53,6 +53,7 @@ import { QuickActions } from "../components/Dashboard/QuickActions";
 import { OnboardingChecklist } from "../components/Dashboard/OnboardingChecklist";
 import {
   TOP_GROUP_LIMIT,
+  MINUTE_MS,
   HOUR_MS,
   DAY_MS,
   DEFAULT_PORT_LABEL,
@@ -121,8 +122,14 @@ const TRAFFIC_RANGE_PRESET_OPTIONS = [
   { value: "last24h", label: "Last 24 hours" },
   { value: "last7d", label: "Last 7 days" },
   { value: "last30d", label: "Last 30 days" },
+  { value: "thisMonth", label: "This month" },
+  { value: "thisYear", label: "This year" },
   { value: "custom", label: "Custom range" },
 ];
+
+// Cap the number of rendered chart buckets to keep the browser's memory and
+// CPU usage low when long spans (month/year) are selected.
+const MAX_CHART_BUCKETS = 400;
 
 type BandwidthDeltaSample = {
   ts: number;
@@ -150,7 +157,7 @@ export default function Dashboard() {
   const [trafficRangePreset, setTrafficRangePreset] = useState<TrafficRangePreset>("last24h");
   const [trafficRangeStart, setTrafficRangeStart] = useState("");
   const [trafficRangeEnd, setTrafficRangeEnd] = useState("");
-  const [chartResolution, setChartResolution] = useState("60");
+  const [chartResolution, setChartResolution] = useState("30");
   const previousPathStatsRef = useRef<Map<string, number> | null>(null);
   const [bandwidthDeltaHistory, setBandwidthDeltaHistory] = useState<BandwidthDeltaSample[]>([]);
 
@@ -278,14 +285,26 @@ export default function Dashboard() {
     [combinedBandwidthHistory, trafficRangeBounds],
   );
 
+  // Coarsen the resolution automatically so that wide spans never produce more
+  // than MAX_CHART_BUCKETS data points (bounded client memory/CPU).
+  const effectiveResolution = useMemo(() => {
+    const requested = parseInt(chartResolution) || 30;
+    if (!trafficRangeBounds) {
+      return requested;
+    }
+    const spanMinutes = (trafficRangeBounds.endTs - trafficRangeBounds.startTs) / MINUTE_MS;
+    const minStep = Math.ceil(spanMinutes / MAX_CHART_BUCKETS);
+    return Math.max(requested, minStep);
+  }, [chartResolution, trafficRangeBounds]);
+
   const hourlyTrafficData = useMemo(
-    () => aggregateTrafficSamples(filteredTrafficSamples, parseInt(chartResolution), trafficRangeBounds),
-    [filteredTrafficSamples, chartResolution, trafficRangeBounds],
+    () => aggregateTrafficSamples(filteredTrafficSamples, effectiveResolution, trafficRangeBounds),
+    [filteredTrafficSamples, effectiveResolution, trafficRangeBounds],
   );
 
   const hourlyBandwidthData = useMemo(
-    () => aggregateBandwidthSamples(filteredBandwidthSamples, parseInt(chartResolution), trafficRangeBounds),
-    [filteredBandwidthSamples, chartResolution, trafficRangeBounds],
+    () => aggregateBandwidthSamples(filteredBandwidthSamples, effectiveResolution, trafficRangeBounds),
+    [filteredBandwidthSamples, effectiveResolution, trafficRangeBounds],
   );
 
   const bandwidthSummaries = useMemo(
@@ -840,7 +859,7 @@ export default function Dashboard() {
               { value: "1440", label: "1 day" },
             ]}
             value={chartResolution}
-            onChange={(value) => setChartResolution(value ?? "60")}
+            onChange={(value) => setChartResolution(value ?? "30")}
           />
         </Group>
 

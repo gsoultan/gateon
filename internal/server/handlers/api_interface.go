@@ -33,6 +33,7 @@ type GlobalAndAuthAPI interface {
 	GetCloudflareIPs(ctx context.Context, req *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error)
 	TriggerWafUpdate(ctx context.Context, req *gateonv1.TriggerWafUpdateRequest) (*gateonv1.TriggerWafUpdateResponse, error)
 	InstallClamav(ctx context.Context, req *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error)
+	UninstallClamav(ctx context.Context, req *gateonv1.UninstallClamavRequest) (*gateonv1.UninstallClamavResponse, error)
 	RunDeepScan(ctx context.Context, req *gateonv1.RunDeepScanRequest) (*gateonv1.RunDeepScanResponse, error)
 	Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error)
 	Verify2FA(ctx context.Context, req *gateonv1.Verify2FARequest) (*gateonv1.Verify2FAResponse, error)

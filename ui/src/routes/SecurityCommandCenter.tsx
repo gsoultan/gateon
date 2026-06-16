@@ -19,13 +19,15 @@ import {
   Menu, 
   Loader, 
   Tabs,
+  Select,
 } from '@mantine/core';
 import { 
   IconShieldCheck, 
   IconAdjustments, 
   IconInfoCircle, 
   IconX, 
-  IconDownload, 
+  IconDownload,
+  IconTrash,
   IconBox, 
   IconChevronDown,
   IconDashboard,
@@ -45,6 +47,17 @@ import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { TimeDisplay } from '../components/TimeDisplay';
 import { getThreatColor, getSeverityColor } from '../utils/security';
+import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
+import type { TrafficRangePreset } from '../utils/dashboard';
+
+const TREND_RANGE_OPTIONS = [
+  { value: 'last24h', label: 'Last 24 hours' },
+  { value: 'last7d', label: 'Last 7 days' },
+  { value: 'last30d', label: 'Last 30 days' },
+  { value: 'thisMonth', label: 'This month' },
+  { value: 'thisYear', label: 'This year' },
+  { value: 'all', label: 'All' },
+];
 
 export default function SecurityCommandCenter() {
   const [page, setPage] = React.useState(1);
@@ -52,9 +65,11 @@ export default function SecurityCommandCenter() {
   const { data: status } = useGateonStatus();
   const [globalConfig, setGlobalConfig] = React.useState<GlobalConfig | null>(null);
   const [installing, setInstalling] = React.useState(false);
+  const [uninstalling, setUninstalling] = React.useState(false);
   const [scanning, setScanning] = React.useState(false);
   const [scanStatus, setScanStatus] = React.useState<DeepScanStatus | null>(null);
   const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const [trendRange, setTrendRange] = React.useState<string>('last24h');
 
   const pollScanStatus = async () => {
     try {
@@ -144,6 +159,33 @@ export default function SecurityCommandCenter() {
     }
   };
 
+  const handleUninstall = async () => {
+    setUninstalling(true);
+    try {
+      const res = await apiFetch("/v1/security/clamav/uninstall", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notifications.show({
+          title: 'Uninstallation Started',
+          message: 'ClamAV removal has been initiated. This might take a few minutes.',
+          color: 'blue',
+          icon: <IconShieldCheck size={16} />
+        });
+      } else {
+        throw new Error(data.message || 'Failed to start uninstallation');
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: 'Uninstallation Failed',
+        message: err.message || 'Failed to start ClamAV uninstallation',
+        color: 'red',
+        icon: <IconX size={16} />
+      });
+    } finally {
+      setUninstalling(false);
+    }
+  };
+
   React.useEffect(() => {
     apiFetch("/v1/global")
       .then(r => r.ok ? r.json() : null)
@@ -185,15 +227,26 @@ export default function SecurityCommandCenter() {
 
   const trendData = React.useMemo(() => {
     if (!metrics?.security?.attack_trend) return [];
-    return metrics.security.attack_trend.map((t: any) => {
-      const date = new Date(t.ts);
-      return {
-        date: isNaN(date.getTime()) ? 'N/A' : format(date, 'HH:mm'),
-        threats: t.requests,
-        fullDate: isNaN(date.getTime()) ? 'N/A' : format(date, 'MMM d, HH:mm')
-      };
-    });
-  }, [metrics]);
+    const bounds =
+      trendRange === 'all'
+        ? null
+        : resolveTrafficRangeBounds('range', '', trendRange as TrafficRangePreset, '', '');
+    // Use day-granular labels for spans wider than two days so month/year
+    // selections stay readable.
+    const spanMs = bounds ? bounds.endTs - bounds.startTs : Number.POSITIVE_INFINITY;
+    const isWideSpan = spanMs > 2 * DAY_MS;
+    return metrics.security.attack_trend
+      .filter((t: any) => !bounds || (t.ts >= bounds.startTs && t.ts < bounds.endTs))
+      .map((t: any) => {
+        const date = new Date(t.ts);
+        const valid = !isNaN(date.getTime());
+        return {
+          date: valid ? format(date, isWideSpan ? 'MMM d' : 'HH:mm') : 'N/A',
+          threats: t.requests,
+          fullDate: valid ? format(date, 'MMM d, HH:mm') : 'N/A',
+        };
+      });
+  }, [metrics, trendRange]);
 
   return (
     <Container size="xl" py="md">
@@ -237,6 +290,17 @@ export default function SecurityCommandCenter() {
                     </Text>
                   )}
                 </Stack>
+                {status?.clamav_installed && (
+                  <Button
+                    variant="subtle"
+                    color="red"
+                    leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
+                    onClick={handleUninstall}
+                    disabled={uninstalling}
+                  >
+                    Uninstall ClamAV
+                  </Button>
+                )}
               </Group>
             </Grid.Col>
           </Grid>
@@ -287,6 +351,17 @@ export default function SecurityCommandCenter() {
           </Tabs.Panel>
 
           <Tabs.Panel value="analytics">
+            <Group justify="flex-end" mb="md">
+              <Select
+                label="Trend range"
+                size="xs"
+                w={170}
+                data={TREND_RANGE_OPTIONS}
+                value={trendRange}
+                onChange={(value) => setTrendRange(value ?? 'last24h')}
+                allowDeselect={false}
+              />
+            </Group>
             <AnalyticsTab 
               metrics={metrics}
               trendData={trendData}

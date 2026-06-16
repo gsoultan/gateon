@@ -22,6 +22,7 @@ type Manager struct {
 	db           *sql.DB
 	dialect      db.Dialect
 	symmetricKey paseto.V4SymmetricKey
+	encKey       []byte
 	logger       logger.Logger
 }
 
@@ -52,6 +53,7 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 		db:           database,
 		dialect:      dialect,
 		symmetricKey: key,
+		encKey:       append([]byte(nil), keyBytes[:32]...),
 		logger:       l,
 	}
 
@@ -86,10 +88,6 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 		return "", nil, err
 	}
 
-	if recoveryCodes != "" {
-		user.RecoveryCodes = strings.Split(recoveryCodes, ",")
-	}
-
 	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
 		return "", nil, ErrAccountLocked
 	}
@@ -102,6 +100,8 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 	m.resetFailedAttempts(username)
 
 	if user.TwoFactorEnabled {
+		// Never leak the secret or recovery codes on the 2FA challenge response.
+		sanitizeUser(&user)
 		return "", &user, ErrTwoFactorRequired
 	}
 
@@ -123,9 +123,19 @@ func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error
 
 	encrypted := token.V4Encrypt(m.symmetricKey, nil)
 
-	user.Password = ""
-	user.TwoFactorSecret = "" // Don't leak secret
+	sanitizeUser(user)
 	return encrypted, user, nil
+}
+
+// sanitizeUser strips all credential-equivalent fields from a User before it is
+// returned to a client to prevent leaking secrets over the wire.
+func sanitizeUser(user *gateonv1.User) {
+	if user == nil {
+		return
+	}
+	user.Password = ""
+	user.TwoFactorSecret = ""
+	user.RecoveryCodes = nil
 }
 
 func (m *Manager) VerifyToken(token string) (any, error) {
@@ -278,6 +288,7 @@ func (m *Manager) UpdateSymmetricKey(key string) {
 	k, err := paseto.V4SymmetricKeyFromBytes(keyBytes[:32])
 	if err == nil {
 		m.symmetricKey = k
+		m.encKey = append([]byte(nil), keyBytes[:32]...)
 	}
 }
 
@@ -302,15 +313,21 @@ func (m *Manager) Setup2FA(id string) (string, string, []string, error) {
 		return "", "", nil, err
 	}
 
-	// Generate recovery codes
-	codes := make([]string, 10)
-	for i := range 10 {
-		codes[i] = uuid.New().String()[:8]
+	// Generate cryptographically strong recovery codes; store only their hashes.
+	plainCodes, hashedCodes, err := generateRecoveryCodes()
+	if err != nil {
+		return "", "", nil, err
 	}
 
-	// Update user with secret but don't enable it yet
+	// Encrypt the TOTP secret at rest.
+	encSecret, err := encryptSecret(m.encKey, key.Secret())
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	// Update user with secret but don't enable it yet.
 	qUpdate := m.dialect.Rebind(QueryUpdate2FA)
-	_, err = m.db.Exec(qUpdate, false, key.Secret(), strings.Join(codes, ","), id)
+	_, err = m.db.Exec(qUpdate, false, encSecret, strings.Join(hashedCodes, ","), id)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -322,7 +339,7 @@ func (m *Manager) Setup2FA(id string) (string, string, []string, error) {
 	}
 
 	qrBase64 := "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
-	return key.Secret(), qrBase64, codes, nil
+	return key.Secret(), qrBase64, plainCodes, nil
 }
 
 func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, error) {
@@ -338,39 +355,52 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 		return false, "", nil, err
 	}
 
-	// Check recovery codes first
-	if recoveryCodes != "" {
-		codes := strings.Split(recoveryCodes, ",")
-		for i, c := range codes {
-			if c == code {
-				// Use code, remove it
-				newCodes := append(codes[:i], codes[i+1:]...)
-				qUpdate := m.dialect.Rebind(QueryUpdate2FA)
-				_, err = m.db.Exec(qUpdate, true, user.TwoFactorSecret, strings.Join(newCodes, ","), id)
-				if err != nil {
-					return false, "", nil, err
-				}
-				token, u, err := m.issueToken(&user)
-				return true, token, u, err
+	// Enforce the same lockout used for password login to throttle brute-force
+	// attempts against the 6-digit TOTP and recovery codes.
+	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
+		return false, "", nil, ErrAccountLocked
+	}
+
+	// The stored secret is encrypted at rest; keep the stored form for persistence
+	// and decrypt a copy for validation.
+	storedSecret := user.TwoFactorSecret
+	plainSecret, err := decryptSecret(m.encKey, storedSecret)
+	if err != nil {
+		return false, "", nil, err
+	}
+
+	// Recovery codes are only valid once 2FA is fully enabled, never during the
+	// enrollment verification step.
+	if user.TwoFactorEnabled && recoveryCodes != "" {
+		hashes := strings.Split(recoveryCodes, ",")
+		if i := matchRecoveryCode(hashes, code); i >= 0 {
+			newCodes := removeAt(hashes, i)
+			qUpdate := m.dialect.Rebind(QueryUpdate2FA)
+			if _, err = m.db.Exec(qUpdate, true, storedSecret, strings.Join(newCodes, ","), id); err != nil {
+				return false, "", nil, err
 			}
+			m.resetFailedAttempts(user.Username)
+			token, u, err := m.issueToken(&user)
+			return true, token, u, err
 		}
 	}
 
-	valid := totp.Validate(code, user.TwoFactorSecret)
-	if valid {
+	if totp.Validate(code, plainSecret) {
 		if !user.TwoFactorEnabled {
-			// Enable 2FA on first successful verification
+			// Enable 2FA on first successful verification.
 			qUpdate := m.dialect.Rebind(QueryUpdate2FA)
-			_, err = m.db.Exec(qUpdate, true, user.TwoFactorSecret, recoveryCodes, id)
-			if err != nil {
+			if _, err = m.db.Exec(qUpdate, true, storedSecret, recoveryCodes, id); err != nil {
 				return false, "", nil, err
 			}
 		}
+		m.resetFailedAttempts(user.Username)
 		token, u, err := m.issueToken(&user)
 		return true, token, u, err
 	}
 
-	return false, "", nil, nil
+	// Invalid code: count it towards the lockout threshold.
+	m.handleFailedLogin(user.Username, failedAttempts)
+	return false, "", nil, ErrInvalidTwoFactorCode
 }
 
 func (m *Manager) Disable2FA(id string) error {

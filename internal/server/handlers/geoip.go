@@ -14,6 +14,21 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
+// reloadGeoIPByFilename reloads the GeoIP reader that matches the uploaded
+// edition. ASN and Country databases are detected by their MaxMind filename and
+// loaded into their dedicated readers; everything else reloads the City reader.
+func reloadGeoIPByFilename(filename, destPath string) error {
+	lower := strings.ToLower(filename)
+	switch {
+	case strings.Contains(lower, "asn"):
+		return telemetry.InitGeoIPASN(destPath)
+	case strings.Contains(lower, "country"):
+		return telemetry.InitGeoIPCountry(destPath)
+	default:
+		return telemetry.InitGeoIP(destPath)
+	}
+}
+
 func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStore) {
 	mux.HandleFunc("POST /v1/geoip/upload", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
@@ -64,8 +79,10 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": destPath})
 		logger.L.LogInfo("geoip database uploaded", "path", destPath)
 
-		// Reload the database
-		if err := telemetry.InitGeoIP(destPath); err != nil {
+		// Reload the appropriate reader based on the uploaded edition. ASN and
+		// Country databases use dedicated readers; anything else is treated as
+		// the City/geolocation database.
+		if err := reloadGeoIPByFilename(filename, destPath); err != nil {
 			logger.L.LogError("failed to reload GeoIP database after upload", "error", err)
 		}
 	})

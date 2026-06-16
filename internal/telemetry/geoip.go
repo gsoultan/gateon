@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,10 +27,26 @@ type publicIPInfo struct {
 	Lon         float64 `json:"lon"`
 }
 
+// MaxMind GeoLite2 edition identifiers and their default on-disk locations.
+const (
+	editionCity    = "GeoLite2-City"
+	editionASN     = "GeoLite2-ASN"
+	editionCountry = "GeoLite2-Country"
+
+	defaultCityDBPath    = "geoip/GeoLite2-City.mmdb"
+	defaultASNDBPath     = "geoip/GeoLite2-ASN.mmdb"
+	defaultCountryDBPath = "geoip/GeoLite2-Country.mmdb"
+
+	geoDir = "geoip"
+)
+
 var (
-	geoDB     *geoip2.Reader
+	geoDB     *geoip2.Reader // City (or Country) edition used for geolocation.
+	asnDB     *geoip2.Reader // Optional GeoLite2-ASN edition used for ASN lookups.
+	countryDB *geoip2.Reader // Optional GeoLite2-Country edition used as a fallback.
 	geoMu     sync.RWMutex
 	geoDBPath string
+	asnDBPath string
 
 	ipCache   = make(map[string]publicIPInfo)
 	cacheMu   sync.RWMutex
@@ -46,7 +63,7 @@ func InitGeoIP(dbPath string) error {
 	}
 	if dbPath == "" {
 		// Look in default location
-		defaultPath := filepath.Join("geoip", "GeoLite2-City.mmdb")
+		defaultPath := filepath.FromSlash(defaultCityDBPath)
 		if _, err := os.Stat(defaultPath); err == nil {
 			dbPath = defaultPath
 		}
@@ -206,52 +223,207 @@ func ResolveCountry(ipStr string) string {
 	return code
 }
 
-// CloseGeoIP closes the global GeoIP database.
+// InitGeoIPASN initializes the optional GeoLite2-ASN reader used to resolve the
+// autonomous system of an IP address. A missing database is not an error: ASN
+// resolution is treated as optional so existing deployments keep working.
+func InitGeoIPASN(dbPath string) error {
+	geoMu.Lock()
+	defer geoMu.Unlock()
+
+	if dbPath == "" {
+		dbPath = os.Getenv("GATEON_GEOIP_ASN_DB_PATH")
+	}
+	if dbPath == "" {
+		defaultPath := filepath.FromSlash(defaultASNDBPath)
+		if _, err := os.Stat(defaultPath); err == nil {
+			dbPath = defaultPath
+		}
+	}
+	if dbPath == "" {
+		return nil // Not configured; ASN resolution stays disabled.
+	}
+
+	if asnDB != nil {
+		_ = asnDB.Close()
+		asnDB = nil
+	}
+
+	db, err := geoip2.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open GeoIP ASN database at %s: %w", dbPath, err)
+	}
+
+	asnDB = db
+	asnDBPath = dbPath
+	return nil
+}
+
+// InitGeoIPCountry initializes the optional GeoLite2-Country reader. It is used
+// as an additional fallback and is treated as optional like the ASN database.
+func InitGeoIPCountry(dbPath string) error {
+	geoMu.Lock()
+	defer geoMu.Unlock()
+
+	if dbPath == "" {
+		dbPath = os.Getenv("GATEON_GEOIP_COUNTRY_DB_PATH")
+	}
+	if dbPath == "" {
+		defaultPath := filepath.FromSlash(defaultCountryDBPath)
+		if _, err := os.Stat(defaultPath); err == nil {
+			dbPath = defaultPath
+		}
+	}
+	if dbPath == "" {
+		return nil // Not configured.
+	}
+
+	if countryDB != nil {
+		_ = countryDB.Close()
+		countryDB = nil
+	}
+
+	db, err := geoip2.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open GeoIP Country database at %s: %w", dbPath, err)
+	}
+
+	countryDB = db
+	return nil
+}
+
+// ResolveASN resolves an IP address to its autonomous system, formatted as
+// "AS<number> <organization>". It returns "" when the ASN database is not
+// loaded, the IP is invalid, or no ASN is associated with the address.
+func ResolveASN(ipStr string) string {
+	geoMu.RLock()
+	defer geoMu.RUnlock()
+
+	if asnDB == nil {
+		return ""
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return ""
+	}
+
+	record, err := asnDB.ASN(ip)
+	if err != nil || record == nil || record.AutonomousSystemNumber == 0 {
+		return ""
+	}
+
+	org := strings.TrimSpace(record.AutonomousSystemOrganization)
+	if org == "" {
+		return fmt.Sprintf("AS%d", record.AutonomousSystemNumber)
+	}
+	return fmt.Sprintf("AS%d %s", record.AutonomousSystemNumber, org)
+}
+
+// CloseGeoIP closes all loaded GeoIP databases.
 func CloseGeoIP() error {
 	geoMu.Lock()
 	defer geoMu.Unlock()
 
+	var errs []error
 	if geoDB != nil {
-		return geoDB.Close()
+		if err := geoDB.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		geoDB = nil
 	}
-	return nil
+	if asnDB != nil {
+		if err := asnDB.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		asnDB = nil
+	}
+	if countryDB != nil {
+		if err := countryDB.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		countryDB = nil
+	}
+	return errors.Join(errs...)
 }
 
-// DownloadGeoIP downloads the GeoLite2-City database from MaxMind using the provided license key.
+// geoIPEdition describes a MaxMind GeoLite2 edition to download together with
+// its on-disk destination and the reload hook that swaps the in-memory reader.
+type geoIPEdition struct {
+	id       string
+	destPath string
+	reload   func(string) error
+	required bool
+}
+
+// geoIPEditions returns the editions Gateon downloads from MaxMind. The City
+// edition is required (it powers geolocation); ASN and Country are optional and
+// a failure to fetch them must not break the City update.
+func geoIPEditions() []geoIPEdition {
+	return []geoIPEdition{
+		{id: editionCity, destPath: filepath.FromSlash(defaultCityDBPath), reload: InitGeoIP, required: true},
+		{id: editionASN, destPath: filepath.FromSlash(defaultASNDBPath), reload: InitGeoIPASN, required: false},
+		{id: editionCountry, destPath: filepath.FromSlash(defaultCountryDBPath), reload: InitGeoIPCountry, required: false},
+	}
+}
+
+// DownloadGeoIP downloads the configured GeoLite2 editions (City, ASN and
+// Country) from MaxMind using the provided license key. The City edition is
+// mandatory; optional editions are downloaded on a best-effort basis and their
+// failures are aggregated and returned without aborting the whole update.
 func DownloadGeoIP(licenseKey string) error {
 	if licenseKey == "" {
 		return fmt.Errorf("maxmind license key is required")
 	}
 
-	url := fmt.Sprintf("https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=%s&suffix=tar.gz", licenseKey)
+	if err := os.MkdirAll(geoDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create geoip directory: %w", err)
+	}
+
+	var optionalErrs []error
+	for _, edition := range geoIPEditions() {
+		if err := downloadGeoIPEdition(licenseKey, edition); err != nil {
+			if edition.required {
+				return err
+			}
+			optionalErrs = append(optionalErrs, err)
+		}
+	}
+
+	return errors.Join(optionalErrs...)
+}
+
+// downloadGeoIPEdition downloads a single MaxMind edition, extracts the embedded
+// .mmdb file to its destination and reloads the associated reader.
+func downloadGeoIPEdition(licenseKey string, edition geoIPEdition) error {
+	url := fmt.Sprintf("https://download.maxmind.com/app/geoip_download?edition_id=%s&license_key=%s&suffix=tar.gz", edition.id, licenseKey)
 
 	resp, err := http.Get(url)
 	if err != nil {
-		return fmt.Errorf("failed to download GeoIP database: %w", err)
+		return fmt.Errorf("failed to download %s database: %w", edition.id, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("maxmind download failed with status: %s", resp.Status)
+		return fmt.Errorf("maxmind download of %s failed with status: %s", edition.id, resp.Status)
 	}
 
-	// Create geoip directory if it doesn't exist
-	if err := os.MkdirAll("geoip", 0755); err != nil {
-		return fmt.Errorf("failed to create geoip directory: %w", err)
+	if err := extractMMDB(resp.Body, edition.destPath); err != nil {
+		return fmt.Errorf("%s: %w", edition.id, err)
 	}
 
-	// Extract tar.gz
-	gzr, err := gzip.NewReader(resp.Body)
+	return edition.reload(edition.destPath)
+}
+
+// extractMMDB reads a gzip-compressed tar stream and writes the first contained
+// .mmdb file to destPath.
+func extractMMDB(body io.Reader, destPath string) error {
+	gzr, err := gzip.NewReader(body)
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
 	defer gzr.Close()
 
 	tr := tar.NewReader(gzr)
-
-	var found bool
-	destPath := filepath.Join("geoip", "GeoLite2-City.mmdb")
-
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -261,27 +433,23 @@ func DownloadGeoIP(licenseKey string) error {
 			return fmt.Errorf("failed to read tar entry: %w", err)
 		}
 
-		if strings.HasSuffix(header.Name, ".mmdb") {
-			f, err := os.Create(destPath)
-			if err != nil {
-				return fmt.Errorf("failed to create destination file: %w", err)
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return fmt.Errorf("failed to copy mmdb content: %w", err)
-			}
-			f.Close()
-			found = true
-			break
+		if !strings.HasSuffix(header.Name, ".mmdb") {
+			continue
 		}
+
+		f, err := os.Create(destPath)
+		if err != nil {
+			return fmt.Errorf("failed to create destination file: %w", err)
+		}
+		if _, err := io.Copy(f, tr); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("failed to copy mmdb content: %w", err)
+		}
+		_ = f.Close()
+		return nil
 	}
 
-	if !found {
-		return fmt.Errorf("no .mmdb file found in the downloaded archive")
-	}
-
-	// Reload database
-	return InitGeoIP(destPath)
+	return fmt.Errorf("no .mmdb file found in the downloaded archive")
 }
 
 // GetGeoIPStatus returns information about the current GeoIP database.

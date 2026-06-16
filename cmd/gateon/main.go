@@ -113,7 +113,7 @@ func main() {
 	if gc := globalReg.Get(ctx); gc != nil {
 		alerting.Init(gc.Alerting, ebpfHolder)
 		telemetry.SetAlertingHandler(alerting.HandleThreat)
-		databaseURL := db.AuthDatabaseURL(gc.Auth)
+		databaseURL := db.AuditDatabaseURL(gc.Audit, gc.Auth)
 		if err := audit.Init(gc.Audit, databaseURL); err != nil {
 			logger.L.LogError("failed to init audit manager", "error", err)
 		}
@@ -209,14 +209,29 @@ func initConfigRegistries() (*config.GlobalRegistry, string) {
 func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 	// Initialize global GeoIP for background resolution
 	dbPath := ""
+	asnDBPath := ""
+	countryDBPath := ""
 	if gc := globalReg.Get(ctx); gc != nil && gc.Geoip != nil {
 		dbPath = gc.Geoip.DbPath
+		asnDBPath = gc.Geoip.AsnDbPath
+		countryDBPath = gc.Geoip.CountryDbPath
 	}
 
 	if err := telemetry.InitGeoIP(dbPath); err == nil {
 		request.RegisterCountryResolver(&telemetry.GeoIPResolver{})
 	} else {
 		logger.L.LogWarn("failed to initialize GeoIP background resolver", "error", err)
+	}
+
+	// Initialize the optional ASN database so Top Attack Sources can display the
+	// autonomous system of attacking IPs. A missing database is not fatal.
+	if err := telemetry.InitGeoIPASN(asnDBPath); err != nil {
+		logger.L.LogWarn("failed to initialize GeoIP ASN resolver", "error", err)
+	}
+
+	// Initialize the optional Country database used as a geolocation fallback.
+	if err := telemetry.InitGeoIPCountry(countryDBPath); err != nil {
+		logger.L.LogWarn("failed to initialize GeoIP Country resolver", "error", err)
 	}
 
 	// Start GeoIP worker

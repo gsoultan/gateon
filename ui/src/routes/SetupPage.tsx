@@ -41,7 +41,47 @@ import { notifications } from "@mantine/notifications";
 import { useClipboard } from "@mantine/hooks";
 import { generateRandomString } from "../utils/random";
 
-const WIZARD_STEPS = 5; // Admin, Security, Database, Management, Review
+const WIZARD_STEPS = 6; // Admin, Security, Database, Logging, Management, Review
+
+type DbFields = {
+  useUrl: boolean;
+  url: string;
+  driver: string;
+  sqlitePath: string;
+  host: string;
+  port: string;
+  user: string;
+  password: string;
+  name: string;
+  sslMode: string;
+};
+
+// buildDbPayload validates a set of database fields and returns either a ready
+// to send payload or a human-readable validation error.
+function buildDbPayload(f: DbFields): { payload?: any; error?: string } {
+  if (f.useUrl) {
+    if (!f.url) return { error: "Please provide a database connection string (URL)" };
+    return { payload: { database_url: f.url } };
+  }
+  if (f.driver === "sqlite") {
+    if (!f.sqlitePath) return { error: "Please provide a path for the SQLite database file" };
+    return { payload: { database_config: { driver: "sqlite", sqlite_path: f.sqlitePath } } };
+  }
+  if (!f.host || !f.port || !f.name) return { error: "Please fill host, port and database" };
+  return {
+    payload: {
+      database_config: {
+        driver: f.driver,
+        host: f.host,
+        port: Number(f.port) || 0,
+        user: f.user,
+        password: f.password,
+        database: f.name,
+        ssl_mode: f.driver === "postgres" ? f.sslMode || "disable" : "",
+      },
+    },
+  };
+}
 
 export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +89,45 @@ export default function SetupPage() {
   const [wizardStep, setWizardStep] = useState(0);
   const clipboard = useClipboard({ timeout: 2000 });
   const navigate = useNavigate();
+
+  const testDb = async (payload: any) => {
+    setLoading(true);
+    try {
+      await testDbConnection(payload);
+      return true;
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : "Database connection failed");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const managementDbFields = (): DbFields => ({
+    useUrl: form.values.database_use_url,
+    url: form.values.database_url,
+    driver: form.values.database_driver,
+    sqlitePath: form.values.sqlite_path,
+    host: form.values.db_host,
+    port: form.values.db_port,
+    user: form.values.db_user,
+    password: form.values.db_password,
+    name: form.values.db_name,
+    sslMode: form.values.db_ssl_mode,
+  });
+
+  const loggingDbFields = (): DbFields => ({
+    useUrl: form.values.logging_use_url,
+    url: form.values.logging_url,
+    driver: form.values.logging_driver,
+    sqlitePath: form.values.logging_sqlite_path,
+    host: form.values.log_db_host,
+    port: form.values.log_db_port,
+    user: form.values.log_db_user,
+    password: form.values.log_db_password,
+    name: form.values.log_db_name,
+    sslMode: form.values.log_db_ssl_mode,
+  });
 
   const nextStep = async () => {
     const adminValid = form.validateField("admin_username").hasError === false &&
@@ -68,52 +147,23 @@ export default function SetupPage() {
     }
     if (wizardStep === 2) {
       // Database step: test connection before proceeding
-      try {
-        const useUrl = form.values.database_use_url;
-        const driver = form.values.database_driver;
-        const payload: any = {};
-        if (useUrl) {
-          if (!form.values.database_url) {
-            setError("Please provide a database connection string (URL)");
-            return;
-          }
-          payload.database_url = form.values.database_url;
-        } else {
-          if (driver === "sqlite") {
-            if (!form.values.sqlite_path) {
-              setError("Please provide a path for the SQLite database file");
-              return;
-            }
-            payload.database_config = {
-              driver: "sqlite",
-              sqlite_path: form.values.sqlite_path,
-            };
-          } else {
-            if (!form.values.db_host || !form.values.db_port || !form.values.db_name) {
-              setError("Please fill host, port and database");
-              return;
-            }
-            payload.database_config = {
-              driver,
-              host: form.values.db_host,
-              port: Number(form.values.db_port) || 0,
-              user: form.values.db_user,
-              password: form.values.db_password,
-              database: form.values.db_name,
-              ssl_mode: driver === "postgres" ? form.values.db_ssl_mode || "disable" : "",
-            };
-          }
-        }
-        setLoading(true);
-        await testDbConnection(payload);
-      } catch (e: any) {
-        setLoading(false);
-        setError(e?.message ? String(e.message) : "Database connection failed");
+      const { payload, error: dbError } = buildDbPayload(managementDbFields());
+      if (dbError) {
+        setError(dbError);
         return;
       }
-      setLoading(false);
+      if (!(await testDb(payload))) return;
     }
-    if (wizardStep === 3 && !managementValid) {
+    if (wizardStep === 3 && !form.values.logging_use_same) {
+      // Logging step: test the dedicated logging database connection
+      const { payload, error: dbError } = buildDbPayload(loggingDbFields());
+      if (dbError) {
+        setError(dbError);
+        return;
+      }
+      if (!(await testDb(payload))) return;
+    }
+    if (wizardStep === 4 && !managementValid) {
       form.validate();
       return;
     }
@@ -145,6 +195,18 @@ export default function SetupPage() {
       db_password: "",
       db_name: "gateon",
       db_ssl_mode: "disable",
+      // Logging database fields (defaults to reusing the management database)
+      logging_use_same: true,
+      logging_driver: "sqlite",
+      logging_use_url: false,
+      logging_url: "",
+      logging_sqlite_path: "gateon-logs.db",
+      log_db_host: "127.0.0.1",
+      log_db_port: "",
+      log_db_user: "",
+      log_db_password: "",
+      log_db_name: "gateon_logs",
+      log_db_ssl_mode: "disable",
     },
     validate: {
       admin_username: (value) => (value.length < 3 ? "Username too short" : null),
@@ -189,6 +251,15 @@ export default function SetupPage() {
             database: values.db_name,
             ssl_mode: values.database_driver === "postgres" ? values.db_ssl_mode || "disable" : "",
           };
+        }
+      }
+      // Dedicated logging database (when the user opted out of reusing the management store)
+      if (!values.logging_use_same) {
+        const { payload: logPayload } = buildDbPayload(loggingDbFields());
+        if (logPayload?.database_url) {
+          payload.logging_database_url = logPayload.database_url;
+        } else if (logPayload?.database_config) {
+          payload.logging_database_config = logPayload.database_config;
         }
       }
       const res = await setupGateon(payload);
@@ -261,11 +332,26 @@ export default function SetupPage() {
               active={wizardStep}
               onStepClick={(s) => s < wizardStep && setWizardStep(s)}
               allowNextStepsSelect={false}
-              size="sm"
-              completedIcon={<IconCheck size={18} />}
+              size="xs"
+              iconSize={28}
+              wrap={false}
+              completedIcon={<IconCheck size={16} />}
               mb="xl"
+              styles={{
+                steps: { flexWrap: "nowrap", overflowX: "auto", paddingBottom: 4 },
+                step: {
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 6,
+                  minWidth: 0,
+                  flex: "1 1 auto",
+                },
+                stepBody: { marginInlineStart: 0, textAlign: "center" },
+                separator: { minWidth: 8, marginInline: 4 },
+                stepLabel: { fontSize: rem(11), lineHeight: 1.1 },
+              }}
             >
-              <Stepper.Step label="Account" description="Admin user">
+              <Stepper.Step label="Account">
                 <Stack gap="lg" mt="md">
                   <Box>
                     <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -329,7 +415,7 @@ export default function SetupPage() {
                 </Stack>
               </Stepper.Step>
 
-              <Stepper.Step label="Security" description="PASETO key">
+              <Stepper.Step label="Security">
                 <Stack gap="lg" mt="md">
                   <Box>
                     <Group justify="space-between" mb={10}>
@@ -377,7 +463,7 @@ export default function SetupPage() {
                 </Stack>
               </Stepper.Step>
 
-              <Stepper.Step label="Database" description="Management store">
+              <Stepper.Step label="Database">
                 <Stack gap="lg" mt="md">
                   <Box>
                     <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -479,7 +565,104 @@ export default function SetupPage() {
                 </Stack>
               </Stepper.Step>
 
-              <Stepper.Step label="Management" description="API Access">
+              <Stepper.Step label="Logging">
+                <Stack gap="lg" mt="md">
+                  <Box>
+                    <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Logging Database
+                    </Text>
+                    <Text size="xs" c="dimmed" mb="md">
+                      Choose where audit and security logs are stored. By default they
+                      are kept in the management database, but you can isolate them in a
+                      dedicated database.
+                    </Text>
+                    <Checkbox
+                      label="Use the same database as management"
+                      {...form.getInputProps("logging_use_same", { type: 'checkbox' })}
+                    />
+
+                    {!form.values.logging_use_same && (
+                      <Box mt="md">
+                        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                          <Select
+                            label="Driver"
+                            data={[
+                              { value: "sqlite", label: "SQLite" },
+                              { value: "postgres", label: "PostgreSQL" },
+                              { value: "mysql", label: "MySQL" },
+                              { value: "mariadb", label: "MariaDB" },
+                            ]}
+                            {...form.getInputProps("logging_driver")}
+                          />
+                          <Checkbox
+                            mt={28}
+                            label="Use connection string (URL)"
+                            {...form.getInputProps("logging_use_url", { type: 'checkbox' })}
+                          />
+                        </SimpleGrid>
+
+                        {form.values.logging_use_url ? (
+                          <TextInput
+                            mt="md"
+                            label="Connection string"
+                            placeholder="e.g. postgres://user:pass@host:5432/db?sslmode=disable"
+                            {...form.getInputProps("logging_url")}
+                          />
+                        ) : form.values.logging_driver === 'sqlite' ? (
+                          <TextInput
+                            mt="md"
+                            label="SQLite file path"
+                            placeholder="gateon-logs.db"
+                            {...form.getInputProps("logging_sqlite_path")}
+                          />
+                        ) : (
+                          <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
+                            <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("log_db_host")} />
+                            <TextInput label="Port" placeholder={form.values.logging_driver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("log_db_port")} />
+                            <TextInput label="User" placeholder="gateon" {...form.getInputProps("log_db_user")} />
+                            <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("log_db_password")} />
+                            <TextInput label="Database" placeholder="gateon_logs" {...form.getInputProps("log_db_name")} />
+                            {form.values.logging_driver === 'postgres' && (
+                              <Select
+                                label="SSL mode"
+                                data={[
+                                  { value: 'disable', label: 'disable' },
+                                  { value: 'require', label: 'require' },
+                                  { value: 'verify-ca', label: 'verify-ca' },
+                                  { value: 'verify-full', label: 'verify-full' },
+                                ]}
+                                {...form.getInputProps("log_db_ssl_mode")}
+                              />
+                            )}
+                          </SimpleGrid>
+                        )}
+
+                        <Group mt="md">
+                          <Button
+                            variant="light"
+                            loading={loading}
+                            onClick={async () => {
+                              const { payload, error: dbError } = buildDbPayload(loggingDbFields());
+                              if (dbError) {
+                                setError(dbError);
+                                return;
+                              }
+                              if (await testDb(payload)) {
+                                notifications.show({ title: 'Database OK', message: 'Connection successful', color: 'green', icon: <IconCheck size={18} /> });
+                                setError(null);
+                              }
+                            }}
+                          >
+                            Test Connection
+                          </Button>
+                        </Group>
+                      </Box>
+                    )}
+                  </Box>
+                </Stack>
+              </Stepper.Step>
+
+              <Stepper.Step label="API">
                 <Stack gap="lg" mt="md">
                   <Box>
                     <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -516,7 +699,7 @@ export default function SetupPage() {
                 </Stack>
               </Stepper.Step>
 
-              <Stepper.Step label="Confirm" description="Review & complete">
+              <Stepper.Step label="Confirm">
                 <Stack gap="lg" mt="md">
                   <Text size="sm" c="dimmed">
                     Review your configuration. global.json will be created when you confirm.
@@ -539,6 +722,18 @@ export default function SetupPage() {
                           <Code>sqlite:{form.values.sqlite_path}</Code>
                         ) : (
                           <Code>{`${form.values.database_driver}://${form.values.db_user ? form.values.db_user + '@' : ''}${form.values.db_host}:${form.values.db_port}/${form.values.db_name}`}</Code>
+                        )}
+                      </Group>
+                      <Group gap="xs">
+                        <Text size="xs" fw={600} c="dimmed">Logging DB:</Text>
+                        {form.values.logging_use_same ? (
+                          <Code>same as management</Code>
+                        ) : form.values.logging_use_url ? (
+                          <Code>{form.values.logging_url || '—'}</Code>
+                        ) : form.values.logging_driver === 'sqlite' ? (
+                          <Code>sqlite:{form.values.logging_sqlite_path}</Code>
+                        ) : (
+                          <Code>{`${form.values.logging_driver}://${form.values.log_db_user ? form.values.log_db_user + '@' : ''}${form.values.log_db_host}:${form.values.log_db_port}/${form.values.log_db_name}`}</Code>
                         )}
                       </Group>
                       <Group gap="xs">

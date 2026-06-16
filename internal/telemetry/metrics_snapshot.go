@@ -210,7 +210,7 @@ func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
 	snap.DomainMetrics = buildDomainMetrics(idx)
 	snap.HourlyDomainMetrics = GetDomainStatsWindow(ctx, 1)
-	snap.TrafficHistory = GetSystemTrafficHistory(ctx, CurrentRetentionDays())
+	snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
 	snap.System = buildSystemMetrics(idx)
 	snap.Security = buildSecurityInsights(ctx, idx, limit, offset)
 
@@ -706,7 +706,7 @@ func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily
 		TopThreatSources:  GetTopThreatSources(ctx, 5),
 		TopThreatTypes:    GetTopThreatTypes(ctx, 5),
 		ThreatsByCountry:  GetThreatsByCountry(ctx, 10),
-		AttackTrend:       GetAttackTrend(ctx, 1),
+		AttackTrend:       GetAttackTrend(ctx, dashboardTrendWindowDays()),
 		RecentAnomalies:   threats,
 		TotalAnomalies:    total,
 		ActiveThreats:     activeCount,

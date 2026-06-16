@@ -19,7 +19,13 @@ export type HourlyTrafficDatum = {
 };
 
 export type TrafficFilterMode = "all" | "date" | "range";
-export type TrafficRangePreset = "last24h" | "last7d" | "last30d" | "custom";
+export type TrafficRangePreset =
+  | "last24h"
+  | "last7d"
+  | "last30d"
+  | "thisMonth"
+  | "thisYear"
+  | "custom";
 
 export type TrafficRangeBounds = {
   startTs: number;
@@ -317,6 +323,18 @@ export function resolveTrafficRangeBounds(
     const startTs = parseDateInputToStartTs(dateValue);
     if (startTs === null) return null;
     return { startTs, endTs: startTs + DAY_MS };
+  }
+
+  if (rangePreset === "thisMonth") {
+    const now = new Date(nowTs);
+    const startTs = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
+    return { startTs, endTs: nowTs };
+  }
+
+  if (rangePreset === "thisYear") {
+    const now = new Date(nowTs);
+    const startTs = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0).getTime();
+    return { startTs, endTs: nowTs };
   }
 
   if (rangePreset !== "custom") {
