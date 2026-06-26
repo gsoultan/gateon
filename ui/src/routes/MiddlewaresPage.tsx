@@ -30,7 +30,7 @@ import {
   IconCode,
 } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { Middleware } from "../types/gateon";
 import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } from "../hooks/useGateon";
@@ -302,6 +302,7 @@ export default function MiddlewaresPage() {
               { label: "Buffering (max body)", value: "buffering" },
               { label: "Authentication", value: "auth" },
               { label: "Header Manipulation", value: "headers" },
+              { label: "Forwarded Headers (X-Forwarded-Proto)", value: "forwardedheaders" },
               { label: "Path Rewrite", value: "rewrite" },
               { label: "Add Prefix", value: "addprefix" },
               { label: "Strip Prefix", value: "stripprefix" },
@@ -391,6 +392,8 @@ export default function MiddlewaresPage() {
                     "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret; oidc: issuer, audience; oauth2: introspection_url, client_id, client_secret; paseto: secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
                   {editingMW?.type === "headers" &&
                     "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, add_response_X, set_response_X, del_request_X, del_response_X"}
+                  {editingMW?.type === "forwardedheaders" &&
+                    "Keys: proto (http/https — force X-Forwarded-Proto), trust_forward_header (true/false — honor inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES)"}
                   {editingMW?.type === "rewrite" &&
                     "Keys: path, pattern, replacement, query_X"}
                   {editingMW?.type === "addprefix" && "Keys: prefix"}

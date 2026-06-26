@@ -83,6 +83,31 @@ export function MiddlewareConfigEditor({
     case "headers":
       return <HeadersConfigEditor config={config} onChange={onChange} />;
 
+    case "forwardedheaders":
+      return (
+        <Stack gap="md">
+          <Select
+            label="X-Forwarded-Proto"
+            description="Force the scheme forwarded to the backend. Leave as Auto to derive it from TLS / trusted proxies."
+            value={config.proto || ""}
+            onChange={(val) => updateConfig("proto", val || "")}
+            data={[
+              { label: "Auto (derive)", value: "" },
+              { label: "https", value: "https" },
+              { label: "http", value: "http" },
+            ]}
+          />
+          <Switch
+            label="Trust inbound X-Forwarded-Proto"
+            description="Honor the inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES. Ignored when a scheme is forced above."
+            checked={config.trust_forward_header === "true"}
+            onChange={(e) =>
+              updateConfig("trust_forward_header", e.currentTarget.checked ? "true" : "false")
+            }
+          />
+        </Stack>
+      );
+
     case "rewrite":
       return <RewriteConfigEditor config={config} updateConfig={updateConfig} onChange={onChange} />;
 

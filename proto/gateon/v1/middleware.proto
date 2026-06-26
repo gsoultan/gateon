@@ -33,7 +33,7 @@ message DeleteMiddlewareResponse {
   bool success = 1;
 }
 
-// Supported types: ratelimit, inflightreq, buffering, auth, headers, rewrite,
+// Supported types: ratelimit, inflightreq, buffering, auth, headers, forwardedheaders, rewrite,
 // addprefix, stripprefix, stripprefixregex, replacepath, replacepathregex,
 // compress, forwardauth, accesslog, metrics, errors, retry, cors, grpcweb,
 // ipfilter, waf, honeypot, bot_management, turnstile, geoip, hmac, cache, policy, xfcc, wasm, transform, schema_validation, request_id

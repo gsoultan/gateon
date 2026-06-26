@@ -81,11 +81,7 @@ func (h *ProxyHandler) prepareRequest(r *http.Request, state *targetState, targe
 	r.URL.Host = targetURL.Host
 	r.URL.Scheme = targetURL.Scheme
 	r.Header.Set("X-Forwarded-Host", r.Host)
-	if r.TLS != nil {
-		r.Header.Set("X-Forwarded-Proto", "https")
-	} else {
-		r.Header.Set("X-Forwarded-Proto", "http")
-	}
+	r.Header.Set("X-Forwarded-Proto", request.Scheme(r))
 	r.Host = targetURL.Host
 	return r
 }

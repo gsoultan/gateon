@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 const (
@@ -92,17 +94,13 @@ func (h *ProxyHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, ta
 	backendReq.Host = host
 	backendReq.RequestURI = ""
 
-	// Preserve X-Forwarded-* if not set
+	// X-Forwarded-*: preserve the inbound host, but always normalize the scheme
+	// through request.Scheme so an untrusted client cannot spoof X-Forwarded-Proto
+	// (consistent with the HTTP proxy path in serve_http.go).
 	if backendReq.Header.Get("X-Forwarded-Host") == "" {
 		backendReq.Header.Set("X-Forwarded-Host", r.Host)
 	}
-	if backendReq.Header.Get("X-Forwarded-Proto") == "" {
-		if r.TLS != nil {
-			backendReq.Header.Set("X-Forwarded-Proto", "https")
-		} else {
-			backendReq.Header.Set("X-Forwarded-Proto", "http")
-		}
-	}
+	backendReq.Header.Set("X-Forwarded-Proto", request.Scheme(r))
 
 	// Force HTTP/1.1 for upgrade
 	backendReq.Proto = "HTTP/1.1"
