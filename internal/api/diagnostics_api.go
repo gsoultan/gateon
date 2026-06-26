@@ -168,6 +168,35 @@ func (s *ApiService) buildRouteDiagnostic(
 	return rd
 }
 
+// RunSecurityAnalysisLoop periodically runs the anomaly/threat analysis engine
+// so reputation, coordinated-scan and multi-IP detections are recorded
+// continuously — not only while an operator has the Diagnostics page open
+// (which is the only thing that used to trigger this analysis). Each pass
+// records security threats via telemetry.RecordSecurityThreat, which feed the
+// threat broadcaster -> correlation engine -> incidents pipeline. The loop exits
+// when ctx is cancelled. A non-positive interval defaults to one minute.
+func (s *ApiService) RunSecurityAnalysisLoop(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if s.Routes == nil {
+				continue
+			}
+			routes := s.Routes.List(ctx)
+			// The return value is for the Diagnostics UI; here we run it purely
+			// for its threat-recording side effects.
+			_ = s.detectAnomalies(ctx, routes)
+		}
+	}
+}
+
 func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Route) []*gateonv1.Anomaly {
 	mgmtHosts := s.getManagementHosts(ctx)
 

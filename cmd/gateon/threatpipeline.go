@@ -32,6 +32,9 @@ func startThreatPipeline(ctx context.Context, version string) {
 
 	engine := correlation.New(correlation.Config{
 		OnIncident: func(inc correlation.Incident) {
+			// Retain in-process so the gateway can surface incidents in its own
+			// API/UI (GET /v1/security/incidents) even without an external SIEM.
+			correlation.DefaultIncidentStore.Add(inc)
 			logIncident(inc)
 			if shipper != nil {
 				shipper.Ship(incidentToEvent(inc))
@@ -57,6 +60,8 @@ func initSIEMShipper(ctx context.Context, version string) *siem.Shipper {
 		return nil
 	}
 	go shipper.Run(ctx)
+	// Register so the posture endpoint / Security Hub can report SIEM status.
+	siem.SetDefault(shipper)
 	logger.L.LogInfo("SIEM exporter enabled",
 		"endpoint", cfg.Endpoint, "format", string(cfg.Format), "transport", cfg.Transport)
 	return shipper

@@ -11,6 +11,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/fim"
+	"github.com/gsoultan/gateon/internal/security/siem"
 	"github.com/gsoultan/gateon/internal/security/yara"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -105,6 +106,7 @@ func newPostureProvider(
 				Enabled:   true,
 				RuleCount: yara.Default().RuleCount(),
 			},
+			SIEM: siem.CurrentStatus(),
 		}
 		if fimScanner != nil {
 			st := fimScanner.Status()
