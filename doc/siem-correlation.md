@@ -129,6 +129,30 @@ export GATEON_SIEM_RAW_THREATS="true"
 
 ---
 
+## Graduated incident mitigation
+
+Correlated incidents drive **graduated, confidence-aware mitigation** of the
+offending source (`internal/security/mitigation`). The design favours reversible,
+escalating responses so legitimate heavy traffic is not knocked offline:
+
+- **Signal diversity guard.** A single legitimate high-traffic client typically
+  trips ONE signal type repeatedly (e.g. `rate_limit`); a real attack trips
+  DIVERSE types. Active mitigation therefore requires a minimum number of
+  **distinct** signal types (default 2), not just a raw count.
+- **Allowlist.** Trusted CIDRs (and all loopback/private/link-local sources) are
+  never actively mitigated.
+- **Escalation tiers:** medium → moderate reputation penalty (tightens the WAF's
+  adaptive anomaly threshold and hardens PoW); high/critical → heavy penalty
+  (near-block via WAF); critical + ≥3 distinct signals → optional hard eBPF shun.
+- **Self-healing.** Reputation recovers over time if the behaviour stops, so a
+  false positive degrades gracefully rather than permanently blocking.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GATEON_MITIGATION_ENABLED` | `true` | Master switch for active mitigation (flag-only when false). |
+| `GATEON_MITIGATION_AUTO_SHUN` | `false` | Enable hard eBPF shunning for critical multi-signal incidents (requires eBPF privileges). |
+| `GATEON_MITIGATION_ALLOWLIST` | _(unset)_ | Comma-separated CIDRs/IPs that must never be actively mitigated. |
+
 ## Security & resource notes
 
 - The exporter and correlation engine never block request handling: ingestion is

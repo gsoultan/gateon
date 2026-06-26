@@ -147,9 +147,10 @@ func main() {
 	}
 	newSecuritySupervisor(ctx, globalReg, ebpfHolder, wafAuto, clamavReconf).Run()
 
-	// Correlate recorded threats into MITRE-annotated incidents and (when
+	// Correlate recorded threats into MITRE-annotated incidents, drive graduated
+	// mitigation (reputation degrade -> restrict -> optional eBPF shun), and (when
 	// configured via GATEON_SIEM_*) export them to an external SIEM.
-	startThreatPipeline(ctx, version())
+	startThreatPipeline(ctx, version(), ebpfHolder)
 
 	port := getPort()
 	s, err := server.NewServer(
