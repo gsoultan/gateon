@@ -322,6 +322,17 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		}
 	}
 
+	// Global WAF: when enabled in the global config, protect every route with the
+	// full OWASP CRS (plus malware/ransomware detection) without requiring a
+	// per-route "waf" middleware to be attached. This is what makes the global
+	// "Enable WAF" switch actually take effect; previously global.Waf.Enabled only
+	// fed defaults into per-route merges and never ran on its own.
+	if gwaf, err := mwFactory.CreateGlobalWAF(); err != nil {
+		logger.L.LogError("failed to build global WAF middleware", "error", err, "route", routeLabel)
+	} else if gwaf != nil {
+		chain = append(chain, gwaf)
+	}
+
 	// Resolve and append user-defined middlewares from the registry
 	for _, mid := range rt.Middlewares {
 		mid = strings.TrimSpace(mid)

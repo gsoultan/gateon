@@ -100,6 +100,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
 		SecurityPosture:    newPostureProvider(s.Version, s.GlobalStore, clamavManager, wafUpdater, fimScanner),
+		InvalidateAllProxies: func() {
+			s.InvalidateRouteProxies(func(*gateonv1.Route) bool { return true })
+		},
 	})
 
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

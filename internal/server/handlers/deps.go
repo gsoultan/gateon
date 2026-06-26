@@ -30,4 +30,10 @@ type Deps struct {
 	RouteStatsProvider RouteStatsProvider
 	// SecurityPosture, when set, supplies the report for GET /v1/security/posture.
 	SecurityPosture SecurityPostureProvider
+	// InvalidateAllProxies, when set, drops every cached route proxy so the
+	// composed middleware chain is rebuilt on the next request. It is called
+	// after a global-config change that affects chain composition (e.g. toggling
+	// the global WAF or advanced-security middlewares, which are injected at
+	// chain-build time in router.ApplyRouteMiddlewares).
+	InvalidateAllProxies func()
 }

@@ -11,9 +11,95 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 var wafCache sync.Map
+
+// globalWAFCache memoizes the global WAF middleware keyed by the global WAF
+// config bytes, so it is compiled once and shared by every route rather than
+// rebuilt per route in ApplyRouteMiddlewares.
+var globalWAFCache sync.Map
+
+// CreateGlobalWAF builds the gateway-wide WAF middleware from the global config.
+//
+// It returns (nil, nil) when global WAF is disabled. Unlike the per-route
+// createWAF path, it does NOT merge the proto's positive category booleans into
+// the cfg map — that legacy merge writes "false" for every unset category, which
+// the parser maps to Disable*=true and silently strips the entire OWASP CRS
+// attack coverage (the root cause of "WAF detections = 0" once enabled). Instead
+// it enables the full CRS attack set plus malware/ransomware detection by
+// default, keeping only the false-positive-prone rule groups (WordPress admin
+// lockdown) opt-in via the proto flags.
+func (f *Factory) CreateGlobalWAF() (Middleware, error) {
+	if f.globalStore == nil {
+		return nil, nil
+	}
+	g := f.globalStore.Get(context.TODO())
+	if g == nil || g.Waf == nil || !g.Waf.GetEnabled() {
+		return nil, nil
+	}
+	w := g.Waf
+
+	key := "global-waf:" + hashWAFProto(w)
+	if cached, ok := globalWAFCache.Load(key); ok {
+		return cached.(Middleware), nil
+	}
+
+	pl := int(w.GetParanoiaLevel())
+	if pl < 1 {
+		pl = 1
+	}
+	cfg := WAFConfig{
+		UseCRS:        w.GetUseCrs(),
+		ParanoiaLevel: pl,
+		// Full OWASP CRS attack coverage stays enabled (Disable*=false).
+		// Opt-in, false-positive-prone groups honour the explicit proto flag:
+		DisableWordPress: !w.GetWordpress(), // WP admin lockdown breaks legit /wp-admin
+		// Robust extras — malware & ransomware on by default for the global WAF:
+		EnableMalwareDetection:    true,
+		EnableRansomwareDetection: true,
+		EnableIPReputation:        w.GetIpReputation(),
+		EnableDOSProtection:       w.GetDosProtection(),
+		EnableDLP:                 w.GetDlp(),
+		AnomalyThreshold:          int(w.GetAnomalyThreshold()),
+		RequestBodyLimit:          int(w.GetRequestBodyLimit()),
+		ResponseBodyLimit:         int(w.GetResponseBodyLimit()),
+		AuditLogPath:              w.GetAuditLogPath(),
+		AuditLogRelevantOnly:      w.GetAuditLogRelevantOnly(),
+		AllowedAdminIps:           w.GetAllowedAdminIps(),
+		EntropyThreshold:          w.GetEntropyThreshold(),
+		DisableEntropy:            w.GetDisableEntropy(),
+		GlobalDirectives:          w.GetCustomDirectives(),
+		RouteID:                   "gateon-global-waf",
+		EbpfManager:               f.ebpfManager,
+	}
+	// When auto-update has fetched fresh rules to disk, prefer them.
+	if w.GetAutoUpdateRules() {
+		rulesPath := filepath.Join(f.dataDir, "waf", "rules")
+		if _, err := os.Stat(rulesPath); err == nil {
+			cfg.RulesPath = rulesPath
+		}
+	}
+
+	mw, err := WAF(cfg)
+	if err != nil {
+		return nil, err
+	}
+	globalWAFCache.Store(key, mw)
+	return mw, nil
+}
+
+func hashWAFProto(w *gateonv1.WafConfig) string {
+	b, err := proto.Marshal(w)
+	if err != nil {
+		return "nohash"
+	}
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
+}
 
 func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 	globalDirectives := ""
@@ -99,6 +185,10 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 func InvalidateWAFCache() {
 	wafCache.Range(func(key, _ any) bool {
 		wafCache.Delete(key)
+		return true
+	})
+	globalWAFCache.Range(func(key, _ any) bool {
+		globalWAFCache.Delete(key)
 		return true
 	})
 }
