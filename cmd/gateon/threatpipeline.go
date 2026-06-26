@@ -9,8 +9,16 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/correlation"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/siem"
 	"github.com/gsoultan/gateon/internal/telemetry"
+)
+
+// Mitigation tuning environment variables.
+const (
+	envMitigationEnabled   = "GATEON_MITIGATION_ENABLED"   // default true
+	envMitigationAutoShun  = "GATEON_MITIGATION_AUTO_SHUN" // default false (hard block)
+	envMitigationAllowlist = "GATEON_MITIGATION_ALLOWLIST" // CIDR/IP list never mitigated
 )
 
 // signalQueueSize bounds the buffer between the threat broadcaster and the
@@ -26,9 +34,10 @@ const envShipRawThreats = "GATEON_SIEM_RAW_THREATS"
 // always runs and logs incidents; SIEM export is enabled only when configured
 // via GATEON_SIEM_* environment variables. All goroutines exit when ctx is
 // cancelled.
-func startThreatPipeline(ctx context.Context, version string) {
+func startThreatPipeline(ctx context.Context, version string, shun mitigation.Shunner) {
 	shipper := initSIEMShipper(ctx, version)
 	shipRaw := shipper != nil && boolEnvTrue(envShipRawThreats)
+	mitigator := initMitigator(shun)
 
 	engine := correlation.New(correlation.Config{
 		OnIncident: func(inc correlation.Incident) {
@@ -36,6 +45,9 @@ func startThreatPipeline(ctx context.Context, version string) {
 			// API/UI (GET /v1/security/incidents) even without an external SIEM.
 			correlation.DefaultIncidentStore.Add(inc)
 			logIncident(inc)
+			// Apply graduated, confidence-aware mitigation (reputation degrade ->
+			// restrict -> optional hard shun) to the incident source.
+			mitigator.Handle(inc)
 			if shipper != nil {
 				shipper.Ship(incidentToEvent(inc))
 			}
@@ -65,6 +77,42 @@ func initSIEMShipper(ctx context.Context, version string) *siem.Shipper {
 	logger.L.LogInfo("SIEM exporter enabled",
 		"endpoint", cfg.Endpoint, "format", string(cfg.Format), "transport", cfg.Transport)
 	return shipper
+}
+
+// initMitigator builds the graduated incident-mitigation responder from
+// environment configuration. Reputation-based mitigation is on by default
+// (reversible, self-healing); hard eBPF shunning is opt-in via
+// GATEON_MITIGATION_AUTO_SHUN.
+func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
+	enabled := true
+	if raw := strings.TrimSpace(os.Getenv(envMitigationEnabled)); raw != "" {
+		enabled = boolEnvTrue(envMitigationEnabled)
+	}
+	cfg := mitigation.Config{
+		Enabled:   enabled,
+		AutoShun:  boolEnvTrue(envMitigationAutoShun),
+		Allowlist: mitigation.ParseAllowlist(os.Getenv(envMitigationAllowlist)),
+	}
+	if cfg.AutoShun && shun != nil {
+		logger.L.LogInfo("incident auto-shun enabled (hard eBPF block for critical multi-signal incidents)")
+	}
+	return mitigation.New(cfg, mitigation.Deps{
+		Shun:    shun,
+		Degrade: telemetry.DecreaseReputation,
+		Mark:    telemetry.MarkIPMitigated,
+		Log: func(action mitigation.Action, inc correlation.Incident, reason string) {
+			if action == mitigation.ActionNone || action == mitigation.ActionFlag {
+				return // avoid log spam for no-op/flag-only outcomes
+			}
+			logger.L.LogWarn("incident mitigation applied",
+				"action", string(action),
+				"source_ip", inc.SourceIP,
+				"severity", inc.Severity,
+				"signal_types", strings.Join(inc.SignalTypes, ","),
+				"reason", reason,
+			)
+		},
+	})
 }
 
 // consumeThreats subscribes to the threat broadcaster and feeds the correlation
