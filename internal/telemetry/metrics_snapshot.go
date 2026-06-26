@@ -236,18 +236,51 @@ func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 }
 
 func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) GoldenSignals {
-	gs := GoldenSignals{}
-
-	isEP := func(m *dto.Metric) bool {
+	// Golden signals represent total traffic through the gateway. The preferred
+	// source is the entrypoint layer ("gateon-" prefixed route label), which
+	// counts every request hitting the gateway exactly once (including requests
+	// that don't match a user route). If no entrypoint-level series exist — e.g.
+	// only a management entrypoint is configured, or a custom label scheme is in
+	// use — we fall back to summing the per-route series so the headline signals
+	// still reflect real proxied traffic instead of silently showing zero (RC#1).
+	epFilter := func(m *dto.Metric) bool {
 		return strings.HasPrefix(labelValue(m, "route"), "gateon-")
 	}
+	routeFilter := func(m *dto.Metric) bool {
+		r := labelValue(m, "route")
+		return r != "" && !strings.HasPrefix(r, "gateon-")
+	}
 
-	gs.RequestsTotal = sumCounter(idx, "gateon_requests_total", isEP)
+	gs := computeGoldenSignals(idx, epFilter)
+	if gs.RequestsTotal == 0 {
+		if fallback := computeGoldenSignals(idx, routeFilter); fallback.RequestsTotal > 0 {
+			gs = fallback
+		}
+	}
+
+	// Active connections are tracked per-target, not per-route, so they are
+	// summed independently of the request-series filter above.
+	gs.ActiveConnTotal = sumGauge(idx, "gateon_active_connections", nil)
+
+	// Populate daily totals from store
+	reqToday, bytesToday := GetSystemTrafficToday(ctx)
+	gs.RequestsToday = reqToday
+	gs.BytesToday = bytesToday
+
+	return gs
+}
+
+// computeGoldenSignals aggregates the request/error/latency/bytes/in-flight
+// signals for the subset of series matching the supplied filter.
+func computeGoldenSignals(idx map[string]*dto.MetricFamily, match func(*dto.Metric) bool) GoldenSignals {
+	gs := GoldenSignals{}
+
+	gs.RequestsTotal = sumCounter(idx, "gateon_requests_total", match)
 
 	// Errors = 5xx status codes
 	if fam, ok := idx["gateon_requests_total"]; ok {
 		for _, m := range fam.GetMetric() {
-			if !isEP(m) {
+			if !match(m) {
 				continue
 			}
 			sc := labelValue(m, "status_code")
@@ -265,7 +298,7 @@ func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) G
 		var totalSum float64
 		var totalCount uint64
 		for _, m := range fam.GetMetric() {
-			if !isEP(m) {
+			if !match(m) {
 				continue
 			}
 			h := m.GetHistogram()
@@ -275,17 +308,16 @@ func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) G
 		if totalCount > 0 {
 			gs.AvgLatencyMs = (totalSum / float64(totalCount)) * 1000
 		}
-		gs.P50LatencyMs = estimatePercentile(fam, 0.50, isEP) * 1000
-		gs.P95LatencyMs = estimatePercentile(fam, 0.95, isEP) * 1000
-		gs.P99LatencyMs = estimatePercentile(fam, 0.99, isEP) * 1000
+		gs.P50LatencyMs = estimatePercentile(fam, 0.50, match) * 1000
+		gs.P95LatencyMs = estimatePercentile(fam, 0.95, match) * 1000
+		gs.P99LatencyMs = estimatePercentile(fam, 0.99, match) * 1000
 	}
 
-	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", isEP)
-	gs.ActiveConnTotal = sumGauge(idx, "gateon_active_connections", nil) // Not route-specific
+	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", match)
 
 	if fam, ok := idx["gateon_request_bytes_total"]; ok {
 		for _, m := range fam.GetMetric() {
-			if !isEP(m) {
+			if !match(m) {
 				continue
 			}
 			dir := labelValue(m, "direction")
@@ -297,11 +329,6 @@ func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) G
 			}
 		}
 	}
-
-	// Populate daily totals from store
-	reqToday, bytesToday := GetSystemTrafficToday(ctx)
-	gs.RequestsToday = reqToday
-	gs.BytesToday = bytesToday
 
 	return gs
 }
