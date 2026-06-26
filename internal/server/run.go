@@ -149,6 +149,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	metricsStop := make(chan struct{})
 	telemetry.StartSystemMetricsCollector(metricsStop)
 	go telemetry.StartCacheMetricsLoop(ctx)
+	// Continuously run the security analysis engine so reputation / coordinated-
+	// scan / multi-IP threats are recorded even when no operator has the
+	// Diagnostics page open; these feed the correlation engine and incidents.
+	wg.Go(func() { apiService.RunSecurityAnalysisLoop(ctx, time.Minute) })
 
 	// Start TLS certificate expiry monitoring
 	certInfos := collectCertInfos(ctx, s, s.TLSManager)

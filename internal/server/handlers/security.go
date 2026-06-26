@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/security/correlation"
 	"github.com/gsoultan/gateon/internal/security/fim"
+	"github.com/gsoultan/gateon/internal/security/siem"
 )
 
 // SecurityPostureProvider produces the current security posture report. It is
@@ -19,12 +22,13 @@ type SecurityPostureProvider func(context.Context) *SecurityPostureReport
 // It summarizes the freshness and health of Gateon's defensive subsystems so
 // operators (and external SIEMs) can assess detection coverage at a glance.
 type SecurityPostureReport struct {
-	Version     string           `json:"version"`
-	GeneratedAt time.Time        `json:"generated_at"`
-	WAF         WAFPosture       `json:"waf"`
-	ClamAV      ClamAVPosture    `json:"clamav"`
-	Signatures  SignaturePosture `json:"signatures"`
-	FIM         *fim.Status      `json:"fim,omitzero"`
+	Version     string            `json:"version"`
+	GeneratedAt time.Time         `json:"generated_at"`
+	WAF         WAFPosture        `json:"waf"`
+	ClamAV      ClamAVPosture     `json:"clamav"`
+	Signatures  SignaturePosture  `json:"signatures"`
+	SIEM        siem.StatusReport `json:"siem"`
+	FIM         *fim.Status       `json:"fim,omitzero"`
 }
 
 // SignaturePosture reports the dependency-free YARA-lite upload signature engine
@@ -50,7 +54,8 @@ type ClamAVPosture struct {
 	LastError  string    `json:"last_error,omitzero"`
 }
 
-// registerSecurityHandlers wires the security posture endpoint.
+// registerSecurityHandlers wires the security posture and correlated-incidents
+// endpoints.
 func registerSecurityHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/security/posture", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
@@ -59,6 +64,30 @@ func registerSecurityHandlers(mux *http.ServeMux, d *Deps) {
 		report := d.buildPostureReport(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(report)
+	})
+
+	// Correlated incidents are higher-level findings raised by the correlation
+	// engine when multiple related detections from one source cross a threshold,
+	// annotated with MITRE ATT&CK techniques. They are retained in-process so the
+	// Security Hub can surface them without an external SIEM.
+	mux.HandleFunc("GET /v1/security/incidents", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		limit := 100
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		incidents := correlation.DefaultIncidentStore.List(limit)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"incidents":    incidents,
+			"total_seen":   correlation.DefaultIncidentStore.TotalSeen(),
+			"retained":     correlation.DefaultIncidentStore.Len(),
+			"generated_at": time.Now(),
+		})
 	})
 }
 

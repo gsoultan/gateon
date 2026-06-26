@@ -15,6 +15,16 @@ Both are dependency-free (standard library only) and run off the request hot
 path. The correlation engine **always runs** and logs incidents; SIEM export is
 **opt-in** via environment variables.
 
+> **Surfaced in the UI.** Correlated incidents are retained in-process and exposed
+> at `GET /v1/security/incidents` (RBAC: global read), rendered in the Security Hub
+> **Incidents** tab with MITRE ATT&CK technique chips, contributing signal types
+> and source. SIEM exporter health (enabled/endpoint/format/transport + shipped/
+> dropped/error counts, never the bearer token) is included in
+> `GET /v1/security/posture` and shown as a status card on the same tab. The
+> security analysis engine also runs on a background loop (every minute) so
+> reputation/coordinated-scan/multi-IP threats are recorded continuously rather
+> than only while the Diagnostics page is open.
+
 ---
 
 ## How it fits together

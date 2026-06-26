@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -63,10 +64,59 @@ type Shipper struct {
 	transport transport
 	queue     chan Event
 
+	// Reportable (non-secret) config for status surfacing. The bearer token is
+	// deliberately NOT retained here so it can never leak into a status report.
+	endpoint      string
+	format        string
+	transportName string
+	queueSize     int
+
 	enqueued atomic.Int64
 	shipped  atomic.Int64
 	dropped  atomic.Int64
 	errs     atomic.Int64
+}
+
+// StatusReport is a non-secret snapshot of the SIEM exporter for posture/UI.
+type StatusReport struct {
+	Enabled   bool   `json:"enabled"`
+	Endpoint  string `json:"endpoint,omitzero"`
+	Format    string `json:"format,omitzero"`
+	Transport string `json:"transport,omitzero"`
+	QueueSize int    `json:"queue_size,omitzero"`
+	Stats     Stats  `json:"stats"`
+}
+
+var (
+	defaultMu      sync.RWMutex
+	defaultShipper *Shipper
+)
+
+// SetDefault registers the active shipper so CurrentStatus can report it. Pass
+// nil to clear (export disabled).
+func SetDefault(s *Shipper) {
+	defaultMu.Lock()
+	defaultShipper = s
+	defaultMu.Unlock()
+}
+
+// CurrentStatus returns the status of the registered shipper, or a disabled
+// report when SIEM export is not active. Never includes the bearer token.
+func CurrentStatus() StatusReport {
+	defaultMu.RLock()
+	s := defaultShipper
+	defaultMu.RUnlock()
+	if s == nil {
+		return StatusReport{Enabled: false}
+	}
+	return StatusReport{
+		Enabled:   true,
+		Endpoint:  s.endpoint,
+		Format:    s.format,
+		Transport: s.transportName,
+		QueueSize: s.queueSize,
+		Stats:     s.Stats(),
+	}
 }
 
 // ConfigFromEnv builds a Config from environment variables. It returns
@@ -120,10 +170,18 @@ func New(cfg Config) (*Shipper, error) {
 		return nil, err
 	}
 
+	transportName := cfg.Transport
+	if transportName == "" {
+		transportName = "http"
+	}
 	return &Shipper{
-		formatter: fmtr,
-		transport: tr,
-		queue:     make(chan Event, queueSize),
+		formatter:     fmtr,
+		transport:     tr,
+		queue:         make(chan Event, queueSize),
+		endpoint:      cfg.Endpoint,
+		format:        string(cfg.Format),
+		transportName: transportName,
+		queueSize:     queueSize,
 	}, nil
 }
 

@@ -33,7 +33,8 @@ import {
   IconDashboard,
   IconSearch,
   IconActivity,
-  IconBrain
+  IconBrain,
+  IconAlertTriangle
 } from '@tabler/icons-react';
 import { useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
@@ -43,6 +44,7 @@ import { format } from 'date-fns';
 
 import { OverviewTab } from '../components/SecurityCenter/OverviewTab';
 import { ThreatExplorerTab } from '../components/SecurityCenter/ThreatExplorerTab';
+import { IncidentsTab } from '../components/SecurityCenter/IncidentsTab';
 import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { TimeDisplay } from '../components/TimeDisplay';
@@ -332,6 +334,7 @@ export default function SecurityCommandCenter() {
           <Tabs.List mb="lg">
             <Tabs.Tab value="overview" leftSection={<IconDashboard size={16} />}>Overview</Tabs.Tab>
             <Tabs.Tab value="explorer" leftSection={<IconSearch size={16} />}>Threat Explorer</Tabs.Tab>
+            <Tabs.Tab value="incidents" leftSection={<IconAlertTriangle size={16} />}>Incidents</Tabs.Tab>
             <Tabs.Tab value="analytics" leftSection={<IconActivity size={16} />}>Analytics & Trends</Tabs.Tab>
             <Tabs.Tab value="advisory" leftSection={<IconBrain size={16} />}>AI Advisory</Tabs.Tab>
           </Tabs.List>
@@ -348,6 +351,10 @@ export default function SecurityCommandCenter() {
 
           <Tabs.Panel value="explorer">
             <ThreatExplorerTab />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="incidents">
+            <IncidentsTab />
           </Tabs.Panel>
 
           <Tabs.Panel value="analytics">
