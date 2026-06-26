@@ -1405,7 +1405,7 @@ export default function SettingsPage() {
               <Title order={3}>Global WAF Settings</Title>
             </Group>
             <Switch
-              label="Enable Global Rules"
+              label="Protect all routes"
               checked={config.waf?.enabled || false}
               onChange={(e) =>
                 setConfig({
@@ -1423,8 +1423,10 @@ export default function SettingsPage() {
             />
           </Group>
           <Text size="sm" c="dimmed">
-            Configure global Web Application Firewall rules that apply to all
-            routes using the WAF middleware.
+            When enabled, the Web Application Firewall (OWASP Core Rule Set plus
+            malware &amp; ransomware detection) runs on <strong>every</strong>{" "}
+            route automatically — no per-route WAF middleware required. Changes
+            apply live to existing routes.
           </Text>
 
           {config.waf?.enabled && (

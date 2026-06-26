@@ -161,6 +161,12 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if conf.Waf != nil {
 			middleware.InvalidateWAFCache()
 		}
+		// WAF and advanced-security middlewares are composed into each route's
+		// handler at build time (router.ApplyRouteMiddlewares), so toggling them
+		// only takes effect once the cached route proxies are rebuilt.
+		if (conf.Waf != nil || conf.SecurityAdvanced != nil) && d.InvalidateAllProxies != nil {
+			d.InvalidateAllProxies()
+		}
 		if conf.Geoip != nil && conf.Geoip.Enabled {
 			if conf.Geoip.DbPath != "" {
 				_ = telemetry.InitGeoIP(conf.Geoip.DbPath)
