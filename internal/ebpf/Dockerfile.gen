@@ -1,0 +1,30 @@
+# Dockerfile.gen — reproducible build environment for generating the eBPF/XDP
+# bpf2go bindings. The host (e.g. macOS) cannot compile BPF objects because it
+# lacks a BPF-target clang and Linux kernel/libbpf headers; this container does.
+#
+# Usage (from repo root):
+#   make ebpf-docker
+# which mounts the repo at /src and runs `go generate ./internal/ebpf/...`,
+# producing gateon_ebpf_bpfel.go / gateon_ebpf_bpfeb.go and the embedded *.o
+# objects in internal/ebpf/. Commit those generated files.
+#
+# Pin the Go version to match go.mod (go 1.26.x).
+FROM golang:1.26-bookworm
+
+# clang/llvm provide the BPF-target compiler + llvm-strip; libbpf-dev provides
+# <bpf/bpf_helpers.h>; linux-headers + libc headers provide <linux/*.h>.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang \
+        llvm \
+        libbpf-dev \
+        libelf-dev \
+        linux-libc-dev \
+        gcc-multilib \
+        make \
+    && rm -rf /var/lib/apt/lists/*
+
+# bpf2go shells out to `clang` and `llvm-strip` by default.
+ENV BPF2GO_CC=clang
+ENV BPF2GO_STRIP=llvm-strip
+
+WORKDIR /src

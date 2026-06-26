@@ -1,8 +1,23 @@
-.PHONY: proto build build-fips test test-race bench clean vuln staticcheck gosec sec
+.PHONY: proto build build-fips test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
 	buf generate
+
+## ebpf: compile the XDP/eBPF C program and (re)generate the bpf2go Go bindings.
+##       Requires a Linux host with clang/llvm + libbpf headers + kernel headers.
+##       The generated gateon_ebpf_bpf*.go and *.o files MUST be committed so a
+##       plain `go build` works on any platform without the BPF toolchain.
+ebpf:
+	go generate ./internal/ebpf/...
+
+## ebpf-docker: same as `ebpf` but runs the codegen inside a Linux container so
+##              it is reproducible from macOS/Windows (no local BPF toolchain
+##              needed). Generated artifacts land in the working tree to commit.
+ebpf-docker:
+	docker build -f internal/ebpf/Dockerfile.gen -t gateon-ebpf-gen .
+	docker run --rm -v "$(CURDIR)":/src -w /src gateon-ebpf-gen \
+		sh -c 'go generate ./internal/ebpf/...'
 
 ## build: build the gateon binary
 build:

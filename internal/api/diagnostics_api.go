@@ -246,8 +246,12 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 	var ebpfStats *gateonv1.EbpfStats
 	if s.EbpfManager != nil {
 		if stats, err := s.EbpfManager.GetMapStats(); err == nil {
+			// Enabled reflects whether the XDP program is actually attached, not
+			// merely that a manager object exists — otherwise the UI would show
+			// "enabled" while the kernel offload is silently absent and the drop
+			// counters sit at zero.
 			ebpfStats = &gateonv1.EbpfStats{
-				Enabled:         true,
+				Enabled:         stats.Attached,
 				ShunnedIpsCount: int32(stats.ShunnedIPsCount),
 				DroppedPackets:  stats.DroppedPackets,
 			}

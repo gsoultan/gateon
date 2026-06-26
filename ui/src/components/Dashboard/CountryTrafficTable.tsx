@@ -1,7 +1,9 @@
-import { memo } from "react";
-import { Table, Text, Paper, Group, Box, Progress } from "@mantine/core";
+import { memo, useState, useMemo, useEffect } from "react";
+import { Table, Text, Paper, Group, Box, Progress, Pagination } from "@mantine/core";
 import { getCountryFlag, formatBytes } from "../../utils/format";
 import { useTableDensity } from "../../hooks/useTableDensity";
+
+const PAGE_SIZE = 10;
 
 interface CountryMetric {
   group: string;
@@ -25,6 +27,20 @@ export const CountryTrafficTable = memo(function CountryTrafficTable({
   isBandwidth = false,
 }: CountryTrafficTableProps) {
   const density = useTableDensity();
+  const [page, setPage] = useState(1);
+
+  const total = data?.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [total, totalPages, page]);
+
+  const paginated = useMemo(
+    () => (data ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [data, page],
+  );
+
   if (!data || data.length === 0) {
     return (
       <Paper p="md" radius="md" withBorder>
@@ -41,7 +57,7 @@ export const CountryTrafficTable = memo(function CountryTrafficTable({
     );
   }
 
-  const rows = data.map((m) => {
+  const rows = paginated.map((m) => {
     const percentage =
       totalRequests > 0 ? (m.requests / totalRequests) * 100 : 0;
     return (
@@ -91,6 +107,12 @@ export const CountryTrafficTable = memo(function CountryTrafficTable({
       <Table {...density}>
         <Table.Tbody>{rows}</Table.Tbody>
       </Table>
+
+      {total > PAGE_SIZE && (
+        <Group justify="center" mt="md">
+          <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
+        </Group>
+      )}
     </Paper>
   );
 });

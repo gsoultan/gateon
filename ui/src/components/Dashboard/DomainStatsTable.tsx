@@ -1,7 +1,9 @@
-import { memo } from "react";
-import { Table, Text, Paper, Box, Group, Badge, Title } from "@mantine/core";
+import { memo, useState, useMemo, useEffect } from "react";
+import { Table, Text, Paper, Group, Badge, Title, Pagination } from "@mantine/core";
 import { formatBytes } from "../../utils/format";
 import { useTableDensity } from "../../hooks/useTableDensity";
+
+const PAGE_SIZE = 10;
 
 interface HourlyDomainMetric {
   domain: string;
@@ -18,6 +20,20 @@ export const DomainStatsTable = memo(function DomainStatsTable({
   metrics,
 }: DomainStatsTableProps) {
   const density = useTableDensity();
+  const [page, setPage] = useState(1);
+
+  const total = metrics?.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [total, totalPages, page]);
+
+  const paginated = useMemo(
+    () => (metrics ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [metrics, page],
+  );
+
   if (!metrics || metrics.length === 0) {
     return (
       <Paper p="md" radius="md" withBorder>
@@ -28,7 +44,7 @@ export const DomainStatsTable = memo(function DomainStatsTable({
     );
   }
 
-  const rows = metrics.map((m, i) => (
+  const rows = paginated.map((m, i) => (
     <Table.Tr key={i}>
       <Table.Td>
         <Text fw={600} size="sm">
@@ -121,6 +137,15 @@ export const DomainStatsTable = memo(function DomainStatsTable({
           <Table.Tbody>{rows}</Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+
+      {total > PAGE_SIZE && (
+        <Group justify="space-between" align="center" mt="md">
+          <Text size="xs" c="dimmed">
+            Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+          </Text>
+          <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
+        </Group>
+      )}
     </Paper>
   );
 });

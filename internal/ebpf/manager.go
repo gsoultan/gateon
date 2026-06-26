@@ -1,14 +1,14 @@
 package ebpf
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpf gateon_ebpf bpf/xdp_rate_limit.c -- -I../include
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpf -type ebpf_config gateon_ebpf bpf/xdp_rate_limit.c
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,16 +20,43 @@ import (
 
 // EbpfManager handles loading and attaching eBPF programs for performance offloading.
 // Supports XDP (eXpress Data Path) for early packet dropping/rate limiting.
+//
+// The actual program load/attach lives in the OS-specific files
+// (manager_linux.go for the real implementation, manager_other.go for the
+// no-op stub on non-Linux). This file holds the parts that compile on every
+// platform: the BPF-map mutation methods and the stats reader, which operate
+// over m.maps and are harmless no-ops while m.maps is empty (eBPF disabled or
+// not yet loaded).
 type EbpfManager struct {
 	config       *gateonv1.EbpfConfig
 	mu           sync.RWMutex
 	maps         map[string]*ebpf.Map
 	shunnedCount atomic.Int64
+
+	// Teardown handles populated by loadXDP/loadTC (the attached link and the
+	// loaded objects collection). Closed in reverse by close() when the
+	// manager's context is cancelled, which detaches XDP and frees the maps.
+	closers []io.Closer
+
+	// Load status, set under mu during loadXDP and surfaced via GetMapStats so
+	// operators can tell *why* metrics are zero (not attached, wrong iface, or
+	// a load error) without digging through logs.
+	attached bool
+	iface    string
+	loadErr  string
 }
 
 type MapStats struct {
 	ShunnedIPsCount int
 	DroppedPackets  map[string]uint64
+
+	// Attached reports whether the XDP program is currently attached to a NIC.
+	// When false, all other counters are expected to be zero.
+	Attached bool
+	// Interface is the NIC the XDP program is attached to (empty if not attached).
+	Interface string
+	// LoadError holds the last load/attach failure, if any.
+	LoadError string
 }
 
 // Manager defines the interface for eBPF operations.
@@ -57,74 +84,24 @@ func NewEbpfManager(conf *gateonv1.EbpfConfig) *EbpfManager {
 	}
 }
 
-// Start initiates the eBPF subsystem loading.
-func (m *EbpfManager) Start(ctx context.Context) {
-	if m.config == nil || !m.config.Enabled {
-		return
-	}
+// close detaches the XDP program and frees the loaded objects, then clears the
+// map registry and load status. It is idempotent and safe to call when nothing
+// was ever loaded (e.g. eBPF disabled or running on a non-Linux host).
+func (m *EbpfManager) close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if runtime.GOOS != "linux" {
-		logger.L.LogInfo("eBPF offloading is skipped on non-Linux OS (kernel support required)")
-		return
-	}
-
-	logger.L.LogInfo("Initializing eBPF performance offloading subsystem",
-		"xdp_rate_limit", m.config.XdpRateLimit,
-		"xdp_ip_shunning", m.config.XdpIpShunning,
-		"xdp_load_balancing", m.config.XdpLoadBalancing,
-		"tc_filtering", m.config.TcFiltering)
-
-	if m.config.XdpRateLimit || m.config.XdpIpShunning || m.config.XdpLoadBalancing {
-		m.loadXDP(ctx)
-	}
-	if m.config.TcFiltering {
-		m.loadTC(ctx)
-	}
-}
-
-func (m *EbpfManager) loadXDP(ctx context.Context) {
-	if runtime.GOOS != "linux" {
-		return
-	}
-	logger.L.LogInfo("Attaching XDP program to primary interface for kernel-level offloading")
-
-	// We use the interface name from config or default to eth0.
-	ifaceName := "eth0"
-	if m.config.Interface != "" {
-		ifaceName = m.config.Interface
-	}
-
-	logger.L.LogDebug("Loading eBPF/XDP program", "interface", ifaceName)
-
-	// The following would be implemented using the generated bpf2go code:
-	/*
-		iface, err := net.InterfaceByName(ifaceName)
-		if err != nil {
-			logger.L.LogError("failed to find interface", "error", err)
-			return
+	// Close in reverse order: the attached link first (detaches XDP), then the
+	// objects collection (frees programs and maps).
+	for i := len(m.closers) - 1; i >= 0; i-- {
+		if err := m.closers[i].Close(); err != nil {
+			logger.L.LogError("failed to close eBPF resource during teardown", "error", err)
 		}
-
-		// Load pre-compiled programs and maps into the kernel.
-		objs := gateon_ebpfObjects{}
-		if err := loadGateon_ebpfObjects(&objs, nil); err != nil {
-			logger.L.LogError("failed to load eBPF objects", "error", err)
-			return
-		}
-		defer objs.Close()
-
-		// Attach the program to the interface.
-		l, err := link.AttachXDP(link.XDPOptions{
-			Program:   objs.XdpMain,
-			Interface: iface.Index,
-		})
-		if err != nil {
-			logger.L.LogError("failed to attach XDP program", "error", err)
-			return
-		}
-		defer l.Close()
-
-		logger.L.LogInfo("XDP performance offloading successfully attached")
-	*/
+	}
+	m.closers = nil
+	m.maps = make(map[string]*ebpf.Map)
+	m.attached = false
+	m.loadErr = ""
 }
 
 func ipToUint32(ipStr string) (uint32, error) {
@@ -381,18 +358,20 @@ var dropReasons = map[uint32]string{
 	4: "rate_limited",
 }
 
-// GetMapStats returns statistics from eBPF maps.
+// GetMapStats returns statistics from eBPF maps along with the current load
+// status. On a non-Linux host or while the program is not attached, m.maps is
+// empty so the per-reason drop counters are simply omitted, but Attached /
+// Interface / LoadError are always reported so callers can see why.
 func (m *EbpfManager) GetMapStats() (MapStats, error) {
-	if runtime.GOOS != "linux" {
-		return MapStats{}, nil
-	}
-
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	stats := MapStats{
 		ShunnedIPsCount: int(m.shunnedCount.Load()),
 		DroppedPackets:  make(map[string]uint64),
+		Attached:        m.attached,
+		Interface:       m.iface,
+		LoadError:       m.loadErr,
 	}
 
 	if dropStatsMap, ok := m.maps["drop_stats"]; ok {
@@ -410,9 +389,4 @@ func (m *EbpfManager) GetMapStats() (MapStats, error) {
 	}
 
 	return stats, nil
-}
-
-func (m *EbpfManager) loadTC(ctx context.Context) {
-	logger.L.LogInfo("Attaching TC (Traffic Control) programs for kernel-level traffic classification")
-	// TC programs allow for more complex filtering and can handle fragmented packets better than XDP.
 }

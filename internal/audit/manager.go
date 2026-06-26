@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -220,4 +221,55 @@ func GetLogs(ctx context.Context, limit int) ([]AuditEntry, error) {
 		logs = append(logs, e)
 	}
 	return logs, nil
+}
+
+// GetLogsPaginated returns a page of audit logs (newest first) along with the
+// total number of rows matching the optional case-insensitive search across
+// action, resource, user_id and details. page is 0-indexed.
+func GetLogsPaginated(ctx context.Context, page, pageSize int, search string) ([]AuditEntry, int, error) {
+	if manager == nil {
+		return nil, 0, fmt.Errorf("audit manager not initialized")
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	where := ""
+	var args []any
+	if search = strings.TrimSpace(search); search != "" {
+		where = " WHERE LOWER(action) LIKE ? OR LOWER(resource) LIKE ? OR LOWER(user_id) LIKE ? OR LOWER(details) LIKE ?"
+		like := "%" + strings.ToLower(search) + "%"
+		args = append(args, like, like, like, like)
+	}
+
+	var total int
+	countQuery := manager.dialect.Rebind("SELECT COUNT(*) FROM audit_logs" + where)
+	if err := manager.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return []AuditEntry{}, 0, nil
+	}
+
+	offset := page * pageSize
+	pageArgs := append(append([]any{}, args...), pageSize, offset)
+	query := manager.dialect.Rebind("SELECT id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash FROM audit_logs" + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	rows, err := manager.db.QueryContext(ctx, query, pageArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	logs := make([]AuditEntry, 0, pageSize)
+	for rows.Next() {
+		var e AuditEntry
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.Details, &e.Timestamp, &e.IPAddress, &e.Signature, &e.PreviousHash); err != nil {
+			continue
+		}
+		logs = append(logs, e)
+	}
+	return logs, total, nil
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   Title,
@@ -38,6 +38,16 @@ export default function CircuitBreakerPage() {
   const { data: aggStats } = useAggStats();
   const { data: events } = useCircuitBreakerEvents();
   const [stateFilter, setStateFilter] = useState<CircuitState>("all");
+  const [eventPage, setEventPage] = useState(1);
+
+  // Newest events first; paginate the reversed list.
+  const orderedEvents = (events ?? []).slice().reverse();
+  const eventTotalPages = Math.max(1, Math.ceil(orderedEvents.length / PAGE_SIZE));
+  const pagedEvents = orderedEvents.slice((eventPage - 1) * PAGE_SIZE, eventPage * PAGE_SIZE);
+
+  useEffect(() => {
+    if (eventPage > eventTotalPages) setEventPage(eventTotalPages);
+  }, [orderedEvents.length, eventTotalPages, eventPage]);
 
   const routes = data?.routes ?? [];
   const totalCount = data?.total_count ?? 0;
@@ -243,7 +253,7 @@ export default function CircuitBreakerPage() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {events.slice().reverse().map((e, i) => (
+              {pagedEvents.map((e, i) => (
                 <Table.Tr key={i}>
                   <Table.Td>
                     <Text size="xs" c="dimmed">
@@ -268,6 +278,14 @@ export default function CircuitBreakerPage() {
               ))}
             </Table.Tbody>
           </Table>
+        )}
+        {orderedEvents.length > PAGE_SIZE && (
+          <Group justify="space-between" align="center" mt="md">
+            <Text size="xs" c="dimmed">
+              Showing {((eventPage - 1) * PAGE_SIZE) + 1}–{Math.min(eventPage * PAGE_SIZE, orderedEvents.length)} of {orderedEvents.length}
+            </Text>
+            <Pagination total={eventTotalPages} value={eventPage} onChange={setEventPage} size="sm" radius="md" />
+          </Group>
         )}
       </Card>
     </Stack>

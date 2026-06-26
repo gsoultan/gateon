@@ -5,6 +5,17 @@ project_name: gateon
 gomod:
   proxy: false
 
+# Compile the XDP/eBPF C program and (re)generate the bpf2go bindings before any
+# build runs. This produces gateon_ebpf_bpfel.go/bpfeb.go plus the embedded *.o
+# objects in internal/ebpf/, which manager_linux.go's loadGateon_ebpf() embeds
+# straight into the gateon binary — so eBPF ships inside the binary and attaches
+# at runtime on Linux. The BPF object is arch-portable (clang -target bpf), so a
+# single generation serves both linux/amd64 and linux/arm64. The CI runner must
+# provide the BPF toolchain (clang/llvm/libbpf-dev); see .github/workflows.
+before:
+  hooks:
+    - go generate ./internal/ebpf/...
+
 builds:
   - id: gateon
     main: ./cmd/gateon
