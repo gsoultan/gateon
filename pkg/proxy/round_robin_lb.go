@@ -45,7 +45,7 @@ func (lb *RoundRobinLB) NextState() *targetState {
 	for i := uint64(0); i < uint64(len(targets)); i++ {
 		idx := (start + i) % uint64(len(targets))
 		t := targets[idx]
-		if t.alive {
+		if t.alive.Load() {
 			return t
 		}
 	}
@@ -66,14 +66,14 @@ func (lb *RoundRobinLB) SetAlive(url string, alive bool) {
 	defer lb.mu.Unlock()
 	for _, t := range lb.targets {
 		if t.url == url {
-			if t.alive != alive {
+			if t.alive.Load() != alive {
 				state := telemetry.CircuitClosed
 				if !alive {
 					state = telemetry.CircuitOpen
 				}
 				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
 			}
-			t.alive = alive
+			t.alive.Store(alive)
 			return
 		}
 	}

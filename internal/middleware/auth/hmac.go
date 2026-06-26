@@ -50,7 +50,10 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) || ShouldSkipMetrics(r) {
+			// Only skip signature verification for CORS preflight. Never gate a
+			// security check on ShouldSkipMetrics — it is a metrics predicate and
+			// using it here would let any request matching it bypass HMAC.
+			if IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

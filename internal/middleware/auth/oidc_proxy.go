@@ -46,6 +46,14 @@ func OIDCProxy(cfg OIDCProxyConfig) (Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Strip any client-supplied identity headers up front: only a
+			// successfully verified session may set them (below). Otherwise a
+			// client could inject X-Forwarded-User and have it forwarded when
+			// claim extraction fails but the request still reaches the backend.
+			r.Header.Del("X-Forwarded-User")
+			r.Header.Del("X-Forwarded-Email")
+			r.Header.Del("X-Forwarded-Name")
+
 			// 1. Check if it's the callback
 			callbackPath := parsePath(cfg.RedirectURL)
 			if r.URL.Path == callbackPath {
@@ -75,7 +83,12 @@ func OIDCProxy(cfg OIDCProxyConfig) (Middleware, error) {
 			}
 
 			// 3. Not authenticated, redirect to provider
-			state := generateState()
+			state, err := generateState()
+			if err != nil {
+				logger.L.LogError("oidc: failed to generate state", "error", err)
+				http.Error(w, "Authentication failed", http.StatusInternalServerError)
+				return
+			}
 			// Store state in cookie for verification on callback
 			http.SetCookie(w, &http.Cookie{
 				Name:     "gateon_state_" + cfg.RouteID,
@@ -143,10 +156,13 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request, oauth2Config oau
 		Expires:  idToken.Expiry,
 	})
 
-	// Get origin URL
+	// Get origin URL. Only accept a same-origin relative path to prevent an
+	// open redirect (reject absolute URLs and scheme-relative "//host" values).
 	origin := "/"
 	if originCookie, err := r.Cookie("gateon_origin_" + routeID); err == nil {
-		origin = originCookie.Value
+		if v := originCookie.Value; strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "//") {
+			origin = v
+		}
 	}
 
 	// Cleanup temp cookies
@@ -156,10 +172,12 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request, oauth2Config oau
 	http.Redirect(w, r, origin, http.StatusFound)
 }
 
-func generateState() string {
+func generateState() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return base64.URLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate state: %w", err)
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
 }
 
 func parsePath(rawURL string) string {

@@ -279,7 +279,8 @@ func (s *tlsClientIdentitySelector) Select(req *http.Request) *tlsClientIdentity
 }
 
 func cloneTLSConfigWithIdentity(base *tls.Config, selectedIdentity *tlsClientIdentity) *tls.Config {
-	cfg := &tls.Config{InsecureSkipVerify: true}
+	// Fail secure: default to a verifying config when no base is supplied.
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if base != nil {
 		cfg = base.Clone()
 	}

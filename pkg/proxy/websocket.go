@@ -67,7 +67,18 @@ func (h *ProxyHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, ta
 	if err != nil {
 		// err set above
 	} else if scheme == "https" {
-		tlsConn := tls.Client(rawConn, &tls.Config{InsecureSkipVerify: true})
+		// Reuse the route's backend TLS config (verification ON by default unless
+		// the operator set skip_verify); never hardcode InsecureSkipVerify here.
+		var tlsCfg *tls.Config
+		if h.tlsConfig != nil {
+			tlsCfg = h.tlsConfig.Clone()
+		} else {
+			tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		if tlsCfg.ServerName == "" {
+			tlsCfg.ServerName = targetURL.Hostname()
+		}
+		tlsConn := tls.Client(rawConn, tlsCfg)
 		if err = tlsConn.HandshakeContext(ctx); err != nil {
 			rawConn.Close()
 		} else {

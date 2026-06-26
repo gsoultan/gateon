@@ -73,6 +73,14 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 				next.ServeHTTP(w, r)
 				return
 			}
+			// The auth service is authoritative for the AuthResponseHeaders
+			// (identity headers). Strip any client-supplied copies up front so
+			// they can neither be forwarded to the auth service as forged input
+			// nor reach the backend if the auth service omits them.
+			for h := range authResponseSet {
+				r.Header.Del(h)
+			}
+
 			method := "GET"
 			if cfg.PreserveRequestMethod {
 				method = r.Method

@@ -11,14 +11,20 @@ import (
 )
 
 // CreateTLSClientConfig creates a *tls.Config from the given gateonv1.TlsClientConfig.
+//
+// SECURITY: verification is ON by default. When no client-TLS config is present
+// we return a verifying config (not InsecureSkipVerify), so the gateway never
+// silently accepts an unverified upstream certificate. Certificate verification
+// is only skipped when the operator explicitly sets SkipVerify=true.
 func CreateTLSClientConfig(cfg *gateonv1.TlsClientConfig) (*tls.Config, error) {
 	if cfg == nil || !cfg.Enabled {
-		return &tls.Config{InsecureSkipVerify: true}, nil
+		return &tls.Config{MinVersion: tls.VersionTLS12}, nil
 	}
 
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: cfg.SkipVerify,
+		InsecureSkipVerify: cfg.SkipVerify, // only when explicitly requested
 		ServerName:         cfg.ServerName,
+		MinVersion:         tls.VersionTLS12,
 	}
 
 	if cfg.CertFile != "" && cfg.KeyFile != "" {

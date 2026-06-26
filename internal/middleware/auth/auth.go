@@ -70,7 +70,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		token, err := jwt.Parse(tokenString, v.keyFunc)
+		token, err := jwt.Parse(tokenString, v.keyFunc, jwt.WithValidMethods(v.validMethods()))
 		if err != nil {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "jwt").Inc()
 			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:jwt").Inc()
@@ -114,6 +114,18 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// validMethods returns the JWT signing algorithms this validator will accept.
+// Enforcing an explicit allowlist (defense-in-depth) blocks "alg=none" and
+// HS/RS algorithm-confusion attacks in our own code rather than relying on
+// library internals. JWKS-backed validators expect asymmetric algorithms;
+// the local-secret path expects HMAC.
+func (v *JWTValidator) validMethods() []string {
+	if v.kf != nil {
+		return []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "EdDSA"}
+	}
+	return []string{"HS256", "HS384", "HS512"}
 }
 
 func (v *JWTValidator) keyFunc(token *jwt.Token) (any, error) {
