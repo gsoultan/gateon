@@ -59,8 +59,12 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			return
 		}
 		defer file.Close()
-		filename := handler.Filename
-		if !strings.HasSuffix(filename, ".crt") && !strings.HasSuffix(filename, ".key") && !strings.HasSuffix(filename, ".pem") {
+		// Never trust the client-supplied multipart filename: strip any path
+		// components so traversal sequences (e.g. "../../etc/cron.d/x.crt")
+		// cannot escape the certs directory.
+		filename := filepath.Base(handler.Filename)
+		if filename == "." || filename == string(os.PathSeparator) ||
+			(!strings.HasSuffix(filename, ".crt") && !strings.HasSuffix(filename, ".key") && !strings.HasSuffix(filename, ".pem")) {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("invalid file type"))
 			return
@@ -72,6 +76,12 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			return
 		}
 		destPath := filepath.Join(certsDir, filename)
+		// Defense-in-depth: ensure the resolved path is still inside certsDir.
+		if !strings.HasPrefix(filepath.Clean(destPath)+string(os.PathSeparator), filepath.Clean(certsDir)+string(os.PathSeparator)) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("invalid filename"))
+			return
+		}
 		dst, err := os.Create(destPath)
 		if err != nil {
 			logger.L.LogError("failed to create certificate file", "error", err, "path", destPath)

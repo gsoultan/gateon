@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,6 +22,60 @@ import (
 )
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+// isBlockedIP reports whether an address is in a range that must never be
+// reachable via the diagnostics test-target (SSRF protection).
+func isBlockedIP(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+}
+
+// hostResolvesToBlockedIP resolves host and returns true if it is (or resolves
+// to) a blocked address. A bare IP literal is checked directly.
+func hostResolvesToBlockedIP(ctx context.Context, host string) (bool, string) {
+	if host == "" {
+		return true, "invalid target host"
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true, "access to localhost is forbidden"
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if isBlockedIP(addr) {
+			return true, "access to internal addresses is forbidden"
+		}
+		return false, ""
+	}
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	if err != nil {
+		return true, "failed to resolve target host"
+	}
+	for _, ip := range ips {
+		if addr, ok := netip.AddrFromSlice(ip); ok && isBlockedIP(addr) {
+			return true, "access to internal addresses is forbidden"
+		}
+	}
+	return false, ""
+}
+
+// ssrfSafeTransport returns an http.Transport whose dialer re-validates the
+// resolved IP at connect time, defeating DNS-rebinding attacks where the host
+// passed initial validation but later resolves to an internal address.
+func ssrfSafeTransport() *http.Transport {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			if blocked, msg := hostResolvesToBlockedIP(ctx, host); blocked {
+				return nil, fmt.Errorf("ssrf blocked: %s", msg)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+}
 
 func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier) bool {
 	claimsVal := r.Context().Value(middleware.UserContextKey)
@@ -402,16 +459,18 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			WriteHTTPError(w, http.StatusBadRequest, "invalid target url")
 			return
 		}
-		// Basic SSRF: reject loopback
-		if u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1" {
-			WriteHTTPError(w, http.StatusBadRequest, "access to localhost is forbidden")
+		// Resolve the host now and reject any address in a loopback / private /
+		// link-local (incl. cloud metadata 169.254.169.254) / ULA / unspecified
+		// range. This is re-checked at dial time below to defeat DNS rebinding.
+		if blocked, msg := hostResolvesToBlockedIP(r.Context(), u.Hostname()); blocked {
+			WriteHTTPError(w, http.StatusBadRequest, msg)
 			return
 		}
 
 		if req.Method == "" {
 			req.Method = "GET"
 		}
-		client := &http.Client{Timeout: 5 * time.Second}
+		client := &http.Client{Timeout: 5 * time.Second, Transport: ssrfSafeTransport()}
 		proxyReq, err := http.NewRequestWithContext(r.Context(), req.Method, req.Target, nil)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

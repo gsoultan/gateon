@@ -26,13 +26,14 @@ func targetStatsFromState(t *targetState) TargetStats {
 	if atomic.LoadUint64(&t.requestCount) > 0 {
 		avg = atomic.LoadUint64(&t.latencySumMs) / atomic.LoadUint64(&t.requestCount)
 	}
+	alive := t.alive.Load()
 	circuit := CircuitClosed
-	if !t.alive {
+	if !alive {
 		circuit = CircuitOpen
 	}
 	return TargetStats{
 		URL:          t.url,
-		Alive:        t.alive,
+		Alive:        alive,
 		CircuitState: circuit,
 		RequestCount: atomic.LoadUint64(&t.requestCount),
 		ErrorCount:   atomic.LoadUint64(&t.errorCount),

@@ -40,7 +40,7 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 
 	totalWeight := int32(0)
 	for _, t := range lb.targets {
-		if t.alive {
+		if t.alive.Load() {
 			totalWeight += t.weight
 		}
 	}
@@ -54,7 +54,7 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 
 	currentSum := int32(0)
 	for _, t := range lb.targets {
-		if !t.alive {
+		if !t.alive.Load() {
 			continue
 		}
 		currentSum += t.weight
@@ -79,14 +79,14 @@ func (lb *WeightedRoundRobinLB) SetAlive(url string, alive bool) {
 	defer lb.mu.Unlock()
 	for _, t := range lb.targets {
 		if t.url == url {
-			if t.alive != alive {
+			if t.alive.Load() != alive {
 				state := telemetry.CircuitClosed
 				if !alive {
 					state = telemetry.CircuitOpen
 				}
 				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
 			}
-			t.alive = alive
+			t.alive.Store(alive)
 			return
 		}
 	}

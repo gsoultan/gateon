@@ -214,6 +214,16 @@ func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, eng
 		return res
 	}
 
+	// Close the MIME head-window bypass: MIME/magic detection only inspects the
+	// first fileTypeHeaderSize bytes, so an attacker can prepend a benign header
+	// (e.g. PNG magic) and append a payload. Scan the FULL content for
+	// unambiguous executable magic and block when the file is wrapped as a
+	// benign inline type. This is independent of (and complements) the signature
+	// engine below, so it holds even when signature scanning is disabled.
+	if res := scanEmbeddedExecutable(r, p, head, content); res.blocked {
+		return res
+	}
+
 	if engine != nil {
 		if res := scanSignatures(r, p, content, engine, blockSev); res.blocked {
 			return res
@@ -307,6 +317,58 @@ func validateMime(r *http.Request, p *multipart.Part, head []byte, cfg FileSecur
 		logger.L.LogWarn("File upload blocked: extension/magic mismatch",
 			"filename", p.FileName(), "ext", ext, "magic_ext", kind.Extension, "client_ip", r.RemoteAddr)
 		return scanResult{blocked: true, status: http.StatusForbidden, message: "File extension mismatch"}
+	}
+	return scanResult{}
+}
+
+// benignWrapperMIMEs are content types that render/preview inline and must not
+// legitimately contain an embedded executable image. A hit here strongly
+// indicates a polyglot/padding bypass.
+var benignWrapperMIMEs = map[string]bool{
+	"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true,
+	"image/bmp": true, "image/tiff": true, "application/pdf": true, "text/plain": true,
+}
+
+// scanEmbeddedExecutable looks for unambiguous executable magic anywhere in the
+// full content and blocks when the file was uploaded under a benign inline MIME
+// type. This catches the "benign 261-byte header + appended payload" bypass that
+// head-only MIME detection cannot see. Magic signatures are chosen to be highly
+// specific (≥4 bytes) so legitimate images/PDFs effectively never match.
+func scanEmbeddedExecutable(r *http.Request, p *multipart.Part, head, content []byte) scanResult {
+	if len(head) == 0 {
+		return scanResult{}
+	}
+	kind, _ := filetype.Match(head)
+	mimeType := kind.MIME.Value
+	if mimeType == "" {
+		mimeType = http.DetectContentType(head)
+	}
+	// Only treat embedded executables as a block-worthy bypass when the file
+	// claims to be a benign inline type; ZIP/octet-stream uploads legitimately
+	// carry such bytes and are handled by the MIME allowlist + signature engine.
+	base := mimeType
+	if idx := strings.IndexByte(base, ';'); idx != -1 {
+		base = strings.TrimSpace(base[:idx])
+	}
+	if !benignWrapperMIMEs[base] {
+		return scanResult{}
+	}
+	type sig struct {
+		name  string
+		magic []byte
+	}
+	for _, s := range []sig{
+		{"ELF", []byte("\x7fELF")},
+		{"Mach-O", []byte("\xcf\xfa\xed\xfe")},
+		{"Mach-O", []byte("\xfe\xed\xfa\xcf")},
+		{"Mach-O", []byte("\xca\xfe\xba\xbe")},
+		{"PE", []byte("PE\x00\x00")},
+	} {
+		if bytes.Contains(content, s.magic) {
+			logger.L.LogWarn("File upload blocked: embedded executable in benign wrapper",
+				"filename", p.FileName(), "mime", mimeType, "embedded", s.name, "client_ip", r.RemoteAddr)
+			return scanResult{blocked: true, status: http.StatusForbidden, message: "Embedded executable content detected"}
+		}
 	}
 	return scanResult{}
 }

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/url"
+	"sync/atomic"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -15,11 +16,14 @@ type targetState struct {
 	proxyProtocolEnabled bool
 	proxyProtocolVersion gateonv1.ProxyProtocolVersion
 	weight               int32
-	alive                bool
-	requestCount         uint64
-	errorCount           uint64
-	latencySumMs         uint64
-	activeConn           int32
+	// alive is read lock-free on the request hot path (e.g. RoundRobinLB.NextState
+	// releases the LB lock before iterating) while the health checker writes it,
+	// so it must be atomic to avoid a data race.
+	alive        atomic.Bool
+	requestCount uint64
+	errorCount   uint64
+	latencySumMs uint64
+	activeConn   int32
 }
 
 func newTargetState(rawURL string, weight int32) *targetState {
@@ -29,11 +33,11 @@ func newTargetState(rawURL string, weight int32) *targetState {
 func newTargetStateWithProxy(rawURL string, weight int32, proxyEnabled bool, proxyVersion gateonv1.ProxyProtocolVersion) *targetState {
 	ts := &targetState{
 		url:                  rawURL,
-		alive:                true,
 		weight:               weight,
 		proxyProtocolEnabled: proxyEnabled,
 		proxyProtocolVersion: proxyVersion,
 	}
+	ts.alive.Store(true)
 	if parsed, err := url.Parse(rawURL); err == nil {
 		ts.transportScheme = parsed.Scheme
 		// Normalize scheme for proxy cache key

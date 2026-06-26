@@ -20,6 +20,12 @@ type XFCCConfig struct {
 func XFCC(cfg XFCCConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Never trust a client-supplied X-Forwarded-Client-Cert: the gateway
+			// is the sole authority for this header. Strip any inbound value
+			// unconditionally before doing anything else, so a request that
+			// arrives without a verified client cert can never inject identity.
+			r.Header.Del("X-Forwarded-Client-Cert")
+
 			if IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
@@ -51,12 +57,9 @@ func XFCC(cfg XFCCConfig) Middleware {
 			}
 
 			if len(parts) > 0 {
-				xfcc := strings.Join(parts, ";")
-				// Append to existing if any
-				if existing := r.Header.Get("X-Forwarded-Client-Cert"); existing != "" {
-					xfcc = existing + "," + xfcc
-				}
-				r.Header.Set("X-Forwarded-Client-Cert", xfcc)
+				// Set only the gateway-derived value; do not concatenate any
+				// (already-stripped) inbound header.
+				r.Header.Set("X-Forwarded-Client-Cert", strings.Join(parts, ";"))
 			}
 
 			next.ServeHTTP(w, r)

@@ -22,7 +22,10 @@ func TestSecurityHeadersUpgradeInsecureRequests(t *testing.T) {
 	}{
 		{name: "RecommendedPlainHTTP", preset: "recommended", wantUpgrade: false, wantHSTS: false},
 		{name: "RecommendedTLS", preset: "recommended", tls: true, wantUpgrade: true, wantHSTS: true},
-		{name: "RecommendedForwardedHTTPS", preset: "recommended", fwdProto: "https", wantUpgrade: true, wantHSTS: true},
+		// X-Forwarded-Proto from an untrusted peer must NOT be believed (it is
+		// client-spoofable); detection now requires GATEON_TRUSTED_PROXIES. The
+		// fail-safe outcome is simply that HTTPS-only headers are not emitted.
+		{name: "ForwardedHTTPSUntrustedIgnored", preset: "recommended", fwdProto: "https", wantUpgrade: false, wantHSTS: false},
 		{name: "StrictPlainHTTP", preset: "strict", wantUpgrade: false, wantHSTS: false},
 		{name: "StrictTLS", preset: "strict", tls: true, wantUpgrade: true, wantHSTS: true},
 		{name: "DefaultNoCSP", preset: "", wantCSPEmpty: true},

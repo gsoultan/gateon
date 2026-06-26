@@ -81,6 +81,10 @@ func TestProxyHandler_Protocols(t *testing.T) {
 				WeightedTargets: []*gateonv1.Target{
 					{Url: targetURL, Weight: 1},
 				},
+				// The httptest TLS server uses a self-signed cert; backend TLS
+				// verification is now ON by default, so the test must explicitly
+				// opt into skip-verify (harmless for the non-TLS h2c case).
+				TlsClientConfig: &gateonv1.TlsClientConfig{Enabled: true, SkipVerify: true},
 			}
 			tmpDir := t.TempDir()
 			servicePath := filepath.Join(tmpDir, "services.json")

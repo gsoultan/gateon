@@ -23,16 +23,16 @@ func TestScheme(t *testing.T) {
 		remoteAddr string
 		xfp        string
 		override   string         // context override set by forwardedheaders middleware
-		trusted    []netip.Prefix // nil = trust all (default posture)
+		trusted    []netip.Prefix // nil = no trusted proxies (default; forwarded headers ignored)
 		want       string
 	}{
 		{name: "direct TLS wins over header", tls: true, xfp: "http", want: "https"},
-		{name: "trust-all honors https", remoteAddr: "1.2.3.4:1111", xfp: "https", want: "https"},
-		{name: "trust-all honors http", remoteAddr: "1.2.3.4:1111", xfp: "http", want: "http"},
+		{name: "trusted proxy honors https", remoteAddr: "10.0.0.1:1111", xfp: "https", trusted: []netip.Prefix{mustPrefix("10.0.0.0/8")}, want: "https"},
+		{name: "untrusted http defaults http", remoteAddr: "1.2.3.4:1111", xfp: "http", want: "http"},
 		{name: "no header defaults http", remoteAddr: "1.2.3.4:1111", want: "http"},
-		{name: "leftmost token of chain", remoteAddr: "1.2.3.4:1111", xfp: "https, http", want: "https"},
+		{name: "trusted proxy first proto token", remoteAddr: "10.0.0.1:1111", xfp: "https, http", trusted: []netip.Prefix{mustPrefix("10.0.0.0/8")}, want: "https"},
 		{name: "invalid value falls back", remoteAddr: "1.2.3.4:1111", xfp: "ftp", want: "http"},
-		{name: "case insensitive", remoteAddr: "1.2.3.4:1111", xfp: "HTTPS", want: "https"},
+		{name: "trusted proxy case insensitive", remoteAddr: "10.0.0.1:1111", xfp: "HTTPS", trusted: []netip.Prefix{mustPrefix("10.0.0.0/8")}, want: "https"},
 		{name: "override beats untrusted client", remoteAddr: "1.2.3.4:1111", xfp: "http", override: "https", trusted: []netip.Prefix{mustPrefix("10.0.0.0/8")}, want: "https"},
 		{name: "override beats TLS", tls: true, override: "http", want: "http"},
 		{name: "invalid override is ignored", tls: true, override: "ftp", want: "https"},

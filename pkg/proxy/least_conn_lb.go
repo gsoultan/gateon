@@ -38,7 +38,7 @@ func (lb *LeastConnLB) NextState() *targetState {
 	}
 	var best *targetState
 	for _, t := range lb.targets {
-		if !t.alive {
+		if !t.alive.Load() {
 			continue
 		}
 		if best == nil || atomic.LoadInt32(&t.activeConn) < atomic.LoadInt32(&best.activeConn) {
@@ -65,14 +65,14 @@ func (lb *LeastConnLB) SetAlive(url string, alive bool) {
 	defer lb.mu.Unlock()
 	for _, t := range lb.targets {
 		if t.url == url {
-			if t.alive != alive {
+			if t.alive.Load() != alive {
 				state := telemetry.CircuitClosed
 				if !alive {
 					state = telemetry.CircuitOpen
 				}
 				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
 			}
-			t.alive = alive
+			t.alive.Store(alive)
 			return
 		}
 	}

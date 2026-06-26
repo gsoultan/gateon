@@ -84,8 +84,10 @@ func (b *ProxyHandlerBuilder) resolveService() {
 func (b *ProxyHandlerBuilder) buildTransport() {
 	tlsCfg, err := gtls.CreateTLSClientConfig(b.tlsClientConfig)
 	if err != nil {
-		logger.L.LogWarn("failed to create tls client config; using insecure fallback", "error", err)
-		tlsCfg = &tls.Config{InsecureSkipVerify: true}
+		// Fail secure: a broken TLS config must not silently downgrade to an
+		// unverified connection. Fall back to a verifying config instead.
+		logger.L.LogWarn("failed to create tls client config; using secure (verifying) fallback", "error", err)
+		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
 	b.tlsConfig = tlsCfg
 	selector, err := newTLSClientIdentitySelector(b.tlsClientConfig)

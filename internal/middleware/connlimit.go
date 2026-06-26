@@ -98,6 +98,16 @@ func (m *perIPConnMap) get(key string, cap int) *connBucket {
 
 func (m *perIPConnMap) release(key string, b *connBucket) {
 	<-b.sem
+	m.unref(key, b)
+}
+
+// unref drops the reference taken by get() WITHOUT consuming a semaphore slot.
+// It must be used on the reject path, where get() incremented ref but no slot
+// was ever acquired (so release()'s `<-b.sem` would block/underflow). Without
+// this, every rejected request leaks a ref and the bucket is never evicted,
+// allowing an attacker (especially with a spoofable per-IP key) to grow the
+// bucket map without bound.
+func (m *perIPConnMap) unref(key string, b *connBucket) {
 	s := m.getShard(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -130,6 +140,8 @@ func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) Middleware
 				defer m.release(key, b)
 				next.ServeHTTP(w, r)
 			default:
+				// Rejected: drop the ref taken by get() (no slot acquired).
+				m.unref(key, b)
 				if !ShouldSkipMetrics(r) {
 					inflightRejectedTotal.WithLabelValues("max_connections_per_ip").Inc()
 					telemetry.IncInflightRejected("max_connections_per_ip")
