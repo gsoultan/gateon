@@ -17,12 +17,15 @@ import {
   Button 
 } from '@mantine/core';
 import { DonutChart } from '@mantine/charts';
-import { IconShieldCheck, IconActivity, IconHistory, IconFingerprint, IconArrowUpRight, IconRefresh, IconClock } from '@tabler/icons-react';
+import { IconShieldCheck, IconShieldOff, IconActivity, IconHistory, IconFingerprint, IconArrowUpRight, IconRefresh, IconClock } from '@tabler/icons-react';
+import { Alert, Anchor } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { format } from 'date-fns';
 import { useAnimateValue } from '../../hooks/useAnimateValue';
 import { useDisclosure } from '@mantine/hooks';
 import { SecurityAnomalyModal } from '../SecurityAnomalyModal';
 import TraceVisualizer from '../Diagnostics/TraceVisualizer';
+import { useSecurityPosture } from '../../hooks/useSecurityPosture';
 import type { MetricsSnapshot, SecurityThreat, DonutChartDataItem } from '../../types/metrics';
 import type { Anomaly } from '../../types/gateon';
 
@@ -83,8 +86,30 @@ export function OverviewTab({
     openTrace();
   };
 
+  const { data: posture } = useSecurityPosture();
+  const wafEnabled = posture?.waf?.enabled;
+
   return (
     <Stack gap="lg">
+      {wafEnabled === false && (
+        <Alert
+          color="orange"
+          variant="light"
+          icon={<IconShieldOff size={18} />}
+          title="Web Application Firewall is disabled"
+        >
+          <Group justify="space-between" wrap="nowrap" gap="md">
+            <Text size="sm">
+              Your routes are not being inspected by the WAF, so WAF block counts will
+              read 0. Enable <strong>Protect all routes</strong> to run OWASP CRS plus
+              malware &amp; ransomware detection on every route.
+            </Text>
+            <Anchor component={Link} to="/settings" fw={600} style={{ whiteSpace: 'nowrap' }}>
+              Open Settings
+            </Anchor>
+          </Group>
+        </Alert>
+      )}
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
           <Group justify="space-between">

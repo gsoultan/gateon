@@ -521,8 +521,11 @@ func buildTargetMetrics(idx map[string]*dto.MetricFamily) []TargetMetric {
 	if fam, ok := idx["gateon_active_connections"]; ok {
 		for _, m := range fam.GetMetric() {
 			target := labelValue(m, "target")
-			for key, tm := range targMap {
-				if strings.Contains(key, target) {
+			// Exact target match: substring matching misattributes connections
+			// when one target URL is a prefix/substring of another (e.g. a
+			// ":80" target inside a ":8080" target).
+			for _, tm := range targMap {
+				if tm.Target == target {
 					tm.ActiveConn = m.GetGauge().GetValue()
 				}
 			}
