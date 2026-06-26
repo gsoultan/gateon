@@ -9,12 +9,19 @@ import (
 )
 
 func (s *ApiService) ListAuditLogs(ctx context.Context, req *gateonv1.ListAuditLogsRequest) (*gateonv1.ListAuditLogsResponse, error) {
-	limit := int(req.GetLimit())
-	if limit <= 0 {
-		limit = 100
+	// Page-based pagination is preferred. The legacy `limit` field is honoured
+	// as a page size when no explicit page_size is supplied.
+	page := int(req.GetPage())
+	pageSize := int(req.GetPageSize())
+	if pageSize <= 0 {
+		if limit := int(req.GetLimit()); limit > 0 {
+			pageSize = limit
+		} else {
+			pageSize = 100
+		}
 	}
 
-	logs, err := audit.GetLogs(ctx, limit)
+	logs, total, err := audit.GetLogsPaginated(ctx, page, pageSize, req.GetSearch())
 	if err != nil {
 		return nil, err
 	}
@@ -33,5 +40,10 @@ func (s *ApiService) ListAuditLogs(ctx context.Context, req *gateonv1.ListAuditL
 		})
 	}
 
-	return &gateonv1.ListAuditLogsResponse{Logs: protoLogs}, nil
+	return &gateonv1.ListAuditLogsResponse{
+		Logs:       protoLogs,
+		TotalCount: int32(total),
+		Page:       int32(page),
+		PageSize:   int32(pageSize),
+	}, nil
 }

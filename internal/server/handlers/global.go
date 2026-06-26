@@ -79,19 +79,31 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
 			return
 		}
-		limit := 100
-		if lStr := r.URL.Query().Get("limit"); lStr != "" {
-			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-				limit = l
+		page, pageSize, search := ParsePagination(r)
+		// Fall back to the legacy `limit` query param as the page size so older
+		// clients keep working.
+		if pageSize <= 0 {
+			if lStr := r.URL.Query().Get("limit"); lStr != "" {
+				if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+					pageSize = int32(l)
+				}
 			}
 		}
-		logs, err := audit.GetLogs(r.Context(), limit)
+		if pageSize <= 0 {
+			pageSize = 100
+		}
+		logs, total, err := audit.GetLogsPaginated(r.Context(), int(page), int(pageSize), search)
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"logs": logs})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"logs":        logs,
+			"total_count": total,
+			"page":        page,
+			"page_size":   pageSize,
+		})
 	})
 	mux.HandleFunc("GET /v1/audit/logs/watch", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
@@ -518,8 +530,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 		if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
-			if claims.ID != req.Id && !auth.Allowed(r.Context(), claims.Role, auth.ActionWrite, auth.ResourceUsers) {
-				WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
+			// 2FA setup is strictly self-service: the response contains the
+			// TOTP secret, QR code, and recovery codes, which must only ever be
+			// disclosed to the account owner. Even admins must not be able to
+			// enable 2FA for another user, as that would hand them the second
+			// factor and allow account takeover.
+			if claims.ID != req.Id {
+				WriteHTTPError(w, http.StatusForbidden, "2FA can only be set up for your own account")
 				return
 			}
 		}

@@ -1,21 +1,35 @@
-import { Container, Title, Text, Card, Table, Badge, Group, Stack, TextInput, ActionIcon, Tooltip, Paper } from '@mantine/core';
+import { useState, useEffect } from 'react';
+import { Container, Title, Text, Card, Table, Badge, Group, Stack, TextInput, ActionIcon, Tooltip, Paper, Pagination } from '@mantine/core';
+import { useDebouncedValue } from '@mantine/hooks';
 import { IconSearch, IconRefresh, IconFingerprint, IconShieldCheck, IconShieldX } from '@tabler/icons-react';
 import { useAuditLogs } from '../hooks/useAuditLogs';
 import { useUrlFilters } from '../hooks/useUrlFilters';
 import { format } from 'date-fns';
 
+const PAGE_SIZE = 50;
+
 export default function AuditLogsPage() {
   // Filter state lives in the URL so a filtered audit view is shareable.
   const [filters, setFilters] = useUrlFilters<{ q: string }>();
   const search = filters.q ?? '';
-  const { data, isLoading, refetch, isFetching } = useAuditLogs(100);
+  const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [page, setPage] = useState(1);
 
-  const filteredLogs = data?.logs?.filter(log => 
-    (log.action?.toLowerCase() || '').includes(search.toLowerCase()) ||
-    (log.resource?.toLowerCase() || '').includes(search.toLowerCase()) ||
-    (log.user_id?.toLowerCase() || '').includes(search.toLowerCase()) ||
-    (log.details?.toLowerCase() || '').includes(search.toLowerCase())
-  );
+  // Reset to the first page whenever the (debounced) search changes so we never
+  // request a page that no longer exists for the filtered result set.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
+  const { data, isLoading, refetch, isFetching } = useAuditLogs({
+    page: page - 1,
+    page_size: PAGE_SIZE,
+    search: debouncedSearch,
+  });
+
+  const logs = data?.logs ?? [];
+  const totalCount = data?.total_count ?? logs.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const formatTimestamp = (ts: string) => {
     try {
@@ -61,8 +75,8 @@ export default function AuditLogsPage() {
                   <Table.Th>Security</Table.Th>
                 </Table.Tr>
               </Table.Thead>
-              <Table.Tbody>
-                {filteredLogs?.map((log) => (
+              <Table.Tbody style={{ opacity: isFetching ? 0.6 : 1, transition: 'opacity 0.2s' }}>
+                {logs.map((log) => (
                   <Table.Tr key={log.id}>
                     <Table.Td>
                       <Text size="sm" fw={500}>
@@ -92,7 +106,7 @@ export default function AuditLogsPage() {
                     </Table.Td>
                   </Table.Tr>
                 ))}
-                {filteredLogs?.length === 0 && (
+                {!isLoading && logs.length === 0 && (
                   <Table.Tr>
                     <Table.Td colSpan={6}>
                       <Text ta="center" py="xl" c="dimmed">No audit logs found.</Text>
@@ -102,9 +116,18 @@ export default function AuditLogsPage() {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
+
+          {totalCount > PAGE_SIZE && (
+            <Group justify="space-between" align="center" pt="md" mt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+              <Text size="xs" c="dimmed">
+                Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount}
+              </Text>
+              <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
+            </Group>
+          )}
         </Card>
 
-        {filteredLogs && filteredLogs.length > 0 && (
+        {logs.length > 0 && (
           <Paper withBorder p="md" radius="md" bg="var(--mantine-color-blue-light)">
             <Group gap="sm">
               <IconFingerprint size={24} color="var(--mantine-color-blue-filled)" />

@@ -34,6 +34,10 @@ func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
 	logger.L.LogInfo("eBPF metrics polling loop started")
 
 	lastDropped := make(map[string]uint64)
+	// Track attachment so we log the transition once (not every tick). attached
+	// starts unset so the first observation is always logged — this is the
+	// operator's answer to "why are the eBPF metrics zero?".
+	var lastAttached *bool
 
 	for {
 		select {
@@ -44,6 +48,17 @@ func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
 			if err != nil {
 				logger.L.LogError("failed to get eBPF map stats", "error", err)
 				continue
+			}
+
+			if lastAttached == nil || *lastAttached != stats.Attached {
+				if stats.Attached {
+					logger.L.LogInfo("eBPF XDP program attached; metrics now live", "interface", stats.Interface)
+				} else {
+					logger.L.LogError("eBPF enabled but XDP program is NOT attached; metrics will stay zero",
+						"interface", stats.Interface, "load_error", stats.LoadError)
+				}
+				a := stats.Attached
+				lastAttached = &a
 			}
 
 			ActiveShunnedEntitiesTotal.WithLabelValues("ip").Set(float64(stats.ShunnedIPsCount))

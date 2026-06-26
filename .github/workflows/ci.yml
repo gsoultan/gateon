@@ -19,6 +19,15 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      # The Linux build compiles internal/ebpf/manager_linux.go, which depends on
+      # the bpf2go-generated loader; this toolchain lets `go generate` compile the
+      # XDP C program and emit those bindings below.
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -44,6 +53,11 @@ jobs:
 
       - name: Tidy
         run: go mod tidy
+
+      # Compile the XDP/eBPF C program and regenerate the bpf2go bindings so the
+      # Linux build (manager_linux.go) and tests can link loadGateon_ebpf().
+      - name: Generate eBPF bindings
+        run: go generate ./internal/ebpf/...
 
       - name: Build
         run: go build ./...

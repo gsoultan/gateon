@@ -240,22 +240,27 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 		return globalReg.Get(ctx)
 	})
 
-	if !globalReg.ConfigFileExists() {
-		return
+	// Initialize the persistent telemetry store regardless of whether a global
+	// config file exists yet. Without it the store stays nil, GetSystemTrafficHistory
+	// returns nothing, and the dashboard's "Traffic/Bandwidth over time" charts fall
+	// back to volatile in-session deltas that only span from page load — so they
+	// appear to "only show the last hour". When no config is present we resolve the
+	// default database (gateon.db, matching AuthDatabaseURL's default) and retention.
+	var gc *gateonv1.GlobalConfig
+	if globalReg.ConfigFileExists() {
+		gc = globalReg.Get(ctx)
 	}
-	if gc := globalReg.Get(ctx); gc != nil {
-		databaseURL := db.AuthDatabaseURL(gc.Auth)
-		retention := 7
-		if gc.Log != nil {
-			if gc.Log.AccessLogRetentionDays > 0 {
-				retention = int(gc.Log.AccessLogRetentionDays)
-			} else if gc.Log.PathStatsRetentionDays > 0 {
-				retention = int(gc.Log.PathStatsRetentionDays)
-			}
+	databaseURL := db.AuthDatabaseURL(gc.GetAuth())
+	retention := 7
+	if gc != nil && gc.Log != nil {
+		if gc.Log.AccessLogRetentionDays > 0 {
+			retention = int(gc.Log.AccessLogRetentionDays)
+		} else if gc.Log.PathStatsRetentionDays > 0 {
+			retention = int(gc.Log.PathStatsRetentionDays)
 		}
-		if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
-			logger.L.LogError("failed to init path stats store", "error", err, "database_url", databaseURL)
-		}
+	}
+	if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
+		logger.L.LogError("failed to init path stats store", "error", err, "database_url", databaseURL)
 	}
 }
 

@@ -1,20 +1,31 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, getApiUrl } from "./api";
+import { apiFetch, getApiUrl, buildQueryString } from "./api";
 import type { AuditLog } from "../types/gateon";
 
 export interface AuditLogsResponse {
   logs: AuditLog[];
+  total_count?: number;
+  page?: number;
+  page_size?: number;
 }
 
-export function useAuditLogs(limit = 100) {
+export interface AuditLogsParams {
+  page?: number;
+  page_size?: number;
+  search?: string;
+}
+
+export function useAuditLogs(params: AuditLogsParams = {}) {
+  const { page = 0, page_size = 50, search = "" } = params;
   const queryClient = useQueryClient();
-  const queryKey = ["audit-logs", limit];
+  const queryKey = ["audit-logs", page, page_size, search];
 
   const query = useQuery<AuditLogsResponse>({
     queryKey,
     queryFn: async () => {
-      const res = await apiFetch(`/v1/audit/logs?limit=${limit}`);
+      const qs = buildQueryString({ page, page_size, search });
+      const res = await apiFetch(`/v1/audit/logs${qs}`);
       if (!res.ok) {
         throw new Error("Failed to fetch audit logs");
       }
@@ -23,6 +34,10 @@ export function useAuditLogs(limit = 100) {
   });
 
   useEffect(() => {
+    // Live updates only make sense on the first page of an unfiltered view —
+    // prepending to a later page or a filtered list would corrupt pagination.
+    if (page !== 0 || search) return;
+
     const url = getApiUrl(`/v1/audit/logs/watch`);
     const eventSource = new EventSource(url, { withCredentials: true });
 
@@ -30,11 +45,13 @@ export function useAuditLogs(limit = 100) {
       try {
         const newEntry = JSON.parse(event.data) as AuditLog;
         queryClient.setQueryData<AuditLogsResponse>(queryKey, (old) => {
-          if (!old) return { logs: [newEntry] };
+          if (!old) return { logs: [newEntry], total_count: 1, page, page_size };
           const exists = old.logs.some((l) => l.id === newEntry.id);
           if (exists) return old;
           return {
-            logs: [newEntry, ...old.logs].slice(0, limit),
+            ...old,
+            logs: [newEntry, ...old.logs].slice(0, page_size),
+            total_count: (old.total_count ?? old.logs.length) + 1,
           };
         });
       } catch (err) {
@@ -45,7 +62,7 @@ export function useAuditLogs(limit = 100) {
     return () => {
       eventSource.close();
     };
-  }, [limit, queryClient, queryKey]);
+  }, [page, page_size, search, queryClient, queryKey]);
 
   return query;
 }

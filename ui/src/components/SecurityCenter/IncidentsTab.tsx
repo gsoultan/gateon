@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Card,
   Group,
@@ -12,6 +13,7 @@ import {
   Tooltip,
   ThemeIcon,
   Code,
+  Pagination,
 } from "@mantine/core";
 import {
   IconAlertTriangle,
@@ -116,10 +118,19 @@ function PostureStatusCards() {
   );
 }
 
+const PAGE_SIZE = 15;
+
 export function IncidentsTab() {
   const { data, isLoading, error } = useSecurityIncidents(100);
   const density = useTableDensity();
   const incidents = data?.incidents ?? [];
+  const [page, setPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(incidents.length / PAGE_SIZE));
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [incidents.length, totalPages, page]);
+  const pagedIncidents = incidents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <Stack gap="lg">
@@ -188,7 +199,7 @@ export function IncidentsTab() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {incidents.map((inc) => (
+                {pagedIncidents.map((inc) => (
                   <Table.Tr key={inc.id}>
                     <Table.Td>
                       <Badge color={getSeverityColor(inc.severity)} variant="filled">
@@ -246,6 +257,15 @@ export function IncidentsTab() {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
+        )}
+
+        {!isLoading && !error && incidents.length > PAGE_SIZE && (
+          <Group justify="space-between" align="center" mt="md">
+            <Text size="xs" c="dimmed">
+              Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, incidents.length)} of {incidents.length}
+            </Text>
+            <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
+          </Group>
         )}
       </Card>
     </Stack>

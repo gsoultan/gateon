@@ -23,6 +23,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Required so GoReleaser's `before` hook (go generate ./internal/ebpf/...)
+      # can compile the XDP/eBPF C program and embed the object into the binary.
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
