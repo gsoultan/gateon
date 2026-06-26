@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -22,6 +23,43 @@ import (
 )
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+// aggRateEstimator derives a system-wide requests/second figure from the
+// monotonically-increasing cumulative request total across successive agg-stats
+// calls. It is process-wide and guarded by a mutex; the sample is only refreshed
+// once at least a second has elapsed so that bursty multi-client polling does not
+// produce noisy or divide-by-near-zero rates. The last computed rate is returned
+// between refreshes. This keeps the agg-stats contract consistent (the field is
+// always present and tracks total_requests' growth) without inventing a number.
+var aggRate = &rateEstimator{}
+
+type rateEstimator struct {
+	mu        sync.Mutex
+	lastTotal uint64
+	lastAt    time.Time
+	rate      float64
+}
+
+func (e *rateEstimator) observe(total uint64, now time.Time) float64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lastAt.IsZero() {
+		e.lastTotal, e.lastAt = total, now
+		return 0
+	}
+	elapsed := now.Sub(e.lastAt).Seconds()
+	if elapsed < 1 {
+		return e.rate
+	}
+	// Counters can reset (process restart) — clamp negative deltas to zero.
+	var delta float64
+	if total >= e.lastTotal {
+		delta = float64(total - e.lastTotal)
+	}
+	e.rate = delta / elapsed
+	e.lastTotal, e.lastAt = total, now
+	return e.rate
+}
 
 // isBlockedIP reports whether an address is in a range that must never be
 // reachable via the diagnostics test-target (SSRF protection).
@@ -345,6 +383,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"total_requests":        finalTotalReqs,
+			"requests_per_second":   aggRate.observe(finalTotalReqs, time.Now()),
 			"total_bandwidth_bytes": pathTotalBandwidth,
 			"total_errors":          totalErrs,
 			"active_connections":    activeConn,
