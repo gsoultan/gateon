@@ -3,10 +3,11 @@
 // path predicates, security-header presets, the pooled StatusResponseWriter, and
 // the custom-error-page middleware.
 //
-// It is a leaf package (it imports only the standard library and internal/logger)
-// so that the per-concern middleware subpackages (auth, security, traffic,
-// transform) can depend on it without creating an import cycle with the parent
-// package middleware (ADR-0002, Stage 0).
+// It is a near-leaf package (it imports only the standard library, internal/logger,
+// and internal/request — both themselves cycle-free) so that the per-concern
+// middleware subpackages (auth, security, traffic, transform) can depend on it
+// without creating an import cycle with the parent package middleware
+// (ADR-0002, Stage 0).
 package kind
 
 import (
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // ContextKey is the type used for values stored in a request's context by the
@@ -164,13 +166,11 @@ func contentSecurityPolicy(secure bool) string {
 }
 
 // isSecureRequest reports whether the request reached the server over a secure
-// (TLS) connection, either directly or via a TLS-terminating proxy that sets
-// X-Forwarded-Proto: https.
+// (TLS) connection, either directly or via a trusted TLS-terminating proxy.
+// Trust of X-Forwarded-Proto is centralized in request.Scheme, which honors
+// GATEON_TRUSTED_PROXIES so an untrusted client cannot spoof the scheme.
 func isSecureRequest(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	return request.IsSecure(r)
 }
 
 // Chain composes multiple middlewares into a single middleware.

@@ -51,6 +51,11 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return f.createAuth(cfg)
 	case "headers":
 		return f.createHeaders(cfg)
+	case "forwardedheaders":
+		return ForwardedHeaders(ForwardedHeadersConfig{
+			Proto:              cfg["proto"],
+			TrustForwardHeader: parseBoolStrict(cfg["trust_forward_header"], false),
+		}), nil
 	case "rewrite":
 		return f.createRewrite(cfg)
 	case "addprefix":

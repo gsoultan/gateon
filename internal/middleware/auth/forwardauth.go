@@ -106,7 +106,7 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 
 			// X-Forwarded-* headers (Traefik-style)
 			authReq.Header.Set("X-Forwarded-Method", r.Method)
-			authReq.Header.Set("X-Forwarded-Proto", scheme(r))
+			authReq.Header.Set("X-Forwarded-Proto", request.Scheme(r))
 			authReq.Header.Set("X-Forwarded-Host", r.Host)
 			authReq.Header.Set("X-Forwarded-Uri", r.URL.RequestURI())
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" && cfg.TrustForwardHeader {
@@ -158,14 +158,4 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			next.ServeHTTP(w, r)
 		})
 	}, nil
-}
-
-func scheme(r *http.Request) string {
-	if r.TLS != nil {
-		return "https"
-	}
-	if s := r.Header.Get("X-Forwarded-Proto"); s != "" {
-		return s
-	}
-	return "http"
 }
