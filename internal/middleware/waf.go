@@ -49,16 +49,22 @@ type WAFConfig struct {
 	EnableMalwareDetection    bool
 	EnableRansomwareDetection bool
 	EnableDLP                 bool
-	AnomalyThreshold          int
-	EntropyThreshold          float64 // Threshold for Shannon entropy check (default 5.8)
-	DisableEntropy            bool    // If true, skip fast-path entropy check
-	RequestBodyLimit          int     // Maximum request body size in bytes
-	ResponseBodyLimit         int     // Maximum response body size in bytes
-	AuditLogPath              string  // Path to audit log file
-	AuditLogRelevantOnly      bool    // Only log relevant transactions
-	EbpfManager               ebpf.Manager
-	AllowedAdminIps           []string // IPs allowed to access WP admin
-	RulesPath                 string   // Path to external WAF rules (CRS)
+	// EnableResponseInspection turns on the CRS RESPONSE-phase (data-leakage /
+	// DLP) rules. These require buffering response bodies, which is the most
+	// expensive part of the WAF in CPU, latency and memory, so it is off outside
+	// the enterprise tier. When false, no RESPONSE-* rules are loaded and response
+	// body access stays off.
+	EnableResponseInspection bool
+	AnomalyThreshold         int
+	EntropyThreshold         float64 // Threshold for Shannon entropy check (default 5.8)
+	DisableEntropy           bool    // If true, skip fast-path entropy check
+	RequestBodyLimit         int     // Maximum request body size in bytes
+	ResponseBodyLimit        int     // Maximum response body size in bytes
+	AuditLogPath             string  // Path to audit log file
+	AuditLogRelevantOnly     bool    // Only log relevant transactions
+	EbpfManager              ebpf.Manager
+	AllowedAdminIps          []string // IPs allowed to access WP admin
+	RulesPath                string   // Path to external WAF rules (CRS)
 
 	// GRPCMode relaxes the CRS Protocol-Enforcement rules that are structurally
 	// incompatible with the gRPC/HTTP-2 transport (see grpcCompatDirective) and
@@ -262,22 +268,27 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
 		// Blocking evaluation
 		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
 
-		// Response rules
-		if cfg.EnableDLP {
-			sb.WriteString("Include @owasp_crs/RESPONSE-950-DATA-LEAKAGES.conf\n")
+		// Response rules (RESPONSE-phase). These buffer response bodies, the most
+		// expensive part of the WAF, so they are only loaded when response
+		// inspection is enabled (enterprise tier). When off we skip the whole
+		// response phase, avoiding response buffering entirely.
+		if cfg.EnableResponseInspection {
+			if cfg.EnableDLP {
+				sb.WriteString("Include @owasp_crs/RESPONSE-950-DATA-LEAKAGES.conf\n")
+			}
+			if !cfg.DisableSQLI {
+				sb.WriteString("Include @owasp_crs/RESPONSE-951-DATA-LEAKAGES-SQL.conf\n")
+			}
+			if !cfg.DisableJava {
+				sb.WriteString("Include @owasp_crs/RESPONSE-952-DATA-LEAKAGES-JAVA.conf\n")
+			}
+			if !cfg.DisablePHP {
+				sb.WriteString("Include @owasp_crs/RESPONSE-953-DATA-LEAKAGES-PHP.conf\n")
+			}
+			sb.WriteString("Include @owasp_crs/RESPONSE-954-DATA-LEAKAGES-IIS.conf\n")
+			sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
+			sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
 		}
-		if !cfg.DisableSQLI {
-			sb.WriteString("Include @owasp_crs/RESPONSE-951-DATA-LEAKAGES-SQL.conf\n")
-		}
-		if !cfg.DisableJava {
-			sb.WriteString("Include @owasp_crs/RESPONSE-952-DATA-LEAKAGES-JAVA.conf\n")
-		}
-		if !cfg.DisablePHP {
-			sb.WriteString("Include @owasp_crs/RESPONSE-953-DATA-LEAKAGES-PHP.conf\n")
-		}
-		sb.WriteString("Include @owasp_crs/RESPONSE-954-DATA-LEAKAGES-IIS.conf\n")
-		sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
-		sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
 
 		if cfg.RulesPath != "" {
 			wafConfig = wafConfig.WithRootFS(os.DirFS(cfg.RulesPath))
@@ -329,7 +340,9 @@ SecAuditLog "%s"
 		wafConfig = wafConfig.WithRequestBodyInMemoryLimit(int(memLimit))
 		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
 	}
-	if cfg.ResponseBodyLimit > 0 {
+	// Response body access is only meaningful (and only worth its buffering cost)
+	// when the RESPONSE-phase rules are loaded.
+	if cfg.EnableResponseInspection && cfg.ResponseBodyLimit > 0 {
 		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
 		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
 	}
@@ -383,11 +396,20 @@ SecAuditLog "%s"
 			r.Header.Set("X-Gateon-Reputation", fmt.Sprintf("%.2f", reputation))
 
 			// Deterministic Fast Path: Aho-Corasick & Entropy
-			// We check URI and Headers for known signatures before entering the heavy WAF engine.
-			if !grpcRequest && fastScanner.Scan(r.RequestURI) {
-				telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
-				http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-				return
+			// We check the URI (which includes the query string) plus the two
+			// headers most commonly abused to smuggle injection payloads
+			// (Referer, User-Agent) for known signatures before entering the heavy
+			// WAF engine. These headers frequently land in backend logs/admin views
+			// and are classic SQLi/XSS vectors; the signatures are specific enough
+			// (e.g. "UNION ", "<script") that legitimate values rarely match.
+			if !grpcRequest {
+				if fastScanner.Scan(r.RequestURI) ||
+					fastScanner.Scan(r.Header.Get("Referer")) ||
+					fastScanner.Scan(r.Header.Get("User-Agent")) {
+					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+					return
+				}
 			}
 
 			// Check entropy of common fields to detect shellcode/obfuscation

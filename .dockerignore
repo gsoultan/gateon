@@ -1,0 +1,19 @@
+# Build artifacts and local state — regenerated inside the image.
+dist/
+telemetry_pebble/
+*.db
+*.db-shm
+*.db-wal
+
+# UI deps/build output are produced in the image's ui stage.
+ui/node_modules/
+ui/dist/
+
+# VCS / editor / CI.
+.git/
+.github/
+.idea/
+.vscode/
+
+# Docs and tests don't belong in the build context.
+*.md

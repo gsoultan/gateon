@@ -79,6 +79,22 @@ func accessLogSampleRate() uint32 {
 	return uint32(n)
 }
 
+// traceSampleRate returns GATEON_TRACE_SAMPLE_RATE (1=all, 0=none, N=1-in-N). Default 1.
+// Trace recording marshals request+response headers to JSON and persists a blob
+// per request, so sampling it bounds the dominant per-request CPU/allocation cost
+// on high-throughput routes. An active debugger always records regardless of this.
+func traceSampleRate() uint32 {
+	s := os.Getenv("GATEON_TRACE_SAMPLE_RATE")
+	if s == "" {
+		return 1
+	}
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil {
+		return 1 // invalid => default to all
+	}
+	return uint32(n) // explicit 0 => no trace recording
+}
+
 // Metrics returns a middleware that records comprehensive Prometheus metrics
 // including request counts, latency histograms, status code breakdown,
 // body size tracking, TTFB, and in-flight request gauges.
@@ -88,6 +104,8 @@ func Metrics(routeID string) Middleware {
 
 // MetricsWithService returns a metrics middleware that also records the service label.
 func MetricsWithService(routeID, serviceID string) Middleware {
+	traceRate := traceSampleRate()
+	var traceCounter uint64
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ShouldSkipMetrics(r) {
@@ -158,73 +176,87 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				country = sw.Country
 			}
 
-			id := request.GetID(r)
-			ja3, ja4 := "", ""
-			if r.TLS != nil {
-				// Try to get fingerprints from our internal map first
-				if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
-					f := GetFingerprints(conn)
-					ja3, ja4 = f.JA3, f.JA4
-				}
-
-				// Fallback to headers if still empty
-				if ja3 == "" {
-					ja3 = r.Header.Get("X-JA3-Fingerprint")
-				}
-				if ja4 == "" {
-					ja4 = r.Header.Get("X-JA4-Fingerprint")
-				}
+			// Trace recording: an active debugger always records (explicit opt-in);
+			// otherwise sample per GATEON_TRACE_SAMPLE_RATE to bound hot-path cost.
+			debug, hasDebug := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
+			recordDetailed := hasDebug && debug != nil
+			recordSampled := false
+			if !recordDetailed {
+				recordSampled = traceRate != 0 && (traceRate == 1 || atomic.AddUint64(&traceCounter, 1)%uint64(traceRate) == 0)
 			}
 
-			if debug, ok := r.Context().Value(DebugInfoContextKey).(*DebugInfo); ok && debug != nil {
-				telemetry.RecordTraceDetailed(
-					id,
-					method+" "+origPath,
-					activeRouteID,
-					activeRouteID,
-					float64(duration.Nanoseconds())/1e6,
-					start,
-					status,
-					origPath,
-					clientIP,
-					fingerprint,
-					country,
-					r.UserAgent(),
-					method,
-					r.Referer(),
-					origHost+r.URL.RequestURI(),
-					ja3,
-					ja4,
-					debug.RequestHeaders,
-					debug.RequestBody,
-					debug.ResponseHeaders,
-					debug.ResponseBody,
-				)
-			} else {
-				reqHeadersJSON, _ := json.Marshal(flattenHeaders(r.Header, r.Trailer))
-				respHeadersJSON, _ := json.Marshal(flattenHeaders(sw.Header()))
+			if recordDetailed || recordSampled {
+				id := request.GetID(r)
 
-				telemetry.RecordTrace(
-					id,
-					method+" "+origPath,
-					activeRouteID,
-					activeRouteID,
-					float64(duration.Nanoseconds())/1e6,
-					start,
-					status,
-					origPath,
-					clientIP,
-					fingerprint,
-					country,
-					r.UserAgent(),
-					method,
-					r.Referer(),
-					origHost+r.URL.RequestURI(),
-					ja3,
-					ja4,
-					string(reqHeadersJSON),
-					string(respHeadersJSON),
-				)
+				// JA3/JA4 fingerprints are only consumed by trace records, so resolve
+				// them lazily inside the recording branch.
+				ja3, ja4 := "", ""
+				if r.TLS != nil {
+					// Try to get fingerprints from our internal map first
+					if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
+						f := GetFingerprints(conn)
+						ja3, ja4 = f.JA3, f.JA4
+					}
+
+					// Fallback to headers if still empty
+					if ja3 == "" {
+						ja3 = r.Header.Get("X-JA3-Fingerprint")
+					}
+					if ja4 == "" {
+						ja4 = r.Header.Get("X-JA4-Fingerprint")
+					}
+				}
+
+				if recordDetailed {
+					telemetry.RecordTraceDetailed(
+						id,
+						method+" "+origPath,
+						activeRouteID,
+						activeRouteID,
+						float64(duration.Nanoseconds())/1e6,
+						start,
+						status,
+						origPath,
+						clientIP,
+						fingerprint,
+						country,
+						r.UserAgent(),
+						method,
+						r.Referer(),
+						origHost+r.URL.RequestURI(),
+						ja3,
+						ja4,
+						debug.RequestHeaders,
+						debug.RequestBody,
+						debug.ResponseHeaders,
+						debug.ResponseBody,
+					)
+				} else {
+					reqHeadersJSON, _ := json.Marshal(flattenHeaders(r.Header, r.Trailer))
+					respHeadersJSON, _ := json.Marshal(flattenHeaders(sw.Header()))
+
+					telemetry.RecordTrace(
+						id,
+						method+" "+origPath,
+						activeRouteID,
+						activeRouteID,
+						float64(duration.Nanoseconds())/1e6,
+						start,
+						status,
+						origPath,
+						clientIP,
+						fingerprint,
+						country,
+						r.UserAgent(),
+						method,
+						r.Referer(),
+						origHost+r.URL.RequestURI(),
+						ja3,
+						ja4,
+						string(reqHeadersJSON),
+						string(respHeadersJSON),
+					)
+				}
 			}
 
 			statusStr := getStatusString(sw.Status)
@@ -233,10 +265,15 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, method, statusStr).Inc()
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
 
-			telemetry.RequestsByIPTotal.WithLabelValues(clientIP).Inc()
+			// Bounded per-IP analytics (heavy-hitters / reputation) always run.
 			telemetry.GetAggregator().RecordRequest(clientIP, sw.Status)
-			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "in").Add(float64(reqInSize + 256))
-			telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
+			// Unbounded per-IP Prometheus series is opt-in (GATEON_PER_IP_METRICS)
+			// to avoid label-cardinality memory growth under many distinct clients.
+			if telemetry.PerIPMetricsEnabled() {
+				telemetry.RequestsByIPTotal.WithLabelValues(clientIP).Inc()
+				telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "in").Add(float64(reqInSize + 256))
+				telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
+			}
 
 			// Country-based metrics
 			telemetry.RequestsByCountryTotal.WithLabelValues(country).Inc()

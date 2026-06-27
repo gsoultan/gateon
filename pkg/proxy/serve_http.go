@@ -75,7 +75,12 @@ func (h *ProxyHandler) decrementActiveConn(state *targetState) {
 
 func (h *ProxyHandler) prepareRequest(r *http.Request, state *targetState, targetURL *url.URL) *http.Request {
 	ctx := context.WithValue(r.Context(), targetStateContextKey, state)
-	ctx = withClientRemoteAddr(ctx, r.RemoteAddr)
+	// The client remote address is only consumed when writing a PROXY-protocol
+	// header on the backend dial, so only carry it in the context when proxy
+	// protocol is enabled for this target (avoids a context alloc per request).
+	if state.proxyProtocolEnabled {
+		ctx = withClientRemoteAddr(ctx, r.RemoteAddr)
+	}
 	r = r.WithContext(ctx)
 
 	r.URL.Host = targetURL.Host

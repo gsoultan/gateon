@@ -17,6 +17,7 @@ import (
 	"github.com/cockroachdb/pebble"
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/audit"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -162,6 +163,7 @@ type pathStatsStore struct {
 	pruning                     atomic.Bool
 	scoreCache                  *lru.ARCCache
 	unmitigatedCache            *lru.ARCCache
+	traceStoreEnabled           bool
 
 	// Real-time daily counters
 	baselineReqToday    atomic.Uint64
@@ -210,20 +212,38 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 	_ = os.MkdirAll(pebbleDir, 0755)
 
-	pdb, err := pebble.Open(pebbleDir, &pebble.Options{})
+	// Size Pebble's in-memory structures by resource profile (default Pebble uses
+	// an 8 MiB cache + generous memtables) and compress trace blobs with Zstd
+	// (Pebble defaults to Snappy) for a smaller on-disk trace footprint. The cache
+	// is created with refcount 1; Open takes its own ref, so we drop ours after.
+	td := config.CurrentTierDefaults()
+	cache := pebble.NewCache(td.PebbleCacheBytes)
+	defer cache.Unref()
+	pebbleOpts := &pebble.Options{
+		Cache:        cache,
+		MemTableSize: uint64(td.PebbleMemTableBytes),
+		MaxOpenFiles: td.PebbleMaxOpenFiles,
+	}
+	pebbleOpts.EnsureDefaults()
+	for i := range pebbleOpts.Levels {
+		pebbleOpts.Levels[i].Compression = pebble.ZstdCompression
+	}
+
+	pdb, err := pebble.Open(pebbleDir, pebbleOpts)
 	if err != nil {
 		_ = database.Close()
 		return fmt.Errorf("open pebble: %w", err)
 	}
 
 	st := &pathStatsStore{
-		db:         database,
-		pebble:     pdb,
-		dialect:    dialect,
-		inCh:       make(chan increment, 4096),
-		traceInCh:  make(chan TraceRecord, 4096),
-		threatInCh: make(chan SecurityThreat, 1024),
-		stopCh:     make(chan struct{}),
+		db:                database,
+		pebble:            pdb,
+		dialect:           dialect,
+		inCh:              make(chan increment, 4096),
+		traceInCh:         make(chan TraceRecord, 4096),
+		threatInCh:        make(chan SecurityThreat, 1024),
+		stopCh:            make(chan struct{}),
+		traceStoreEnabled: td.TraceStoreEnabled,
 	}
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
 
@@ -240,8 +260,11 @@ func initStore(databaseURL string, retentionDays int) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	// Migration: Move existing traces from SQL to Pebble if table exists
-	go st.migrateTracesToPebble()
+	// Migration: Move existing traces from SQL to Pebble if table exists.
+	// Skipped when the trace store is disabled by the resource profile.
+	if st.traceStoreEnabled {
+		go st.migrateTracesToPebble()
+	}
 
 	// Restore volatile security counters from persisted history so the
 	// dashboard reflects past activity instead of resetting to 0 on restart.
@@ -717,7 +740,7 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 
 // recordTraceToStore attempts to enqueue a trace record.
 func recordTraceToStore(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
-	if store == nil {
+	if store == nil || !store.traceStoreEnabled {
 		return
 	}
 	select {

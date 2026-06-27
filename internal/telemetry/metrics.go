@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/prometheus/client_golang/prometheus"
@@ -28,10 +29,16 @@ func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
 		return
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
+	// Poll cadence follows the resource profile: the minimal tier polls less
+	// often to cut idle CPU wakeups, enterprise keeps the tight 2s cadence.
+	interval := time.Duration(config.CurrentTierDefaults().EbpfPollSeconds) * time.Second
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	logger.L.LogInfo("eBPF metrics polling loop started")
+	logger.L.LogInfo("eBPF metrics polling loop started", "interval", interval)
 
 	lastDropped := make(map[string]uint64)
 	// Track attachment so we log the transition once (not every tick). attached
@@ -228,6 +235,25 @@ var RequestBytesByIPTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_request_bytes_by_ip_total",
 	Help: "Total bytes transferred by client IP and direction (in/out).",
 }, []string{"ip", "direction"})
+
+// perIPMetricsEnabled gates the per-client-IP Prometheus series above. It is
+// disabled by default: the "ip" label is unbounded, so under many distinct
+// clients (worst during a DDoS, exactly when the gateway must survive) these
+// CounterVecs grow without bound and leak memory. The bounded GetAggregator,
+// Count-Min Sketch, and heavy-hitter structures already provide per-IP
+// analytics for the dashboard. Opt in with GATEON_PER_IP_METRICS=1 (or =true)
+// for short-lived debugging on a trusted, low-cardinality network.
+var perIPMetricsEnabled = func() bool {
+	switch os.Getenv("GATEON_PER_IP_METRICS") {
+	case "1", "true", "TRUE", "True":
+		return true
+	default:
+		return false
+	}
+}()
+
+// PerIPMetricsEnabled reports whether per-client-IP Prometheus metrics are exported.
+func PerIPMetricsEnabled() bool { return perIPMetricsEnabled }
 
 // RequestsByCountryTotal counts HTTP requests by country.
 var RequestsByCountryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
