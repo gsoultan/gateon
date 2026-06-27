@@ -44,6 +44,10 @@ type EbpfManager struct {
 	attached bool
 	iface    string
 	loadErr  string
+	// attachMode records how XDP attached: "native" (driver-level, fastest) or
+	// "generic" (SKB/stack-level, a slower fallback used when the driver rejects
+	// native attach — common on virtualized NICs such as AWS ENA/ens5).
+	attachMode string
 }
 
 type MapStats struct {
@@ -57,6 +61,10 @@ type MapStats struct {
 	Interface string
 	// LoadError holds the last load/attach failure, if any.
 	LoadError string
+	// AttachMode is "native" or "generic" when attached, empty otherwise. Generic
+	// mode is a slower SKB-level fallback; surfacing it lets operators understand
+	// the performance trade-off when native XDP isn't available on the NIC.
+	AttachMode string
 }
 
 // Manager defines the interface for eBPF operations.
@@ -102,6 +110,7 @@ func (m *EbpfManager) close() {
 	m.maps = make(map[string]*ebpf.Map)
 	m.attached = false
 	m.loadErr = ""
+	m.attachMode = ""
 }
 
 func ipToUint32(ipStr string) (uint32, error) {
@@ -372,6 +381,7 @@ func (m *EbpfManager) GetMapStats() (MapStats, error) {
 		Attached:        m.attached,
 		Interface:       m.iface,
 		LoadError:       m.loadErr,
+		AttachMode:      m.attachMode,
 	}
 
 	if dropStatsMap, ok := m.maps["drop_stats"]; ok {

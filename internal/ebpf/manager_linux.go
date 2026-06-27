@@ -86,6 +86,7 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 		m.loadErr = err.Error()
 		m.attached = false
 		m.iface = ifaceName
+		m.attachMode = ""
 		m.mu.Unlock()
 		logger.L.LogError("eBPF XDP load failed", "interface", ifaceName, "error", err)
 	}
@@ -121,10 +122,7 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 		return
 	}
 
-	l, err := link.AttachXDP(link.XDPOptions{
-		Program:   prog,
-		Interface: iface.Index,
-	})
+	l, mode, err := attachXDPWithFallback(prog, iface.Index)
 	if err != nil {
 		coll.Close()
 		setErr(fmt.Errorf("attach XDP to %s: %w", ifaceName, err))
@@ -149,12 +147,18 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 	m.attached = true
 	m.iface = ifaceName
 	m.loadErr = ""
+	m.attachMode = mode
 	m.mu.Unlock()
 
 	// Push runtime config into the kernel now that the maps exist.
 	m.applyRuntimeConfig()
 
-	logger.L.LogInfo("XDP performance offloading attached", "interface", ifaceName)
+	if mode == "generic" {
+		logger.L.LogWarn("XDP attached in generic (SKB) mode; native driver mode unavailable on this NIC, performance will be reduced",
+			"interface", ifaceName)
+	} else {
+		logger.L.LogInfo("XDP performance offloading attached", "interface", ifaceName, "mode", mode)
+	}
 
 	// Detach and free on context cancellation (supervisor reconfigure / shutdown).
 	go func() {
@@ -162,6 +166,42 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 		logger.L.LogInfo("Detaching XDP program", "interface", ifaceName)
 		m.close()
 	}()
+}
+
+// attachXDPWithFallback attaches the XDP program preferring native driver mode
+// (fastest — runs in the NIC driver before skb allocation) and falling back to
+// generic/SKB mode when the driver or kernel rejects the native attach.
+//
+// Virtualized NICs frequently reject native XDP: AWS ENA (ens5) enforces queue
+// count and MTU constraints and otherwise returns EINVAL ("create link: invalid
+// argument"), and some kernels/drivers don't implement the ndo_bpf hook at all.
+// Generic mode hooks higher in the network stack so it works almost everywhere,
+// trading throughput for compatibility. Returning the mode lets callers surface
+// the trade-off instead of silently running slow or, previously, not attaching
+// at all.
+func attachXDPWithFallback(prog *ebpf.Program, ifaceIndex int) (link.Link, string, error) {
+	// First try native/driver mode. Default flags (0) ask the kernel for the
+	// best available native attach; it does NOT fall back to generic on its own.
+	l, err := link.AttachXDP(link.XDPOptions{
+		Program:   prog,
+		Interface: ifaceIndex,
+	})
+	if err == nil {
+		return l, "native", nil
+	}
+	nativeErr := err
+
+	// Fall back to generic (SKB) mode, which is supported on virtually any NIC.
+	l, err = link.AttachXDP(link.XDPOptions{
+		Program:   prog,
+		Interface: ifaceIndex,
+		Flags:     link.XDPGenericMode,
+	})
+	if err == nil {
+		return l, "generic", nil
+	}
+
+	return nil, "", fmt.Errorf("native mode failed (%v); generic mode failed: %w", nativeErr, err)
 }
 
 // applyRuntimeConfig writes the manager's configuration into the kernel maps

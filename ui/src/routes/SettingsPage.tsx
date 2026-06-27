@@ -2100,10 +2100,18 @@ export default function SettingsPage() {
                 />
               )}
               {netInfo?.ebpf?.attached ? (
-                <Text size="xs" c="teal">
-                  <IconCheck size={12} style={{ verticalAlign: "middle" }} /> XDP attached to{" "}
-                  {netInfo.ebpf.interface}; eBPF drop metrics are live.
-                </Text>
+                netInfo.ebpf.attach_mode === "generic" ? (
+                  <Text size="xs" c="yellow">
+                    <IconAlertTriangle size={12} style={{ verticalAlign: "middle" }} /> XDP attached to{" "}
+                    {netInfo.ebpf.interface} in generic (SKB) mode — native driver mode is
+                    unavailable on this NIC, so throughput is reduced. Drop metrics are live.
+                  </Text>
+                ) : (
+                  <Text size="xs" c="teal">
+                    <IconCheck size={12} style={{ verticalAlign: "middle" }} /> XDP attached to{" "}
+                    {netInfo.ebpf.interface} (native mode); eBPF drop metrics are live.
+                  </Text>
+                )
               ) : netInfo?.ebpf?.enabled ? (
                 <Alert color="red" variant="light" icon={<IconAlertTriangle size="1rem" />} title="XDP not attached">
                   <Text size="sm">
