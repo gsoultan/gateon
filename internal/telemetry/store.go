@@ -166,14 +166,16 @@ type pathStatsStore struct {
 	traceStoreEnabled           bool
 
 	// Real-time daily counters
-	baselineReqToday    atomic.Uint64
-	baselineBytesToday  atomic.Uint64
-	baselineActiveToday atomic.Uint64
-	currentReqToday     atomic.Uint64
-	currentBytesToday   atomic.Uint64
-	currentActiveToday  atomic.Uint64
-	lastResetDay        string
-	resetMu             sync.Mutex
+	baselineReqToday       atomic.Uint64
+	baselineBytesToday     atomic.Uint64
+	baselineActiveToday    atomic.Uint64
+	baselineMitigatedToday atomic.Uint64
+	currentReqToday        atomic.Uint64
+	currentBytesToday      atomic.Uint64
+	currentActiveToday     atomic.Uint64
+	currentMitigatedToday  atomic.Uint64
+	lastResetDay           string
+	resetMu                sync.Mutex
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -380,6 +382,18 @@ func (s *pathStatsStore) syncDailyBaselines(resetCurrent bool) {
 		s.baselineActiveToday.Store(uint64(activeCount))
 	}
 
+	// Mitigated threats baseline (today's blocked/challenged/shunned actions),
+	// mirroring the active-threats baseline so "Mitigated Today" survives
+	// process restarts instead of resetting to 0.
+	qMitigated := s.dialect.Rebind(QueryGetMitigatedThreatsToday)
+	var mitigatedCount int64
+	err = s.db.QueryRow(qMitigated, startOfDay.Format(threatTimestampLayout)).Scan(&mitigatedCount)
+	if err != nil {
+		s.baselineMitigatedToday.Store(0)
+	} else {
+		s.baselineMitigatedToday.Store(uint64(mitigatedCount))
+	}
+
 	if !resetCurrent {
 		return
 	}
@@ -387,6 +401,7 @@ func (s *pathStatsStore) syncDailyBaselines(resetCurrent bool) {
 	s.currentReqToday.Store(0)
 	s.currentBytesToday.Store(0)
 	s.currentActiveToday.Store(0)
+	s.currentMitigatedToday.Store(0)
 
 	// Reset global telemetry structures for the new day
 	GlobalCMS.Clear()
@@ -823,6 +838,7 @@ func RecordSecurityThreat(t SecurityThreat) {
 	// Increment Prometheus counter
 	if t.Mitigated {
 		MitigatedThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium"), cmp.Or(t.ActionTaken, "blocked")).Inc()
+		store.currentMitigatedToday.Add(1)
 	} else {
 		ActiveThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium")).Inc()
 		store.currentActiveToday.Add(1)
@@ -1164,6 +1180,17 @@ func GetActiveThreatsToday() uint64 {
 		return 0
 	}
 	return store.baselineActiveToday.Load() + store.currentActiveToday.Load()
+}
+
+// GetMitigatedToday returns the count of threats actively mitigated
+// (blocked/challenged/shunned) for the current day. The baseline is seeded
+// from the database at startup and on each day rollover, so the figure
+// survives process restarts.
+func GetMitigatedToday() uint64 {
+	if store == nil {
+		return 0
+	}
+	return store.baselineMitigatedToday.Load() + store.currentMitigatedToday.Load()
 }
 
 // GetSecurityThreats returns a paged list of security threats from the store.

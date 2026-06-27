@@ -130,10 +130,14 @@ func wafPosture(ctx context.Context, store config.GlobalConfigStore, waf *middle
 }
 
 // clamavPosture derives antivirus availability and last-scan freshness.
+// Enabled reflects whether ClamAV malware scanning is actually turned on
+// (WafConfig.malware_detection), NOT merely whether a Clamav config block
+// exists — the default global config always populates that block, so keying
+// off its presence would report "enabled" even when scanning is off.
 func clamavPosture(ctx context.Context, store config.GlobalConfigStore, clamav *security.ClamAVManager) handlers.ClamAVPosture {
 	var p handlers.ClamAVPosture
-	if gc := store.Get(ctx); gc != nil && gc.Waf != nil && gc.Waf.GetClamav() != nil {
-		p.Enabled = true
+	if gc := store.Get(ctx); gc != nil && gc.Waf != nil {
+		p.Enabled = gc.Waf.GetMalwareDetection()
 	}
 	if clamav == nil {
 		return p

@@ -46,6 +46,7 @@ import {
   IconX,
   IconAdjustments,
   IconTrash,
+  IconAlertTriangle,
 } from "@tabler/icons-react";
 import { notifications } from '@mantine/notifications';
 import { ConfigImportExportCard } from "../components/ConfigImportExportCard";
@@ -60,6 +61,7 @@ import {
 } from "../components/settings";
 import { usePermissions } from "../hooks/usePermissions";
 import { useGateonStatus } from "../hooks/useGateonStatus";
+import { useNetworkInterfaces } from "../hooks/useNetworkInterfaces";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 import type { GlobalConfig, DatabaseConfig } from "../types/gateon";
 import { generateRandomString } from "../utils/random";
@@ -80,6 +82,7 @@ function inferDriver(
 export default function SettingsPage() {
   const { canEditGlobal, canImportConfig, canExportConfig } = usePermissions();
   const { data: status } = useGateonStatus();
+  const { data: netInfo, isError: netInfoError } = useNetworkInterfaces();
   const formDisabled = !canEditGlobal;
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const apiUrl = useApiConfigStore((s) => s.apiUrl);
@@ -2063,14 +2066,53 @@ export default function SettingsPage() {
 
           {config.ebpf?.enabled && (
             <Stack gap="sm">
-              <TextInput
-                label="Network Interface"
-                description="The network interface to attach eBPF programs to (e.g. eth0)"
-                placeholder="eth0"
-                value={config.ebpf.interface || ""}
-                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, interface: e.currentTarget.value}})}
-                disabled={formDisabled}
-              />
+              {netInfoError || !netInfo?.interfaces?.length ? (
+                // Fallback to free-text when the host interface list is
+                // unavailable (e.g. air-gapped or restricted environments).
+                <TextInput
+                  label="Network Interface"
+                  description="The network interface to attach eBPF programs to (e.g. eth0)"
+                  placeholder="eth0"
+                  value={config.ebpf.interface || ""}
+                  onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, interface: e.currentTarget.value}})}
+                  disabled={formDisabled}
+                />
+              ) : (
+                <Select
+                  label="Network Interface"
+                  description="The NIC to attach eBPF/XDP programs to. Pick the interface that carries your traffic."
+                  placeholder={
+                    netInfo.interfaces.find((i) => i.recommended)
+                      ? `${netInfo.interfaces.find((i) => i.recommended)!.name} (recommended)`
+                      : "Select interface"
+                  }
+                  data={netInfo.interfaces.map((i) => ({
+                    value: i.name,
+                    label: `${i.name}${i.recommended ? " ★" : ""} — ${
+                      i.addrs.find((a) => a.includes(".")) || "no IPv4"
+                    }${i.up ? "" : " (down)"}`,
+                  }))}
+                  value={config.ebpf.interface || null}
+                  onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, interface: val || ""}})}
+                  searchable
+                  allowDeselect={false}
+                  disabled={formDisabled}
+                />
+              )}
+              {netInfo?.ebpf?.attached ? (
+                <Text size="xs" c="teal">
+                  <IconCheck size={12} style={{ verticalAlign: "middle" }} /> XDP attached to{" "}
+                  {netInfo.ebpf.interface}; eBPF drop metrics are live.
+                </Text>
+              ) : netInfo?.ebpf?.enabled ? (
+                <Alert color="red" variant="light" icon={<IconAlertTriangle size="1rem" />} title="XDP not attached">
+                  <Text size="sm">
+                    eBPF is enabled but the XDP program is not attached, so eBPF drop
+                    metrics will read 0.
+                    {netInfo.ebpf.load_error ? ` Reason: ${netInfo.ebpf.load_error}` : " Verify the selected interface exists and the gateway has CAP_NET_ADMIN."}
+                  </Text>
+                </Alert>
+              ) : null}
               <Switch
                 label="XDP Rate Limiting"
                 description="Drop packets at the network driver level"

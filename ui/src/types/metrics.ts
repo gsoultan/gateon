@@ -140,6 +140,7 @@ export type SecurityInsights = {
   recent_anomalies: SecurityThreat[] | null;
   total_anomalies: number;
   active_threats: number;
+  mitigated_today: number;
   heavy_hitters: HeavyHitter[] | null;
   global_threat_score: number;
 };

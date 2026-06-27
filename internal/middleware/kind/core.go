@@ -112,6 +112,13 @@ func Recovery() Middleware {
 // SecurityHeadersConfig defines presets for common security headers.
 type SecurityHeadersConfig struct {
 	Preset string // "recommended", "strict", "none"
+	// ExtraImgSrc adds additional sources to the CSP img-src directive on top
+	// of the preset baseline. It is intended for first-party surfaces that must
+	// load images from a known third party (e.g. the management UI's diagnostics
+	// map, which pulls basemap tiles from a tile CDN). It is deliberately NOT
+	// wired into the user-facing security_headers middleware so that attaching
+	// the preset to a proxied backend never silently widens that backend's CSP.
+	ExtraImgSrc []string
 }
 
 // SecurityHeaders returns a middleware that adds standard security headers to all responses based on a preset.
@@ -125,7 +132,7 @@ func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
 				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 				w.Header().Set("X-XSS-Protection", "0")
 				w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-				w.Header().Set("Content-Security-Policy", contentSecurityPolicy(secure))
+				w.Header().Set("Content-Security-Policy", contentSecurityPolicy(secure, cfg.ExtraImgSrc))
 				w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 				if secure {
 					w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -135,7 +142,7 @@ func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
 				w.Header().Set("X-Frame-Options", "DENY")
 				w.Header().Set("X-XSS-Protection", "0")
 				w.Header().Set("Referrer-Policy", "no-referrer")
-				w.Header().Set("Content-Security-Policy", contentSecurityPolicy(secure))
+				w.Header().Set("Content-Security-Policy", contentSecurityPolicy(secure, cfg.ExtraImgSrc))
 				w.Header().Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
 				if secure {
 					w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
@@ -157,8 +164,12 @@ func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
 // requests; emitting it over plain HTTP would force browsers to upgrade
 // same-origin asset requests to https://, which fails against an HTTP-only
 // listener (e.g. the management UI on http://localhost) and breaks the page.
-func contentSecurityPolicy(secure bool) string {
-	csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+func contentSecurityPolicy(secure bool, extraImgSrc []string) string {
+	imgSrc := "'self' data:"
+	if len(extraImgSrc) > 0 {
+		imgSrc += " " + strings.Join(extraImgSrc, " ")
+	}
+	csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src " + imgSrc + "; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
 	if secure {
 		csp += " upgrade-insecure-requests;"
 	}

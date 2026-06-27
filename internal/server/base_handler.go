@@ -13,6 +13,14 @@ import (
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 )
 
+// managementImgSrc lists the third-party image hosts the management UI must be
+// allowed to load. The diagnostics "Anomaly Intelligence Engine" map renders
+// basemap tiles served from CARTO's tile CDN (a/b/c/d.basemaps.cartocdn.com),
+// so those tiles need an explicit img-src entry; the baseline CSP only permits
+// 'self' and data: URIs. This widening is applied ONLY to the management UI
+// handler below — never to proxied backends.
+var managementImgSrc = []string{"https://*.basemaps.cartocdn.com"}
+
 // BaseHandlerDeps holds narrow dependencies for CreateBaseHandler (Interface Segregation).
 // Auth may be nil when auth is disabled.
 type BaseHandlerDeps struct {
@@ -49,7 +57,7 @@ func CreateBaseHandler(
 	// Pre-chain middlewares to avoid per-request allocations.
 	finalInternal := middleware.Chain(
 		middleware.Recovery(),
-		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
+		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended", ExtraImgSrc: managementImgSrc}),
 		middleware.XSSRecognition("gateon-management"),
 		middleware.MaxConnections(500),
 	)(internalHandler)

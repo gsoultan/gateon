@@ -154,7 +154,7 @@ export function OverviewTab({
           <Group justify="space-between">
             <Stack gap={0}>
               <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated Today</Text>
-              <AnimatedTitle value={metrics?.middleware?.mitigated_threats?.reduce((a: any, b: any) => a + b.value, 0) || 0} />
+              <AnimatedTitle value={metrics?.security?.mitigated_today ?? 0} />
             </Stack>
             <ThemeIcon color="teal" variant="light" size="lg" radius="md">
               <IconShieldCheck size={20} />

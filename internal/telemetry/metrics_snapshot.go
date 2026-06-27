@@ -67,6 +67,7 @@ type SecurityInsights struct {
 	RecentAnomalies   []SecurityThreat `json:"recent_anomalies,omitzero"`
 	TotalAnomalies    int64            `json:"total_anomalies"`
 	ActiveThreats     int              `json:"active_threats"`
+	MitigatedToday    int              `json:"mitigated_today"`
 	HeavyHitters      []HeavyHitter    `json:"heavy_hitters,omitzero"`
 	GlobalThreatScore float64          `json:"global_threat_score"`
 }
@@ -740,6 +741,7 @@ func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily
 		RecentAnomalies:   threats,
 		TotalAnomalies:    total,
 		ActiveThreats:     activeCount,
+		MitigatedToday:    int(GetMitigatedToday()),
 		HeavyHitters:      GlobalHHH.GetHeavyHitters(10), // Threshold of 10 threat events
 		GlobalThreatScore: float64(GlobalCMS.Estimate("global")),
 	}

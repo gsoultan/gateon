@@ -148,6 +148,99 @@ func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier)
 	return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceGlobal)
 }
 
+// netInterfaceInfo describes one host network interface for the eBPF interface
+// picker so operators choose a real, traffic-carrying NIC instead of guessing a
+// name (a wrong name silently prevents XDP from attaching).
+type netInterfaceInfo struct {
+	Name        string   `json:"name"`
+	MAC         string   `json:"mac,omitempty"`
+	Up          bool     `json:"up"`
+	Running     bool     `json:"running"`
+	Loopback    bool     `json:"loopback"`
+	Addrs       []string `json:"addrs"`
+	Recommended bool     `json:"recommended"`
+}
+
+// ebpfStatusInfo surfaces whether XDP is configured and actually attached, plus
+// the load error if it failed — the operator's answer to "why are my eBPF drop
+// metrics zero?".
+type ebpfStatusInfo struct {
+	Enabled   bool   `json:"enabled"`
+	Attached  bool   `json:"attached"`
+	Interface string `json:"interface,omitempty"`
+	LoadError string `json:"load_error,omitempty"`
+}
+
+type systemInterfacesResponse struct {
+	Interfaces []netInterfaceInfo `json:"interfaces"`
+	Ebpf       ebpfStatusInfo     `json:"ebpf"`
+}
+
+// buildSystemInterfaces enumerates host NICs and the current XDP attach status.
+// The recommended interface is the first non-loopback, up NIC with an IPv4
+// address — the same heuristic the gossip layer uses to pick a bind IP.
+func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInterfacesResponse {
+	resp := systemInterfacesResponse{Interfaces: []netInterfaceInfo{}}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		logger.L.LogError("failed to list network interfaces", "error", err)
+		ifaces = nil
+	}
+
+	recommended := false
+	for _, ifc := range ifaces {
+		info := netInterfaceInfo{
+			Name:     ifc.Name,
+			Up:       ifc.Flags&net.FlagUp != 0,
+			Running:  ifc.Flags&net.FlagRunning != 0,
+			Loopback: ifc.Flags&net.FlagLoopback != 0,
+			Addrs:    []string{},
+		}
+		if mac := ifc.HardwareAddr.String(); mac != "" {
+			info.MAC = mac
+		}
+
+		hasIPv4 := false
+		if addrs, err := ifc.Addrs(); err == nil {
+			for _, a := range addrs {
+				ipnet, ok := a.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				info.Addrs = append(info.Addrs, ipnet.IP.String())
+				if ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+					hasIPv4 = true
+				}
+			}
+		}
+
+		// Recommend the first up, non-loopback NIC that has a usable IPv4.
+		if !recommended && info.Up && !info.Loopback && hasIPv4 {
+			info.Recommended = true
+			recommended = true
+		}
+
+		resp.Interfaces = append(resp.Interfaces, info)
+	}
+
+	// eBPF / XDP runtime status.
+	if globals := svc.GetGlobals(); globals != nil {
+		if gc := globals.Get(ctx); gc != nil {
+			resp.Ebpf.Enabled = gc.GetEbpf().GetEnabled()
+		}
+	}
+	if mgr := svc.GetEbpfManager(); mgr != nil {
+		if stats, err := mgr.GetMapStats(); err == nil {
+			resp.Ebpf.Attached = stats.Attached
+			resp.Ebpf.Interface = stats.Interface
+			resp.Ebpf.LoadError = stats.LoadError
+		}
+	}
+
+	return resp
+}
+
 func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/diagnostics", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
@@ -473,6 +566,12 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 				return
 			}
 		}
+	})
+	mux.HandleFunc("GET /v1/system/interfaces", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		WriteJSON(w, http.StatusOK, buildSystemInterfaces(r.Context(), svc))
 	})
 	mux.HandleFunc("POST /v1/diag/test-target", func(w http.ResponseWriter, r *http.Request) {
 		// Restrict to Admin only as this can be used for SSRF
