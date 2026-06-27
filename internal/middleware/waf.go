@@ -59,6 +59,49 @@ type WAFConfig struct {
 	EbpfManager               ebpf.Manager
 	AllowedAdminIps           []string // IPs allowed to access WP admin
 	RulesPath                 string   // Path to external WAF rules (CRS)
+
+	// GRPCMode relaxes the CRS Protocol-Enforcement rules that are structurally
+	// incompatible with the gRPC/HTTP-2 transport (see grpcCompatDirective) and
+	// skips the binary-hostile fast-paths for gRPC requests. It MUST be derived
+	// from the trusted server-side route type (rt.Type == "grpc"), never from a
+	// client-supplied header: a single shared WAF instance protects every route,
+	// so gating on the request Content-Type would let an attacker disable body
+	// inspection on a plain HTTP route by spoofing "Content-Type: application/grpc".
+	GRPCMode bool
+}
+
+// grpcCompatDirective makes the OWASP CRS Protocol-Enforcement rules compatible
+// with the gRPC / gRPC-Web transport. It MUST be loaded after
+// REQUEST-901-INITIALIZATION (which seeds the defaults it overrides) and before
+// REQUEST-920-PROTOCOL-ENFORCEMENT (whose rules read those values / are removed
+// here). All directives are phase:1 and run in load order, so they take effect
+// before 920 evaluates and before phase:2 body processing. Ids sit in the
+// reserved user range (900200+) and do not collide with the 9000xx setup actions.
+//
+// Two gRPC incompatibilities are addressed:
+//  1. 920420 ("content type not allowed"): gRPC content types are absent from the
+//     CRS default tx.allowed_request_content_type list, so every gRPC request
+//     scores a critical hit. We extend the default list with the gRPC family.
+//     Values must be lowercase (920420 applies t:lowercase before @within).
+//  2. 920180 ("POST without Content-Length or Transfer-Encoding"): gRPC runs over
+//     HTTP/2, which carries neither header, so this rule fires on every gRPC
+//     request. We remove it for gRPC content types only.
+//
+// We also turn request body access Off for gRPC: the body is binary protobuf that
+// CRS cannot parse (it would only yield false positives on the SQLi/XSS/RCE body
+// rules) and buffering it would break gRPC streaming. CRS still inspects the
+// (text) gRPC request headers and URI, preserving real attack coverage.
+const grpcCompatDirective = `SecAction "id:900200,phase:1,nolog,pass,t:none,setvar:'tx.allowed_request_content_type=|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/cloudevents-batch+json| |application/grpc| |application/grpc+proto| |application/grpc+json| |application/grpc-web| |application/grpc-web+proto| |application/grpc-web+json| |application/grpc-web-text| |application/grpc-web-text+proto|'"
+SecRule REQUEST_HEADERS:Content-Type "@rx ^application/grpc" "id:900201,phase:1,nolog,pass,t:lowercase,ctl:ruleRemoveById=920180,ctl:requestBodyAccess=Off"
+`
+
+// isGRPCRequest reports whether the request carries a gRPC or gRPC-Web payload.
+// gRPC frames are binary protobuf with high Shannon entropy and binary "-bin"
+// metadata headers; the deterministic byte/entropy fast-paths would false-positive
+// on that framing, so they are skipped for gRPC traffic. The CRS engine still
+// inspects gRPC request headers and the URI.
+func isGRPCRequest(r *http.Request) bool {
+	return strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 }
 
 var (
@@ -116,6 +159,23 @@ SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 20" "id:900012,phase:1,nolog,pa
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
+
+		// gRPC compatibility: REQUEST-901-INITIALIZATION sets a default
+		// tx.allowed_request_content_type list that does NOT include the gRPC
+		// content types, so REQUEST-920 Protocol Enforcement rule 920420
+		// ("Request content type is not allowed by policy") adds a critical
+		// anomaly score for every gRPC / gRPC-Web request. With the default
+		// inbound anomaly threshold of 5 that single hit trips
+		// REQUEST-949-BLOCKING-EVALUATION -> 403. We extend the allow-list with
+		// the gRPC family before 920 is included (phase:1 directives run in load
+		// order, so this overrides the 901 default before 920420 evaluates).
+		// This keeps full CRS coverage for gRPC headers/URI while letting the
+		// legitimate gRPC transport through. See grpcCompatDirective for details.
+		// Only emitted for routes the operator typed as gRPC — never on HTTP/
+		// GraphQL routes — so it cannot be used to weaken their inspection.
+		if cfg.GRPCMode {
+			sb.WriteString(grpcCompatDirective)
+		}
 
 		if !cfg.DisableProtocol {
 			sb.WriteString("Include @owasp_crs/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
@@ -308,6 +368,15 @@ SecAuditLog "%s"
 				r.RemoteAddr = request.GetClientIP(r, true)
 			}
 
+			// gRPC transport carries binary protobuf framing and binary "-bin"
+			// metadata headers that are inherently high-entropy and meaningless to
+			// the byte-signature / entropy fast-paths, which would otherwise return
+			// a spurious 403. Skip the fast-paths for gRPC; the CRS engine below
+			// still inspects gRPC headers and the request URI. This is gated on the
+			// trusted route type (cfg.GRPCMode) AND the request actually being gRPC,
+			// so a spoofed Content-Type on a non-gRPC route cannot skip the scanners.
+			grpcRequest := cfg.GRPCMode && isGRPCRequest(r)
+
 			// Adaptive WAF: Adjust anomaly threshold based on client reputation
 			fingerprint := telemetry.GetDetailedFingerprint(r).Hash
 			reputation := telemetry.GetReputationScore(fingerprint)
@@ -315,14 +384,14 @@ SecAuditLog "%s"
 
 			// Deterministic Fast Path: Aho-Corasick & Entropy
 			// We check URI and Headers for known signatures before entering the heavy WAF engine.
-			if fastScanner.Scan(r.RequestURI) {
+			if !grpcRequest && fastScanner.Scan(r.RequestURI) {
 				telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 				http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 				return
 			}
 
 			// Check entropy of common fields to detect shellcode/obfuscation
-			if !cfg.DisableEntropy {
+			if !grpcRequest && !cfg.DisableEntropy {
 				threshold := cfg.EntropyThreshold
 				if threshold <= 0 {
 					threshold = 5.8
