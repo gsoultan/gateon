@@ -189,59 +189,65 @@ export function OverviewTab({
             <Title order={4} mb="md">Mitigation Funnel Efficiency</Title>
             <Stack gap="xs">
               {(() => {
-                const xdpDrops = metrics?.middleware?.ebpf_dropped_packets?.reduce((a, b) => a + b.value, 0) || 0;
-                const wafBlocks = metrics?.middleware?.waf_blocked?.reduce((a, b) => a + b.value, 0) || 0;
-                const rateLimits = metrics?.middleware?.rate_limit_rejected?.reduce((a, b) => a + b.value, 0) || 0;
-                const geoipBlocks = metrics?.middleware?.geoip_blocked?.reduce((a, b) => a + b.value, 0) || 0;
-                const authFailures = metrics?.middleware?.auth_failures?.reduce((a, b) => a + b.value, 0) || 0;
-                const turnstileFails = metrics?.middleware?.turnstile_fail || 0;
-                const hmacFailures = metrics?.middleware?.hmac_failures || 0;
-                const errors = metrics?.golden_signals?.errors_total || 0;
-                const requestsTotal = metrics?.golden_signals?.requests_total || 0;
+                // The funnel is computed server-side (single, consistent scope) so
+                // that Allowed + mitigations == HTTP ingress. See MitigationFunnel
+                // in internal/telemetry/metrics_snapshot.go.
+                const f = metrics?.mitigation_funnel;
+                const ingress = f?.http_ingress || 0;
 
-                const totalIngress = requestsTotal + xdpDrops;
-                // Calculate allowed traffic by subtracting all mitigations and errors from the requests that reached the server.
-                const allowed = Math.max(0, requestsTotal - wafBlocks - rateLimits - geoipBlocks - authFailures - turnstileFails - hmacFailures - errors);
-
-                const steps = [
-                  { label: "Total Ingress", value: totalIngress, color: "blue" },
-                  { label: "XDP/eBPF Drop", value: xdpDrops, color: "red" },
-                  { label: "WAF Block", value: wafBlocks, color: "orange" },
-                  { label: "Rate Limit", value: rateLimits, color: "yellow" },
+                // Request-unit funnel stages (denominator = HTTP ingress).
+                const stages: { label: string; value: number; color: string }[] = [
+                  { label: "HTTP Ingress", value: ingress, color: "blue" },
+                  { label: "WAF Block", value: f?.waf_blocked || 0, color: "orange" },
+                  { label: "Rate Limit", value: f?.rate_limited || 0, color: "yellow" },
                 ];
+                if ((f?.geoip_blocked || 0) > 0) stages.push({ label: "GeoIP Block", value: f!.geoip_blocked, color: "indigo" });
+                if ((f?.auth_failures || 0) > 0) stages.push({ label: "Auth Failures", value: f!.auth_failures, color: "cyan" });
+                if ((f?.turnstile_failures || 0) > 0) stages.push({ label: "Turnstile Fail", value: f!.turnstile_failures, color: "violet" });
+                if ((f?.hmac_failures || 0) > 0) stages.push({ label: "HMAC Fail", value: f!.hmac_failures, color: "gray" });
+                stages.push({ label: "Allowed (Passed)", value: f?.allowed || 0, color: "teal" });
 
-                if (geoipBlocks > 0) steps.push({ label: "GeoIP Block", value: geoipBlocks, color: "indigo" });
-                if (authFailures > 0) steps.push({ label: "Auth Failures", value: authFailures, color: "cyan" });
-                if (turnstileFails > 0) steps.push({ label: "Turnstile Fail", value: turnstileFails, color: "violet" });
-                if (hmacFailures > 0) steps.push({ label: "HMAC Fail", value: hmacFailures, color: "gray" });
-                if (errors > 0) steps.push({ label: "Server Errors", value: errors, color: "pink" });
-
-                steps.push({ label: "Allowed (Passed)", value: allowed, color: "teal" });
-
-                return steps;
-              })().map((step, _, allSteps) => {
-                const totalValue = allSteps[0].value || 1;
-                return (
+                const denom = ingress || 1;
+                return stages.map((step) => (
                   <Box key={step.label}>
                     <Group justify="space-between" mb={4}>
                       <Text size="sm" fw={500}>{step.label}</Text>
                       <Text size="sm" c="dimmed">{step.value.toLocaleString()}</Text>
                     </Group>
                     <Box h={8} style={{ borderRadius: '100px', overflow: 'hidden' }} bg="light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4))">
-                      <Box 
-                        h="100%" 
-                        bg={step.color} 
-                        style={{ 
-                          width: `${Math.min(100, (step.value / totalValue) * 100)}%`,
+                      <Box
+                        h="100%"
+                        bg={step.color}
+                        style={{
+                          width: `${Math.min(100, (step.value / denom) * 100)}%`,
                           borderRadius: "inherit",
                           transition: "width 1s ease-in-out"
-                        }} 
+                        }}
                       />
                     </Box>
                   </Box>
-                );
-              })}
+                ));
+              })()}
             </Stack>
+            {/* Separate, differently-scoped indicators: 5xx are failures of
+                already-allowed traffic; XDP drops are packet-level (not requests). */}
+            {((metrics?.mitigation_funnel?.server_errors || 0) > 0 ||
+              (metrics?.mitigation_funnel?.xdp_packets_dropped || 0) > 0) && (
+              <Group gap="lg" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+                <Group gap={6}>
+                  <Text size="xs" c="dimmed">Server Errors (5xx of allowed):</Text>
+                  <Text size="xs" fw={600} c="pink">
+                    {(metrics?.mitigation_funnel?.server_errors || 0).toLocaleString()}
+                  </Text>
+                </Group>
+                <Group gap={6}>
+                  <Text size="xs" c="dimmed">XDP/eBPF packets dropped:</Text>
+                  <Text size="xs" fw={600} c="red">
+                    {(metrics?.mitigation_funnel?.xdp_packets_dropped || 0).toLocaleString()}
+                  </Text>
+                </Group>
+              </Group>
+            )}
           </Card>
         </Grid.Col>
         <Grid.Col span={{ base: 12, lg: 4 }}>

@@ -37,6 +37,9 @@ import { LogAIAnalyst } from "./LogAIAnalyst";
 
 interface LiveLogsProps {
   height?: number;
+  // When true, the component stretches to fill its parent's height instead of
+  // using a fixed pixel `height`. The parent must establish a bounded height.
+  fill?: boolean;
 }
 
 // MAX_LOGS bounds retained rows so the live stream cannot grow memory without
@@ -45,7 +48,7 @@ interface LiveLogsProps {
 const MAX_LOGS = 100;
 const FLUSH_INTERVAL_MS = 300;
 
-export default function LiveLogs({ height = 400 }: LiveLogsProps) {
+export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) {
   const [logs, setLogs] = useState<{ id: string; raw: string }[]>([]);
   const logIdCounter = useRef(0);
   const [connected, setConnected] = useState(false);
@@ -243,8 +246,14 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
   }, [getLogColor]);
 
   return (
-    <Card shadow="xs" padding="lg" radius="lg" withBorder>
-      <Stack gap="sm">
+    <Card
+      shadow="xs"
+      padding="lg"
+      radius="lg"
+      withBorder
+      style={fill ? { height: "100%", display: "flex", flexDirection: "column" } : undefined}
+    >
+      <Stack gap="sm" style={fill ? { flex: 1, minHeight: 0 } : undefined}>
         <Group justify="space-between">
           <Group gap="xs">
             <IconTerminal size={20} color="var(--mantine-color-indigo-6)" />
@@ -349,8 +358,14 @@ export default function LiveLogs({ height = 400 }: LiveLogsProps) {
           radius="md"
           bg="var(--mantine-color-black)"
           className="border-solid border-[var(--mantine-color-default-border)] overflow-hidden"
+          style={fill ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : undefined}
         >
-          <ScrollArea h={height} offsetScrollbars scrollbarSize={8}>
+          <ScrollArea
+            h={fill ? undefined : height}
+            style={fill ? { flex: 1, minHeight: 0 } : undefined}
+            offsetScrollbars
+            scrollbarSize={8}
+          >
             <Stack gap={4} p="xs">
               {filteredLogs.length === 0 && (
                 <Text

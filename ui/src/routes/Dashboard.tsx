@@ -490,7 +490,7 @@ export default function Dashboard() {
     },
     {
       label: "Mitigated Threats",
-      value: formatCompact(metricsSnap?.middleware?.mitigated_threats?.reduce((acc, val) => acc + val.value, 0) || 0),
+      value: formatCompact(metricsSnap?.security?.mitigated_today || 0),
       icon: IconShieldExclamation,
       color: "red" as const,
       description: "Security threats blocked today",

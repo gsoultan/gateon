@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -999,7 +1000,7 @@ func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 	q := store.dialect.Rebind(QueryGetPathStatsWin)
 	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
-		logger.Default().LogError("path stats: DB query failed, falling back to in-memory stats", "error", err)
+		logQueryErr(ctx, "path stats: DB query failed, falling back to in-memory stats", err)
 		return getInMemoryPathStats()
 	}
 	defer rows.Close()
@@ -1041,7 +1042,7 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	q := store.dialect.Rebind(QueryGetDomainStatsWin)
 	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
-		logger.Default().LogError("domain stats: query failed", "error", err)
+		logQueryErr(ctx, "domain stats: query failed", err)
 		return nil
 	}
 	defer rows.Close()
@@ -1079,6 +1080,18 @@ func GetSystemTrafficToday(ctx context.Context) (uint64, uint64) {
 		store.baselineBytesToday.Load() + store.currentBytesToday.Load()
 }
 
+// logQueryErr logs a query failure unless it was caused by the caller's
+// context being canceled or timing out — which happens routinely when a
+// dashboard client disconnects or aborts an in-flight poll. Those are
+// expected and would otherwise flood the log at ERROR level, masking real
+// faults.
+func logQueryErr(ctx context.Context, msg string, err error) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		return
+	}
+	logger.Default().LogError(msg, "error", err)
+}
+
 // GetSystemTrafficHistory returns traffic samples for the last N days.
 func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 	if store == nil {
@@ -1094,7 +1107,7 @@ func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 	q := store.dialect.Rebind(query)
 	rows, err := store.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
-		logger.Default().LogError("traffic history: query failed", "error", err)
+		logQueryErr(ctx, "traffic history: query failed", err)
 		return nil
 	}
 	defer rows.Close()
@@ -1210,7 +1223,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat
 	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
 	rows, err := store.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
-		logger.Default().LogError("threats: query failed", "error", err)
+		logQueryErr(ctx, "threats: query failed", err)
 		return nil
 	}
 	defer rows.Close()
