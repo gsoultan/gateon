@@ -19,6 +19,7 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
+	"golang.org/x/net/http2"
 )
 
 const (
@@ -26,6 +27,14 @@ const (
 	quicKeepAlivePeriod       = 10 * time.Second
 	quicMaxIncomingStreams    = 1000
 	quicMaxIncomingUniStreams = 500
+
+	// HTTP/2 limits for the public entrypoint. Without explicit configuration the
+	// public TLS server inherits Go's defaults; we pin them to bound per-connection
+	// memory and reduce exposure to HTTP/2 stream-flood DoS (CVE-2023-44487
+	// "Rapid Reset" class). The internal gRPC server caps streams separately.
+	h2MaxConcurrentStreams = 250
+	h2MaxReadFrameSize     = 1 << 18 // 256 KiB
+	h2IdleTimeout          = 1 * time.Minute
 
 	// defaultEntryPointTimeout is used when an entrypoint has no explicit
 	// read/write timeout configured.
@@ -173,6 +182,18 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 				middleware.RemoveFingerprints(conn)
 			}
 		},
+	}
+	// Explicitly bound HTTP/2 on the public TLS server (h2 is negotiated via ALPN
+	// over TLS). This caps concurrent streams and frame size instead of relying on
+	// Go's defaults, hardening against HTTP/2 stream-flood DoS.
+	if epTLSConfig != nil {
+		if err := http2.ConfigureServer(server, &http2.Server{
+			MaxConcurrentStreams: h2MaxConcurrentStreams,
+			MaxReadFrameSize:     h2MaxReadFrameSize,
+			IdleTimeout:          h2IdleTimeout,
+		}); err != nil {
+			logger.L.LogError("failed to configure HTTP/2 limits", "error", err, "addr", addr)
+		}
 	}
 	if deps.ShutdownRegistry != nil {
 		deps.ShutdownRegistry.Register(server.Shutdown)

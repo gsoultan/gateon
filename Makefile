@@ -1,4 +1,4 @@
-.PHONY: proto build build-fips test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker
+.PHONY: proto build build-fips test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -19,9 +19,31 @@ ebpf-docker:
 	docker run --rm -v "$(CURDIR)":/src -w /src gateon-ebpf-gen \
 		sh -c 'go generate ./internal/ebpf/...'
 
-## build: build the gateon binary
+## build: build the gateon binary. The Go toolchain automatically applies
+##        Profile-Guided Optimization when cmd/gateon/default.pgo exists
+##        (see `make pgo-profile`).
 build:
 	go build -v -o dist/gateon ./cmd/gateon
+
+## pgo-profile: capture a CPU profile from representative benchmarks and install
+##              it as cmd/gateon/default.pgo, which `make build`/`go build` then
+##              apply automatically (PGO). The benchmarks exercise the full
+##              request path (proxy + middleware chain). For best results in
+##              production, replace it with a profile captured live from the
+##              pprof endpoint: set GATEON_PPROF_ADDR and fetch
+##              /debug/pprof/profile?seconds=60 under real load.
+pgo-profile:
+	mkdir -p dist
+	go test -run '^$$' -bench 'ServeHTTP|GetOrCreateProxy' -benchtime 3s \
+		-cpuprofile dist/pgo-proxy.prof ./pkg/proxy/
+	go test -run '^$$' -bench 'InfraChain' -benchtime 3s \
+		-cpuprofile dist/pgo-mw.prof ./internal/middleware/
+	go tool pprof -proto dist/pgo-proxy.prof dist/pgo-mw.prof > cmd/gateon/default.pgo
+	@echo "Wrote cmd/gateon/default.pgo — 'make build' now applies PGO."
+
+## docker: build the production container image (multi-stage, CGO-free static).
+docker:
+	docker build -t gateon:latest .
 
 ## build-fips: build the gateon binary with FIPS 140-2 compliance (BoringCrypto)
 build-fips:

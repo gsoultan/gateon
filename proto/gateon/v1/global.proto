@@ -39,6 +39,11 @@ message GlobalConfig {
   AlertingConfig alerting = 16;
   AuditConfig audit = 17;
   RBACConfig rbac = 18;
+  // Resource profile preset: "minimal" | "standard" | "enterprise" (empty =>
+  // "standard"). Sizes heavy subsystems (correlation engine, telemetry sketches,
+  // trace store, retention, WAF tier) for the deployment's footprint without
+  // removing capabilities. Overridable per-subsystem and by the GATEON_PROFILE env.
+  string profile = 19;
 }
 
 message AlertingConfig {
@@ -264,6 +269,11 @@ message WafConfig {
   ClamavConfig clamav = 31;
   double entropy_threshold = 32;
   bool disable_entropy = 33;
+  // Rule/inspection tier: "minimal" | "standard" | "enterprise" (empty =>
+  // inherit the global profile). minimal = protocol+SQLi+XSS at PL1; standard =
+  // full request-phase CRS; enterprise also enables response-phase (DLP) rules,
+  // which buffer responses and cost the most CPU/latency/memory.
+  string tier = 34;
 }
 
 message ClamavConfig {

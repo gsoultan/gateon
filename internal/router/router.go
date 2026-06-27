@@ -336,6 +336,16 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		chain = append(chain, gwaf)
 	}
 
+	// Set the route name once for the user middlewares and the inner proxy
+	// handler, rather than re-allocating a context value on every middleware on
+	// every request. Placed after the infrastructure/security middlewares so it
+	// does not alter their metrics-skip behavior, which keys off an unset name.
+	chain = append(chain, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), middleware.RouteNameContextKey, routeLabel)))
+		})
+	})
+
 	// Resolve and append user-defined middlewares from the registry
 	for _, mid := range rt.Middlewares {
 		mid = strings.TrimSpace(mid)
@@ -351,12 +361,13 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 					wrapped := func(next http.Handler) http.Handler {
 						h := mw(next)
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							ctx := context.WithValue(r.Context(), middleware.RouteNameContextKey, routeLabel)
-							logger.L.LogInfo("Executing middleware",
+							// Debug-level: avoids a per-middleware structured log
+							// write on the hot path when running at info or above.
+							logger.L.LogDebug("Executing middleware",
 								"flow_step", "middleware_start",
 								"request_id", request.GetID(r),
 								"middleware_id", mID)
-							h.ServeHTTP(w, r.WithContext(ctx))
+							h.ServeHTTP(w, r)
 						})
 					}
 					chain = append(chain, wrapped)

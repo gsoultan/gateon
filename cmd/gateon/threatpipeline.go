@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/correlation"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
@@ -37,26 +38,45 @@ const envShipRawThreats = "GATEON_SIEM_RAW_THREATS"
 func startThreatPipeline(ctx context.Context, version string, shun mitigation.Shunner) {
 	shipper := initSIEMShipper(ctx, version)
 	shipRaw := shipper != nil && boolEnvTrue(envShipRawThreats)
-	mitigator := initMitigator(shun)
 
-	engine := correlation.New(correlation.Config{
-		OnIncident: func(inc correlation.Incident) {
-			// Retain in-process so the gateway can surface incidents in its own
-			// API/UI (GET /v1/security/incidents) even without an external SIEM.
-			correlation.DefaultIncidentStore.Add(inc)
-			logIncident(inc)
-			// Apply graduated, confidence-aware mitigation (reputation degrade ->
-			// restrict -> optional hard shun) to the incident source.
-			mitigator.Handle(inc)
-			if shipper != nil {
-				shipper.Ship(incidentToEvent(inc))
-			}
-		},
-	})
+	// The correlation engine is the largest bounded RAM consumer (up to
+	// MaxSources x MaxSignalsPerSource retained signals), so its bounds — and
+	// whether it runs at all — follow the active resource profile. The minimal
+	// profile turns it off; SIEM raw export (if configured) still works.
+	td := config.CurrentTierDefaults()
+	correlate := td.CorrelationEnabled
 
-	signals := make(chan correlation.Signal, signalQueueSize)
-	go engine.Run(ctx, signals)
-	go consumeThreats(ctx, signals, shipper, shipRaw)
+	var signals chan correlation.Signal
+	if correlate {
+		mitigator := initMitigator(shun)
+		engine := correlation.New(correlation.Config{
+			MaxSources:          td.CorrelationMaxSources,
+			MaxSignalsPerSource: td.CorrelationMaxPerSource,
+			OnIncident: func(inc correlation.Incident) {
+				// Retain in-process so the gateway can surface incidents in its own
+				// API/UI (GET /v1/security/incidents) even without an external SIEM.
+				correlation.DefaultIncidentStore.Add(inc)
+				logIncident(inc)
+				// Apply graduated, confidence-aware mitigation (reputation degrade ->
+				// restrict -> optional hard shun) to the incident source.
+				mitigator.Handle(inc)
+				if shipper != nil {
+					shipper.Ship(incidentToEvent(inc))
+				}
+			},
+		})
+		signals = make(chan correlation.Signal, signalQueueSize)
+		go engine.Run(ctx, signals)
+	} else {
+		logger.L.LogInfo("correlation engine disabled by resource profile",
+			"profile", string(config.ResolveProfile()))
+	}
+
+	// Only subscribe to the threat broadcaster if there is a consumer: the
+	// correlation engine and/or raw SIEM shipping.
+	if correlate || shipRaw {
+		go consumeThreats(ctx, signals, shipper, shipRaw, correlate)
+	}
 }
 
 // initSIEMShipper builds and starts the SIEM exporter if configured. Returns
@@ -117,7 +137,7 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 
 // consumeThreats subscribes to the threat broadcaster and feeds the correlation
 // engine, optionally shipping raw threats too.
-func consumeThreats(ctx context.Context, signals chan<- correlation.Signal, shipper *siem.Shipper, shipRaw bool) {
+func consumeThreats(ctx context.Context, signals chan<- correlation.Signal, shipper *siem.Shipper, shipRaw, correlate bool) {
 	ch := telemetry.ThreatBroadcaster.Subscribe()
 	defer telemetry.ThreatBroadcaster.Unsubscribe(ch)
 
@@ -129,9 +149,11 @@ func consumeThreats(ctx context.Context, signals chan<- correlation.Signal, ship
 			if shipRaw {
 				shipper.Ship(threatToEvent(t))
 			}
-			select {
-			case signals <- threatToSignal(t):
-			default: // drop on backpressure; never block the broadcaster
+			if correlate {
+				select {
+				case signals <- threatToSignal(t):
+				default: // drop on backpressure; never block the broadcaster
+				}
 			}
 		}
 	}

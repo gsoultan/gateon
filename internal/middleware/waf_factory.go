@@ -12,9 +12,51 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+// resolveWAFTier returns the WAF inspection tier: the explicit WafConfig.tier
+// when set, otherwise the WAF tier implied by the active global profile.
+func resolveWAFTier(w *gateonv1.WafConfig) config.Tier {
+	if t := strings.TrimSpace(w.GetTier()); t != "" {
+		return config.NormalizeTier(t)
+	}
+	return config.CurrentTierDefaults().WAFTier
+}
+
+// applyWAFTier sets the tier baseline on cfg. Precedence is: tier sets the
+// baseline; callers may then honour explicit proto "enable" flags to add (never
+// remove) protection. minimal = protocol+SQLi+XSS at PL1, request-phase only;
+// standard = full request-phase CRS; enterprise = PL>=2 plus the response-phase
+// (DLP) rules and malware/ransomware detection.
+func applyWAFTier(cfg *WAFConfig, tier config.Tier) {
+	switch tier {
+	case config.TierMinimal:
+		cfg.ParanoiaLevel = 1
+		cfg.DisableLFI = true
+		cfg.DisableRCE = true
+		cfg.DisablePHP = true
+		cfg.DisableJava = true
+		cfg.DisableNodeJS = true
+		cfg.DisableScanner = true
+		cfg.EnableMalwareDetection = false
+		cfg.EnableRansomwareDetection = false
+		cfg.EnableDLP = false
+		cfg.EnableResponseInspection = false
+	case config.TierEnterprise:
+		if cfg.ParanoiaLevel < 2 {
+			cfg.ParanoiaLevel = 2
+		}
+		cfg.EnableMalwareDetection = true
+		cfg.EnableRansomwareDetection = true
+		cfg.EnableDLP = true
+		cfg.EnableResponseInspection = true
+	default: // standard: full request-phase coverage, response phase off by default
+		cfg.EnableResponseInspection = false
+	}
+}
 
 var wafCache sync.Map
 
@@ -48,7 +90,11 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 	// route never receives the gRPC-relaxed instance, so a spoofed Content-Type
 	// cannot disable its body inspection.
 	grpcMode := f.isGRPCRoute()
-	key := "global-waf:" + strconv.FormatBool(grpcMode) + ":" + hashWAFProto(w)
+	// The resolved tier may come from the global profile (env/config), which is
+	// not part of the WAF proto, so it must be in the cache key alongside the
+	// proto hash and the gRPC variant.
+	tier := resolveWAFTier(w)
+	key := "global-waf:" + string(tier) + ":" + strconv.FormatBool(grpcMode) + ":" + hashWAFProto(w)
 	if cached, ok := globalWAFCache.Load(key); ok {
 		return cached.(Middleware), nil
 	}
@@ -82,6 +128,15 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		EbpfManager:               f.ebpfManager,
 		GRPCMode:                  grpcMode,
 	}
+	// Apply the resolved tier baseline, then honour an explicit DLP opt-in as an
+	// upgrade: a user who deliberately enabled DLP gets response inspection even
+	// at the standard tier, while DLP stays off by default below enterprise.
+	applyWAFTier(&cfg, tier)
+	if w.GetDlp() {
+		cfg.EnableDLP = true
+		cfg.EnableResponseInspection = true
+	}
+
 	// When auto-update has fetched fresh rules to disk, prefer them.
 	if w.GetAutoUpdateRules() {
 		rulesPath := filepath.Join(f.dataDir, "waf", "rules")

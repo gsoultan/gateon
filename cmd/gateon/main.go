@@ -76,6 +76,10 @@ func main() {
 	}
 	defer logger.Sync()
 
+	// Apply container-aware runtime tuning (GOMAXPROCS awareness, optional soft
+	// memory limit and GC target) before any allocation-heavy subsystem starts.
+	tuneRuntime()
+
 	globalReg, globalFile := initConfigRegistries()
 	auth.SetConfigGetter(globalReg)
 	authManager := inits.InitGlobalConfig(globalFile, globalReg)
@@ -251,7 +255,9 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 		gc = globalReg.Get(ctx)
 	}
 	databaseURL := db.AuthDatabaseURL(gc.GetAuth())
-	retention := 7
+	// Default retention follows the active resource profile (minimal=1, standard=7,
+	// enterprise=30); explicit config still overrides.
+	retention := config.CurrentTierDefaults().RetentionDays
 	if gc != nil && gc.Log != nil {
 		if gc.Log.AccessLogRetentionDays > 0 {
 			retention = int(gc.Log.AccessLogRetentionDays)
