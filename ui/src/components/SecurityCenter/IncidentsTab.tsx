@@ -99,21 +99,30 @@ function PostureStatusCards() {
         )}
       </Card>
 
-      <Card withBorder radius="md" padding="md">
-        <Group justify="space-between" wrap="nowrap">
-          <Stack gap={2}>
-            <Text size="xs" c="dimmed" fw={700} tt="uppercase">
-              ClamAV
-            </Text>
-            <Badge color={posture.clamav.installed ? "teal" : "gray"} variant="light">
-              {posture.clamav.installed ? "Installed" : posture.clamav.enabled ? "Enabled" : "Off"}
-            </Badge>
-          </Stack>
-          <ThemeIcon color={posture.clamav.installed ? "teal" : "gray"} variant="light" size="lg" radius="md">
-            <IconNetwork size={20} />
-          </ThemeIcon>
-        </Group>
-      </Card>
+      {(() => {
+        // Three honest states: installed & ready (teal), enabled but missing
+        // (red — a misconfiguration, not a healthy "Enabled"), or off (gray).
+        const { installed, enabled } = posture.clamav;
+        const color = installed ? "teal" : enabled ? "red" : "gray";
+        const label = installed ? "Installed" : enabled ? "Not Installed" : "Off";
+        return (
+          <Card withBorder radius="md" padding="md">
+            <Group justify="space-between" wrap="nowrap">
+              <Stack gap={2}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                  ClamAV
+                </Text>
+                <Badge color={color} variant="light">
+                  {label}
+                </Badge>
+              </Stack>
+              <ThemeIcon color={color} variant="light" size="lg" radius="md">
+                <IconNetwork size={20} />
+              </ThemeIcon>
+            </Group>
+          </Card>
+        );
+      })()}
     </SimpleGrid>
   );
 }

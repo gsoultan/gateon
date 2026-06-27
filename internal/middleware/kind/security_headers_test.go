@@ -66,3 +66,44 @@ func TestSecurityHeadersUpgradeInsecureRequests(t *testing.T) {
 		})
 	}
 }
+
+// TestSecurityHeadersExtraImgSrc verifies that ExtraImgSrc widens only the
+// img-src directive (so the management UI can load basemap tiles) without
+// touching script-src/connect-src or leaking into the default preset's CSP.
+func TestSecurityHeadersExtraImgSrc(t *testing.T) {
+	const tileHost = "https://*.basemaps.cartocdn.com"
+
+	t.Run("AddsToImgSrcOnly", func(t *testing.T) {
+		h := SecurityHeaders(SecurityHeadersConfig{
+			Preset:      "recommended",
+			ExtraImgSrc: []string{tileHost},
+		})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+		csp := rec.Header().Get("Content-Security-Policy")
+		if !strings.Contains(csp, "img-src 'self' data: "+tileHost+";") {
+			t.Errorf("expected img-src to include %q; csp=%q", tileHost, csp)
+		}
+		if strings.Contains(csp, "script-src 'self' "+tileHost) || strings.Contains(csp, "connect-src 'self' "+tileHost) {
+			t.Errorf("tile host leaked beyond img-src; csp=%q", csp)
+		}
+	})
+
+	t.Run("BaselineUnaffectedWhenEmpty", func(t *testing.T) {
+		h := SecurityHeaders(SecurityHeadersConfig{Preset: "recommended"})(
+			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+		csp := rec.Header().Get("Content-Security-Policy")
+		if !strings.Contains(csp, "img-src 'self' data:;") {
+			t.Errorf("baseline img-src changed; csp=%q", csp)
+		}
+		if strings.Contains(csp, "cartocdn") {
+			t.Errorf("baseline CSP must not mention tile host; csp=%q", csp)
+		}
+	})
+}

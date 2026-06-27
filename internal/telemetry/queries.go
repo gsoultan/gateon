@@ -78,6 +78,9 @@ const (
 	QueryGetActiveThreatsToday = `SELECT COUNT(*) FROM security_threats
 		WHERE timestamp >= ? AND action_taken NOT IN ('blocked', 'challenged', 'shunned')`
 
+	QueryGetMitigatedThreatsToday = `SELECT COUNT(*) FROM security_threats
+		WHERE timestamp >= ? AND action_taken IN ('blocked', 'challenged', 'shunned')`
+
 	// QueryGetWAFBlockCounts returns the number of persisted WAF block events
 	// grouped by route. It is used at startup to restore the in-memory
 	// gateon_middleware_waf_blocked_total counter so the dashboard does not
