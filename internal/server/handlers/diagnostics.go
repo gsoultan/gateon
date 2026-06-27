@@ -165,10 +165,11 @@ type netInterfaceInfo struct {
 // the load error if it failed — the operator's answer to "why are my eBPF drop
 // metrics zero?".
 type ebpfStatusInfo struct {
-	Enabled   bool   `json:"enabled"`
-	Attached  bool   `json:"attached"`
-	Interface string `json:"interface,omitempty"`
-	LoadError string `json:"load_error,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	Attached   bool   `json:"attached"`
+	Interface  string `json:"interface,omitempty"`
+	LoadError  string `json:"load_error,omitempty"`
+	AttachMode string `json:"attach_mode,omitempty"`
 }
 
 type systemInterfacesResponse struct {
@@ -235,6 +236,7 @@ func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInte
 			resp.Ebpf.Attached = stats.Attached
 			resp.Ebpf.Interface = stats.Interface
 			resp.Ebpf.LoadError = stats.LoadError
+			resp.Ebpf.AttachMode = stats.AttachMode
 		}
 	}
 

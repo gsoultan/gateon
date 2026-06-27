@@ -59,7 +59,7 @@ func StartEBpFPollLoop(ctx context.Context, manager ebpf.Manager) {
 
 			if lastAttached == nil || *lastAttached != stats.Attached {
 				if stats.Attached {
-					logger.L.LogInfo("eBPF XDP program attached; metrics now live", "interface", stats.Interface)
+					logger.L.LogInfo("eBPF XDP program attached; metrics now live", "interface", stats.Interface, "mode", stats.AttachMode)
 				} else {
 					logger.L.LogError("eBPF enabled but XDP program is NOT attached; metrics will stay zero",
 						"interface", stats.Interface, "load_error", stats.LoadError)
