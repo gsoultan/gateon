@@ -43,7 +43,12 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 	}
 	w := g.Waf
 
-	key := "global-waf:" + hashWAFProto(w)
+	// gRPC relaxations are keyed on the trusted route type, so the gateway-wide
+	// WAF is memoized as two distinct variants (strict vs gRPC-relaxed). An HTTP
+	// route never receives the gRPC-relaxed instance, so a spoofed Content-Type
+	// cannot disable its body inspection.
+	grpcMode := f.isGRPCRoute()
+	key := "global-waf:" + strconv.FormatBool(grpcMode) + ":" + hashWAFProto(w)
 	if cached, ok := globalWAFCache.Load(key); ok {
 		return cached.(Middleware), nil
 	}
@@ -75,6 +80,7 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		GlobalDirectives:          w.GetCustomDirectives(),
 		RouteID:                   "gateon-global-waf",
 		EbpfManager:               f.ebpfManager,
+		GRPCMode:                  grpcMode,
 	}
 	// When auto-update has fetched fresh rules to disk, prefer them.
 	if w.GetAutoUpdateRules() {
@@ -165,13 +171,15 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 		}
 	}
 
-	key := wafConfigKey(cfg) + ":" + globalDirectives
+	grpcMode := f.isGRPCRoute()
+	key := wafConfigKey(cfg) + ":" + globalDirectives + ":grpc=" + strconv.FormatBool(grpcMode)
 	if cached, ok := wafCache.Load(key); ok {
 		return cached.(Middleware), nil
 	}
 	wafCfg := parseWAFConfig(cfg)
 	wafCfg.GlobalDirectives = globalDirectives
 	wafCfg.EbpfManager = f.ebpfManager
+	wafCfg.GRPCMode = grpcMode
 
 	mw, err := WAF(wafCfg)
 	if err != nil {

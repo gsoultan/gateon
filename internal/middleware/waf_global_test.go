@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -65,6 +66,93 @@ func TestCreateGlobalWAF_LoadsCRSWithDefaultFlags(t *testing.T) {
 				t.Errorf("expected status %d, got %d", tc.expectCode, rr.Code)
 			}
 		})
+	}
+}
+
+// TestCreateGlobalWAF_AllowsGRPC is the regression guard for the gRPC 403:
+// once Phase B injected the full-CRS global WAF into every route, native gRPC
+// and gRPC-Web requests were rejected by REQUEST-920 rule 920420 because their
+// content types are absent from the CRS default tx.allowed_request_content_type
+// list (a single critical hit reaches the default anomaly threshold of 5 and
+// 949110 denies with 403). The WAF must let the legitimate gRPC transport pass
+// while still inspecting headers/URI.
+func TestCreateGlobalWAF_AllowsGRPC(t *testing.T) {
+	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
+		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1},
+	}}
+	f := NewFactory(nil, store, nil, ".")
+	f.SetRouteType("grpc") // trusted route type unlocks the gRPC transport relaxations
+
+	mw, err := f.CreateGlobalWAF()
+	if err != nil {
+		t.Fatalf("CreateGlobalWAF: %v", err)
+	}
+
+	reached := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	grpcCTs := []string{
+		"application/grpc",
+		"application/grpc+proto",
+		"application/grpc-web+proto",
+		"application/grpc-web-text",
+	}
+	for _, ct := range grpcCTs {
+		t.Run(ct, func(t *testing.T) {
+			reached = false
+			req := httptest.NewRequest(http.MethodPost, "/helloworld.Greeter/SayHello", strings.NewReader(""))
+			req.Header.Set("Content-Type", ct)
+			req.Header.Set("Te", "trailers")
+			// Binary protobuf metadata is delivered as high-entropy "-bin"
+			// headers — the entropy fast-path must not trip on it.
+			req.Header.Set("x-trace-bin", strings.Repeat("AQIDBAUGBwgJ", 16))
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK || !reached {
+				t.Errorf("gRPC request with %s was blocked: status=%d reached=%v", ct, rr.Code, reached)
+			}
+		})
+	}
+}
+
+// TestCreateGlobalWAF_GRPCRelaxationNotBypassableByHeader is the security guard
+// for the gRPC fix: the gRPC transport relaxations (allowed content type, removal
+// of rule 920180, request-body-access Off, fast-path skip) must be gated on the
+// trusted route type, NOT the client Content-Type. A request to a non-gRPC route
+// that spoofs "Content-Type: application/grpc" must still be fully inspected, so a
+// SQLi payload in the body is blocked rather than waved through.
+func TestCreateGlobalWAF_GRPCRelaxationNotBypassableByHeader(t *testing.T) {
+	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
+		Waf: &gateonv1.WafConfig{
+			Enabled: true, UseCrs: true, ParanoiaLevel: 1,
+			// Force CRS to inspect the request body so the bypass would be observable.
+			RequestBodyLimit: 1 << 20,
+		},
+	}}
+
+	// HTTP route (no gRPC type): the relaxation must NOT apply.
+	f := NewFactory(nil, store, nil, ".")
+	f.SetRouteType("http")
+	mw, err := f.CreateGlobalWAF()
+	if err != nil {
+		t.Fatalf("CreateGlobalWAF: %v", err)
+	}
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	body := "username=admin'+OR+1=1--+-&password=x"
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+	// Attacker spoofs the gRPC content type to try to dodge body inspection.
+	req.Header.Set("Content-Type", "application/grpc")
+	req.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("spoofed Content-Type bypassed the WAF on an HTTP route: got status %d, want 403", rr.Code)
 	}
 }
 

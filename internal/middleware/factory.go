@@ -21,10 +21,25 @@ type Factory struct {
 	globalStore config.GlobalConfigStore
 	ebpfManager ebpf.Manager
 	dataDir     string
+	routeType   string // trusted route type (e.g. "grpc"); empty = treat as plain HTTP
 }
 
 func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, dataDir string) *Factory {
 	return &Factory{redisClient: redisClient, globalStore: globalStore, ebpfManager: ebpfManager, dataDir: dataDir}
+}
+
+// SetRouteType records the trusted route type for the route this factory builds
+// middlewares for. It controls gRPC-specific WAF relaxations, which must be keyed
+// on the operator-configured route type rather than a spoofable request header.
+// A factory is created per route in ApplyRouteMiddlewares and used synchronously,
+// so this is safe to set before building the chain.
+func (f *Factory) SetRouteType(t string) {
+	f.routeType = t
+}
+
+// isGRPCRoute reports whether this factory builds for a gRPC-typed route.
+func (f *Factory) isGRPCRoute() bool {
+	return strings.EqualFold(strings.TrimSpace(f.routeType), "grpc")
 }
 
 // Validate checks that the middleware config is valid without creating the middleware.

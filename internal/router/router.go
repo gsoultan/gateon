@@ -273,6 +273,9 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager) http.Handler {
 	var chain []middleware.Middleware
 	mwFactory := middleware.NewFactory(redisClient, globalStore, ebpfManager, ".")
+	// Record the trusted route type so the WAF applies gRPC transport relaxations
+	// only to operator-declared gRPC routes, not based on a spoofable request header.
+	mwFactory.SetRouteType(rt.Type)
 
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
