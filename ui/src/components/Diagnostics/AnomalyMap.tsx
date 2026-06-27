@@ -1,5 +1,5 @@
 import React from "react";
-import { Paper, Text, Badge, Stack, Group, ThemeIcon, Box, useComputedColorScheme } from "@mantine/core";
+import { Paper, Text, Badge, Stack, Group, ThemeIcon, Box } from "@mantine/core";
 import { IconShieldLock, IconLock, IconBug, IconActivity } from "@tabler/icons-react";
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import type { Anomaly } from "../../types/gateon";
@@ -44,9 +44,10 @@ const getIcon = (type: string) => {
 };
 
 const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies, onTrace }) => {
-  const colorScheme = useComputedColorScheme("light", { getInitialValueInEffect: true });
-  const tiles = colorScheme === "dark" ? TILES.dark : TILES.light;
-  const isDark = colorScheme === "dark";
+  // Always use the light basemap so the geography stays clear regardless of the
+  // app's dark/light theme. The colored severity markers read well against light tiles.
+  const tiles = TILES.light;
+  const isDark = false;
 
   // Filter anomalies that have geo coordinates
   // We include 0,0 if country_code is present, as it might be a valid coordinate for some countries or fallback
@@ -60,7 +61,6 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies, onTrace }) => {
   return (
     <Paper withBorder radius="lg" shadow="sm" p={0} style={{ height: 400, overflow: "hidden", position: "relative" }}>
       <MapContainer
-        key={colorScheme}
         center={[20, 0]}
         zoom={2}
         style={{ height: "100%", width: "100%", background: tiles.bg }}
