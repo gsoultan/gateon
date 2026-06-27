@@ -21,6 +21,13 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, nil
 	}
 
+	// If audit signing is enabled with no key, generate a random one BEFORE
+	// persisting so it is saved to disk (chain stays verifiable across restarts)
+	// and returned to the UI on the next GetGlobalConfig.
+	if a := req.Config.Audit; a != nil && a.SignEntries && a.SignatureKey == "" {
+		a.SignatureKey = audit.GenerateSignatureKey()
+	}
+
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
 	}

@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -36,7 +37,18 @@ type AuditManager struct {
 	dialect     db.Dialect
 	Broadcaster *Broadcaster
 	lastHash    string
-	currentKey  string
+}
+
+// GenerateSignatureKey returns a cryptographically-random 256-bit key as a hex
+// string, suitable for HMAC-SHA256 audit signing. Used when signing is enabled
+// but no key was supplied.
+func GenerateSignatureKey() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand should never fail; fall back to UUID-derived entropy.
+		return strings.ReplaceAll(uuid.NewString()+uuid.NewString(), "-", "")
+	}
+	return hex.EncodeToString(b)
 }
 
 type Broadcaster struct {
@@ -87,6 +99,12 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 			err = migrateErr
 			return
 		}
+		// Fallback: if signing is enabled but no key was provided, generate one so
+		// entries are still signed. The API/registry layer is the primary place that
+		// generates and persists this key; this covers boot paths with no API update.
+		if cfg != nil && cfg.SignEntries && cfg.SignatureKey == "" {
+			cfg.SignatureKey = GenerateSignatureKey()
+		}
 		manager = &AuditManager{
 			config:  cfg,
 			db:      database,
@@ -112,6 +130,9 @@ func (m *AuditManager) loadLastHash() {
 func UpdateConfig(cfg *gateonv1.AuditConfig) {
 	if manager == nil {
 		return
+	}
+	if cfg != nil && cfg.SignEntries && cfg.SignatureKey == "" {
+		cfg.SignatureKey = GenerateSignatureKey()
 	}
 	manager.mu.Lock()
 	manager.config = cfg
@@ -140,13 +161,14 @@ func Unsubscribe(ch chan AuditEntry) {
 }
 
 func (m *AuditManager) log(ctx context.Context, userID, action, resource, details, ip string) {
+	// Hold the lock across read-lastHash → sign → update-lastHash so concurrent
+	// writers chain off each other rather than forking the hash chain on a shared
+	// previous_hash.
 	m.mu.Lock()
 	cfg := m.config
-	lastHash := m.lastHash
-	currentKey := m.currentKey
-	m.mu.Unlock()
 
 	if cfg != nil && !cfg.Enabled {
+		m.mu.Unlock()
 		return
 	}
 
@@ -158,23 +180,20 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		Details:      details,
 		Timestamp:    time.Now(),
 		IPAddress:    ip,
-		PreviousHash: lastHash,
+		PreviousHash: m.lastHash,
 	}
 
+	// Sign with the STATIC configured key (not a per-entry rotated key) and chain
+	// via previous_hash. A fixed key is what makes the chain independently
+	// verifiable after a restart: a verifier holding the configured key can
+	// recompute every signature in order and detect any insertion, edit or
+	// reorder. (The previous forward-ratchet key rotation was unverifiable because
+	// the rotated key was in-memory only and lost on restart.)
 	if cfg != nil && cfg.SignEntries && cfg.SignatureKey != "" {
-		if currentKey == "" {
-			currentKey = cfg.SignatureKey
-		}
-		entry.Signature = m.sign(entry, currentKey)
-
-		// Rotate key for forward integrity
-		nextKey := m.deriveNextKey(currentKey, entry.Signature)
-
-		m.mu.Lock()
+		entry.Signature = m.sign(entry, cfg.SignatureKey)
 		m.lastHash = entry.Signature
-		m.currentKey = nextKey
-		m.mu.Unlock()
 	}
+	m.mu.Unlock()
 
 	query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	_, err := m.db.ExecContext(ctx, query, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
@@ -186,12 +205,6 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 	if m.Broadcaster != nil {
 		m.Broadcaster.Broadcast(entry)
 	}
-}
-
-func (m *AuditManager) deriveNextKey(currentKey, hash string) string {
-	h := hmac.New(sha256.New, []byte(currentKey))
-	h.Write([]byte(hash))
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (m *AuditManager) sign(entry AuditEntry, key string) string {

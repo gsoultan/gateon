@@ -130,6 +130,21 @@ export type MetricsSnapshot = {
   active_anomaly_score_average: number;
   system: SystemMetrics;
   security: SecurityInsights;
+  mitigation_funnel?: MitigationFunnel;
+};
+
+export type MitigationFunnel = {
+  http_ingress: number;
+  waf_blocked: number;
+  rate_limited: number;
+  geoip_blocked: number;
+  auth_failures: number;
+  turnstile_failures: number;
+  hmac_failures: number;
+  total_mitigated: number;
+  allowed: number;
+  server_errors: number;
+  xdp_packets_dropped: number;
 };
 
 export type SecurityInsights = {

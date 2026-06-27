@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { MantineProvider, createTheme, virtualColor, ColorSchemeScript } from '@mantine/core'
+import { MantineProvider, createTheme } from '@mantine/core'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './queryClient'
 import { Notifications } from '@mantine/notifications'
@@ -134,7 +134,6 @@ function Root() {
     <MantineProvider
       theme={theme}
       defaultColorScheme="auto"
-      storageKey="gateon-color-scheme"
     >
       <Notifications position="top-right" zIndex={2000} />
       <ErrorBoundary>
@@ -148,12 +147,33 @@ function Root() {
   )
 }
 
+// Apply the persisted color scheme before React mounts, replacing Mantine's
+// <ColorSchemeScript>. That component emits an inline <script> which React 19
+// hoists and executes, tripping our strict `script-src 'self'` CSP (no nonce,
+// no 'unsafe-inline'). This runs from the same-origin bundle instead, so it
+// prevents the flash of unstyled content without a CSP violation. The key and
+// "auto" default mirror Mantine's localStorageColorSchemeManager defaults.
+function applyInitialColorScheme() {
+  try {
+    const stored = window.localStorage.getItem('mantine-color-scheme-value')
+    const scheme =
+      stored === 'light' || stored === 'dark' || stored === 'auto' ? stored : 'auto'
+    const computed =
+      scheme !== 'auto'
+        ? scheme
+        : window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light'
+    document.documentElement.setAttribute('data-mantine-color-scheme', computed)
+  } catch {
+    // localStorage / matchMedia unavailable — MantineProvider applies it on mount.
+  }
+}
+
+applyInitialColorScheme()
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ColorSchemeScript
-      defaultColorScheme="auto"
-      storageKey="gateon-color-scheme"
-    />
     <Root />
   </React.StrictMode>,
 )

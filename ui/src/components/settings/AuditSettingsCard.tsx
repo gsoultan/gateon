@@ -9,9 +9,18 @@ import {
   TextInput,
   ThemeIcon,
   Divider,
+  Button,
 } from "@mantine/core";
-import { IconHistory, IconFingerprint } from "@tabler/icons-react";
+import { IconHistory, IconFingerprint, IconRefresh } from "@tabler/icons-react";
 import type { GlobalConfig, AuditConfig } from "../../types/gateon";
+
+// generateSignatureKey returns a cryptographically-random 256-bit key as hex,
+// matching the backend's audit.GenerateSignatureKey format.
+function generateSignatureKey(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 interface AuditSettingsCardProps {
   config: GlobalConfig;
@@ -76,15 +85,31 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
               </Group>
 
               {audit.sign_entries && (
-                <TextInput
-                  label="Signature Key"
-                  placeholder="Enter secret key for HMAC"
-                  type="password"
-                  value={audit.signature_key || ""}
-                  onChange={(e) => updateAudit({ signature_key: e.currentTarget.value })}
-                  disabled={disabled}
-                  leftSection={<IconFingerprint size={16} />}
-                />
+                <Stack gap={6}>
+                  <TextInput
+                    label="Signature Key"
+                    placeholder="Enter a secret key, or generate one — leave blank to auto-generate on save"
+                    type="password"
+                    value={audit.signature_key || ""}
+                    onChange={(e) => updateAudit({ signature_key: e.currentTarget.value })}
+                    disabled={disabled}
+                    leftSection={<IconFingerprint size={16} />}
+                  />
+                  <Group justify="space-between" align="center">
+                    <Text size="xs" c="dimmed">
+                      HMAC-SHA256 key. Store it securely — it's required to verify the audit chain.
+                    </Text>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      leftSection={<IconRefresh size={14} />}
+                      disabled={disabled}
+                      onClick={() => updateAudit({ signature_key: generateSignatureKey() })}
+                    >
+                      Generate key
+                    </Button>
+                  </Group>
+                </Stack>
               )}
             </Stack>
           </>

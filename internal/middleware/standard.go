@@ -274,6 +274,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "in").Add(float64(reqInSize + 256))
 				telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
 			}
+			// Bounded per-IP bandwidth accumulator backs the dashboard "Bandwidth by
+			// IP" card without the unbounded-cardinality risk of the opt-in series above.
+			telemetry.RecordIPBandwidth(clientIP, uint64(reqInSize+256), uint64(respOutSize+200))
 
 			// Country-based metrics
 			telemetry.RequestsByCountryTotal.WithLabelValues(country).Inc()

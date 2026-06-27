@@ -57,6 +57,34 @@ type MetricsSnapshot struct {
 
 	// Security insights
 	Security SecurityInsights `json:"security,omitzero"`
+
+	// Reconciled mitigation funnel (single-unit, server-computed).
+	MitigationFunnel MitigationFunnel `json:"mitigation_funnel,omitzero"`
+}
+
+// MitigationFunnel holds a reconciled, single-unit (HTTP request) view of how
+// ingress traffic is filtered by each security layer. The invariant
+//
+//	Allowed + TotalMitigated == HTTPIngress
+//
+// holds by construction. All inputs share one scope: the request baseline and
+// each mitigation counter are summed unfiltered across every label, so they are
+// directly comparable (the previous frontend math mixed an entrypoint-scoped
+// request total with all-route block counters). ServerErrors (5xx of allowed
+// traffic) and XDPPacketsDropped (packets dropped below the HTTP layer, a
+// different unit) are reported separately and are NOT funnel stages.
+type MitigationFunnel struct {
+	HTTPIngress       float64 `json:"http_ingress"`
+	WAFBlocked        float64 `json:"waf_blocked"`
+	RateLimited       float64 `json:"rate_limited"`
+	GeoIPBlocked      float64 `json:"geoip_blocked"`
+	AuthFailures      float64 `json:"auth_failures"`
+	TurnstileFailures float64 `json:"turnstile_failures"`
+	HMACFailures      float64 `json:"hmac_failures"`
+	TotalMitigated    float64 `json:"total_mitigated"`
+	Allowed           float64 `json:"allowed"`
+	ServerErrors      float64 `json:"server_errors"`
+	XDPPacketsDropped float64 `json:"xdp_packets_dropped"`
 }
 
 type SecurityInsights struct {
@@ -214,6 +242,7 @@ func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
 	snap.System = buildSystemMetrics(idx)
 	snap.Security = buildSecurityInsights(ctx, idx, limit, offset)
+	snap.MitigationFunnel = buildMitigationFunnel(idx)
 
 	// Build active threat metrics
 	snap.ActiveSuspiciousSessions = gaugeValue(idx, "gateon_active_suspicious_sessions_total")
@@ -332,6 +361,49 @@ func computeGoldenSignals(idx map[string]*dto.MetricFamily, match func(*dto.Metr
 	}
 
 	return gs
+}
+
+// buildMitigationFunnel produces a reconciled, single-unit view of the security
+// mitigation funnel. Unlike the old frontend computation, it uses one consistent
+// scope (unfiltered request total + unfiltered block counters) so the stages add
+// up exactly: Allowed + TotalMitigated == HTTPIngress.
+func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
+	// Unfiltered baseline so it shares scope with the all-label block counters.
+	allMatch := func(*dto.Metric) bool { return true }
+	gs := computeGoldenSignals(idx, allMatch)
+
+	f := MitigationFunnel{
+		HTTPIngress:       gs.RequestsTotal,
+		WAFBlocked:        sumCounter(idx, "gateon_middleware_waf_blocked_total", nil),
+		RateLimited:       sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", nil),
+		GeoIPBlocked:      sumCounter(idx, "gateon_middleware_geoip_blocked_total", nil),
+		AuthFailures:      sumCounter(idx, "gateon_middleware_auth_failures_total", nil),
+		HMACFailures:      sumCounter(idx, "gateon_middleware_hmac_failures_total", nil),
+		ServerErrors:      gs.ErrorsTotal,
+		XDPPacketsDropped: sumCounter(idx, "gateon_ebpf_dropped_packets_total", nil),
+	}
+
+	if fam, ok := idx["gateon_middleware_turnstile_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			if labelValue(m, "outcome") == "fail" {
+				f.TurnstileFailures += m.GetCounter().GetValue()
+			}
+		}
+	}
+
+	f.TotalMitigated = f.WAFBlocked + f.RateLimited + f.GeoIPBlocked +
+		f.AuthFailures + f.TurnstileFailures + f.HMACFailures
+
+	// Rejected requests are still counted once in gateon_requests_total (they
+	// return a 4xx through the metrics middleware), so subtracting the block
+	// counters yields the requests that passed every mitigation. Clamp at zero in
+	// case counters were restored/reset out of step across a restart.
+	f.Allowed = f.HTTPIngress - f.TotalMitigated
+	if f.Allowed < 0 {
+		f.Allowed = 0
+	}
+
+	return f
 }
 
 func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
@@ -574,6 +646,12 @@ func buildIPMetrics(idx map[string]*dto.MetricFamily) []IPMetric {
 	result := make([]IPMetric, 0, len(ipMap))
 	for _, im := range ipMap {
 		result = append(result, *im)
+	}
+
+	// Fall back to the bounded in-memory tracker when the opt-in per-IP Prometheus
+	// series is disabled (the default), so the "Bandwidth by IP" card still shows data.
+	if len(result) == 0 {
+		result = getIPBandwidthStats()
 	}
 
 	// Sort by requests descending and limit to top 100 to avoid UI/bandwidth issues
