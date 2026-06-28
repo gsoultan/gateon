@@ -15,9 +15,12 @@ type Service interface {
 	DeleteUser(id string) error
 	ChangePassword(id, password string) error
 	UpdateSymmetricKey(key string)
+	SetUserDisabled(id string, disabled bool) error
+	SetTwoFactorPending(id string, pending bool) error
 
 	// 2FA methods
 	Setup2FA(id string) (string, string, []string, error)
+	EnrollPending2FA(username, password string) (string, string, []string, string, error)
 	Verify2FA(id, code string) (bool, string, *gateonv1.User, error)
 	Disable2FA(id string) error
 

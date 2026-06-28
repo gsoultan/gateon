@@ -32,6 +32,11 @@ func TestAllowed(t *testing.T) {
 		{"viewer write users", RoleViewer, ActionWrite, ResourceUsers, false},
 		{"viewer write global", RoleViewer, ActionWrite, ResourceGlobal, false},
 		{"viewer read global", RoleViewer, ActionRead, ResourceGlobal, false},
+		// Viewer: observability (diagnostics) is read-only visible, never writable.
+		{"viewer read diagnostics", RoleViewer, ActionRead, ResourceDiagnostics, true},
+		{"viewer write diagnostics", RoleViewer, ActionWrite, ResourceDiagnostics, false},
+		{"operator read diagnostics", RoleOperator, ActionRead, ResourceDiagnostics, true},
+		{"admin read diagnostics", RoleAdmin, ActionRead, ResourceDiagnostics, true},
 		// Unknown role
 		{"unknown read", "unknown", ActionRead, ResourceRoutes, false},
 		{"empty role", "", ActionRead, ResourceRoutes, false},

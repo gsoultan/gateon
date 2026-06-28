@@ -1143,7 +1143,7 @@ func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		logger.Default().LogError("traffic history: rows error", "error", err)
+		logQueryErr(ctx, "traffic history: rows error", err)
 	}
 	return samples
 }
@@ -1229,9 +1229,58 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat
 	defer rows.Close()
 	res := make([]SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
+		// Stop scanning the moment the caller's context is done (client
+		// disconnect or deadline). Otherwise every remaining row's Scan fails
+		// the same way and floods the log; the partial result is discarded.
+		if ctx.Err() != nil {
+			break
+		}
 		var th SecurityThreat
 		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method); err != nil {
-			logger.Default().LogError("threats: scan failed", "error", err)
+			logQueryErr(ctx, "threats: scan failed", err)
+			continue
+		}
+		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
+		res = append(res, th)
+	}
+	return res
+}
+
+// GetSecurityThreatsLite returns a paged list of recent security threats WITHOUT
+// the heavyweight request/response header and body blobs. It is used on the hot
+// dashboard-snapshot path (polled every couple of seconds), where those blobs are
+// never rendered: fetching them needlessly scans four LONGTEXT columns per row,
+// which under load blows the snapshot's request deadline ("threats: scan failed:
+// context deadline exceeded") and bloats the SSE payload. The full-blob variant
+// (GetSecurityThreats) remains for the detail/Threat-Explorer endpoint.
+func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []SecurityThreat {
+	if store == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	rows, err := store.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		logQueryErr(ctx, "threats: query failed", err)
+		return nil
+	}
+	defer rows.Close()
+	res := make([]SecurityThreat, 0, min(limit, 100))
+	for rows.Next() {
+		if ctx.Err() != nil {
+			break
+		}
+		var th SecurityThreat
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.UserAgent, &th.Method); err != nil {
+			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
 		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"

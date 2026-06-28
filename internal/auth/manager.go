@@ -80,7 +80,8 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 	q := m.dialect.Rebind(QueryUserByUsername)
 	err := m.db.QueryRow(q, username).
 		Scan(&user.Id, &user.Username, &hashed, &user.Role, &failedAttempts, &lockedUntil,
-			&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes)
+			&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes,
+			&user.Disabled, &user.TwoFactorPending)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil, ErrInvalidCredentials
@@ -97,12 +98,27 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 		return "", nil, ErrInvalidCredentials
 	}
 
+	// A disabled account is blocked AFTER a correct password (so an attacker can't
+	// use this to enumerate which accounts are disabled vs. wrong-password).
+	if user.Disabled {
+		return "", nil, ErrAccountDisabled
+	}
+
 	m.resetFailedAttempts(username)
 
 	if user.TwoFactorEnabled {
 		// Never leak the secret or recovery codes on the 2FA challenge response.
 		sanitizeUser(&user)
 		return "", &user, ErrTwoFactorRequired
+	}
+
+	// An administrator mandated 2FA but the user has not enrolled yet: do not issue
+	// a session. The client must run first-time TOTP enrollment (self-service
+	// Setup2FA + Verify2FA) before login completes. The user id is returned (no
+	// secret) so the client knows which account to enroll.
+	if user.TwoFactorPending {
+		sanitizeUser(&user)
+		return "", &user, ErrTwoFactorSetupRequired
 	}
 
 	return m.issueToken(&user)
@@ -202,7 +218,7 @@ func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.Us
 	var users []*gateonv1.User
 	for rows.Next() {
 		var u gateonv1.User
-		if err := rows.Scan(&u.Id, &u.Username, &u.Role, &u.TwoFactorEnabled); err != nil {
+		if err := rows.Scan(&u.Id, &u.Username, &u.Role, &u.TwoFactorEnabled, &u.Disabled, &u.TwoFactorPending); err != nil {
 			return nil, 0, err
 		}
 		users = append(users, &u)
@@ -292,6 +308,54 @@ func (m *Manager) UpdateSymmetricKey(key string) {
 	}
 }
 
+// EnrollPending2FA begins first-time TOTP enrollment for a user whom an
+// administrator has flagged as 2FA-pending, during the login flow (before a
+// session exists). It re-verifies the password so the TOTP secret and recovery
+// codes are only ever disclosed to someone who already proved the first factor,
+// and only when the account is genuinely pending (not already enrolled). It
+// returns the same (secret, qrDataURL, recoveryCodes) tuple as Setup2FA plus the
+// resolved user id so the caller can complete verification.
+func (m *Manager) EnrollPending2FA(username, password string) (string, string, []string, string, error) {
+	var id, hashed, role, recoveryCodes string
+	var twoFactorEnabled, twoFactorPending, disabled bool
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+	var twoFactorSecret, uname string
+
+	q := m.dialect.Rebind(QueryUserByUsername)
+	err := m.db.QueryRow(q, username).Scan(&id, &uname, &hashed, &role, &failedAttempts, &lockedUntil,
+		&twoFactorEnabled, &twoFactorSecret, &recoveryCodes, &disabled, &twoFactorPending)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", nil, "", ErrInvalidCredentials
+		}
+		return "", "", nil, "", err
+	}
+
+	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
+		return "", "", nil, "", ErrAccountLocked
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)); err != nil {
+		m.handleFailedLogin(username, failedAttempts)
+		return "", "", nil, "", ErrInvalidCredentials
+	}
+	if disabled {
+		return "", "", nil, "", ErrAccountDisabled
+	}
+	// Enrollment via this unauthenticated path is only for accounts an admin
+	// mandated 2FA for and that haven't enrolled. Anything else must go through the
+	// authenticated self-service Setup2FA endpoint.
+	if twoFactorEnabled || !twoFactorPending {
+		return "", "", nil, "", ErrInvalidCredentials
+	}
+
+	secret, qr, codes, err := m.Setup2FA(id)
+	if err != nil {
+		return "", "", nil, "", err
+	}
+	return secret, qr, codes, id, nil
+}
+
 func (m *Manager) Setup2FA(id string) (string, string, []string, error) {
 	var user gateonv1.User
 	var hashed, role, recoveryCodes string
@@ -300,7 +364,7 @@ func (m *Manager) Setup2FA(id string) (string, string, []string, error) {
 
 	q := m.dialect.Rebind(QueryUserByID)
 	err := m.db.QueryRow(q, id).Scan(&user.Id, &user.Username, &hashed, &role, &failedAttempts, &lockedUntil,
-		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes)
+		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes, &user.Disabled, &user.TwoFactorPending)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -350,7 +414,7 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 
 	q := m.dialect.Rebind(QueryUserByID)
 	err := m.db.QueryRow(q, id).Scan(&user.Id, &user.Username, &hashed, &role, &failedAttempts, &lockedUntil,
-		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes)
+		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes, &user.Disabled, &user.TwoFactorPending)
 	if err != nil {
 		return false, "", nil, err
 	}
@@ -392,6 +456,13 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 			if _, err = m.db.Exec(qUpdate, true, storedSecret, recoveryCodes, id); err != nil {
 				return false, "", nil, err
 			}
+			// Enrollment is complete; clear any admin-mandated pending flag so the
+			// next login goes straight to the normal 2FA code challenge.
+			if user.TwoFactorPending {
+				if err = m.setTwoFactorPending(id, false); err != nil {
+					return false, "", nil, err
+				}
+			}
 		}
 		m.resetFailedAttempts(user.Username)
 		token, u, err := m.issueToken(&user)
@@ -407,6 +478,32 @@ func (m *Manager) Disable2FA(id string) error {
 	qUpdate := m.dialect.Rebind(QueryUpdate2FA)
 	_, err := m.db.Exec(qUpdate, false, "", "", id)
 	return err
+}
+
+// SetUserDisabled enables or disables an account without deleting it. A disabled
+// account is rejected at login (after a correct password) until re-enabled.
+func (m *Manager) SetUserDisabled(id string, disabled bool) error {
+	q := m.dialect.Rebind(QueryUpdateUserDisabled)
+	if _, err := m.db.Exec(q, disabled, id); err != nil {
+		return fmt.Errorf("failed to update disabled state: %w", err)
+	}
+	return nil
+}
+
+// SetTwoFactorPending marks (or clears) an administrator-mandated 2FA requirement.
+// When set, the user is forced through first-time TOTP enrollment on next login.
+// This never generates or exposes a TOTP secret — enrollment stays self-service so
+// an admin can require 2FA without ever holding the user's second factor.
+func (m *Manager) SetTwoFactorPending(id string, pending bool) error {
+	return m.setTwoFactorPending(id, pending)
+}
+
+func (m *Manager) setTwoFactorPending(id string, pending bool) error {
+	q := m.dialect.Rebind(QueryUpdateTwoFactorPending)
+	if _, err := m.db.Exec(q, pending, id); err != nil {
+		return fmt.Errorf("failed to update 2FA pending state: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) handleFailedLogin(username string, currentAttempts int) {

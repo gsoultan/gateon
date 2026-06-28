@@ -13,10 +13,12 @@ const (
 )
 
 var (
-	ErrInvalidCredentials   = errors.New("invalid credentials")
-	ErrAccountLocked        = errors.New("account locked due to multiple failed attempts; please try again later")
-	ErrTwoFactorRequired    = errors.New("two-factor authentication required")
-	ErrInvalidTwoFactorCode = errors.New("invalid two-factor authentication code")
+	ErrInvalidCredentials     = errors.New("invalid credentials")
+	ErrAccountLocked          = errors.New("account locked due to multiple failed attempts; please try again later")
+	ErrAccountDisabled        = errors.New("account is disabled; contact an administrator")
+	ErrTwoFactorRequired      = errors.New("two-factor authentication required")
+	ErrTwoFactorSetupRequired = errors.New("two-factor authentication setup required")
+	ErrInvalidTwoFactorCode   = errors.New("invalid two-factor authentication code")
 )
 
 const (

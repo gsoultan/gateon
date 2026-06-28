@@ -91,7 +91,11 @@ export function Shell() {
 
   const securityLinks = [
     { label: "Security Hub", to: "/security-center", icon: IconShieldCheck },
-    { label: "Audit Logs", to: "/audit-logs", icon: IconTimeline },
+    // Audit Logs are an admin/operator surface (global resource); a read-only
+    // Viewer would only hit a 403 here, so hide the link for them.
+    ...(isViewer
+      ? []
+      : [{ label: "Audit Logs", to: "/audit-logs", icon: IconTimeline }]),
     { label: "Certificates", to: "/certificates", icon: IconCertificate },
     {
       label: "Client Authorities",
@@ -109,7 +113,10 @@ export function Shell() {
     ...(user?.role === "admin"
       ? [{ label: "Users", to: "/users", icon: IconUsers }]
       : []),
-    { label: "Settings", to: "/settings", icon: IconSettings },
+    // The global Settings editor is the global-config resource (admin/operator).
+    ...(isViewer
+      ? []
+      : [{ label: "Settings", to: "/settings", icon: IconSettings }]),
   ];
 
   return (

@@ -1,11 +1,9 @@
 import {
-  Paper,
   TextInput,
   PasswordInput,
   Button,
   Title,
   Text,
-  Center,
   rem,
   Alert,
   Stack,
@@ -13,6 +11,8 @@ import {
   SimpleGrid,
   ThemeIcon,
   Group,
+  Image,
+  Code,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useNavigate } from "@tanstack/react-router";
@@ -33,8 +33,14 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeFeature, setActiveFeature] = useState(0);
-  const [step, setStep] = useState<"login" | "2fa">("login");
+  const [step, setStep] = useState<"login" | "2fa" | "2fa-setup">("login");
   const [tempUser, setTempUser] = useState<any>(null);
+  const [enrollData, setEnrollData] = useState<{
+    id: string;
+    secret: string;
+    qr_code_url: string;
+    recovery_codes: string[];
+  } | null>(null);
   const [tfaCode, setTfaCode] = useState("");
   const tfaInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -69,7 +75,7 @@ export default function LoginPage() {
   // keyboard and screen-reader users land on the only relevant input. This is
   // an explicit, expected context change (preferred over the `autoFocus` prop).
   useEffect(() => {
-    if (step === "2fa") {
+    if (step === "2fa" || step === "2fa-setup") {
       tfaInputRef.current?.focus();
     }
   }, [step]);
@@ -102,6 +108,10 @@ export default function LoginPage() {
         if (data.two_factor_required) {
           setTempUser(data.user);
           setStep("2fa");
+        } else if (data.two_factor_setup_required) {
+          // Administrator mandated 2FA but the user hasn't enrolled. Begin
+          // first-time enrollment (re-uses the just-entered password).
+          await startEnrollment(values.username, values.password);
         } else {
           setAuth(data.token, data.user);
           navigate({ to: "/" });
@@ -147,6 +157,30 @@ export default function LoginPage() {
       setError("Connection error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startEnrollment = async (username: string, password: string) => {
+    setError(null);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/v1/auth/2fa/enroll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEnrollData(data);
+        setTempUser({ id: data.id });
+        setTfaCode("");
+        setStep("2fa-setup");
+      } else {
+        const text = await res.text();
+        setError(`Could not start 2FA setup: ${text || res.statusText}`);
+      }
+    } catch (err) {
+      setError("Connection error while starting 2FA setup");
     }
   };
 
@@ -276,12 +310,18 @@ export default function LoginPage() {
                  </Group>
               </Box>
               <Title order={2} fw={900} style={{ fontSize: rem(32), letterSpacing: -1 }}>
-                {step === "login" ? "Sign In" : "Verify Identity"}
+                {step === "login"
+                  ? "Sign In"
+                  : step === "2fa-setup"
+                    ? "Set Up Two-Factor"
+                    : "Verify Identity"}
               </Title>
               <Text c="dimmed" size="md" mt={8}>
-                {step === "login" 
+                {step === "login"
                   ? "Welcome back! Please enter your details."
-                  : "We've sent a code to your registered device."}
+                  : step === "2fa-setup"
+                    ? "Your administrator requires two-factor authentication. Enroll your device to continue."
+                    : "Enter the code from your authenticator app."}
               </Text>
             </Box>
 
@@ -360,6 +400,93 @@ export default function LoginPage() {
                   </Button>
                 </Stack>
               </form>
+            ) : step === "2fa-setup" ? (
+              <Stack gap="lg">
+                {enrollData && (
+                  <>
+                    <Text size="sm" fw={600}>
+                      1. Scan this QR code with your authenticator app
+                    </Text>
+                    <Group justify="center">
+                      <Image
+                        src={enrollData.qr_code_url}
+                        w={180}
+                        h={180}
+                        alt="2FA QR code"
+                      />
+                    </Group>
+                    <Text size="xs" c="dimmed" ta="center">
+                      Or enter this secret manually: <Code>{enrollData.secret}</Code>
+                    </Text>
+                    {enrollData.recovery_codes?.length > 0 && (
+                      <>
+                        <Text size="sm" fw={600}>
+                          2. Save your recovery codes
+                        </Text>
+                        <Alert color="blue" variant="light" radius="md">
+                          <Text size="xs">
+                            Store these somewhere safe. If you lose your device, they
+                            are the only way back into your account.
+                          </Text>
+                        </Alert>
+                        <SimpleGrid cols={2} spacing="xs">
+                          {enrollData.recovery_codes.map((c) => (
+                            <Code key={c} block>
+                              {c}
+                            </Code>
+                          ))}
+                        </SimpleGrid>
+                      </>
+                    )}
+                    <Text size="sm" fw={600}>
+                      3. Enter the 6-digit code to finish enrollment
+                    </Text>
+                  </>
+                )}
+                <TextInput
+                  label="Verification Code"
+                  placeholder="000 000"
+                  required
+                  size="lg"
+                  radius="lg"
+                  value={tfaCode}
+                  onChange={(e) => setTfaCode(e.currentTarget.value)}
+                  ref={tfaInputRef}
+                  styles={{
+                    input: {
+                      textAlign: "center",
+                      fontSize: rem(24),
+                      letterSpacing: rem(8),
+                      fontWeight: 700,
+                    },
+                    label: { marginBottom: 8, fontWeight: 600 },
+                  }}
+                />
+                <Button
+                  fullWidth
+                  onClick={handle2FAVerify}
+                  loading={loading}
+                  size="lg"
+                  radius="lg"
+                  className="bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
+                  style={{ height: rem(54) }}
+                >
+                  Verify & Enable
+                </Button>
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  fullWidth
+                  onClick={() => {
+                    setStep("login");
+                    setEnrollData(null);
+                    setTfaCode("");
+                  }}
+                  radius="lg"
+                >
+                  Back to login
+                </Button>
+              </Stack>
             ) : (
               <Stack gap="xl">
                 <TextInput
