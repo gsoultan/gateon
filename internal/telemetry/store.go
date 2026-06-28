@@ -25,6 +25,28 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
+// RedactHeaders masks sensitive headers like Authorization and X-Api-Key.
+func RedactHeaders(headers string) string {
+	if headers == "" {
+		return ""
+	}
+	lines := strings.Split(headers, "\n")
+	for i, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "authorization:") ||
+			strings.HasPrefix(lower, "x-api-key:") ||
+			strings.HasPrefix(lower, "cookie:") ||
+			strings.HasPrefix(lower, "set-cookie:") ||
+			strings.HasPrefix(lower, "x-auth-token:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				lines[i] = parts[0] + ": [REDACTED]"
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // AlertingHandler is a function type for alerting integration.
 type AlertingHandler func(*SecurityThreat)
 
@@ -782,9 +804,9 @@ func recordTraceToStore(id, operationName, serviceName, routeID string, duration
 		RequestURI:      requestURI,
 		JA3:             ja3,
 		JA4:             ja4,
-		RequestHeaders:  reqHeaders,
+		RequestHeaders:  RedactHeaders(reqHeaders),
 		RequestBody:     reqBody,
-		ResponseHeaders: respHeaders,
+		ResponseHeaders: RedactHeaders(respHeaders),
 		ResponseBody:    respBody,
 	}:
 	default:
@@ -800,6 +822,12 @@ func RecordSecurityThreat(t SecurityThreat) {
 	if t.Time.IsZero() {
 		t.Time = time.Now()
 	}
+
+	// Redact sensitive data before persistence and broadcasting
+	t.RequestHeaders = RedactHeaders(t.RequestHeaders)
+	t.ResponseHeaders = RedactHeaders(t.ResponseHeaders)
+	// We also redact the Details if it contains sensitive headers
+	t.Details = RedactHeaders(t.Details)
 
 	if t.ActionTaken == "" {
 		t.ActionTaken = "detected"

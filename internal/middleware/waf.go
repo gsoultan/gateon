@@ -14,8 +14,10 @@ import (
 
 	"github.com/corazawaf/coraza-coreruleset"
 	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/collection"
 	txhttp "github.com/corazawaf/coraza/v3/http"
 	"github.com/corazawaf/coraza/v3/types"
+	"github.com/corazawaf/coraza/v3/types/variables"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -115,6 +117,22 @@ func isGRPCRequest(r *http.Request) bool {
 	return strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 }
 
+const securityExclusionsDirective = `
+# CRS Exclusions for sensitive high-entropy headers (JWTs, API Keys)
+# These rules often false-positive on long base64 strings or crypt hashes.
+SecRuleUpdateTargetById 942100 "!REQUEST_HEADERS:Authorization"
+SecRuleUpdateTargetById 942100 "!REQUEST_HEADERS:X-Api-Key"
+SecRuleUpdateTargetById 942200 "!REQUEST_HEADERS:Authorization"
+SecRuleUpdateTargetById 942200 "!REQUEST_HEADERS:X-Api-Key"
+SecRuleUpdateTargetById 942260 "!REQUEST_HEADERS:Authorization"
+SecRuleUpdateTargetById 942260 "!REQUEST_HEADERS:X-Api-Key"
+SecRuleUpdateTargetById 941100 "!REQUEST_HEADERS:Authorization"
+SecRuleUpdateTargetById 941100 "!REQUEST_HEADERS:X-Api-Key"
+
+# Redact sensitive headers from Coraza audit log
+SecAction "id:900300,phase:1,nolog,pass,setvar:tx.redact_headers=Authorization,setvar:tx.redact_headers=X-Api-Key,setvar:tx.redact_headers=Cookie,setvar:tx.redact_headers=Set-Cookie"
+`
+
 var (
 	fastScanner = scanner.NewScanner([]string{
 		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ", "EXEC ", // SQLi
@@ -158,24 +176,22 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 Include @crs-setup.conf.example
 `, pl)
 
-		if cfg.AnomalyThreshold > 0 {
-			_, _ = fmt.Fprintf(&sb, `SecAction "id:900001,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d"
-`, cfg.AnomalyThreshold, cfg.AnomalyThreshold)
-		}
-
-		// Adaptive WAF: Reduce anomaly threshold for low reputation clients
-		sb.WriteString(`
-# Adaptive Anomaly Thresholds based on Gateon Reputation
-# If reputation < 80, threshold = 10 (Moderate)
-# If reputation < 50, threshold = 5 (Strict)
-# If reputation < 20, threshold = 2 (Critical/Paranoid)
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 80" "id:900010,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=10"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 50" "id:900011,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 20" "id:900012,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=2"
-`)
-
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
+
+		// Adaptive WAF: Adjust anomaly thresholds based on Gateon Reputation.
+		// Trustworthy clients (Reputation > 90) are given more room for high-entropy headers (JWTs).
+		// Unknown or low reputation clients are subject to strict enforcement.
+		// Rules are ordered progressively so the most specific match (highest reputation) wins.
+		sb.WriteString(`
+# Adaptive Anomaly Thresholds (Progressive Override)
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 0"  "id:900001,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=2"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 15" "id:900012,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900013,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=10"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 80" "id:900011,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=15"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 95" "id:900010,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=25"
+`)
+
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
 
 		// gRPC compatibility: REQUEST-901-INITIALIZATION sets a default
@@ -296,6 +312,7 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
     "id:100007,phase:2,deny,status:403,msg:'Ransomware file extension detected',tag:'ransomware',severity:CRITICAL"
 `)
 		}
+		sb.WriteString(securityExclusionsDirective)
 
 		// Blocking evaluation
 		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
@@ -399,10 +416,8 @@ SecAuditLog "%s"
 			"severity", mr.Rule().Severity().String(),
 			"message", mr.ErrorLog())
 
-		// IPS feature: automatically shun IPs that trigger critical security rules
-		if mr.Rule().Severity() <= types.RuleSeverityCritical && cfg.EbpfManager != nil {
-			_ = cfg.EbpfManager.ShunIP(mr.ClientIPAddress())
-		}
+		// Shunning is now handled in txWrapper.Close() with better heuristics
+		// to avoid false-positive L3/L4 blocks for reputable users.
 	})
 
 	waf, err := coraza.NewWAF(wafConfig)
@@ -410,7 +425,7 @@ SecAuditLog "%s"
 		return nil, fmt.Errorf("create WAF: %w", err)
 	}
 
-	wrappedWaf := &wafWrapper{WAF: waf, routeID: cfg.RouteID}
+	wrappedWaf := &wafWrapper{WAF: waf, routeID: cfg.RouteID, cfg: cfg}
 
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(wrappedWaf, next)
@@ -435,7 +450,8 @@ SecAuditLog "%s"
 			// Adaptive WAF: Adjust anomaly threshold based on client reputation
 			fingerprint := telemetry.GetDetailedFingerprint(r).Hash
 			reputation := telemetry.GetReputationScore(fingerprint)
-			r.Header.Set("X-Gateon-Reputation", fmt.Sprintf("%.2f", reputation))
+			// Use integer to avoid lexicographical comparison issues in SecLang
+			r.Header.Set("X-Gateon-Reputation", fmt.Sprintf("%d", int(reputation)))
 
 			// Deterministic Fast Path: Aho-Corasick & Entropy
 			// We check the URI (which includes the query string) plus the two
@@ -578,12 +594,14 @@ func isSafeHeader(name string) bool {
 type wafWrapper struct {
 	coraza.WAF
 	routeID string
+	cfg     WAFConfig
 }
 
 func (w *wafWrapper) NewTransaction() types.Transaction {
 	return &txWrapper{
 		Transaction: w.WAF.NewTransaction(),
 		routeID:     w.routeID,
+		cfg:         w.cfg,
 	}
 }
 
@@ -591,12 +609,14 @@ func (w *wafWrapper) NewTransactionWithID(id string) types.Transaction {
 	return &txWrapper{
 		Transaction: w.WAF.NewTransactionWithID(id),
 		routeID:     w.routeID,
+		cfg:         w.cfg,
 	}
 }
 
 type txWrapper struct {
 	types.Transaction
 	routeID string
+	cfg     WAFConfig
 }
 
 func (t *txWrapper) Close() error {
@@ -611,12 +631,17 @@ func (t *txWrapper) Close() error {
 		details := ""
 		clientIP := ""
 		uri := ""
+		isCritical := false
+
 		for _, rule := range t.MatchedRules() {
 			if clientIP == "" {
 				clientIP = rule.ClientIPAddress()
 			}
 			if uri == "" {
 				uri = rule.URI()
+			}
+			if rule.Rule().Severity() <= types.RuleSeverityCritical {
+				isCritical = true
 			}
 
 			// Always check all tags to find the best category
@@ -659,6 +684,52 @@ func (t *txWrapper) Close() error {
 
 		if clientIP != "" {
 			telemetry.GetAggregator().RecordWAFBlock(clientIP)
+
+			// IPS feature: automatically shun IPs at L3/L4 via eBPF.
+			// Heuristic: Shun only if it's a critical attack AND (reputation is low OR score is very high).
+			// This prevents a single false-positive on a JWT/header from shunning a whole office IP.
+			if t.cfg.EbpfManager != nil && isCritical {
+				repScore := 100.0
+				anomalyScore := 0
+
+				if ca, ok := t.Transaction.(interface {
+					GetCollection(variables.RuleVariable) collection.Collection
+				}); ok {
+					if c, ok := ca.GetCollection(variables.RequestHeaders).(collection.Keyed); ok {
+						if vals := c.Get("X-Gateon-Reputation"); len(vals) > 0 {
+							if f, err := strconv.ParseFloat(vals[0], 64); err == nil {
+								repScore = f
+							}
+						}
+					}
+					if c, ok := ca.GetCollection(variables.TX).(collection.Keyed); ok {
+						if vals := c.Get("inbound_anomaly_score"); len(vals) > 0 {
+							if s, err := strconv.Atoi(vals[0]); err == nil {
+								anomalyScore = s
+							}
+						}
+					}
+				}
+
+				// Shun conditions:
+				// 1. Critical attack from a low-reputation client (rep < 50)
+				// 2. High-confidence attack (score >= 20) regardless of reputation
+				// 3. Known honeypot/trap hit (ids in 100000 range)
+				shouldShun := repScore < 50 || anomalyScore >= 20
+				if !shouldShun {
+					for _, rule := range t.MatchedRules() {
+						id := rule.Rule().ID()
+						if id >= 100001 && id <= 100013 {
+							shouldShun = true
+							break
+						}
+					}
+				}
+
+				if shouldShun {
+					_ = t.cfg.EbpfManager.ShunIP(clientIP)
+				}
+			}
 		}
 
 		// Record security threat for telemetry and UI
