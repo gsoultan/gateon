@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/corazawaf/coraza/v3"
 	txhttp "github.com/corazawaf/coraza/v3/http"
 	"github.com/corazawaf/coraza/v3/types"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
@@ -297,17 +299,27 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
 		}
 	}
 
-	if cfg.AuditLogPath != "" {
-		auditEngine := "On"
-		if cfg.AuditLogRelevantOnly {
-			auditEngine = "RelevantOnly"
-		}
-		_, _ = fmt.Fprintf(&sb, `
+	// Coraza will not create the audit log's directory or file on its own; if the
+	// path doesn't already exist it silently fails to write. So Gateon resolves a
+	// sensible default when the operator leaves the field blank and provisions the
+	// folder + file here. A provisioning failure only disables the audit directive
+	// (e.g. read-only filesystem) — it never fails the whole WAF.
+	if auditPath := resolveAuditLogPath(cfg); auditPath != "" {
+		if err := ensureAuditLogFile(auditPath); err != nil {
+			logger.L.LogError("waf: could not provision audit log; auditing disabled for this WAF",
+				"path", auditPath, "route", cfg.RouteID, "error", err)
+		} else {
+			auditEngine := "On"
+			if cfg.AuditLogRelevantOnly {
+				auditEngine = "RelevantOnly"
+			}
+			_, _ = fmt.Fprintf(&sb, `
 SecAuditEngine %s
 SecAuditLogParts ABIJDEFHKZ
 SecAuditLogType Serial
 SecAuditLog "%s"
-`, auditEngine, strings.ReplaceAll(cfg.AuditLogPath, "\\", "/"))
+`, auditEngine, strings.ReplaceAll(auditPath, "\\", "/"))
+		}
 	}
 
 	if sb.Len() > 0 {
@@ -583,6 +595,51 @@ type fsWrapper struct {
 
 func (f fsWrapper) Open(name string) (fs.File, error) {
 	return f.FS.Open(strings.ReplaceAll(name, "\\", "/"))
+}
+
+// resolveAuditLogPath returns the audit log path to use. When the operator left
+// the field blank it derives a stable default under the Gateon data directory so
+// auditing "just works" without anyone having to hand-pick a writable path.
+func resolveAuditLogPath(cfg WAFConfig) string {
+	if p := strings.TrimSpace(cfg.AuditLogPath); p != "" {
+		return p
+	}
+	name := sanitizeAuditName(cfg.RouteID)
+	if name == "" {
+		name = "waf"
+	}
+	return filepath.Join(config.DataDir(), "audit", "waf", name+"_audit.log")
+}
+
+// sanitizeAuditName makes a route/middleware identifier safe to use as a filename
+// component (no path separators or other surprising characters).
+func sanitizeAuditName(s string) string {
+	s = strings.TrimSpace(s)
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return strings.Trim(b.String(), "._")
+}
+
+// ensureAuditLogFile creates the audit log's parent directory and the file itself
+// if they do not yet exist, so Coraza's SecAuditLog directive has somewhere to
+// write. It is idempotent and safe to call on every (re)build of the WAF.
+func ensureAuditLogFile(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create audit log dir %q: %w", dir, err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	if err != nil {
+		return fmt.Errorf("create audit log file %q: %w", path, err)
+	}
+	return f.Close()
 }
 
 // parseWAFConfig parses middleware config map into WAFConfig.

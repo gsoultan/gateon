@@ -258,12 +258,15 @@ export type User = {
   two_factor_enabled?: boolean;
   two_factor_secret?: string;
   recovery_codes?: string[];
+  disabled?: boolean;
+  two_factor_pending?: boolean;
 };
 
 export type LoginResponse = {
   token: string;
   user: User;
   two_factor_required?: boolean;
+  two_factor_setup_required?: boolean;
 };
 
 export type Setup2FARequest = {

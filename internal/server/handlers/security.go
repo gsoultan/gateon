@@ -58,7 +58,7 @@ type ClamAVPosture struct {
 // endpoints.
 func registerSecurityHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/security/posture", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		report := d.buildPostureReport(r.Context())
@@ -71,7 +71,7 @@ func registerSecurityHandlers(mux *http.ServeMux, d *Deps) {
 	// annotated with MITRE ATT&CK techniques. They are retained in-process so the
 	// Security Hub can surface them without an external SIEM.
 	mux.HandleFunc("GET /v1/security/incidents", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		limit := 100

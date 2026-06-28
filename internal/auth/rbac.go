@@ -27,6 +27,12 @@ const (
 	ResourceGlobal      Resource = "global"
 	ResourceUsers       Resource = "users"
 	ResourceConfig      Resource = "config"
+	// ResourceDiagnostics covers read-only observability: dashboards, metrics,
+	// traces, path metrics, circuit breaker, system logs, topology, and the
+	// Security Hub data feeds. It is separated from ResourceGlobal (the global
+	// configuration editor) so a read-only Viewer can watch the system without
+	// being able to read or change global settings.
+	ResourceDiagnostics Resource = "diagnostics"
 )
 
 var globalConfigGetter interface {
@@ -90,10 +96,14 @@ func allowedHardcoded(role string, action Action, resource Resource) bool {
 		if action != ActionRead {
 			return false
 		}
-		// Viewers can see general configuration but NOT system global config, users, or diagnostics.
+		// Viewers get read-only visibility into the routing/config surface plus all
+		// observability (dashboards, metrics, traces, path metrics, circuit breaker,
+		// system logs, topology, Security Hub) via ResourceDiagnostics. They still
+		// cannot read the global settings editor (ResourceGlobal) or users.
 		switch resource {
 		case ResourceRoutes, ResourceServices, ResourceEntryPoints,
-			ResourceMiddlewares, ResourceTLSOptions, ResourceCerts:
+			ResourceMiddlewares, ResourceTLSOptions, ResourceCerts,
+			ResourceDiagnostics:
 			return true
 		}
 		return false

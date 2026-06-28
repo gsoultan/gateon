@@ -20,6 +20,14 @@ func (s *ApiService) Login(_ context.Context, req *gateonv1.LoginRequest) (*gate
 				TwoFactorRequired: true,
 			}, nil
 		}
+		// Administrator mandated 2FA but the user hasn't enrolled: signal the client
+		// to run first-time enrollment. No token/cookie is issued yet.
+		if errors.Is(err, auth.ErrTwoFactorSetupRequired) {
+			return &gateonv1.LoginResponse{
+				User:                   user,
+				TwoFactorSetupRequired: true,
+			}, nil
+		}
 		return nil, err
 	}
 	return &gateonv1.LoginResponse{Token: token, User: user}, nil

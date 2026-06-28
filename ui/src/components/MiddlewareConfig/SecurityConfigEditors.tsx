@@ -236,12 +236,17 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
           <Divider label="Audit Logging" labelPosition="center" />
           <Stack gap="xs">
             <TextInput
-              label="Audit Log Path"
-              description="File path for Coraza audit logs (e.g. /var/log/gateon/waf_audit.log)"
-              placeholder="/var/log/gateon/waf_audit.log"
+              label="Audit Log Path (optional)"
+              description="Leave blank — Gateon automatically creates the folder and file and writes WAF audit events there. Only set this to override the default location."
+              placeholder="Auto: <data-dir>/audit/waf/<route>_audit.log"
               value={config.audit_log_path || ""}
               onChange={(e) => updateConfig("audit_log_path", e.currentTarget.value)}
             />
+            <Text size="xs" c="dimmed">
+              {config.audit_log_path
+                ? `Gateon will create this file and its parent folder if they don't exist.`
+                : `Default location: the Gateon data directory under audit/waf/. The folder and log file are created for you on save.`}
+            </Text>
             <Switch
               label="Relevant Only"
               description="Only log 'relevant' events (e.g. those that triggered a rule)"

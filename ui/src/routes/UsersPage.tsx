@@ -27,6 +27,8 @@ import {
   IconShieldLock,
   IconUsers,
   IconSearch,
+  IconBan,
+  IconUserCheck,
 } from "@tabler/icons-react";
 import { useUsers, apiFetch } from "../hooks/useGateon";
 import { useTableDensity } from "../hooks/useTableDensity";
@@ -81,9 +83,50 @@ export default function UsersPage() {
     pwOpen();
   };
 
+  const isAdmin = currentUser?.role === "admin";
+
+  // putUser persists a partial change while preserving the rest of the user's
+  // state, so toggling one flag never silently resets the others (the backend
+  // applies disabled and two_factor_pending from whatever the body contains).
+  const putUser = async (user: User, changes: Partial<User>) => {
+    try {
+      const res = await apiFetch("/v1/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          disabled: user.disabled ?? false,
+          two_factor_pending: user.two_factor_pending ?? false,
+          two_factor_enabled: user.two_factor_enabled ?? false,
+          ...changes,
+        }),
+      });
+      if (res.ok) refetch();
+    } catch (err) {
+      console.error("Failed to update user", err);
+    }
+  };
+
+  const handleToggleDisabled = (user: User) => {
+    putUser(user, { disabled: !user.disabled });
+  };
+
   const handle2FA = (user: User) => {
-    setTargetUser(user);
-    tfaOpen();
+    // Self-service: the account owner manages their own 2FA via the enrollment
+    // modal (only they ever see the secret).
+    if (currentUser?.id === user.id) {
+      setTargetUser(user);
+      tfaOpen();
+      return;
+    }
+    // Admin acting on another user: an admin can only MANDATE 2FA (set/clear the
+    // pending requirement); they never see the secret. The user enrolls on their
+    // next login. Mandating is a no-op once 2FA is already enabled.
+    if (isAdmin && !user.two_factor_enabled) {
+      putUser(user, { two_factor_pending: !user.two_factor_pending });
+    }
   };
 
   const handleCreate = () => {
@@ -179,6 +222,20 @@ export default function UsersPage() {
               You
             </Badge>
           )}
+          {user.disabled && (
+            <Badge size="xs" color="red" variant="light">
+              Disabled
+            </Badge>
+          )}
+          {user.two_factor_enabled ? (
+            <Badge size="xs" color="green" variant="light">
+              2FA
+            </Badge>
+          ) : user.two_factor_pending ? (
+            <Badge size="xs" color="orange" variant="light">
+              2FA pending
+            </Badge>
+          ) : null}
         </Group>
       </Table.Td>
       <Table.Td>
@@ -207,14 +264,49 @@ export default function UsersPage() {
               <IconKey size={16} />
             </ActionIcon>
           </Tooltip>
-          <Tooltip label="Two-factor authentication">
+          <Tooltip
+            label={
+              currentUser?.id === user.id
+                ? "Manage your two-factor authentication"
+                : user.two_factor_enabled
+                  ? "User has 2FA enabled"
+                  : user.two_factor_pending
+                    ? "2FA required — click to cancel requirement"
+                    : "Require this user to set up 2FA"
+            }
+          >
             <ActionIcon
               variant="subtle"
-              color={user.two_factor_enabled ? "green" : "gray"}
+              color={
+                user.two_factor_enabled
+                  ? "green"
+                  : user.two_factor_pending
+                    ? "orange"
+                    : "gray"
+              }
               onClick={() => handle2FA(user)}
-              disabled={currentUser?.id !== user.id}
+              disabled={
+                !(
+                  currentUser?.id === user.id ||
+                  (isAdmin && !user.two_factor_enabled)
+                )
+              }
             >
               <IconShieldLock size={16} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label={user.disabled ? "Enable user" : "Disable user"}>
+            <ActionIcon
+              variant="subtle"
+              color={user.disabled ? "green" : "orange"}
+              onClick={() => handleToggleDisabled(user)}
+              disabled={!isAdmin || currentUser?.id === user.id}
+            >
+              {user.disabled ? (
+                <IconUserCheck size={16} />
+              ) : (
+                <IconBan size={16} />
+              )}
             </ActionIcon>
           </Tooltip>
           <Tooltip label="Edit user">

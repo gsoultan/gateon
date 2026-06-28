@@ -122,8 +122,8 @@ func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier)
 		if !ok || claims == nil {
 			return false
 		}
-		// Only Admin and Operator can see logs
-		return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceGlobal)
+		// System logs are read-only observability: Admin, Operator, and Viewer.
+		return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceDiagnostics)
 	}
 
 	if verifier == nil {
@@ -145,7 +145,7 @@ func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier)
 	if !ok || claims == nil {
 		return false
 	}
-	return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceGlobal)
+	return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceDiagnostics)
 }
 
 // netInterfaceInfo describes one host network interface for the eBPF interface
@@ -245,7 +245,7 @@ func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInte
 
 func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/diagnostics", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		res, err := svc.GetDiagnostics(r.Context(), &gateonv1.GetDiagnosticsRequest{})
@@ -259,7 +259,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /v1/diagnostics/watch", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		SetSSEHeaders(w)
@@ -380,7 +380,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 	})
 	mux.HandleFunc("GET /v1/diag/sys", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -393,21 +393,21 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/limit-stats", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(telemetry.GetLimitStats())
 	})
 	mux.HandleFunc("GET /v1/diag/circuit-breaker/events", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(telemetry.GetCircuitBreakerEvents())
 	})
 	mux.HandleFunc("GET /v1/diag/agg-stats", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 
@@ -491,7 +491,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/path-stats", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -507,7 +507,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_ = json.NewEncoder(w).Encode(stats)
 	})
 	mux.HandleFunc("GET /v1/diag/metrics", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		limit := 50
@@ -538,7 +538,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		WriteJSON(w, http.StatusOK, snap)
 	})
 	mux.HandleFunc("GET /v1/diag/metrics/watch", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		SetSSEHeaders(w)
@@ -555,7 +555,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		for {
 			select {
 			case <-ticker.C:
-				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				// Match the non-watch /v1/diag/metrics budget so transient DB
+				// slowness doesn't deadline an otherwise-legitimate snapshot.
+				ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 				snap, err := telemetry.CollectMetricsSnapshot(ctx, 50, 0)
 				cancel()
 				if err != nil {
@@ -570,7 +572,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 	})
 	mux.HandleFunc("GET /v1/system/interfaces", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		WriteJSON(w, http.StatusOK, buildSystemInterfaces(r.Context(), svc))
@@ -630,7 +632,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/security-threats", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		limit := 50
@@ -650,7 +652,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /v1/diag/security-threats/watch", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		SetSSEHeaders(w)
@@ -679,7 +681,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 	})
 	mux.HandleFunc("GET /v1/security/reputations", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		limit := 20

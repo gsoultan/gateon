@@ -42,6 +42,20 @@ func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserReq
 	if err := s.Auth.UpsertUser(req.User); err != nil {
 		return &gateonv1.UpdateUserResponse{Success: false}, err
 	}
+	// UpsertUser only covers username/password/role; the disabled and
+	// admin-mandated-2FA flags are persisted via dedicated setters. UpsertUser
+	// populates req.User.Id when creating a new account.
+	if err := s.Auth.SetUserDisabled(req.User.Id, req.User.Disabled); err != nil {
+		return &gateonv1.UpdateUserResponse{Success: false}, err
+	}
+	// Only (re)assert a pending-2FA requirement; never clear an active enrollment.
+	// Clearing happens automatically once the user finishes enrollment, and a user
+	// who already has 2FA enabled must not be flipped back to "pending".
+	if !req.User.TwoFactorEnabled {
+		if err := s.Auth.SetTwoFactorPending(req.User.Id, req.User.TwoFactorPending); err != nil {
+			return &gateonv1.UpdateUserResponse{Success: false}, err
+		}
+	}
 	return &gateonv1.UpdateUserResponse{Success: true}, nil
 }
 

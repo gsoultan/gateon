@@ -596,6 +596,47 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
+	// First-time 2FA enrollment during login, used when an administrator mandated
+	// 2FA for an account that has not enrolled yet. It re-verifies the password (no
+	// session exists at this point), so the TOTP secret is only disclosed to
+	// someone who already passed the first factor. The client then completes
+	// enrollment via POST /v1/auth/2fa/verify with the user id and the TOTP code.
+	mux.HandleFunc("POST /v1/auth/2fa/enroll", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if d.AuthManager == nil {
+			WriteHTTPError(w, http.StatusServiceUnavailable, "auth not initialized")
+			return
+		}
+		var req struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		secret, qr, recovery, id, err := d.AuthManager.EnrollPending2FA(req.Username, req.Password)
+		if err != nil {
+			switch {
+			case errors.Is(err, auth.ErrAccountLocked):
+				WriteHTTPError(w, http.StatusTooManyRequests, err.Error())
+			case errors.Is(err, auth.ErrAccountDisabled):
+				WriteHTTPError(w, http.StatusForbidden, err.Error())
+			case errors.Is(err, auth.ErrInvalidCredentials):
+				logger.SecurityEvent("auth_2fa_enroll_failure", r, "invalid_credentials")
+				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+			default:
+				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             id,
+			"secret":         secret,
+			"qr_code_url":    qr,
+			"recovery_codes": recovery,
+		})
+	})
 	mux.HandleFunc("POST /v1/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.LoginRequest
@@ -615,7 +656,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		audit.Log(r.Context(), req.Username, "login", "auth", "User logged in", request.GetClientIP(r, true))
 
-		if !resp.TwoFactorRequired {
+		if !resp.TwoFactorRequired && !resp.TwoFactorSetupRequired {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
 			middleware.SetSessionCookie(w, resp.Token, 24*3600, r.TLS != nil)
 		}

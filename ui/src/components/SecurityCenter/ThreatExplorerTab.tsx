@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Card,
   Group,
@@ -14,6 +14,7 @@ import {
   Alert,
   Tooltip,
   Center,
+  Pagination,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -33,6 +34,8 @@ import { format } from "date-fns";
 import { getSeverityColor } from "../../utils/security";
 import { notifications } from "@mantine/notifications";
 
+const PAGE_SIZE = 15;
+
 export function ThreatExplorerTab() {
   const { data, isLoading, error, refetch } = useSecurityThreats(1000);
   const density = useTableDensity();
@@ -46,6 +49,7 @@ export function ThreatExplorerTab() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
   const [mitigatedFilter, setMitigatedFilter] = useState<string | null>("all");
+  const [page, setPage] = useState(1);
 
   const filteredThreats = useMemo(() => {
     if (!data?.threats) return [];
@@ -78,6 +82,19 @@ export function ThreatExplorerTab() {
     const cats = new Set(data.threats.map((t) => t.category).filter((c): c is string => !!c));
     return ["all", ...Array.from(cats)];
   }, [data?.threats]);
+
+  // Reset to the first page whenever the filtered result set changes (new filter,
+  // search term, or refreshed data) so the user never lands on an empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [search, categoryFilter, mitigatedFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredThreats.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedThreats = filteredThreats.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   const handleUnmitigate = async (e: React.MouseEvent, ip: string) => {
     e.stopPropagation();
@@ -176,7 +193,7 @@ export function ThreatExplorerTab() {
             </Table.Thead>
             <Table.Tbody>
               {filteredThreats.length > 0 ? (
-                filteredThreats.map((threat, index) => (
+                pagedThreats.map((threat, index) => (
                   <Table.Tr key={index} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(threat)}>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
@@ -247,6 +264,23 @@ export function ThreatExplorerTab() {
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
+
+        {filteredThreats.length > PAGE_SIZE && (
+          <Group justify="space-between" align="center" mt="md">
+            <Text size="xs" c="dimmed">
+              Showing {(currentPage - 1) * PAGE_SIZE + 1}–
+              {Math.min(currentPage * PAGE_SIZE, filteredThreats.length)} of{" "}
+              {filteredThreats.length}
+            </Text>
+            <Pagination
+              total={totalPages}
+              value={currentPage}
+              onChange={setPage}
+              size="sm"
+              radius="md"
+            />
+          </Group>
+        )}
       </Card>
 
       <SecurityAnomalyModal

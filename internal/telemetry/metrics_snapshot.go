@@ -807,7 +807,10 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 }
 
 func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily, limit, offset int) SecurityInsights {
-	threats := GetSecurityThreats(ctx, limit, offset)
+	// Use the lite (no-blob) query: RecentAnomalies on the dashboard never renders
+	// the full request/response header+body blobs, and fetching them on this hot,
+	// frequently-polled snapshot path is what trips the request deadline.
+	threats := GetSecurityThreatsLite(ctx, limit, offset)
 	total := CountSecurityThreats(ctx)
 	activeCount := int(GetActiveThreatsToday())
 
