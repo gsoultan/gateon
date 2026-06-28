@@ -21,29 +21,59 @@ type IPReputationStore struct {
 	integrations []reputationProvider
 }
 
+// ReputationClient is the interface for external IP reputation providers.
+type ReputationClient interface {
+	CheckIP(ctx context.Context, ip string) (int, error)
+}
+
 type reputationProvider struct {
 	config *gateonv1.IPReputationIntegration
-	client *AbuseIPDBClient // For now, only AbuseIPDB is supported
+	client ReputationClient
 }
 
 func NewIPReputationStore(cfg *gateonv1.IPReputationConfig) *IPReputationStore {
 	store := &IPReputationStore{
 		badIPs: make(map[string]float64),
-		config: cfg,
 	}
+	store.Reconfigure(cfg)
+	return store
+}
 
+// Reconfigure updates the store configuration and re-initializes integrations.
+func (s *IPReputationStore) Reconfigure(cfg *gateonv1.IPReputationConfig) {
+	s.mu.Lock()
+	s.config = cfg
+	s.integrations = nil
 	if cfg != nil {
 		for _, integration := range cfg.Integrations {
-			if integration.Enabled && integration.Type == "abuseipdb" {
-				store.integrations = append(store.integrations, reputationProvider{
+			if !integration.Enabled {
+				continue
+			}
+			switch integration.Type {
+			case "abuseipdb":
+				s.integrations = append(s.integrations, reputationProvider{
 					config: integration,
 					client: NewAbuseIPDBClient(integration.ApiKey),
+				})
+			case "virustotal":
+				s.integrations = append(s.integrations, reputationProvider{
+					config: integration,
+					client: NewVirusTotalClient(integration.ApiKey),
+				})
+			case "alienvault":
+				s.integrations = append(s.integrations, reputationProvider{
+					config: integration,
+					client: NewAlienVaultClient(integration.ApiKey),
 				})
 			}
 		}
 	}
+	s.mu.Unlock()
 
-	return store
+	if cfg != nil && cfg.Enabled {
+		// Trigger an update in background to pick up new feed URLs immediately
+		go s.update(context.Background())
+	}
 }
 
 func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {

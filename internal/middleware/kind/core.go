@@ -194,3 +194,27 @@ func Chain(middlewares ...Middleware) Middleware {
 		return next
 	}
 }
+
+// RealIP returns a middleware that resolves the real client IP and updates r.RemoteAddr.
+// This ensures that all downstream middlewares see the real client IP instead of a proxy IP.
+// It also ensures that the original scheme (http/https) is preserved via a context override
+// before r.RemoteAddr is changed, which would otherwise break trusted-proxy detection.
+func RealIP(trustCloudflare bool) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Resolve Client IP
+			clientIP := request.GetClientIP(r, trustCloudflare)
+
+			// If the immediate peer is a trusted proxy (including Cloudflare if enabled),
+			// capture the forwarded proto before we lose the peer IP in r.RemoteAddr.
+			if request.IsTrusted(r.RemoteAddr, trustCloudflare) {
+				if proto := request.NormalizeProto(r.Header.Get(request.HeaderXForwardedProto)); proto != "" {
+					r = r.WithContext(request.WithForwardedProto(r.Context(), proto))
+				}
+			}
+
+			r.RemoteAddr = clientIP
+			next.ServeHTTP(w, r)
+		})
+	}
+}

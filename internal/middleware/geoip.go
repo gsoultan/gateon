@@ -152,7 +152,7 @@ func GeoIPGlobalWithResolver(globalStore config.GlobalConfigStore, resolver func
 				return
 			}
 
-			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
 			country := resolver(clientIP)
 
 			// Add country to context for other middlewares to use

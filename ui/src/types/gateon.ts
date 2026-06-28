@@ -352,6 +352,7 @@ export type WafConfig = {
   clamav?: ClamavConfig;
   entropy_threshold?: number;
   disable_entropy?: boolean;
+  trust_cloudflare_headers?: boolean;
 };
 
 export type ClamavConfig = {

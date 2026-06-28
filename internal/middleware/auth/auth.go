@@ -11,6 +11,7 @@ import (
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -100,7 +101,7 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 
 		// Zero Trust Check
 		userID := fmt.Sprintf("%v", claims["sub"])
-		clientIP := request.GetClientIP(r, true)
+		clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
 		fp := telemetry.GenerateFingerprint(r)
 		if err := telemetry.CheckZeroTrust(userID, fp.Hash, clientIP, r); err != nil {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "zerotrust").Inc()

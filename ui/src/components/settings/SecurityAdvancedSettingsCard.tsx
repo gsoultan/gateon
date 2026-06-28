@@ -365,6 +365,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                               data={[
                                 { value: "abuseipdb", label: "AbuseIPDB" },
                                 { value: "virustotal", label: "VirusTotal" },
+                                { value: "alienvault", label: "AlienVault OTX" },
                               ]}
                               value={integration.type}
                               onChange={(val) => updateIntegration(index, { type: val || "" })}

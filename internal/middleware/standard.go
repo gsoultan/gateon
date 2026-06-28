@@ -160,7 +160,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RecordPathRequest(origHost, origPath, duration.Seconds(), totalBandwidthBytes)
 
 			// IP-based metrics
-			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			trust := config.EffectiveTrustCloudflare()
+			clientIP := request.GetClientIP(r, trust)
 
 			// Behavioral Fingerprinting
 			fingerprint := ""
@@ -171,7 +172,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 			status := getStatusString(sw.Status)
-			country := request.GetCountry(r)
+			country := request.GetCountry(r, trust)
 			if sw.Country != "" {
 				country = sw.Country
 			}
@@ -415,7 +416,7 @@ func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Requ
 // For Cloudflare, use IPFilterWithClientIP with a resolver that uses CF-Connecting-IP.
 func IPFilter(allowList, denyList []string) Middleware {
 	return IPFilterWithClientIP(allowList, denyList, func(r *http.Request) string {
-		return request.GetClientIP(r, request.TrustCloudflareFromEnv())
+		return request.GetClientIP(r, config.EffectiveTrustCloudflare())
 	})
 }
 

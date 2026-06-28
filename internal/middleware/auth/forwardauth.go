@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/request"
 )
 
@@ -120,7 +121,7 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" && cfg.TrustForwardHeader {
 				authReq.Header.Set("X-Forwarded-For", xff)
 			} else {
-				authReq.Header.Set("X-Forwarded-For", request.GetClientIP(r, request.TrustCloudflareFromEnv()))
+				authReq.Header.Set("X-Forwarded-For", request.GetClientIP(r, config.EffectiveTrustCloudflare()))
 			}
 
 			// Copy request headers

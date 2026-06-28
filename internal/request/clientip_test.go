@@ -100,6 +100,13 @@ func TestGetClientIP(t *testing.T) {
 			trustCloudflare: false,
 			want:            "70.41.3.18",
 		},
+		{
+			name:            "cf_trusted_builtin_ip",
+			remoteAddr:      "172.64.0.1:80",
+			headers:         map[string]string{HeaderCloudflareConnectingIP: "203.0.113.50"},
+			trustCloudflare: true,
+			want:            "203.0.113.50",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
