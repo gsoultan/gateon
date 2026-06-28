@@ -18,6 +18,7 @@ const (
 
 var (
 	fingerprintMap = make(map[net.Conn]Fingerprints)
+	addrMap        = make(map[string]Fingerprints)
 	mapMu          sync.RWMutex
 )
 
@@ -29,19 +30,39 @@ type Fingerprints struct {
 func GetFingerprints(conn net.Conn) Fingerprints {
 	mapMu.RLock()
 	defer mapMu.RUnlock()
-	return fingerprintMap[conn]
+	f, ok := fingerprintMap[conn]
+	if ok {
+		return f
+	}
+	// Fallback to remote address if pointer identity is lost due to wrapping
+	if conn != nil && conn.RemoteAddr() != nil {
+		return addrMap[conn.RemoteAddr().String()]
+	}
+	return Fingerprints{}
+}
+
+func GetFingerprintsByAddr(addr string) Fingerprints {
+	mapMu.RLock()
+	defer mapMu.RUnlock()
+	return addrMap[addr]
 }
 
 func SetFingerprints(conn net.Conn, f Fingerprints) {
 	mapMu.Lock()
 	defer mapMu.Unlock()
 	fingerprintMap[conn] = f
+	if conn != nil && conn.RemoteAddr() != nil {
+		addrMap[conn.RemoteAddr().String()] = f
+	}
 }
 
 func RemoveFingerprints(conn net.Conn) {
 	mapMu.Lock()
 	defer mapMu.Unlock()
 	delete(fingerprintMap, conn)
+	if conn != nil && conn.RemoteAddr() != nil {
+		delete(addrMap, conn.RemoteAddr().String())
+	}
 }
 
 // CalcFingerprints calculates a JA3-like fingerprint from ClientHelloInfo.

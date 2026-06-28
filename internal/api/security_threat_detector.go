@@ -165,6 +165,7 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		sequence []string
 		ua       string
 		ja3      string
+		ja4      string
 	}
 	ipData := make(map[string]*ipMetadata)
 	for _, tr := range data.Traces {
@@ -173,7 +174,7 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		}
 		meta, ok := ipData[tr.SourceIP]
 		if !ok {
-			meta = &ipMetadata{ua: tr.UserAgent, ja3: tr.JA3}
+			meta = &ipMetadata{ua: tr.UserAgent, ja3: tr.JA3, ja4: tr.JA4}
 			ipData[tr.SourceIP] = meta
 		}
 		// Skip consecutive duplicate paths (polling)
@@ -188,6 +189,10 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		ips        map[string]struct{}
 		userAgents map[string]struct{}
 		ja3s       map[string]struct{}
+		ja4s       map[string]struct{}
+		uaCount    int // How many IPs provided non-empty UA
+		ja3Count   int // How many IPs provided non-empty JA3
+		ja4Count   int // How many IPs provided non-empty JA4
 	}
 	signatureStats := make(map[string]*sigStats)
 	for ip, meta := range ipData {
@@ -203,15 +208,24 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 					ips:        make(map[string]struct{}),
 					userAgents: make(map[string]struct{}),
 					ja3s:       make(map[string]struct{}),
+					ja4s:       make(map[string]struct{}),
 				}
 				signatureStats[sig] = stats
 			}
-			stats.ips[ip] = struct{}{}
-			if meta.ua != "" {
-				stats.userAgents[meta.ua] = struct{}{}
-			}
-			if meta.ja3 != "" {
-				stats.ja3s[meta.ja3] = struct{}{}
+			if _, ok := stats.ips[ip]; !ok {
+				stats.ips[ip] = struct{}{}
+				if meta.ua != "" {
+					stats.userAgents[meta.ua] = struct{}{}
+					stats.uaCount++
+				}
+				if meta.ja3 != "" {
+					stats.ja3s[meta.ja3] = struct{}{}
+					stats.ja3Count++
+				}
+				if meta.ja4 != "" {
+					stats.ja4s[meta.ja4] = struct{}{}
+					stats.ja4Count++
+				}
 			}
 		}
 	}
@@ -229,15 +243,22 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		reasons := []string{fmt.Sprintf("%d distinct IPs", ipCount)}
 
 		// Signal: Identical User-Agent across multiple IPs
-		if len(stats.userAgents) == 1 {
+		// We only boost if at least 2 IPs provided a UA and they are all identical.
+		if len(stats.userAgents) == 1 && stats.uaCount >= 2 {
 			score += 40
 			reasons = append(reasons, "identical User-Agent")
 		}
 
 		// Signal: Identical JA3 fingerprint across multiple IPs
-		if len(stats.ja3s) == 1 {
+		if len(stats.ja3s) == 1 && stats.ja3Count >= 2 {
 			score += 40
 			reasons = append(reasons, "identical JA3 fingerprint")
+		}
+
+		// Signal: Identical JA4 fingerprint across multiple IPs
+		if len(stats.ja4s) == 1 && stats.ja4Count >= 2 {
+			score += 40
+			reasons = append(reasons, "identical JA4 fingerprint")
 		}
 
 		// Signal: Suspicious paths in the sequence

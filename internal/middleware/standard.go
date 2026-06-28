@@ -197,6 +197,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						f := GetFingerprints(conn)
 						ja3, ja4 = f.JA3, f.JA4
 					}
+					if ja3 == "" {
+						f := GetFingerprintsByAddr(r.RemoteAddr)
+						ja3, ja4 = f.JA3, f.JA4
+					}
 
 					// Fallback to headers if still empty
 					if ja3 == "" {
