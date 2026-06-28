@@ -2,19 +2,13 @@ import React from 'react';
 import { 
   Container, 
   Grid, 
-  Card, 
-  Text, 
+  Text,
   Title, 
   Group, 
   Stack, 
   Badge, 
-  ThemeIcon, 
-  SimpleGrid, 
-  Button, 
-  ActionIcon, 
-  Tooltip, 
-  Box, 
-  Paper, 
+  Button,
+  Paper,
   Alert, 
   Menu, 
   Loader, 
@@ -48,7 +42,7 @@ import { IncidentsTab } from '../components/SecurityCenter/IncidentsTab';
 import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { TimeDisplay } from '../components/TimeDisplay';
-import { getThreatColor, getSeverityColor } from '../utils/security';
+import { getThreatColor } from '../utils/security';
 import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
 import type { TrafficRangePreset } from '../utils/dashboard';
 
@@ -62,7 +56,7 @@ const TREND_RANGE_OPTIONS = [
 ];
 
 export default function SecurityCommandCenter() {
-  const [page, setPage] = React.useState(1);
+  const [page] = React.useState(1);
   const { data: metrics } = useMetricsSnapshot(10, page);
   const { data: status } = useGateonStatus();
   const [globalConfig, setGlobalConfig] = React.useState<GlobalConfig | null>(null);
