@@ -126,6 +126,10 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	}
 	ctx := context.Background()
 	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		// Calculate and store TLS fingerprints as early as possible
+		f := middleware.CalcFingerprints(hello)
+		middleware.SetFingerprints(hello.Conn, f)
+
 		sniHost := strings.TrimSpace(hello.ServerName)
 		if sniHost != "" {
 			// Strip port from SNI if present (RFC 6066 allows hostname only; some clients may send host:port)
@@ -183,10 +187,6 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					}
 					newCfg := tlsConfig.Clone()
 					newCfg.Certificates = certs
-
-					// Calculate and store TLS fingerprints
-					f := middleware.CalcFingerprints(hello)
-					middleware.SetFingerprints(hello.Conn, f)
 
 					if rt.Tls.OptionId != "" {
 						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
@@ -280,6 +280,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 						newCfg.ClientCAs = pool
 					}
 				}
+
 				return newCfg, nil
 			}
 		}
