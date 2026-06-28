@@ -11,6 +11,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -31,7 +32,7 @@ type ApiService struct {
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager
 	WafUpdater         *middleware.WAFUpdater
-	IPReputation       *IPReputationStore
+	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 }
 
@@ -179,9 +180,11 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		ClamAVManager:      cfg.ClamAVManager,
 	}
 
-	if cfg.Globals != nil {
+	if cfg.IPReputation != nil {
+		s.IPReputation = cfg.IPReputation
+	} else if cfg.Globals != nil {
 		if gc := cfg.Globals.Get(context.Background()); gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.IpReputation != nil {
-			s.IPReputation = NewIPReputationStore(gc.SecurityAdvanced.IpReputation)
+			s.IPReputation = reputation.NewIPReputationStore(gc.SecurityAdvanced.IpReputation)
 			s.IPReputation.Start(context.Background())
 		}
 	}

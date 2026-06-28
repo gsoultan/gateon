@@ -1,4 +1,4 @@
-package api
+package reputation
 
 import (
 	"bufio"
@@ -14,17 +14,36 @@ import (
 )
 
 type IPReputationStore struct {
-	mu      sync.RWMutex
-	badIPs  map[string]float64
-	badNets []*net.IPNet
-	config  *gateonv1.IPReputationConfig
+	mu           sync.RWMutex
+	badIPs       map[string]float64
+	badNets      []*net.IPNet
+	config       *gateonv1.IPReputationConfig
+	integrations []reputationProvider
+}
+
+type reputationProvider struct {
+	config *gateonv1.IPReputationIntegration
+	client *AbuseIPDBClient // For now, only AbuseIPDB is supported
 }
 
 func NewIPReputationStore(cfg *gateonv1.IPReputationConfig) *IPReputationStore {
-	return &IPReputationStore{
+	store := &IPReputationStore{
 		badIPs: make(map[string]float64),
 		config: cfg,
 	}
+
+	if cfg != nil {
+		for _, integration := range cfg.Integrations {
+			if integration.Enabled && integration.Type == "abuseipdb" {
+				store.integrations = append(store.integrations, reputationProvider{
+					config: integration,
+					client: NewAbuseIPDBClient(integration.ApiKey),
+				})
+			}
+		}
+	}
+
+	return store
 }
 
 func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
@@ -47,6 +66,52 @@ func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
 	}
 
 	return false, 0
+}
+
+// SetIPScore manually sets the reputation score for an IP (primarily for testing or internal overrides).
+func (s *IPReputationStore) SetIPScore(ip string, score float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.badIPs == nil {
+		s.badIPs = make(map[string]float64)
+	}
+	s.badIPs[ip] = score
+}
+
+// GetExternalScore checks external integrations for the given IP.
+// It returns the highest confidence score found and the name of the provider.
+func (s *IPReputationStore) GetExternalScore(ctx context.Context, ip string) (int, string) {
+	s.mu.RLock()
+	integrations := s.integrations
+	s.mu.RUnlock()
+
+	maxScore := 0
+	bestProvider := ""
+
+	for _, p := range integrations {
+		if p.client != nil {
+			score, err := p.client.CheckIP(ctx, ip)
+			if err != nil {
+				logger.L.LogWarn("failed to check IP in external provider", "provider", p.config.Name, "error", err)
+				continue
+			}
+			if score > maxScore {
+				maxScore = score
+				bestProvider = p.config.Name
+			}
+		}
+	}
+
+	return maxScore, bestProvider
+}
+
+func (s *IPReputationStore) GetBlockThreshold() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.config != nil && s.config.BlockThreshold > 0 {
+		return s.config.BlockThreshold
+	}
+	return 80.0 // Default
 }
 
 func (s *IPReputationStore) Start(ctx context.Context) {

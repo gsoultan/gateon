@@ -626,12 +626,16 @@ func init() {
 	})
 
 	Register(26, "add_indices_to_telemetry_tables", func(db *sql.DB, dialect Dialect) error {
+		tracesExists := TableExists(db, dialect, "traces")
 		queries := []string{
 			`CREATE INDEX IF NOT EXISTS idx_security_threats_timestamp ON security_threats(timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);`,
 			`CREATE INDEX IF NOT EXISTS idx_traces_path ON traces(path);`,
 		}
 		for _, q := range queries {
+			if strings.Contains(q, " ON traces(") && !tracesExists {
+				continue
+			}
 			if _, err := db.Exec(q); err != nil {
 				return err
 			}
@@ -778,6 +782,7 @@ func init() {
 		// These indices improve performance for dashboard aggregations and security lookups.
 		// Note: CREATE INDEX IF NOT EXISTS is supported by SQLite and Postgres (9.5+).
 		// For MySQL/MariaDB, IF NOT EXISTS is followed here for consistency with earlier migrations.
+		tracesExists := TableExists(db, dialect, "traces")
 		queries := []string{
 			`CREATE INDEX IF NOT EXISTS idx_security_threats_source_ip ON security_threats(source_ip);`,
 			`CREATE INDEX IF NOT EXISTS idx_security_threats_type ON security_threats(type);`,
@@ -800,7 +805,120 @@ func init() {
 			`CREATE INDEX IF NOT EXISTS idx_traces_service_name ON traces(service_name);`,
 		}
 		for _, q := range queries {
+			if strings.Contains(q, " ON traces(") && !tracesExists {
+				continue
+			}
 			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	Register(33, "ensure_traces_table_exists", func(db *sql.DB, dialect Dialect) error {
+		// Re-create the traces table if it was dropped in previous versions.
+		// This ensures compatibility and avoids errors in migrations or external tools.
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `CREATE TABLE IF NOT EXISTS traces (
+				id VARCHAR(255) PRIMARY KEY,
+				operation_name TEXT NOT NULL,
+				service_name TEXT NOT NULL,
+				duration_ms DOUBLE PRECISION NOT NULL,
+				timestamp TIMESTAMP NOT NULL,
+				status VARCHAR(20) NOT NULL,
+				path TEXT NOT NULL,
+				source_ip TEXT NOT NULL DEFAULT '',
+				country_code VARCHAR(5) NOT NULL DEFAULT '',
+				user_agent TEXT NOT NULL DEFAULT '',
+				method TEXT NOT NULL DEFAULT '',
+				referer TEXT NOT NULL DEFAULT '',
+				request_uri TEXT NOT NULL DEFAULT '',
+				ja3 TEXT NOT NULL DEFAULT '',
+				ja4 TEXT NOT NULL DEFAULT '',
+				request_headers TEXT NOT NULL DEFAULT '',
+				request_body TEXT NOT NULL DEFAULT '',
+				response_headers TEXT NOT NULL DEFAULT '',
+				response_body TEXT NOT NULL DEFAULT '',
+				fingerprint TEXT NOT NULL DEFAULT '',
+				route_id TEXT NOT NULL DEFAULT ''
+			);`
+		case DriverMySQL:
+			query = `CREATE TABLE IF NOT EXISTS traces (
+				id VARCHAR(255) PRIMARY KEY,
+				operation_name TEXT NOT NULL,
+				service_name TEXT NOT NULL,
+				duration_ms DOUBLE PRECISION NOT NULL,
+				timestamp TIMESTAMP NOT NULL,
+				status VARCHAR(20) NOT NULL,
+				path TEXT NOT NULL,
+				source_ip TEXT NOT NULL DEFAULT '',
+				country_code VARCHAR(5) NOT NULL DEFAULT '',
+				user_agent TEXT NOT NULL DEFAULT '',
+				method TEXT NOT NULL DEFAULT '',
+				referer TEXT NOT NULL DEFAULT '',
+				request_uri TEXT NOT NULL DEFAULT '',
+				ja3 TEXT NOT NULL DEFAULT '',
+				ja4 TEXT NOT NULL DEFAULT '',
+				request_headers LONGTEXT NOT NULL DEFAULT '',
+				request_body LONGTEXT NOT NULL DEFAULT '',
+				response_headers LONGTEXT NOT NULL DEFAULT '',
+				response_body LONGTEXT NOT NULL DEFAULT '',
+				fingerprint VARCHAR(255) NOT NULL DEFAULT '',
+				route_id VARCHAR(255) NOT NULL DEFAULT ''
+			);`
+		default: // sqlite
+			query = `CREATE TABLE IF NOT EXISTS traces (
+				id TEXT PRIMARY KEY,
+				operation_name TEXT NOT NULL,
+				service_name TEXT NOT NULL,
+				duration_ms REAL NOT NULL,
+				timestamp DATETIME NOT NULL,
+				status TEXT NOT NULL,
+				path TEXT NOT NULL,
+				source_ip TEXT NOT NULL DEFAULT '',
+				country_code TEXT NOT NULL DEFAULT '',
+				user_agent TEXT NOT NULL DEFAULT '',
+				method TEXT NOT NULL DEFAULT '',
+				referer TEXT NOT NULL DEFAULT '',
+				request_uri TEXT NOT NULL DEFAULT '',
+				ja3 TEXT NOT NULL DEFAULT '',
+				ja4 TEXT NOT NULL DEFAULT '',
+				request_headers TEXT NOT NULL DEFAULT '',
+				request_body TEXT NOT NULL DEFAULT '',
+				response_headers TEXT NOT NULL DEFAULT '',
+				response_body TEXT NOT NULL DEFAULT '',
+				fingerprint TEXT NOT NULL DEFAULT '',
+				route_id TEXT NOT NULL DEFAULT ''
+			);`
+		}
+		if _, err := db.Exec(query); err != nil {
+			return err
+		}
+
+		// Ensure route_id exists even if the table already existed (as it was missed in earlier migrations).
+		var alterQuery string
+		switch dialect.Driver {
+		case DriverPostgres:
+			alterQuery = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_id TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			alterQuery = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_id VARCHAR(255) NOT NULL DEFAULT '';`
+		default: // sqlite
+			alterQuery = `ALTER TABLE traces ADD COLUMN route_id TEXT NOT NULL DEFAULT '';`
+		}
+		_, _ = db.Exec(alterQuery)
+
+		// Re-ensure indexes exist for the (possibly newly recreated) traces table.
+		indexes := []string{
+			`CREATE INDEX IF NOT EXISTS idx_traces_timestamp ON traces(timestamp);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_service_name ON traces(service_name);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(status);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_path ON traces(path);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_operation_name ON traces(operation_name);`,
+		}
+		for _, idxQuery := range indexes {
+			if _, err := db.Exec(idxQuery); err != nil {
 				return err
 			}
 		}

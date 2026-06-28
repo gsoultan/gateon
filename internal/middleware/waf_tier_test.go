@@ -12,7 +12,7 @@ import (
 func buildTierWAF(t *testing.T, waf *gateonv1.WafConfig) http.Handler {
 	t.Helper()
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{Waf: waf}}
-	f := NewFactory(nil, store, nil, ".")
+	f := NewFactory(nil, store, nil, nil, ".")
 	mw, err := f.CreateGlobalWAF()
 	if err != nil {
 		t.Fatalf("CreateGlobalWAF: %v", err)

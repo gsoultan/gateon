@@ -24,6 +24,7 @@ import (
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/tui"
@@ -156,10 +157,18 @@ func main() {
 	// configured via GATEON_SIEM_*) export them to an external SIEM.
 	startThreatPipeline(ctx, version(), ebpfHolder)
 
+	// Initialize the reputation store if enabled.
+	var ipReputation *reputation.IPReputationStore
+	if gc := globalReg.Get(ctx); gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.IpReputation != nil {
+		ipReputation = reputation.NewIPReputationStore(gc.SecurityAdvanced.IpReputation)
+		ipReputation.Start(ctx)
+	}
+
 	port := getPort()
 	s, err := server.NewServer(
 		server.WithLogger(logger.Default()),
 		server.WithGlobalRegistry(globalReg),
+		server.WithIPReputation(ipReputation),
 		server.WithAuthManager(authManager),
 		server.WithEbpfManager(ebpfHolder),
 		server.WithWafUpdater(wafUpdater),

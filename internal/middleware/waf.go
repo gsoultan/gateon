@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/scanner"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -65,6 +66,7 @@ type WAFConfig struct {
 	AuditLogPath             string  // Path to audit log file
 	AuditLogRelevantOnly     bool    // Only log relevant transactions
 	EbpfManager              ebpf.Manager
+	Reputation               *reputation.IPReputationStore
 	AllowedAdminIps          []string // IPs allowed to access WP admin
 	RulesPath                string   // Path to external WAF rules (CRS)
 
@@ -218,6 +220,7 @@ SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 20" "id:900012,phase:1,nolog,pa
 			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf\n")
 		}
 		if cfg.EnableIPReputation {
+			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-IP-Reputation-Block \"@eq 1\" \"id:910000,phase:1,nolog,pass,setvar:tx.ip_reputation_block_flag=1\"\n")
 			// REQUEST-910-IP-REPUTATION.conf is missing in some CRS 4.0 distributions.
 			// We provide a basic rule that blocks based on the ip_reputation_block_flag.
 			// We use phase:2 to ensure it catches variables set in phase:1 directives.
@@ -456,6 +459,17 @@ SecAuditLog "%s"
 			// Deterministic Trace Correlation
 			traceID := telemetry.GetCachedJA4H(r) // Use JA4H as a deterministic trace correlation component if OTel is missing
 			r.Header.Set("X-Gateon-Fingerprint", traceID)
+
+			// Global IP Reputation check
+			if cfg.EnableIPReputation && cfg.Reputation != nil {
+				clientIP := request.GetClientIP(r, cfg.TrustCloudflare)
+				if bad, score := cfg.Reputation.IsBad(clientIP); bad {
+					r.Header.Set("X-Gateon-IP-Reputation-Score", fmt.Sprintf("%.2f", score))
+					if score >= cfg.Reputation.GetBlockThreshold() {
+						r.Header.Set("X-Gateon-IP-Reputation-Block", "1")
+					}
+				}
+			}
 
 			wafHandler.ServeHTTP(w, r)
 		})

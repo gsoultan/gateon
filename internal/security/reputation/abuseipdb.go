@@ -1,4 +1,4 @@
-package api
+package reputation
 
 import (
 	"context"
@@ -29,12 +29,16 @@ type AbuseIPDBResponse struct {
 }
 
 type AbuseIPDBClient struct {
-	APIKey string
-	cache  sync.Map
+	APIKey  string
+	BaseURL string
+	cache   sync.Map
 }
 
 func NewAbuseIPDBClient(apiKey string) *AbuseIPDBClient {
-	return &AbuseIPDBClient{APIKey: apiKey}
+	return &AbuseIPDBClient{
+		APIKey:  apiKey,
+		BaseURL: "https://api.abuseipdb.com/api/v2/check",
+	}
 }
 
 func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
@@ -48,7 +52,7 @@ func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.abuseipdb.com/api/v2/check", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL, nil)
 	if err != nil {
 		return 0, err
 	}

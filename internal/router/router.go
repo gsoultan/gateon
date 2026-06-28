@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -270,9 +271,9 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 }
 
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
-func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager) http.Handler {
+func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore) http.Handler {
 	var chain []middleware.Middleware
-	mwFactory := middleware.NewFactory(redisClient, globalStore, ebpfManager, ".")
+	mwFactory := middleware.NewFactory(redisClient, globalStore, ebpfManager, reputation, ".")
 	// Record the trusted route type so the WAF applies gRPC transport relaxations
 	// only to operator-declared gRPC routes, not based on a spoofable request header.
 	mwFactory.SetRouteType(rt.Type)

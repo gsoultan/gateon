@@ -25,6 +25,7 @@ type Server struct {
 	EbpfManager   ebpf.Manager
 	RedisClient   redis.Client
 	TLSManager    gtls.TLSManager
+	IPReputation  any // reputation.IPReputationStore
 	WafUpdater    any // middleware.WAFUpdater (interface to avoid cyclic import)
 	ClamAVManager any // security.ClamAVManager
 	Logger        logger.Logger
@@ -38,7 +39,7 @@ type Server struct {
 
 func (s *Server) proxyCache() *ProxyCache {
 	s.cacheOnce.Do(func() {
-		s.cache = NewProxyCache(s.RouteStore, s.ServiceStore, s.MwStore, s.RedisClient, s.GlobalStore, s.EbpfManager)
+		s.cache = NewProxyCache(s.RouteStore, s.ServiceStore, s.MwStore, s.RedisClient, s.GlobalStore, s.EbpfManager, s.IPReputation)
 	})
 	return s.cache
 }

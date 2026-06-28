@@ -7,6 +7,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/tls"
 )
 
@@ -25,5 +26,6 @@ type ApiServiceConfig struct {
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager
 	WafUpdater         *middleware.WAFUpdater
+	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 }

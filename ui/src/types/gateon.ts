@@ -497,6 +497,16 @@ export type IPReputationConfig = {
   feed_urls?: string[];
   update_interval_hours?: number;
   block_threshold?: number;
+  integrations?: IPReputationIntegration[];
+};
+
+export type IPReputationIntegration = {
+  id: string;
+  name: string;
+  type: string; // "abuseipdb", "virustotal", etc.
+  api_key: string;
+  enabled: boolean;
+  confidence_threshold?: number;
 };
 
 export type DeceptionConfig = {

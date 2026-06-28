@@ -13,6 +13,11 @@ import {
   TagsInput,
   SimpleGrid,
   Paper,
+  ActionIcon,
+  PasswordInput,
+  Select,
+  Checkbox,
+  Button,
 } from "@mantine/core";
 import {
   IconShieldLock,
@@ -22,8 +27,10 @@ import {
   IconBrain,
   IconLockSearch,
   IconDatabase,
+  IconTrash,
+  IconPlus,
 } from "@tabler/icons-react";
-import type { GlobalConfig, SecurityAdvancedConfig } from "../../types/gateon";
+import type { GlobalConfig, SecurityAdvancedConfig, IPReputationIntegration } from "../../types/gateon";
 
 interface SecurityAdvancedSettingsCardProps {
   config: GlobalConfig;
@@ -49,6 +56,31 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
         },
       },
     });
+  };
+
+  const updateIntegration = (index: number, val: Partial<IPReputationIntegration>) => {
+    const integrations = [...(security.ip_reputation?.integrations || [])];
+    integrations[index] = { ...integrations[index], ...val };
+    updateSection("ip_reputation", { integrations });
+  };
+
+  const addIntegration = () => {
+    const integrations = [...(security.ip_reputation?.integrations || [])];
+    integrations.push({
+      id: Math.random().toString(36).substring(7),
+      name: "AbuseIPDB",
+      type: "abuseipdb",
+      api_key: "",
+      enabled: true,
+      confidence_threshold: 80,
+    });
+    updateSection("ip_reputation", { integrations });
+  };
+
+  const removeIntegration = (index: number) => {
+    const integrations = [...(security.ip_reputation?.integrations || [])];
+    integrations.splice(index, 1);
+    updateSection("ip_reputation", { integrations });
   };
 
   return (
@@ -301,6 +333,84 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                       decimalScale={1}
                     />
                   </SimpleGrid>
+
+                  <Divider label="External Integrations" labelPosition="center" />
+                  <Stack gap="xs">
+                    {(security.ip_reputation?.integrations || []).map((integration, index) => (
+                      <Paper key={integration.id || index} withBorder p="sm" radius="sm">
+                        <Stack gap="xs">
+                          <Group justify="space-between">
+                            <Text size="sm" fw={500}>
+                              {integration.name || "New Integration"}
+                            </Text>
+                            <ActionIcon
+                              color="red"
+                              variant="subtle"
+                              onClick={() => removeIntegration(index)}
+                              disabled={disabled}
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Group>
+                          <SimpleGrid cols={2}>
+                            <TextInput
+                              label="Name"
+                              value={integration.name}
+                              onChange={(e) => updateIntegration(index, { name: e.currentTarget.value })}
+                              size="xs"
+                              disabled={disabled}
+                            />
+                            <Select
+                              label="Type"
+                              data={[
+                                { value: "abuseipdb", label: "AbuseIPDB" },
+                                { value: "virustotal", label: "VirusTotal" },
+                              ]}
+                              value={integration.type}
+                              onChange={(val) => updateIntegration(index, { type: val || "" })}
+                              size="xs"
+                              disabled={disabled}
+                            />
+                          </SimpleGrid>
+                          <PasswordInput
+                            label="API Key"
+                            value={integration.api_key}
+                            onChange={(e) => updateIntegration(index, { api_key: e.currentTarget.value })}
+                            size="xs"
+                            disabled={disabled}
+                          />
+                          <Group grow>
+                            <NumberInput
+                              label="Confidence Threshold"
+                              description="Score above which to consider IP malicious."
+                              value={integration.confidence_threshold}
+                              onChange={(val) => updateIntegration(index, { confidence_threshold: Number(val) })}
+                              size="xs"
+                              min={0}
+                              max={100}
+                              disabled={disabled}
+                            />
+                            <Checkbox
+                              label="Enabled"
+                              mt="xl"
+                              checked={integration.enabled}
+                              onChange={(e) => updateIntegration(index, { enabled: e.currentTarget.checked })}
+                              disabled={disabled}
+                            />
+                          </Group>
+                        </Stack>
+                      </Paper>
+                    ))}
+                    <Button
+                      variant="light"
+                      size="xs"
+                      leftSection={<IconPlus size={14} />}
+                      onClick={addIntegration}
+                      disabled={disabled}
+                    >
+                      Add Reputation Integration
+                    </Button>
+                  </Stack>
                 </Stack>
               )}
             </Stack>

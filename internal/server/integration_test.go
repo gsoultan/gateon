@@ -28,7 +28,7 @@ import (
 func handlerDeps(s *Server) *handlers.Deps {
 	l4Resolver := l4.NewResolver(s.RouteStore, s.ServiceStore)
 	proxyInvalidator := NewServerProxyInvalidator(s, l4Resolver, s.RouteStore)
-	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ".")
+	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, nil, ".")
 	return &handlers.Deps{
 		RouteService:   route.NewService(s.RouteStore, proxyInvalidator, s.Logger),
 		ServiceService: service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger),
