@@ -794,9 +794,6 @@ func recordTraceToStore(id, operationName, serviceName, routeID string, duration
 
 // RecordSecurityThreat attempts to enqueue a security threat.
 func RecordSecurityThreat(t SecurityThreat) {
-	if store == nil {
-		return
-	}
 	if t.ID == "" {
 		t.ID = uuid.NewString()
 	}
@@ -815,6 +812,20 @@ func RecordSecurityThreat(t SecurityThreat) {
 
 	if t.ASN == "" && t.SourceIP != "" {
 		t.ASN = ResolveASN(t.SourceIP)
+	}
+
+	// Alerting and Broadcasting should work even without a persistent store (e.g. in tests)
+	alertMu.RLock()
+	h := onThreatAlert
+	alertMu.RUnlock()
+	if h != nil {
+		h(&t)
+	}
+
+	ThreatBroadcaster.Broadcast(t)
+
+	if store == nil {
+		return
 	}
 
 	if store.scoreCache != nil {
@@ -848,15 +859,6 @@ func RecordSecurityThreat(t SecurityThreat) {
 		ActiveThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium")).Inc()
 		store.currentActiveToday.Add(1)
 	}
-
-	alertMu.RLock()
-	h := onThreatAlert
-	alertMu.RUnlock()
-	if h != nil {
-		h(&t)
-	}
-
-	ThreatBroadcaster.Broadcast(t)
 
 	select {
 	case store.threatInCh <- t:
