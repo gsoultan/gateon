@@ -11,6 +11,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/yara"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -20,12 +21,13 @@ type Factory struct {
 	redisClient redis.Client
 	globalStore config.GlobalConfigStore
 	ebpfManager ebpf.Manager
+	reputation  *reputation.IPReputationStore
 	dataDir     string
 	routeType   string // trusted route type (e.g. "grpc"); empty = treat as plain HTTP
 }
 
-func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, dataDir string) *Factory {
-	return &Factory{redisClient: redisClient, globalStore: globalStore, ebpfManager: ebpfManager, dataDir: dataDir}
+func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore, dataDir string) *Factory {
+	return &Factory{redisClient: redisClient, globalStore: globalStore, ebpfManager: ebpfManager, reputation: reputation, dataDir: dataDir}
 }
 
 // SetRouteType records the trusted route type for the route this factory builds

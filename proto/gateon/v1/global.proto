@@ -97,6 +97,16 @@ message IPReputationConfig {
   repeated string feed_urls = 2;
   int32 update_interval_hours = 3;
   double block_threshold = 4;
+  repeated IPReputationIntegration integrations = 5;
+}
+
+message IPReputationIntegration {
+  string id = 1;
+  string name = 2;
+  string type = 3; // "abuseipdb", "virustotal", etc.
+  string api_key = 4;
+  bool enabled = 5;
+  int32 confidence_threshold = 6;
 }
 
 message DeceptionConfig {

@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -55,6 +56,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 	fimScanner := startFIM(ctx, &wg)
 
+	var ipReputation *reputation.IPReputationStore
+	if s.IPReputation != nil {
+		ipReputation = s.IPReputation.(*reputation.IPReputationStore)
+	}
+
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Version:            s.Version,
 		Routes:             s.RouteStore,
@@ -69,12 +75,13 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		RouteStatsProvider: s.GetRouteStats,
 		EbpfManager:        s.EbpfManager,
 		WafUpdater:         wafUpdater,
+		IPReputation:       ipReputation,
 		ClamAVManager:      clamavManager,
 	})
 	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)
 	epService := dentrypoint.NewService(s.EpStore, s.Logger)
-	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ".")
+	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ipReputation, ".")
 	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger)
 	tlsOptService := dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger)
 	canaryService := canary.NewService(serviceService, s.Logger)

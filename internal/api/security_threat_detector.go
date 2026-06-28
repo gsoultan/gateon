@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -19,10 +20,9 @@ var (
 
 // SecurityThreatDetector detects potential security threats based on multiple signals.
 type SecurityThreatDetector struct {
-	Threshold    float64
-	ThreatClient *AbuseIPDBClient
-	Reputation   *IPReputationStore
-	Config       *gateonv1.BehavioralConfig
+	Threshold  float64
+	Reputation *reputation.IPReputationStore
+	Config     *gateonv1.BehavioralConfig
 }
 
 func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
@@ -84,10 +84,10 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		score += d.analyzeDirectoryBusting(stats, &reasons)
 
 		// External Threat Intelligence
-		if d.ThreatClient != nil && (score > 0 || stats.TotalRequests > 10) {
-			if abuseScore, err := d.ThreatClient.CheckIP(ctx, ip); err == nil && abuseScore > 20 {
+		if d.Reputation != nil && (score > 0 || stats.TotalRequests > 10) {
+			if abuseScore, provider := d.Reputation.GetExternalScore(ctx, ip); abuseScore > 20 {
 				score += abuseScore / 2
-				reasons = append(reasons, fmt.Sprintf("External threat feed (AbuseIPDB) confidence: %d%%", abuseScore))
+				reasons = append(reasons, fmt.Sprintf("External threat feed (%s) confidence: %d%%", provider, abuseScore))
 			}
 		}
 

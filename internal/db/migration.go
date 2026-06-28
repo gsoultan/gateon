@@ -87,3 +87,23 @@ func markApplied(db *sql.DB, dialect Dialect, id int, name string) error {
 	_, err := db.Exec(query, id, name)
 	return err
 }
+
+// TableExists returns true if the specified table exists in the database.
+func TableExists(db *sql.DB, dialect Dialect, name string) bool {
+	var query string
+	switch dialect.Driver {
+	case DriverPostgres:
+		query = "SELECT 1 FROM information_schema.tables WHERE table_name = ?"
+	case DriverMySQL:
+		query = "SHOW TABLES LIKE ?"
+	default: // sqlite
+		query = "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?"
+	}
+
+	rows, err := db.Query(dialect.Rebind(query), name)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	return rows.Next()
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/router"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -22,6 +23,7 @@ type ProxyCache struct {
 	mwStore       config.MiddlewareStore
 	globalStore   config.GlobalConfigStore
 	ebpfManager   ebpf.Manager
+	reputation    *reputation.IPReputationStore
 	redisClient   redis.Client
 	proxies       map[string]http.Handler
 	proxyHandlers map[string]*proxy.ProxyHandler
@@ -36,13 +38,16 @@ func NewProxyCache(
 	redisClient redis.Client,
 	globalStore config.GlobalConfigStore,
 	ebpfManager ebpf.Manager,
+	ipReputation any,
 ) *ProxyCache {
+	rep, _ := ipReputation.(*reputation.IPReputationStore)
 	return &ProxyCache{
 		routeStore:    routeStore,
 		serviceStore:  serviceStore,
 		mwStore:       mwStore,
 		globalStore:   globalStore,
 		ebpfManager:   ebpfManager,
+		reputation:    rep,
 		redisClient:   redisClient,
 		proxies:       make(map[string]http.Handler),
 		proxyHandlers: make(map[string]*proxy.ProxyHandler),
@@ -87,7 +92,7 @@ func (c *ProxyCache) GetOrCreate(rt *gateonv1.Route) http.Handler {
 		SetStripCORS(stripCORS).
 		Build()
 	c.proxyHandlers[rt.Id] = pHandler
-	h = router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager)
+	h = router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)
 	c.proxies[rt.Id] = h
 	return h
 }

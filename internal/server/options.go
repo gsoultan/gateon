@@ -117,6 +117,13 @@ func WithClamAVManager(m any) ServerOption {
 	}
 }
 
+func WithIPReputation(r any) ServerOption {
+	return func(s *Server) error {
+		s.IPReputation = r
+		return nil
+	}
+}
+
 // WithLogger sets the logger.
 func WithLogger(l logger.Logger) ServerOption {
 	return func(s *Server) error {

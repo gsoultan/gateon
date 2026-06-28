@@ -25,7 +25,7 @@ func TestCreateGlobalWAF_LoadsCRSWithDefaultFlags(t *testing.T) {
 			// All Sqli/Xss/Lfi/... left false (proto zero value) — the trap scenario.
 		},
 	}}
-	f := NewFactory(nil, store, nil, ".")
+	f := NewFactory(nil, store, nil, nil, ".")
 
 	mw, err := f.CreateGlobalWAF()
 	if err != nil {
@@ -80,7 +80,7 @@ func TestCreateGlobalWAF_AllowsGRPC(t *testing.T) {
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
 		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1},
 	}}
-	f := NewFactory(nil, store, nil, ".")
+	f := NewFactory(nil, store, nil, nil, ".")
 	f.SetRouteType("grpc") // trusted route type unlocks the gRPC transport relaxations
 
 	mw, err := f.CreateGlobalWAF()
@@ -134,7 +134,7 @@ func TestCreateGlobalWAF_GRPCRelaxationNotBypassableByHeader(t *testing.T) {
 	}}
 
 	// HTTP route (no gRPC type): the relaxation must NOT apply.
-	f := NewFactory(nil, store, nil, ".")
+	f := NewFactory(nil, store, nil, nil, ".")
 	f.SetRouteType("http")
 	mw, err := f.CreateGlobalWAF()
 	if err != nil {
@@ -166,7 +166,7 @@ func TestCreateGlobalWAF_DisabledReturnsNil(t *testing.T) {
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
-			f := NewFactory(nil, &mockGlobalConfigStore{config: cfg}, nil, ".")
+			f := NewFactory(nil, &mockGlobalConfigStore{config: cfg}, nil, nil, ".")
 			mw, err := f.CreateGlobalWAF()
 			if err != nil {
 				t.Fatalf("CreateGlobalWAF: %v", err)

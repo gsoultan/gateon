@@ -126,6 +126,7 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		GlobalDirectives:          w.GetCustomDirectives(),
 		RouteID:                   "gateon-global-waf",
 		EbpfManager:               f.ebpfManager,
+		Reputation:                f.reputation,
 		GRPCMode:                  grpcMode,
 	}
 	// Apply the resolved tier baseline, then honour an explicit DLP opt-in as an
@@ -234,6 +235,7 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 	wafCfg := parseWAFConfig(cfg)
 	wafCfg.GlobalDirectives = globalDirectives
 	wafCfg.EbpfManager = f.ebpfManager
+	wafCfg.Reputation = f.reputation
 	wafCfg.GRPCMode = grpcMode
 
 	mw, err := WAF(wafCfg)

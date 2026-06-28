@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -14,7 +15,7 @@ type AnomalyAnalysisEngine struct {
 	detectors []AnomalyDetector
 }
 
-func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *IPReputationStore) *AnomalyAnalysisEngine {
+func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *reputation.IPReputationStore) *AnomalyAnalysisEngine {
 	securityThreshold := 30.0
 	var behavioral *gateonv1.BehavioralConfig
 	if config != nil {

@@ -281,16 +281,20 @@ func initStore(databaseURL string, retentionDays int) error {
 }
 
 func (s *pathStatsStore) migrateTracesToPebble() {
+	if !db.TableExists(s.db, s.dialect, "traces") {
+		return
+	}
+
 	// Check if traces table has data
 	var count int
-	_ = s.db.QueryRow("SELECT COUNT(*) FROM traces").Scan(&count)
-	if count == 0 {
+	err := s.db.QueryRow("SELECT COUNT(*) FROM traces").Scan(&count)
+	if err != nil || count == 0 {
 		return
 	}
 
 	logger.Default().LogInfo("telemetry: migrating existing traces to Pebble", "count", count)
 
-	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, '') FROM traces")
+	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(route_id, '') FROM traces")
 	if err != nil {
 		return
 	}
@@ -300,7 +304,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 	n := 0
 	for rows.Next() {
 		var tr TraceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody); err != nil {
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID); err != nil {
 			continue
 		}
 
@@ -316,8 +320,8 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 	}
 	_ = batch.Commit(pebble.Sync)
 
-	logger.Default().LogInfo("telemetry: migration complete, dropping SQL traces table", "migrated", n)
-	_, _ = s.db.Exec("DROP TABLE traces")
+	logger.Default().LogInfo("telemetry: migration complete, clearing SQL traces table", "migrated", n)
+	_, _ = s.db.Exec("DELETE FROM traces")
 }
 
 func makeTraceKey(ts time.Time, id string) []byte {
