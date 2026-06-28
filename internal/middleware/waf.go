@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -116,13 +117,20 @@ func isGRPCRequest(r *http.Request) bool {
 
 var (
 	fastScanner = scanner.NewScanner([]string{
-		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ",
-		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(",
-		"/etc/passwd", "/etc/shadow", "/bin/sh", "cmd.exe", "/proc/self/", "/windows/system32",
-		"<?php", "base64_decode", "shell_exec", "system(",
-		"authorized_keys", "id_rsa", "id_dsa", ".ssh/",
-		"powershell", "curl http", "wget http", "python -c",
-		"nessustoken", "qualys-scan", "acunetix", "sqlmap",
+		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ", "EXEC ", // SQLi
+		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(", "alert(", // XSS
+		"/etc/passwd", "/etc/shadow", "/bin/sh", "cmd.exe", "/proc/self/", "/windows/system32", // LFI/RCE
+		"<?php", "base64_decode", "shell_exec", "system(", "passthru(", "exec(", // PHP
+		"authorized_keys", "id_rsa", "id_dsa", ".ssh/", // Creds
+		"powershell", "curl http", "wget http", "python -c", "perl -e", "ruby -e", // RCE
+		"nessustoken", "qualys-scan", "acunetix", "sqlmap", "nikto", "nmap", "masscan", // Scanners
+		"zgrab", "gobuster", "dirb", "dirbuster", "ffuf", "hydra", "burp", "metasploit", // Scanners
+		"w3af", "absenthe", "blackwidow", "commix", "darkstat", "dnsmap", "dnsrecon", // Scanners
+		"runtime.exec", "java.lang.Runtime", "java.lang.ProcessBuilder", "javax.crypto", // Java
+		"os/exec", "net/http/httputil", "reflect.ValueOf", "unsafe.Pointer", // Golang
+		"wp-admin", "wp-login", "wp-config.php", "xmlrpc.php", "wp-json", // WordPress
+		"wp-links-opml.php", "wp-config-sample.php", "readme.html", "license.txt", // WP info
+		"log4j", "jndi:ldap", "jndi:rmi", "${jndi:", // Log4j
 	})
 )
 
@@ -261,6 +269,25 @@ SecRule FILES "@rx %PDF-1\.[0-7].*obj.*<<.*\/JS.*>>.*endobj" \
     "id:100006,phase:2,deny,status:403,msg:'PDF with JavaScript detected',tag:'malware',severity:CRITICAL"
 `)
 		}
+
+		// Additional protections for Golang and Java
+		sb.WriteString(`
+# Golang specific injection patterns
+SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (os/exec|net/http/httputil|reflect\.ValueOf|unsafe\.Pointer|go\s+func\()" \
+    "id:100010,phase:2,deny,status:403,msg:'Potential Golang code injection',tag:'rce',tag:'golang',severity:CRITICAL"
+
+# Java specific injection patterns (supplemental to CRS)
+SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (runtime\.exec|java\.lang\.Runtime|java\.lang\.ProcessBuilder|javax\.crypto|javax\.script|ognl\.|java\.net\.URLClassLoader)" \
+    "id:100011,phase:2,deny,status:403,msg:'Potential Java code injection',tag:'rce',tag:'java',severity:CRITICAL"
+
+# Java/Log4j protection
+SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx \$\{jndi:(ldap|rmi|dns|nis|iiop|corba|nds|http):" \
+    "id:100013,phase:2,deny,status:403,msg:'Potential Log4Shell (CVE-2021-44228) attempt',tag:'rce',tag:'java',severity:CRITICAL"
+
+# WordPress additional scan protection
+SecRule REQUEST_URI "@rx (wp-json/wp/v2/users|wp-links-opml\.php|wp-config-sample\.php|wp-content/debug\.log|readme\.html|license\.txt|wp-content/uploads/.*\.php)" \
+    "id:100012,phase:1,deny,status:403,msg:'WordPress enumeration/info leak attempt',tag:'wp_scan',severity:CRITICAL"
+`)
 
 		// Ransomware protection
 		if cfg.EnableRansomwareDetection {
@@ -418,9 +445,33 @@ SecAuditLog "%s"
 			// and are classic SQLi/XSS vectors; the signatures are specific enough
 			// (e.g. "UNION ", "<script") that legitimate values rarely match.
 			if !grpcRequest {
-				if fastScanner.Scan(r.RequestURI) ||
-					fastScanner.Scan(r.Header.Get("Referer")) ||
-					fastScanner.Scan(r.Header.Get("User-Agent")) {
+				// We scan the raw RequestURI AND the unescaped version to catch obfuscated attacks.
+				rawURI := r.RequestURI
+				unescapedURI, _ := url.PathUnescape(rawURI)
+
+				if match := fastScanner.FindAll(rawURI); len(match) > 0 {
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "Request URI match: "+strings.Join(match, ", "))
+					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+					return
+				}
+				if unescapedURI != "" && unescapedURI != rawURI {
+					if match := fastScanner.FindAll(unescapedURI); len(match) > 0 {
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "Unescaped Request URI match: "+strings.Join(match, ", "))
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+						return
+					}
+				}
+
+				if match := fastScanner.FindAll(r.Header.Get("Referer")); len(match) > 0 {
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "Referer header match: "+strings.Join(match, ", "))
+					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+					return
+				}
+				if match := fastScanner.FindAll(r.Header.Get("User-Agent")); len(match) > 0 {
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "User-Agent header match: "+strings.Join(match, ", "))
 					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 					return
@@ -448,6 +499,7 @@ SecAuditLog "%s"
 						// Increase min length to 64 and threshold to 5.8 to reduce false positives.
 						// High entropy in unknown headers is still suspicious.
 						if len(val) > 64 && entropy.IsSuspicious(val, threshold) {
+							recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", fmt.Sprintf("High entropy in header %s: %.2f (threshold %.2f)", key, entropy.CalculateString(val), threshold))
 							telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_entropy").Inc()
 							http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
 							return
@@ -474,6 +526,33 @@ SecAuditLog "%s"
 			wafHandler.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
+	clientIP := request.GetClientIP(r, true)
+	category := "general"
+	if strings.Contains(strings.ToLower(details), "sql") || strings.Contains(strings.ToLower(details), "union") {
+		category = "sqli"
+	} else if strings.Contains(strings.ToLower(details), "script") || strings.Contains(strings.ToLower(details), "xss") {
+		category = "xss"
+	} else if strings.Contains(strings.ToLower(details), "scanner") || strings.Contains(strings.ToLower(details), "nmap") || strings.Contains(strings.ToLower(details), "sqlmap") {
+		category = "bot"
+	}
+
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		Type:        typeStr,
+		SourceIP:    clientIP,
+		Score:       100,
+		Details:     details,
+		Time:        time.Now(),
+		RouteID:     routeID,
+		RequestURI:  r.RequestURI,
+		UserAgent:   r.UserAgent(),
+		Method:      r.Method,
+		Category:    category,
+		Severity:    "critical",
+		ActionTaken: "blocked",
+	})
 }
 
 func isSafeHeader(name string) bool {
