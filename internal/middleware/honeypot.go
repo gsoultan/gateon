@@ -25,7 +25,7 @@ type HoneypotConfig struct {
 func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
 
 			blocklistMu.RLock()
 			until, blocked := honeypotBlocklist[clientIP]
@@ -80,7 +80,7 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 func Honeypot(cfg HoneypotConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
 
 			blocklistMu.RLock()
 			until, blocked := honeypotBlocklist[clientIP]

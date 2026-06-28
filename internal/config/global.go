@@ -246,3 +246,14 @@ func (r *GlobalRegistry) ConfigFileExists() bool {
 	_, err := os.Stat(r.path)
 	return err == nil
 }
+
+// EffectiveTrustCloudflare returns true if Cloudflare headers should be trusted,
+// checking the global configuration first and falling back to the environment variable.
+func EffectiveTrustCloudflare() bool {
+	gc := GetGlobalConfig()
+	if gc != nil && gc.Waf != nil {
+		return gc.Waf.TrustCloudflareHeaders
+	}
+	s := strings.TrimSpace(strings.ToLower(os.Getenv("GATEON_TRUST_CLOUDFLARE_HEADERS")))
+	return s == "true" || s == "1" || s == "yes"
+}

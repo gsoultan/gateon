@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -37,7 +38,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				return
 			}
 
-			clientIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
 
 			// 1. Check browser integrity
 			if cfg.EnableBrowserIntegrity {

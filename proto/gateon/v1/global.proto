@@ -284,6 +284,7 @@ message WafConfig {
   // full request-phase CRS; enterprise also enables response-phase (DLP) rules,
   // which buffer responses and cost the most CPU/latency/memory.
   string tier = 34;
+  bool trust_cloudflare_headers = 35;
 }
 
 message ClamavConfig {

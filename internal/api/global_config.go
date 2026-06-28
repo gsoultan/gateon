@@ -39,6 +39,9 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	if req.Config.Audit != nil {
 		audit.UpdateConfig(req.Config.Audit)
 	}
+	if req.Config.SecurityAdvanced != nil && req.Config.SecurityAdvanced.IpReputation != nil && s.IPReputation != nil {
+		s.IPReputation.Reconfigure(req.Config.SecurityAdvanced.IpReputation)
+	}
 
 	// Update telemetry retention if log config is present
 	if req.Config.Log != nil {

@@ -123,6 +123,7 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		AllowedAdminIps:           w.GetAllowedAdminIps(),
 		EntropyThreshold:          w.GetEntropyThreshold(),
 		DisableEntropy:            w.GetDisableEntropy(),
+		TrustCloudflare:           w.GetTrustCloudflareHeaders(),
 		GlobalDirectives:          w.GetCustomDirectives(),
 		RouteID:                   "gateon-global-waf",
 		EbpfManager:               f.ebpfManager,
@@ -215,6 +216,9 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				}
 				if _, ok := cfg["disable_entropy"]; !ok {
 					cfg["disable_entropy"] = strconv.FormatBool(global.Waf.DisableEntropy)
+				}
+				if _, ok := cfg["trust_cloudflare_headers"]; !ok {
+					cfg["trust_cloudflare_headers"] = strconv.FormatBool(global.Waf.TrustCloudflareHeaders)
 				}
 
 				if global.Waf.AutoUpdateRules {

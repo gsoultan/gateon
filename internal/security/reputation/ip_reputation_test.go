@@ -54,8 +54,8 @@ func TestIPReputationStore_ExternalScore(t *testing.T) {
 
 	// Override the URL in the client for testing
 	for i := range store.integrations {
-		if store.integrations[i].config.Type == "abuseipdb" {
-			store.integrations[i].client.BaseURL = server.URL
+		if client, ok := store.integrations[i].client.(*AbuseIPDBClient); ok {
+			client.BaseURL = server.URL
 		}
 	}
 

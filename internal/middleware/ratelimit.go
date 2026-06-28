@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
@@ -330,7 +331,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 
 // PerIP returns the client's IP address for rate-limit keys (uses X-Forwarded-For by default).
 func PerIP(r *http.Request) string {
-	return request.GetClientIP(r, request.TrustCloudflareFromEnv())
+	return request.GetClientIP(r, config.EffectiveTrustCloudflare())
 }
 
 // PerIPWithTrust returns a keyFunc that uses the given trustCloudflare setting.

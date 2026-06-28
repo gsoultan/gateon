@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -71,7 +72,7 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 				return
 			}
 
-			remoteIP := request.GetClientIP(r, request.TrustCloudflareFromEnv())
+			remoteIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
 			form := url.Values{}
 			form.Set("secret", secret)
 			form.Set("response", token)

@@ -41,6 +41,7 @@ var (
 	IsCorsPreflight         = kind.IsCorsPreflight
 	GetStatusResponseWriter = kind.GetStatusResponseWriter
 	PutStatusResponseWriter = kind.PutStatusResponseWriter
+	RealIP                  = kind.RealIP
 
 	// getStatusString is kept as an unexported alias so internal callers
 	// (e.g. standard.go) continue to compile without importing kind directly.

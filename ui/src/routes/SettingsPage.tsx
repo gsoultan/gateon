@@ -1449,6 +1449,20 @@ export default function SettingsPage() {
                   }
                   disabled={formDisabled}
                 />
+                <Switch
+                  label="Trust Cloudflare IPs/Headers"
+                  checked={config.waf.trust_cloudflare_headers}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      waf: {
+                        ...config.waf!,
+                        trust_cloudflare_headers: e.currentTarget.checked,
+                      },
+                    })
+                  }
+                  disabled={formDisabled}
+                />
                 <Select
                   label="Paranoia Level"
                   data={[

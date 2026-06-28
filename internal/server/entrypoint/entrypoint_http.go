@@ -99,6 +99,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	isMgmt := IsManagementAddress(ep.Address, deps)
 	epHandler = injectEntryPointID(ep.Id, epLabel, isMgmt, epHandler)
 	chain := []middleware.Middleware{
+		middleware.RealIPGlobal(),
 		middleware.RequestID(), // Added for global correlation
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
