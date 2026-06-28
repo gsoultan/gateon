@@ -773,4 +773,37 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(32, "add_performance_indexes_v2", func(db *sql.DB, dialect Dialect) error {
+		// These indices improve performance for dashboard aggregations and security lookups.
+		// Note: CREATE INDEX IF NOT EXISTS is supported by SQLite and Postgres (9.5+).
+		// For MySQL/MariaDB, IF NOT EXISTS is followed here for consistency with earlier migrations.
+		queries := []string{
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_source_ip ON security_threats(source_ip);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_type ON security_threats(type);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_route_id ON security_threats(route_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_fingerprint ON security_threats(fingerprint);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_country_code ON security_threats(country_code);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_action_taken ON security_threats(action_taken);`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource);`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_timestamp ON security_threats(timestamp);`,
+			`CREATE INDEX IF NOT EXISTS idx_ip_mitigations_status ON ip_mitigations(status);`,
+			`CREATE INDEX IF NOT EXISTS idx_ip_mitigations_mitigated_at ON ip_mitigations(mitigated_at);`,
+			`CREATE INDEX IF NOT EXISTS idx_ip_mitigations_updated_at ON ip_mitigations(updated_at);`,
+			`CREATE INDEX IF NOT EXISTS idx_path_stats_host ON path_stats(host);`,
+			`CREATE INDEX IF NOT EXISTS idx_path_stats_path ON path_stats(path);`,
+			`CREATE INDEX IF NOT EXISTS idx_domain_stats_domain ON domain_stats(domain);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_operation_name ON traces(operation_name);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_service_name ON traces(service_name);`,
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
