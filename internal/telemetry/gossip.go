@@ -127,7 +127,7 @@ func BroadcastReputation(fingerprint string, score float64, violations int, hist
 		return
 	}
 
-	payload := gateonv1.ReputationSyncPayload{
+	payload := &gateonv1.ReputationSyncPayload{
 		Fingerprint:    fingerprint,
 		Score:          score,
 		ViolationCount: int32(violations),

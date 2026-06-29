@@ -16,15 +16,18 @@ import (
 )
 
 type RouteRegistry struct {
-	mu     sync.RWMutex
-	routes map[string]*gateonv1.Route
-	path   string
+	mu        sync.RWMutex
+	routes    map[string]*gateonv1.Route
+	sorted    []*gateonv1.Route            // Cached sorted list
+	hostIndex map[string][]*gateonv1.Route // host -> routes for O(1) lookup
+	path      string
 }
 
 func NewRouteRegistry(path string) *RouteRegistry {
 	reg := &RouteRegistry{
-		routes: make(map[string]*gateonv1.Route),
-		path:   path,
+		routes:    make(map[string]*gateonv1.Route),
+		hostIndex: make(map[string][]*gateonv1.Route),
+		path:      path,
 	}
 	reg.load()
 	return reg
@@ -58,7 +61,25 @@ func (r *RouteRegistry) load() {
 	for _, rt := range routes {
 		r.routes[rt.Id] = rt
 	}
+	r.rebuildSortedLocked()
 	logger.L.LogInfo("loaded routes", "count", len(r.routes), "path", r.path)
+}
+
+func (r *RouteRegistry) rebuildSortedLocked() {
+	r.sorted = slices.SortedFunc(maps.Values(r.routes), func(a, b *gateonv1.Route) int {
+		return strings.Compare(a.Id, b.Id)
+	})
+
+	clear(r.hostIndex)
+	for _, rt := range r.routes {
+		if rt.Rule == "" {
+			continue
+		}
+		host := hostFromRule(rt.Rule)
+		if host != "" {
+			r.hostIndex[host] = append(r.hostIndex[host], rt)
+		}
+	}
 }
 
 func (r *RouteRegistry) saveLocked() error {
@@ -86,8 +107,18 @@ func (r *RouteRegistry) saveLocked() error {
 }
 
 func (r *RouteRegistry) List(ctx context.Context) []*gateonv1.Route {
-	items, _ := r.ListPaginated(ctx, 0, 0, "", nil)
-	return items
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return slices.Clone(r.sorted)
+}
+
+func (r *RouteRegistry) GetByHost(host string) []*gateonv1.Route {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if items, ok := r.hostIndex[strings.ToLower(host)]; ok {
+		return slices.Clone(items)
+	}
+	return nil
 }
 
 func hostFromRule(rule string) string {
@@ -193,6 +224,7 @@ func (r *RouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error {
 	defer r.mu.Unlock()
 
 	r.routes[rt.Id] = rt
+	r.rebuildSortedLocked()
 	return r.saveLocked()
 }
 
@@ -201,5 +233,6 @@ func (r *RouteRegistry) Delete(ctx context.Context, id string) error {
 	defer r.mu.Unlock()
 
 	delete(r.routes, id)
+	r.rebuildSortedLocked()
 	return r.saveLocked()
 }

@@ -13,6 +13,7 @@ type RouteStore interface {
 	ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *RouteFilter) ([]*gateonv1.Route, int32)
 	All(ctx context.Context) map[string]*gateonv1.Route
 	Get(ctx context.Context, id string) (*gateonv1.Route, bool)
+	GetByHost(host string) []*gateonv1.Route
 	Update(ctx context.Context, rt *gateonv1.Route) error
 	Delete(ctx context.Context, id string) error
 }

@@ -430,6 +430,12 @@ SecAuditLog "%s"
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(wrappedWaf, next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Security Header Spoofing Prevention: clear internal headers from incoming request.
+			r.Header.Del("X-Gateon-Reputation")
+			r.Header.Del("X-Gateon-Anomaly-Score")
+			r.Header.Del("X-Gateon-Threat-Type")
+			r.Header.Del("X-Gateon-WAF-Matched")
+
 			if IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
@@ -619,7 +625,7 @@ type txWrapper struct {
 	cfg     WAFConfig
 }
 
-func (t *txWrapper) Close() error {
+func (t *txWrapper) ProcessLogging() {
 	if t.IsInterrupted() {
 		it := t.Interruption()
 		ruleID := strconv.Itoa(it.RuleID)
@@ -748,7 +754,7 @@ func (t *txWrapper) Close() error {
 			ActionTaken: "blocked",
 		})
 	}
-	return t.Transaction.Close()
+	t.Transaction.ProcessLogging()
 }
 
 // fsWrapper wraps an fs.FS to convert backslashes to forward slashes,

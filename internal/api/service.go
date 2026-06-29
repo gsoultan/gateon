@@ -51,6 +51,11 @@ func (s *ApiService) GetEbpfManager() ebpf.Manager {
 	return s.EbpfManager
 }
 
+// GetInvalidator returns the proxy invalidator.
+func (s *ApiService) GetInvalidator() proxy.Invalidator {
+	return s.Invalidator
+}
+
 // GetClamAVStatus returns the ClamAV installation status.
 func (s *ApiService) GetClamAVStatus(ctx context.Context) bool {
 	if s.ClamAVManager == nil {

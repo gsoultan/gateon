@@ -20,6 +20,11 @@ func (s *ApiService) UpdateService(ctx context.Context, req *gateonv1.UpdateServ
 	if err := s.Services.Update(ctx, req.Service); err != nil {
 		return &gateonv1.UpdateServiceResponse{Success: false}, err
 	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
+			return r.ServiceId == req.Service.Id
+		})
+	}
 	return &gateonv1.UpdateServiceResponse{Success: true}, nil
 }
 
@@ -29,6 +34,11 @@ func (s *ApiService) DeleteService(ctx context.Context, req *gateonv1.DeleteServ
 	}
 	if err := s.Services.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteServiceResponse{Success: false}, err
+	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
+			return r.ServiceId == req.Id
+		})
 	}
 	return &gateonv1.DeleteServiceResponse{Success: true}, nil
 }

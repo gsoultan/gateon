@@ -17,4 +17,9 @@ func (m *EbpfManager) Start(ctx context.Context) {
 		return
 	}
 	logger.L.LogInfo("eBPF offloading is enabled in config but skipped on this OS (kernel XDP support requires Linux)")
+
+	go func() {
+		<-ctx.Done()
+		m.close()
+	}()
 }

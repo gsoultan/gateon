@@ -31,6 +31,10 @@ func (m *mockRouteStore) Get(ctx context.Context, id string) (*gateonv1.Route, b
 	return nil, false
 }
 
+func (m *mockRouteStore) GetByHost(host string) []*gateonv1.Route {
+	return nil
+}
+
 func (m *mockRouteStore) Update(ctx context.Context, rt *gateonv1.Route) error {
 	return nil
 }

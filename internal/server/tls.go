@@ -6,13 +6,27 @@ import (
 	"crypto/x509"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/router"
 	gtls "github.com/gsoultan/gateon/internal/tls"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
+
+var (
+	certCache     sync.Map // string (certId) -> *tls.Certificate
+	certPoolCache sync.Map // string (joined IDs) -> *x509.CertPool
+)
+
+// InvalidateTLSCache clears the certificate and pool caches.
+// This is called when TLS configuration or certificates change.
+func InvalidateTLSCache() {
+	certCache.Clear()
+	certPoolCache.Clear()
+}
 
 // CreateTLSManager builds the TLS manager from global config.
 func CreateTLSManager(s *Server) *gtls.Manager {
@@ -136,11 +150,21 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 			if idx := strings.LastIndex(sniHost, ":"); idx > 0 {
 				sniHost = sniHost[:idx]
 			}
-			routes := deps.RouteStore.List(ctx)
+			sniHost = strings.ToLower(sniHost)
+
+			// Fast-path: O(1) exact host lookup
+			exactRoutes := deps.RouteStore.GetByHost(sniHost)
+
 			// First pass: exact host match (e.g. Host(`api.example.com`) for api.example.com)
 			// Second pass: wildcard match (e.g. Host(`*.example.com`) for api.example.com)
-			for _, exact := range []bool{true, false} {
-				for _, rt := range routes {
+			for _, pass := range []struct {
+				exact bool
+				list  []*gateonv1.Route
+			}{
+				{true, exactRoutes},
+				{false, deps.RouteStore.List(ctx)}, // Fallback to linear scan for wildcards
+			} {
+				for _, rt := range pass.list {
 					if rt.Disabled || rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
 						continue
 					}
@@ -148,13 +172,14 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
 						continue
 					}
-					if router.RouteHostIsExact(routeHost) != exact {
+					isExactMatch := router.RouteHostIsExact(routeHost)
+					if isExactMatch != pass.exact {
 						continue
 					}
 					// If the route references a TLS option with SNI strict, do not allow wildcard matches
 					if rt.Tls.OptionId != "" {
 						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
-							if opt.SniStrict && !exact {
+							if opt.SniStrict && !pass.exact {
 								continue
 							}
 						}
@@ -166,6 +191,12 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 						continue
 					}
 					for _, certId := range rt.Tls.CertificateIds {
+						// Cache check
+						if cached, ok := certCache.Load(certId); ok {
+							certs = append(certs, *cached.(*tls.Certificate))
+							continue
+						}
+
 						for _, c := range gc.Tls.Certificates {
 							if c.Id != certId {
 								continue
@@ -173,6 +204,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 							cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
 							if err == nil {
 								certs = append(certs, *cert)
+								certCache.Store(certId, cert)
 							} else {
 								logger.L.Error().Err(err).
 									Str("cert_id", c.Id).
@@ -208,27 +240,34 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 							}
 							// Bind Client Authorities to tls.Config when present on TLS Option
 							if len(opt.ClientAuthorityIds) > 0 {
-								// Build a CertPool from referenced Client Authorities in Global TLS config
-								if gc := deps.GlobalStore.Get(ctx); gc != nil && gc.Tls != nil {
-									var pool *x509.CertPool
-									for _, wantID := range opt.ClientAuthorityIds {
-										for _, ca := range gc.Tls.ClientAuthorities {
-											if ca.Id != wantID {
-												continue
+								// Cache check for CertPool
+								poolKey := "pool:" + strings.Join(opt.ClientAuthorityIds, ",")
+								if cached, ok := certPoolCache.Load(poolKey); ok {
+									newCfg.ClientCAs = cached.(*x509.CertPool)
+								} else {
+									// Build a CertPool from referenced Client Authorities in Global TLS config
+									if gc := deps.GlobalStore.Get(ctx); gc != nil && gc.Tls != nil {
+										var pool *x509.CertPool
+										for _, wantID := range opt.ClientAuthorityIds {
+											for _, ca := range gc.Tls.ClientAuthorities {
+												if ca.Id != wantID {
+													continue
+												}
+												if pool == nil {
+													pool = x509.NewCertPool()
+												}
+												// Read PEM file and append certs; errors ignored here to avoid handshake crash
+												// The manager-level validation will surface issues via API/logs.
+												if caData, err := tlsManager.LoadCAData(ca.CaFile); err == nil && caData != nil {
+													pool.AppendCertsFromPEM(caData)
+												}
+												break
 											}
-											if pool == nil {
-												pool = x509.NewCertPool()
-											}
-											// Read PEM file and append certs; errors ignored here to avoid handshake crash
-											// The manager-level validation will surface issues via API/logs.
-											if caData, err := tlsManager.LoadCAData(ca.CaFile); err == nil && caData != nil {
-												pool.AppendCertsFromPEM(caData)
-											}
-											break
 										}
-									}
-									if pool != nil {
-										newCfg.ClientCAs = pool
+										if pool != nil {
+											newCfg.ClientCAs = pool
+											certPoolCache.Store(poolKey, pool)
+										}
 									}
 								}
 							}
@@ -267,17 +306,27 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					newCfg.ClientAuth = gtls.ParseClientAuthType(gc.Tls.ClientAuthType)
 				}
 				if len(gc.Tls.ClientAuthorities) > 0 {
-					var pool *x509.CertPool
+					ids := make([]string, 0, len(gc.Tls.ClientAuthorities))
 					for _, ca := range gc.Tls.ClientAuthorities {
-						if caData, err := tlsManager.LoadCAData(ca.CaFile); err == nil && caData != nil {
-							if pool == nil {
-								pool = x509.NewCertPool()
-							}
-							pool.AppendCertsFromPEM(caData)
-						}
+						ids = append(ids, ca.Id)
 					}
-					if pool != nil {
-						newCfg.ClientCAs = pool
+					poolKey := "global-pool:" + strings.Join(ids, ",")
+					if cached, ok := certPoolCache.Load(poolKey); ok {
+						newCfg.ClientCAs = cached.(*x509.CertPool)
+					} else {
+						var pool *x509.CertPool
+						for _, ca := range gc.Tls.ClientAuthorities {
+							if caData, err := tlsManager.LoadCAData(ca.CaFile); err == nil && caData != nil {
+								if pool == nil {
+									pool = x509.NewCertPool()
+								}
+								pool.AppendCertsFromPEM(caData)
+							}
+						}
+						if pool != nil {
+							newCfg.ClientCAs = pool
+							certPoolCache.Store(poolKey, pool)
+						}
 					}
 				}
 

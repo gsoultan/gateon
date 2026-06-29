@@ -57,6 +57,9 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	// Invalidate cache if needed
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool { return true })
+		if req.Config.Tls != nil {
+			s.Invalidator.InvalidateTLS()
+		}
 	}
 
 	// Update eBPF Port Knocking sequence

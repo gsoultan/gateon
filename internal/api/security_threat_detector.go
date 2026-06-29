@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -329,20 +330,58 @@ func (d *SecurityThreatDetector) detectImpossibleTravel(data *DiagnosticData) []
 			c1 := list[i]
 			c2 := list[i+1]
 			diff := c2.last.Sub(c1.last)
-			if diff < 2*time.Hour { // Cross-country in less than 2 hours is suspicious
-				anomaly := &gateonv1.Anomaly{
-					Type:           "security_threat",
-					Severity:       "high",
-					Description:    fmt.Sprintf("Impossible travel detected for fingerprint %s: seen in %s and then %s within %s", fp, c1.code, c2.code, diff.Round(time.Minute)),
-					Timestamp:      c2.last.Format(time.RFC3339),
-					Source:         fp,
-					Recommendation: "This actor is accessing from multiple geographical locations rapidly, indicating session hijacking or credential sharing.",
+			if diff <= 0 {
+				continue
+			}
+
+			// Cross-country check with distance
+			if c1.code != c2.code && c1.code != "XX" && c2.code != "XX" {
+				lat1, lon1 := telemetry.GetCountryCoordinates(c1.code)
+				lat2, lon2 := telemetry.GetCountryCoordinates(c2.code)
+
+				if lat1 != 0 || lon1 != 0 || lat2 != 0 || lon2 != 0 {
+					dist := haversine(lat1, lon1, lat2, lon2)
+					speed := dist / diff.Hours()
+
+					// Commercial jet speed is ~900 km/h. Threshold at 1200 km/h to avoid false positives.
+					if speed > 1200 {
+						anomaly := &gateonv1.Anomaly{
+							Type:           "security_threat",
+							Severity:       "critical",
+							Description:    fmt.Sprintf("Impossible travel detected for fingerprint %s: traveled %d km from %s to %s at %d km/h (within %s)", fp, int(dist), c1.code, c2.code, int(speed), diff.Round(time.Minute)),
+							Timestamp:      c2.last.Format(time.RFC3339),
+							Source:         fp,
+							Recommendation: "This actor is accessing from geographically distant locations at physically impossible speeds, strongly indicating session hijacking or proxy-based automated attacks.",
+						}
+						anomalies = append(anomalies, anomaly)
+					}
+				} else if diff < 1*time.Hour {
+					// Fallback for missing coordinates: any country change in < 1 hour is suspicious
+					anomaly := &gateonv1.Anomaly{
+						Type:           "security_threat",
+						Severity:       "high",
+						Description:    fmt.Sprintf("Impossible travel detected for fingerprint %s: seen in %s and then %s within %s", fp, c1.code, c2.code, diff.Round(time.Minute)),
+						Timestamp:      c2.last.Format(time.RFC3339),
+						Source:         fp,
+						Recommendation: "Rapid geographical movement between countries detected.",
+					}
+					anomalies = append(anomalies, anomaly)
 				}
-				anomalies = append(anomalies, anomaly)
 			}
 		}
 	}
 	return anomalies
+}
+
+func haversine(lat1, lon1, lat2, lon2 float64) float64 {
+	const R = 6371 // Earth radius in km
+	dLat := (lat2 - lat1) * math.Pi / 180
+	dLon := (lon2 - lon1) * math.Pi / 180
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*
+			math.Sin(dLon/2)*math.Sin(dLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return R * c
 }
 
 func (d *SecurityThreatDetector) analyzeTraffic(stats *IPStats, reasons *[]string, primaryType *string) int {

@@ -97,6 +97,10 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		relPath := filepath.Join("certs", filename)
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": relPath})
 		logger.L.LogInfo("certificate uploaded", "path", destPath)
+
+		if inv := svc.GetInvalidator(); inv != nil {
+			inv.InvalidateTLS()
+		}
 	})
 
 	mux.HandleFunc("POST /v1/certs/paste", func(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +142,10 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		relPath := filepath.Join("certs", filename)
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": relPath})
 		logger.L.LogInfo("certificate pasted and saved", "path", destPath)
+
+		if inv := svc.GetInvalidator(); inv != nil {
+			inv.InvalidateTLS()
+		}
 	})
 }
 

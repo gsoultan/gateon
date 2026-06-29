@@ -230,9 +230,16 @@ func initStore(databaseURL string, retentionDays int) error {
 	// Initialize Pebble for traces
 	pebbleDir := "telemetry_pebble"
 	if dialect.Driver == db.DriverSQLite {
-		// Place Pebble next to SQLite db if it's a file
-		if !filepath.IsAbs(databaseURL) && !strings.Contains(databaseURL, "://") {
-			pebbleDir = filepath.Join(filepath.Dir(databaseURL), "telemetry_pebble")
+		// Place Pebble next to SQLite db if it's a file.
+		// We use the same path extraction logic as db.Open to find the DB's directory.
+		dsn := databaseURL
+		if strings.HasPrefix(dsn, "sqlite:") {
+			dsn = strings.TrimPrefix(dsn, "sqlite:")
+			dsn = strings.TrimPrefix(dsn, "//")
+		}
+		// If DSN is not a memory DB, use its directory for Pebble.
+		if dsn != ":memory:" && dsn != "" {
+			pebbleDir = filepath.Join(filepath.Dir(dsn), "telemetry_pebble")
 		}
 	}
 	_ = os.MkdirAll(pebbleDir, 0755)
