@@ -12,24 +12,30 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 )
 
 const (
-	// websocketDialTimeout is the max time to establish backend connection for WebSocket.
-	websocketDialTimeout = 10 * time.Second
+	// upgradeDialTimeout is the max time to establish backend connection for WebSocket.
+	upgradeDialTimeout = 10 * time.Second
 )
 
-// isWebSocketRequest returns true if the request is a WebSocket upgrade.
-func isWebSocketRequest(r *http.Request) bool {
-	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket") &&
-		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+// isUpgradeRequest returns true if the request is an HTTP protocol upgrade.
+func isUpgradeRequest(r *http.Request) bool {
+	return r.Header.Get("Upgrade") != ""
 }
 
-// proxyWebSocket hijacks the client connection and tunnels WebSocket traffic to the backend.
+// proxyUpgrade hijacks the client connection and tunnels upgraded traffic to the backend.
 // It handles the handshake and bidirectional byte streaming. Used when ReverseProxy would
 // strip Upgrade headers. Caller must have already selected the target (targetURL).
-func (h *ProxyHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, targetURL *url.URL, state *targetState, start time.Time) {
+func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targetURL *url.URL, state *targetState, start time.Time) {
+	logger.L.LogDebug("Hijacking for protocol upgrade",
+		"request_id", request.GetID(r),
+		"upgrade", r.Header.Get("Upgrade"))
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
@@ -58,7 +64,7 @@ func (h *ProxyHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, ta
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), websocketDialTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), upgradeDialTimeout)
 	defer cancel()
 
 	var backendConn net.Conn
@@ -95,6 +101,15 @@ func (h *ProxyHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, ta
 	}
 	defer backendConn.Close()
 
+	// 1. PROXY Protocol: If enabled for the target, write the PROXY header before any HTTP data.
+	if state.proxyProtocolEnabled {
+		// Use r.RemoteAddr which is already resolved to the real client IP by RealIP middleware.
+		if err := writeProxyHeader(backendConn, r.RemoteAddr, backendConn.RemoteAddr(), state.proxyProtocolVersion); err != nil {
+			logger.L.LogWarn("Failed to write PROXY header to backend", "error", err, "target", host)
+			// Non-fatal, continue with the request
+		}
+	}
+
 	// Build backend request: preserve Upgrade, Connection, Sec-WebSocket-*; set URL/host
 	backendReq := r.Clone(r.Context())
 	backendReq.URL.Scheme = scheme
@@ -113,10 +128,25 @@ func (h *ProxyHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, ta
 	}
 	backendReq.Header.Set("X-Forwarded-Proto", request.Scheme(r))
 
-	// Force HTTP/1.1 for upgrade
+	// X-Forwarded-For: append the immediate peer IP to the chain.
+	// We use the underlying connection's remote address if available to ensure we
+	// append the actual peer, even if RealIP middleware updated r.RemoteAddr.
+	peerIP := httputil.StripPort(r.RemoteAddr)
+	if conn, ok := r.Context().Value(middleware.ConnContextKey).(net.Conn); ok {
+		peerIP = httputil.StripPort(conn.RemoteAddr().String())
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		backendReq.Header.Set("X-Forwarded-For", xff+", "+peerIP)
+	} else {
+		backendReq.Header.Set("X-Forwarded-For", peerIP)
+	}
+
+	// Force HTTP/1.1 and Upgrade headers for the backend handshake.
+	// Many backends (like GitLab) require Connection: upgrade explicitly.
 	backendReq.Proto = "HTTP/1.1"
 	backendReq.ProtoMajor = 1
 	backendReq.ProtoMinor = 1
+	backendReq.Header.Set("Connection", "upgrade")
 
 	if err := backendReq.Write(backendConn); err != nil {
 		atomic.AddUint64(&state.requestCount, 1)

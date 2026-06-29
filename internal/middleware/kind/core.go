@@ -11,6 +11,7 @@
 package kind
 
 import (
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -213,7 +214,13 @@ func RealIP(trustCloudflare bool) Middleware {
 				}
 			}
 
-			r.RemoteAddr = clientIP
+			// Maintain the original port if present in RemoteAddr, as some components
+			// (like PROXY protocol generation) expect a host:port format.
+			if _, port, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				r.RemoteAddr = net.JoinHostPort(clientIP, port)
+			} else {
+				r.RemoteAddr = clientIP
+			}
 			next.ServeHTTP(w, r)
 		})
 	}

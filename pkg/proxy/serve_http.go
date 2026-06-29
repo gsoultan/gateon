@@ -37,8 +37,8 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	r = h.prepareRequest(r, state, targetURL)
 
-	if isWebSocketRequest(r) {
-		h.proxyWebSocket(w, r, targetURL, state, start)
+	if isUpgradeRequest(r) {
+		h.proxyUpgrade(w, r, targetURL, state, start)
 		return
 	}
 

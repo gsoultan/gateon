@@ -7,6 +7,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"strings"
@@ -41,12 +42,21 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 			// 1. If it's an asset (js, css, images, etc.), return 404.
 			// 2. Otherwise, serve index.html for SPA routing.
 			if isAsset(cleanPath) {
-				// For assets, return a clear 404 with a plain text message to avoid MIME mismatch errors.
-				// Browsers are strict about module scripts needing valid JS/Wasm MIME types.
-				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				// For assets, return a 404 with a MIME type that matches the extension.
+				// If we return text/plain with nosniff for a .js file, browsers will
+				// report a MIME mismatch error instead of a clear 404.
+				ext := path.Ext(cleanPath)
+				contentType := "text/plain; charset=utf-8"
+				if ext != "" {
+					contentType = mime.TypeByExtension(ext)
+					if contentType == "" {
+						contentType = "application/octet-stream"
+					}
+				}
+				w.Header().Set("Content-Type", contentType)
 				w.Header().Set("X-Content-Type-Options", "nosniff")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprintln(w, "Asset not found")
+				fmt.Fprintf(w, "Asset not found: %s\n", cleanPath)
 				return
 			}
 			r.URL.Path = "/"
