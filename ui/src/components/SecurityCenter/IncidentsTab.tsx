@@ -195,7 +195,6 @@ export function IncidentsTab() {
               highlightOnHover
               verticalSpacing={density.verticalSpacing}
               horizontalSpacing={density.horizontalSpacing}
-              fontSize={density.fontSize}
             >
               <Table.Thead>
                 <Table.Tr>

@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 func TestIsInternalPath(t *testing.T) {
@@ -77,8 +79,11 @@ func TestShouldSkipMetrics(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.WithValue(context.Background(), IsManagementContextKey, tc.mgmt)
-			ctx = context.WithValue(ctx, RouteNameContextKey, tc.routeID)
+			rs := &request.RequestState{
+				IsManagement: tc.mgmt,
+				RouteName:    tc.routeID,
+			}
+			ctx := context.WithValue(context.Background(), request.RequestStateContextKey{}, rs)
 			r := httptest.NewRequest(http.MethodGet, tc.path, nil).WithContext(ctx)
 			if got := ShouldSkipMetrics(r); got != tc.want {
 				t.Errorf("ShouldSkipMetrics() = %v; want %v", got, tc.want)

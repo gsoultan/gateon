@@ -324,7 +324,7 @@ export default function SecurityCommandCenter() {
           </Alert>
         )}
 
-        <Tabs defaultValue="overview" variant="pills" radius="md">
+        <Tabs defaultValue="overview" variant="pills" radius="md" keepMounted={false}>
           <Tabs.List mb="lg">
             <Tabs.Tab value="overview" leftSection={<IconDashboard size={16} />}>Overview</Tabs.Tab>
             <Tabs.Tab value="explorer" leftSection={<IconSearch size={16} />}>Threat Explorer</Tabs.Tab>

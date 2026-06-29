@@ -11,7 +11,6 @@ import {
   SimpleGrid, 
   RingProgress, 
   Center, 
-  Paper, 
   Box, 
   Table, 
   Button 
@@ -88,6 +87,26 @@ export function OverviewTab({
 
   const { data: posture } = useSecurityPosture();
   const wafEnabled = posture?.waf?.enabled;
+
+  const funnelStages = React.useMemo(() => {
+    const f = metrics?.mitigation_funnel;
+    const ingress = f?.http_ingress || 0;
+    const stages: { label: string; value: number; color: string }[] = [
+      { label: "HTTP Ingress", value: ingress, color: "blue" },
+      { label: "WAF Block", value: f?.waf_blocked || 0, color: "orange" },
+      { label: "Rate Limit", value: f?.rate_limited || 0, color: "yellow" },
+    ];
+    if ((f?.bot_blocked || 0) > 0) stages.push({ label: "Bot Mitigation", value: f!.bot_blocked, color: "pink" });
+    if ((f?.file_security_blocked || 0) > 0) stages.push({ label: "File Security", value: f!.file_security_blocked, color: "red" });
+    if ((f?.deception_blocked || 0) > 0) stages.push({ label: "Deception/Trap", value: f!.deception_blocked, color: "grape" });
+    if ((f?.advanced_security_blocked || 0) > 0) stages.push({ label: "Advanced Sec", value: f!.advanced_security_blocked, color: "dark" });
+    if ((f?.geoip_blocked || 0) > 0) stages.push({ label: "GeoIP Block", value: f!.geoip_blocked, color: "indigo" });
+    if ((f?.auth_failures || 0) > 0) stages.push({ label: "Auth Failures", value: f!.auth_failures, color: "cyan" });
+    if ((f?.turnstile_failures || 0) > 0) stages.push({ label: "Turnstile Fail", value: f!.turnstile_failures, color: "violet" });
+    if ((f?.hmac_failures || 0) > 0) stages.push({ label: "HMAC Fail", value: f!.hmac_failures, color: "gray" });
+    stages.push({ label: "Allowed (Passed)", value: f?.allowed || 0, color: "teal" });
+    return { stages, ingress };
+  }, [metrics?.mitigation_funnel]);
 
   return (
     <Stack gap="lg">
@@ -189,24 +208,7 @@ export function OverviewTab({
             <Title order={4} mb="md">Mitigation Funnel Efficiency</Title>
             <Stack gap="xs">
               {(() => {
-                // The funnel is computed server-side (single, consistent scope) so
-                // that Allowed + mitigations == HTTP ingress. See MitigationFunnel
-                // in internal/telemetry/metrics_snapshot.go.
-                const f = metrics?.mitigation_funnel;
-                const ingress = f?.http_ingress || 0;
-
-                // Request-unit funnel stages (denominator = HTTP ingress).
-                const stages: { label: string; value: number; color: string }[] = [
-                  { label: "HTTP Ingress", value: ingress, color: "blue" },
-                  { label: "WAF Block", value: f?.waf_blocked || 0, color: "orange" },
-                  { label: "Rate Limit", value: f?.rate_limited || 0, color: "yellow" },
-                ];
-                if ((f?.geoip_blocked || 0) > 0) stages.push({ label: "GeoIP Block", value: f!.geoip_blocked, color: "indigo" });
-                if ((f?.auth_failures || 0) > 0) stages.push({ label: "Auth Failures", value: f!.auth_failures, color: "cyan" });
-                if ((f?.turnstile_failures || 0) > 0) stages.push({ label: "Turnstile Fail", value: f!.turnstile_failures, color: "violet" });
-                if ((f?.hmac_failures || 0) > 0) stages.push({ label: "HMAC Fail", value: f!.hmac_failures, color: "gray" });
-                stages.push({ label: "Allowed (Passed)", value: f?.allowed || 0, color: "teal" });
-
+                const { stages, ingress } = funnelStages;
                 const denom = ingress || 1;
                 return stages.map((step) => (
                   <Box key={step.label}>
@@ -256,15 +258,12 @@ export function OverviewTab({
             <Box h={200} w="100%" style={{ minWidth: 0 }}>
               <DonutChart
                 h={200}
-                minWidth={0}
                 thickness={20}
                 data={threatTypeData}
                 withTooltip
                 chartLabel={`${totalThreats} Total`}
                 tooltipDataSource="segment"
-                animationDuration={1200}
                 strokeWidth={2}
-                withPadding
                 paddingAngle={4}
               />
             </Box>

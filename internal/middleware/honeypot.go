@@ -9,6 +9,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 var (
@@ -60,7 +61,7 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 				}
 				// Exact match or prefix match for directories
 				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
-					logger.SecurityEvent("honeypot_triggered", r, "access to trap path: "+trapPath+"; IP blocked for 24h")
+					recordHoneypotThreat(r, trapPath)
 
 					blocklistMu.Lock()
 					honeypotBlocklist[clientIP] = time.Now().Add(24 * time.Hour)
@@ -104,7 +105,7 @@ func Honeypot(cfg HoneypotConfig) Middleware {
 				}
 				// Exact match or prefix match for directories
 				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
-					logger.SecurityEvent("honeypot_triggered", r, "access to trap path: "+trapPath+"; IP blocked for 24h")
+					recordHoneypotThreat(r, trapPath)
 
 					blocklistMu.Lock()
 					honeypotBlocklist[clientIP] = time.Now().Add(24 * time.Hour)
@@ -118,6 +119,30 @@ func Honeypot(cfg HoneypotConfig) Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func recordHoneypotThreat(r *http.Request, trapPath string) {
+	clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+	routeID := GetRouteName(r)
+	if routeID == "" {
+		routeID = "global-honeypot"
+	}
+
+	logger.SecurityEvent("honeypot_triggered", r, "access to trap path: "+trapPath+"; IP blocked for 24h")
+	telemetry.MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, trapPath).Inc()
+
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		Type:        "honeypot_triggered",
+		SourceIP:    clientIP,
+		Score:       100,
+		Details:     "Access to deception trap path: " + trapPath,
+		Time:        time.Now(),
+		RouteID:     routeID,
+		RequestURI:  r.URL.Path,
+		Category:    "deception",
+		Severity:    "high",
+		ActionTaken: "blocked",
+	})
 }
 
 // parseHoneypotConfig parses the middleware configuration into HoneypotConfig.

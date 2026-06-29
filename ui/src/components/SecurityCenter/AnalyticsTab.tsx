@@ -10,12 +10,11 @@ import {
   Avatar, 
   Badge, 
   ThemeIcon, 
-  Group, 
-  Paper 
+  Group 
 } from '@mantine/core';
 import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
 import { IconMapPin, IconActivity, IconTarget } from '@tabler/icons-react';
-import type { MetricsSnapshot, TrafficSample, LabeledCount, DonutChartDataItem, HeavyHitter } from '../../types/metrics';
+import type { MetricsSnapshot, LabeledCount, DonutChartDataItem, HeavyHitter } from '../../types/metrics';
 
 interface CountryData {
   country: string;
@@ -52,7 +51,6 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Box h={300} w="100%" style={{ minWidth: 0 }}>
           <AreaChart
             h={300}
-            minWidth={0}
             data={trendData}
             dataKey="date"
             series={[{ name: 'threats', color: 'red.7', label: 'Threats Detected' }]}
@@ -67,7 +65,6 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
             withYAxis
             withTooltip
             tooltipAnimationDuration={200}
-            animationDuration={1200}
             type="default"
             connectNulls
           />
@@ -81,7 +78,6 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
             <Box h={300} w="100%" style={{ minWidth: 0 }}>
               <BarChart
                 h={300}
-                minWidth={0}
                 data={countryData}
                 dataKey="country"
                 series={[{ name: 'threats', color: 'blue.7', label: 'Attacks' }]}
@@ -90,7 +86,6 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                 yAxisProps={{ width: 80 }}
                 withTooltip
                 barProps={{ radius: [0, 4, 4, 0] }}
-                animationDuration={1200}
               />
             </Box>
           </Card>
@@ -102,15 +97,12 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
               <Box h={250} w="100%" style={{ minWidth: 0 }}>
                 <DonutChart
                   h={200}
-                  minWidth={0}
                   thickness={25}
                   data={threatTypeData}
                   withTooltip
                   chartLabel={`${totalThreats} Total`}
                   strokeWidth={2}
-                  withPadding
                   paddingAngle={4}
-                  animationDuration={1200}
                 />
               </Box>
               <Stack gap="xs" justify="center">

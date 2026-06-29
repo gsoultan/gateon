@@ -259,5 +259,6 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 		EnableSignatureScan:    parseBoolStrict(cfg["enable_signature_scan"], true),
 		SignatureRulesPath:     cfg["signature_rules_path"],
 		SignatureBlockSeverity: yara.Severity(cfg["signature_block_severity"]),
+		RouteID:                cfg["_route_id"],
 	}), nil
 }

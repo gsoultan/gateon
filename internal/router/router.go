@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -212,7 +213,12 @@ func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
 
 // SelectRouteFromSlice finds the best matching route from a provided slice of routes.
 func SelectRouteFromSlice(r *http.Request, routes []*gateonv1.Route) *gateonv1.Route {
-	epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
+	epID := ""
+	if rs := request.GetRequestState(r); rs != nil {
+		epID = rs.EntryPointID
+	} else if val, ok := r.Context().Value(middleware.EntryPointIDContextKey).(string); ok {
+		epID = val
+	}
 
 	var best *gateonv1.Route
 	for _, rt := range routes {
@@ -294,9 +300,15 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// only to operator-declared gRPC routes, not based on a spoofable request header.
 	mwFactory.SetRouteType(rt.Type)
 
-	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
+	// Infrastructure Middlewares (Recovery, Fingerprinting, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
-	chain = append(chain, middleware.Recovery(), middleware.AccessLog(routeLabel), middleware.Metrics(routeLabel), middleware.Debugger(globalStore))
+	chain = append(chain,
+		middleware.Recovery(),
+		middleware.Fingerprinting(),
+		middleware.AccessLog(routeLabel),
+		middleware.Metrics(routeLabel),
+		middleware.Debugger(globalStore),
+	)
 
 	// Advanced Security Middlewares
 	if globalStore != nil {

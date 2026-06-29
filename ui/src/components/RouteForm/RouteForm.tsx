@@ -79,7 +79,7 @@ export default function RouteForm({
     },
   });
 
-  const form = useForm<Route>({
+  const form = useForm<Route, any>({
     defaultValues: {
       id: "",
       name: "",
@@ -178,7 +178,7 @@ export default function RouteForm({
         form.handleSubmit();
       }}
     >
-      <Grid gutter="xl">
+      <Grid>
         <Grid.Col span={{ base: 12, lg: 7 }}>
           <Stack gap="lg">
             <Paper withBorder p="xl" radius="lg" shadow="xs">

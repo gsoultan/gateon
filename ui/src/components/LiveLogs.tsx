@@ -48,8 +48,14 @@ interface LiveLogsProps {
 const MAX_LOGS = 100;
 const FLUSH_INTERVAL_MS = 300;
 
+interface LogEntry {
+  id: string;
+  raw: string;
+  parsed: Record<string, any> | null;
+}
+
 export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) {
-  const [logs, setLogs] = useState<{ id: string; raw: string }[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const logIdCounter = useRef(0);
   const [connected, setConnected] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -89,7 +95,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
 
     // Buffer messages between flushes so a burst of WS frames coalesces into one
     // React state update instead of one per frame (prevents live-stream jank).
-    const pending: { id: string; raw: string }[] = [];
+    const pending: LogEntry[] = [];
     const flush = () => {
       if (pending.length === 0) return;
       const batch = pending.splice(0, pending.length).reverse();
@@ -101,9 +107,19 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
     ws.onclose = () => setConnected(false);
     ws.onmessage = (event) => {
       if (pausedRef.current) return;
+      
+      const raw = String(event.data);
+      let parsed: Record<string, any> | null = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // Not JSON
+      }
+
       pending.push({
         id: `${Date.now()}-${logIdCounter.current++}`,
-        raw: String(event.data),
+        raw,
+        parsed,
       });
       // Cap the buffer too, so a flood while a tab is backgrounded stays bounded.
       if (pending.length > MAX_LOGS) {
@@ -123,12 +139,8 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
         new Set(
           logs
             .map((entry) => {
-              try {
-                const parsed = JSON.parse(entry.raw) as Record<string, unknown>;
-                return String(parsed.route ?? parsed.route_id ?? "").trim();
-              } catch {
-                return "";
-              }
+              if (!entry.parsed) return "";
+              return String(entry.parsed.route ?? entry.parsed.route_id ?? "").trim();
             })
             .filter(Boolean),
         ),
@@ -140,30 +152,27 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
     const searchLower = deferredSearch.toLowerCase();
     const ipLower = deferredClientIpFilter.toLowerCase();
     return logs.filter((entry) => {
-      const log = entry.raw;
       if (deferredSearch) {
-        if (!log.toLowerCase().includes(searchLower)) return false;
+        if (!entry.raw.toLowerCase().includes(searchLower)) return false;
       }
       if (deferredRouteFilter || deferredStatusFilter || deferredClientIpFilter) {
-        try {
-          const parsed = JSON.parse(log) as Record<string, unknown>;
-          if (deferredRouteFilter) {
-            const route = String(parsed.route ?? parsed.route_id ?? "").trim();
-            if (route !== deferredRouteFilter) return false;
-          }
-          if (deferredStatusFilter) {
-            const s = String(parsed.status ?? "");
-            if (s !== deferredStatusFilter && !s.startsWith(deferredStatusFilter))
-              return false;
-          }
-          if (deferredClientIpFilter) {
-            const ip = String(
-              parsed.ip ?? parsed.remote_addr ?? parsed.client_ip ?? "",
-            ).toLowerCase();
-            if (!ip.includes(ipLower)) return false;
-          }
-        } catch {
-          return false;
+        if (!entry.parsed) return false;
+        
+        const parsed = entry.parsed;
+        if (deferredRouteFilter) {
+          const route = String(parsed.route ?? parsed.route_id ?? "").trim();
+          if (route !== deferredRouteFilter) return false;
+        }
+        if (deferredStatusFilter) {
+          const s = String(parsed.status ?? "");
+          if (s !== deferredStatusFilter && !s.startsWith(deferredStatusFilter))
+            return false;
+        }
+        if (deferredClientIpFilter) {
+          const ip = String(
+            parsed.ip ?? parsed.remote_addr ?? parsed.client_ip ?? "",
+          ).toLowerCase();
+          if (!ip.includes(ipLower)) return false;
         }
       }
       return true;
@@ -176,62 +185,17 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
     deferredClientIpFilter,
   ]);
 
-  const getLogColor = useCallback((log: string) => {
-    if (log.includes('"level":"error"') || log.includes("ERROR"))
-      return "red.4";
-    if (log.includes('"level":"warn"') || log.includes("WARN"))
-      return "yellow.4";
-    if (log.includes('"level":"debug"') || log.includes("DEBUG"))
-      return "gray.5";
+  const getLogColor = useCallback((entry: LogEntry) => {
+    if (!entry.parsed) return "blue.4";
+    const level = String(entry.parsed.level || "").toLowerCase();
+    if (level === "error") return "red.4";
+    if (level === "warn" || level === "warning") return "yellow.4";
+    if (level === "debug") return "gray.5";
     return "blue.4";
   }, []);
 
-  const formatLog = useCallback((log: string) => {
-    try {
-      const parsed = JSON.parse(log) as Record<string, any>;
-      const { time, level, message, ...rest } = parsed;
-      
-      const formattedTime = time ? new Date(String(time)).toLocaleTimeString() : "";
-      const logLevel = level ? String(level).toUpperCase() : "INFO";
-      const msg = message || "";
-
-      return (
-        <Group gap="xs" align="flex-start" wrap="nowrap">
-          <Text
-            size="xs"
-            c="dimmed"
-            ff="monospace"
-            className="whitespace-nowrap"
-          >
-            {formattedTime}
-          </Text>
-          <Badge
-            size="xs"
-            variant="light"
-            color={getLogColor(log)}
-            radius="sm"
-            className="min-w-[50px]"
-          >
-            {logLevel}
-          </Badge>
-          <Stack gap={0} flex={1}>
-            <Text size="xs" fw={600} c="gray.3" ff="monospace">
-              {msg}
-            </Text>
-            {Object.keys(rest).length > 0 && (
-              <Text
-                size="xs"
-                c="dimmed"
-                ff="monospace"
-                className="text-[10px]"
-              >
-                {JSON.stringify(rest)}
-              </Text>
-            )}
-          </Stack>
-        </Group>
-      );
-    } catch (e) {
+  const formatLog = useCallback((entry: LogEntry) => {
+    if (!entry.parsed) {
       return (
         <Text
           size="xs"
@@ -239,10 +203,53 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
           c="gray.4"
           style={{ wordBreak: "break-all" }}
         >
-          {log}
+          {entry.raw}
         </Text>
       );
     }
+
+    const { time, level, message, ...rest } = entry.parsed;
+    
+    const formattedTime = time ? new Date(String(time)).toLocaleTimeString() : "";
+    const logLevel = level ? String(level).toUpperCase() : "INFO";
+    const msg = message || "";
+
+    return (
+      <Group gap="xs" align="flex-start" wrap="nowrap">
+        <Text
+          size="xs"
+          c="dimmed"
+          ff="monospace"
+          className="whitespace-nowrap"
+        >
+          {formattedTime}
+        </Text>
+        <Badge
+          size="xs"
+          variant="light"
+          color={getLogColor(entry)}
+          radius="sm"
+          className="min-w-[50px]"
+        >
+          {logLevel}
+        </Badge>
+        <Stack gap={0} flex={1}>
+          <Text size="xs" fw={600} c="gray.3" ff="monospace">
+            {msg}
+          </Text>
+          {Object.keys(rest).length > 0 && (
+            <Text
+              size="xs"
+              c="dimmed"
+              ff="monospace"
+              className="text-[10px]"
+            >
+              {JSON.stringify(rest)}
+            </Text>
+          )}
+        </Stack>
+      </Group>
+    );
   }, [getLogColor]);
 
   return (
@@ -386,7 +393,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
                   py={2}
                   className="border-b border-solid border-[var(--mantine-color-dark-6)]"
                 >
-                  {formatLog(entry.raw)}
+                  {formatLog(entry)}
                 </Box>
               ))}
             </Stack>

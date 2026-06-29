@@ -1,11 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiUrl } from "./api";
 import type { MetricsSnapshot } from "../types/metrics";
 
 export function useMetricsSnapshot(limit?: number, page?: number) {
   const queryClient = useQueryClient();
-  const queryKey = ["metrics-snapshot", limit, page];
+  const queryKey = useMemo(() => ["metrics-snapshot", limit, page], [limit, page]);
 
   const query = useQuery<MetricsSnapshot>({
     queryKey,

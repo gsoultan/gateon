@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
-	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
@@ -24,62 +23,29 @@ import (
 // middleware layer.
 type ContextKey string
 
+var (
+	EntryPointIDContextKey = request.RequestStateContextKey{}
+)
+
 const (
-	EntryPointIDContextKey ContextKey = "entrypoint_id"
 	RouteNameContextKey    ContextKey = "route_name"
 	MatchedRouteContextKey ContextKey = "matched_route"
 	IsManagementContextKey ContextKey = "is_management"
 	DebugInfoContextKey    ContextKey = "debug_info"
 	FingerprintContextKey  ContextKey = "fingerprint"
-	RequestStateContextKey ContextKey = "request_state"
 )
-
-var RequestStatePool = sync.Pool{
-	New: func() any {
-		return &RequestState{}
-	},
-}
-
-// RequestState holds mutable request-scoped data to avoid multiple context allocations.
-type RequestState struct {
-	EntryPointID string
-	RouteName    string
-	IsManagement bool
-	MatchedRoute any // avoids circular dependency with proto
-	DebugInfo    *DebugInfo
-	RequestID    string
-}
-
-// GetRequestState returns the RequestState from the context, or nil if not set.
-func GetRequestState(r *http.Request) *RequestState {
-	if val, ok := r.Context().Value(RequestStateContextKey).(*RequestState); ok {
-		return val
-	}
-	return nil
-}
-
-// DebugInfo captures request/response details for diagnostic tracing.
-type DebugInfo struct {
-	RequestHeaders  string
-	RequestBody     string
-	ResponseHeaders string
-	ResponseBody    string
-}
 
 // GetRouteName returns the route ID from the request context, or empty if not set.
 func GetRouteName(r *http.Request) string {
-	if rs := GetRequestState(r); rs != nil {
+	if rs := request.GetRequestState(r); rs != nil {
 		return rs.RouteName
-	}
-	if val, ok := r.Context().Value(RouteNameContextKey).(string); ok {
-		return val
 	}
 	return ""
 }
 
 // GetRequestID returns the request ID from the request context, or "unknown" if not set.
 func GetRequestID(r *http.Request) string {
-	if rs := GetRequestState(r); rs != nil && rs.RequestID != "" {
+	if rs := request.GetRequestState(r); rs != nil && rs.RequestID != "" {
 		return rs.RequestID
 	}
 	return request.GetID(r)
@@ -101,7 +67,7 @@ func IsDashboardPath(path string) bool {
 // for a given request. It skips metrics for the management entrypoint and internal
 // paths, unless it's a dedicated proxy route (non-gateon prefix).
 func ShouldSkipMetrics(r *http.Request) bool {
-	if rs := GetRequestState(r); rs != nil {
+	if rs := request.GetRequestState(r); rs != nil {
 		if rs.IsManagement {
 			return true
 		}
@@ -109,19 +75,6 @@ func ShouldSkipMetrics(r *http.Request) bool {
 			return true
 		}
 		return false
-	}
-
-	isMgmt, _ := r.Context().Value(IsManagementContextKey).(bool)
-	if isMgmt {
-		return true
-	}
-
-	routeID := GetRouteName(r)
-
-	// For infrastructure-level metrics (entrypoints starting with "gateon-"),
-	// skip recording for any internal paths to isolate proxy metrics.
-	if strings.HasPrefix(routeID, "gateon-") && IsInternalPath(r.URL.Path) {
-		return true
 	}
 
 	return false
@@ -171,36 +124,45 @@ type SecurityHeadersConfig struct {
 
 // SecurityHeaders returns a middleware that adds standard security headers to all responses based on a preset.
 func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
+	cspHTTP := contentSecurityPolicy(false, cfg.ExtraImgSrc)
+	cspHTTPS := contentSecurityPolicy(true, cfg.ExtraImgSrc)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			secure := isSecureRequest(r)
+			h := w.Header()
+
 			switch cfg.Preset {
 			case "recommended":
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-				w.Header().Set("X-XSS-Protection", "0")
-				w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-				w.Header().Set("Content-Security-Policy", contentSecurityPolicy(secure, cfg.ExtraImgSrc))
-				w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+				h.Set("X-Content-Type-Options", "nosniff")
+				h.Set("X-Frame-Options", "SAMEORIGIN")
+				h.Set("X-XSS-Protection", "0")
+				h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 				if secure {
-					w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+					h.Set("Content-Security-Policy", cspHTTPS)
+					h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+				} else {
+					h.Set("Content-Security-Policy", cspHTTP)
 				}
+				h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 			case "strict":
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.Header().Set("X-Frame-Options", "DENY")
-				w.Header().Set("X-XSS-Protection", "0")
-				w.Header().Set("Referrer-Policy", "no-referrer")
-				w.Header().Set("Content-Security-Policy", contentSecurityPolicy(secure, cfg.ExtraImgSrc))
-				w.Header().Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
+				h.Set("X-Content-Type-Options", "nosniff")
+				h.Set("X-Frame-Options", "DENY")
+				h.Set("X-XSS-Protection", "0")
+				h.Set("Referrer-Policy", "no-referrer")
 				if secure {
-					w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+					h.Set("Content-Security-Policy", cspHTTPS)
+					h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+				} else {
+					h.Set("Content-Security-Policy", cspHTTP)
 				}
+				h.Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
 			default:
 				// Default legacy behavior if preset is empty or unknown
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-				w.Header().Set("X-XSS-Protection", "1; mode=block")
-				w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+				h.Set("X-Content-Type-Options", "nosniff")
+				h.Set("X-Frame-Options", "SAMEORIGIN")
+				h.Set("X-XSS-Protection", "1; mode=block")
+				h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -245,7 +207,7 @@ func Chain(middlewares ...Middleware) Middleware {
 
 // RealIP returns a middleware that resolves the real client IP and updates r.RemoteAddr.
 // This ensures that all downstream middlewares see the real client IP instead of a proxy IP.
-// It also ensures that the original scheme (http/https) is preserved via a context override
+// It also ensures that the original scheme (http/https) is preserved via a RequestState override
 // before r.RemoteAddr is changed, which would otherwise break trusted-proxy detection.
 func RealIP(trustCloudflare bool) Middleware {
 	return func(next http.Handler) http.Handler {
@@ -257,7 +219,12 @@ func RealIP(trustCloudflare bool) Middleware {
 			// capture the forwarded proto before we lose the peer IP in r.RemoteAddr.
 			if request.IsTrusted(r.RemoteAddr, trustCloudflare) {
 				if proto := request.NormalizeProto(r.Header.Get(request.HeaderXForwardedProto)); proto != "" {
-					r = r.WithContext(request.WithForwardedProto(r.Context(), proto))
+					if rs := request.GetRequestState(r); rs != nil {
+						rs.ForwardedProto = proto
+					} else {
+						// Fallback if no RequestState is present (e.g. testing)
+						r = r.WithContext(request.WithForwardedProto(r.Context(), proto))
+					}
 				}
 			}
 

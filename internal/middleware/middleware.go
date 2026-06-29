@@ -1,6 +1,9 @@
 package middleware
 
-import "github.com/gsoultan/gateon/internal/middleware/kind"
+import (
+	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/request"
+)
 
 // The cycle-free core middleware primitives now live in the leaf package
 // internal/middleware/kind (ADR-0002, Stage 0). The transparent aliases below
@@ -13,26 +16,30 @@ import "github.com/gsoultan/gateon/internal/middleware/kind"
 type (
 	Middleware            = kind.Middleware
 	ContextKey            = kind.ContextKey
-	DebugInfo             = kind.DebugInfo
 	SecurityHeadersConfig = kind.SecurityHeadersConfig
 	StatusResponseWriter  = kind.StatusResponseWriter
 	ErrorsConfig          = kind.ErrorsConfig
-	RequestState          = kind.RequestState
+	RequestState          = request.RequestState
+	DebugInfo             = request.DebugInfo
 )
 
 // Request-context keys.
-const (
+var (
 	EntryPointIDContextKey = kind.EntryPointIDContextKey
+	RequestStateContextKey = request.RequestStateContextKey{}
+)
+
+const (
 	RouteNameContextKey    = kind.RouteNameContextKey
 	MatchedRouteContextKey = kind.MatchedRouteContextKey
 	IsManagementContextKey = kind.IsManagementContextKey
 	DebugInfoContextKey    = kind.DebugInfoContextKey
 	FingerprintContextKey  = kind.FingerprintContextKey
-	RequestStateContextKey = kind.RequestStateContextKey
 )
 
 var (
-	GetRequestState = kind.GetRequestState
+	GetRequestState  = request.GetRequestState
+	RequestStatePool = &request.RequestStatePool
 )
 
 // Core constructors, predicates, and the pooled status writer.
@@ -49,7 +56,6 @@ var (
 	GetStatusResponseWriter = kind.GetStatusResponseWriter
 	PutStatusResponseWriter = kind.PutStatusResponseWriter
 	RealIP                  = kind.RealIP
-	RequestStatePool        = kind.RequestStatePool
 	GetRequestID            = kind.GetRequestID
 
 	// getStatusString is kept as an unexported alias so internal callers

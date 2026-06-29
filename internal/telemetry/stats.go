@@ -117,11 +117,53 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 
 // RecordTrace records a trace for an operation.
 func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, respHeaders string) {
-	recordTraceToStore(id, operationName, serviceName, routeID, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, "", respHeaders, "")
+	tr := GetTraceRecord()
+	tr.ID = id
+	tr.OperationName = operationName
+	tr.ServiceName = serviceName
+	tr.RouteID = routeID
+	tr.DurationMs = durationMs
+	tr.Timestamp = timestamp
+	tr.Status = status
+	tr.Path = path
+	tr.SourceIP = sourceIP
+	tr.Fingerprint = fingerprint
+	tr.CountryCode = countryCode
+	tr.UserAgent = userAgent
+	tr.Method = method
+	tr.Referer = referer
+	tr.RequestURI = requestURI
+	tr.JA3 = ja3
+	tr.JA4 = ja4
+	tr.RequestHeaders = reqHeaders
+	tr.ResponseHeaders = respHeaders
+	recordTraceToStore(tr)
 }
 
 func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
-	recordTraceToStore(id, operationName, serviceName, routeID, durationMs, timestamp, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody)
+	tr := GetTraceRecord()
+	tr.ID = id
+	tr.OperationName = operationName
+	tr.ServiceName = serviceName
+	tr.RouteID = routeID
+	tr.DurationMs = durationMs
+	tr.Timestamp = timestamp
+	tr.Status = status
+	tr.Path = path
+	tr.SourceIP = sourceIP
+	tr.Fingerprint = fingerprint
+	tr.CountryCode = countryCode
+	tr.UserAgent = userAgent
+	tr.Method = method
+	tr.Referer = referer
+	tr.RequestURI = requestURI
+	tr.JA3 = ja3
+	tr.JA4 = ja4
+	tr.RequestHeaders = reqHeaders
+	tr.RequestBody = reqBody
+	tr.ResponseHeaders = respHeaders
+	tr.ResponseBody = respBody
+	recordTraceToStore(tr)
 }
 
 // getInMemoryPathStats returns aggregated path statistics from the in-memory map.

@@ -10,7 +10,7 @@ import (
 
 // DiagnosticData holds the data needed for anomaly detection.
 type DiagnosticData struct {
-	Traces           []telemetry.TraceRecord
+	Traces           []*telemetry.TraceRecord
 	Routes           []*gateonv1.Route
 	Middlewares      []*gateonv1.Middleware
 	ManagementHosts  []string

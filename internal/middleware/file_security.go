@@ -15,7 +15,9 @@ import (
 
 	"github.com/dutchcoders/go-clamd"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/yara"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/h2non/filetype"
 	aho_corasick "github.com/petar-dambovaliev/aho-corasick"
 )
@@ -90,6 +92,8 @@ type FileSecurityConfig struct {
 	// SignatureBlockSeverity is the minimum match severity that blocks an upload.
 	// Lower-severity matches are logged but allowed. Defaults to "high".
 	SignatureBlockSeverity yara.Severity
+	// RouteID is the identifier for the route being protected, used for telemetry.
+	RouteID string
 }
 
 func (c FileSecurityConfig) withDefaults() FileSecurityConfig {
@@ -180,6 +184,8 @@ func FileSecurity(cfg FileSecurityConfig) Middleware {
 				}
 				logger.L.LogWarn("ClamAV scan failed (fail-open), forwarding upload", "error", res.scannerErr, "client_ip", r.RemoteAddr)
 			} else if res.blocked {
+				recordFileSecurityThreat(r, cfg.RouteID, "file_security_block", res.message)
+				telemetry.MiddlewareFileSecurityBlockedTotal.WithLabelValues(cfg.RouteID, "policy_violation").Inc()
 				http.Error(w, res.message, res.status)
 				return
 			}
@@ -265,11 +271,17 @@ func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecuri
 // inspectPart validates a single file part: size, MIME/magic, and ClamAV.
 // The part is fully read from the already-buffered (bounded) request body.
 func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity, allowedMap, blockedMap map[string]bool) scanResult {
-	content, err := io.ReadAll(p)
+	buf := fileScannerBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer fileScannerBufferPool.Put(buf)
+
+	// Use io.Copy to avoid io.ReadAll's internal allocations
+	_, err := io.Copy(buf, p)
 	if err != nil {
 		logger.L.LogError("Failed to read upload part", "error", err)
 		return scanResult{}
 	}
+	content := buf.Bytes()
 
 	if cfg.MaxFileSize > 0 && int64(len(content)) > cfg.MaxFileSize {
 		logger.L.LogWarn("File upload blocked: file too large",
@@ -305,6 +317,25 @@ func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, eng
 		return scanPartWithClamAV(r, p, content, cfg)
 	}
 	return scanResult{}
+}
+
+func recordFileSecurityThreat(r *http.Request, routeID, ttype, details string) {
+	clientIP := request.GetClientIP(r, true)
+	logger.SecurityEvent(ttype, r, details)
+
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		ID:          fmt.Sprintf("file-sec-%d", time.Now().UnixNano()),
+		Type:        ttype,
+		SourceIP:    clientIP,
+		Score:       90,
+		Details:     details,
+		Time:        time.Now(),
+		RouteID:     routeID,
+		RequestURI:  r.URL.Path,
+		Category:    "malware",
+		Severity:    "high",
+		ActionTaken: "blocked",
+	})
 }
 
 // buildSignatureEngine constructs the YARA-lite engine for the middleware,

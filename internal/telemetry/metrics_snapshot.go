@@ -74,30 +74,34 @@ type MetricsSnapshot struct {
 // traffic) and XDPPacketsDropped (packets dropped below the HTTP layer, a
 // different unit) are reported separately and are NOT funnel stages.
 type MitigationFunnel struct {
-	HTTPIngress       float64 `json:"http_ingress"`
-	WAFBlocked        float64 `json:"waf_blocked"`
-	RateLimited       float64 `json:"rate_limited"`
-	GeoIPBlocked      float64 `json:"geoip_blocked"`
-	AuthFailures      float64 `json:"auth_failures"`
-	TurnstileFailures float64 `json:"turnstile_failures"`
-	HMACFailures      float64 `json:"hmac_failures"`
-	TotalMitigated    float64 `json:"total_mitigated"`
-	Allowed           float64 `json:"allowed"`
-	ServerErrors      float64 `json:"server_errors"`
-	XDPPacketsDropped float64 `json:"xdp_packets_dropped"`
+	HTTPIngress           float64 `json:"http_ingress"`
+	WAFBlocked            float64 `json:"waf_blocked"`
+	RateLimited           float64 `json:"rate_limited"`
+	GeoIPBlocked          float64 `json:"geoip_blocked"`
+	AuthFailures          float64 `json:"auth_failures"`
+	TurnstileFailures     float64 `json:"turnstile_failures"`
+	HMACFailures          float64 `json:"hmac_failures"`
+	BotBlocked            float64 `json:"bot_blocked"`
+	FileSecurityBlocked   float64 `json:"file_security_blocked"`
+	DeceptionBlocked      float64 `json:"deception_blocked"`
+	AdvancedSecurityBlock float64 `json:"advanced_security_blocked"`
+	TotalMitigated        float64 `json:"total_mitigated"`
+	Allowed               float64 `json:"allowed"`
+	ServerErrors          float64 `json:"server_errors"`
+	XDPPacketsDropped     float64 `json:"xdp_packets_dropped"`
 }
 
 type SecurityInsights struct {
-	TopThreatSources  []LabeledCount   `json:"top_threat_sources,omitzero"`
-	TopThreatTypes    []LabeledCount   `json:"top_threat_types,omitzero"`
-	ThreatsByCountry  []LabeledCount   `json:"threats_by_country,omitzero"`
-	AttackTrend       []TrafficSample  `json:"attack_trend,omitzero"`
-	RecentAnomalies   []SecurityThreat `json:"recent_anomalies,omitzero"`
-	TotalAnomalies    int64            `json:"total_anomalies"`
-	ActiveThreats     int              `json:"active_threats"`
-	MitigatedToday    int              `json:"mitigated_today"`
-	HeavyHitters      []HeavyHitter    `json:"heavy_hitters,omitzero"`
-	GlobalThreatScore float64          `json:"global_threat_score"`
+	TopThreatSources  []LabeledCount    `json:"top_threat_sources,omitzero"`
+	TopThreatTypes    []LabeledCount    `json:"top_threat_types,omitzero"`
+	ThreatsByCountry  []LabeledCount    `json:"threats_by_country,omitzero"`
+	AttackTrend       []TrafficSample   `json:"attack_trend,omitzero"`
+	RecentAnomalies   []*SecurityThreat `json:"recent_anomalies,omitzero"`
+	TotalAnomalies    int64             `json:"total_anomalies"`
+	ActiveThreats     int               `json:"active_threats"`
+	MitigatedToday    int               `json:"mitigated_today"`
+	HeavyHitters      []HeavyHitter     `json:"heavy_hitters,omitzero"`
+	GlobalThreatScore float64           `json:"global_threat_score"`
 }
 
 // GoldenSignals represents the four golden signals of monitoring.
@@ -377,14 +381,27 @@ func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
 	gs := computeGoldenSignals(idx, allMatch)
 
 	f := MitigationFunnel{
-		HTTPIngress:       gs.RequestsTotal,
-		WAFBlocked:        sumCounter(idx, "gateon_middleware_waf_blocked_total", nil),
-		RateLimited:       sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", nil),
-		GeoIPBlocked:      sumCounter(idx, "gateon_middleware_geoip_blocked_total", nil),
-		AuthFailures:      sumCounter(idx, "gateon_middleware_auth_failures_total", nil),
-		HMACFailures:      sumCounter(idx, "gateon_middleware_hmac_failures_total", nil),
-		ServerErrors:      gs.ErrorsTotal,
-		XDPPacketsDropped: sumCounter(idx, "gateon_ebpf_dropped_packets_total", nil),
+		HTTPIngress:           gs.RequestsTotal,
+		WAFBlocked:            sumCounter(idx, "gateon_middleware_waf_blocked_total", nil),
+		RateLimited:           sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", nil),
+		GeoIPBlocked:          sumCounter(idx, "gateon_middleware_geoip_blocked_total", nil),
+		AuthFailures:          sumCounter(idx, "gateon_middleware_auth_failures_total", nil),
+		HMACFailures:          sumCounter(idx, "gateon_middleware_hmac_failures_total", nil),
+		FileSecurityBlocked:   sumCounter(idx, "gateon_middleware_file_security_blocked_total", nil),
+		AdvancedSecurityBlock: sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", nil),
+		DeceptionBlocked:      sumCounter(idx, "gateon_middleware_deception_blocked_total", nil),
+		ServerErrors:          gs.ErrorsTotal,
+		XDPPacketsDropped:     sumCounter(idx, "gateon_ebpf_dropped_packets_total", nil),
+	}
+
+	// Add Bot Management blocks to the funnel
+	if fam, ok := idx["gateon_middleware_bot_management_total"]; ok {
+		for _, m := range fam.GetMetric() {
+			outcome := labelValue(m, "outcome")
+			if outcome == "blocked" || outcome == "integrity_failed" || outcome == "challenge_failed" {
+				f.BotBlocked += m.GetCounter().GetValue()
+			}
+		}
 	}
 
 	if fam, ok := idx["gateon_middleware_turnstile_total"]; ok {
@@ -399,7 +416,9 @@ func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
 	}
 
 	f.TotalMitigated = f.WAFBlocked + f.RateLimited + f.GeoIPBlocked +
-		f.AuthFailures + f.TurnstileFailures + f.HMACFailures
+		f.AuthFailures + f.TurnstileFailures + f.HMACFailures +
+		f.BotBlocked + f.FileSecurityBlocked + f.DeceptionBlocked +
+		f.AdvancedSecurityBlock
 
 	// Rejected requests are still counted once in gateon_requests_total (they
 	// return a 4xx through the metrics middleware), so subtracting the block

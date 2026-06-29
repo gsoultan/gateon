@@ -9,10 +9,10 @@ import {
 } from "@mantine/core";
 import { IconInfoCircle } from "@tabler/icons-react";
 import type { Route } from "../../types/gateon";
-import type { useForm } from "@tanstack/react-form";
+import type { FormApi } from "@tanstack/react-form";
 import { RuleBuilder } from "./RuleBuilder";
 
-export type RouteFormApi = ReturnType<typeof useForm<Route>>;
+export type RouteFormApi = FormApi<Route, any>;
 
 interface RoutingConfigProps {
   form: RouteFormApi;
