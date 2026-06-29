@@ -23,6 +23,8 @@ func TestIsInternalPath(t *testing.T) {
 		{"grpc health", "/grpc.health.v1.Health/Check", true},
 		{"dashboard api", "/gateon.v1.ApiService/ListRoutes", true},
 		{"dashboard ai", "/gateon.v1.AIService/Chat", true},
+		{"user app api", "/v1/apps/documents", false},
+		{"user employee api", "/v1/employees/home", false},
 		{"proxied path", "/api/users", false},
 		{"root", "/", false},
 	}

@@ -15,11 +15,6 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// CORSProvider provides CORS middleware wrapping (e.g. *cors.Cors).
-type CORSProvider interface {
-	Handler(h http.Handler) http.Handler
-}
-
 // GRPCWebHandler handles gRPC-Web requests (e.g. *grpcweb.WrappedGrpcServer).
 type GRPCWebHandler interface {
 	IsGrpcWebRequest(r *http.Request) bool
@@ -98,7 +93,6 @@ type Deps struct {
 	EpStore          config.EntryPointStore
 	BaseHandler      http.Handler
 	Wrapped          GRPCWebHandler
-	CORS             CORSProvider // For management/internal
 	TLSConfig        *tls.Config
 	TLSManager       gtls.TLSManager
 	Limiter          RateLimiter

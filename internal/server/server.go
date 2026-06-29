@@ -10,6 +10,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/redis"
 	gtls "github.com/gsoultan/gateon/internal/tls"
+	"github.com/rs/cors"
 )
 
 // Server is the main application container (Dependency Injection).
@@ -32,6 +33,7 @@ type Server struct {
 	Port          string
 	Version       string
 	startTime     time.Time
+	MgmtCORS      *cors.Cors
 
 	cache     *ProxyCache
 	cacheOnce sync.Once

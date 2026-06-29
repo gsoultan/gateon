@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
+	"github.com/rs/cors"
 )
 
 // managementImgSrc lists the third-party image hosts the management UI must be
@@ -30,6 +31,7 @@ type BaseHandlerDeps struct {
 	GlobalReg    config.GlobalConfigStore
 	Auth         auth.Service
 	LoginLimiter middleware.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
+	MgmtCORS     *cors.Cors
 }
 
 // CreateBaseHandler builds the main HTTP handler that routes to proxy or local API/UI.
@@ -58,6 +60,12 @@ func CreateBaseHandler(
 	// Pre-chain middlewares to avoid per-request allocations.
 	finalInternal := middleware.Chain(
 		middleware.Recovery(),
+		func(next http.Handler) http.Handler {
+			if deps.MgmtCORS != nil {
+				return deps.MgmtCORS.Handler(next)
+			}
+			return next
+		},
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended", ExtraImgSrc: managementImgSrc}),
 		middleware.XSSRecognition("gateon-management"),
 		middleware.MaxConnections(500),

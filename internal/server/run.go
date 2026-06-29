@@ -117,18 +117,22 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 	// Login rate limit: 5 attempts per minute per IP to mitigate brute force.
 	loginLimiter := middleware.NewRateLimiter(rate.Every(time.Minute/5), 5)
+
+	var mgmtConfig *gateonv1.ManagementConfig
+	if gc := s.GlobalStore.Get(ctx); gc != nil {
+		mgmtConfig = gc.Management
+	}
+	mgmtCors := BuildManagementCORS(mgmtConfig)
+	s.MgmtCORS = mgmtCors
+
 	baseHandler := CreateBaseHandler(uiHandler, BaseHandlerDeps{
 		ProxyHandler: proxyHandler,
 		RouteStore:   s.RouteStore,
 		GlobalReg:    s.GlobalStore,
 		Auth:         s.AuthManager,
 		LoginLimiter: loginLimiter,
+		MgmtCORS:     mgmtCors,
 	}, internalAPI, mux)
-	var mgmtConfig *gateonv1.ManagementConfig
-	if gc := s.GlobalStore.Get(ctx); gc != nil {
-		mgmtConfig = gc.Management
-	}
-	mgmtCors := BuildManagementCORS(mgmtConfig)
 	tlsConfig, err := s.TLSManager.GetTLSConfig()
 	if err != nil {
 		logger.Fatal("failed to initialize tls", "error", err)
@@ -150,7 +154,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, mgmtCors, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore)
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	metricsStop := make(chan struct{})

@@ -112,20 +112,9 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	// Global per-IP connection limit to prevent Slowloris and basic DDOS.
 	chain = append(chain, entrypointConnLimiter())
 
-	// Final handler: wrap with monitoring, global rate limiter, and global CORS (for non-proxied requests).
-	// For proxied requests, they use their own CORS policy from their route config if provided.
-	finalEPHandler := middleware.Chain(chain...)(deps.Limiter.Handler(middleware.PerIP)(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// If it's a management or internal path, apply global CORS.
-			// For user-defined routes, they handle their own CORS (avoid double headers).
-			isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
-			if isMgmt || middleware.IsInternalPath(r.URL.Path) {
-				deps.CORS.Handler(epHandler).ServeHTTP(w, r)
-			} else {
-				epHandler.ServeHTTP(w, r)
-			}
-		}),
-	))
+	// Final handler: wrap with monitoring, global rate limiter.
+	// CORS is handled at the route level for proxy traffic, and in BaseHandler for internal traffic.
+	finalEPHandler := middleware.Chain(chain...)(deps.Limiter.Handler(middleware.PerIP)(epHandler))
 	var epTLSConfig *tls.Config
 	if ep.Tls != nil && ep.Tls.Enabled {
 		epTLSConfig = deps.TLSConfig.Clone()
