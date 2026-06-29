@@ -50,6 +50,7 @@ func (p *serverProxyInvalidator) InvalidateRoutes(strategy func(*gateonv1.Route)
 
 // InvalidateTLS implements proxy.Invalidator.
 func (p *serverProxyInvalidator) InvalidateTLS() {
+	InvalidateTLSCache()
 	if p.server.TLSManager != nil {
 		p.server.TLSManager.UpdateConfig(BuildGtlsConfig(p.server))
 		p.server.TLSManager.ClearCache()

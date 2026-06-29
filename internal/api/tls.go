@@ -20,6 +20,9 @@ func (s *ApiService) UpdateTLSOption(ctx context.Context, req *gateonv1.UpdateTL
 	if err := s.TLSOptions.Update(ctx, req.TlsOption); err != nil {
 		return &gateonv1.UpdateTLSOptionResponse{Success: false}, err
 	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateTLS()
+	}
 	return &gateonv1.UpdateTLSOptionResponse{Success: true}, nil
 }
 
@@ -29,6 +32,9 @@ func (s *ApiService) DeleteTLSOption(ctx context.Context, req *gateonv1.DeleteTL
 	}
 	if err := s.TLSOptions.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteTLSOptionResponse{Success: false}, err
+	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateTLS()
 	}
 	return &gateonv1.DeleteTLSOptionResponse{Success: true}, nil
 }

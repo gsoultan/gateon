@@ -20,6 +20,16 @@ func (s *ApiService) UpdateMiddleware(ctx context.Context, req *gateonv1.UpdateM
 	if err := s.Middlewares.Update(ctx, req.Middleware); err != nil {
 		return &gateonv1.UpdateMiddlewareResponse{Success: false}, err
 	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
+			for _, mID := range r.Middlewares {
+				if mID == req.Middleware.Id {
+					return true
+				}
+			}
+			return false
+		})
+	}
 	return &gateonv1.UpdateMiddlewareResponse{Success: true}, nil
 }
 
@@ -29,6 +39,16 @@ func (s *ApiService) DeleteMiddleware(ctx context.Context, req *gateonv1.DeleteM
 	}
 	if err := s.Middlewares.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteMiddlewareResponse{Success: false}, err
+	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
+			for _, mID := range r.Middlewares {
+				if mID == req.Id {
+					return true
+				}
+			}
+			return false
+		})
 	}
 	return &gateonv1.DeleteMiddlewareResponse{Success: true}, nil
 }

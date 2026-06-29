@@ -20,6 +20,9 @@ func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteR
 	if err := s.Routes.Update(ctx, req.Route); err != nil {
 		return &gateonv1.UpdateRouteResponse{Success: false}, err
 	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoute(req.Route.Id)
+	}
 	return &gateonv1.UpdateRouteResponse{Success: true}, nil
 }
 
@@ -29,6 +32,9 @@ func (s *ApiService) DeleteRoute(ctx context.Context, req *gateonv1.DeleteRouteR
 	}
 	if err := s.Routes.Delete(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteRouteResponse{Success: false}, err
+	}
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoute(req.Id)
 	}
 	return &gateonv1.DeleteRouteResponse{Success: true}, nil
 }
