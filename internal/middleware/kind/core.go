@@ -119,12 +119,31 @@ func Recovery() Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
+					// http.ErrAbortHandler is a sentinel panic value to abort a handler.
+					// We must re-panic it to let the net/http server handle it gracefully
+					// (stop processing without logging an error).
+					if err == http.ErrAbortHandler {
+						panic(err)
+					}
+
 					logger.L.LogError("handler panic recovered",
 						"panic", err,
 						"path", r.URL.Path,
 						"method", r.Method,
 						"stack", string(debug.Stack()))
-					w.WriteHeader(http.StatusInternalServerError)
+
+					// Try to send 500 if headers haven't been sent yet.
+					// We use a type assertion to check for our StatusResponseWriter
+					// which tracks this.
+					if sw, ok := w.(*StatusResponseWriter); ok {
+						if !sw.ttfbRecorded {
+							w.WriteHeader(http.StatusInternalServerError)
+						}
+					} else {
+						// Fallback if not wrapped or wrapped by something else.
+						// net/http will ignore multiple WriteHeader calls with a warning.
+						w.WriteHeader(http.StatusInternalServerError)
+					}
 				}
 			}()
 			next.ServeHTTP(w, r)
