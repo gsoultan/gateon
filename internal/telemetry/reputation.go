@@ -191,6 +191,17 @@ func ApplyRemoteReputation(fingerprint string, score float64, violations int, hi
 	shard.cache.Add(fingerprint, r)
 }
 
+func ResetReputation(fingerprint string) {
+	if fingerprint == "" {
+		return
+	}
+	shard := getRepShard(fingerprint)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	shard.cache.Remove(fingerprint)
+}
+
 type ReputationRecord struct {
 	Fingerprint    string
 	Score          float64

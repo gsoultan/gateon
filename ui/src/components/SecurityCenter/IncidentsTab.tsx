@@ -229,7 +229,7 @@ export function IncidentsTab() {
                         <Badge size="sm" variant="light" color="orange">
                           {inc.signal_count} signals
                         </Badge>
-                        {inc.signal_types.map((t) => (
+                        {inc.signal_types?.map((t) => (
                           <Badge key={t} size="xs" variant="outline" color="gray">
                             {t.replace(/_/g, " ")}
                           </Badge>
@@ -238,12 +238,12 @@ export function IncidentsTab() {
                     </Table.Td>
                     <Table.Td>
                       <Group gap={4}>
-                        {inc.techniques.length === 0 && (
+                        {(inc.techniques?.length ?? 0) === 0 && (
                           <Text size="xs" c="dimmed">
                             —
                           </Text>
                         )}
-                        {inc.techniques.map((tech) => (
+                        {inc.techniques?.map((tech) => (
                           <Tooltip key={tech.id} label={`${tech.name} (${tech.tactic})`}>
                             <Badge size="sm" variant="light" color="red">
                               {tech.id}

@@ -391,6 +391,9 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		}
 	}
 
+	// Record mitigation in telemetry
+	telemetry.MarkIPMitigated(sourceIP, "Manual recommendation applied via API")
+
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
 		Message: fmt.Sprintf("IP %s blocked via middleware and shunned at XDP level.", sourceIP),
@@ -486,6 +489,10 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 	}
 
+	// 4. Mark as unmitigated in telemetry and reset reputation
+	telemetry.MarkIPUnmitigated(sourceIP)
+	telemetry.ResetReputation(sourceIP)
+
 	return &gateonv1.RemoveMitigatedThreatResponse{
 		Success: true,
 		Message: fmt.Sprintf("Mitigation for IP %s removed successfully.", sourceIP),
@@ -514,7 +521,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		RequestUri:      t.RequestURI,
 		Category:        t.Category,
 		ActionTaken:     t.ActionTaken,
-		Mitigated:       t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned",
+		Mitigated:       (t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned") && !telemetry.IsIPUnmitigated(t.SourceIP),
 		RequestHeaders:  t.RequestHeaders,
 		RequestBody:     t.RequestBody,
 		ResponseHeaders: t.ResponseHeaders,
