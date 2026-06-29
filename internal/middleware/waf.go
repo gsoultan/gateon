@@ -436,7 +436,7 @@ SecAuditLog "%s"
 			r.Header.Del("X-Gateon-Threat-Type")
 			r.Header.Del("X-Gateon-WAF-Matched")
 
-			if IsCorsPreflight(r) {
+			if IsCorsPreflight(r) || r.Header.Get("Upgrade") != "" {
 				next.ServeHTTP(w, r)
 				return
 			}
