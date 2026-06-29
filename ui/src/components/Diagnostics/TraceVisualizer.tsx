@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Modal, Text, Stack, Group, Paper, Box, ThemeIcon, Timeline, Badge, Loader, Alert } from "@mantine/core";
-import { IconMap2, IconMapPin, IconClock, IconWorld, IconAlertCircle } from "@tabler/icons-react";
+import { Modal, Text, Stack, Group, Box, Timeline, Badge, Loader, Alert, Paper } from "@mantine/core";
+import { IconMap2, IconMapPin, IconWorld, IconAlertCircle } from "@tabler/icons-react";
 import { traceRoute } from "../../hooks/api";
 import type { TraceHop } from "../../types/gateon";
 

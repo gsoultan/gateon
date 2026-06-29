@@ -1,3 +1,4 @@
+import { useMemo, useCallback } from "react";
 import {
   Alert,
   AppShell,
@@ -60,6 +61,18 @@ import {
   IconLogout,
 } from "@tabler/icons-react";
 
+const CORE_LINKS = [
+  { label: "Dashboard", to: "/", icon: IconDashboard },
+  { label: "Topology", to: "/topology", icon: IconNetwork },
+  { label: "Traces", to: "/traces", icon: IconTimeline },
+  { label: "Routes", to: "/routes", icon: IconRoute },
+  { label: "Services", to: "/services", icon: IconServer },
+  { label: "Metrics", to: "/metrics", icon: IconChartBar },
+  { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
+  { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
+  { label: "EntryPoints", to: "/entrypoints", icon: IconAccessPoint },
+];
+
 export function Shell() {
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure();
   const sidebarCollapsed = usePreferencesStore((state) => state.sidebarCollapsed);
@@ -73,23 +86,11 @@ export function Shell() {
   const user = useAuthStore((state) => state.user);
   const { isViewer } = usePermissions();
 
-  const cycleScheme = (next: "light" | "dark" | "auto") => {
+  const cycleScheme = useCallback((next: "light" | "dark" | "auto") => {
     setColorScheme(next);
-  };
+  }, [setColorScheme]);
 
-  const coreLinks = [
-    { label: "Dashboard", to: "/", icon: IconDashboard },
-    { label: "Topology", to: "/topology", icon: IconNetwork },
-    { label: "Traces", to: "/traces", icon: IconTimeline },
-    { label: "Routes", to: "/routes", icon: IconRoute },
-    { label: "Services", to: "/services", icon: IconServer },
-    { label: "Metrics", to: "/metrics", icon: IconChartBar },
-    { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
-    { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
-    { label: "EntryPoints", to: "/entrypoints", icon: IconAccessPoint },
-  ];
-
-  const securityLinks = [
+  const securityLinks = useMemo(() => [
     { label: "Security Hub", to: "/security-center", icon: IconShieldCheck },
     // Audit Logs are an admin/operator surface (global resource); a read-only
     // Viewer would only hit a 403 here, so hide the link for them.
@@ -104,9 +105,9 @@ export function Shell() {
     },
     { label: "TLS Options", to: "/tls-options", icon: IconLockAccess },
     { label: "Middlewares", to: "/middlewares", icon: IconSettingsAutomation },
-  ];
+  ], [isViewer]);
 
-  const systemLinks = [
+  const systemLinks = useMemo(() => [
     { label: "Docs", to: "/docs", icon: IconBook2 },
     { label: "Diagnostics", to: "/diagnostics", icon: IconStethoscope },
     { label: "Logs", to: "/logs", icon: IconTerminal2 },
@@ -117,7 +118,7 @@ export function Shell() {
     ...(isViewer
       ? []
       : [{ label: "Settings", to: "/settings", icon: IconSettings }]),
-  ];
+  ], [isViewer, user?.role]);
 
   return (
     <CommandPaletteProvider>
@@ -214,7 +215,7 @@ export function Shell() {
             <Group visibleFrom="lg" style={{ flexShrink: 0 }}>
               <GlobalHealthBar />
             </Group>
-            <Group gap={{ base: "xs", md: "sm" }} style={{ flexShrink: 0 }}>
+            <Group gap="xs" style={{ flexShrink: 0 }}>
               <ConnectionStatus />
 
               {user?.role && (
@@ -261,23 +262,20 @@ export function Shell() {
           <Menu.Item
             leftSection={<IconSun size={16} stroke={1.5} />}
             onClick={() => cycleScheme("light")}
-            active={colorScheme === "light"}
           >
-            Light Mode
+            Light Mode {colorScheme === "light" && "✓"}
           </Menu.Item>
           <Menu.Item
             leftSection={<IconMoon size={16} stroke={1.5} />}
             onClick={() => cycleScheme("dark")}
-            active={colorScheme === "dark"}
           >
-            Dark Mode
+            Dark Mode {colorScheme === "dark" && "✓"}
           </Menu.Item>
           <Menu.Item
             leftSection={<IconDeviceDesktop size={16} stroke={1.5} />}
             onClick={() => cycleScheme("auto")}
-            active={colorScheme === "auto"}
           >
-            Follow System
+            Follow System {colorScheme === "auto" && "✓"}
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
@@ -363,7 +361,7 @@ export function Shell() {
               </Text>
             )}
             <Stack gap={2}>
-              {coreLinks.map((l) => (
+              {CORE_LINKS.map((l) => (
                 <Tooltip
                   key={l.to}
                   label={l.label}

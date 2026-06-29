@@ -230,12 +230,10 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 func injectEntryPointID(epID, epLabel string, isMgmt bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := middleware.RequestStatePool.Get().(*middleware.RequestState)
+		rs.Reset()
 		rs.EntryPointID = epID
 		rs.RouteName = "gateon-" + epLabel
 		rs.IsManagement = isMgmt
-		rs.MatchedRoute = nil
-		rs.DebugInfo = nil
-		rs.RequestID = ""
 		defer middleware.RequestStatePool.Put(rs)
 
 		ctx := context.WithValue(r.Context(), middleware.RequestStateContextKey, rs)

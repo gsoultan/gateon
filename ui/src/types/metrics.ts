@@ -141,6 +141,10 @@ export type MitigationFunnel = {
   auth_failures: number;
   turnstile_failures: number;
   hmac_failures: number;
+  bot_blocked: number;
+  file_security_blocked: number;
+  deception_blocked: number;
+  advanced_security_blocked: number;
   total_mitigated: number;
   allowed: number;
   server_errors: number;

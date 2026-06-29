@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -22,6 +21,16 @@ import (
 	"github.com/gsoultan/gateon/internal/security/art"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
+
+// Fingerprinting returns a middleware that pre-calculates client fingerprints and stores them in RequestState.
+func Fingerprinting() Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = telemetry.WithFingerprint(r)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 // AccessLog returns a middleware that logs request details.
 func AccessLog(routeID string) Middleware {
@@ -166,7 +175,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// Behavioral Fingerprinting
 			fingerprint := ""
 			if gc := config.GetGlobalConfig(); gc != nil && gc.AnomalyDetection != nil && gc.AnomalyDetection.EnableBehavioralFingerprinting {
-				fp := telemetry.GenerateFingerprint(r)
+				fp := telemetry.GetDetailedFingerprint(r)
 				fingerprint = fp.Hash
 				telemetry.TrackBehavior(fingerprint, r, sw.Status)
 			}
@@ -237,8 +246,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						debug.ResponseBody,
 					)
 				} else {
-					reqHeadersJSON, _ := json.Marshal(flattenHeaders(r.Header, r.Trailer))
-					respHeadersJSON, _ := json.Marshal(flattenHeaders(sw.Header()))
+					reqHeaders := telemetry.FormatHeaders(r.Header, r.Trailer)
+					respHeaders := telemetry.FormatHeaders(sw.Header())
 
 					telemetry.RecordTrace(
 						id,
@@ -258,8 +267,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						origHost+r.URL.RequestURI(),
 						ja3,
 						ja4,
-						string(reqHeadersJSON),
-						string(respHeadersJSON),
+						reqHeaders,
+						respHeaders,
 					)
 				}
 			}
@@ -503,10 +512,10 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 			var reqBody []byte
 			if r.Body != nil {
 				reqBody, _ = io.ReadAll(io.LimitReader(r.Body, int64(maxBodySize)))
-				r.Body = io.NopCloser(bytes.NewBuffer(reqBody))
+				r.Body = io.NopCloser(bytes.NewReader(reqBody))
 			}
 
-			reqHeaders, _ := json.Marshal(flattenHeaders(r.Header, r.Trailer))
+			reqHeaders := telemetry.FormatHeaders(r.Header, r.Trailer)
 
 			// Wrap ResponseWriter
 			rec := bodyRecorderPool.Get().(*bodyRecorder)
@@ -515,34 +524,31 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 			rec.maxSize = maxBodySize
 			defer bodyRecorderPool.Put(rec)
 
-			r = r.WithContext(context.WithValue(r.Context(), DebugInfoContextKey, &DebugInfo{
+			dinfo := &DebugInfo{
 				RequestHeaders: string(reqHeaders),
 				RequestBody:    string(reqBody),
-			}))
+			}
+
+			if rs := GetRequestState(r); rs != nil {
+				rs.DebugInfo = dinfo
+			} else {
+				r = r.WithContext(context.WithValue(r.Context(), DebugInfoContextKey, dinfo))
+			}
 
 			next.ServeHTTP(rec, r)
 
-			respHeaders, _ := json.Marshal(flattenHeaders(rec.Header()))
-			debugInfo := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
-			debugInfo.ResponseHeaders = string(respHeaders)
-			debugInfo.ResponseBody = rec.body.String()
+			respHeaders := telemetry.FormatHeaders(rec.Header())
+			var activeDebugInfo *DebugInfo
+			if rs := GetRequestState(r); rs != nil {
+				activeDebugInfo = rs.DebugInfo
+			} else {
+				activeDebugInfo, _ = r.Context().Value(DebugInfoContextKey).(*DebugInfo)
+			}
+
+			if activeDebugInfo != nil {
+				activeDebugInfo.ResponseHeaders = string(respHeaders)
+				activeDebugInfo.ResponseBody = rec.body.String()
+			}
 		})
 	}
-}
-
-func flattenHeaders(h http.Header, trailers ...http.Header) map[string]string {
-	m := make(map[string]string)
-	for k, v := range h {
-		if len(v) > 0 {
-			m[k] = strings.Join(v, ", ")
-		}
-	}
-	for _, t := range trailers {
-		for k, v := range t {
-			if len(v) > 0 {
-				m["Trailer-"+k] = strings.Join(v, ", ")
-			}
-		}
-	}
-	return m
 }

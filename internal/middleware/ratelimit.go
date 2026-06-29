@@ -290,13 +290,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			sb.WriteString(key)
 			redisKey := sb.String()
 
-			sb.Reset()
-			sb.WriteString("0")
-			zero := sb.String()
-
-			sb.Reset()
-			sb.WriteString(strconv.FormatInt(minMs, 10))
-			minMsStr := sb.String()
+			minMsStr := strconv.FormatInt(minMs, 10)
 
 			sb.Reset()
 			sb.WriteString(strconv.FormatInt(nowMs, 10))
@@ -307,7 +301,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			// Pipeline to ensure atomicity
 			pipe := rl.client.Pipeline()
 			// Remove entries older than 1 minute
-			pipe.ZRemRangeByScore(r.Context(), redisKey, zero, minMsStr)
+			pipe.ZRemRangeByScore(r.Context(), redisKey, "0", minMsStr)
 			// Add current request
 			pipe.ZAdd(r.Context(), redisKey, redigo.Z{Score: float64(nowMs), Member: member})
 			// Count requests in the window

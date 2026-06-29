@@ -492,7 +492,7 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 	}, nil
 }
 
-func (s *ApiService) threatToAnomaly(ctx context.Context, t telemetry.SecurityThreat) *gateonv1.Anomaly {
+func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityThreat) *gateonv1.Anomaly {
 	severity := "low"
 	if t.Score >= 100 {
 		severity = "critical"

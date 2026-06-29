@@ -50,17 +50,19 @@ const rootRoute = createRootRouteWithContext<{
       <Outlet />
     </Suspense>
   ),
-  beforeLoad: async ({ location }) => {
+  beforeLoad: async ({ location, context }) => {
     if (location.pathname === "/setup") {
       return;
     }
     try {
-      const res = await apiFetch("/v1/setup/required");
-      if (!res.ok) {
-        return;
-      }
-
-      const data = await res.json();
+      const data = await context.queryClient.ensureQueryData({
+        queryKey: ["setup-required"],
+        queryFn: async () => {
+          const res = await apiFetch("/v1/setup/required");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        },
+      });
       if (data && (data.required === true || data.required === "true")) {
         throw redirect({ to: "/setup" });
       }
@@ -81,14 +83,16 @@ const loginRoute = createRoute({
 const setupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/setup",
-  beforeLoad: async () => {
+  beforeLoad: async ({ context }) => {
     try {
-      const res = await apiFetch("/v1/setup/required");
-      if (!res.ok) {
-        return;
-      }
-
-      const data = await res.json();
+      const data = await context.queryClient.ensureQueryData({
+        queryKey: ["setup-required"],
+        queryFn: async () => {
+          const res = await apiFetch("/v1/setup/required");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        },
+      });
       if (data && !(data.required === true || data.required === "true")) {
         throw redirect({ to: "/" });
       }

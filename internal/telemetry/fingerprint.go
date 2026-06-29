@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 type telemetryContextKey string
@@ -54,6 +56,14 @@ type ClientFingerprint struct {
 
 // GetDetailedFingerprint returns the detailed fingerprint from context or calculates it if missing.
 func GetDetailedFingerprint(r *http.Request) *ClientFingerprint {
+	if rs := request.GetRequestState(r); rs != nil {
+		if fp, ok := rs.Fingerprint.(*ClientFingerprint); ok {
+			return fp
+		}
+		fp := GenerateFingerprint(r)
+		rs.Fingerprint = fp
+		return fp
+	}
 	if fp, ok := r.Context().Value(fingerprintCtxKey).(*ClientFingerprint); ok {
 		return fp
 	}
@@ -62,6 +72,14 @@ func GetDetailedFingerprint(r *http.Request) *ClientFingerprint {
 
 // GetCachedJA4H returns the JA4H fingerprint from context or calculates it if missing.
 func GetCachedJA4H(r *http.Request) string {
+	if rs := request.GetRequestState(r); rs != nil {
+		if rs.JA4H != "" {
+			return rs.JA4H
+		}
+		ja4h := GenerateJA4H(r)
+		rs.JA4H = ja4h
+		return ja4h
+	}
 	if ja4h, ok := r.Context().Value(ja4hCtxKey).(string); ok {
 		return ja4h
 	}
@@ -72,6 +90,11 @@ func GetCachedJA4H(r *http.Request) string {
 func WithFingerprint(r *http.Request) *http.Request {
 	fp := GenerateFingerprint(r)
 	ja4h := GenerateJA4H(r)
+	if rs := request.GetRequestState(r); rs != nil {
+		rs.Fingerprint = fp
+		rs.JA4H = ja4h
+		return r
+	}
 	ctx := context.WithValue(r.Context(), fingerprintCtxKey, fp)
 	ctx = context.WithValue(ctx, ja4hCtxKey, ja4h)
 	return r.WithContext(ctx)
@@ -79,6 +102,13 @@ func WithFingerprint(r *http.Request) *http.Request {
 
 // GetFingerprintHash returns only the fingerprint hash.
 func GetFingerprintHash(r *http.Request) string {
+	if rs := request.GetRequestState(r); rs != nil {
+		if fp, ok := rs.Fingerprint.(*ClientFingerprint); ok {
+			return fp.Hash
+		}
+		// If detailed fp not present, we might still have just the hash if we optimize it later.
+		// For now, compute it.
+	}
 	if fp, ok := r.Context().Value(fingerprintCtxKey).(*ClientFingerprint); ok {
 		return fp.Hash
 	}

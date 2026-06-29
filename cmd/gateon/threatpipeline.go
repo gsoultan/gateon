@@ -160,7 +160,7 @@ func consumeThreats(ctx context.Context, signals chan<- correlation.Signal, ship
 }
 
 // threatToSignal adapts a telemetry threat into a correlation signal.
-func threatToSignal(t telemetry.SecurityThreat) correlation.Signal {
+func threatToSignal(t *telemetry.SecurityThreat) correlation.Signal {
 	return correlation.Signal{
 		Type:        t.Type,
 		SourceIP:    t.SourceIP,
@@ -177,7 +177,7 @@ func threatToSignal(t telemetry.SecurityThreat) correlation.Signal {
 }
 
 // threatToEvent renders a single threat as a SIEM event.
-func threatToEvent(t telemetry.SecurityThreat) siem.Event {
+func threatToEvent(t *telemetry.SecurityThreat) siem.Event {
 	fields := map[string]string{
 		"category": t.Category,
 		"action":   t.ActionTaken,

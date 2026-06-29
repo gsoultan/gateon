@@ -42,6 +42,9 @@ func protoOverride(ctx context.Context) string {
 // The forwarded value is validated against the {http, https} allow-list;
 // anything else falls back to "http".
 func Scheme(r *http.Request) string {
+	if rs := GetRequestState(r); rs != nil && rs.ForwardedProto != "" {
+		return rs.ForwardedProto
+	}
 	if p := NormalizeProto(protoOverride(r.Context())); p != "" {
 		return p
 	}

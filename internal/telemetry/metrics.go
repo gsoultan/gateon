@@ -188,6 +188,24 @@ var MiddlewareBotManagementTotal = promauto.NewCounterVec(prometheus.CounterOpts
 	Help: "Total bot management challenge outcomes.",
 }, []string{"route", "outcome"})
 
+// MiddlewareFileSecurityBlockedTotal counts requests blocked by file security.
+var MiddlewareFileSecurityBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_file_security_blocked_total",
+	Help: "Total requests blocked by file security.",
+}, []string{"route", "reason"})
+
+// MiddlewareAdvancedSecurityBlockedTotal counts requests blocked by advanced security.
+var MiddlewareAdvancedSecurityBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_advanced_security_blocked_total",
+	Help: "Total requests blocked by advanced security.",
+}, []string{"route", "threat_type"})
+
+// MiddlewareDeceptionBlockedTotal counts requests blocked by deception (honeypot).
+var MiddlewareDeceptionBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_deception_blocked_total",
+	Help: "Total requests blocked by deception.",
+}, []string{"route", "trap_type"})
+
 // ActiveThreatsTotal counts detected but not yet mitigated threats.
 var ActiveThreatsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_active_threats_total",

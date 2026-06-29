@@ -162,7 +162,12 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	}
 
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		backendReq.Header.Set("X-Forwarded-For", xff+", "+peerIP)
+		var sb strings.Builder
+		sb.Grow(len(xff) + len(peerIP) + 2)
+		sb.WriteString(xff)
+		sb.WriteString(", ")
+		sb.WriteString(peerIP)
+		backendReq.Header.Set("X-Forwarded-For", sb.String())
 	} else {
 		backendReq.Header.Set("X-Forwarded-For", peerIP)
 	}

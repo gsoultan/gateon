@@ -91,7 +91,7 @@ export function ServiceForm({
     { value: "h2", label: "h2 (HTTP/2 + TLS)" },
   ] as const;
 
-  const form = useForm<Service>({
+  const form = useForm<Service, any>({
     defaultValues: {
       id: "",
       name: "",

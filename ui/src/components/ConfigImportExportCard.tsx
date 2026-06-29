@@ -16,15 +16,19 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
   const base = getApiBaseUrl();
 
   const getAuthHeaders = () => {
+    const headers: Record<string, string> = {};
     try {
       const raw = localStorage.getItem("gateon-auth-storage");
-      if (!raw) return {};
+      if (!raw) return headers;
       const parsed = JSON.parse(raw);
       const token = parsed?.state?.token;
-      return token ? { Authorization: `Bearer ${token}` } : {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
     } catch {
-      return {};
+      // ignore
     }
+    return headers;
   };
 
   const handleExport = () => {

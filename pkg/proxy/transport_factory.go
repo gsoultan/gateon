@@ -21,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -293,12 +294,19 @@ func withClientRemoteAddr(ctx context.Context, remoteAddr string) context.Contex
 	if remoteAddr == "" {
 		return ctx
 	}
+	if rs, ok := ctx.Value(request.RequestStateContextKey{}).(*request.RequestState); ok {
+		rs.ClientRemoteAddr = remoteAddr
+		return ctx
+	}
 	return context.WithValue(ctx, clientRemoteAddrContextKey, remoteAddr)
 }
 
 func clientRemoteAddrFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
+	}
+	if rs, ok := ctx.Value(request.RequestStateContextKey{}).(*request.RequestState); ok {
+		return rs.ClientRemoteAddr
 	}
 	v, _ := ctx.Value(clientRemoteAddrContextKey).(string)
 	return v

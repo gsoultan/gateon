@@ -78,6 +78,83 @@ func RedactHeaders(headers string) string {
 	return sb.String()
 }
 
+// ParseHeaders parses a plain text header block (formatted by FormatHeaders) back into a map.
+// It also supports legacy JSON-formatted headers for backward compatibility.
+func ParseHeaders(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+	m := make(map[string]string)
+
+	// Backward compatibility: if it looks like JSON, try unmarshaling it.
+	if s[0] == '{' {
+		if err := json.Unmarshal([]byte(s), &m); err == nil {
+			return m
+		}
+		// If unmarshal fails, fall through to plain text parsing.
+		m = make(map[string]string)
+	}
+
+	start := 0
+	for {
+		end := strings.IndexByte(s[start:], '\n')
+		var line string
+		if end == -1 {
+			line = s[start:]
+		} else {
+			line = s[start : start+end]
+		}
+
+		if colon := strings.Index(line, ": "); colon != -1 {
+			m[line[:colon]] = line[colon+2:]
+		}
+
+		if end == -1 {
+			break
+		}
+		start += end + 1
+	}
+	return m
+}
+
+// FormatHeaders formats multiple http.Headers into a single string.
+// Optimized to minimize allocations using a pooled builder.
+func FormatHeaders(h map[string][]string, trailers ...map[string][]string) string {
+	if len(h) == 0 && len(trailers) == 0 {
+		return ""
+	}
+
+	sb := builderPool.Get().(*strings.Builder)
+	sb.Reset()
+	defer builderPool.Put(sb)
+
+	for k, v := range h {
+		sb.WriteString(k)
+		sb.WriteString(": ")
+		for i, s := range v {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(s)
+		}
+		sb.WriteByte('\n')
+	}
+	for _, t := range trailers {
+		for k, v := range t {
+			sb.WriteString(k)
+			sb.WriteString(": ")
+			for i, s := range v {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(s)
+			}
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
 // AlertingHandler is a function type for alerting integration.
 type AlertingHandler func(*SecurityThreat)
 
@@ -85,35 +162,70 @@ var (
 	onThreatAlert AlertingHandler
 	alertMu       sync.RWMutex
 
-	ThreatBroadcaster = &Broadcaster[SecurityThreat]{
-		subscribers: make(map[chan SecurityThreat]struct{}),
+	ThreatBroadcaster = &Broadcaster[*SecurityThreat]{
+		subscribers: make(map[chan *SecurityThreat]struct{}),
+	}
+
+	tracePool = sync.Pool{
+		New: func() any { return &TraceRecord{} },
 	}
 )
 
+func (tr *TraceRecord) Reset() {
+	if tr == nil {
+		return
+	}
+	*tr = TraceRecord{}
+}
+
+// GetTraceRecord returns a clean TraceRecord from the pool.
+func GetTraceRecord() *TraceRecord {
+	return tracePool.Get().(*TraceRecord)
+}
+
 type Broadcaster[T any] struct {
-	mu          sync.RWMutex
+	mu          sync.Mutex
 	subscribers map[chan T]struct{}
+	subsSlice   atomic.Pointer[[]chan T]
 }
 
 func (b *Broadcaster[T]) Subscribe() chan T {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	ch := make(chan T, 10)
+	if b.subscribers == nil {
+		b.subscribers = make(map[chan T]struct{})
+	}
 	b.subscribers[ch] = struct{}{}
+	b.updateCacheLocked()
 	return ch
 }
 
 func (b *Broadcaster[T]) Unsubscribe(ch chan T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.subscribers == nil {
+		return
+	}
 	delete(b.subscribers, ch)
+	b.updateCacheLocked()
 	close(ch)
 }
 
-func (b *Broadcaster[T]) Broadcast(data T) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+func (b *Broadcaster[T]) updateCacheLocked() {
+	slice := make([]chan T, 0, len(b.subscribers))
 	for ch := range b.subscribers {
+		slice = append(slice, ch)
+	}
+	b.subsSlice.Store(&slice)
+}
+
+func (b *Broadcaster[T]) Broadcast(data T) {
+	slicePtr := b.subsSlice.Load()
+	if slicePtr == nil {
+		return
+	}
+	for _, ch := range *slicePtr {
 		select {
 		case ch <- data:
 		default:
@@ -204,8 +316,8 @@ type pathStatsStore struct {
 	pebble                      *pebble.DB
 	dialect                     db.Dialect
 	inCh                        chan increment
-	traceInCh                   chan TraceRecord
-	threatInCh                  chan SecurityThreat
+	traceInCh                   chan *TraceRecord
+	threatInCh                  chan *SecurityThreat
 	stopCh                      chan struct{}
 	stopped                     atomic.Bool
 	wg                          syncutil.WaitGroup
@@ -299,8 +411,8 @@ func initStore(databaseURL string, retentionDays int) error {
 		pebble:            pdb,
 		dialect:           dialect,
 		inCh:              make(chan increment, 4096),
-		traceInCh:         make(chan TraceRecord, 4096),
-		threatInCh:        make(chan SecurityThreat, 1024),
+		traceInCh:         make(chan *TraceRecord, 4096),
+		threatInCh:        make(chan *SecurityThreat, 1024),
 		stopCh:            make(chan struct{}),
 		traceStoreEnabled: td.TraceStoreEnabled,
 	}
@@ -508,8 +620,8 @@ func (s *pathStatsStore) loop() {
 	defer pruneTicker.Stop()
 
 	batch := make([]increment, 0, 1024)
-	traceBatch := make([]TraceRecord, 0, 1024)
-	threatBatch := make([]SecurityThreat, 0, 128)
+	traceBatch := make([]*TraceRecord, 0, 1024)
+	threatBatch := make([]*SecurityThreat, 0, 128)
 
 	flush := func() {
 		if len(batch) > 0 {
@@ -563,6 +675,10 @@ func (s *pathStatsStore) loop() {
 			}
 			if err := batch.Commit(pebble.Sync); err != nil {
 				logger.Default().LogError("pebble: trace batch commit failed", "error", err)
+			}
+			for _, tr := range traceBatch {
+				tr.Reset()
+				tracePool.Put(tr)
 			}
 			traceBatch = traceBatch[:0]
 		}
@@ -801,65 +917,55 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // recordTraceToStore attempts to enqueue a trace record.
-func recordTraceToStore(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
-	if store == nil || !store.traceStoreEnabled {
+func recordTraceToStore(tr *TraceRecord) {
+	if store == nil || !store.traceStoreEnabled || tr == nil {
+		if tr != nil {
+			tr.Reset()
+			tracePool.Put(tr)
+		}
 		return
 	}
+
+	// Redact sensitive headers before enqueuing
+	tr.RequestHeaders = RedactHeaders(tr.RequestHeaders)
+	tr.ResponseHeaders = RedactHeaders(tr.ResponseHeaders)
+
 	select {
-	case store.traceInCh <- TraceRecord{
-		ID:              id,
-		OperationName:   operationName,
-		ServiceName:     serviceName,
-		RouteID:         routeID,
-		DurationMs:      durationMs,
-		Timestamp:       timestamp,
-		Status:          status,
-		Path:            path,
-		SourceIP:        sourceIP,
-		Fingerprint:     fingerprint,
-		CountryCode:     countryCode,
-		UserAgent:       userAgent,
-		Method:          method,
-		Referer:         referer,
-		RequestURI:      requestURI,
-		JA3:             ja3,
-		JA4:             ja4,
-		RequestHeaders:  RedactHeaders(reqHeaders),
-		RequestBody:     reqBody,
-		ResponseHeaders: RedactHeaders(respHeaders),
-		ResponseBody:    respBody,
-	}:
+	case store.traceInCh <- tr:
 	default:
 		// drop on backpressure
+		tr.Reset()
+		tracePool.Put(tr)
 	}
 }
 
 // RecordSecurityThreat attempts to enqueue a security threat.
 func RecordSecurityThreat(t SecurityThreat) {
-	if t.ID == "" {
-		t.ID = uuid.NewString()
+	st := &t
+	if st.ID == "" {
+		st.ID = uuid.NewString()
 	}
-	if t.Time.IsZero() {
-		t.Time = time.Now()
+	if st.Time.IsZero() {
+		st.Time = time.Now()
 	}
 
 	// Redact sensitive data before persistence and broadcasting
-	t.RequestHeaders = RedactHeaders(t.RequestHeaders)
-	t.ResponseHeaders = RedactHeaders(t.ResponseHeaders)
+	st.RequestHeaders = RedactHeaders(st.RequestHeaders)
+	st.ResponseHeaders = RedactHeaders(st.ResponseHeaders)
 	// We also redact the Details if it contains sensitive headers
-	t.Details = RedactHeaders(t.Details)
+	st.Details = RedactHeaders(st.Details)
 
-	if t.ActionTaken == "" {
-		t.ActionTaken = "detected"
+	if st.ActionTaken == "" {
+		st.ActionTaken = "detected"
 	}
-	t.Mitigated = t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned"
+	st.Mitigated = st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
 
-	if t.CountryCode == "" && t.SourceIP != "" {
-		t.CountryCode = ResolveCountry(t.SourceIP)
+	if st.CountryCode == "" && st.SourceIP != "" {
+		st.CountryCode = ResolveCountry(st.SourceIP)
 	}
 
-	if t.ASN == "" && t.SourceIP != "" {
-		t.ASN = ResolveASN(t.SourceIP)
+	if st.ASN == "" && st.SourceIP != "" {
+		st.ASN = ResolveASN(st.SourceIP)
 	}
 
 	// Alerting and Broadcasting should work even without a persistent store (e.g. in tests)
@@ -867,55 +973,55 @@ func RecordSecurityThreat(t SecurityThreat) {
 	h := onThreatAlert
 	alertMu.RUnlock()
 	if h != nil {
-		h(&t)
+		h(st)
 	}
 
-	ThreatBroadcaster.Broadcast(t)
+	ThreatBroadcaster.Broadcast(st)
 
 	if store == nil {
 		return
 	}
 
 	if store.scoreCache != nil {
-		current, ok := store.scoreCache.Get(t.SourceIP)
-		score := t.Score
+		current, ok := store.scoreCache.Get(st.SourceIP)
+		score := st.Score
 		if ok {
 			score += current.(float64)
 		}
-		store.scoreCache.Add(t.SourceIP, score)
+		store.scoreCache.Add(st.SourceIP, score)
 	}
 
-	repID := t.Fingerprint
+	repID := st.Fingerprint
 	if repID == "" {
-		repID = t.SourceIP
+		repID = st.SourceIP
 	}
 	if repID != "" {
-		DecreaseReputation(repID, t.Score/2, t.Type) // Penalty is half the threat score
+		DecreaseReputation(repID, st.Score/2, st.Type) // Penalty is half the threat score
 	}
 
 	// Update global telemetry structures
-	GlobalCMS.AddWeighted("global", uint32(t.Score))
-	if t.SourceIP != "" {
-		GlobalHHH.Add(t.SourceIP)
+	GlobalCMS.AddWeighted("global", uint32(st.Score))
+	if st.SourceIP != "" {
+		GlobalHHH.Add(st.SourceIP)
 	}
 
 	// Increment Prometheus counter
-	if t.Mitigated {
-		MitigatedThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium"), cmp.Or(t.ActionTaken, "blocked")).Inc()
+	if st.Mitigated {
+		MitigatedThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium"), cmp.Or(st.ActionTaken, "blocked")).Inc()
 		store.currentMitigatedToday.Add(1)
 	} else {
-		ActiveThreatsTotal.WithLabelValues(cmp.Or(t.Category, "general"), cmp.Or(t.Severity, "medium")).Inc()
+		ActiveThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium")).Inc()
 		store.currentActiveToday.Add(1)
 	}
 
 	select {
-	case store.threatInCh <- t:
+	case store.threatInCh <- st:
 	default:
 		// drop on backpressure
 	}
 
 	// Log to audit trail
-	audit.Log(context.Background(), "system", "security_threat", t.RequestURI, fmt.Sprintf("Type: %s, Severity: %s, Details: %s, Action: %s", t.Type, t.Severity, t.Details, t.ActionTaken), t.SourceIP)
+	audit.Log(context.Background(), "system", "security_threat", st.RequestURI, fmt.Sprintf("Type: %s, Severity: %s, Details: %s, Action: %s", st.Type, st.Severity, st.Details, st.ActionTaken), st.SourceIP)
 }
 
 // GetIPThreatScore returns the current security threat score for an IP.
@@ -1010,7 +1116,7 @@ func GetMitigatedIPs(ctx context.Context) []string {
 }
 
 // GetTraces returns the last N traces from the store.
-func GetTraces(ctx context.Context, limit int) []TraceRecord {
+func GetTraces(ctx context.Context, limit int) []*TraceRecord {
 	if store == nil || store.pebble == nil {
 		return nil
 	}
@@ -1020,22 +1126,24 @@ func GetTraces(ctx context.Context, limit int) []TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-
 	iter, _ := store.pebble.NewIter(&pebble.IterOptions{})
 	defer iter.Close()
-
-	res := make([]TraceRecord, 0, min(limit, 100))
+	res := make([]*TraceRecord, 0, min(limit, 100))
 	seen := make(map[string]struct{})
-
 	// Start from the end (most recent)
 	for ok := iter.Last(); ok && len(res) < limit; ok = iter.Prev() {
-		var tr TraceRecord
-		if err := json.Unmarshal(iter.Value(), &tr); err == nil {
+		tr := GetTraceRecord()
+		if err := json.Unmarshal(iter.Value(), tr); err == nil {
 			if _, ok := seen[tr.ID]; ok {
+				tr.Reset()
+				tracePool.Put(tr)
 				continue
 			}
 			seen[tr.ID] = struct{}{}
 			res = append(res, tr)
+		} else {
+			tr.Reset()
+			tracePool.Put(tr)
 		}
 	}
 	return res
@@ -1258,7 +1366,7 @@ func GetMitigatedToday() uint64 {
 }
 
 // GetSecurityThreats returns a paged list of security threats from the store.
-func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat {
+func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThreat {
 	if store == nil {
 		return nil
 	}
@@ -1278,15 +1386,12 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat
 		return nil
 	}
 	defer rows.Close()
-	res := make([]SecurityThreat, 0, min(limit, 100))
+	res := make([]*SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
-		// Stop scanning the moment the caller's context is done (client
-		// disconnect or deadline). Otherwise every remaining row's Scan fails
-		// the same way and floods the log; the partial result is discarded.
 		if ctx.Err() != nil {
 			break
 		}
-		var th SecurityThreat
+		th := &SecurityThreat{}
 		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method); err != nil {
 			logQueryErr(ctx, "threats: scan failed", err)
 			continue
@@ -1304,7 +1409,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []SecurityThreat
 // which under load blows the snapshot's request deadline ("threats: scan failed:
 // context deadline exceeded") and bloats the SSE payload. The full-blob variant
 // (GetSecurityThreats) remains for the detail/Threat-Explorer endpoint.
-func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []SecurityThreat {
+func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityThreat {
 	if store == nil {
 		return nil
 	}
@@ -1324,12 +1429,12 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []SecurityTh
 		return nil
 	}
 	defer rows.Close()
-	res := make([]SecurityThreat, 0, min(limit, 100))
+	res := make([]*SecurityThreat, 0, min(limit, 100))
 	for rows.Next() {
 		if ctx.Err() != nil {
 			break
 		}
-		var th SecurityThreat
+		th := &SecurityThreat{}
 		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.UserAgent, &th.Method); err != nil {
 			continue
 		}

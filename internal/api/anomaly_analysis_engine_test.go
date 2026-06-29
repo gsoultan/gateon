@@ -22,7 +22,7 @@ func TestAnomalyAnalysisEngine_HeaderConsistency(t *testing.T) {
 			trace: telemetry.TraceRecord{
 				SourceIP:       "1.1.1.1",
 				UserAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36",
-				RequestHeaders: `{"Accept-Language":"en-US", "Accept-Encoding":"gzip", "Accept":"text/html"}`,
+				RequestHeaders: "Accept-Language: en-US\nAccept-Encoding: gzip\nAccept: text/html\n",
 				ServiceName:    "route-http",
 				Timestamp:      time.Now(),
 			},
@@ -36,7 +36,7 @@ func TestAnomalyAnalysisEngine_HeaderConsistency(t *testing.T) {
 			trace: telemetry.TraceRecord{
 				SourceIP:       "1.1.1.2",
 				UserAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36",
-				RequestHeaders: `{}`,
+				RequestHeaders: "Host: example.com\n",
 				ServiceName:    "route-http",
 				Timestamp:      time.Now(),
 			},
@@ -50,7 +50,7 @@ func TestAnomalyAnalysisEngine_HeaderConsistency(t *testing.T) {
 			trace: telemetry.TraceRecord{
 				SourceIP:       "1.1.1.3",
 				UserAgent:      "grpc-go/1.40.0",
-				RequestHeaders: `{"Content-Type":"application/grpc"}`,
+				RequestHeaders: "Content-Type: application/grpc\n",
 				ServiceName:    "route-grpc",
 				Timestamp:      time.Now(),
 			},
@@ -64,7 +64,7 @@ func TestAnomalyAnalysisEngine_HeaderConsistency(t *testing.T) {
 			trace: telemetry.TraceRecord{
 				SourceIP:       "1.1.1.4",
 				UserAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-				RequestHeaders: `{"Accept-Language":"en-US"}`,
+				RequestHeaders: "Accept-Language: en-US\n",
 				ServiceName:    "route-grpc",
 				Timestamp:      time.Now(),
 			},
@@ -78,7 +78,7 @@ func TestAnomalyAnalysisEngine_HeaderConsistency(t *testing.T) {
 			trace: telemetry.TraceRecord{
 				SourceIP:       "1.1.1.5",
 				UserAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-				RequestHeaders: `{"Accept-Language":"en-US", "Accept-Encoding":"gzip"}`,
+				RequestHeaders: "Accept-Language: en-US\nAccept-Encoding: gzip\n",
 				ServiceName:    "route-grpc",
 				Timestamp:      time.Now(),
 			},
@@ -106,7 +106,7 @@ func TestAnomalyAnalysisEngine_HeaderConsistency(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := &DiagnosticData{
-				Traces: []telemetry.TraceRecord{tt.trace},
+				Traces: []*telemetry.TraceRecord{&tt.trace},
 				Routes: tt.routes,
 			}
 			engine.Analyze(t.Context(), data)
