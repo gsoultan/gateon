@@ -54,13 +54,13 @@ type Incident struct {
 	SourceKey   string      `json:"source_key"`
 	SourceIP    string      `json:"source_ip"`
 	Fingerprint string      `json:"fingerprint,omitzero"`
-	FirstSeen   time.Time   `json:"first_seen"`
-	LastSeen    time.Time   `json:"last_seen"`
+	FirstSeen   time.Time   `json:"first_seen,omitzero"`
+	LastSeen    time.Time   `json:"last_seen,omitzero"`
 	Severity    string      `json:"severity"`
 	Score       float64     `json:"score"`
 	SignalCount int         `json:"signal_count"`
-	SignalTypes []string    `json:"signal_types"`
-	Techniques  []Technique `json:"techniques"`
+	SignalTypes []string    `json:"signal_types,omitzero"`
+	Techniques  []Technique `json:"techniques,omitzero"`
 	Countries   []string    `json:"countries,omitzero"`
 }
 
@@ -357,7 +357,7 @@ func pruneOld(signals []Signal, cutoff time.Time) []Signal {
 
 func sortedKeys(set map[string]struct{}) []string {
 	if len(set) == 0 {
-		return nil
+		return []string{}
 	}
 	out := make([]string, 0, len(set))
 	for k := range set {
@@ -369,7 +369,7 @@ func sortedKeys(set map[string]struct{}) []string {
 
 func sortedTechniques(set map[string]Technique) []Technique {
 	if len(set) == 0 {
-		return nil
+		return []Technique{}
 	}
 	out := make([]Technique, 0, len(set))
 	for _, t := range set {
