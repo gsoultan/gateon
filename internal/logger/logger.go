@@ -205,8 +205,10 @@ func (lb *LogBroadcast) Subscribe() (chan string, []string) {
 func (lb *LogBroadcast) Unsubscribe(ch chan string) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
-	delete(lb.subscribers, ch)
-	close(ch)
+	if _, ok := lb.subscribers[ch]; ok {
+		delete(lb.subscribers, ch)
+		close(ch)
+	}
 }
 
 func (lb *LogBroadcast) Write(p []byte) (n int, err error) {

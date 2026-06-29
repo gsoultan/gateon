@@ -67,8 +67,10 @@ func (b *Broadcaster) Subscribe() chan AuditEntry {
 func (b *Broadcaster) Unsubscribe(ch chan AuditEntry) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.subscribers, ch)
-	close(ch)
+	if _, ok := b.subscribers[ch]; ok {
+		delete(b.subscribers, ch)
+		close(ch)
+	}
 }
 
 func (b *Broadcaster) Broadcast(data AuditEntry) {

@@ -162,8 +162,8 @@ var (
 	onThreatAlert AlertingHandler
 	alertMu       sync.RWMutex
 
-	ThreatBroadcaster = &Broadcaster[*SecurityThreat]{
-		subscribers: make(map[chan *SecurityThreat]struct{}),
+	ThreatBroadcaster = &Broadcaster[SecurityThreat]{
+		subscribers: make(map[chan SecurityThreat]struct{}),
 	}
 
 	tracePool = sync.Pool{
@@ -183,10 +183,24 @@ func GetTraceRecord() *TraceRecord {
 	return tracePool.Get().(*TraceRecord)
 }
 
+func (st *SecurityThreat) Reset() {
+	if st == nil {
+		return
+	}
+	*st = SecurityThreat{}
+}
+
+var threatPool = sync.Pool{
+	New: func() any { return &SecurityThreat{} },
+}
+
+func GetSecurityThreat() *SecurityThreat {
+	return threatPool.Get().(*SecurityThreat)
+}
+
 type Broadcaster[T any] struct {
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	subscribers map[chan T]struct{}
-	subsSlice   atomic.Pointer[[]chan T]
 }
 
 func (b *Broadcaster[T]) Subscribe() chan T {
@@ -197,7 +211,6 @@ func (b *Broadcaster[T]) Subscribe() chan T {
 		b.subscribers = make(map[chan T]struct{})
 	}
 	b.subscribers[ch] = struct{}{}
-	b.updateCacheLocked()
 	return ch
 }
 
@@ -207,25 +220,16 @@ func (b *Broadcaster[T]) Unsubscribe(ch chan T) {
 	if b.subscribers == nil {
 		return
 	}
-	delete(b.subscribers, ch)
-	b.updateCacheLocked()
-	close(ch)
-}
-
-func (b *Broadcaster[T]) updateCacheLocked() {
-	slice := make([]chan T, 0, len(b.subscribers))
-	for ch := range b.subscribers {
-		slice = append(slice, ch)
+	if _, ok := b.subscribers[ch]; ok {
+		delete(b.subscribers, ch)
+		close(ch)
 	}
-	b.subsSlice.Store(&slice)
 }
 
 func (b *Broadcaster[T]) Broadcast(data T) {
-	slicePtr := b.subsSlice.Load()
-	if slicePtr == nil {
-		return
-	}
-	for _, ch := range *slicePtr {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for ch := range b.subscribers {
 		select {
 		case ch <- data:
 		default:
@@ -249,8 +253,14 @@ func SetAlertingHandler(h AlertingHandler) {
 
 var (
 	store   *pathStatsStore
-	storeMu sync.Mutex
+	storeMu sync.RWMutex
 )
+
+func getStore() *pathStatsStore {
+	storeMu.RLock()
+	defer storeMu.RUnlock()
+	return store
+}
 
 type increment struct {
 	host       string
@@ -699,6 +709,10 @@ func (s *pathStatsStore) loop() {
 				} else {
 					_ = tx.Rollback()
 				}
+				for _, th := range threatBatch {
+					th.Reset()
+					threatPool.Put(th)
+				}
 			}
 			threatBatch = threatBatch[:0]
 		}
@@ -845,10 +859,10 @@ func (s *pathStatsStore) reclaimSQLDisk(ctx context.Context) {
 func ClosePathStatsStore(ctx context.Context) error {
 	storeMu.Lock()
 	defer storeMu.Unlock()
-	if store == nil {
+	s := store
+	if s == nil {
 		return nil
 	}
-	s := store
 	store = nil
 
 	if !s.stopped.Swap(true) {
@@ -870,32 +884,35 @@ func ClosePathStatsStore(ctx context.Context) error {
 
 // ConfigureRetention updates the retention days at runtime.
 func ConfigureRetention(days int) {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return
 	}
 	if days <= 0 {
 		days = 1
 	}
-	store.retentionDays.Store(int32(days))
+	s.retentionDays.Store(int32(days))
 }
 
 func ConfigureGranularRetention(pathStats, accessLog, securityThreat, auditLog int) {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return
 	}
-	store.pathStatsRetentionDays.Store(int32(pathStats))
-	store.accessLogRetentionDays.Store(int32(accessLog))
-	store.securityThreatRetentionDays.Store(int32(securityThreat))
-	store.auditLogRetentionDays.Store(int32(auditLog))
+	s.pathStatsRetentionDays.Store(int32(pathStats))
+	s.accessLogRetentionDays.Store(int32(accessLog))
+	s.securityThreatRetentionDays.Store(int32(securityThreat))
+	s.auditLogRetentionDays.Store(int32(auditLog))
 }
 
 // recordToStore attempts to enqueue an increment; if the store is not initialized or channel is full, it drops silently to avoid impacting the hot path.
 func recordToStore(host, path string, latencySeconds float64, bytesTotal uint64, at time.Time) {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return
 	}
 	select {
-	case store.inCh <- increment{host: host, path: path, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: false}:
+	case s.inCh <- increment{host: host, path: path, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: false}:
 		// No need to update currentReqToday here as it's done in recordDomainToStore for total traffic
 	default:
 		// drop on backpressure to protect the request path
@@ -904,13 +921,14 @@ func recordToStore(host, path string, latencySeconds float64, bytesTotal uint64,
 
 // recordDomainToStore attempts to enqueue an increment for a domain.
 func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint64, at time.Time) {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return
 	}
 	select {
-	case store.inCh <- increment{host: domain, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: true}:
-		store.currentReqToday.Add(1)
-		store.currentBytesToday.Add(bytesTotal)
+	case s.inCh <- increment{host: domain, latS: latencySeconds, bytesTotal: bytesTotal, atTime: at, isDomain: true}:
+		s.currentReqToday.Add(1)
+		s.currentBytesToday.Add(bytesTotal)
 	default:
 		// drop on backpressure
 	}
@@ -918,7 +936,8 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 
 // recordTraceToStore attempts to enqueue a trace record.
 func recordTraceToStore(tr *TraceRecord) {
-	if store == nil || !store.traceStoreEnabled || tr == nil {
+	s := getStore()
+	if s == nil || !s.traceStoreEnabled || tr == nil {
 		if tr != nil {
 			tr.Reset()
 			tracePool.Put(tr)
@@ -931,7 +950,7 @@ func recordTraceToStore(tr *TraceRecord) {
 	tr.ResponseHeaders = RedactHeaders(tr.ResponseHeaders)
 
 	select {
-	case store.traceInCh <- tr:
+	case s.traceInCh <- tr:
 	default:
 		// drop on backpressure
 		tr.Reset()
@@ -941,7 +960,8 @@ func recordTraceToStore(tr *TraceRecord) {
 
 // RecordSecurityThreat attempts to enqueue a security threat.
 func RecordSecurityThreat(t SecurityThreat) {
-	st := &t
+	st := GetSecurityThreat()
+	*st = t
 	if st.ID == "" {
 		st.ID = uuid.NewString()
 	}
@@ -968,6 +988,9 @@ func RecordSecurityThreat(t SecurityThreat) {
 		st.ASN = ResolveASN(st.SourceIP)
 	}
 
+	// Log to audit trail before potentially returning to pool or enqueuing
+	audit.Log(context.Background(), "system", "security_threat", st.RequestURI, fmt.Sprintf("Type: %s, Severity: %s, Details: %s, Action: %s", st.Type, st.Severity, st.Details, st.ActionTaken), st.SourceIP)
+
 	// Alerting and Broadcasting should work even without a persistent store (e.g. in tests)
 	alertMu.RLock()
 	h := onThreatAlert
@@ -976,19 +999,22 @@ func RecordSecurityThreat(t SecurityThreat) {
 		h(st)
 	}
 
-	ThreatBroadcaster.Broadcast(st)
+	ThreatBroadcaster.Broadcast(*st)
 
-	if store == nil {
+	s := getStore()
+	if s == nil {
+		st.Reset()
+		threatPool.Put(st)
 		return
 	}
 
-	if store.scoreCache != nil {
-		current, ok := store.scoreCache.Get(st.SourceIP)
+	if s.scoreCache != nil {
+		current, ok := s.scoreCache.Get(st.SourceIP)
 		score := st.Score
 		if ok {
 			score += current.(float64)
 		}
-		store.scoreCache.Add(st.SourceIP, score)
+		s.scoreCache.Add(st.SourceIP, score)
 	}
 
 	repID := st.Fingerprint
@@ -1008,28 +1034,28 @@ func RecordSecurityThreat(t SecurityThreat) {
 	// Increment Prometheus counter
 	if st.Mitigated {
 		MitigatedThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium"), cmp.Or(st.ActionTaken, "blocked")).Inc()
-		store.currentMitigatedToday.Add(1)
+		s.currentMitigatedToday.Add(1)
 	} else {
 		ActiveThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium")).Inc()
-		store.currentActiveToday.Add(1)
+		s.currentActiveToday.Add(1)
 	}
 
 	select {
-	case store.threatInCh <- st:
+	case s.threatInCh <- st:
 	default:
 		// drop on backpressure
+		st.Reset()
+		threatPool.Put(st)
 	}
-
-	// Log to audit trail
-	audit.Log(context.Background(), "system", "security_threat", st.RequestURI, fmt.Sprintf("Type: %s, Severity: %s, Details: %s, Action: %s", st.Type, st.Severity, st.Details, st.ActionTaken), st.SourceIP)
 }
 
 // GetIPThreatScore returns the current security threat score for an IP.
 func GetIPThreatScore(ip string) float64 {
-	if store == nil || store.scoreCache == nil {
+	s := getStore()
+	if s == nil || s.scoreCache == nil {
 		return 0
 	}
-	if val, ok := store.scoreCache.Get(ip); ok {
+	if val, ok := s.scoreCache.Get(ip); ok {
 		return val.(float64)
 	}
 	return 0
@@ -1037,70 +1063,74 @@ func GetIPThreatScore(ip string) float64 {
 
 // IsIPUnmitigated checks if an IP has been manually unmitigated by the user.
 func IsIPUnmitigated(ip string) bool {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return false
 	}
-	if store.unmitigatedCache != nil {
-		if val, ok := store.unmitigatedCache.Get(ip); ok {
+	if s.unmitigatedCache != nil {
+		if val, ok := s.unmitigatedCache.Get(ip); ok {
 			return val.(bool)
 		}
 	}
 
 	var status string
-	query := store.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
-	err := store.db.QueryRow(query, ip).Scan(&status)
+	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
+	err := s.db.QueryRow(query, ip).Scan(&status)
 	if err != nil {
 		return false
 	}
 
 	unmitigated := status == "unmitigated"
-	if store.unmitigatedCache != nil {
-		store.unmitigatedCache.Add(ip, unmitigated)
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Add(ip, unmitigated)
 	}
 	return unmitigated
 }
 
 // MarkIPMitigated records that an IP has been mitigated.
 func MarkIPMitigated(ip string, reason string) {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return
 	}
-	query := store.dialect.Rebind("INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, updated_at) VALUES (?, 'mitigated', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
-	if store.dialect.Driver == db.DriverMySQL {
+	query := s.dialect.Rebind("INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, updated_at) VALUES (?, 'mitigated', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
+	if s.dialect.Driver == db.DriverMySQL {
 		query = "INSERT INTO ip_mitigations (ip, status, reason, mitigated_at) VALUES (?, 'mitigated', ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
 	}
 	now := time.Now()
-	_, err := store.db.Exec(query, ip, reason, now, reason, now)
+	_, err := s.db.Exec(query, ip, reason, now, reason, now)
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as mitigated", "ip", ip, "error", err)
 	}
-	if store.unmitigatedCache != nil {
-		store.unmitigatedCache.Add(ip, false)
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Add(ip, false)
 	}
 }
 
 // MarkIPUnmitigated records that an IP has been manually unmitigated.
 func MarkIPUnmitigated(ip string) {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return
 	}
-	query := store.dialect.Rebind("UPDATE ip_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE ip = ?")
-	_, err := store.db.Exec(query, ip)
+	query := s.dialect.Rebind("UPDATE ip_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE ip = ?")
+	_, err := s.db.Exec(query, ip)
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as unmitigated", "ip", ip, "error", err)
 	}
-	if store.unmitigatedCache != nil {
-		store.unmitigatedCache.Add(ip, true)
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Add(ip, true)
 	}
 }
 
 // GetMitigatedIPs returns a list of currently mitigated IPs.
 func GetMitigatedIPs(ctx context.Context) []string {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
-	query := store.dialect.Rebind("SELECT ip FROM ip_mitigations WHERE status = 'mitigated'")
-	rows, err := store.db.QueryContext(ctx, query)
+	query := s.dialect.Rebind("SELECT ip FROM ip_mitigations WHERE status = 'mitigated'")
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil
 	}
@@ -1117,7 +1147,8 @@ func GetMitigatedIPs(ctx context.Context) []string {
 
 // GetTraces returns the last N traces from the store.
 func GetTraces(ctx context.Context, limit int) []*TraceRecord {
-	if store == nil || store.pebble == nil {
+	s := getStore()
+	if s == nil || s.pebble == nil {
 		return nil
 	}
 	if limit <= 0 {
@@ -1126,7 +1157,7 @@ func GetTraces(ctx context.Context, limit int) []*TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
-	iter, _ := store.pebble.NewIter(&pebble.IterOptions{})
+	iter, _ := s.pebble.NewIter(&pebble.IterOptions{})
 	defer iter.Close()
 	res := make([]*TraceRecord, 0, min(limit, 100))
 	seen := make(map[string]struct{})
@@ -1152,15 +1183,16 @@ func GetTraces(ctx context.Context, limit int) []*TraceRecord {
 // GetPathStatsWindow returns aggregated stats from storage for the last `days` days.
 // Falls back to in-memory stats on DB errors to ensure metrics are always available.
 func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return getInMemoryPathStats()
 	}
 	if days <= 0 {
-		days = int(store.retentionDays.Load())
+		days = int(s.retentionDays.Load())
 	}
 	cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
-	q := store.dialect.Rebind(QueryGetPathStatsWin)
-	rows, err := store.db.QueryContext(ctx, q, cutoff)
+	q := s.dialect.Rebind(QueryGetPathStatsWin)
+	rows, err := s.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
 		logQueryErr(ctx, "path stats: DB query failed, falling back to in-memory stats", err)
 		return getInMemoryPathStats()
@@ -1194,15 +1226,16 @@ func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 
 // GetDomainStatsWindow returns aggregated domain statistics for the last N days.
 func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
 	if days <= 0 {
-		days = int(store.retentionDays.Load())
+		days = int(s.retentionDays.Load())
 	}
 	cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
-	q := store.dialect.Rebind(QueryGetDomainStatsWin)
-	rows, err := store.db.QueryContext(ctx, q, cutoff)
+	q := s.dialect.Rebind(QueryGetDomainStatsWin)
+	rows, err := s.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
 		logQueryErr(ctx, "domain stats: query failed", err)
 		return nil
@@ -1235,10 +1268,11 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 
 // GetSystemTrafficToday returns total requests and bandwidth for the current day.
 func GetSystemTrafficToday(ctx context.Context) (uint64, uint64) {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return 0, 0
 	}
-	return store.currentReqToday.Load(), store.currentBytesToday.Load()
+	return s.currentReqToday.Load(), s.currentBytesToday.Load()
 }
 
 // logQueryErr logs a query failure unless it was caused by the caller's
@@ -1255,7 +1289,8 @@ func logQueryErr(ctx context.Context, msg string, err error) {
 
 // GetSystemTrafficHistory returns traffic samples for the last N days.
 func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
@@ -1265,8 +1300,8 @@ func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 	if days > trafficDailyAggregationThresholdDays {
 		query = QueryGetTrafficHistoryDaily
 	}
-	q := store.dialect.Rebind(query)
-	rows, err := store.db.QueryContext(ctx, q, cutoff)
+	q := s.dialect.Rebind(query)
+	rows, err := s.db.QueryContext(ctx, q, cutoff)
 	if err != nil {
 		logQueryErr(ctx, "traffic history: query failed", err)
 		return nil
@@ -1311,11 +1346,12 @@ func GetSystemTrafficHistory(ctx context.Context, days int) []TrafficSample {
 
 // GetDomainStatsHourly returns domain statistics for a specific hour.
 func GetDomainStatsHourly(day string, hour int) []DomainStats {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
-	q := store.dialect.Rebind(QueryGetDomainStatsHourly)
-	rows, err := store.db.Query(q, day, hour)
+	q := s.dialect.Rebind(QueryGetDomainStatsHourly)
+	rows, err := s.db.Query(q, day, hour)
 	if err != nil {
 		logger.Default().LogError("domain stats: hourly query failed", "error", err)
 		return nil
@@ -1350,24 +1386,27 @@ func GetDomainStatsHourly(day string, hour int) []DomainStats {
 
 // GetActiveThreatsToday returns the count of active threats for the current day.
 func GetActiveThreatsToday() uint64 {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return 0
 	}
-	return store.currentActiveToday.Load()
+	return s.currentActiveToday.Load()
 }
 
 // GetMitigatedToday returns the count of threats actively mitigated
 // (blocked/challenged/shunned) for the current day.
 func GetMitigatedToday() uint64 {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return 0
 	}
-	return store.currentMitigatedToday.Load()
+	return s.currentMitigatedToday.Load()
 }
 
 // GetSecurityThreats returns a paged list of security threats from the store.
 func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThreat {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
 	if limit <= 0 {
@@ -1379,8 +1418,8 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThrea
 	if offset < 0 {
 		offset = 0
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
-	rows, err := store.db.QueryContext(ctx, query, limit, offset)
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	rows, err := s.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
 		return nil
@@ -1410,7 +1449,8 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThrea
 // context deadline exceeded") and bloats the SSE payload. The full-blob variant
 // (GetSecurityThreats) remains for the detail/Threat-Explorer endpoint.
 func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityThreat {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
 	if limit <= 0 {
@@ -1422,8 +1462,8 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityT
 	if offset < 0 {
 		offset = 0
 	}
-	query := store.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
-	rows, err := store.db.QueryContext(ctx, query, limit, offset)
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	rows, err := s.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
 		return nil
@@ -1446,12 +1486,13 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityT
 
 // CountSecurityThreats returns the total number of security threats in the store.
 func CountSecurityThreats(ctx context.Context) int64 {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return 0
 	}
 	var count int64
-	query := store.dialect.Rebind("SELECT COUNT(*) FROM security_threats")
-	err := store.db.QueryRowContext(ctx, query).Scan(&count)
+	query := s.dialect.Rebind("SELECT COUNT(*) FROM security_threats")
+	err := s.db.QueryRowContext(ctx, query).Scan(&count)
 	if err != nil {
 		return 0
 	}
@@ -1459,23 +1500,25 @@ func CountSecurityThreats(ctx context.Context) int64 {
 }
 
 func IsStoreEnabled() bool {
-	return store != nil
+	return getStore() != nil
 }
 
 // PingStore checks the health of the telemetry database.
 func PingStore(ctx context.Context) error {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return fmt.Errorf("telemetry store not initialized")
 	}
-	return store.db.PingContext(ctx)
+	return s.db.PingContext(ctx)
 }
 
 // CurrentRetentionDays returns the active retention configuration.
 func CurrentRetentionDays() int {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return 0
 	}
-	return int(store.retentionDays.Load())
+	return int(s.retentionDays.Load())
 }
 
 // maxDashboardTrendWindowDays caps the dashboard trend window to one year so
@@ -1496,11 +1539,12 @@ func dashboardTrendWindowDays() int {
 
 // GetTopThreatSources returns the most frequent attacking IP addresses.
 func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
-	query := store.dialect.Rebind("SELECT source_ip, COALESCE(MAX(asn), ''), COUNT(*) as cnt FROM security_threats GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
-	rows, err := store.db.QueryContext(ctx, query, limit)
+	query := s.dialect.Rebind("SELECT source_ip, COUNT(*) as cnt, MAX(asn) FROM security_threats WHERE source_ip != '' GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
+	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil
 	}
@@ -1521,11 +1565,12 @@ func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
 
 // GetTopThreatTypes returns the most frequent types of security threats.
 func GetTopThreatTypes(ctx context.Context, limit int) []LabeledCount {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
-	query := store.dialect.Rebind("SELECT type, COUNT(*) as cnt FROM security_threats GROUP BY type ORDER BY cnt DESC LIMIT ?")
-	rows, err := store.db.QueryContext(ctx, query, limit)
+	query := s.dialect.Rebind("SELECT type, COUNT(*) as cnt FROM security_threats GROUP BY type ORDER BY cnt DESC LIMIT ?")
+	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil
 	}
@@ -1543,13 +1588,14 @@ func GetTopThreatTypes(ctx context.Context, limit int) []LabeledCount {
 	return res
 }
 
-// GetThreatsByCountry returns the distribution of threats by country.
+// GetThreats by country returns the distribution of threats by country.
 func GetThreatsByCountry(ctx context.Context, limit int) []LabeledCount {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
-	query := store.dialect.Rebind("SELECT country_code, COUNT(*) as cnt FROM security_threats WHERE country_code != '' GROUP BY country_code ORDER BY cnt DESC LIMIT ?")
-	rows, err := store.db.QueryContext(ctx, query, limit)
+	query := s.dialect.Rebind("SELECT country_code, COUNT(*) as cnt FROM security_threats WHERE country_code != '' GROUP BY country_code ORDER BY cnt DESC LIMIT ?")
+	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil
 	}
@@ -1587,16 +1633,17 @@ func attackTrendBucketQuery(driver string, daily bool) string {
 
 // GetAttackTrend returns a time-series of security threat counts.
 func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
-	if store == nil {
+	s := getStore()
+	if s == nil {
 		return nil
 	}
 	if days <= 0 {
 		days = 1
 	}
 	cutoff := time.Now().Add(time.Duration(-days*24) * time.Hour).Format(threatTimestampLayout)
-	query := attackTrendBucketQuery(store.dialect.Driver, days > attackTrendDailyThresholdDays)
+	query := attackTrendBucketQuery(s.dialect.Driver, days > attackTrendDailyThresholdDays)
 
-	rows, err := store.db.QueryContext(ctx, store.dialect.Rebind(query), cutoff)
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(query), cutoff)
 	if err != nil {
 		return nil
 	}

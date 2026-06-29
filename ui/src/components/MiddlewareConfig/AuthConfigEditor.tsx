@@ -107,10 +107,10 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             onChange={onChange}
             title="API Keys"
             prefix="key_"
-            placeholderKey="tenant-name"
-            placeholderValue="actual-api-key"
-            keyLabel="Tenant/Name"
-            valueLabel="Key"
+            placeholderKey="actual-api-key"
+            placeholderValue="tenant-id-or-name"
+            keyLabel="API Key (Secret)"
+            valueLabel="Tenant ID / Label"
           />
         </>
       )}
