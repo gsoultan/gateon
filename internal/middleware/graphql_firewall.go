@@ -1,14 +1,28 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
+)
+
+var (
+	graphqlQueryCache *lru.ARCCache
+	graphqlCacheOnce  sync.Once
+
+	graphqlBufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
 )
 
 type GraphQLFirewallConfig struct {
@@ -19,7 +33,30 @@ type GraphQLFirewallConfig struct {
 	Introspection bool              // Allow introspection
 }
 
+type queryAnalysis struct {
+	depth        int
+	complexity   int
+	isIntrospect bool
+}
+
+func initGraphQLCache() {
+	graphqlCacheOnce.Do(func() {
+		graphqlQueryCache, _ = lru.NewARC(2048)
+	})
+}
+
+type pooledReadCloser struct {
+	io.Reader
+	buf *bytes.Buffer
+}
+
+func (prc *pooledReadCloser) Close() error {
+	graphqlBufferPool.Put(prc.buf)
+	return nil
+}
+
 func GraphQLFirewall(cfg GraphQLFirewallConfig) Middleware {
+	initGraphQLCache()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
@@ -27,63 +64,98 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) Middleware {
 				return
 			}
 
-			// We need to read the body to parse the GraphQL query
-			// In a real implementation, we should use a buffered reader or limit the size
+			// Use a pooled buffer to read the body once
+			buf := graphqlBufferPool.Get().(*bytes.Buffer)
+			buf.Reset()
+
+			// Limit body size to avoid OOM
+			if _, err := io.Copy(buf, io.LimitReader(r.Body, 10*1024*1024)); err != nil {
+				graphqlBufferPool.Put(buf)
+				http.Error(w, "Error reading request body", http.StatusInternalServerError)
+				return
+			}
+			r.Body.Close()
+
 			var body struct {
 				Query string `json:"query"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.Unmarshal(buf.Bytes(), &body); err != nil {
+				graphqlBufferPool.Put(buf)
 				http.Error(w, "Invalid GraphQL request", http.StatusBadRequest)
 				return
 			}
 
 			if body.Query == "" {
+				r.Body = &pooledReadCloser{Reader: bytes.NewReader(buf.Bytes()), buf: buf}
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			doc, gerr := parser.ParseQuery(&ast.Source{Input: body.Query})
-			if gerr != nil {
-				http.Error(w, fmt.Sprintf("GraphQL parse error: %v", gerr), http.StatusBadRequest)
-				return
-			}
-
-			// 1. Introspection check
-			if !cfg.Introspection {
-				if isIntrospectionQuery(doc) {
-					http.Error(w, "GraphQL introspection is disabled", http.StatusForbidden)
-					return
+			// Cache lookup for query analysis
+			var analysis queryAnalysis
+			var found bool
+			if graphqlQueryCache != nil {
+				if cached, ok := graphqlQueryCache.Get(body.Query); ok {
+					analysis = cached.(queryAnalysis)
+					found = true
 				}
 			}
 
+			if !found {
+				doc, gerr := parser.ParseQuery(&ast.Source{Input: body.Query})
+				if gerr != nil {
+					graphqlBufferPool.Put(buf)
+					http.Error(w, fmt.Sprintf("GraphQL parse error: %v", gerr), http.StatusBadRequest)
+					return
+				}
+
+				analysis = queryAnalysis{
+					depth:        calculateDepth(doc),
+					complexity:   calculateComplexity(doc, cfg.FieldCosts),
+					isIntrospect: isIntrospectionQuery(doc),
+				}
+				if graphqlQueryCache != nil {
+					graphqlQueryCache.Add(body.Query, analysis)
+				}
+			}
+
+			// 1. Introspection check
+			if !cfg.Introspection && analysis.isIntrospect {
+				graphqlBufferPool.Put(buf)
+				http.Error(w, "GraphQL introspection is disabled", http.StatusForbidden)
+				return
+			}
+
 			// 2. Depth check
-			depth := calculateDepth(doc)
-			if cfg.MaxDepth > 0 && depth > cfg.MaxDepth {
-				http.Error(w, fmt.Sprintf("GraphQL query depth %d exceeds limit %d", depth, cfg.MaxDepth), http.StatusForbidden)
+			if cfg.MaxDepth > 0 && analysis.depth > cfg.MaxDepth {
+				graphqlBufferPool.Put(buf)
+				http.Error(w, fmt.Sprintf("GraphQL query depth %d exceeds limit %d", analysis.depth, cfg.MaxDepth), http.StatusForbidden)
 				return
 			}
 
 			// 3. Complexity check
-			complexity := calculateComplexity(doc, cfg.FieldCosts)
-			if cfg.MaxComplexity > 0 && complexity > cfg.MaxComplexity {
-				http.Error(w, fmt.Sprintf("GraphQL query complexity %d exceeds limit %d", complexity, cfg.MaxComplexity), http.StatusForbidden)
+			if cfg.MaxComplexity > 0 && analysis.complexity > cfg.MaxComplexity {
+				graphqlBufferPool.Put(buf)
+				http.Error(w, fmt.Sprintf("GraphQL query complexity %d exceeds limit %d", analysis.complexity, cfg.MaxComplexity), http.StatusForbidden)
 				return
 			}
 
-			// 4. Field-level Auth
+			// 4. Field-level Auth (This still needs the doc, but we can re-parse or cache parsed doc if needed)
+			// For now, we only re-parse if field auth is enabled to keep the common path fast.
 			if len(cfg.FieldClaims) > 0 {
-				if err := checkFieldAuth(doc, r, cfg.FieldClaims); err != nil {
-					http.Error(w, err.Error(), http.StatusForbidden)
-					return
+				doc, gerr := parser.ParseQuery(&ast.Source{Input: body.Query})
+				if gerr == nil {
+					if err := checkFieldAuth(doc, r, cfg.FieldClaims); err != nil {
+						graphqlBufferPool.Put(buf)
+						http.Error(w, err.Error(), http.StatusForbidden)
+						return
+					}
 				}
 			}
 
-			// Restore body for the next handler
-			// Note: This is a simplified approach. In Gateon, we might want to use a more efficient way to re-inject the body.
-			// Since we already decoded it, we can re-encode it or use a custom ReadCloser.
-			newBody, _ := json.Marshal(body)
-			r.Body = io.NopCloser(strings.NewReader(string(newBody)))
-			r.ContentLength = int64(len(newBody))
+			// Re-inject body using the pooled buffer
+			r.Body = &pooledReadCloser{Reader: bytes.NewReader(buf.Bytes()), buf: buf}
+			r.ContentLength = int64(buf.Len())
 
 			next.ServeHTTP(w, r)
 		})

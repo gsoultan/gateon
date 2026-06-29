@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
@@ -42,7 +43,7 @@ func MaxBodySize(max int64) Middleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) || r.Header.Get("Upgrade") != "" {
+			if IsCorsPreflight(r) || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.Header.Get("Upgrade") != "" {
 				next.ServeHTTP(w, r)
 				return
 			}

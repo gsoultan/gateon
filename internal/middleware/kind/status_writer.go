@@ -21,10 +21,10 @@ type StatusResponseWriter struct {
 	start        time.Time
 }
 
-var statusCodes = make(map[int]string)
+var statusCodes [600]string
 
 func init() {
-	for i := 100; i < 600; i++ {
+	for i := 0; i < 600; i++ {
 		statusCodes[i] = strconv.Itoa(i)
 	}
 }
@@ -32,8 +32,8 @@ func init() {
 // StatusString returns the cached decimal string for an HTTP status code,
 // avoiding a per-call allocation for the common 100..599 range.
 func StatusString(code int) string {
-	if s, ok := statusCodes[code]; ok {
-		return s
+	if code >= 100 && code < 600 {
+		return statusCodes[code]
 	}
 	return strconv.Itoa(code)
 }

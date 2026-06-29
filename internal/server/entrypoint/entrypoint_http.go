@@ -13,7 +13,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
-	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -230,16 +229,22 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 
 func injectEntryPointID(epID, epLabel string, isMgmt bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		ctx = context.WithValue(ctx, middleware.EntryPointIDContextKey, epID)
-		ctx = context.WithValue(ctx, middleware.RouteNameContextKey, "gateon-"+epLabel)
-		ctx = context.WithValue(ctx, middleware.IsManagementContextKey, isMgmt)
+		rs := middleware.RequestStatePool.Get().(*middleware.RequestState)
+		rs.EntryPointID = epID
+		rs.RouteName = "gateon-" + epLabel
+		rs.IsManagement = isMgmt
+		rs.MatchedRoute = nil
+		rs.DebugInfo = nil
+		rs.RequestID = ""
+		defer middleware.RequestStatePool.Put(rs)
+
+		ctx := context.WithValue(r.Context(), middleware.RequestStateContextKey, rs)
 
 		// Log arrival for proxy traffic only
 		if !isMgmt && !middleware.IsInternalPath(r.URL.Path) {
 			logger.L.LogInfo("Proxy request received",
 				"flow_step", "entrypoint_arrival",
-				"request_id", request.GetID(r),
+				"request_id", middleware.GetRequestID(r),
 				"entrypoint", epID,
 				"method", r.Method,
 				"path", r.URL.Path)

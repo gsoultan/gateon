@@ -94,7 +94,7 @@ func TestSelectRoute_RuleBased(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req, _ := http.NewRequest("GET", "http://"+tt.host+tt.path, nil)
-			got := SelectRoute(req, routes)
+			got := SelectRouteFromSlice(req, routes)
 			if tt.expected == "" {
 				if got != nil {
 					t.Errorf("expected nil, got %s", got.Id)
@@ -134,7 +134,7 @@ func TestSelectRoute_EntryPoints(t *testing.T) {
 	t.Run("match web entrypoint", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "http://example.com", nil)
 		ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "http-80")
-		got := SelectRoute(req.WithContext(ctx), routes)
+		got := SelectRouteFromSlice(req.WithContext(ctx), routes)
 		if got == nil || got.Id != "web-only" {
 			t.Errorf("expected web-only, got %v", got)
 		}
@@ -143,7 +143,7 @@ func TestSelectRoute_EntryPoints(t *testing.T) {
 	t.Run("match secure entrypoint", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "http://example.com", nil)
 		ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "https-443")
-		got := SelectRoute(req.WithContext(ctx), routes)
+		got := SelectRouteFromSlice(req.WithContext(ctx), routes)
 		if got == nil || got.Id != "secure-only" {
 			t.Errorf("expected secure-only, got %v", got)
 		}
@@ -152,7 +152,7 @@ func TestSelectRoute_EntryPoints(t *testing.T) {
 	t.Run("global route matches any entrypoint", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "http://any.com/ping", nil)
 		ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "random-ep")
-		got := SelectRoute(req.WithContext(ctx), routes)
+		got := SelectRouteFromSlice(req.WithContext(ctx), routes)
 		if got == nil || got.Id != "global" {
 			t.Errorf("expected global, got %v", got)
 		}
@@ -161,7 +161,7 @@ func TestSelectRoute_EntryPoints(t *testing.T) {
 	t.Run("no match on mismatched entrypoint", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "http://example.com", nil)
 		ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "internal-ep")
-		got := SelectRoute(req.WithContext(ctx), routes)
+		got := SelectRouteFromSlice(req.WithContext(ctx), routes)
 		if got != nil {
 			t.Errorf("expected nil, got %s", got.Id)
 		}
@@ -184,7 +184,7 @@ func TestSelectRoute_PathRegex(t *testing.T) {
 	}
 	for _, tt := range tests {
 		req, _ := http.NewRequest("GET", "http://localhost"+tt.path, nil)
-		got := SelectRoute(req, routes)
+		got := SelectRouteFromSlice(req, routes)
 		if tt.expected == "" {
 			if got != nil {
 				t.Errorf("path %q: expected nil, got %s", tt.path, got.Id)
@@ -221,7 +221,7 @@ func TestSelectRoute_Methods(t *testing.T) {
 		if tt.method == "OPTIONS" {
 			req.Header.Set("Access-Control-Request-Method", "POST")
 		}
-		got := SelectRoute(req, routes)
+		got := SelectRouteFromSlice(req, routes)
 		if tt.expected == "" {
 			if got != nil {
 				t.Errorf("%s %s: expected nil, got %s", tt.method, tt.path, got.Id)
@@ -241,22 +241,22 @@ func TestSelectRoute_Headers(t *testing.T) {
 		{Id: "v2", Rule: "Path(`/api`) && Headers(`X-Version`, `v2`)"},
 	}
 	req, _ := http.NewRequest("GET", "http://localhost/api", nil)
-	if got := SelectRoute(req, routes); got != nil {
+	if got := SelectRouteFromSlice(req, routes); got != nil {
 		t.Errorf("no header: expected nil, got %s", got.Id)
 	}
 	req.Header.Set("X-Version", "v2")
-	if got := SelectRoute(req, routes); got == nil || got.Id != "v2" {
+	if got := SelectRouteFromSlice(req, routes); got == nil || got.Id != "v2" {
 		t.Errorf("with X-Version=v2: expected v2, got %v", got)
 	}
 	req.Header.Set("X-Version", "v1")
-	if got := SelectRoute(req, routes); got != nil {
+	if got := SelectRouteFromSlice(req, routes); got != nil {
 		t.Errorf("X-Version=v1: expected nil, got %s", got.Id)
 	}
 
 	// Test OPTIONS preflight should match even without the header
 	reqOpt, _ := http.NewRequest("OPTIONS", "http://localhost/api", nil)
 	reqOpt.Header.Set("Access-Control-Request-Method", "GET")
-	if got := SelectRoute(reqOpt, routes); got == nil || got.Id != "v2" {
+	if got := SelectRouteFromSlice(reqOpt, routes); got == nil || got.Id != "v2" {
 		t.Errorf("OPTIONS without header: expected v2, got %v", got)
 	}
 }

@@ -13,35 +13,27 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
-	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 var (
-	ruleCache   = make(map[string]matcher)
-	ruleCacheMu sync.RWMutex
+	ruleCache sync.Map // map[string]matcher
 )
 
 func getMatcher(rule string) matcher {
-	ruleCacheMu.RLock()
-	m, ok := ruleCache[rule]
-	ruleCacheMu.RUnlock()
-	if ok {
-		return m
+	if m, ok := ruleCache.Load(rule); ok {
+		return m.(matcher)
 	}
 
-	ruleCacheMu.Lock()
-	defer ruleCacheMu.Unlock()
-	if m, ok = ruleCache[rule]; ok {
-		return m
+	m := parseRule(rule)
+	if actual, loaded := ruleCache.LoadOrStore(rule, m); loaded {
+		return actual.(matcher)
 	}
-
-	m = parseRule(rule)
-	ruleCache[rule] = m
 	return m
 }
 
@@ -147,7 +139,9 @@ func (m matcher) Match(r *http.Request) bool {
 	}
 matchMethod:
 	for name, want := range m.headers {
-		if r.Header.Get(name) != want {
+		// Use direct map access to avoid redundant CanonicalMIMEHeaderKey calls in Header.Get
+		values := r.Header[name]
+		if len(values) == 0 || values[0] != want {
 			// For CORS preflight (OPTIONS), we skip header checks as the browser
 			// does not send the actual headers in the preflight request.
 			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
@@ -173,29 +167,51 @@ func RouteHostIsExact(routeHost string) bool {
 
 // HostMatches checks if the request host matches the route's host specification,
 // supporting wildcards like *.example.com.
-func HostMatches(routeHost string, reqHost string) bool {
-	if routeHost == "" {
+func HostMatches(rh string, qh string) bool {
+	if rh == "" {
 		return true
 	}
-	qh := strings.ToLower(reqHost)
-	rh := strings.ToLower(routeHost)
 
-	// Strip port from reqHost if present
-	if idx := strings.LastIndex(qh, ":"); idx != -1 {
+	// Strip port from qh if present (e.g. "localhost:8080" -> "localhost")
+	if idx := strings.LastIndexByte(qh, ':'); idx != -1 && !strings.HasSuffix(qh, "]") {
 		qh = qh[:idx]
+	} else if strings.HasPrefix(qh, "[") && strings.HasSuffix(qh, "]") {
+		qh = qh[1 : len(qh)-1]
+	}
+
+	// Case-insensitive comparison without allocation
+	if !strings.HasPrefix(rh, "*.") {
+		return strings.EqualFold(qh, rh)
 	}
 
 	// Handle wildcards like *.example.com
-	if strings.HasPrefix(rh, "*.") {
-		suffix := rh[1:] // .example.com
-		return strings.HasSuffix(qh, suffix)
+	// rh is "*.example.com", suffix is ".example.com"
+	if len(qh) < len(rh)-1 {
+		return false
 	}
-
-	return qh == rh
+	suffix := rh[1:]
+	// Compare suffix part case-insensitively without allocating lowercased strings
+	qhSuffix := qh[len(qh)-len(suffix):]
+	return strings.EqualFold(qhSuffix, suffix)
 }
 
-// SelectRoute finds the best matching route for the given request based on EntryPoints, Rules, and Priority.
-func SelectRoute(r *http.Request, routes []*gateonv1.Route) *gateonv1.Route {
+// SelectRoute finds the best matching route for the given request using the RouteStore's indexed lookup.
+func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
+	host := httputil.StripPort(r.Host)
+
+	// 1. Try host-specific routes first (O(1) lookup in index)
+	if items := store.GetByHost(host); len(items) > 0 {
+		if rt := SelectRouteFromSlice(r, items); rt != nil {
+			return rt
+		}
+	}
+
+	// 2. Fallback to all routes (wildcards, Path-only rules, etc.)
+	return SelectRouteFromSlice(r, store.List(r.Context()))
+}
+
+// SelectRouteFromSlice finds the best matching route from a provided slice of routes.
+func SelectRouteFromSlice(r *http.Request, routes []*gateonv1.Route) *gateonv1.Route {
 	epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
 
 	var best *gateonv1.Route
@@ -343,6 +359,11 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// does not alter their metrics-skip behavior, which keys off an unset name.
 	chain = append(chain, func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if rs := middleware.GetRequestState(r); rs != nil {
+				rs.RouteName = routeLabel
+				next.ServeHTTP(w, r)
+				return
+			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), middleware.RouteNameContextKey, routeLabel)))
 		})
 	})
@@ -366,7 +387,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 							// write on the hot path when running at info or above.
 							logger.L.LogDebug("Executing middleware",
 								"flow_step", "middleware_start",
-								"request_id", request.GetID(r),
+								"request_id", middleware.GetRequestID(r),
 								"middleware_id", mID)
 							h.ServeHTTP(w, r)
 						})

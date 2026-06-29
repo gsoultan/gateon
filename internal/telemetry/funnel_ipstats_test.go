@@ -65,9 +65,7 @@ func TestMitigationFunnelReconciles(t *testing.T) {
 }
 
 func TestRecordIPBandwidthAccumulates(t *testing.T) {
-	ipBandwidthMu.Lock()
-	ipBandwidthMap = make(map[string]*ipBandwidthInternal)
-	ipBandwidthMu.Unlock()
+	resetIPBandwidth()
 
 	RecordIPBandwidth("10.0.0.1", 100, 200)
 	RecordIPBandwidth("10.0.0.1", 50, 25)
@@ -93,20 +91,18 @@ func TestRecordIPBandwidthAccumulates(t *testing.T) {
 }
 
 func TestRecordIPBandwidthBounded(t *testing.T) {
-	ipBandwidthMu.Lock()
-	ipBandwidthMap = make(map[string]*ipBandwidthInternal)
-	ipBandwidthMu.Unlock()
+	resetIPBandwidth()
 
 	// Insert well beyond the cap; the map must stay bounded via eviction.
-	for i := 0; i < maxIPBandwidthMapSize*2; i++ {
+	// Total capacity is numShards * maxIPBandwidthPerShard = 16 * 64 = 1024.
+	maxTotal := numShards * maxIPBandwidthPerShard
+	for i := 0; i < maxTotal*2; i++ {
 		RecordIPBandwidth(fmt.Sprintf("10.1.%d.%d", i/256, i%256), 1, 1)
 	}
 
-	ipBandwidthMu.RLock()
-	n := len(ipBandwidthMap)
-	ipBandwidthMu.RUnlock()
+	n := len(getIPBandwidthStats())
 
-	if n > maxIPBandwidthMapSize {
-		t.Errorf("ipBandwidthMap size = %d, exceeds cap %d", n, maxIPBandwidthMapSize)
+	if n > maxTotal {
+		t.Errorf("ipBandwidth total size = %d, exceeds cap %d", n, maxTotal)
 	}
 }

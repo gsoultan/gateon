@@ -109,16 +109,13 @@ func (r *RouteRegistry) saveLocked() error {
 func (r *RouteRegistry) List(ctx context.Context) []*gateonv1.Route {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return slices.Clone(r.sorted)
+	return r.sorted
 }
 
 func (r *RouteRegistry) GetByHost(host string) []*gateonv1.Route {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if items, ok := r.hostIndex[strings.ToLower(host)]; ok {
-		return slices.Clone(items)
-	}
-	return nil
+	return r.hostIndex[strings.ToLower(host)]
 }
 
 func hostFromRule(rule string) string {

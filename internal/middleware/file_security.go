@@ -8,13 +8,16 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dutchcoders/go-clamd"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/yara"
 	"github.com/h2non/filetype"
+	aho_corasick "github.com/petar-dambovaliev/aho-corasick"
 )
 
 const (
@@ -22,6 +25,42 @@ const (
 	defaultMaxConcurrentScans = 4
 	defaultMaxScanBytes       = 64 << 20 // 64 MiB
 	fileTypeHeaderSize        = 261      // bytes required by github.com/h2non/filetype
+)
+
+var (
+	fileScannerBufferPool = sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, 0, 1024*1024)) // Start with 1MB
+		},
+	}
+
+	highRiskExts = map[string]bool{
+		".exe": true, ".dll": true, ".so": true, ".sh": true, ".php": true, ".py": true, ".elf": true,
+	}
+	imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".pdf": true}
+
+	embeddedScanner = func() aho_corasick.AhoCorasick {
+		builder := aho_corasick.NewAhoCorasickBuilder(aho_corasick.Opts{
+			AsciiCaseInsensitive: false,
+			MatchOnlyWholeWords:  false,
+			MatchKind:            aho_corasick.LeftMostLongestMatch,
+		})
+		return builder.Build([]string{
+			"\x7fELF",
+			"\xcf\xfa\xed\xfe",
+			"\xfe\xed\xfa\xcf",
+			"\xca\xfe\xba\xbe",
+			"PE\x00\x00",
+		})
+	}()
+
+	embeddedNames = map[int]string{
+		0: "ELF",
+		1: "Mach-O",
+		2: "Mach-O",
+		3: "Mach-O",
+		4: "PE",
+	}
 )
 
 // FileSecurityConfig configures the upload-inspection middleware.
@@ -83,6 +122,15 @@ func FileSecurity(cfg FileSecurityConfig) Middleware {
 	engine := cfg.buildSignatureEngine()
 	blockSev := cfg.blockSeverity()
 
+	allowedMap := make(map[string]bool)
+	for _, m := range cfg.AllowedMimeTypes {
+		allowedMap[m] = true
+	}
+	blockedMap := make(map[string]bool)
+	for _, m := range cfg.BlockedMimeTypes {
+		blockedMap[m] = true
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !isUploadMethod(r.Method) || !isMultipart(r.Header.Get("Content-Type")) {
@@ -104,7 +152,11 @@ func FileSecurity(cfg FileSecurityConfig) Middleware {
 				return
 			}
 
-			body, tooLarge, err := bufferBody(r.Body, cfg.MaxScanBytes)
+			buf := fileScannerBufferPool.Get().(*bytes.Buffer)
+			buf.Reset()
+			defer fileScannerBufferPool.Put(buf)
+
+			body, tooLarge, err := bufferBodyInto(r.Body, cfg.MaxScanBytes, buf)
 			if tooLarge {
 				http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
 				return
@@ -119,7 +171,7 @@ func FileSecurity(cfg FileSecurityConfig) Middleware {
 			// Reconstruct the body so any downstream path receives the intact upload.
 			restoreBody(r, body)
 
-			res := scanMultipart(r, body, boundary, cfg, engine, blockSev)
+			res := scanMultipart(r, body, boundary, cfg, engine, blockSev, allowedMap, blockedMap)
 			if res.scannerErr != nil {
 				if !cfg.FailOpen {
 					logger.L.LogError("ClamAV scan failed (fail-closed)", "error", res.scannerErr, "client_ip", r.RemoteAddr)
@@ -146,6 +198,20 @@ func isMultipart(contentType string) bool {
 }
 
 func multipartBoundary(contentType string) (string, error) {
+	// Optimization for common case: "multipart/form-data; boundary=..."
+	if strings.HasPrefix(contentType, "multipart/form-data;") {
+		if idx := strings.Index(contentType, "boundary="); idx != -1 {
+			boundary := contentType[idx+9:]
+			if idx := strings.IndexByte(boundary, ';'); idx != -1 {
+				boundary = boundary[:idx]
+			}
+			boundary = strings.Trim(boundary, "\" ")
+			if boundary != "" {
+				return boundary, nil
+			}
+		}
+	}
+
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return "", err
@@ -157,21 +223,26 @@ func multipartBoundary(contentType string) (string, error) {
 	return boundary, nil
 }
 
-// bufferBody reads up to maxBytes from the body. It reports tooLarge=true when the
-// body exceeds maxBytes so the caller can reject it without buffering unbounded data.
-func bufferBody(body io.Reader, maxBytes int64) (buf []byte, tooLarge bool, err error) {
-	buf, err = io.ReadAll(io.LimitReader(body, maxBytes+1))
+// bufferBodyInto reads up to maxBytes from the body into the provided buffer.
+// It reports tooLarge=true when the body exceeds maxBytes.
+func bufferBodyInto(body io.Reader, maxBytes int64, buf *bytes.Buffer) (data []byte, tooLarge bool, err error) {
+	n, err := io.Copy(buf, io.LimitReader(body, maxBytes+1))
 	if err != nil {
 		return nil, false, err
 	}
-	if int64(len(buf)) > maxBytes {
+	if n > maxBytes {
 		return nil, true, nil
 	}
-	return buf, false, nil
+	return buf.Bytes(), false, nil
+}
+
+// bufferBody is deprecated, use bufferBodyInto instead.
+func bufferBody(body io.Reader, maxBytes int64) (buf []byte, tooLarge bool, err error) {
+	return bufferBodyInto(body, maxBytes, bytes.NewBuffer(make([]byte, 0, maxBytes)))
 }
 
 // scanMultipart inspects every file part of the buffered body.
-func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity) scanResult {
+func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity, allowedMap, blockedMap map[string]bool) scanResult {
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)
 	for {
 		p, err := mr.NextPart()
@@ -184,7 +255,7 @@ func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecuri
 		if p.FileName() == "" {
 			continue
 		}
-		if res := inspectPart(r, p, cfg, engine, blockSev); res.blocked || res.scannerErr != nil {
+		if res := inspectPart(r, p, cfg, engine, blockSev, allowedMap, blockedMap); res.blocked || res.scannerErr != nil {
 			return res
 		}
 	}
@@ -193,7 +264,7 @@ func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecuri
 
 // inspectPart validates a single file part: size, MIME/magic, and ClamAV.
 // The part is fully read from the already-buffered (bounded) request body.
-func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity) scanResult {
+func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity, allowedMap, blockedMap map[string]bool) scanResult {
 	content, err := io.ReadAll(p)
 	if err != nil {
 		logger.L.LogError("Failed to read upload part", "error", err)
@@ -210,7 +281,7 @@ func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, eng
 	if len(head) > fileTypeHeaderSize {
 		head = head[:fileTypeHeaderSize]
 	}
-	if res := validateMime(r, p, head, cfg); res.blocked {
+	if res := validateMime(r, p, head, allowedMap, blockedMap); res.blocked {
 		return res
 	}
 
@@ -296,7 +367,7 @@ func matchRuleNames(matches []yara.Match) []string {
 }
 
 // validateMime enforces MIME allow/deny lists and extension/magic mismatch rules.
-func validateMime(r *http.Request, p *multipart.Part, head []byte, cfg FileSecurityConfig) scanResult {
+func validateMime(r *http.Request, p *multipart.Part, head []byte, allowedMap, blockedMap map[string]bool) scanResult {
 	if len(head) == 0 {
 		return scanResult{}
 	}
@@ -306,7 +377,7 @@ func validateMime(r *http.Request, p *multipart.Part, head []byte, cfg FileSecur
 		mimeType = http.DetectContentType(head)
 	}
 
-	if isBlockedMime(mimeType, cfg) {
+	if isBlockedMime(mimeType, allowedMap, blockedMap) {
 		logger.L.LogWarn("File upload blocked: suspicious MIME type",
 			"filename", p.FileName(), "mime", mimeType, "client_ip", r.RemoteAddr)
 		return scanResult{blocked: true, status: http.StatusForbidden, message: "File type not allowed"}
@@ -353,22 +424,12 @@ func scanEmbeddedExecutable(r *http.Request, p *multipart.Part, head, content []
 	if !benignWrapperMIMEs[base] {
 		return scanResult{}
 	}
-	type sig struct {
-		name  string
-		magic []byte
-	}
-	for _, s := range []sig{
-		{"ELF", []byte("\x7fELF")},
-		{"Mach-O", []byte("\xcf\xfa\xed\xfe")},
-		{"Mach-O", []byte("\xfe\xed\xfa\xcf")},
-		{"Mach-O", []byte("\xca\xfe\xba\xbe")},
-		{"PE", []byte("PE\x00\x00")},
-	} {
-		if bytes.Contains(content, s.magic) {
-			logger.L.LogWarn("File upload blocked: embedded executable in benign wrapper",
-				"filename", p.FileName(), "mime", mimeType, "embedded", s.name, "client_ip", r.RemoteAddr)
-			return scanResult{blocked: true, status: http.StatusForbidden, message: "Embedded executable content detected"}
-		}
+
+	if match := embeddedScanner.IterByte(content).Next(); match != nil {
+		name := embeddedNames[match.Pattern()]
+		logger.L.LogWarn("File upload blocked: embedded executable in benign wrapper",
+			"filename", p.FileName(), "mime", mimeType, "embedded", name, "client_ip", r.RemoteAddr)
+		return scanResult{blocked: true, status: http.StatusForbidden, message: "Embedded executable content detected"}
 	}
 	return scanResult{}
 }
@@ -435,32 +496,18 @@ func signalAbort(abort chan bool) {
 func restoreBody(r *http.Request, body []byte) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
-	r.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
 }
 
-func isBlockedMime(mimeType string, cfg FileSecurityConfig) bool {
-	if len(cfg.AllowedMimeTypes) > 0 {
-		for _, a := range cfg.AllowedMimeTypes {
-			if mimeType == a {
-				return false
-			}
-		}
-		return true
+func isBlockedMime(mimeType string, allowedMap, blockedMap map[string]bool) bool {
+	if len(allowedMap) > 0 {
+		return !allowedMap[mimeType]
 	}
-	for _, b := range cfg.BlockedMimeTypes {
-		if mimeType == b {
-			return true
-		}
-	}
-	return false
+	return blockedMap[mimeType]
 }
 
 func isHighRiskMismatch(ext, magicExt string) bool {
-	highRiskExts := map[string]bool{
-		".exe": true, ".dll": true, ".so": true, ".sh": true, ".php": true, ".py": true, ".elf": true,
-	}
 	if highRiskExts["."+magicExt] {
-		imageExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".pdf": true}
 		if imageExts[ext] {
 			return true
 		}

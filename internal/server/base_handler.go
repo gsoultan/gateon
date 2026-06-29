@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"os"
@@ -80,8 +81,15 @@ func CreateBaseHandler(
 
 		// On the management entrypoint, we do NOT serve user-defined proxy routes.
 		if epID != "management" {
-			if rt := router.SelectRoute(r, deps.RouteStore.List(r.Context())); rt != nil {
-				handler.ServeHTTP(w, r)
+			if rt := router.SelectRoute(r, deps.RouteStore); rt != nil {
+				// Avoid double-routing in HandleProxyOrLocal by passing the matched route in context.
+				if rs := middleware.GetRequestState(r); rs != nil {
+					rs.MatchedRoute = rt
+					handler.ServeHTTP(w, r)
+				} else {
+					ctx := context.WithValue(r.Context(), middleware.MatchedRouteContextKey, rt)
+					handler.ServeHTTP(w, r.WithContext(ctx))
+				}
 				return
 			}
 

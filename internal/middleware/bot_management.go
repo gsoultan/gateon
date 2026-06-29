@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -185,10 +186,20 @@ func verifyChallengeToken(token, secret, ua, ip string) bool {
 	}
 
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload + ua + ip))
+	_, _ = io.WriteString(mac, payload)
+	_, _ = io.WriteString(mac, ua)
+	_, _ = io.WriteString(mac, ip)
 	expectedSignature := mac.Sum(nil)
-	sigBytes, err := hex.DecodeString(signature)
-	if err != nil || subtle.ConstantTimeCompare(sigBytes, expectedSignature) != 1 {
+
+	// signature is hex encoded, let's decode it safely
+	if len(signature) != hex.EncodedLen(len(expectedSignature)) {
+		return false
+	}
+
+	var sigBuf [32]byte // sha256 is 32 bytes
+	sigBytes := sigBuf[:]
+	n, err := hex.Decode(sigBytes, []byte(signature))
+	if err != nil || n != len(expectedSignature) || subtle.ConstantTimeCompare(sigBytes, expectedSignature) != 1 {
 		return false
 	}
 
@@ -211,8 +222,10 @@ func GenerateChallengeSeed(secret, ua, ip string) string {
 	ts := time.Now().Unix()
 	payload := strconv.FormatInt(ts, 10)
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload + ua + ip))
-	signature := fmt.Sprintf("%x", mac.Sum(nil))
+	_, _ = io.WriteString(mac, payload)
+	_, _ = io.WriteString(mac, ua)
+	_, _ = io.WriteString(mac, ip)
+	signature := hex.EncodeToString(mac.Sum(nil))
 	return payload + "." + signature
 }
 

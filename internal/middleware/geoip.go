@@ -1,17 +1,20 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/oschwald/geoip2-golang"
 )
 
@@ -137,8 +140,45 @@ func GeoIPGlobal(globalStore config.GlobalConfigStore) Middleware {
 	return GeoIPGlobalWithResolver(globalStore, telemetry.ResolveCountry)
 }
 
+type geoIPGlobalState struct {
+	blocked map[string]struct{}
+	allowed map[string]struct{}
+	mu      sync.RWMutex
+}
+
+func (s *geoIPGlobalState) update(newCfg *gateonv1.GlobalConfig) {
+	if newCfg == nil || newCfg.Geoip == nil {
+		return
+	}
+	blocked := make(map[string]struct{}, len(newCfg.Geoip.BlockedCountries))
+	for _, c := range newCfg.Geoip.BlockedCountries {
+		blocked[strings.ToUpper(c)] = struct{}{}
+	}
+	allowed := make(map[string]struct{}, len(newCfg.Geoip.AllowedCountries))
+	for _, c := range newCfg.Geoip.AllowedCountries {
+		allowed[strings.ToUpper(c)] = struct{}{}
+	}
+	s.mu.Lock()
+	s.blocked = blocked
+	s.allowed = allowed
+	s.mu.Unlock()
+}
+
 // GeoIPGlobalWithResolver is the internal implementation of GeoIPGlobal, allowing for dependency injection in tests.
 func GeoIPGlobalWithResolver(globalStore config.GlobalConfigStore, resolver func(string) string) Middleware {
+	state := &geoIPGlobalState{}
+	// Initial load
+	state.update(globalStore.Get(context.Background()))
+
+	// Subscribe to changes
+	if sub, ok := globalStore.(interface {
+		Subscribe(config.ConfigChangeFunc)
+	}); ok {
+		sub.Subscribe(func(_, newCfg *gateonv1.GlobalConfig) {
+			state.update(newCfg)
+		})
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gc := globalStore.Get(r.Context())
@@ -161,29 +201,22 @@ func GeoIPGlobalWithResolver(globalStore config.GlobalConfigStore, resolver func
 				sw.Country = country
 			}
 
-			// 1. Check blocked countries (deny list)
-			for _, blocked := range gc.Geoip.BlockedCountries {
-				if strings.EqualFold(country, blocked) {
-					recordGlobalBlock(r, clientIP, country, "denied by global blocklist")
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
+			state.mu.RLock()
+			_, blocked := state.blocked[country]
+			hasAllowed := len(state.allowed) > 0
+			_, allowed := state.allowed[country]
+			state.mu.RUnlock()
+
+			if blocked {
+				recordGlobalBlock(r, clientIP, country, "denied by global blocklist")
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
 			}
 
-			// 2. Check allowed countries (allow list)
-			if len(gc.Geoip.AllowedCountries) > 0 {
-				allowed := false
-				for _, a := range gc.Geoip.AllowedCountries {
-					if strings.EqualFold(country, a) {
-						allowed = true
-						break
-					}
-				}
-				if !allowed {
-					recordGlobalBlock(r, clientIP, country, "not in global allowlist")
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
+			if hasAllowed && !allowed {
+				recordGlobalBlock(r, clientIP, country, "not in global allowlist")
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
 			}
 
 			next.ServeHTTP(w, r)

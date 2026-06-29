@@ -4,9 +4,9 @@ import { queryClient } from "../queryClient";
 import { apiFetch, getApiUrl } from "./api";
 import type { StatusResponse } from "../types/gateon";
 
-export function useGateonStatus() {
-  const queryKey = ["status"];
+const queryKey = ["status"];
 
+export function useGateonStatus() {
   const query = useQuery<StatusResponse>({
     queryKey,
     queryFn: async () => {
@@ -32,7 +32,7 @@ export function useGateonStatus() {
     return () => {
       eventSource.close();
     };
-  }, [queryClient, queryKey]);
+  }, []); // Only connect on mount
 
   return query;
 }

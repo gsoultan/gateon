@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -104,21 +105,40 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	// 1. PROXY Protocol: If enabled for the target, write the PROXY header before any HTTP data.
 	if state.proxyProtocolEnabled {
 		// Use r.RemoteAddr which is already resolved to the real client IP by RealIP middleware.
-		if err := writeProxyHeader(backendConn, r.RemoteAddr, backendConn.RemoteAddr(), state.proxyProtocolVersion); err != nil {
+		srcIP, srcPort, srcOK := parseTCPAddr(r.RemoteAddr)
+		if conn, ok := r.Context().Value(middleware.ConnContextKey).(net.Conn); ok {
+			if tcp, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				srcIP, srcPort, srcOK = tcp.IP, uint16(tcp.Port), true
+			}
+		}
+		dstIP, dstPort, dstOK := parseTCPAddrFromNetAddr(backendConn.RemoteAddr())
+
+		if err := writeProxyHeader(backendConn, srcIP, srcPort, srcOK, dstIP, dstPort, dstOK, state.proxyProtocolVersion); err != nil {
 			logger.L.LogWarn("Failed to write PROXY header to backend", "error", err, "target", host)
 			// Non-fatal, continue with the request
 		}
 	}
 
 	// Build backend request: preserve Upgrade, Connection, Sec-WebSocket-*; set URL/host
-	backendReq := r.Clone(r.Context())
-	backendReq.URL.Scheme = scheme
-	backendReq.URL.Host = host
-	backendReq.URL.Path = r.URL.Path
-	backendReq.URL.RawPath = r.URL.RawPath
-	backendReq.URL.RawQuery = r.URL.RawQuery
-	backendReq.Host = host
-	backendReq.RequestURI = ""
+	backendReq := &http.Request{
+		Method: r.Method,
+		URL: &url.URL{
+			Scheme:   scheme,
+			Host:     host,
+			Path:     r.URL.Path,
+			RawPath:  r.URL.RawPath,
+			RawQuery: r.URL.RawQuery,
+		},
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     make(http.Header, len(r.Header)),
+		Body:       r.Body,
+		Host:       host,
+		RemoteAddr: r.RemoteAddr,
+	}
+	backendReq = backendReq.WithContext(r.Context())
+	maps.Copy(backendReq.Header, r.Header)
 
 	// X-Forwarded-*: preserve the inbound host, but always normalize the scheme
 	// through request.Scheme so an untrusted client cannot spoof X-Forwarded-Proto
@@ -131,10 +151,16 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	// X-Forwarded-For: append the immediate peer IP to the chain.
 	// We use the underlying connection's remote address if available to ensure we
 	// append the actual peer, even if RealIP middleware updated r.RemoteAddr.
-	peerIP := httputil.StripPort(r.RemoteAddr)
+	peerIP := ""
 	if conn, ok := r.Context().Value(middleware.ConnContextKey).(net.Conn); ok {
-		peerIP = httputil.StripPort(conn.RemoteAddr().String())
+		if tcp, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+			peerIP = tcp.IP.String()
+		}
 	}
+	if peerIP == "" {
+		peerIP = httputil.StripPort(r.RemoteAddr)
+	}
+
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		backendReq.Header.Set("X-Forwarded-For", xff+", "+peerIP)
 	} else {

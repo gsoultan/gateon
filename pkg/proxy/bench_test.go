@@ -92,11 +92,11 @@ func BenchmarkGetOrCreateProxy_CacheHit(b *testing.B) {
 
 	state := lb.targets[0]
 	// Prime the cache
-	_ = h.getOrCreateProxy(state.cacheKey, state.parsedURL)
+	_ = h.getOrCreateProxy(state)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		_ = h.getOrCreateProxy(state.cacheKey, state.parsedURL)
+		_ = h.getOrCreateProxy(state)
 	}
 }

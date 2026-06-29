@@ -149,7 +149,7 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		routeName:           cmp.Or(b.route.Name, b.route.Id),
 		stopDiscovery:       make(chan struct{}),
 		stopHealthCheck:     make(chan struct{}),
-		transport:           &targetAwareRoundTripper{factory: b.transportFactory},
+		transport:           b.transportFactory.HealthCheckTransport(),
 		transportFactory:    b.transportFactory,
 		healthCheckClient:   b.healthCheckClient,
 		tlsConfig:           b.tlsConfig,

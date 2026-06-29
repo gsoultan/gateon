@@ -293,14 +293,10 @@ func ExtractToken(r *http.Request) string {
 // bearerToken returns the Bearer token from the Authorization header.
 func bearerToken(r *http.Request) string {
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
+	if len(authHeader) < 7 || !strings.EqualFold(authHeader[:7], "bearer ") {
 		return ""
 	}
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-		return ""
-	}
-	return parts[1]
+	return authHeader[7:]
 }
 
 // PasetoAuth returns a middleware that validates PASETO tokens from Authorization Bearer or session cookie.

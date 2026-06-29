@@ -3,11 +3,13 @@ package telemetry
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-	"fmt"
-	"maps"
+	"hash"
+	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -20,9 +22,26 @@ const (
 )
 
 var (
+	hashPool = sync.Pool{
+		New: func() any {
+			return sha256.New()
+		},
+	}
 	builderPool = sync.Pool{
 		New: func() any {
 			return &strings.Builder{}
+		},
+	}
+	headerKeysPool = sync.Pool{
+		New: func() any {
+			return make([]string, 0, 32)
+		},
+	}
+	fingerprintPool = sync.Pool{
+		New: func() any {
+			return &ClientFingerprint{
+				Attributes: make(map[string]string, 16),
+			}
 		},
 	}
 )
@@ -58,9 +77,61 @@ func WithFingerprint(r *http.Request) *http.Request {
 	return r.WithContext(ctx)
 }
 
+// GetFingerprintHash returns only the fingerprint hash.
+func GetFingerprintHash(r *http.Request) string {
+	if fp, ok := r.Context().Value(fingerprintCtxKey).(*ClientFingerprint); ok {
+		return fp.Hash
+	}
+
+	h := hashPool.Get().(hash.Hash)
+	h.Reset()
+	defer hashPool.Put(h)
+
+	stableHeaders := []string{
+		"User-Agent",
+		"Accept-Language",
+		"Accept-Encoding",
+		"DNT",
+		"Upgrade-Insecure-Requests",
+		"Sec-CH-UA",
+		"Sec-CH-UA-Mobile",
+		"Sec-CH-UA-Platform",
+	}
+
+	for _, k := range stableHeaders {
+		val := r.Header.Get(k)
+		if val != "" {
+			io.WriteString(h, k)
+			io.WriteString(h, ":")
+			io.WriteString(h, val)
+			io.WriteString(h, "|")
+		}
+	}
+
+	if r.TLS != nil {
+		// Use manual byte writing instead of fmt.Fprintf
+		var b [16]byte
+		binary.BigEndian.PutUint16(b[0:], r.TLS.Version)
+		binary.BigEndian.PutUint16(b[2:], r.TLS.CipherSuite)
+		h.Write([]byte("tls:"))
+		h.Write(b[:4])
+		h.Write([]byte("|"))
+	}
+
+	if r.Proto != "" {
+		h.Write([]byte("proto:"))
+		h.Write([]byte(r.Proto))
+		h.Write([]byte("|"))
+	}
+
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum)
+}
+
 // GenerateFingerprint creates a hash of client attributes to identify the actor.
 func GenerateFingerprint(r *http.Request) *ClientFingerprint {
-	attrs := make(map[string]string)
+	fp := fingerprintPool.Get().(*ClientFingerprint)
+	clear(fp.Attributes)
 
 	// 1. Headers (using a stable subset)
 	stableHeaders := []string{
@@ -74,37 +145,46 @@ func GenerateFingerprint(r *http.Request) *ClientFingerprint {
 		"Sec-CH-UA-Platform",
 	}
 
-	sb := builderPool.Get().(*strings.Builder)
-	sb.Reset()
-	defer builderPool.Put(sb)
+	h := hashPool.Get().(hash.Hash)
+	h.Reset()
+	defer hashPool.Put(h)
 
-	for _, h := range stableHeaders {
-		val := r.Header.Get(h)
+	for _, k := range stableHeaders {
+		val := r.Header.Get(k)
 		if val != "" {
-			attrs[h] = val
-			sb.WriteString(h + ":" + val + "|")
+			fp.Attributes[k] = val
+			io.WriteString(h, k)
+			io.WriteString(h, ":")
+			io.WriteString(h, val)
+			io.WriteString(h, "|")
 		}
 	}
 
 	// 2. TLS properties (if available)
 	if r.TLS != nil {
-		attrs["tls_version"] = fmt.Sprintf("%x", r.TLS.Version)
-		attrs["cipher_suite"] = fmt.Sprintf("%x", r.TLS.CipherSuite)
-		sb.WriteString(fmt.Sprintf("tls:%x:%x|", r.TLS.Version, r.TLS.CipherSuite))
+		v := strconv.FormatUint(uint64(r.TLS.Version), 16)
+		c := strconv.FormatUint(uint64(r.TLS.CipherSuite), 16)
+		fp.Attributes["tls_version"] = v
+		fp.Attributes["cipher_suite"] = c
+		io.WriteString(h, "tls:")
+		io.WriteString(h, v)
+		io.WriteString(h, ":")
+		io.WriteString(h, c)
+		io.WriteString(h, "|")
 	}
 
 	// 3. Negotiated Protocol
 	if r.Proto != "" {
-		attrs["proto"] = r.Proto
-		sb.WriteString("proto:" + r.Proto + "|")
+		fp.Attributes["proto"] = r.Proto
+		io.WriteString(h, "proto:")
+		io.WriteString(h, r.Proto)
+		io.WriteString(h, "|")
 	}
 
-	hash := sha256.Sum256([]byte(sb.String()))
+	sum := h.Sum(nil)
+	fp.Hash = hex.EncodeToString(sum)
 
-	return &ClientFingerprint{
-		Hash:       hex.EncodeToString(hash[:]),
-		Attributes: attrs,
-	}
+	return fp
 }
 
 // GenerateJA4H generates a JA4H HTTP fingerprint.
@@ -138,18 +218,48 @@ func GenerateJA4H(r *http.Request) string {
 	headerCount := len(r.Header)
 
 	// Collect and sort headers for stable hashing
-	headers := slices.Sorted(maps.Keys(r.Header))
+	headerKeys := headerKeysPool.Get().([]string)
+	headerKeys = headerKeys[:0]
+	for k := range r.Header {
+		headerKeys = append(headerKeys, k)
+	}
+	slices.Sort(headerKeys)
+	defer func() {
+		if cap(headerKeys) <= 128 {
+			headerKeysPool.Put(headerKeys)
+		}
+	}()
 
-	// For now, let's just hash the keys.
-	h := sha256.New()
-	for _, k := range headers {
+	h := hashPool.Get().(hash.Hash)
+	h.Reset()
+	defer hashPool.Put(h)
+
+	for _, k := range headerKeys {
 		if k == "Cookie" || k == "Referer" {
 			continue
 		}
-		h.Write([]byte(k))
-		h.Write([]byte(","))
+		io.WriteString(h, k)
+		io.WriteString(h, ",")
 	}
 	headerHash := hex.EncodeToString(h.Sum(nil))[:12]
 
-	return fmt.Sprintf("%s%s%s%s%02d%s", methodChar, versionChar, cookieChar, refererChar, headerCount, headerHash)
+	// method(1) + version(1) + cookie(1) + referer(1) + count(2) + hash(12) = 18 chars
+	var buf [18]byte
+	buf[0] = methodChar[0]
+	buf[1] = versionChar[0]
+	buf[2] = cookieChar[0]
+	buf[3] = refererChar[0]
+	if headerCount < 10 {
+		buf[4] = '0'
+		buf[5] = byte('0' + headerCount)
+	} else if headerCount < 100 {
+		buf[4] = byte('0' + headerCount/10)
+		buf[5] = byte('0' + headerCount%10)
+	} else {
+		buf[4] = '9'
+		buf[5] = '9'
+	}
+	copy(buf[6:], headerHash)
+
+	return string(buf[:])
 }

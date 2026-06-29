@@ -1,15 +1,12 @@
 package telemetry
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
-	"sync"
+	"sync/atomic"
 )
 
 // CMSketch implements a Count-Min Sketch for memory-efficient frequency estimation.
 // It is used for global rate limiting and identifying Top-K attackers with constant memory.
 type CMSketch struct {
-	mu     sync.RWMutex
 	width  int
 	depth  int
 	counts [][]uint32
@@ -35,51 +32,44 @@ func (c *CMSketch) Add(key string) {
 }
 
 // AddWeighted increments the count for the given key by the specified value.
+// It is optimized to be lock-free using atomic increments and a fast hash function.
 func (c *CMSketch) AddWeighted(key string, count uint32) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	data := []byte(key)
 	for i := range c.depth {
-		hash := c.hash(data, i)
-		idx := int(hash % uint64(c.width))
-		c.counts[i][idx] += count
+		h := c.fastHash(key, uint64(i))
+		idx := int(h % uint64(c.width))
+		atomic.AddUint32(&c.counts[i][idx], count)
 	}
 }
 
 // Estimate returns the estimated frequency of the key.
 func (c *CMSketch) Estimate(key string) uint32 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	data := []byte(key)
-	var min uint32 = 0xFFFFFFFF
+	var minVal uint32 = 0xFFFFFFFF
 	for i := range c.depth {
-		hash := c.hash(data, i)
-		idx := int(hash % uint64(c.width))
-		count := c.counts[i][idx]
-		if count < min {
-			min = count
+		h := c.fastHash(key, uint64(i))
+		idx := int(h % uint64(c.width))
+		val := atomic.LoadUint32(&c.counts[i][idx])
+		if val < minVal {
+			minVal = val
 		}
 	}
-	return min
+	return minVal
 }
 
-func (c *CMSketch) hash(data []byte, seed int) uint64 {
-	h := sha256.New()
-	binary.Write(h, binary.LittleEndian, uint32(seed))
-	h.Write(data)
-	sum := h.Sum(nil)
-	return binary.LittleEndian.Uint64(sum[:8])
+// fastHash is a fast, non-cryptographic hash function (FNV-1a like).
+func (c *CMSketch) fastHash(key string, seed uint64) uint64 {
+	h := uint64(14695981039346656037) ^ seed
+	for i := range len(key) {
+		h ^= uint64(key[i])
+		h *= 1099511628211
+	}
+	return h
 }
 
 // Clear resets the sketch.
 func (c *CMSketch) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for i := range c.depth {
 		for j := range c.width {
-			c.counts[i][j] = 0
+			atomic.StoreUint32(&c.counts[i][j], 0)
 		}
 	}
 }

@@ -171,7 +171,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				telemetry.TrackBehavior(fingerprint, r, sw.Status)
 			}
 
-			status := getStatusString(sw.Status)
+			statusStr := getStatusString(sw.Status)
 			country := request.GetCountry(r, trust)
 			if sw.Country != "" {
 				country = sw.Country
@@ -187,7 +187,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 			if recordDetailed || recordSampled {
-				id := request.GetID(r)
+				id := GetRequestID(r)
 
 				// JA3/JA4 fingerprints are only consumed by trace records, so resolve
 				// them lazily inside the recording branch.
@@ -220,7 +220,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						activeRouteID,
 						float64(duration.Nanoseconds())/1e6,
 						start,
-						status,
+						statusStr,
 						origPath,
 						clientIP,
 						fingerprint,
@@ -247,7 +247,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						activeRouteID,
 						float64(duration.Nanoseconds())/1e6,
 						start,
-						status,
+						statusStr,
 						origPath,
 						clientIP,
 						fingerprint,
@@ -263,8 +263,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					)
 				}
 			}
-
-			statusStr := getStatusString(sw.Status)
 
 			// Rich Prometheus metrics
 			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, method, statusStr).Inc()
@@ -289,10 +287,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "out").Add(float64(respOutSize + 200))
 
 			// Domain-based metrics
-			origDomain := origHost
-			if h, _, err := net.SplitHostPort(origDomain); err == nil {
-				origDomain = h
-			}
+			origDomain := httputil.StripPort(origHost)
 			if origDomain == "" {
 				origDomain = "unknown"
 			}
@@ -452,8 +447,14 @@ func RequestID() Middleware {
 				id = request.GenerateID()
 			}
 			w.Header().Set("X-Request-ID", id)
-			r = r.WithContext(request.WithID(r.Context(), id))
-			next.ServeHTTP(w, r)
+
+			if rs := GetRequestState(r); rs != nil {
+				rs.RequestID = id
+				next.ServeHTTP(w, r)
+			} else {
+				r = r.WithContext(request.WithID(r.Context(), id))
+				next.ServeHTTP(w, r)
+			}
 		})
 	}
 }

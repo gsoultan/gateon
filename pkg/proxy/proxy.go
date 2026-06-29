@@ -20,8 +20,6 @@ const flushIntervalImmediate = -1
 // context key for passing targetState to shared ErrorHandler
 type contextKey int
 
-const targetStateContextKey contextKey = 0
-
 // ProxyHandler handles the proxying of requests to backend services.
 type ProxyHandler struct {
 	lb                  LoadBalancer
@@ -98,18 +96,21 @@ func (h *ProxyHandler) activeConnCount() int32 {
 }
 
 // getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.
-func (h *ProxyHandler) getOrCreateProxy(cacheKey string, targetURL *url.URL) *httputil.ReverseProxy {
-	if v, ok := h.proxyPool.Load(cacheKey); ok {
+func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReverseProxy {
+	if v, ok := h.proxyPool.Load(state.cacheKey); ok {
 		return v.(*httputil.ReverseProxy)
 	}
 	// Clone target to avoid mutation affecting the cache key
 	target := &url.URL{
-		Scheme: targetURL.Scheme,
-		Host:   targetURL.Host,
-		Path:   targetURL.Path,
+		Scheme: state.parsedURL.Scheme,
+		Host:   state.parsedURL.Host,
+		Path:   state.parsedURL.Path,
 	}
 	rp := httputil.NewSingleHostReverseProxy(target)
-	rp.Transport = h.transport
+	rp.Transport = &targetBoundRoundTripper{
+		state:   state,
+		factory: h.transportFactory,
+	}
 	rp.BufferPool = bufferPool
 	rp.FlushInterval = flushIntervalImmediate // flush immediately for SSE/streaming
 	if h.StripCORS {
@@ -124,16 +125,14 @@ func (h *ProxyHandler) getOrCreateProxy(cacheKey string, targetURL *url.URL) *ht
 		}
 	}
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		if st, ok := r.Context().Value(targetStateContextKey).(*targetState); ok && st != nil {
-			atomic.AddUint64(&st.errorCount, 1)
-		}
+		atomic.AddUint64(&state.errorCount, 1)
 		routeID := middleware.GetRouteName(r)
 		if routeID != "" {
 			telemetry.RequestFailuresTotal.WithLabelValues(routeID, "service_down").Inc()
 		}
 		w.WriteHeader(http.StatusBadGateway)
 	}
-	if v, loaded := h.proxyPool.LoadOrStore(cacheKey, rp); loaded {
+	if v, loaded := h.proxyPool.LoadOrStore(state.cacheKey, rp); loaded {
 		return v.(*httputil.ReverseProxy)
 	}
 	return rp

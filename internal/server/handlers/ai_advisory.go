@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -93,8 +95,8 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig) aiAnalysisRe
 
 	// --- TLS posture ---
 	if tls := cfg.GetTls(); tls != nil && tls.GetEnabled() {
-		switch strings.ToUpper(strings.ReplaceAll(tls.GetMinTlsVersion(), " ", "")) {
-		case "", "TLS1.0", "TLS1.1":
+		minTLS := tls.GetMinTlsVersion()
+		if minTLS == "" || strings.Contains(minTLS, "1.0") || strings.Contains(minTLS, "1.1") {
 			insights = append(insights, aiInsight{
 				Title:           "Weak minimum TLS version",
 				Description:     "The minimum TLS version is unset or below TLS 1.2, allowing legacy clients to negotiate deprecated, attackable protocol versions.",
@@ -253,15 +255,24 @@ func analyzeLogs(logs []string) string {
 	var errors, warns, infos int
 	msgCounts := make(map[string]int)
 	for _, line := range logs {
-		lower := strings.ToLower(line)
-		switch {
-		case strings.Contains(lower, "level=error") || strings.Contains(lower, "\"error\"") || strings.Contains(lower, " error "):
+		// Avoid strings.ToLower for performance; use case-insensitive checks where possible
+		// or just check for common casing in logs (slog uses level=ERROR/WARN/INFO or "level":"error")
+		hasError := strings.Contains(line, "level=error") || strings.Contains(line, "level=ERROR") ||
+			strings.Contains(line, "\"level\":\"error\"") || strings.Contains(line, "\"level\":\"ERROR\"") ||
+			strings.Contains(line, " error ") || strings.Contains(line, " ERROR ")
+
+		hasWarn := !hasError && (strings.Contains(line, "level=warn") || strings.Contains(line, "level=WARN") ||
+			strings.Contains(line, "\"level\":\"warn\"") || strings.Contains(line, "\"level\":\"WARN\"") ||
+			strings.Contains(line, " warn ") || strings.Contains(line, " WARN "))
+
+		if hasError {
 			errors++
-		case strings.Contains(lower, "level=warn") || strings.Contains(lower, " warn "):
+		} else if hasWarn {
 			warns++
-		default:
+		} else {
 			infos++
 		}
+
 		if key := extractLogMessage(line); key != "" {
 			msgCounts[key]++
 		}
@@ -275,14 +286,15 @@ func analyzeLogs(logs []string) string {
 	for m, c := range msgCounts {
 		top = append(top, kv{m, c})
 	}
-	sort.Slice(top, func(i, j int) bool {
-		if top[i].count != top[j].count {
-			return top[i].count > top[j].count
+	slices.SortFunc(top, func(a, b kv) int {
+		if a.count != b.count {
+			return cmp.Compare(b.count, a.count)
 		}
-		return top[i].msg < top[j].msg
+		return strings.Compare(a.msg, b.msg)
 	})
 
 	var b strings.Builder
+	b.Grow(256)
 	fmt.Fprintf(&b, "Analyzed %d log lines: %d error, %d warning, %d info/other. ", len(logs), errors, warns, infos)
 	switch {
 	case errors == 0 && warns == 0:
@@ -298,11 +310,12 @@ func analyzeLogs(logs []string) string {
 		if len(top) < limit {
 			limit = len(top)
 		}
-		parts := make([]string, 0, limit)
 		for i := 0; i < limit; i++ {
-			parts = append(parts, fmt.Sprintf("%q (×%d)", top[i].msg, top[i].count))
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q (×%d)", top[i].msg, top[i].count)
 		}
-		b.WriteString(strings.Join(parts, ", "))
 		b.WriteString(". ")
 	}
 	b.WriteString("(Local Mode: deterministic analysis, no data left this server.)")

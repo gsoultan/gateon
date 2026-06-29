@@ -22,6 +22,7 @@ type Manager struct {
 	db           *sql.DB
 	dialect      db.Dialect
 	symmetricKey paseto.V4SymmetricKey
+	parser       paseto.Parser
 	encKey       []byte
 	logger       logger.Logger
 }
@@ -53,6 +54,7 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 		db:           database,
 		dialect:      dialect,
 		symmetricKey: key,
+		parser:       paseto.NewParser(),
 		encKey:       append([]byte(nil), keyBytes[:32]...),
 		logger:       l,
 	}
@@ -155,8 +157,7 @@ func sanitizeUser(user *gateonv1.User) {
 }
 
 func (m *Manager) VerifyToken(token string) (any, error) {
-	parser := paseto.NewParser()
-	parsedToken, err := parser.ParseV4Local(m.symmetricKey, token, nil)
+	parsedToken, err := m.parser.ParseV4Local(m.symmetricKey, token, nil)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
