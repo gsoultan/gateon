@@ -2,7 +2,10 @@ package middleware
 
 import (
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +26,12 @@ var (
 		Name: "gateon_ratelimit_rejected_total",
 		Help: "Total number of requests rejected by the rate limiter",
 	}, []string{"backend"})
+
+	sbPool = sync.Pool{
+		New: func() any {
+			return &strings.Builder{}
+		},
+	}
 )
 
 // RateLimiter defines the interface for rate limiting.
@@ -43,7 +52,9 @@ func (NoopRateLimiter) Handler(_ func(*http.Request) string) func(http.Handler) 
 // rateLimiterEntry holds a rate limiter and its last access time for TTL eviction.
 type rateLimiterEntry struct {
 	limiter    *rate.Limiter
-	lastAccess atomic.Int64 // unix seconds
+	lastAccess atomic.Int64  // unix seconds
+	lastRate   atomic.Uint64 // bit-cast of rate.Limit (float64)
+	lastBurst  atomic.Int32
 }
 
 const rateLimiterEvictInterval = 60 * time.Second
@@ -137,10 +148,9 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 	s := rl.getShard(key)
 
 	// Adjust base rate and burst based on reputation (0-100)
-	// At 100 reputation, they get 100% of the limit.
-	// At 10 reputation, they get 10% of the limit.
-	adjRate := rl.rate * rate.Limit(reputation/100.0)
-	adjBurst := int(float64(rl.burst) * (reputation / 100.0))
+	factor := reputation * 0.01
+	adjRate := rl.rate * rate.Limit(factor)
+	adjBurst := int32(float64(rl.burst) * factor)
 	if adjBurst < 1 {
 		adjBurst = 1
 	}
@@ -151,10 +161,13 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 
 	if exists {
 		entry.lastAccess.Store(now)
-		// Update limits if they changed significantly
-		if entry.limiter.Limit() != adjRate {
+		// Update limits only if they changed significantly, using atomics to avoid
+		// calling entry.limiter.Limit() which takes a mutex lock.
+		if entry.lastRate.Load() != math.Float64bits(float64(adjRate)) || entry.lastBurst.Load() != adjBurst {
 			entry.limiter.SetLimit(adjRate)
-			entry.limiter.SetBurst(adjBurst)
+			entry.limiter.SetBurst(int(adjBurst))
+			entry.lastRate.Store(math.Float64bits(float64(adjRate)))
+			entry.lastBurst.Store(adjBurst)
 		}
 		return entry.limiter
 	}
@@ -165,12 +178,16 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 	// Double-check after acquiring write lock
 	entry, exists = s.limiters[key]
 	if !exists {
-		entry = &rateLimiterEntry{limiter: rate.NewLimiter(adjRate, adjBurst)}
+		entry = &rateLimiterEntry{limiter: rate.NewLimiter(adjRate, int(adjBurst))}
+		entry.lastRate.Store(math.Float64bits(float64(adjRate)))
+		entry.lastBurst.Store(adjBurst)
 		s.limiters[key] = entry
 	} else {
-		if entry.limiter.Limit() != adjRate {
+		if entry.lastRate.Load() != math.Float64bits(float64(adjRate)) || entry.lastBurst.Load() != adjBurst {
 			entry.limiter.SetLimit(adjRate)
-			entry.limiter.SetBurst(adjBurst)
+			entry.limiter.SetBurst(int(adjBurst))
+			entry.lastRate.Store(math.Float64bits(float64(adjRate)))
+			entry.lastBurst.Store(adjBurst)
 		}
 	}
 	entry.lastAccess.Store(now)
@@ -193,8 +210,8 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			}
 
 			// Adaptive Rate Limiting based on Reputation
-			fp := telemetry.GetDetailedFingerprint(r)
-			reputation := telemetry.GetReputation(fp.Hash)
+			fpHash := telemetry.GetFingerprintHash(r)
+			reputation := telemetry.GetReputation(fpHash)
 
 			limiter := rl.getLimiter(key, reputation)
 			if !limiter.Allow() {
@@ -263,14 +280,36 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			nowMs := now.UnixMilli()
 			windowMs := int64(60 * 1000) // 1 minute window
 			minMs := nowMs - windowMs
-			redisKey := fmt.Sprintf("ratelimit:v2:%s", key)
+
+			// Use pooled builder to avoid fmt.Sprintf allocations for keys and members
+			sb := sbPool.Get().(*strings.Builder)
+			sb.Reset()
+			defer sbPool.Put(sb)
+
+			sb.WriteString("ratelimit:v2:")
+			sb.WriteString(key)
+			redisKey := sb.String()
+
+			sb.Reset()
+			sb.WriteString("0")
+			zero := sb.String()
+
+			sb.Reset()
+			sb.WriteString(strconv.FormatInt(minMs, 10))
+			minMsStr := sb.String()
+
+			sb.Reset()
+			sb.WriteString(strconv.FormatInt(nowMs, 10))
+			sb.WriteByte('-')
+			sb.WriteString(strconv.FormatInt(now.UnixNano(), 10))
+			member := sb.String()
 
 			// Pipeline to ensure atomicity
 			pipe := rl.client.Pipeline()
 			// Remove entries older than 1 minute
-			pipe.ZRemRangeByScore(r.Context(), redisKey, "0", fmt.Sprintf("%d", minMs))
+			pipe.ZRemRangeByScore(r.Context(), redisKey, zero, minMsStr)
 			// Add current request
-			pipe.ZAdd(r.Context(), redisKey, redigo.Z{Score: float64(nowMs), Member: fmt.Sprintf("%d-%d", nowMs, now.UnixNano())})
+			pipe.ZAdd(r.Context(), redisKey, redigo.Z{Score: float64(nowMs), Member: member})
 			// Count requests in the window
 			pipe.ZCard(r.Context(), redisKey)
 			// Set expiration to clean up unused keys
@@ -289,9 +328,9 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			}
 
 			// Adaptive logic for Redis
-			fp := telemetry.GetDetailedFingerprint(r)
-			reputation := telemetry.GetReputation(fp.Hash)
-			adjLimit := int(float64(rl.rate+rl.burst) * (reputation / 100.0))
+			fpHash := telemetry.GetFingerprintHash(r)
+			reputation := telemetry.GetReputation(fpHash)
+			adjLimit := int(float64(rl.rate+rl.burst) * (reputation * 0.01))
 			if adjLimit < 1 {
 				adjLimit = 1
 			}
@@ -356,5 +395,5 @@ func PerJA4H(r *http.Request) string {
 
 // PerFingerprint returns the detailed client fingerprint hash.
 func PerFingerprint(r *http.Request) string {
-	return telemetry.GetDetailedFingerprint(r).Hash
+	return telemetry.GetFingerprintHash(r)
 }

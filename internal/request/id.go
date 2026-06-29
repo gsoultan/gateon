@@ -25,8 +25,14 @@ func WithID(ctx context.Context, id string) context.Context {
 }
 
 // GenerateID creates a new unique request ID.
+// It is optimized to use a stack-allocated buffer.
 func GenerateID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
-	return "req-" + hex.EncodeToString(b[:])
+
+	// req- + 16 hex chars = 20 chars
+	var buf [20]byte
+	copy(buf[:4], "req-")
+	hex.Encode(buf[4:], b[:])
+	return string(buf[:])
 }

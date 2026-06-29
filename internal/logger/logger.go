@@ -23,6 +23,23 @@ type Logger interface {
 // L is the global logger instance.
 var L *SlogShim = &SlogShim{l: slog.Default()}
 
+var eventPool = sync.Pool{
+	New: func() any {
+		return &Event{
+			args: make([]any, 0, 16),
+		}
+	},
+}
+
+func getEvent(l *slog.Logger, level slog.Level) *Event {
+	e := eventPool.Get().(*Event)
+	e.l = l
+	e.level = level
+	e.isFatal = false
+	e.args = e.args[:0]
+	return e
+}
+
 // Default returns the global logger.
 func Default() Logger {
 	if L == nil {
@@ -46,34 +63,41 @@ func (s *SlogShim) Write(p []byte) (n int, err error) {
 
 // Zerolog-compatible methods
 func (s *SlogShim) Info() *Event {
-	if s == nil || s.l == nil {
-		return &Event{l: slog.Default(), level: slog.LevelInfo}
+	l := slog.Default()
+	if s != nil && s.l != nil {
+		l = s.l
 	}
-	return &Event{l: s.l, level: slog.LevelInfo}
+	return getEvent(l, slog.LevelInfo)
 }
 func (s *SlogShim) Error() *Event {
-	if s == nil || s.l == nil {
-		return &Event{l: slog.Default(), level: slog.LevelError}
+	l := slog.Default()
+	if s != nil && s.l != nil {
+		l = s.l
 	}
-	return &Event{l: s.l, level: slog.LevelError}
+	return getEvent(l, slog.LevelError)
 }
 func (s *SlogShim) Debug() *Event {
-	if s == nil || s.l == nil {
-		return &Event{l: slog.Default(), level: slog.LevelDebug}
+	l := slog.Default()
+	if s != nil && s.l != nil {
+		l = s.l
 	}
-	return &Event{l: s.l, level: slog.LevelDebug}
+	return getEvent(l, slog.LevelDebug)
 }
 func (s *SlogShim) Warn() *Event {
-	if s == nil || s.l == nil {
-		return &Event{l: slog.Default(), level: slog.LevelWarn}
+	l := slog.Default()
+	if s != nil && s.l != nil {
+		l = s.l
 	}
-	return &Event{l: s.l, level: slog.LevelWarn}
+	return getEvent(l, slog.LevelWarn)
 }
 func (s *SlogShim) Fatal() *Event {
-	if s == nil || s.l == nil {
-		return &Event{l: slog.Default(), level: slog.LevelError, isFatal: true}
+	l := slog.Default()
+	if s != nil && s.l != nil {
+		l = s.l
 	}
-	return &Event{l: s.l, level: slog.LevelError, isFatal: true}
+	e := getEvent(l, slog.LevelError)
+	e.isFatal = true
+	return e
 }
 
 type Event struct {
@@ -99,7 +123,9 @@ func (e *Event) Msg(msg string) {
 		return
 	}
 	e.l.Log(context.Background(), e.level, msg, e.args...)
-	if e.isFatal {
+	isFatal := e.isFatal
+	eventPool.Put(e)
+	if isFatal {
 		os.Exit(1)
 	}
 }
@@ -109,7 +135,9 @@ func (e *Event) Msgf(format string, v ...any) {
 		return
 	}
 	e.l.Log(context.Background(), e.level, fmt.Sprintf(format, v...), e.args...)
-	if e.isFatal {
+	isFatal := e.isFatal
+	eventPool.Put(e)
+	if isFatal {
 		os.Exit(1)
 	}
 }
@@ -142,6 +170,13 @@ func (s *SlogShim) LogDebug(msg string, args ...any) {
 		return
 	}
 	s.l.Debug(msg, args...)
+}
+
+func (s *SlogShim) IsEnabled(level slog.Level) bool {
+	if s == nil || s.l == nil {
+		return false
+	}
+	return s.l.Enabled(context.Background(), level)
 }
 
 type LogBroadcast struct {

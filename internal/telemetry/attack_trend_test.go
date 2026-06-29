@@ -14,11 +14,11 @@ func TestAttackTrendBucketQuery(t *testing.T) {
 		daily      bool
 		wantSubstr string
 	}{
-		{"SQLiteHourly", db.DriverSQLite, false, "%Y-%m-%d %H:00:00"},
-		{"SQLiteDaily", db.DriverSQLite, true, "%Y-%m-%d 00:00:00"},
-		{"PostgresHourly", db.DriverPostgres, false, "YYYY-MM-DD HH24:00:00"},
-		{"PostgresDaily", db.DriverPostgres, true, "YYYY-MM-DD 00:00:00"},
-		{"PgxDaily", "pgx", true, "YYYY-MM-DD 00:00:00"},
+		{"SQLiteHourly", db.DriverSQLite, false, "strftime('%Y-%m-%d %H:00:00', timestamp)"},
+		{"SQLiteDaily", db.DriverSQLite, true, "date(timestamp)"},
+		{"PostgresHourly", db.DriverPostgres, false, "date_trunc('hour', timestamp)"},
+		{"PostgresDaily", db.DriverPostgres, true, "date_trunc('day', timestamp)"},
+		{"PgxDaily", "pgx", true, "date_trunc('day', timestamp)"},
 	}
 
 	for _, tc := range tests {

@@ -2,13 +2,12 @@ package server
 
 import (
 	"cmp"
-	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
-	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/pkg/proxy"
@@ -36,13 +35,32 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 	}
 
 	isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
+	if rs := middleware.GetRequestState(r); rs != nil {
+		isMgmt = rs.IsManagement
+	}
+
 	if !isMgmt {
-		if rt := router.SelectRoute(r, s.RouteStore.List(r.Context())); rt != nil {
-			logger.L.LogInfo("Route matched",
-				"flow_step", "route_match",
-				"request_id", request.GetID(r),
-				"route", cmp.Or(rt.Name, rt.Id),
-				"rule", rt.Rule)
+		var rt *gateonv1.Route
+		if rs := middleware.GetRequestState(r); rs != nil {
+			if matched, ok := rs.MatchedRoute.(*gateonv1.Route); ok {
+				rt = matched
+			}
+		}
+		if rt == nil {
+			rt, _ = r.Context().Value(middleware.MatchedRouteContextKey).(*gateonv1.Route)
+		}
+		if rt == nil {
+			rt = router.SelectRoute(r, s.RouteStore)
+		}
+
+		if rt != nil {
+			if logger.L.IsEnabled(slog.LevelDebug) {
+				logger.L.LogDebug("Route matched",
+					"flow_step", "route_match",
+					"request_id", middleware.GetRequestID(r),
+					"route", cmp.Or(rt.Name, rt.Id),
+					"rule", rt.Rule)
+			}
 			if rt.Tls != nil && r.TLS == nil {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("HTTPS required"))
@@ -60,9 +78,6 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 					w.WriteHeader(http.StatusBadGateway)
 					return
 				}
-				// Pass the correctly identified route label into the context.
-				routeLabel := cmp.Or(rt.Name, rt.Id)
-				r = r.WithContext(context.WithValue(r.Context(), middleware.RouteNameContextKey, routeLabel))
 				h.ServeHTTP(w, r)
 				return
 			}

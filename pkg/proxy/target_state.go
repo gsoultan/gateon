@@ -4,7 +4,9 @@ import (
 	"net/url"
 	"sync/atomic"
 
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type targetState struct {
@@ -19,11 +21,12 @@ type targetState struct {
 	// alive is read lock-free on the request hot path (e.g. RoundRobinLB.NextState
 	// releases the LB lock before iterating) while the health checker writes it,
 	// so it must be atomic to avoid a data race.
-	alive        atomic.Bool
-	requestCount uint64
-	errorCount   uint64
-	latencySumMs uint64
-	activeConn   int32
+	alive           atomic.Bool
+	requestCount    uint64
+	errorCount      uint64
+	latencySumMs    uint64
+	activeConn      int32
+	activeConnGuage prometheus.Gauge
 }
 
 func newTargetState(rawURL string, weight int32) *targetState {
@@ -36,6 +39,7 @@ func newTargetStateWithProxy(rawURL string, weight int32, proxyEnabled bool, pro
 		weight:               weight,
 		proxyProtocolEnabled: proxyEnabled,
 		proxyProtocolVersion: proxyVersion,
+		activeConnGuage:      telemetry.ActiveConnections.WithLabelValues(rawURL),
 	}
 	ts.alive.Store(true)
 	if parsed, err := url.Parse(rawURL); err == nil {

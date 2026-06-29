@@ -100,9 +100,9 @@ func TestWriteProxyHeader(t *testing.T) {
 
 	t.Run("v1", func(t *testing.T) {
 		conn := &recordingConn{}
-		err := writeProxyHeader(conn, "192.168.1.10:50000", backendAddr, gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_V1)
+		err := writeProxyHeaderByAddr(conn, "192.168.1.10:50000", backendAddr, gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_V1)
 		if err != nil {
-			t.Fatalf("writeProxyHeader(v1) returned error: %v", err)
+			t.Fatalf("writeProxyHeaderByAddr(v1) returned error: %v", err)
 		}
 
 		wantPrefix := "PROXY TCP4 192.168.1.10 10.10.10.10 50000 8080\r\n"
@@ -113,9 +113,9 @@ func TestWriteProxyHeader(t *testing.T) {
 
 	t.Run("v2", func(t *testing.T) {
 		conn := &recordingConn{}
-		err := writeProxyHeader(conn, "192.168.1.10:50000", backendAddr, gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_V2)
+		err := writeProxyHeaderByAddr(conn, "192.168.1.10:50000", backendAddr, gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_V2)
 		if err != nil {
-			t.Fatalf("writeProxyHeader(v2) returned error: %v", err)
+			t.Fatalf("writeProxyHeaderByAddr(v2) returned error: %v", err)
 		}
 
 		b := conn.Bytes()

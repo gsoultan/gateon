@@ -63,28 +63,19 @@ func init() {
 	}
 }
 
-// isTrustedAddr reports whether the given host/IP string is within the
-// configured trusted-proxy set.
-func isTrustedAddr(host string) bool {
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return false
-	}
-	for _, n := range trustedProxies {
-		if n.Contains(ip) {
+// isTrustedIP reports whether the given IP is within the configured trusted-proxy set.
+func isTrustedIP(ip netip.Addr) bool {
+	for i := range trustedProxies {
+		if trustedProxies[i].Contains(ip) {
 			return true
 		}
 	}
 	return false
 }
 
-func isCloudflareIP(host string) bool {
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return false
-	}
-	for _, n := range cloudflareIPs {
-		if n.Contains(ip) {
+func isCloudflareIP(ip netip.Addr) bool {
+	for i := range cloudflareIPs {
+		if cloudflareIPs[i].Contains(ip) {
 			return true
 		}
 	}
@@ -95,11 +86,15 @@ func isCloudflareIP(host string) bool {
 // If trustCloudflare is true, it also trusts built-in Cloudflare IP ranges.
 func IsTrusted(remoteAddr string, trustCloudflare bool) bool {
 	host := httputil.StripPort(remoteAddr)
-	if isTrustedAddr(host) {
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	if isTrustedIP(ip) {
 		return true
 	}
 	if trustCloudflare {
-		return isCloudflareIP(host)
+		return isCloudflareIP(ip)
 	}
 	return false
 }
@@ -117,44 +112,71 @@ func isTrustedProxy(remoteAddr string) bool {
 // leftmost XFF token is never trusted directly because it is the position a
 // client fully controls. Falls back to RemoteAddr.
 func GetClientIP(r *http.Request, trustCloudflare bool) string {
-	remoteIP := httputil.StripPort(r.RemoteAddr)
-	isTrusted := IsTrusted(r.RemoteAddr, trustCloudflare)
+	remoteAddr := r.RemoteAddr
+	host := httputil.StripPort(remoteAddr)
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return host
+	}
+
+	isTrusted := isTrustedIP(ip)
+	if !isTrusted && trustCloudflare {
+		isTrusted = isCloudflareIP(ip)
+	}
 
 	if !isTrusted {
-		return remoteIP
+		return host
 	}
 
 	if trustCloudflare {
 		if cf := r.Header.Get(HeaderCloudflareConnectingIP); cf != "" {
-			ipStr := strings.TrimSpace(cf)
-			if _, err := netip.ParseAddr(ipStr); err == nil {
-				return ipStr
+			cf = strings.TrimSpace(cf)
+			if _, err := netip.ParseAddr(cf); err == nil {
+				return cf
 			}
 		}
 	}
+
 	if xff := r.Header.Get(HeaderXForwardedFor); xff != "" {
-		parts := strings.Split(xff, ",")
-		// Walk from the closest proxy (rightmost) toward the client (leftmost),
-		// popping trusted hops. The first non-trusted address is the real client.
-		for i := len(parts) - 1; i >= 0; i-- {
-			ip := httputil.StripPort(strings.TrimSpace(parts[i]))
-			if ip == "" {
+		// Zero-allocation right-to-left parsing of X-Forwarded-For
+		for {
+			lastComma := strings.LastIndexByte(xff, ',')
+			part := xff
+			if lastComma != -1 {
+				part = xff[lastComma+1:]
+				xff = xff[:lastComma]
+			}
+
+			token := strings.TrimSpace(part)
+			if token == "" {
+				if lastComma == -1 {
+					break
+				}
 				continue
 			}
-			if isTrustedAddr(ip) {
-				continue // a known proxy hop — keep walking left
+
+			// Strip port if present in XFF (sometimes happens)
+			cleanIP := httputil.StripPort(token)
+			parsed, err := netip.ParseAddr(cleanIP)
+			if err != nil {
+				if lastComma == -1 {
+					break
+				}
+				continue
 			}
-			if _, err := netip.ParseAddr(ip); err == nil {
-				return ip
+
+			if isTrustedIP(parsed) {
+				if lastComma == -1 {
+					// Every hop was trusted, return the leftmost
+					return cleanIP
+				}
+				continue // Keep walking left
 			}
-		}
-		// Every hop was a trusted proxy: the leftmost entry is the origin client.
-		left := httputil.StripPort(strings.TrimSpace(parts[0]))
-		if _, err := netip.ParseAddr(left); err == nil {
-			return left
+
+			return cleanIP // Found the first untrusted IP
 		}
 	}
-	return httputil.StripPort(r.RemoteAddr)
+	return host
 }
 
 // TrustCloudflareFromEnv returns true if GATEON_TRUST_CLOUDFLARE_HEADERS is set

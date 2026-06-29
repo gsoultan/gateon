@@ -22,8 +22,9 @@ func NewScanner(patterns []string) *Scanner {
 }
 
 // Scan returns true if any of the patterns are found in the input.
+// It is optimized to stop at the first match and avoid allocations.
 func (s *Scanner) Scan(input string) bool {
-	return len(s.matcher.FindAll(input)) > 0
+	return s.matcher.Iter(input).Next() != nil
 }
 
 // FindAll returns all patterns found in the input.

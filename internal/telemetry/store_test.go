@@ -273,15 +273,14 @@ func TestGetMitigatedToday(t *testing.T) {
 		t.Fatalf("GetMitigatedToday delta = %d, want 3 (only blocked/challenged/shunned)", got)
 	}
 
-	// Baseline seeding: simulate a restart by zeroing the in-memory current
-	// counter and re-deriving the baseline from persisted threats.
+	// Seeding: simulate a restart by zeroing the in-memory current
+	// counter and re-deriving it from persisted threats.
 	time.Sleep(1500 * time.Millisecond) // allow async batch flush to persist
 	store.currentMitigatedToday.Store(0)
-	store.baselineMitigatedToday.Store(0)
 	store.syncDailyBaselines(false)
 
 	if got := GetMitigatedToday(); got < 3 {
-		t.Errorf("GetMitigatedToday after baseline reload = %d, want >= 3 (seeded from DB)", got)
+		t.Errorf("GetMitigatedToday after reload = %d, want >= 3 (seeded from DB)", got)
 	}
 }
 

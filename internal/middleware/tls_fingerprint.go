@@ -6,21 +6,59 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"unsafe"
 )
 
 type tlsContextKey string
 
 const (
 	ConnContextKey tlsContextKey = "net-conn"
+	numShards                    = 16
 )
 
 var (
-	fingerprintMap = make(map[net.Conn]Fingerprints)
-	addrMap        = make(map[string]Fingerprints)
-	mapMu          sync.RWMutex
+	shards [numShards]*fingerprintShard
+
+	builderPool = sync.Pool{
+		New: func() any {
+			return &strings.Builder{}
+		},
+	}
 )
+
+type fingerprintShard struct {
+	conns map[net.Conn]Fingerprints
+	addrs map[string]Fingerprints
+	mu    sync.RWMutex
+}
+
+func init() {
+	for i := 0; i < numShards; i++ {
+		shards[i] = &fingerprintShard{
+			conns: make(map[net.Conn]Fingerprints),
+			addrs: make(map[string]Fingerprints),
+		}
+	}
+}
+
+func getShard(conn net.Conn) *fingerprintShard {
+	// Extract the data pointer from the interface to avoid reflect.
+	// An interface is two words: (itab/type, data). We use the data pointer for sharding.
+	p := uintptr((*[2]unsafe.Pointer)(unsafe.Pointer(&conn))[1])
+	return shards[p%numShards]
+}
+
+func getShardForAddr(addr string) *fingerprintShard {
+	var h uint64 = 14695981039346656037
+	for i := 0; i < len(addr); i++ {
+		h ^= uint64(addr[i])
+		h *= 1099511628211
+	}
+	return shards[h%numShards]
+}
 
 type Fingerprints struct {
 	JA3 string
@@ -28,46 +66,79 @@ type Fingerprints struct {
 }
 
 func GetFingerprints(conn net.Conn) Fingerprints {
-	mapMu.RLock()
-	defer mapMu.RUnlock()
-	f, ok := fingerprintMap[conn]
+	if conn == nil {
+		return Fingerprints{}
+	}
+	s := getShard(conn)
+	s.mu.RLock()
+	f, ok := s.conns[conn]
+	s.mu.RUnlock()
 	if ok {
 		return f
 	}
-	// Fallback to remote address if pointer identity is lost due to wrapping
-	if conn != nil && conn.RemoteAddr() != nil {
-		return addrMap[conn.RemoteAddr().String()]
-	}
-	return Fingerprints{}
+
+	// Fallback to remote address if pointer identity is lost due to wrapping.
+	// We avoid the String() allocation if possible, but RemoteAddr().String() is standard.
+	addr := conn.RemoteAddr().String()
+	as := getShardForAddr(addr)
+	as.mu.RLock()
+	defer as.mu.RUnlock()
+	return as.addrs[addr]
 }
 
 func GetFingerprintsByAddr(addr string) Fingerprints {
-	mapMu.RLock()
-	defer mapMu.RUnlock()
-	return addrMap[addr]
+	if addr == "" {
+		return Fingerprints{}
+	}
+	s := getShardForAddr(addr)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.addrs[addr]
 }
 
 func SetFingerprints(conn net.Conn, f Fingerprints) {
-	mapMu.Lock()
-	defer mapMu.Unlock()
-	fingerprintMap[conn] = f
-	if conn != nil && conn.RemoteAddr() != nil {
-		addrMap[conn.RemoteAddr().String()] = f
+	if conn == nil {
+		return
+	}
+	s := getShard(conn)
+	s.mu.Lock()
+	s.conns[conn] = f
+	s.mu.Unlock()
+
+	if ra := conn.RemoteAddr(); ra != nil {
+		addr := ra.String()
+		as := getShardForAddr(addr)
+		as.mu.Lock()
+		as.addrs[addr] = f
+		as.mu.Unlock()
 	}
 }
 
 func RemoveFingerprints(conn net.Conn) {
-	mapMu.Lock()
-	defer mapMu.Unlock()
-	delete(fingerprintMap, conn)
-	if conn != nil && conn.RemoteAddr() != nil {
-		delete(addrMap, conn.RemoteAddr().String())
+	if conn == nil {
+		return
+	}
+	s := getShard(conn)
+	s.mu.Lock()
+	delete(s.conns, conn)
+	s.mu.Unlock()
+
+	if ra := conn.RemoteAddr(); ra != nil {
+		addr := ra.String()
+		as := getShardForAddr(addr)
+		as.mu.Lock()
+		delete(as.addrs, addr)
+		as.mu.Unlock()
 	}
 }
 
 // CalcFingerprints calculates a JA3-like fingerprint from ClientHelloInfo.
 // Standard JA3: SSLVersion,Cipher,Extensions,EllipticCurve,EllipticCurvePointFormat
 func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
+	sb := builderPool.Get().(*strings.Builder)
+	sb.Reset()
+	defer builderPool.Put(sb)
+
 	// 1. SSLVersion (Go doesn't give us the record version easily, so we use the max supported)
 	sslVersion := uint16(tls.VersionTLS12)
 	if len(hello.SupportedVersions) > 0 {
@@ -75,35 +146,42 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 	}
 
 	// 2. Ciphers
-	ciphers := make([]string, len(hello.CipherSuites))
 	for i, c := range hello.CipherSuites {
-		ciphers[i] = fmt.Sprintf("%d", c)
+		if i > 0 {
+			sb.WriteByte('-')
+		}
+		sb.WriteString(strconv.FormatUint(uint64(c), 10))
 	}
-	cipherStr := strings.Join(ciphers, "-")
+	cipherStr := sb.String()
+	sb.Reset()
 
 	// 3. Extensions (Not exposed by standard lib ClientHelloInfo)
-	// We'll skip this for a basic implementation or use a placeholder.
 	extensionStr := ""
 
 	// 4. Curves
-	curves := make([]string, len(hello.SupportedCurves))
 	for i, c := range hello.SupportedCurves {
-		curves[i] = fmt.Sprintf("%d", c)
+		if i > 0 {
+			sb.WriteByte('-')
+		}
+		sb.WriteString(strconv.FormatUint(uint64(c), 10))
 	}
-	curveStr := strings.Join(curves, "-")
+	curveStr := sb.String()
+	sb.Reset()
 
 	// 5. Points
-	points := make([]string, len(hello.SupportedPoints))
 	for i, p := range hello.SupportedPoints {
-		points[i] = fmt.Sprintf("%d", p)
+		if i > 0 {
+			sb.WriteByte('-')
+		}
+		sb.WriteString(strconv.FormatUint(uint64(p), 10))
 	}
-	pointStr := strings.Join(points, "-")
+	pointStr := sb.String()
+	sb.Reset()
 
 	ja3Raw := fmt.Sprintf("%d,%s,%s,%s,%s", sslVersion, cipherStr, extensionStr, curveStr, pointStr)
 	ja3Hash := fmt.Sprintf("%x", md5.Sum([]byte(ja3Raw)))
 
 	// JA4 is more modern and includes Alpn, etc.
-	// This is a simplified version: t(tls) 13(version) d(direction) 1(sni) 11(ciphers) 08(extensions) alpn
 	version := "13"
 	if sslVersion == tls.VersionTLS12 {
 		version = "12"
@@ -122,7 +200,7 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 	sort.Slice(sortedCiphers, func(i, j int) bool { return sortedCiphers[i] < sortedCiphers[j] })
 	ja4_b_raw := ""
 	for _, c := range sortedCiphers {
-		ja4_b_raw += fmt.Sprintf("%d", c)
+		ja4_b_raw += strconv.FormatUint(uint64(c), 10)
 	}
 	ja4_b := fmt.Sprintf("%x", md5.Sum([]byte(ja4_b_raw)))[:12]
 

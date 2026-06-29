@@ -135,12 +135,13 @@ func TestEstimatePercentile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p50 := estimatePercentile(families, 0.50, nil)
+	p := estimatePercentiles(families, []float64{0.50, 0.99}, nil)
+	p50 := p[0]
 	if p50 <= 0 {
 		t.Errorf("expected p50 > 0, got %f", p50)
 	}
 
-	p99 := estimatePercentile(families, 0.99, nil)
+	p99 := p[1]
 	if p99 <= p50 {
 		t.Errorf("expected p99 (%f) > p50 (%f)", p99, p50)
 	}

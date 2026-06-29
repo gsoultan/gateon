@@ -134,6 +134,8 @@ SecAction "id:900300,phase:1,nolog,pass,setvar:tx.redact_headers=Authorization,s
 `
 
 var (
+	reputationStrings [101]string
+
 	fastScanner = scanner.NewScanner([]string{
 		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ", "EXEC ", // SQLi
 		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(", "alert(", // XSS
@@ -151,6 +153,24 @@ var (
 		"log4j", "jndi:ldap", "jndi:rmi", "${jndi:", // Log4j
 	})
 )
+
+func init() {
+	for i := 0; i <= 100; i++ {
+		reputationStrings[i] = strconv.Itoa(i)
+	}
+}
+
+// getReputationString returns a cached string for reputation scores 0-100.
+func getReputationString(score float64) string {
+	s := int(score)
+	if s < 0 {
+		s = 0
+	}
+	if s > 100 {
+		s = 100
+	}
+	return reputationStrings[s]
+}
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
 func WAF(cfg WAFConfig) (Middleware, error) {
@@ -186,10 +206,10 @@ Include @crs-setup.conf.example
 		sb.WriteString(`
 # Adaptive Anomaly Thresholds (Progressive Override)
 SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 0"  "id:900001,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=2"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 15" "id:900012,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900013,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=10"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 80" "id:900011,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=15"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 95" "id:900010,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=25"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 15" "id:900012,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=3"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900013,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=4"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 80" "id:900011,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 95" "id:900010,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
 `)
 
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
@@ -436,12 +456,17 @@ SecAuditLog "%s"
 			r.Header.Del("X-Gateon-Threat-Type")
 			r.Header.Del("X-Gateon-WAF-Matched")
 
-			if IsCorsPreflight(r) || r.Header.Get("Upgrade") != "" {
+			if IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
 			if cfg.TrustCloudflare {
-				r.RemoteAddr = request.GetClientIP(r, true)
+				clientIP := request.GetClientIP(r, true)
+				if last := strings.LastIndexByte(r.RemoteAddr, ':'); last != -1 && !strings.HasSuffix(r.RemoteAddr, "]") {
+					r.RemoteAddr = clientIP + r.RemoteAddr[last:]
+				} else {
+					r.RemoteAddr = clientIP
+				}
 			}
 
 			// gRPC transport carries binary protobuf framing and binary "-bin"
@@ -454,10 +479,10 @@ SecAuditLog "%s"
 			grpcRequest := cfg.GRPCMode && isGRPCRequest(r)
 
 			// Adaptive WAF: Adjust anomaly threshold based on client reputation
-			fingerprint := telemetry.GetDetailedFingerprint(r).Hash
+			fingerprint := telemetry.GetFingerprintHash(r)
 			reputation := telemetry.GetReputationScore(fingerprint)
-			// Use integer to avoid lexicographical comparison issues in SecLang
-			r.Header.Set("X-Gateon-Reputation", fmt.Sprintf("%d", int(reputation)))
+			// Use cached string to avoid allocation
+			r.Header.Set("X-Gateon-Reputation", getReputationString(reputation))
 
 			// Deterministic Fast Path: Aho-Corasick & Entropy
 			// We check the URI (which includes the query string) plus the two
@@ -469,31 +494,39 @@ SecAuditLog "%s"
 			if !grpcRequest {
 				// We scan the raw RequestURI AND the unescaped version to catch obfuscated attacks.
 				rawURI := r.RequestURI
-				unescapedURI, _ := url.PathUnescape(rawURI)
-
-				if match := fastScanner.FindAll(rawURI); len(match) > 0 {
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "Request URI match: "+strings.Join(match, ", "))
+				if fastScanner.Scan(rawURI) {
+					match := fastScanner.FindAll(rawURI)
+					details := "Request URI match: " + strings.Join(match, ", ")
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
 					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 					return
 				}
+
+				unescapedURI, _ := url.PathUnescape(rawURI)
 				if unescapedURI != "" && unescapedURI != rawURI {
-					if match := fastScanner.FindAll(unescapedURI); len(match) > 0 {
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "Unescaped Request URI match: "+strings.Join(match, ", "))
+					if fastScanner.Scan(unescapedURI) {
+						match := fastScanner.FindAll(unescapedURI)
+						details := "Unescaped Request URI match: " + strings.Join(match, ", ")
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
 						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 						return
 					}
 				}
 
-				if match := fastScanner.FindAll(r.Header.Get("Referer")); len(match) > 0 {
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "Referer header match: "+strings.Join(match, ", "))
+				if referer := r.Header.Get("Referer"); referer != "" && fastScanner.Scan(referer) {
+					match := fastScanner.FindAll(referer)
+					details := "Referer header match: " + strings.Join(match, ", ")
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
 					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 					return
 				}
-				if match := fastScanner.FindAll(r.Header.Get("User-Agent")); len(match) > 0 {
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", "User-Agent header match: "+strings.Join(match, ", "))
+				if ua := r.Header.Get("User-Agent"); ua != "" && fastScanner.Scan(ua) {
+					match := fastScanner.FindAll(ua)
+					details := "User-Agent header match: " + strings.Join(match, ", ")
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
 					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 					return
@@ -538,7 +571,7 @@ SecAuditLog "%s"
 			if cfg.EnableIPReputation && cfg.Reputation != nil {
 				clientIP := request.GetClientIP(r, cfg.TrustCloudflare)
 				if bad, score := cfg.Reputation.IsBad(clientIP); bad {
-					r.Header.Set("X-Gateon-IP-Reputation-Score", fmt.Sprintf("%.2f", score))
+					r.Header.Set("X-Gateon-IP-Reputation-Score", strconv.FormatFloat(score, 'f', 2, 64))
 					if score >= cfg.Reputation.GetBlockThreshold() {
 						r.Header.Set("X-Gateon-IP-Reputation-Block", "1")
 					}
@@ -550,14 +583,16 @@ SecAuditLog "%s"
 	}, nil
 }
 
+// recordFastPathThreat records a security threat detected by the fast-path.
 func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	clientIP := request.GetClientIP(r, true)
 	category := "general"
-	if strings.Contains(strings.ToLower(details), "sql") || strings.Contains(strings.ToLower(details), "union") {
+	lowerDetails := strings.ToLower(details)
+	if strings.Contains(lowerDetails, "sql") || strings.Contains(lowerDetails, "union") {
 		category = "sqli"
-	} else if strings.Contains(strings.ToLower(details), "script") || strings.Contains(strings.ToLower(details), "xss") {
+	} else if strings.Contains(lowerDetails, "script") || strings.Contains(lowerDetails, "xss") {
 		category = "xss"
-	} else if strings.Contains(strings.ToLower(details), "scanner") || strings.Contains(strings.ToLower(details), "nmap") || strings.Contains(strings.ToLower(details), "sqlmap") {
+	} else if strings.Contains(lowerDetails, "scanner") || strings.Contains(lowerDetails, "nmap") || strings.Contains(lowerDetails, "sqlmap") {
 		category = "bot"
 	}
 
@@ -578,23 +613,37 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 }
 
 func isSafeHeader(name string) bool {
-	name = strings.ToLower(name)
-	switch {
-	case name == "authorization", name == "cookie", name == "set-cookie",
-		name == "x-csrf-token", name == "x-xsrf-token",
-		name == "sec-websocket-key", name == "sec-websocket-accept",
-		name == "x-api-key", name == "x-auth-token",
-		name == "x-gateon-fingerprint", name == "x-request-id",
-		name == "x-correlation-id":
-		return true
-	case strings.HasPrefix(name, "x-amz-"),
-		strings.HasPrefix(name, "x-goog-"),
-		strings.HasPrefix(name, "x-apple-"),
-		strings.HasPrefix(name, "x-ms-"),
-		strings.HasPrefix(name, "grpc-"):
+	// Fast path for canonical headers (most frequent in modern browsers)
+	switch name {
+	case "Authorization", "Cookie", "Set-Cookie", "X-Csrf-Token", "X-Xsrf-Token",
+		"Sec-Websocket-Key", "Sec-Websocket-Accept", "X-Api-Key", "X-Auth-Token",
+		"X-Gateon-Fingerprint", "X-Request-Id", "X-Correlation-Id",
+		"X-Amz-Date", "X-Amz-Security-Token":
 		return true
 	}
+
+	// Prefix checks without allocation
+	if hasPrefixFold(name, "X-Amz-") ||
+		hasPrefixFold(name, "X-Goog-") ||
+		hasPrefixFold(name, "X-Apple-") ||
+		hasPrefixFold(name, "X-Ms-") ||
+		hasPrefixFold(name, "Grpc-") {
+		return true
+	}
+
+	// Fallback for non-canonical forms
+	if strings.EqualFold(name, "authorization") || strings.EqualFold(name, "cookie") {
+		return true
+	}
+
 	return false
+}
+
+func hasPrefixFold(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	return strings.EqualFold(s[:len(prefix)], prefix)
 }
 
 type wafWrapper struct {
@@ -721,7 +770,8 @@ func (t *txWrapper) ProcessLogging() {
 				// 1. Critical attack from a low-reputation client (rep < 50)
 				// 2. High-confidence attack (score >= 20) regardless of reputation
 				// 3. Known honeypot/trap hit (ids in 100000 range)
-				shouldShun := repScore < 50 || anomalyScore >= 20
+				// 4. Custom critical rules when CRS is disabled
+				shouldShun := repScore < 50 || anomalyScore >= 20 || !t.cfg.UseCRS
 				if !shouldShun {
 					for _, rule := range t.MatchedRules() {
 						id := rule.Rule().ID()

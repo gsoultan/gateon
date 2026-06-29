@@ -11,10 +11,10 @@
 package kind
 
 import (
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
@@ -27,10 +27,36 @@ type ContextKey string
 const (
 	EntryPointIDContextKey ContextKey = "entrypoint_id"
 	RouteNameContextKey    ContextKey = "route_name"
+	MatchedRouteContextKey ContextKey = "matched_route"
 	IsManagementContextKey ContextKey = "is_management"
 	DebugInfoContextKey    ContextKey = "debug_info"
 	FingerprintContextKey  ContextKey = "fingerprint"
+	RequestStateContextKey ContextKey = "request_state"
 )
+
+var RequestStatePool = sync.Pool{
+	New: func() any {
+		return &RequestState{}
+	},
+}
+
+// RequestState holds mutable request-scoped data to avoid multiple context allocations.
+type RequestState struct {
+	EntryPointID string
+	RouteName    string
+	IsManagement bool
+	MatchedRoute any // avoids circular dependency with proto
+	DebugInfo    *DebugInfo
+	RequestID    string
+}
+
+// GetRequestState returns the RequestState from the context, or nil if not set.
+func GetRequestState(r *http.Request) *RequestState {
+	if val, ok := r.Context().Value(RequestStateContextKey).(*RequestState); ok {
+		return val
+	}
+	return nil
+}
 
 // DebugInfo captures request/response details for diagnostic tracing.
 type DebugInfo struct {
@@ -42,10 +68,21 @@ type DebugInfo struct {
 
 // GetRouteName returns the route ID from the request context, or empty if not set.
 func GetRouteName(r *http.Request) string {
+	if rs := GetRequestState(r); rs != nil {
+		return rs.RouteName
+	}
 	if val, ok := r.Context().Value(RouteNameContextKey).(string); ok {
 		return val
 	}
 	return ""
+}
+
+// GetRequestID returns the request ID from the request context, or "unknown" if not set.
+func GetRequestID(r *http.Request) string {
+	if rs := GetRequestState(r); rs != nil && rs.RequestID != "" {
+		return rs.RequestID
+	}
+	return request.GetID(r)
 }
 
 // IsInternalPath returns true if the given path belongs to Gateon's internal API,
@@ -64,6 +101,16 @@ func IsDashboardPath(path string) bool {
 // for a given request. It skips metrics for the management entrypoint and internal
 // paths, unless it's a dedicated proxy route (non-gateon prefix).
 func ShouldSkipMetrics(r *http.Request) bool {
+	if rs := GetRequestState(r); rs != nil {
+		if rs.IsManagement {
+			return true
+		}
+		if strings.HasPrefix(rs.RouteName, "gateon-") && IsInternalPath(r.URL.Path) {
+			return true
+		}
+		return false
+	}
+
 	isMgmt, _ := r.Context().Value(IsManagementContextKey).(bool)
 	if isMgmt {
 		return true
@@ -216,8 +263,8 @@ func RealIP(trustCloudflare bool) Middleware {
 
 			// Maintain the original port if present in RemoteAddr, as some components
 			// (like PROXY protocol generation) expect a host:port format.
-			if _, port, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-				r.RemoteAddr = net.JoinHostPort(clientIP, port)
+			if last := strings.LastIndexByte(r.RemoteAddr, ':'); last != -1 && !strings.HasSuffix(r.RemoteAddr, "]") {
+				r.RemoteAddr = clientIP + r.RemoteAddr[last:]
 			} else {
 				r.RemoteAddr = clientIP
 			}

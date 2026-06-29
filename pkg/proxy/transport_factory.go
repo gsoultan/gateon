@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -156,7 +158,7 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 				if err != nil {
 					return nil, err
 				}
-				if err := writeProxyHeader(conn, clientRemoteAddrFromContext(ctx), conn.RemoteAddr(), state.proxyProtocolVersion); err != nil {
+				if err := writeProxyHeaderByAddr(conn, clientRemoteAddrFromContext(ctx), conn.RemoteAddr(), state.proxyProtocolVersion); err != nil {
 					_ = conn.Close()
 					return nil, err
 				}
@@ -172,16 +174,13 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 	}
 }
 
-type targetAwareRoundTripper struct {
+type targetBoundRoundTripper struct {
+	state   *targetState
 	factory *backendTransportFactory
 }
 
-func (t *targetAwareRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t == nil || t.factory == nil {
-		return http.DefaultTransport.RoundTrip(req)
-	}
-	state, _ := req.Context().Value(targetStateContextKey).(*targetState)
-	return t.factory.TransportFor(state, req).RoundTrip(req)
+func (t *targetBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.factory.TransportFor(t.state, req).RoundTrip(req)
 }
 
 type tlsClientIdentity struct {
@@ -305,6 +304,16 @@ func clientRemoteAddrFromContext(ctx context.Context) string {
 	return v
 }
 
+type proxyBuffer struct {
+	data []byte
+}
+
+var proxyBufferPool = sync.Pool{
+	New: func() any {
+		return &proxyBuffer{data: make([]byte, 0, 128)}
+	},
+}
+
 func normalizeHostForMatch(host string) string {
 	host = strings.TrimSpace(strings.ToLower(host))
 	if host == "" {
@@ -314,13 +323,16 @@ func normalizeHostForMatch(host string) string {
 	return strings.Trim(host, "[]")
 }
 
-func writeProxyHeader(conn net.Conn, clientRemoteAddr string, backendAddr net.Addr, version gateonv1.ProxyProtocolVersion) error {
+func writeProxyHeaderByAddr(conn net.Conn, clientRemoteAddr string, backendAddr net.Addr, version gateonv1.ProxyProtocolVersion) error {
+	srcIP, srcPort, srcOK := parseTCPAddr(clientRemoteAddr)
+	dstIP, dstPort, dstOK := parseTCPAddrFromNetAddr(backendAddr)
+	return writeProxyHeader(conn, srcIP, srcPort, srcOK, dstIP, dstPort, dstOK, version)
+}
+
+func writeProxyHeader(conn net.Conn, srcIP net.IP, srcPort uint16, srcOK bool, dstIP net.IP, dstPort uint16, dstOK bool, version gateonv1.ProxyProtocolVersion) error {
 	if conn == nil {
 		return fmt.Errorf("nil connection")
 	}
-
-	srcIP, srcPort, srcOK := parseTCPAddr(clientRemoteAddr)
-	dstIP, dstPort, dstOK := parseTCPAddrFromNetAddr(backendAddr)
 
 	if version == gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_UNSPECIFIED {
 		version = gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_V1
@@ -341,11 +353,31 @@ func writeProxyHeaderV1(conn net.Conn, srcIP net.IP, srcPort uint16, srcOK bool,
 	}
 
 	family := "TCP4"
-	if srcIP.To4() == nil || dstIP.To4() == nil {
+	srcAddr, _ := netip.AddrFromSlice(srcIP)
+	srcAddr = srcAddr.Unmap()
+	dstAddr, _ := netip.AddrFromSlice(dstIP)
+	dstAddr = dstAddr.Unmap()
+	if !srcAddr.Is4() || !dstAddr.Is4() {
 		family = "TCP6"
 	}
-	line := fmt.Appendf(nil, "PROXY %s %s %s %d %d\r\n", family, srcIP.String(), dstIP.String(), srcPort, dstPort)
-	_, err := conn.Write(line)
+
+	pb := proxyBufferPool.Get().(*proxyBuffer)
+	defer proxyBufferPool.Put(pb)
+
+	pb.data = pb.data[:0]
+	pb.data = append(pb.data, "PROXY "...)
+	pb.data = append(pb.data, family...)
+	pb.data = append(pb.data, ' ')
+	pb.data = srcAddr.AppendTo(pb.data)
+	pb.data = append(pb.data, ' ')
+	pb.data = dstAddr.AppendTo(pb.data)
+	pb.data = append(pb.data, ' ')
+	pb.data = strconv.AppendUint(pb.data, uint64(srcPort), 10)
+	pb.data = append(pb.data, ' ')
+	pb.data = strconv.AppendUint(pb.data, uint64(dstPort), 10)
+	pb.data = append(pb.data, "\r\n"...)
+
+	_, err := conn.Write(pb.data)
 	return err
 }
 
@@ -360,50 +392,64 @@ func writeProxyHeaderV2(conn net.Conn, srcIP net.IP, srcPort uint16, srcOK bool,
 	sig := [12]byte{0x0d, 0x0a, 0x0d, 0x0a, 0x00, 0x0d, 0x0a, 0x51, 0x55, 0x49, 0x54, 0x0a}
 	family := byte(familyUnspec)
 	payloadLen := uint16(0)
-	var payload []byte
+
+	var header [52]byte // 16 bytes header + 36 bytes for IPv6 + ports
+	copy(header[0:12], sig[:])
+	header[12] = verCommandProxy
 
 	if srcOK && dstOK {
 		if src4, dst4 := srcIP.To4(), dstIP.To4(); src4 != nil && dst4 != nil {
 			family = familyTCPv4
 			payloadLen = 12
-			payload = make([]byte, payloadLen)
-			copy(payload[0:4], src4)
-			copy(payload[4:8], dst4)
-			binary.BigEndian.PutUint16(payload[8:10], srcPort)
-			binary.BigEndian.PutUint16(payload[10:12], dstPort)
+			copy(header[16:20], src4)
+			copy(header[20:24], dst4)
+			binary.BigEndian.PutUint16(header[24:26], srcPort)
+			binary.BigEndian.PutUint16(header[26:28], dstPort)
 		} else {
 			src16 := srcIP.To16()
 			dst16 := dstIP.To16()
 			if src16 != nil && dst16 != nil {
 				family = familyTCPv6
 				payloadLen = 36
-				payload = make([]byte, payloadLen)
-				copy(payload[0:16], src16)
-				copy(payload[16:32], dst16)
-				binary.BigEndian.PutUint16(payload[32:34], srcPort)
-				binary.BigEndian.PutUint16(payload[34:36], dstPort)
+				copy(header[16:32], src16)
+				copy(header[32:48], dst16)
+				binary.BigEndian.PutUint16(header[48:50], srcPort)
+				binary.BigEndian.PutUint16(header[50:52], dstPort)
 			}
 		}
 	}
 
-	header := make([]byte, 16+len(payload))
-	copy(header[0:12], sig[:])
-	header[12] = verCommandProxy
 	header[13] = family
 	binary.BigEndian.PutUint16(header[14:16], payloadLen)
-	copy(header[16:], payload)
-	_, err := conn.Write(header)
+	_, err := conn.Write(header[:16+payloadLen])
 	return err
 }
 
 func parseTCPAddr(raw string) (net.IP, uint16, bool) {
-	host, port, err := net.SplitHostPort(raw)
-	if err != nil {
+	if raw == "" {
 		return nil, 0, false
 	}
+
+	var host, port string
+	if last := strings.LastIndexByte(raw, ':'); last != -1 && !strings.HasSuffix(raw, "]") {
+		host = raw[:last]
+		port = raw[last+1:]
+	} else {
+		host = raw
+	}
+
 	ip := net.ParseIP(strings.Trim(host, "[]"))
 	if ip == nil {
 		return nil, 0, false
+	}
+
+	if port == "" {
+		return ip, 0, true
+	}
+
+	// Optimization: try numeric port first to avoid expensive net.LookupPort
+	if p, err := strconv.ParseUint(port, 10, 16); err == nil {
+		return ip, uint16(p), true
 	}
 
 	portNum, err := net.LookupPort("tcp", port)
@@ -417,6 +463,9 @@ func parseTCPAddr(raw string) (net.IP, uint16, bool) {
 func parseTCPAddrFromNetAddr(addr net.Addr) (net.IP, uint16, bool) {
 	if addr == nil {
 		return nil, 0, false
+	}
+	if tcp, ok := addr.(*net.TCPAddr); ok {
+		return tcp.IP, uint16(tcp.Port), true
 	}
 	return parseTCPAddr(addr.String())
 }

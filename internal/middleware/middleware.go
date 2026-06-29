@@ -17,15 +17,22 @@ type (
 	SecurityHeadersConfig = kind.SecurityHeadersConfig
 	StatusResponseWriter  = kind.StatusResponseWriter
 	ErrorsConfig          = kind.ErrorsConfig
+	RequestState          = kind.RequestState
 )
 
 // Request-context keys.
 const (
 	EntryPointIDContextKey = kind.EntryPointIDContextKey
 	RouteNameContextKey    = kind.RouteNameContextKey
+	MatchedRouteContextKey = kind.MatchedRouteContextKey
 	IsManagementContextKey = kind.IsManagementContextKey
 	DebugInfoContextKey    = kind.DebugInfoContextKey
 	FingerprintContextKey  = kind.FingerprintContextKey
+	RequestStateContextKey = kind.RequestStateContextKey
+)
+
+var (
+	GetRequestState = kind.GetRequestState
 )
 
 // Core constructors, predicates, and the pooled status writer.
@@ -42,6 +49,8 @@ var (
 	GetStatusResponseWriter = kind.GetStatusResponseWriter
 	PutStatusResponseWriter = kind.PutStatusResponseWriter
 	RealIP                  = kind.RealIP
+	RequestStatePool        = kind.RequestStatePool
+	GetRequestID            = kind.GetRequestID
 
 	// getStatusString is kept as an unexported alias so internal callers
 	// (e.g. standard.go) continue to compile without importing kind directly.

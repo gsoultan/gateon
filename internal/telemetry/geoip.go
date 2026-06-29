@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/oschwald/geoip2-golang"
 )
 
@@ -46,6 +47,10 @@ var (
 	countryDB *geoip2.Reader // Optional GeoLite2-Country edition used as a fallback.
 	geoMu     sync.RWMutex
 	geoDBPath string
+
+	countryCache *lru.ARCCache
+	asnCache     *lru.ARCCache
+	geoCacheOnce sync.Once
 
 	ipCache   = make(map[string]publicIPInfo)
 	cacheMu   sync.RWMutex
@@ -195,9 +200,23 @@ func httpGet(ctx context.Context, url string, timeout time.Duration) (*http.Resp
 	return client.Do(req)
 }
 
+func initGeoCaches() {
+	geoCacheOnce.Do(func() {
+		countryCache, _ = lru.NewARC(4096)
+		asnCache, _ = lru.NewARC(4096)
+	})
+}
+
 // ResolveCountry resolves an IP address to an ISO 3166-1 alpha-2 country code.
 // Returns "XX" if not found or on error.
 func ResolveCountry(ipStr string) string {
+	initGeoCaches()
+	if countryCache != nil {
+		if val, ok := countryCache.Get(ipStr); ok {
+			return val.(string)
+		}
+	}
+
 	geoMu.RLock()
 	defer geoMu.RUnlock()
 
@@ -217,7 +236,11 @@ func ResolveCountry(ipStr string) string {
 
 	code := strings.ToUpper(record.Country.IsoCode)
 	if code == "" {
-		return "XX"
+		code = "XX"
+	}
+
+	if countryCache != nil {
+		countryCache.Add(ipStr, code)
 	}
 	return code
 }
@@ -293,6 +316,13 @@ func InitGeoIPCountry(dbPath string) error {
 // "AS<number> <organization>". It returns "" when the ASN database is not
 // loaded, the IP is invalid, or no ASN is associated with the address.
 func ResolveASN(ipStr string) string {
+	initGeoCaches()
+	if asnCache != nil {
+		if val, ok := asnCache.Get(ipStr); ok {
+			return val.(string)
+		}
+	}
+
 	geoMu.RLock()
 	defer geoMu.RUnlock()
 
@@ -311,10 +341,17 @@ func ResolveASN(ipStr string) string {
 	}
 
 	org := strings.TrimSpace(record.AutonomousSystemOrganization)
+	var res string
 	if org == "" {
-		return fmt.Sprintf("AS%d", record.AutonomousSystemNumber)
+		res = fmt.Sprintf("AS%d", record.AutonomousSystemNumber)
+	} else {
+		res = fmt.Sprintf("AS%d %s", record.AutonomousSystemNumber, org)
 	}
-	return fmt.Sprintf("AS%d %s", record.AutonomousSystemNumber, org)
+
+	if asnCache != nil {
+		asnCache.Add(ipStr, res)
+	}
+	return res
 }
 
 // CloseGeoIP closes all loaded GeoIP databases.

@@ -26,25 +26,56 @@ import (
 )
 
 // RedactHeaders masks sensitive headers like Authorization and X-Api-Key.
+// It is optimized to minimize allocations by using a pooled strings.Builder and avoiding strings.Split.
 func RedactHeaders(headers string) string {
 	if headers == "" {
 		return ""
 	}
-	lines := strings.Split(headers, "\n")
-	for i, line := range lines {
-		lower := strings.ToLower(line)
-		if strings.HasPrefix(lower, "authorization:") ||
-			strings.HasPrefix(lower, "x-api-key:") ||
-			strings.HasPrefix(lower, "cookie:") ||
-			strings.HasPrefix(lower, "set-cookie:") ||
-			strings.HasPrefix(lower, "x-auth-token:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				lines[i] = parts[0] + ": [REDACTED]"
+
+	sb := builderPool.Get().(*strings.Builder)
+	sb.Reset()
+	defer builderPool.Put(sb)
+
+	start := 0
+	for {
+		end := strings.IndexByte(headers[start:], '\n')
+		var line string
+		if end == -1 {
+			line = headers[start:]
+		} else {
+			line = headers[start : start+end]
+		}
+
+		// Fast path: check for common sensitive header prefixes case-insensitively without allocations
+		isSensitive := false
+		if len(line) >= 7 { // shortest is "cookie:"
+			if (len(line) >= 14 && strings.EqualFold(line[:14], "authorization:")) ||
+				(len(line) >= 10 && strings.EqualFold(line[:10], "x-api-key:")) ||
+				(len(line) >= 7 && strings.EqualFold(line[:7], "cookie:")) ||
+				(len(line) >= 11 && strings.EqualFold(line[:11], "set-cookie:")) ||
+				(len(line) >= 13 && strings.EqualFold(line[:13], "x-auth-token:")) {
+				isSensitive = true
 			}
 		}
+
+		if isSensitive {
+			if colon := strings.IndexByte(line, ':'); colon != -1 {
+				sb.WriteString(line[:colon])
+				sb.WriteString(": [REDACTED]")
+			} else {
+				sb.WriteString(line)
+			}
+		} else {
+			sb.WriteString(line)
+		}
+
+		if end == -1 {
+			break
+		}
+		sb.WriteByte('\n')
+		start += end + 1
 	}
-	return strings.Join(lines, "\n")
+	return sb.String()
 }
 
 // AlertingHandler is a function type for alerting integration.
@@ -188,17 +219,13 @@ type pathStatsStore struct {
 	unmitigatedCache            *lru.ARCCache
 	traceStoreEnabled           bool
 
-	// Real-time daily counters
-	baselineReqToday       atomic.Uint64
-	baselineBytesToday     atomic.Uint64
-	baselineActiveToday    atomic.Uint64
-	baselineMitigatedToday atomic.Uint64
-	currentReqToday        atomic.Uint64
-	currentBytesToday      atomic.Uint64
-	currentActiveToday     atomic.Uint64
-	currentMitigatedToday  atomic.Uint64
-	lastResetDay           string
-	resetMu                sync.Mutex
+	// Real-time daily counters (seeded from DB at startup/rollover)
+	currentReqToday       atomic.Uint64
+	currentBytesToday     atomic.Uint64
+	currentActiveToday    atomic.Uint64
+	currentMitigatedToday atomic.Uint64
+	lastResetDay          string
+	resetMu               sync.Mutex
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -365,7 +392,9 @@ func (s *pathStatsStore) dailyResetLoop() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	// Initial sync - load baselines but don't reset current counters
+	// Initial seed - load current daily totals from the database into the
+	// in-memory atomic counters. This ensures "Mitigated Today" and traffic
+	// headline figures survive process restarts.
 	s.syncDailyBaselines(false)
 
 	for {
@@ -378,7 +407,7 @@ func (s *pathStatsStore) dailyResetLoop() {
 
 			s.resetMu.Lock()
 			if s.lastResetDay != "" && s.lastResetDay != day {
-				// Day changed!
+				// Day changed! Reset all "today" counters.
 				s.syncDailyBaselines(true)
 			}
 			s.lastResetDay = day
@@ -387,59 +416,43 @@ func (s *pathStatsStore) dailyResetLoop() {
 	}
 }
 
-func (s *pathStatsStore) syncDailyBaselines(resetCurrent bool) {
+func (s *pathStatsStore) syncDailyBaselines(isDayRollover bool) {
+	if isDayRollover {
+		s.currentReqToday.Store(0)
+		s.currentBytesToday.Store(0)
+		s.currentActiveToday.Store(0)
+		s.currentMitigatedToday.Store(0)
+		// Reset global telemetry structures for the new day
+		GlobalCMS.Clear()
+		GlobalHHH.Clear()
+		return
+	}
+
 	now := time.Now().UTC()
 	day := now.Format("2006-01-02")
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Traffic baselines
+	// Traffic totals for today
 	q := s.dialect.Rebind(QueryGetTotalTrafficToday)
 	var rc, bsum sql.NullInt64
-	err := s.db.QueryRow(q, day).Scan(&rc, &bsum)
-	if err != nil {
-		s.baselineReqToday.Store(0)
-		s.baselineBytesToday.Store(0)
-	} else {
-		s.baselineReqToday.Store(uint64(rc.Int64))
-		s.baselineBytesToday.Store(uint64(bsum.Int64))
+	if err := s.db.QueryRow(q, day).Scan(&rc, &bsum); err == nil {
+		s.currentReqToday.Store(uint64(rc.Int64))
+		s.currentBytesToday.Store(uint64(bsum.Int64))
 	}
 
-	// Active threats baseline. security_threats.timestamp is a TIMESTAMP column
-	// persisted from a time.Time, so it must be compared against a datetime
-	// string (matching GetAttackTrend) rather than an integer Unix value.
-	qThreats := s.dialect.Rebind(QueryGetActiveThreatsToday)
+	// Active threats today
+	qActive := s.dialect.Rebind(QueryGetActiveThreatsToday)
 	var activeCount int64
-	err = s.db.QueryRow(qThreats, startOfDay.Format(threatTimestampLayout)).Scan(&activeCount)
-	if err != nil {
-		s.baselineActiveToday.Store(0)
-	} else {
-		s.baselineActiveToday.Store(uint64(activeCount))
+	if err := s.db.QueryRow(qActive, startOfDay.Format(threatTimestampLayout)).Scan(&activeCount); err == nil {
+		s.currentActiveToday.Store(uint64(activeCount))
 	}
 
-	// Mitigated threats baseline (today's blocked/challenged/shunned actions),
-	// mirroring the active-threats baseline so "Mitigated Today" survives
-	// process restarts instead of resetting to 0.
+	// Mitigated threats today
 	qMitigated := s.dialect.Rebind(QueryGetMitigatedThreatsToday)
 	var mitigatedCount int64
-	err = s.db.QueryRow(qMitigated, startOfDay.Format(threatTimestampLayout)).Scan(&mitigatedCount)
-	if err != nil {
-		s.baselineMitigatedToday.Store(0)
-	} else {
-		s.baselineMitigatedToday.Store(uint64(mitigatedCount))
+	if err := s.db.QueryRow(qMitigated, startOfDay.Format(threatTimestampLayout)).Scan(&mitigatedCount); err == nil {
+		s.currentMitigatedToday.Store(uint64(mitigatedCount))
 	}
-
-	if !resetCurrent {
-		return
-	}
-
-	s.currentReqToday.Store(0)
-	s.currentBytesToday.Store(0)
-	s.currentActiveToday.Store(0)
-	s.currentMitigatedToday.Store(0)
-
-	// Reset global telemetry structures for the new day
-	GlobalCMS.Clear()
-	GlobalHHH.Clear()
 }
 
 // restoreWAFBlockCounter seeds the in-memory WAF block counter from persisted
@@ -1117,8 +1130,7 @@ func GetSystemTrafficToday(ctx context.Context) (uint64, uint64) {
 	if store == nil {
 		return 0, 0
 	}
-	return store.baselineReqToday.Load() + store.currentReqToday.Load(),
-		store.baselineBytesToday.Load() + store.currentBytesToday.Load()
+	return store.currentReqToday.Load(), store.currentBytesToday.Load()
 }
 
 // logQueryErr logs a query failure unless it was caused by the caller's
@@ -1233,18 +1245,16 @@ func GetActiveThreatsToday() uint64 {
 	if store == nil {
 		return 0
 	}
-	return store.baselineActiveToday.Load() + store.currentActiveToday.Load()
+	return store.currentActiveToday.Load()
 }
 
 // GetMitigatedToday returns the count of threats actively mitigated
-// (blocked/challenged/shunned) for the current day. The baseline is seeded
-// from the database at startup and on each day rollover, so the figure
-// survives process restarts.
+// (blocked/challenged/shunned) for the current day.
 func GetMitigatedToday() uint64 {
 	if store == nil {
 		return 0
 	}
-	return store.baselineMitigatedToday.Load() + store.currentMitigatedToday.Load()
+	return store.currentMitigatedToday.Load()
 }
 
 // GetSecurityThreats returns a paged list of security threats from the store.
@@ -1321,7 +1331,6 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []SecurityTh
 		}
 		var th SecurityThreat
 		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.UserAgent, &th.Method); err != nil {
-			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
 		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
@@ -1453,19 +1462,21 @@ func GetThreatsByCountry(ctx context.Context, limit int) []LabeledCount {
 	return res
 }
 
-// attackTrendBucketQuery builds the threat-count trend query, grouping by hour
-// for short spans and by day for longer ones to keep the result set bounded.
+// attackTrendBucketQuery builds the threat-count trend query. Grouping by
+// truncated timestamp is faster than grouping by formatted string.
 func attackTrendBucketQuery(driver string, daily bool) string {
 	isPostgres := driver == db.DriverPostgres || driver == "pgx"
 	switch {
 	case isPostgres && daily:
-		return "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD 00:00:00') as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+		return "SELECT date_trunc('day', timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	case isPostgres:
-		return "SELECT TO_CHAR(timestamp, 'YYYY-MM-DD HH24:00:00') as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+		return "SELECT date_trunc('hour', timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	case daily:
-		return "SELECT strftime('%Y-%m-%d 00:00:00', timestamp) as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+		// SQLite: date() is faster than strftime()
+		return "SELECT date(timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	default:
-		return "SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as hr_bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY hr_bucket ORDER BY hr_bucket ASC"
+		// SQLite hourly
+		return "SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	}
 }
 
@@ -1486,31 +1497,35 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 	}
 	defer rows.Close()
 
-	var res []TrafficSample
+	res := make([]TrafficSample, 0, 48) // typical dashboard view
 	for rows.Next() {
-		var bucket string
+		var bucket any
 		var count uint64
 		if err := rows.Scan(&bucket, &count); err != nil {
-			logger.Default().LogError("attack trend: scan failed", "error", err)
 			continue
 		}
-		// Handle potential varying length from different DB drivers
-		if len(bucket) > 19 {
-			bucket = bucket[:19]
-		}
-		t, err := time.Parse("2006-01-02 15:04:05", bucket)
-		if err != nil {
-			// try alternative format if Parse fails
-			t, err = time.Parse("2006-01-02 15:04", bucket)
-			if err != nil {
-				logger.Default().LogError("attack trend: failed to parse bucket", "bucket", bucket, "error", err)
-				continue
+
+		var t time.Time
+		switch v := bucket.(type) {
+		case time.Time:
+			t = v
+		case string:
+			// SQLite/MySQL return strings
+			if len(v) > 19 {
+				v = v[:19]
+			}
+			t, _ = time.Parse("2006-01-02 15:04:05", v)
+			if t.IsZero() {
+				t, _ = time.Parse("2006-01-02", v)
 			}
 		}
-		res = append(res, TrafficSample{
-			Timestamp: t.UnixMilli(),
-			Requests:  count, // Reusing Requests field for threat count
-		})
+
+		if !t.IsZero() {
+			res = append(res, TrafficSample{
+				Timestamp: t.UnixMilli(),
+				Requests:  count,
+			})
+		}
 	}
 	return res
 }

@@ -11,12 +11,36 @@ import (
 // GATEON_PER_IP_METRICS Prometheus series, whose {ip} label is an unbounded
 // cardinality leak and is therefore opt-in. When the cap is exceeded, ~25% of
 // keys are evicted (same bulk-drop policy as evictPathStatsLocked in stats.go).
-const maxIPBandwidthMapSize = 1024
+const (
+	numShards              = 16
+	maxIPBandwidthPerShard = 64 // total 1024 across all shards
+)
 
 var (
-	ipBandwidthMap = make(map[string]*ipBandwidthInternal)
-	ipBandwidthMu  sync.RWMutex
+	bandwidthShards [numShards]*bandwidthShard
 )
+
+type bandwidthShard struct {
+	m  map[string]*ipBandwidthInternal
+	mu sync.RWMutex
+}
+
+func init() {
+	for i := range numShards {
+		bandwidthShards[i] = &bandwidthShard{
+			m: make(map[string]*ipBandwidthInternal),
+		}
+	}
+}
+
+func getBandwidthShard(ip string) *bandwidthShard {
+	var h uint64 = 14695981039346656037
+	for i := range len(ip) {
+		h ^= uint64(ip[i])
+		h *= 1099511628211
+	}
+	return bandwidthShards[h%numShards]
+}
 
 type ipBandwidthInternal struct {
 	requestCount uint64
@@ -25,30 +49,28 @@ type ipBandwidthInternal struct {
 }
 
 // RecordIPBandwidth accumulates cumulative request/byte counts for a client IP.
-// It is bounded (maxIPBandwidthMapSize) and survives the anomaly detector's
-// ResetIPStats cycle, so it can back the dashboard "Bandwidth by IP" card. It is
-// safe for concurrent use and never blocks the hot path on the slow path beyond
-// a brief write lock during first-insert/eviction.
+// It is sharded to reduce mutex contention and bounded to prevent memory leaks.
 func RecordIPBandwidth(ip string, bytesIn, bytesOut uint64) {
 	if ip == "" {
 		return
 	}
 
-	ipBandwidthMu.RLock()
-	s, ok := ipBandwidthMap[ip]
-	ipBandwidthMu.RUnlock()
+	shard := getBandwidthShard(ip)
+	shard.mu.RLock()
+	s, ok := shard.m[ip]
+	shard.mu.RUnlock()
 
 	if !ok {
-		ipBandwidthMu.Lock()
-		s, ok = ipBandwidthMap[ip]
+		shard.mu.Lock()
+		s, ok = shard.m[ip]
 		if !ok {
-			if len(ipBandwidthMap) >= maxIPBandwidthMapSize {
-				evictIPBandwidthLocked()
+			if len(shard.m) >= maxIPBandwidthPerShard {
+				evictIPBandwidthLocked(shard)
 			}
 			s = &ipBandwidthInternal{}
-			ipBandwidthMap[ip] = s
+			shard.m[ip] = s
 		}
-		ipBandwidthMu.Unlock()
+		shard.mu.Unlock()
 	}
 
 	atomic.AddUint64(&s.requestCount, 1)
@@ -57,40 +79,49 @@ func RecordIPBandwidth(ip string, bytesIn, bytesOut uint64) {
 }
 
 // getIPBandwidthStats returns a snapshot of the per-IP bandwidth tracker as
-// IPMetric values for the metrics snapshot. Results are unsorted; the caller
-// applies the same sort/top-N as the Prometheus-backed path.
+// IPMetric values for the metrics snapshot.
 func getIPBandwidthStats() []IPMetric {
-	ipBandwidthMu.RLock()
-	defer ipBandwidthMu.RUnlock()
+	// Pre-allocate with a reasonable estimate
+	result := make([]IPMetric, 0, 1024)
 
-	result := make([]IPMetric, 0, len(ipBandwidthMap))
-	for ip, s := range ipBandwidthMap {
-		result = append(result, IPMetric{
-			IP:       ip,
-			Requests: float64(atomic.LoadUint64(&s.requestCount)),
-			BytesIn:  float64(atomic.LoadUint64(&s.bytesIn)),
-			BytesOut: float64(atomic.LoadUint64(&s.bytesOut)),
-		})
+	for i := range numShards {
+		shard := bandwidthShards[i]
+		shard.mu.RLock()
+		for ip, s := range shard.m {
+			result = append(result, IPMetric{
+				IP:       ip,
+				Requests: float64(atomic.LoadUint64(&s.requestCount)),
+				BytesIn:  float64(atomic.LoadUint64(&s.bytesIn)),
+				BytesOut: float64(atomic.LoadUint64(&s.bytesOut)),
+			})
+		}
+		shard.mu.RUnlock()
 	}
 	return result
 }
 
-// evictIPBandwidthLocked removes about 25% of keys from ipBandwidthMap.
-// Must be called with ipBandwidthMu held for writing.
-func evictIPBandwidthLocked() {
-	n := len(ipBandwidthMap)
+// evictIPBandwidthLocked removes about 25% of keys from the shard.
+func evictIPBandwidthLocked(shard *bandwidthShard) {
+	n := len(shard.m)
 	if n == 0 {
 		return
 	}
 	toEvict := (n / 4) + 1
-	if toEvict > n {
-		toEvict = n
-	}
-	for k := range ipBandwidthMap {
-		delete(ipBandwidthMap, k)
+	for k := range shard.m {
+		delete(shard.m, k)
 		toEvict--
 		if toEvict <= 0 {
 			break
 		}
+	}
+}
+
+// resetIPBandwidth clears all shards. Used for testing.
+func resetIPBandwidth() {
+	for i := range numShards {
+		shard := bandwidthShards[i]
+		shard.mu.Lock()
+		shard.m = make(map[string]*ipBandwidthInternal)
+		shard.mu.Unlock()
 	}
 }

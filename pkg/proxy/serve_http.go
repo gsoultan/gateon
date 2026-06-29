@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,7 +11,6 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +25,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logRequest(r, state.url)
 
 	atomic.AddInt32(&state.activeConn, 1)
-	telemetry.ActiveConnections.WithLabelValues(state.url).Inc()
+	if state.activeConnGuage != nil {
+		state.activeConnGuage.Inc()
+	}
 	defer h.decrementActiveConn(state)
 
 	targetURL := state.parsedURL
@@ -55,33 +56,36 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer middleware.PutStatusResponseWriter(sw)
 	}
 
-	proxy := h.getOrCreateProxy(state.cacheKey, targetURL)
+	proxy := h.getOrCreateProxy(state)
 	proxy.ServeHTTP(sw, r)
 
 	h.recordMetrics(state, start, sw.Status)
 }
 
 func (h *ProxyHandler) logRequest(r *http.Request, targetURL string) {
-	logger.L.LogDebug("Forwarding to service target",
-		"flow_step", "service_dispatch",
-		"request_id", request.GetID(r),
-		"target", targetURL)
+	if logger.L.IsEnabled(slog.LevelDebug) {
+		logger.L.LogDebug("Forwarding to service target",
+			"flow_step", "service_dispatch",
+			"request_id", request.GetID(r),
+			"target", targetURL)
+	}
 }
 
 func (h *ProxyHandler) decrementActiveConn(state *targetState) {
 	atomic.AddInt32(&state.activeConn, -1)
-	telemetry.ActiveConnections.WithLabelValues(state.url).Dec()
+	if state.activeConnGuage != nil {
+		state.activeConnGuage.Dec()
+	}
 }
 
 func (h *ProxyHandler) prepareRequest(r *http.Request, state *targetState, targetURL *url.URL) *http.Request {
-	ctx := context.WithValue(r.Context(), targetStateContextKey, state)
 	// The client remote address is only consumed when writing a PROXY-protocol
 	// header on the backend dial, so only carry it in the context when proxy
-	// protocol is enabled for this target (avoids a context alloc per request).
+	// protocol is enabled for this target. This eliminates a context allocation
+	// per request for the common case where PROXY protocol is disabled.
 	if state.proxyProtocolEnabled {
-		ctx = withClientRemoteAddr(ctx, r.RemoteAddr)
+		r = r.WithContext(withClientRemoteAddr(r.Context(), r.RemoteAddr))
 	}
-	r = r.WithContext(ctx)
 
 	r.URL.Host = targetURL.Host
 	r.URL.Scheme = targetURL.Scheme

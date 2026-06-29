@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -55,7 +54,7 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, msgPtr, msgLen uint32) {
 			msg, _ := m.Memory().Read(msgPtr, msgLen)
-			logger.L.LogInfo(string(msg), "wasm", "log")
+			logger.L.LogInfo(string(msg), "component", "wasm")
 		}).Export("log").
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, valPtr, valLen uint32) uint32 {
@@ -76,7 +75,10 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 			if !ok {
 				return 0
 			}
-			val := r.URL.String()
+			val := r.RequestURI
+			if val == "" {
+				val = r.URL.Path
+			}
 			if uint32(len(val)) > valLen {
 				return uint32(len(val))
 			}
@@ -97,7 +99,6 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 				SourceIP:   r.RemoteAddr,
 				Score:      score,
 				Details:    string(details),
-				Time:       time.Now(),
 				RouteID:    r.Header.Get("X-Gateon-Route-ID"),
 				RequestURI: r.RequestURI,
 			})

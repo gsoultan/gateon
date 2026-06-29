@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -254,14 +255,23 @@ func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 
 const peekTimeout = 200 * time.Millisecond
 
+var (
+	peekPool = sync.Pool{
+		New: func() any {
+			return make([]byte, PeekSize)
+		},
+	}
+)
+
 func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
 	defer conn.Close()
 	conn.SetReadDeadline(time.Now().Add(peekTimeout))
-	peek := make([]byte, PeekSize)
+	peek := peekPool.Get().([]byte)
+	defer peekPool.Put(peek)
+
 	n, err := io.ReadFull(conn, peek)
 	conn.SetReadDeadline(time.Time{})
 	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		conn.Close()
 		return
 	}
 	peeked := peek[:n]

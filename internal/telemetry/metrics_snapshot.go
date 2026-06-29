@@ -273,8 +273,11 @@ func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) G
 	// only a management entrypoint is configured, or a custom label scheme is in
 	// use — we fall back to summing the per-route series so the headline signals
 	// still reflect real proxied traffic instead of silently showing zero (RC#1).
+
+	// Cache label lookups during filtering
 	epFilter := func(m *dto.Metric) bool {
-		return strings.HasPrefix(labelValue(m, "route"), "gateon-")
+		r := labelValue(m, "route")
+		return strings.HasPrefix(r, "gateon-")
 	}
 	routeFilter := func(m *dto.Metric) bool {
 		r := labelValue(m, "route")
@@ -338,9 +341,10 @@ func computeGoldenSignals(idx map[string]*dto.MetricFamily, match func(*dto.Metr
 		if totalCount > 0 {
 			gs.AvgLatencyMs = (totalSum / float64(totalCount)) * 1000
 		}
-		gs.P50LatencyMs = estimatePercentile(fam, 0.50, match) * 1000
-		gs.P95LatencyMs = estimatePercentile(fam, 0.95, match) * 1000
-		gs.P99LatencyMs = estimatePercentile(fam, 0.99, match) * 1000
+		p := estimatePercentiles(fam, []float64{0.50, 0.95, 0.99}, match)
+		gs.P50LatencyMs = p[0] * 1000
+		gs.P95LatencyMs = p[1] * 1000
+		gs.P99LatencyMs = p[2] * 1000
 	}
 
 	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", match)
@@ -385,8 +389,11 @@ func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
 
 	if fam, ok := idx["gateon_middleware_turnstile_total"]; ok {
 		for _, m := range fam.GetMetric() {
-			if labelValue(m, "outcome") == "fail" {
-				f.TurnstileFailures += m.GetCounter().GetValue()
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == "outcome" && lp.GetValue() == "fail" {
+					f.TurnstileFailures += m.GetCounter().GetValue()
+					break
+				}
 			}
 		}
 	}
@@ -422,7 +429,7 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 			sc := labelValue(m, "status_code")
 			val := m.GetCounter().GetValue()
 			rm.Requests += val
-			rm.StatusCodes[sc] = rm.StatusCodes[sc] + val
+			rm.StatusCodes[sc] += val
 			if strings.HasPrefix(sc, "5") {
 				rm.Errors += val
 			}
@@ -448,11 +455,11 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 			}
 			rm := getOrCreateRoute(routeMap, route)
 			dir := labelValue(m, "direction")
-			switch dir {
-			case "in":
-				rm.BytesIn += m.GetCounter().GetValue()
-			case "out":
-				rm.BytesOut += m.GetCounter().GetValue()
+			val := m.GetCounter().GetValue()
+			if dir == "in" {
+				rm.BytesIn += val
+			} else if dir == "out" {
+				rm.BytesOut += val
 			}
 		}
 	}
@@ -929,8 +936,9 @@ func collectLabeledCounts(idx map[string]*dto.MetricFamily, name, labelName stri
 	return result
 }
 
-// estimatePercentile estimates a percentile from a histogram using linear interpolation.
-func estimatePercentile(fam *dto.MetricFamily, q float64, filter func(*dto.Metric) bool) float64 {
+// estimatePercentiles estimates multiple percentiles from a histogram in one pass.
+func estimatePercentiles(fam *dto.MetricFamily, quantiles []float64, filter func(*dto.Metric) bool) []float64 {
+	results := make([]float64, len(quantiles))
 	var totalCount uint64
 	for _, m := range fam.GetMetric() {
 		if filter != nil && !filter(m) {
@@ -939,11 +947,10 @@ func estimatePercentile(fam *dto.MetricFamily, q float64, filter func(*dto.Metri
 		totalCount += m.GetHistogram().GetSampleCount()
 	}
 	if totalCount == 0 {
-		return 0
+		return results
 	}
 
-	// Merge all buckets across label combinations.
-	type bucket struct {
+	type bkt struct {
 		upperBound      float64
 		cumulativeCount uint64
 	}
@@ -957,43 +964,41 @@ func estimatePercentile(fam *dto.MetricFamily, q float64, filter func(*dto.Metri
 		}
 	}
 
-	buckets := make([]bucket, 0, len(bucketMap))
+	buckets := make([]bkt, 0, len(bucketMap))
 	for ub, cc := range bucketMap {
-		buckets = append(buckets, bucket{upperBound: ub, cumulativeCount: cc})
+		buckets = append(buckets, bkt{upperBound: ub, cumulativeCount: cc})
 	}
 
-	// Sort by upper bound.
-	for i := range len(buckets) {
-		for j := i + 1; j < len(buckets); j++ {
-			if buckets[j].upperBound < buckets[i].upperBound {
-				buckets[i], buckets[j] = buckets[j], buckets[i]
+	slices.SortFunc(buckets, func(a, b bkt) int {
+		return cmp.Compare(a.upperBound, b.upperBound)
+	})
+
+	for i, q := range quantiles {
+		target := q * float64(totalCount)
+		var prevBound float64
+		var prevCount uint64
+		found := false
+		for _, b := range buckets {
+			if float64(b.cumulativeCount) >= target {
+				countInBucket := float64(b.cumulativeCount - prevCount)
+				if countInBucket <= 0 {
+					results[i] = b.upperBound
+				} else {
+					fraction := (target - float64(prevCount)) / countInBucket
+					results[i] = prevBound + fraction*(b.upperBound-prevBound)
+				}
+				found = true
+				break
 			}
+			prevBound = b.upperBound
+			prevCount = b.cumulativeCount
+		}
+		if !found && len(buckets) > 0 {
+			results[i] = buckets[len(buckets)-1].upperBound
 		}
 	}
 
-	target := q * float64(totalCount)
-	var prevBound float64
-	var prevCount uint64
-	for _, b := range buckets {
-		if float64(b.cumulativeCount) >= target {
-			// Linear interpolation within this bucket.
-			countInBucket := float64(b.cumulativeCount - prevCount)
-			if countInBucket <= 0 {
-				return b.upperBound
-			}
-			fraction := (target - float64(prevCount)) / countInBucket
-			return prevBound + fraction*(b.upperBound-prevBound)
-		}
-		prevBound = b.upperBound
-		prevCount = b.cumulativeCount
-	}
-
-	// Fallback: return the highest bucket bound.
-	if len(buckets) > 0 {
-		return buckets[len(buckets)-1].upperBound
-	}
-
-	return 0
+	return results
 }
 
 // GetServiceGoldenSignals returns golden signals for a specific service.
@@ -1046,9 +1051,10 @@ func GetServiceGoldenSignals(ctx context.Context, serviceID string) GoldenSignal
 		if totalCount > 0 {
 			gs.AvgLatencyMs = (totalSum / float64(totalCount)) * 1000
 		}
-		gs.P50LatencyMs = estimatePercentile(fam, 0.50, isService) * 1000
-		gs.P95LatencyMs = estimatePercentile(fam, 0.95, isService) * 1000
-		gs.P99LatencyMs = estimatePercentile(fam, 0.99, isService) * 1000
+		p := estimatePercentiles(fam, []float64{0.50, 0.95, 0.99}, isService)
+		gs.P50LatencyMs = p[0] * 1000
+		gs.P95LatencyMs = p[1] * 1000
+		gs.P99LatencyMs = p[2] * 1000
 	}
 
 	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", isService)
