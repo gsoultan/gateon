@@ -53,7 +53,6 @@ func StartServers(
 	wrapped GRPCWebHandler,
 	tlsConfig *tls.Config,
 	tlsManager gtls.TLSManager,
-	mgmtCORS CORSProvider,
 	wg *syncutil.WaitGroup,
 	shutdownReg *ShutdownRegistry,
 	l4Resolver L4Resolver,
@@ -66,7 +65,6 @@ func StartServers(
 		EpStore:          epStore,
 		BaseHandler:      baseHandler,
 		Wrapped:          wrapped,
-		CORS:             mgmtCORS,
 		TLSConfig:        tlsConfig,
 		TLSManager:       tlsManager,
 		Limiter:          limiter,
@@ -132,7 +130,6 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		middleware.RequestID(), // Added
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
-		func(next http.Handler) http.Handler { return deps.CORS.Handler(next) },
 		middleware.HostFilter(mgmtHost),
 		middleware.IPFilter(allowedIPs, nil),
 		middleware.MaxConnections(500),

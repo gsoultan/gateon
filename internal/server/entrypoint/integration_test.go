@@ -22,13 +22,11 @@ func mockDepsForInspection(t *testing.T) *Deps {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("inspected-http"))
 	})
-	noopCORS := &mockCORS{}
 	noopLimiter := middleware.NoopRateLimiter{}
 	tlsMgr := gtls.NewManager(gtls.Config{})
 	return &Deps{
 		BaseHandler:      baseHandler,
 		Wrapped:          &mockGRPCWeb{},
-		CORS:             noopCORS,
 		TLSConfig:        nil,
 		TLSManager:       tlsMgr,
 		Limiter:          noopLimiter,
@@ -36,10 +34,6 @@ func mockDepsForInspection(t *testing.T) *Deps {
 		L4Resolver:       nil,
 	}
 }
-
-type mockCORS struct{}
-
-func (m *mockCORS) Handler(h http.Handler) http.Handler { return h }
 
 type mockGRPCWeb struct{}
 

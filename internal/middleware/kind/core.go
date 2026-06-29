@@ -54,8 +54,30 @@ func GetRequestID(r *http.Request) string {
 // IsInternalPath returns true if the given path belongs to Gateon's internal API,
 // monitoring, or health-check system.
 func IsInternalPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/") || path == "/metrics" || path == "/healthz" || path == "/readyz" ||
-		IsDashboardPath(path) || path == "/grpc.health.v1.Health/Check"
+	if path == "/metrics" || path == "/healthz" || path == "/readyz" ||
+		IsDashboardPath(path) || path == "/grpc.health.v1.Health/Check" {
+		return true
+	}
+	// Only match /v1/ if it is one of Gateon's own known management API routes.
+	// We use explicit prefixes to avoid matching user routes that happen to start with /v1/ (e.g. /v1/apps).
+	return strings.HasPrefix(path, "/v1/routes") ||
+		strings.HasPrefix(path, "/v1/services") ||
+		strings.HasPrefix(path, "/v1/entrypoints") ||
+		strings.HasPrefix(path, "/v1/middlewares") ||
+		strings.HasPrefix(path, "/v1/tls-options") ||
+		strings.HasPrefix(path, "/v1/global") ||
+		strings.HasPrefix(path, "/v1/certs") ||
+		strings.HasPrefix(path, "/v1/geoip") ||
+		strings.HasPrefix(path, "/v1/diagnostic") ||
+		strings.HasPrefix(path, "/v1/traces") ||
+		strings.HasPrefix(path, "/v1/security") ||
+		strings.HasPrefix(path, "/v1/ai-advisory") ||
+		strings.HasPrefix(path, "/v1/login") ||
+		strings.HasPrefix(path, "/v1/logout") ||
+		strings.HasPrefix(path, "/v1/config") ||
+		strings.HasPrefix(path, "/v1/status") ||
+		strings.HasPrefix(path, "/v1/Analyze") ||
+		path == "/v1/openapi.json"
 }
 
 // IsDashboardPath returns true if the path is a Gateon dashboard gRPC-Web service.
