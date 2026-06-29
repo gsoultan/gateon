@@ -185,7 +185,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 		if pl > 4 {
 			pl = 4
 		}
-		engineDirective := ""
+		engineDirective := "SecRuleEngine On\n"
 		if cfg.AuditOnly {
 			engineDirective = `SecRuleEngine DetectionOnly
 `
@@ -336,6 +336,9 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
 
 		// Blocking evaluation
 		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
+		// Explicitly set the block status to 403 for the evaluation rules to avoid status 0 in audit logs
+		// and 520 errors in Cloudflare.
+		sb.WriteString("SecRuleUpdateActionById 949110 \"deny,status:403\"\n")
 
 		// Response rules (RESPONSE-phase). These buffer response bodies, the most
 		// expensive part of the WAF, so they are only loaded when response
@@ -356,6 +359,7 @@ SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lock
 			}
 			sb.WriteString("Include @owasp_crs/RESPONSE-954-DATA-LEAKAGES-IIS.conf\n")
 			sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
+			sb.WriteString("SecRuleUpdateActionById 959100 \"deny,status:403\"\n")
 			sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
 		}
 

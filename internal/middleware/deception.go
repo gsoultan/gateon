@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // DeceptionConfig defines configuration for Deception middleware.
@@ -30,10 +32,16 @@ func Deception(cfg DeceptionConfig) Middleware {
 				if r.Header.Get(cfg.CanaryHeader) == cfg.CanaryToken {
 					recordAdvancedThreat(r, "canary_token_reused", 100, "Attacker reused injected canary header: "+cfg.CanaryHeader, cfg.RouteID)
 					if cfg.EnableTrollResponse {
-						serveTrollResponse(w)
-					} else {
-						http.Error(w, "Forbidden", http.StatusForbidden)
+						// Only troll if reputation is significantly degraded.
+						// High-reputation clients (e.g. mistaken browser reuse) should get a standard error.
+						fingerprint := telemetry.GetIPFingerprint(r)
+						reputation := telemetry.GetReputationScore(fingerprint)
+						if reputation < 50 {
+							serveTrollResponse(w)
+							return
+						}
 					}
+					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
 				}
 			}
@@ -43,10 +51,14 @@ func Deception(cfg DeceptionConfig) Middleware {
 				if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
 					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID)
 					if cfg.EnableTrollResponse {
-						serveTrollResponse(w)
-					} else {
-						http.Error(w, "Forbidden", http.StatusForbidden)
+						fingerprint := telemetry.GetIPFingerprint(r)
+						reputation := telemetry.GetReputationScore(fingerprint)
+						if reputation < 50 {
+							serveTrollResponse(w)
+							return
+						}
 					}
+					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
 				}
 			}
@@ -56,10 +68,14 @@ func Deception(cfg DeceptionConfig) Middleware {
 				if link != "" && path == link {
 					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID)
 					if cfg.EnableTrollResponse {
-						serveTrollResponse(w)
-					} else {
-						http.Error(w, "Forbidden", http.StatusForbidden)
+						fingerprint := telemetry.GetIPFingerprint(r)
+						reputation := telemetry.GetReputationScore(fingerprint)
+						if reputation < 50 {
+							serveTrollResponse(w)
+							return
+						}
 					}
+					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
 				}
 			}

@@ -165,3 +165,53 @@ func TestStatusResponseWriterCapturesStatusAndBytes(t *testing.T) {
 		t.Errorf("TTFB = %v; want > 0", sw.TTFB())
 	}
 }
+
+func TestRecovery(t *testing.T) {
+	t.Run("normal panic", func(t *testing.T) {
+		h := Recovery()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic("test panic")
+		}))
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		// We expect Recovery to catch it and not crash the test
+		h.ServeHTTP(rec, r)
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("expected 500, got %d", rec.Code)
+		}
+	})
+
+	t.Run("abort handler panic", func(t *testing.T) {
+		h := Recovery()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic(http.ErrAbortHandler)
+		}))
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		defer func() {
+			err := recover()
+			if err != http.ErrAbortHandler {
+				t.Errorf("expected http.ErrAbortHandler to be re-panicked, got %v", err)
+			}
+		}()
+
+		h.ServeHTTP(rec, r)
+	})
+
+	t.Run("panic after header sent", func(t *testing.T) {
+		h := Recovery()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sw := GetStatusResponseWriter(w)
+			defer PutStatusResponseWriter(sw)
+			sw.WriteHeader(http.StatusOK)
+			panic("test panic after write")
+		}))
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		// Should not panic, but also should not change status code because it's already sent
+		h.ServeHTTP(rec, r)
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rec.Code)
+		}
+	})
+}
