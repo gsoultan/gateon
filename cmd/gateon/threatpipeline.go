@@ -147,11 +147,11 @@ func consumeThreats(ctx context.Context, signals chan<- correlation.Signal, ship
 			return
 		case t := <-ch:
 			if shipRaw {
-				shipper.Ship(threatToEvent(t))
+				shipper.Ship(threatToEvent(&t))
 			}
 			if correlate {
 				select {
-				case signals <- threatToSignal(t):
+				case signals <- threatToSignal(&t):
 				default: // drop on backpressure; never block the broadcaster
 				}
 			}
