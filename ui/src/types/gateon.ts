@@ -766,6 +766,7 @@ export type ValidateCORSRequest = {
   origin: string;
   method: string;
   headers: Record<string, string>;
+  auth_bearer_token: string;
 };
 
 export type ValidateCORSResponse = {
@@ -776,6 +777,8 @@ export type ValidateCORSResponse = {
   is_preflight: boolean;
   middleware_config: Record<string, string>;
   route_name: string;
+  suggestions: string[];
+  route_id: string;
 };
 
 export type RemoveMitigatedThreatResponse = {

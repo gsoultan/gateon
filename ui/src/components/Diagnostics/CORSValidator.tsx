@@ -3,6 +3,7 @@ import {
   Card,
   Stack,
   TextInput,
+  PasswordInput,
   Select,
   Button,
   Group,
@@ -11,11 +12,9 @@ import {
   Alert,
   List,
   ThemeIcon,
-  Divider,
-  Paper,
-  Code,
   Badge,
   SimpleGrid,
+  Fieldset,
 } from "@mantine/core";
 import {
   IconWorld,
@@ -24,7 +23,12 @@ import {
   IconInfoCircle,
   IconCheck,
   IconX,
+  IconLock,
+  IconBolt,
+  IconCopy,
+  IconExternalLink,
 } from "@tabler/icons-react";
+import { useClipboard } from "@mantine/hooks";
 import { validateCORS } from "../../hooks/api";
 import type { ValidateCORSResponse } from "../../types/gateon";
 
@@ -33,10 +37,12 @@ const CORSValidator: React.FC = () => {
   const [origin, setOrigin] = useState("");
   const [method, setMethod] = useState("GET");
   const [headers, setHeaders] = useState("");
+  const [bearerToken, setBearerToken] = useState("");
   const [acrm, setAcrm] = useState("POST");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ValidateCORSResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const clipboard = useClipboard({ timeout: 2000 });
 
   const handleValidate = async () => {
     setLoading(true);
@@ -64,6 +70,7 @@ const CORSValidator: React.FC = () => {
         origin,
         method,
         headers: headerMap,
+        auth_bearer_token: bearerToken,
       });
       setResult(res);
     } catch (err: any) {
@@ -71,6 +78,42 @@ const CORSValidator: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const applySuggestion = (suggestion: string) => {
+    if (suggestion.startsWith("Add header: ")) {
+      const header = suggestion.replace("Add header: ", "");
+      if (!headers.includes(header)) {
+        setHeaders(headers ? `${headers}, ${header}` : header);
+      }
+    } else if (suggestion.includes("Bearer Token")) {
+      // Focus the token field or show a message?
+      // Since it's a PasswordInput, maybe just set a dummy if they want to test?
+      // But user should provide their own.
+    }
+  };
+
+  const copyAsCurl = () => {
+    if (!url) return;
+    let curl = `curl -X ${method} "${url}" \\\n  -H "Origin: ${origin || 'http://localhost'}"`;
+    
+    if (bearerToken) {
+      curl += ` \\\n  -H "Authorization: Bearer ${bearerToken}"`;
+    }
+
+    if (method === "OPTIONS") {
+      curl += ` \\\n  -H "Access-Control-Request-Method: ${acrm}"`;
+      if (headers) {
+        curl += ` \\\n  -H "Access-Control-Request-Headers: ${headers}"`;
+      }
+    } else if (headers) {
+      headers.split(",").forEach(h => {
+        const trimmed = h.trim();
+        if (trimmed) curl += ` \\\n  -H "${trimmed}: test-value"`;
+      });
+    }
+
+    clipboard.copy(curl);
   };
 
   return (
@@ -89,51 +132,66 @@ const CORSValidator: React.FC = () => {
             </ThemeIcon>
           </Group>
 
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <TextInput
-              label="Target URL"
-              placeholder="https://your-gateon.com/api/v1/resource"
-              value={url}
-              onChange={(e) => setUrl(e.currentTarget.value)}
-              required
-            />
-            <TextInput
-              label="Origin"
-              placeholder="https://your-frontend.com"
-              value={origin}
-              onChange={(e) => setOrigin(e.currentTarget.value)}
-              required
-            />
-            <Select
-              label="HTTP Method"
-              data={["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}
-              value={method}
-              onChange={(val) => setMethod(val || "GET")}
-            />
-            {method === "OPTIONS" ? (
-               <Select
-                label="Preflight Method (ACRM)"
-                data={["GET", "POST", "PUT", "PATCH", "DELETE"]}
-                value={acrm}
-                onChange={(val) => setAcrm(val || "POST")}
-              />
-            ) : (
+          <Fieldset legend="Request Parameters" variant="default" radius="md">
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
               <TextInput
-                label="Request Headers (comma separated)"
-                placeholder="Content-Type, Authorization, X-Custom"
-                value={headers}
-                onChange={(e) => setHeaders(e.currentTarget.value)}
+                label="Target URL"
+                placeholder="https://your-gateon.com/api/v1/resource"
+                value={url}
+                onChange={(e) => setUrl(e.currentTarget.value)}
+                required
+                description="Gateon will use this to match a route"
               />
-            )}
-            {method === "OPTIONS" && (
-               <TextInput
-                label="Preflight Headers (ACRH)"
-                placeholder="Content-Type, Authorization, X-Custom"
-                value={headers}
-                onChange={(e) => setHeaders(e.currentTarget.value)}
+              <TextInput
+                label="Origin"
+                placeholder="https://your-frontend.com"
+                value={origin}
+                onChange={(e) => setOrigin(e.currentTarget.value)}
+                required
+                description="The Origin header sent by the browser"
               />
-            )}
-          </SimpleGrid>
+              <Select
+                label="HTTP Method"
+                data={["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}
+                value={method}
+                onChange={(val) => setMethod(val || "GET")}
+              />
+              <PasswordInput
+                label="Auth Bearer Token (Optional)"
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                value={bearerToken}
+                onChange={(e) => setBearerToken(e.currentTarget.value)}
+                leftSection={<IconLock size={16} />}
+                description="Automatically adds Authorization: Bearer <token>"
+              />
+              {method === "OPTIONS" ? (
+                <Select
+                  label="Preflight Method (ACRM)"
+                  data={["GET", "POST", "PUT", "PATCH", "DELETE"]}
+                  value={acrm}
+                  onChange={(val) => setAcrm(val || "POST")}
+                  description="Access-Control-Request-Method"
+                />
+              ) : (
+                <TextInput
+                  label="Custom Request Headers (Optional)"
+                  placeholder="X-Custom-Header, X-Other"
+                  value={headers}
+                  onChange={(e) => setHeaders(e.currentTarget.value)}
+                  description="Comma-separated list of headers to simulate"
+                />
+              )}
+              {method === "OPTIONS" && (
+                <TextInput
+                  label="Preflight Headers (ACRH)"
+                  placeholder="Content-Type, Authorization, X-Custom"
+                  value={headers}
+                  onChange={(e) => setHeaders(e.currentTarget.value)}
+                  description="Access-Control-Request-Headers"
+                />
+              )}
+            </SimpleGrid>
+          </Fieldset>
 
           <Button
             onClick={handleValidate}
@@ -162,8 +220,59 @@ const CORSValidator: React.FC = () => {
             radius="lg"
             variant="light"
           >
-            <Text fw={700} size="lg" style={{ whiteSpace: 'pre-wrap' }}>{result.message}</Text>
+            <Stack gap="sm">
+               <Text fw={700} size="lg" style={{ whiteSpace: 'pre-wrap' }}>{result.message}</Text>
+               <Group gap="xs">
+                 <Button 
+                   variant="subtle" 
+                   color={result.is_allowed ? "teal" : "red"} 
+                   size="compact-xs" 
+                   leftSection={clipboard.copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                   onClick={copyAsCurl}
+                 >
+                   {clipboard.copied ? "Copied!" : "Copy as cURL"}
+                 </Button>
+                 {result.route_id && (
+                    <Badge variant="light" color="gray" size="sm" leftSection={<IconExternalLink size={10} />}>
+                      Route ID: {result.route_id}
+                    </Badge>
+                 )}
+               </Group>
+            </Stack>
           </Alert>
+
+          {result.suggestions && result.suggestions.length > 0 && (
+            <Alert
+              icon={<IconBolt size={20} />}
+              title="Gateon Smart Analysis"
+              color="blue"
+              radius="lg"
+              variant="light"
+            >
+              <Text size="sm" mb="xs" fw={500}>
+                Based on the matched route and its middlewares, Gateon suggests the following for your test:
+              </Text>
+              <List size="sm" spacing="xs">
+                {result.suggestions.map((s, i) => (
+                  <List.Item key={i}>
+                    <Group gap="xs">
+                      <Text size="sm">{s}</Text>
+                      {s.startsWith("Add header: ") && (
+                        <Button 
+                          variant="subtle" 
+                          size="compact-xs" 
+                          p={0} 
+                          onClick={() => applySuggestion(s)}
+                        >
+                          [Apply]
+                        </Button>
+                      )}
+                    </Group>
+                  </List.Item>
+                ))}
+              </List>
+            </Alert>
+          )}
 
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
             <Card withBorder radius="lg" p="md">

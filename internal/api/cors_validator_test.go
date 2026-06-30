@@ -57,9 +57,18 @@ func TestValidateCORS(t *testing.T) {
 		Entrypoints: []string{"http"},
 	}
 
+	mwAuth := &gateonv1.Middleware{
+		Id:   "mwAuth",
+		Name: "auth-mw",
+		Type: "auth",
+		Config: map[string]string{
+			"type": "jwt",
+		},
+	}
+
 	apiSvc := &ApiService{
 		Routes:      &mockRouteStore{routes: []*gateonv1.Route{rt, rtHost}},
-		Middlewares: &mockMiddlewareStore{middlewares: map[string]*gateonv1.Middleware{"mw1": mw}},
+		Middlewares: &mockMiddlewareStore{middlewares: map[string]*gateonv1.Middleware{"mw1": mw, "mwAuth": mwAuth}},
 	}
 
 	tests := []struct {
@@ -134,7 +143,29 @@ func TestValidateCORS(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			name: "Bearer Token and Suggestions",
+			req: &gateonv1.ValidateCORSRequest{
+				Url:             "http://gateon/api/test",
+				Origin:          "https://example.com",
+				Method:          "GET",
+				AuthBearerToken: "my-token",
+			},
+			expected: true,
+		},
+		{
+			name: "Missing Bearer Token Suggestion",
+			req: &gateonv1.ValidateCORSRequest{
+				Url:    "http://gateon/api/test",
+				Origin: "https://example.com",
+				Method: "GET",
+			},
+			expected: true,
+		},
 	}
+
+	// Attach auth middleware to rt
+	rt.Middlewares = append(rt.Middlewares, "mwAuth")
 
 	// Update mw with exposed headers and max age for the last test case
 	mw.Config["exposed_headers"] = "X-Custom-Response"
@@ -151,6 +182,16 @@ func TestValidateCORS(t *testing.T) {
 			if tc.name == "Exposed Headers and Max Age" {
 				assert.Equal(t, "X-Custom-Response", resp.ResponseHeaders["Access-Control-Expose-Headers"])
 				assert.Equal(t, "3600", resp.ResponseHeaders["Access-Control-Max-Age"])
+			}
+			if tc.name == "Bearer Token and Suggestions" {
+				// Should not have the suggestion if token provided
+				for _, s := range resp.Suggestions {
+					assert.NotContains(t, s, "Authorization")
+				}
+			}
+			if tc.name == "Missing Bearer Token Suggestion" {
+				assert.NotEmpty(t, resp.Suggestions)
+				assert.Contains(t, resp.Suggestions[0], "Bearer Token")
 			}
 		})
 	}
