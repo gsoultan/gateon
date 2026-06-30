@@ -59,6 +59,7 @@ func (m *mockEbpfManager) ShunJA3(ja3Md5 [16]byte) error                        
 func (m *mockEbpfManager) UnshunJA3(ja3Md5 [16]byte) error                              { return nil }
 func (m *mockEbpfManager) ShunJA4(ja4Fingerprint string) error                          { return nil }
 func (m *mockEbpfManager) BlocklistCuckoo(key string) error                             { return nil }
+func (m *mockEbpfManager) GetTopIPs(limit int) ([]ebpf.IPStat, error)                   { return nil, nil }
 func (m *mockEbpfManager) GetMapStats() (ebpf.MapStats, error)                          { return ebpf.MapStats{}, nil }
 
 func TestWAF_Shunning(t *testing.T) {

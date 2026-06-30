@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
@@ -73,16 +74,22 @@ type LocalRateLimiter struct {
 	rate      rate.Limit
 	burst     int
 	stopEvict chan struct{}
+	ebpf      ebpf.Manager
 }
 
 // NewRateLimiter creates a new LocalRateLimiter with rate (requests per second) and burst.
 // Stale entries are evicted automatically after rateLimiterEntryTTL of inactivity.
 func NewRateLimiter(r rate.Limit, b int) *LocalRateLimiter {
+	return NewRateLimiterWithEbpf(r, b, nil)
+}
+
+func NewRateLimiterWithEbpf(r rate.Limit, b int, e ebpf.Manager) *LocalRateLimiter {
 	rl := &LocalRateLimiter{
 		shards:    make([]*rateLimiterShard, rateLimiterShards),
 		rate:      r,
 		burst:     b,
 		stopEvict: make(chan struct{}),
+		ebpf:      e,
 	}
 	for i := range rateLimiterShards {
 		rl.shards[i] = &rateLimiterShard{
@@ -215,6 +222,15 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 
 			limiter := rl.getLimiter(key, reputation)
 			if !limiter.Allow() {
+				if rl.ebpf != nil {
+					// Offload this IP to eBPF for 1 minute of hard rate limiting at the kernel level.
+					// We calculate the minimum interval based on the current limit.
+					interval := time.Second / 10 // Default fallback: 10 pps
+					if rl.rate > 0 {
+						interval = time.Duration(float64(time.Second) / float64(rl.rate))
+					}
+					_ = rl.ebpf.SetAdaptiveRateLimit(key, interval)
+				}
 				if !ShouldSkipMetrics(r) {
 					routeID := GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("local").Inc()
@@ -223,7 +239,7 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					telemetry.IncRateLimitRejected("local")
 
 					// Record as security threat
-					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 						SourceIP:    key,
 						Type:        "rate_limit",
 						Category:    "abuse",
@@ -235,7 +251,7 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 						RouteID:     routeID,
 						RequestURI:  r.RequestURI,
 						Mitigated:   true,
-					})
+					}))
 				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests", "")

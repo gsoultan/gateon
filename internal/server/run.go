@@ -106,7 +106,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
-		SecurityPosture:    newPostureProvider(s.Version, s.GlobalStore, clamavManager, wafUpdater, fimScanner),
+		SecurityPosture:    newPostureProvider(s.Version, s.GlobalStore, clamavManager, wafUpdater, fimScanner, s.EbpfManager),
 		InvalidateAllProxies: func() {
 			s.InvalidateRouteProxies(func(*gateonv1.Route) bool { return true })
 		},

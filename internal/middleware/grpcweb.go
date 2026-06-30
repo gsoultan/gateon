@@ -3,6 +3,7 @@ package middleware
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"io"
@@ -55,8 +56,16 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 			isGRPCWeb := detector.IsGrpcWebRequest(r) || detector.IsAcceptableGrpcCorsRequest(r)
 
 			if isGRPCWeb {
+				if r.Context().Value(CORSHandledContextKey) != nil {
+					// CORS already handled by a previous middleware.
+					serveGRPCWeb(w, r, detector, next)
+					return
+				}
+
 				if c != nil {
 					c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						// Mark as handled for downstream middlewares
+						r = r.WithContext(context.WithValue(r.Context(), CORSHandledContextKey, true))
 						// Actual request handling (non-preflight)
 						serveGRPCWeb(w, r, detector, next)
 					})).ServeHTTP(w, r)
@@ -70,6 +79,10 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 			// let the CORS handler handle it even if the detector didn't recognize it
 			// as gRPC-Web. Browsers might vary in their preflight headers.
 			if r.Method == http.MethodOptions && c != nil {
+				if r.Context().Value(CORSHandledContextKey) != nil {
+					next.ServeHTTP(w, r)
+					return
+				}
 				c.Handler(next).ServeHTTP(w, r)
 				return
 			}
@@ -130,6 +143,7 @@ type grpcWebResponseWriter struct {
 	isTextFormat  bool
 	originalWebCT string
 	wroteHeader   bool
+	status        int
 	// b64Writer is used only for grpc-web-text to base64-encode the response.
 	b64Writer io.WriteCloser
 	finalized bool
@@ -142,6 +156,7 @@ func (w *grpcWebResponseWriter) WriteHeader(code int) {
 		return
 	}
 	w.wroteHeader = true
+	w.status = code
 
 	h := w.ResponseWriter.Header()
 
@@ -202,8 +217,29 @@ func (w *grpcWebResponseWriter) finalize() {
 		w.WriteHeader(http.StatusOK)
 	}
 
+	if w.status == http.StatusNoContent || w.status == http.StatusNotModified {
+		if w.isTextFormat && w.b64Writer != nil {
+			_ = w.b64Writer.Close()
+		}
+		return
+	}
+
 	// Collect trailers from the underlying ResponseWriter
 	trailers := w.ResponseWriter.Header()
+
+	// Only append trailers if this is a gRPC response.
+	// For gRPC-Web, the response Content-Type will be application/grpc-web (+proto/json).
+	// If it's a trailers-only response, it might have application/grpc.
+	ct := trailers.Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/grpc") && !strings.HasPrefix(ct, "application/grpc-web") {
+		// Not a gRPC response, don't append trailers.
+		// If we opened a base64 writer, we still need to close it.
+		if w.isTextFormat && w.b64Writer != nil {
+			_ = w.b64Writer.Close()
+		}
+		return
+	}
+
 	var buf bytes.Buffer
 	for key, vals := range trailers {
 		// HTTP trailers set via Header().Set() after WriteHeader are available

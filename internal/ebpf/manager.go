@@ -3,12 +3,14 @@ package ebpf
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpf -type ebpf_config gateon_ebpf bpf/xdp_rate_limit.c
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,7 +83,13 @@ type Manager interface {
 	UnshunJA3(ja3Md5 [16]byte) error
 	ShunJA4(ja4Fingerprint string) error // New: JA4 support
 	BlocklistCuckoo(ip string) error     // New: Cuckoo Filter support
+	GetTopIPs(limit int) ([]IPStat, error)
 	GetMapStats() (MapStats, error)
+}
+
+type IPStat struct {
+	IP    string
+	Count uint64
 }
 
 // NewEbpfManager creates a new eBPF manager.
@@ -124,6 +132,12 @@ func ipToUint32(ipStr string) (uint32, error) {
 	}
 	// XDP/IP headers are in network byte order (Big Endian)
 	return binary.BigEndian.Uint32(ipv4), nil
+}
+
+func uint32ToIP(nn uint32) net.IP {
+	ip := make(net.IP, 4)
+	binary.BigEndian.PutUint32(ip, nn)
+	return ip
 }
 
 // ShunIP adds an IP to the XDP blocklist.
@@ -371,6 +385,41 @@ var dropReasons = map[uint32]string{
 // status. On a non-Linux host or while the program is not attached, m.maps is
 // empty so the per-reason drop counters are simply omitted, but Attached /
 // Interface / LoadError are always reported so callers can see why.
+func (m *EbpfManager) GetTopIPs(limit int) ([]IPStat, error) {
+	m.mu.RLock()
+	ipMap := m.maps["ip_telemetry"]
+	m.mu.RUnlock()
+
+	if ipMap == nil {
+		return nil, nil
+	}
+
+	var stats []IPStat
+	var key uint32
+	var value uint64
+	iter := ipMap.Iterate()
+	for iter.Next(&key, &value) {
+		stats = append(stats, IPStat{
+			IP:    uint32ToIP(key).String(),
+			Count: value,
+		})
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(stats, func(a, b IPStat) int {
+		return cmp.Compare(b.Count, a.Count)
+	})
+
+	if len(stats) > limit {
+		stats = stats[:limit]
+	}
+
+	return stats, nil
+}
+
 func (m *EbpfManager) GetMapStats() (MapStats, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -78,6 +78,13 @@ struct {
 } country_block_map SEC(".maps");
 
 struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u32);   // IPv4 address
+    __type(value, __u64); // Packet count
+} ip_telemetry SEC(".maps");
+
+struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 10240);
     __type(key, __u32);   // IP
@@ -210,6 +217,15 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
         return XDP_PASS;
 
     __u32 src_ip = iph->saddr;
+
+    // Telemetry: Count packets per IP (using LRU to prevent memory exhaustion)
+    __u64 *p_count = bpf_map_lookup_elem(&ip_telemetry, &src_ip);
+    if (p_count) {
+        __sync_fetch_and_add(p_count, 1);
+    } else {
+        __u64 init_count = 1;
+        bpf_map_update_elem(&ip_telemetry, &src_ip, &init_count, BPF_ANY);
+    }
 
     // 1. IP Shunning (DDoS Mitigation)
     __u32 *shunned = bpf_map_lookup_elem(&shunned_ips, &src_ip);

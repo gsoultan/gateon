@@ -11,6 +11,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -87,10 +88,27 @@ func (h *ProxyHandler) prepareRequest(r *http.Request, state *targetState, targe
 		r = r.WithContext(withClientRemoteAddr(r.Context(), r.RemoteAddr))
 	}
 
+	clientIP := request.GetClientIP(r, false)
+	r.Header.Set("X-Real-IP", clientIP)
+
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		r.Header.Set("X-Forwarded-For", xff+", "+clientIP)
+	} else {
+		r.Header.Set("X-Forwarded-For", clientIP)
+	}
+
 	r.URL.Host = targetURL.Host
 	r.URL.Scheme = targetURL.Scheme
 	r.Header.Set("X-Forwarded-Host", r.Host)
-	r.Header.Set("X-Forwarded-Proto", request.Scheme(r))
+	scheme := request.Scheme(r)
+	r.Header.Set("X-Forwarded-Proto", scheme)
+	if scheme == "https" {
+		r.Header.Set("X-Forwarded-Ssl", "on")
+	}
+	if ja4 := telemetry.GetCachedJA4H(r); ja4 != "" {
+		r.Header.Set("X-Gateon-JA4", ja4)
+	}
+
 	r.Host = targetURL.Host
 	return r
 }

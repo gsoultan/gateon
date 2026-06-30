@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -956,6 +957,17 @@ func recordTraceToStore(tr *TraceRecord) {
 		tr.Reset()
 		tracePool.Put(tr)
 	}
+}
+
+// RecordSecurityThreatWithJA4 is a helper that populates JA4 from the request before recording.
+func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThreat {
+	if t.JA4 == "" {
+		t.JA4 = GetCachedJA4H(r)
+	}
+	if t.Fingerprint == "" {
+		t.Fingerprint = GetFingerprintHash(r)
+	}
+	return t
 }
 
 // RecordSecurityThreat attempts to enqueue a security threat.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
@@ -95,6 +96,7 @@ func newPostureProvider(
 	clamav *security.ClamAVManager,
 	waf *middleware.WAFUpdater,
 	fimScanner *fim.Scanner,
+	ebpfManager ebpf.Manager,
 ) handlers.SecurityPostureProvider {
 	return func(ctx context.Context) *handlers.SecurityPostureReport {
 		report := &handlers.SecurityPostureReport{
@@ -107,6 +109,7 @@ func newPostureProvider(
 				RuleCount: yara.Default().RuleCount(),
 			},
 			SIEM: siem.CurrentStatus(),
+			Ebpf: ebpfPosture(ctx, globalStore, ebpfManager),
 		}
 		if fimScanner != nil {
 			st := fimScanner.Status()
@@ -147,5 +150,23 @@ func clamavPosture(ctx context.Context, store config.GlobalConfigStore, clamav *
 	p.LastScan = status.LastScan
 	p.LastResult = status.LastResult
 	p.LastError = status.LastError
+	return p
+}
+
+func ebpfPosture(ctx context.Context, store config.GlobalConfigStore, ebpfManager ebpf.Manager) handlers.EbpfPosture {
+	var p handlers.EbpfPosture
+	if gc := store.Get(ctx); gc != nil && gc.Ebpf != nil {
+		p.Enabled = gc.Ebpf.Enabled
+	}
+	if ebpfManager == nil {
+		return p
+	}
+	stats, err := ebpfManager.GetMapStats()
+	if err == nil {
+		p.Attached = stats.Attached
+		p.Interface = stats.Interface
+		p.AttachMode = stats.AttachMode
+		p.ShunnedIPs = stats.ShunnedIPsCount
+	}
 	return p
 }

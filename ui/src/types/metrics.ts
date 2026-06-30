@@ -162,6 +162,12 @@ export type SecurityInsights = {
   mitigated_today: number;
   heavy_hitters: HeavyHitter[] | null;
   global_threat_score: number;
+  ebpf_top_ips?: IPStat[] | null;
+};
+
+export type IPStat = {
+  ip: string;
+  count: number;
 };
 
 export type HeavyHitter = {

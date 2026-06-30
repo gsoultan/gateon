@@ -165,6 +165,7 @@ func threatToSignal(t *telemetry.SecurityThreat) correlation.Signal {
 		Type:        t.Type,
 		SourceIP:    t.SourceIP,
 		Fingerprint: t.Fingerprint,
+		JA4:         t.JA4,
 		Score:       t.Score,
 		Severity:    t.Severity,
 		Category:    t.Category,

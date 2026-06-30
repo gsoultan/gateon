@@ -35,6 +35,7 @@ const (
 	IsManagementContextKey = kind.IsManagementContextKey
 	DebugInfoContextKey    = kind.DebugInfoContextKey
 	FingerprintContextKey  = kind.FingerprintContextKey
+	CORSHandledContextKey  = kind.CORSHandledContextKey
 )
 
 var (

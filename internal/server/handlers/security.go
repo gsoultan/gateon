@@ -29,6 +29,7 @@ type SecurityPostureReport struct {
 	Signatures  SignaturePosture  `json:"signatures"`
 	SIEM        siem.StatusReport `json:"siem"`
 	FIM         *fim.Status       `json:"fim,omitzero"`
+	Ebpf        EbpfPosture       `json:"ebpf"`
 }
 
 // SignaturePosture reports the dependency-free YARA-lite upload signature engine
@@ -52,6 +53,15 @@ type ClamAVPosture struct {
 	LastScan   time.Time `json:"last_scan,omitzero"`
 	LastResult string    `json:"last_result,omitzero"`
 	LastError  string    `json:"last_error,omitzero"`
+}
+
+// EbpfPosture reports eBPF offloading and security state.
+type EbpfPosture struct {
+	Enabled    bool   `json:"enabled"`
+	Attached   bool   `json:"attached"`
+	Interface  string `json:"interface,omitzero"`
+	AttachMode string `json:"attach_mode,omitzero"`
+	ShunnedIPs int    `json:"shunned_ips"`
 }
 
 // registerSecurityHandlers wires the security posture and correlated-incidents

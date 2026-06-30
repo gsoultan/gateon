@@ -147,6 +147,9 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 		backendReq.Header.Set("X-Forwarded-Host", r.Host)
 	}
 	backendReq.Header.Set("X-Forwarded-Proto", request.Scheme(r))
+	if request.Scheme(r) == "https" {
+		backendReq.Header.Set("X-Forwarded-Ssl", "on")
+	}
 
 	// X-Forwarded-For: append the immediate peer IP to the chain.
 	// We use the underlying connection's remote address if available to ensure we
