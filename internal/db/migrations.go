@@ -924,4 +924,38 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(34, "add_advanced_metrics_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS entropy DOUBLE PRECISION DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS cluster_size INTEGER DEFAULT 0;`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS confidence DOUBLE DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS entropy DOUBLE DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS cluster_size INT DEFAULT 0;`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN confidence REAL DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN entropy REAL DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN cluster_size INTEGER DEFAULT 0;`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

@@ -16,6 +16,19 @@ type DiagnosticData struct {
 	ManagementHosts  []string
 	IPStats          map[string]*IPStats
 	FingerprintStats map[string]*FingerprintStats
+	PathMap          map[uint64]string            // Hash -> Original path
+	SequenceStats    map[[3]uint64]*SequenceStats // [3]PathHash -> Aggregated signals
+}
+
+type SequenceStats struct {
+	IPs        map[string]struct{}
+	UserAgents map[string]int
+	JA3s       map[string]int
+	JA4s       map[string]int
+	Countries  map[string]struct{}
+	UACount    int
+	JA3Count   int
+	JA4Count   int
 }
 
 // IsIPMitigated checks if an IP is currently blocked or shunned by any middleware.

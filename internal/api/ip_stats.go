@@ -27,4 +27,12 @@ type IPStats struct {
 	PathErrors    map[string]int // Track 401/403 errors per path
 	HeaderAnomaly int            // Count of requests with suspicious header combinations
 	LastTrace     *telemetry.TraceRecord
+
+	// Advanced Behavioral Signals
+	IATSum        float64   // Sum of durations between requests (ms)
+	IATSumSq      float64   // Sum of squares of durations (ms^2)
+	IATCount      int       // Number of inter-arrival intervals
+	LastRequestAt time.Time // Time of previous request for IAT calculation
+	LastPathHash  uint64    // Previous path hash
+	PrevPathHash  uint64    // Path hash before LastPathHash
 }

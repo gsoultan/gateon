@@ -19,6 +19,14 @@ func (f *fakeShun) ShunIP(ip string) error {
 	return nil
 }
 
+func (f *fakeShun) ShunJA4(ja4 string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.shunned = append(f.shunned, ja4)
+	return nil
+}
+
 func newTestResponder(cfg Config, shun Shunner) (*Responder, *[]string) {
 	var degraded []string
 	r := New(cfg, Deps{

@@ -232,6 +232,44 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
           )}
         </Grid>
 
+        {(anomaly.confidence !== undefined || anomaly.entropy !== undefined || (anomaly.cluster_size ?? 0) > 0) && (
+          <>
+            <Divider label="Advanced Metrics" labelPosition="center" />
+            <Grid grow>
+              {anomaly.confidence !== undefined && (
+                <Grid.Col span={{ base: 6, sm: 4 }}>
+                  <Stack gap={2} align="center">
+                    <Text size="xs" c="dimmed" fw={700}>CONFIDENCE</Text>
+                    <Badge variant="light" color={anomaly.confidence > 0.8 ? "red" : "orange"} size="lg">
+                      {Math.round(anomaly.confidence * 100)}%
+                    </Badge>
+                  </Stack>
+                </Grid.Col>
+              )}
+              {anomaly.entropy !== undefined && anomaly.entropy > 0 && (
+                <Grid.Col span={{ base: 6, sm: 4 }}>
+                  <Stack gap={2} align="center">
+                    <Text size="xs" c="dimmed" fw={700}>ENTROPY (UA)</Text>
+                    <Badge variant="light" color={anomaly.entropy < 1.0 ? "red" : "blue"} size="lg">
+                      {anomaly.entropy.toFixed(2)}
+                    </Badge>
+                  </Stack>
+                </Grid.Col>
+              )}
+              {(anomaly.cluster_size ?? 0) > 0 && (
+                <Grid.Col span={{ base: 6, sm: 4 }}>
+                  <Stack gap={2} align="center">
+                    <Text size="xs" c="dimmed" fw={700}>CLUSTER SIZE</Text>
+                    <Badge variant="light" color="violet" size="lg">
+                      {anomaly.cluster_size} IPs
+                    </Badge>
+                  </Stack>
+                </Grid.Col>
+              )}
+            </Grid>
+          </>
+        )}
+
         {(anomaly.request_headers || anomaly.request_body) && (
           <>
             <Divider label="Request Details" labelPosition="center" />

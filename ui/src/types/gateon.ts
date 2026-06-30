@@ -717,6 +717,9 @@ export type Anomaly = {
   response_body?: string;
   user_agent?: string;
   http_method?: string;
+  confidence?: number;
+  entropy?: number;
+  cluster_size?: number;
 };
 
 export type Reputation = {

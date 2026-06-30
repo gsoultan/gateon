@@ -159,76 +159,162 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 	now := time.Now()
 
 	t.Run("Legitimate common sequence - False Positive", func(t *testing.T) {
-		detector := &SecurityThreatDetector{Threshold: 10}
+		engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+				SecurityThreatThreshold: 10.0,
+			},
+		}, nil)
 
 		var traces []*telemetry.TraceRecord
-		for i := 1; i <= 20; i++ {
+		for i := 1; i <= 30; i++ {
 			ip := fmt.Sprintf("192.168.1.%d", i)
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/", Method: "GET", Timestamp: now})
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/login", Method: "GET", Timestamp: now.Add(time.Second)})
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/dashboard", Method: "GET", Timestamp: now.Add(2 * time.Second)})
-		}
-		// Set different UAs to avoid triggering identical UA signal
-		ipStats := make(map[string]*IPStats)
-		for i := 1; i <= 20; i++ {
-			ip := fmt.Sprintf("192.168.1.%d", i)
-			ipStats[ip] = &IPStats{
-				UniquePaths: map[string]struct{}{"/": {}, "/login": {}, "/dashboard": {}},
-				UserAgents:  map[string]struct{}{fmt.Sprintf("UA-%d", i): {}},
-			}
-		}
-
-		for i := range traces {
-			traces[i].UserAgent = fmt.Sprintf("UA-%d", i/3)
+			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/", Method: "GET", Timestamp: now, UserAgent: fmt.Sprintf("UA-%d", i)})
+			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/login", Method: "GET", Timestamp: now.Add(time.Second), UserAgent: fmt.Sprintf("UA-%d", i)})
+			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/dashboard", Method: "GET", Timestamp: now.Add(2 * time.Second), UserAgent: fmt.Sprintf("UA-%d", i)})
 		}
 
 		data := &DiagnosticData{
-			Traces:  traces,
-			IPStats: ipStats,
+			Traces: traces,
 		}
 
-		anomalies := detector.Detect(ctx, data)
+		anomalies := engine.Analyze(ctx, data)
 		coordinatedAnoms := 0
 		for _, a := range anomalies {
 			if a.Type == "coordinated_attack" {
 				coordinatedAnoms++
 			}
 		}
-		assert.Equal(t, 0, coordinatedAnoms, "Should NOT detect coordinated attack for legitimate sequence with different UAs")
+		assert.Equal(t, 0, coordinatedAnoms, "Should NOT detect coordinated attack for legitimate diverse sequence")
 	})
 
 	t.Run("Actual coordinated attack - True Positive", func(t *testing.T) {
-		detector := &SecurityThreatDetector{Threshold: 10}
+		engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+				SecurityThreatThreshold: 10.0,
+			},
+		}, nil)
 
 		var traces []*telemetry.TraceRecord
 		ua := "Bot-UA-1.0"
 		ja3 := "771,4865-4866-4867,0-23-65281-10-11-35-16-5-13-18-51-45-43-21,29-23-24,0"
-		ipStats := make(map[string]*IPStats)
-		for i := 1; i <= 6; i++ {
+		for i := 1; i <= 10; i++ {
 			ip := fmt.Sprintf("10.0.0.%d", i)
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/wp-login.php", Method: "POST", Timestamp: now, UserAgent: ua, JA3: ja3})
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/xmlrpc.php", Method: "POST", Timestamp: now.Add(time.Millisecond), UserAgent: ua, JA3: ja3})
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/admin-ajax.php", Method: "POST", Timestamp: now.Add(2 * time.Millisecond), UserAgent: ua, JA3: ja3})
-
-			ipStats[ip] = &IPStats{
-				UniquePaths: map[string]struct{}{"/wp-login.php": {}, "/xmlrpc.php": {}, "/admin-ajax.php": {}},
-				UserAgents:  map[string]struct{}{ua: {}},
-				JA3s:        map[string]int{ja3: 1},
-			}
 		}
 
 		data := &DiagnosticData{
-			Traces:  traces,
-			IPStats: ipStats,
+			Traces: traces,
 		}
 
-		anomalies := detector.Detect(ctx, data)
+		anomalies := engine.Analyze(ctx, data)
 		coordinatedAnoms := 0
 		for _, a := range anomalies {
 			if a.Type == "coordinated_attack" {
 				coordinatedAnoms++
 			}
 		}
-		assert.Equal(t, 1, coordinatedAnoms, "Should detect coordinated attack with same UA and JA3")
+		assert.GreaterOrEqual(t, coordinatedAnoms, 1, "Should detect coordinated attack with same UA and JA3")
+	})
+
+	t.Run("IAT Regularity Detection", func(t *testing.T) {
+		engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+				SecurityThreatThreshold: 30.0,
+			},
+		}, nil)
+
+		var traces []*telemetry.TraceRecord
+		ip := "1.2.3.4"
+		// Exactly every 5 seconds
+		for i := 0; i < 15; i++ {
+			traces = append(traces, &telemetry.TraceRecord{
+				SourceIP:  ip,
+				Path:      "/api/data",
+				Method:    "GET",
+				Timestamp: now.Add(time.Duration(i*5) * time.Second),
+			})
+		}
+
+		data := &DiagnosticData{
+			Traces: traces,
+		}
+
+		anomalies := engine.Analyze(ctx, data)
+		foundRegular := false
+		for _, a := range anomalies {
+			if a.Source == ip && strings.Contains(strings.ToLower(a.Description), "regular request intervals") {
+				foundRegular = true
+				break
+			}
+		}
+		assert.True(t, foundRegular, "Should detect highly regular request intervals")
+	})
+
+	t.Run("Adaptive Thresholding - High Global Noise", func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Now()
+		// Create 1000 IPs each with some legitimate traffic and errors
+		var traces []*telemetry.TraceRecord
+		for i := 0; i < 1000; i++ {
+			ip := fmt.Sprintf("10.1.1.%d", i%255) // cycle IPs
+			if i > 255 {
+				ip = fmt.Sprintf("10.1.2.%d", i%255)
+			}
+			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/", Method: "GET", Status: "404 Not Found", Timestamp: now, ServiceName: "app"})
+		}
+
+		engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+				SecurityThreatThreshold: 30.0,
+			},
+		}, nil)
+
+		data := &DiagnosticData{Traces: traces}
+		// Single IP with slightly suspicious but low-volume activity
+		ipNoise := "192.168.50.50"
+		for i := 0; i < 5; i++ {
+			data.Traces = append(data.Traces, &telemetry.TraceRecord{SourceIP: ipNoise, Path: "/debug", Method: "GET", Status: "404 Not Found", Timestamp: now, ServiceName: "app"})
+		}
+
+		anomalies := engine.Analyze(ctx, data)
+		foundNoise := false
+		for _, a := range anomalies {
+			if a.Source == ipNoise {
+				foundNoise = true
+				break
+			}
+		}
+		// With 1000 IPs and high error rate, threshold should be much higher than default 30
+		assert.False(t, foundNoise, "Should NOT flag noise IP when global traffic is high and threshold is adapted")
+	})
+
+	t.Run("Behavioral Clustering Detection", func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Now()
+		engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{}, nil)
+		var traces []*telemetry.TraceRecord
+		// 5 IPs accessing the same random set of 6 paths
+		paths := []string{"/p1", "/p2", "/p3", "/p4", "/p5", "/p6"}
+		for i := 1; i <= 5; i++ {
+			ip := fmt.Sprintf("172.16.0.%d", i)
+			for _, p := range paths {
+				traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: p, Method: "GET", Timestamp: now})
+			}
+		}
+
+		data := &DiagnosticData{Traces: traces}
+		anomalies := engine.Analyze(ctx, data)
+
+		foundCluster := false
+		for _, a := range anomalies {
+			if a.Type == "coordinated_attack" && strings.Contains(a.Description, "Behavioral cluster") {
+				foundCluster = true
+				assert.Equal(t, int32(5), a.ClusterSize)
+				break
+			}
+		}
+		assert.True(t, foundCluster, "Should detect behavioral cluster of IPs with identical path signatures")
 	})
 }

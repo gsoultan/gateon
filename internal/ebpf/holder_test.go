@@ -28,11 +28,12 @@ func (s *stubManager) SetAdaptiveRateLimit(string, time.Duration) error {
 	s.callCount++
 	return s.err
 }
-func (s *stubManager) ShunJA3([16]byte) error         { s.callCount++; return s.err }
-func (s *stubManager) UnshunJA3([16]byte) error       { s.callCount++; return s.err }
-func (s *stubManager) ShunJA4(string) error           { s.callCount++; return s.err }
-func (s *stubManager) BlocklistCuckoo(string) error   { s.callCount++; return s.err }
-func (s *stubManager) GetMapStats() (MapStats, error) { s.callCount++; return s.mapStats, s.err }
+func (s *stubManager) ShunJA3([16]byte) error          { s.callCount++; return s.err }
+func (s *stubManager) UnshunJA3([16]byte) error        { s.callCount++; return s.err }
+func (s *stubManager) ShunJA4(string) error            { s.callCount++; return s.err }
+func (s *stubManager) BlocklistCuckoo(string) error    { s.callCount++; return s.err }
+func (s *stubManager) GetTopIPs(int) ([]IPStat, error) { s.callCount++; return nil, s.err }
+func (s *stubManager) GetMapStats() (MapStats, error)  { s.callCount++; return s.mapStats, s.err }
 
 // TestHolderNoOpWhenEmpty verifies that every mutating call is a safe no-op and
 // GetMapStats returns empty stats when no underlying manager is installed.

@@ -295,3 +295,51 @@ func TestGenerateIDUniqueness(t *testing.T) {
 		ids[id] = true
 	}
 }
+
+func TestGetTopThreatSources(t *testing.T) {
+	// Start fresh
+	_ = ClosePathStatsStore(context.Background())
+
+	dbPath := filepath.Join(t.TempDir(), "top_threats.db")
+	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
+		t.Fatalf("init store: %v", err)
+	}
+	defer ClosePathStatsStore(context.Background())
+
+	// Wait for store loop
+	time.Sleep(100 * time.Millisecond)
+
+	// Record a few threats from the same IP with an ASN string
+	const ip = "1.2.3.4"
+	const asn = "AS7713 PT Telekomunikasi Indonesia"
+	for range 3 {
+		RecordSecurityThreat(SecurityThreat{
+			ID:          request.GenerateID(),
+			SourceIP:    ip,
+			ASN:         asn,
+			Type:        "attack",
+			ActionTaken: "blocked",
+			Time:        time.Now(),
+		})
+	}
+
+	// Flush (batch flush is ~1s)
+	time.Sleep(1500 * time.Millisecond)
+
+	// This should NOT fail if fixed, but currently it triggers "scan failed" log and returns empty/wrong data
+	top := GetTopThreatSources(t.Context(), 10)
+
+	if len(top) == 0 {
+		t.Fatal("Expected 1 top threat source, got 0. Check if scan failed in logs.")
+	}
+
+	if top[0].Label != ip {
+		t.Errorf("Expected label %s, got %s", ip, top[0].Label)
+	}
+	if top[0].Value != 3 {
+		t.Errorf("Expected value 3, got %f", top[0].Value)
+	}
+	if top[0].Subtext != asn {
+		t.Errorf("Expected subtext %s, got %s", asn, top[0].Subtext)
+	}
+}
