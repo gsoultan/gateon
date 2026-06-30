@@ -51,14 +51,28 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) Middlewar
 }
 
 // Entropy middleware calculates Shannon entropy of the request body.
+// It uses a non-destructive read to avoid interfering with proxying.
 func Entropy(threshold float64, routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.ContentLength > 0 && r.ContentLength < 1024*1024 {
-				body, err := io.ReadAll(r.Body)
-				if err == nil {
-					r.Body = io.NopCloser(bytes.NewBuffer(body))
-					e := entropy.Calculate(body)
+			if r.Body != nil && r.Body != http.NoBody {
+				// We limit entropy check to 1MB to avoid memory issues and latency
+				limit := int64(1024 * 1024)
+				// Use a TeeReader-like approach but we need the data before next.ServeHTTP
+				// if we want to block, but here we only record threats.
+				// To keep it non-destructive and simple:
+				peeked, err := io.ReadAll(io.LimitReader(r.Body, limit))
+				if err == nil && len(peeked) > 0 {
+					// Restore body for downstream
+					r.Body = struct {
+						io.Reader
+						io.Closer
+					}{
+						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+						Closer: r.Body,
+					}
+
+					e := entropy.Calculate(peeked)
 					if e > threshold {
 						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID)
 					}
@@ -139,16 +153,25 @@ func XSSRecognition(routeID string) Middleware {
 				}
 			}
 
-			// Check body if small
-			if !found && r.ContentLength > 0 && r.ContentLength < 64*1024 {
+			// Check body if small or if we can peek it safely
+			if !found && r.Body != nil && r.Body != http.NoBody {
 				buf := securityBufferPool.Get().(*bytes.Buffer)
 				buf.Reset()
 				defer securityBufferPool.Put(buf)
 
-				if _, err := io.Copy(buf, io.LimitReader(r.Body, 64*1024)); err == nil {
-					body := buf.Bytes()
-					r.Body = io.NopCloser(bytes.NewReader(body))
-					if matches := xssScanner.FindAll(string(body)); len(matches) > 0 {
+				// Peek up to 64KB
+				peeked, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+				if err == nil && len(peeked) > 0 {
+					// Restore body for downstream
+					r.Body = struct {
+						io.Reader
+						io.Closer
+					}{
+						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+						Closer: r.Body,
+					}
+
+					if matches := xssScanner.FindAll(string(peeked)); len(matches) > 0 {
 						found = true
 						details = fmt.Sprintf("XSS pattern(s) '%s' found in request body", strings.Join(matches, ", "))
 					}

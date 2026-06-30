@@ -90,16 +90,20 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			var bodyBuf []byte
 			if cfg.ForwardBody && (r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH") {
 				var err error
-				if maxBody >= 0 {
-					bodyBuf, err = io.ReadAll(io.LimitReader(r.Body, maxBody))
-				} else {
-					bodyBuf, err = io.ReadAll(r.Body)
-				}
+				// Peek body up to limit to avoid destructive read
+				bodyBuf, err = io.ReadAll(io.LimitReader(r.Body, maxBody))
 				if err != nil {
 					http.Error(w, "failed to read body", http.StatusBadRequest)
 					return
 				}
-				r.Body = io.NopCloser(bytes.NewReader(bodyBuf))
+				// Restore body for downstream
+				r.Body = struct {
+					io.Reader
+					io.Closer
+				}{
+					Reader: io.MultiReader(bytes.NewReader(bodyBuf), r.Body),
+					Closer: r.Body,
+				}
 			}
 
 			var bodyReader io.Reader

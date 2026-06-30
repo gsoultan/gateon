@@ -412,14 +412,18 @@ SecAuditLog "%s"
 		wafConfig = wafConfig.WithDirectives(`SecRuleEngine Off`)
 	}
 
-	if cfg.RequestBodyLimit > 0 {
-		wafConfig = wafConfig.WithRequestBodyLimit(cfg.RequestBodyLimit)
+	if cfg.RequestBodyLimit > 0 || cfg.EnableMalwareDetection || cfg.EnableRansomwareDetection {
+		limit := cfg.RequestBodyLimit
+		if limit <= 0 {
+			limit = 10 * 1024 * 1024 // Default to 10MB if malware detection is on but no limit set
+		}
+		wafConfig = wafConfig.WithRequestBodyLimit(limit)
 		// Also set in-memory limit to 10% of total limit or 1MB min, but not exceeding the total limit
-		memLimit := int64(cfg.RequestBodyLimit) / 10
+		memLimit := int64(limit) / 10
 		if memLimit < 1024*1024 {
 			memLimit = 1024 * 1024
 		}
-		memLimit = min(memLimit, int64(cfg.RequestBodyLimit))
+		memLimit = min(memLimit, int64(limit))
 		wafConfig = wafConfig.WithRequestBodyInMemoryLimit(int(memLimit))
 		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
 	}
@@ -618,11 +622,13 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 
 func isSafeHeader(name string) bool {
 	// Fast path for canonical headers (most frequent in modern browsers)
+	// We use exact case matching for performance, then fallback to EqualFold.
 	switch name {
 	case "Authorization", "Cookie", "Set-Cookie", "X-Csrf-Token", "X-Xsrf-Token",
-		"Sec-Websocket-Key", "Sec-Websocket-Accept", "X-Api-Key", "X-Auth-Token",
+		"Sec-Websocket-Key", "Sec-Websocket-Accept", "X-Api-Key", "X-API-Key", "X-Auth-Token",
 		"X-Gateon-Fingerprint", "X-Request-Id", "X-Correlation-Id",
-		"X-Amz-Date", "X-Amz-Security-Token":
+		"X-Amz-Date", "X-Amz-Security-Token", "Content-Type", "Accept-Encoding",
+		"User-Agent", "Referer", "Host", "Origin", "Connection", "Upgrade":
 		return true
 	}
 
@@ -631,12 +637,15 @@ func isSafeHeader(name string) bool {
 		hasPrefixFold(name, "X-Goog-") ||
 		hasPrefixFold(name, "X-Apple-") ||
 		hasPrefixFold(name, "X-Ms-") ||
-		hasPrefixFold(name, "Grpc-") {
+		hasPrefixFold(name, "Grpc-") ||
+		hasPrefixFold(name, "Access-Control-") {
 		return true
 	}
 
-	// Fallback for non-canonical forms
-	if strings.EqualFold(name, "authorization") || strings.EqualFold(name, "cookie") {
+	// Fallback for non-canonical forms or mixed case
+	lname := strings.ToLower(name)
+	switch lname {
+	case "authorization", "cookie", "set-cookie", "x-api-key", "x-csrf-token", "x-xsrf-token":
 		return true
 	}
 

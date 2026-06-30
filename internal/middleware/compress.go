@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"bufio"
 	"compress/gzip"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -116,9 +118,13 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 				return
 			}
 
-			bodyBuf := compressBodyPool.Get().(*[]byte)
+			bodyBuf, ok := compressBodyPool.Get().(*[]byte)
+			if !ok {
+				b := make([]byte, 0, 4096)
+				bodyBuf = &b
+			}
 			*bodyBuf = (*bodyBuf)[:0]
-			rec := &compressRecorder{ResponseWriter: w, status: 200, maxBytes: maxBuf, body: *bodyBuf}
+			rec := &compressRecorder{ResponseWriter: w, status: 200, maxBytes: maxBuf, body: bodyBuf}
 			next.ServeHTTP(rec, r)
 
 			// Already compressed or error - pass through
@@ -139,7 +145,7 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 				rec.returnBody()
 				return
 			}
-			if len(rec.body) < minBytes {
+			if len(*rec.body) < minBytes {
 				rec.flushRaw(false)
 				rec.returnBody()
 				return
@@ -158,13 +164,13 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 			if encoding == "br" {
 				bw := brotliWriterPool.Get().(*brotli.Writer)
 				bw.Reset(w)
-				_, _ = bw.Write(rec.body)
+				_, _ = bw.Write(*rec.body)
 				bw.Close()
 				brotliWriterPool.Put(bw)
 			} else if encoding == "gzip" {
 				gz := gzipWriterPool.Get().(*gzip.Writer)
 				gz.Reset(w)
-				_, _ = gz.Write(rec.body)
+				_, _ = gz.Write(*rec.body)
 				gz.Close()
 				gzipWriterPool.Put(gz)
 			}
@@ -225,7 +231,7 @@ func selectCompressionEncoding(acceptEncoding string, algorithm string) string {
 type compressRecorder struct {
 	http.ResponseWriter
 	status     int
-	body       []byte
+	body       *[]byte
 	maxBytes   int
 	header     http.Header
 	wrote      bool
@@ -257,14 +263,34 @@ func (r *compressRecorder) Write(b []byte) (int, error) {
 	if r.overflowed {
 		return r.ResponseWriter.Write(b)
 	}
-	if len(r.body)+len(b) <= r.maxBytes {
-		r.body = append(r.body, b...)
+	if len(*r.body)+len(b) <= r.maxBytes {
+		*r.body = append(*r.body, b...)
 		return len(b), nil
 	}
 	// Exceeded buffer: flush buffered data raw (no Content-Length; streaming), then pass through
 	r.overflowed = true
 	r.flushRaw(true)
 	return r.ResponseWriter.Write(b)
+}
+
+func (r *compressRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *compressRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func (r *compressRecorder) Push(target string, opts *http.PushOptions) error {
+	if p, ok := r.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
 
 func (r *compressRecorder) flushRaw(streaming bool) {
@@ -276,17 +302,16 @@ func (r *compressRecorder) flushRaw(streaming bool) {
 		}
 	}
 	if !streaming {
-		r.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(len(r.body)))
+		r.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(len(*r.body)))
 	}
 	r.ResponseWriter.WriteHeader(r.status)
-	_, _ = r.ResponseWriter.Write(r.body)
+	_, _ = r.ResponseWriter.Write(*r.body)
 }
 
 // returnBody returns the body buffer to the pool for reuse.
 func (r *compressRecorder) returnBody() {
 	if r.body != nil {
-		b := r.body
-		compressBodyPool.Put(&b)
+		compressBodyPool.Put(r.body)
 		r.body = nil
 	}
 }

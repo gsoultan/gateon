@@ -358,17 +358,6 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		}
 	}
 
-	// Global WAF: when enabled in the global config, protect every route with the
-	// full OWASP CRS (plus malware/ransomware detection) without requiring a
-	// per-route "waf" middleware to be attached. This is what makes the global
-	// "Enable WAF" switch actually take effect; previously global.Waf.Enabled only
-	// fed defaults into per-route merges and never ran on its own.
-	if gwaf, err := mwFactory.CreateGlobalWAF(); err != nil {
-		logger.L.LogError("failed to build global WAF middleware", "error", err, "route", routeLabel)
-	} else if gwaf != nil {
-		chain = append(chain, gwaf)
-	}
-
 	// Set the route name once for the user middlewares and the inner proxy
 	// handler, rather than re-allocating a context value on every middleware on
 	// every request. Placed after the infrastructure/security middlewares so it
@@ -412,6 +401,19 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 				}
 			}
 		}
+	}
+
+	// Global WAF: when enabled in the global config, protect every route with the
+	// full OWASP CRS (plus malware/ransomware detection) without requiring a
+	// per-route "waf" middleware to be attached. Placed after the user-defined
+	// middlewares so it runs closer to the proxy: on the response path it sees
+	// uncompressed data (running before Gzip) and on the request path it runs
+	// after Auth, avoiding inspection of blocked/unauthenticated traffic and
+	// preventing interference with high-entropy auth headers.
+	if gwaf, err := mwFactory.CreateGlobalWAF(); err != nil {
+		logger.L.LogError("failed to build global WAF middleware", "error", err, "route", routeLabel)
+	} else if gwaf != nil {
+		chain = append(chain, gwaf)
 	}
 
 	if len(chain) > 0 {
