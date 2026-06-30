@@ -40,6 +40,8 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 
 	// 1. Coordinated scan detection
 	pathIPs := d.detectCoordinatedScans(data)
+	totalIPs := len(data.IPStats)
+
 	if d.Config == nil || d.Config.EnableSequenceValidation {
 		anomalies = append(anomalies, d.detectCoordinatedSequences(data)...)
 	}
@@ -79,7 +81,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		// Analysis pipeline
 		score += d.analyzeTraffic(stats, &reasons, &primaryType)
 		score += d.analyzeErrors(stats, &reasons, &primaryType)
-		score += d.analyzePatterns(stats, pathIPs, &reasons, &primaryType)
+		score += d.analyzePatterns(stats, pathIPs, totalIPs, &reasons, &primaryType)
 		score += d.analyzeHeaders(stats, &reasons)
 		score += d.analyzeBehavior(stats, &reasons)
 		score += d.analyzeDirectoryBusting(stats, &reasons)
@@ -157,7 +159,7 @@ func (d *SecurityThreatDetector) detectCoordinatedScans(data *DiagnosticData) ma
 
 func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
-	if len(data.Traces) < 10 {
+	if len(data.Traces) < 15 {
 		return nil
 	}
 
@@ -167,8 +169,12 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		ua       string
 		ja3      string
 		ja4      string
+		country  string
 	}
 	ipData := make(map[string]*ipMetadata)
+	totalIPs := len(data.IPStats)
+	pathPopularity := make(map[string]int)
+
 	for _, tr := range data.Traces {
 		if tr.SourceIP == "" || tr.Path == "" {
 			continue
@@ -176,6 +182,9 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		meta, ok := ipData[tr.SourceIP]
 		if !ok {
 			meta = &ipMetadata{ua: tr.UserAgent, ja3: tr.JA3, ja4: tr.JA4}
+			if s, exists := data.IPStats[tr.SourceIP]; exists {
+				meta.country = s.CountryCode
+			}
 			ipData[tr.SourceIP] = meta
 		}
 		// Skip consecutive duplicate paths (polling)
@@ -185,15 +194,23 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		meta.sequence = append(meta.sequence, tr.Path)
 	}
 
+	// Calculate Global Path Popularity to distinguish happy paths
+	for _, stats := range data.IPStats {
+		for path := range stats.UniquePaths {
+			pathPopularity[strings.ToLower(path)]++
+		}
+	}
+
 	// 2. Identify common sub-sequences (Signature) and collect signals
 	type sigStats struct {
 		ips        map[string]struct{}
 		userAgents map[string]struct{}
 		ja3s       map[string]struct{}
 		ja4s       map[string]struct{}
-		uaCount    int // How many IPs provided non-empty UA
-		ja3Count   int // How many IPs provided non-empty JA3
-		ja4Count   int // How many IPs provided non-empty JA4
+		countries  map[string]struct{}
+		uaCount    int
+		ja3Count   int
+		ja4Count   int
 	}
 	signatureStats := make(map[string]*sigStats)
 	for ip, meta := range ipData {
@@ -210,6 +227,7 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 					userAgents: make(map[string]struct{}),
 					ja3s:       make(map[string]struct{}),
 					ja4s:       make(map[string]struct{}),
+					countries:  make(map[string]struct{}),
 				}
 				signatureStats[sig] = stats
 			}
@@ -227,6 +245,9 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 					stats.ja4s[meta.ja4] = struct{}{}
 					stats.ja4Count++
 				}
+				if meta.country != "" {
+					stats.countries[meta.country] = struct{}{}
+				}
 			}
 		}
 	}
@@ -236,68 +257,107 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 	// 3. Score and flag sequences
 	for sig, stats := range signatureStats {
 		ipCount := len(stats.ips)
-		if ipCount < 4 { // Minimum threshold to start considering it
+
+		// DYNAMIC MINIMUM THRESHOLD: Scales with total traffic volume
+		// A common sequence hit by 5% of users is likely legitimate application flow.
+		minIPs := 3
+		if totalIPs > 20 {
+			minIPs = int(math.Max(3, float64(totalIPs)*0.06))
+		}
+
+		if ipCount < minIPs {
 			continue
 		}
 
-		score := ipCount * 5
-		reasons := []string{fmt.Sprintf("%d distinct IPs", ipCount)}
-
-		// Signal: Identical User-Agent across multiple IPs
-		// We only boost if at least 2 IPs provided a UA and they are all identical.
-		if len(stats.userAgents) == 1 && stats.uaCount >= 2 {
-			score += 40
-			reasons = append(reasons, "identical User-Agent")
+		// DIVERSITY ANALYSIS: Coordinated botnets often use same tools/fingerprints
+		uaDiversity := 1.0
+		if stats.uaCount > 1 {
+			uaDiversity = float64(len(stats.userAgents)) / float64(stats.uaCount)
+		}
+		fingerprintDiversity := 1.0
+		if stats.ja3Count > 1 || stats.ja4Count > 1 {
+			totalFingerprints := stats.ja3Count + stats.ja4Count
+			distinctFingerprints := len(stats.ja3s) + len(stats.ja4s)
+			fingerprintDiversity = float64(distinctFingerprints) / float64(totalFingerprints)
 		}
 
-		// Signal: Identical JA3 fingerprint across multiple IPs
+		// POPULARITY ANALYSIS: Determine if this sequence is a "Happy Path"
+		sigPaths := strings.Split(sig, "->")
+		minPopularity := totalIPs
+		for _, p := range sigPaths {
+			pop := pathPopularity[strings.ToLower(p)]
+			if pop < minPopularity {
+				minPopularity = pop
+			}
+		}
+		popularityRatio := float64(minPopularity) / float64(max(1, totalIPs))
+
+		// Base Score based on IP count
+		score := float64(ipCount * 5)
+		reasons := []string{fmt.Sprintf("%d distinct IPs", ipCount)}
+
+		// SIGNAL: Low diversity is highly suspicious
+		if uaDiversity <= 0.25 || fingerprintDiversity <= 0.25 {
+			score *= 2.0
+			reasons = append(reasons, "low fingerprint diversity (botnet indicator)")
+		} else if uaDiversity > 0.8 && fingerprintDiversity > 0.8 {
+			// High diversity (different browsers/OS) -> likely legitimate humans
+			score *= 0.3
+		}
+
+		// SIGNAL: Sequence popularity (Happy Path discount)
+		if totalIPs > 10 {
+			if popularityRatio > 0.3 {
+				score *= 0.1 // 90% discount for very common paths
+				reasons = append(reasons, "very common application flow")
+			} else if popularityRatio > 0.15 {
+				score *= 0.4
+			}
+		}
+
+		// Signal boosts for identical identifiers (original logic)
+		if len(stats.userAgents) == 1 && stats.uaCount >= 3 {
+			score += 50
+			reasons = append(reasons, "identical User-Agent")
+		}
 		if len(stats.ja3s) == 1 && stats.ja3Count >= 2 {
 			score += 40
 			reasons = append(reasons, "identical JA3 fingerprint")
 		}
 
-		// Signal: Identical JA4 fingerprint across multiple IPs
-		if len(stats.ja4s) == 1 && stats.ja4Count >= 2 {
-			score += 40
-			reasons = append(reasons, "identical JA4 fingerprint")
-		}
-
-		// Signal: Suspicious paths in the sequence
+		// Suspicious paths in the sequence
 		suspiciousInSig := false
-		sigPaths := strings.Split(sig, "->")
 		for _, p := range sigPaths {
 			lp := strings.ToLower(p)
 			if patterns.SuspiciousPath.MatchString(lp) {
 				suspiciousInSig = true
 				break
 			}
-			// Check honeypots
 			for _, hp := range patterns.HoneypotPaths {
 				if lp == strings.ToLower(hp) {
-					score += 100
+					score += 150
 					reasons = append(reasons, "contains honeypot path")
 					break
 				}
 			}
 		}
 		if suspiciousInSig {
-			score += 30
+			score += 40
 			reasons = append(reasons, "contains suspicious paths")
 		}
 
-		// A "coordinated attack" needs high confidence (score >= 100)
-		// This avoids flagging 4 random users following the same common path (score 20)
-		if score >= 100 || (ipCount > 15 && score >= 70) {
+		// Final detection threshold
+		if score >= 100 || (ipCount > 25 && score >= 70) {
 			ipList := slices.Collect(maps.Keys(stats.ips))
 			slices.Sort(ipList)
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           "coordinated_attack",
-				Severity:       d.calculateSeverity(score, 40),
-				Description:    fmt.Sprintf("Coordinated behavior signature detected (%s): %d distinct IPs followed the same sequence: %s", strings.Join(reasons, ", "), ipCount, sig),
+				Severity:       d.calculateSeverity(int(score), 40),
+				Description:    fmt.Sprintf("Coordinated behavior detected (%s): %d IPs followed sequence [%s]. Diversity: %.2f, Popularity: %.2f", strings.Join(reasons, ", "), ipCount, sig, fingerprintDiversity, popularityRatio),
 				Timestamp:      time.Now().Format(time.RFC3339),
 				Source:         strings.Join(ipList, ", "),
-				Recommendation: "Multiple actors are following an identical path sequence with highly similar fingerprints. This is a strong indicator of a distributed botnet. Recommend blocking all involved IPs and fingerprints.",
+				Recommendation: "Multiple actors with suspicious fingerprint similarity are following an identical path sequence. Recommend implementing CAPTCHA or JS challenge for these IPs.",
 			}
 			anomalies = append(anomalies, anomaly)
 		}
@@ -447,7 +507,7 @@ func (d *SecurityThreatDetector) analyzeErrors(stats *IPStats, reasons *[]string
 	return score
 }
 
-func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[string]map[string]struct{}, reasons *[]string, primaryType *string) int {
+func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[string]map[string]struct{}, totalIPs int, reasons *[]string, primaryType *string) int {
 	score := 0
 	matches := 0
 	coordinatedCount := 0
@@ -461,7 +521,7 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 		// Check Honeypot Paths
 		for _, hp := range patterns.HoneypotPaths {
 			if lp == strings.ToLower(hp) {
-				score += 100 // Instant critical threat
+				score += 150 // Instant critical threat
 				honeypotHits++
 				pathMatched = true
 				break
@@ -469,11 +529,16 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 		}
 
 		if patterns.SuspiciousPath.MatchString(lp) {
-			score += 25
+			pathScore := 20
 			pathMatched = true
-			if len(pathIPs[lp]) > 1 {
+
+			// Only count as coordinated if it's NOT a popular path (hit by < 10% of users)
+			// and at least 2 distinct IPs hit it. In small datasets, we skip popularity check.
+			popRatio := float64(len(pathIPs[lp])) / float64(max(1, totalIPs))
+			if (totalIPs < 10 || popRatio < 0.1) && len(pathIPs[lp]) > 1 {
 				coordinatedCount++
 			}
+			score += pathScore
 		}
 
 		if patterns.SQLI.MatchString(lp) || patterns.XSS.MatchString(lp) || patterns.Traversal.MatchString(lp) ||
@@ -501,8 +566,9 @@ func (d *SecurityThreatDetector) analyzePatterns(stats *IPStats, pathIPs map[str
 	}
 
 	if coordinatedCount > 0 {
-		score += 20 * coordinatedCount
-		*reasons = append(*reasons, fmt.Sprintf("Coordinated scan of %d suspicious paths detected", coordinatedCount))
+		// Non-linear coordination boost to avoid explosive scores in high traffic
+		score += int(math.Min(100, float64(15*coordinatedCount)))
+		*reasons = append(*reasons, fmt.Sprintf("Coordinated access to %d suspicious paths", coordinatedCount))
 	}
 
 	return score
@@ -558,16 +624,14 @@ func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]stri
 }
 
 func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons *[]string) int {
-	if stats.Error404 < 10 {
+	// Require more 404s and a minimum total requests to avoid flagging low-traffic noise
+	if stats.Error404 < 20 || stats.TotalRequests < 30 {
 		return 0
 	}
 
 	// Group 404s by parent directory
 	dirs := make(map[string]int)
 	for path := range stats.UniquePaths {
-		// We don't have per-path status in IPStats directly, but we have PathErrors.
-		// Wait, PathErrors only tracks 401/403 according to ip_stats.go.
-		// Let's assume most unique paths hit by a scanner result in 404.
 		parts := strings.Split(path, "/")
 		if len(parts) > 2 {
 			dir := "/" + parts[1]
@@ -584,9 +648,10 @@ func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons
 		}
 	}
 
-	if maxBust > 15 {
+	// Higher threshold for modern apps
+	if maxBust > 30 {
 		*reasons = append(*reasons, fmt.Sprintf("Directory busting detected in %s (%d unique paths)", suspiciousDir, maxBust))
-		return 50
+		return 60
 	}
 
 	return 0
