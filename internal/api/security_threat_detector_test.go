@@ -162,20 +162,29 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		detector := &SecurityThreatDetector{Threshold: 10}
 
 		var traces []*telemetry.TraceRecord
-		for i := 1; i <= 4; i++ {
+		for i := 1; i <= 20; i++ {
 			ip := fmt.Sprintf("192.168.1.%d", i)
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/", Method: "GET", Timestamp: now})
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/login", Method: "GET", Timestamp: now.Add(time.Second)})
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/dashboard", Method: "GET", Timestamp: now.Add(2 * time.Second)})
 		}
 		// Set different UAs to avoid triggering identical UA signal
+		ipStats := make(map[string]*IPStats)
+		for i := 1; i <= 20; i++ {
+			ip := fmt.Sprintf("192.168.1.%d", i)
+			ipStats[ip] = &IPStats{
+				UniquePaths: map[string]struct{}{"/": {}, "/login": {}, "/dashboard": {}},
+				UserAgents:  map[string]struct{}{fmt.Sprintf("UA-%d", i): {}},
+			}
+		}
+
 		for i := range traces {
 			traces[i].UserAgent = fmt.Sprintf("UA-%d", i/3)
 		}
 
 		data := &DiagnosticData{
 			Traces:  traces,
-			IPStats: make(map[string]*IPStats),
+			IPStats: ipStats,
 		}
 
 		anomalies := detector.Detect(ctx, data)
@@ -194,16 +203,23 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		var traces []*telemetry.TraceRecord
 		ua := "Bot-UA-1.0"
 		ja3 := "771,4865-4866-4867,0-23-65281-10-11-35-16-5-13-18-51-45-43-21,29-23-24,0"
-		for i := 1; i <= 4; i++ {
+		ipStats := make(map[string]*IPStats)
+		for i := 1; i <= 6; i++ {
 			ip := fmt.Sprintf("10.0.0.%d", i)
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/wp-login.php", Method: "POST", Timestamp: now, UserAgent: ua, JA3: ja3})
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/xmlrpc.php", Method: "POST", Timestamp: now.Add(time.Millisecond), UserAgent: ua, JA3: ja3})
 			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/admin-ajax.php", Method: "POST", Timestamp: now.Add(2 * time.Millisecond), UserAgent: ua, JA3: ja3})
+
+			ipStats[ip] = &IPStats{
+				UniquePaths: map[string]struct{}{"/wp-login.php": {}, "/xmlrpc.php": {}, "/admin-ajax.php": {}},
+				UserAgents:  map[string]struct{}{ua: {}},
+				JA3s:        map[string]int{ja3: 1},
+			}
 		}
 
 		data := &DiagnosticData{
 			Traces:  traces,
-			IPStats: make(map[string]*IPStats),
+			IPStats: ipStats,
 		}
 
 		anomalies := detector.Detect(ctx, data)
