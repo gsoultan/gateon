@@ -53,7 +53,7 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			isGRPCWeb := detector.IsGrpcWebRequest(r) || detector.IsAcceptableGrpcCorsRequest(r)
+			isGRPCWeb := detector.IsGrpcWebRequest(r) || (r.Method == http.MethodOptions && detector.IsAcceptableGrpcCorsRequest(r))
 
 			if isGRPCWeb {
 				if r.Context().Value(CORSHandledContextKey) != nil {
@@ -111,19 +111,20 @@ func serveGRPCWeb(w http.ResponseWriter, r *http.Request, detector *grpcweb.Wrap
 		r.Body = io.NopCloser(base64.NewDecoder(base64.StdEncoding, r.Body))
 	}
 
+	// gRPC requires HTTP/2. We upgrade the request metadata
+	// so the proxy knows to treat it as a gRPC call.
+	// We only do this for actual gRPC requests, not for CORS preflights.
+	if r.Method == http.MethodPost && r.ProtoMajor < 2 {
+		r.ProtoMajor = 2
+		r.ProtoMinor = 0
+	}
+
 	if strings.HasPrefix(contentType, "application/grpc-web") {
 		// Translate gRPC-Web content type to standard gRPC
 		newType := contentType
 		newType = strings.Replace(newType, "application/grpc-web-text", "application/grpc", 1)
 		newType = strings.Replace(newType, "application/grpc-web", "application/grpc", 1)
 		r.Header.Set("Content-Type", newType)
-	}
-
-	// gRPC requires HTTP/2. We upgrade the request metadata
-	// so the proxy knows to treat it as a gRPC call.
-	if r.ProtoMajor < 2 {
-		r.ProtoMajor = 2
-		r.ProtoMinor = 0
 	}
 
 	gwrw := &grpcWebResponseWriter{
@@ -160,17 +161,20 @@ func (w *grpcWebResponseWriter) WriteHeader(code int) {
 
 	h := w.ResponseWriter.Header()
 
-	// Translate Content-Type back to gRPC-Web
+	// Only apply gRPC-Web transformations if this is a gRPC response.
 	ct := h.Get("Content-Type")
-	if strings.HasPrefix(ct, "application/grpc") && !strings.HasPrefix(ct, "application/grpc-web") {
-		h.Set("Content-Type", w.originalWebCT)
+	isGRPC := strings.HasPrefix(ct, "application/grpc")
+
+	if isGRPC {
+		// Translate Content-Type back to gRPC-Web
+		if !strings.HasPrefix(ct, "application/grpc-web") {
+			h.Set("Content-Type", w.originalWebCT)
+		}
+		// Remove Content-Length since we will append trailer frames
+		h.Del("Content-Length")
+		// Announce trailers in the Trailer header so the client knows to expect them
+		h.Del("Trailer")
 	}
-
-	// Remove Content-Length since we will append trailer frames
-	h.Del("Content-Length")
-
-	// Announce trailers in the Trailer header so the client knows to expect them
-	h.Del("Trailer")
 
 	w.ResponseWriter.WriteHeader(code)
 }
