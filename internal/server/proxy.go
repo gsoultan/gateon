@@ -24,21 +24,14 @@ func (s *Server) GetOrCreateProxy(rt *gateonv1.Route) http.Handler {
 // gRPC-Web: conversion happens only when the route has the grpcweb middleware.
 // Internal API: no matching route -> internalAPI (dashboard); origin allow-all.
 func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, internalAPI entrypoint.GRPCWebHandler, mux *http.ServeMux) {
-	isGRPC := (r.ProtoMajor == 2 || r.ProtoMajor == 3) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
-	isGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsAcceptableGrpcCorsRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
-
-	// For CORS preflight (OPTIONS), the detector might be too strict.
-	// If it's a preflight for a POST request, we treat it as potentially gRPC-Web
-	// to ensure it can match gRPC routes or be handled by the internal gRPC-Web CORS handler.
-	if !isGRPCWeb && r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") == "POST" {
-		isGRPCWeb = true
-	}
-
-	isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
+	isMgmt := false
 	if rs := middleware.GetRequestState(r); rs != nil {
 		isMgmt = rs.IsManagement
+	} else if m, ok := r.Context().Value(middleware.IsManagementContextKey).(bool); ok {
+		isMgmt = m
 	}
 
+	// 1. Try to find and handle a user-defined route first (priority)
 	if !isMgmt {
 		var rt *gateonv1.Route
 		if rs := middleware.GetRequestState(r); rs != nil {
@@ -61,41 +54,61 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 					"route", cmp.Or(rt.Name, rt.Id),
 					"rule", rt.Rule)
 			}
+
+			// Security: Enforce HTTPS if configured for the route
 			if rt.Tls != nil && r.TLS == nil {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("HTTPS required"))
 				return
 			}
-			if ((isGRPC || isGRPCWeb) && (strings.EqualFold(rt.Type, "grpc") || strings.EqualFold(rt.Type, "http"))) || (!isGRPC && !isGRPCWeb) {
-				isActualGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
-				if isActualGRPCWeb && strings.EqualFold(rt.Type, "grpc") && !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {
-					w.WriteHeader(http.StatusUnsupportedMediaType)
-					_, _ = w.Write([]byte("gRPC-Web requires the grpcweb middleware on this route"))
-					return
+
+			// Protocol Check: Only for gRPC routes, verify gRPC-Web requirements
+			if strings.EqualFold(rt.Type, "grpc") && internalAPI != nil {
+				// We use a stricter check here for actual gRPC-Web payloads
+				if internalAPI.IsGrpcWebRequest(r) || internalAPI.IsGrpcWebSocketRequest(r) {
+					if !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {
+						w.WriteHeader(http.StatusUnsupportedMediaType)
+						_, _ = w.Write([]byte("gRPC-Web requires the grpcweb middleware on this route"))
+						return
+					}
 				}
-				h := s.GetOrCreateProxy(rt)
-				if h == nil {
-					w.WriteHeader(http.StatusBadGateway)
-					return
-				}
+			}
+
+			// Execute proxy
+			h := s.GetOrCreateProxy(rt)
+			if h != nil {
 				h.ServeHTTP(w, r)
 				return
 			}
+			w.WriteHeader(http.StatusBadGateway)
+			return
 		}
 	}
+
+	// 2. Fallback to Internal API (Dashboard), Metrics, or Mux
+	// We only use the dashboard gRPC-Web handler if no user route matched.
+	isGRPC := (r.ProtoMajor >= 2) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+	isGRPCWeb := internalAPI != nil && (internalAPI.IsGrpcWebRequest(r) || internalAPI.IsAcceptableGrpcCorsRequest(r) || internalAPI.IsGrpcWebSocketRequest(r))
+
+	// Broaden OPTIONS detection for dashboard preflights if not already caught
+	if !isGRPCWeb && r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") == "POST" {
+		isGRPCWeb = true
+	}
+
 	if isGRPC || isGRPCWeb {
 		if internalAPI != nil {
-			// Internal API: dashboard gRPC-Web (no matching user route)
 			internalAPI.ServeHTTP(w, r)
 		} else {
 			w.WriteHeader(http.StatusNotImplemented)
 		}
 		return
 	}
+
 	if r.URL.Path == "/metrics" {
 		promhttp.Handler().ServeHTTP(w, r)
 		return
 	}
+
 	mux.ServeHTTP(w, r)
 }
 
