@@ -140,6 +140,14 @@ func (h *Holder) BlocklistCuckoo(ip string) error {
 	return nil
 }
 
+// GetTopIPs delegates to the active manager, if any.
+func (h *Holder) GetTopIPs(limit int) ([]IPStat, error) {
+	if m := h.Current(); m != nil {
+		return m.GetTopIPs(limit)
+	}
+	return nil, nil
+}
+
 // GetMapStats delegates to the active manager, returning empty stats when the
 // eBPF subsystem is disabled.
 func (h *Holder) GetMapStats() (MapStats, error) {

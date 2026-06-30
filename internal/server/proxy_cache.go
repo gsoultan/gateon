@@ -4,7 +4,10 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
@@ -25,9 +28,10 @@ type ProxyCache struct {
 	ebpfManager   ebpf.Manager
 	reputation    *reputation.IPReputationStore
 	redisClient   redis.Client
-	proxies       map[string]http.Handler
-	proxyHandlers map[string]*proxy.ProxyHandler
-	mu            sync.RWMutex
+	proxies       atomic.Value // map[string]http.Handler
+	proxyHandlers atomic.Value // map[string]*proxy.ProxyHandler
+	mu            sync.Mutex   // only for writes
+	sf            singleflight.Group
 }
 
 // NewProxyCache creates a proxy cache with the given dependencies.
@@ -41,17 +45,18 @@ func NewProxyCache(
 	ipReputation any,
 ) *ProxyCache {
 	rep, _ := ipReputation.(*reputation.IPReputationStore)
-	return &ProxyCache{
-		routeStore:    routeStore,
-		serviceStore:  serviceStore,
-		mwStore:       mwStore,
-		globalStore:   globalStore,
-		ebpfManager:   ebpfManager,
-		reputation:    rep,
-		redisClient:   redisClient,
-		proxies:       make(map[string]http.Handler),
-		proxyHandlers: make(map[string]*proxy.ProxyHandler),
+	c := &ProxyCache{
+		routeStore:   routeStore,
+		serviceStore: serviceStore,
+		mwStore:      mwStore,
+		globalStore:  globalStore,
+		ebpfManager:  ebpfManager,
+		reputation:   rep,
+		redisClient:  redisClient,
 	}
+	c.proxies.Store(make(map[string]http.Handler))
+	c.proxyHandlers.Store(make(map[string]*proxy.ProxyHandler))
+	return c
 }
 
 func transportConfigFromGlobal(gc *gateonv1.GlobalConfig) *proxy.TransportConfig {
@@ -74,27 +79,53 @@ func transportConfigFromGlobal(gc *gateonv1.GlobalConfig) *proxy.TransportConfig
 
 // GetOrCreate returns a cached proxy handler for the route or creates one.
 func (c *ProxyCache) GetOrCreate(rt *gateonv1.Route) http.Handler {
-	c.mu.RLock()
-	h, ok := c.proxies[rt.Id]
-	c.mu.RUnlock()
-	if ok {
+	// Lock-free read path
+	m := c.proxies.Load().(map[string]http.Handler)
+	if h, ok := m[rt.Id]; ok {
 		return h
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if h, ok = c.proxies[rt.Id]; ok {
-		return h
-	}
-	transportCfg := transportConfigFromGlobal(c.globalStore.Get(context.Background()))
-	stripCORS := router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "cors")
-	pHandler := proxy.NewProxyHandlerBuilder(rt, c.serviceStore, nil).
-		SetTransportConfig(transportCfg).
-		SetStripCORS(stripCORS).
-		Build()
-	c.proxyHandlers[rt.Id] = pHandler
-	h = router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)
-	c.proxies[rt.Id] = h
-	return h
+
+	// Use singleflight to prevent thundering herd during cold start or invalidation
+	res, _, _ := c.sf.Do(rt.Id, func() (any, error) {
+		// Double check under write lock
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		m := c.proxies.Load().(map[string]http.Handler)
+		if h, ok := m[rt.Id]; ok {
+			return h, nil
+		}
+
+		transportCfg := transportConfigFromGlobal(c.globalStore.Get(context.Background()))
+		stripCORS := router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "cors") ||
+			router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "grpcweb")
+		pHandler := proxy.NewProxyHandlerBuilder(rt, c.serviceStore, nil).
+			SetTransportConfig(transportCfg).
+			SetStripCORS(stripCORS).
+			Build()
+
+		h := router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)
+
+		// Atomic update: swap maps
+		newProxies := make(map[string]http.Handler, len(m)+1)
+		for k, v := range m {
+			newProxies[k] = v
+		}
+		newProxies[rt.Id] = h
+		c.proxies.Store(newProxies)
+
+		phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
+		newPhMap := make(map[string]*proxy.ProxyHandler, len(phMap)+1)
+		for k, v := range phMap {
+			newPhMap[k] = v
+		}
+		newPhMap[rt.Id] = pHandler
+		c.proxyHandlers.Store(newPhMap)
+
+		return h, nil
+	})
+
+	return res.(http.Handler)
 }
 
 // InvalidateRoute removes the cached proxy for the given route ID.
@@ -124,10 +155,32 @@ func (c *ProxyCache) InvalidateRoutes(strategy func(*gateonv1.Route) bool) {
 const drainTimeout = 30 * time.Second
 
 func (c *ProxyCache) invalidateLocked(id string) {
-	ph := c.proxyHandlers[id]
-	old := c.proxies[id]
-	delete(c.proxies, id)
-	delete(c.proxyHandlers, id)
+	phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
+	m := c.proxies.Load().(map[string]http.Handler)
+
+	ph := phMap[id]
+	old := m[id]
+
+	if ph == nil && old == nil {
+		return
+	}
+
+	newM := make(map[string]http.Handler, len(m))
+	for k, v := range m {
+		if k != id {
+			newM[k] = v
+		}
+	}
+	c.proxies.Store(newM)
+
+	newPhMap := make(map[string]*proxy.ProxyHandler, len(phMap))
+	for k, v := range phMap {
+		if k != id {
+			newPhMap[k] = v
+		}
+	}
+	c.proxyHandlers.Store(newPhMap)
+
 	if ph != nil {
 		go ph.DrainAndClose(drainTimeout)
 		return
@@ -142,18 +195,16 @@ func (c *ProxyCache) invalidateLocked(id string) {
 
 // GetRouteStats returns target stats for a route, or nil if not found.
 func (c *ProxyCache) GetRouteStats(routeID string) []proxy.TargetStats {
-	c.mu.RLock()
-	ph, ok := c.proxyHandlers[routeID]
-	c.mu.RUnlock()
+	phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
+	ph, ok := phMap[routeID]
 	if !ok {
 		rt, exists := c.routeStore.Get(context.Background(), routeID)
 		if !exists || rt == nil {
 			return nil
 		}
 		_ = c.GetOrCreate(rt)
-		c.mu.RLock()
-		ph = c.proxyHandlers[routeID]
-		c.mu.RUnlock()
+		phMap = c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
+		ph = phMap[routeID]
 	}
 	if ph == nil {
 		return nil
@@ -165,5 +216,6 @@ func (c *ProxyCache) GetRouteStats(routeID string) []proxy.TargetStats {
 func (c *ProxyCache) Sync() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_ = len(c.proxies)
+	m := c.proxies.Load().(map[string]http.Handler)
+	_ = len(m)
 }

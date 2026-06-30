@@ -13,8 +13,8 @@ import {
   Group 
 } from '@mantine/core';
 import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
-import { IconMapPin, IconActivity, IconTarget } from '@tabler/icons-react';
-import type { MetricsSnapshot, LabeledCount, DonutChartDataItem, HeavyHitter } from '../../types/metrics';
+import { IconMapPin, IconActivity, IconTarget, IconCpu } from '@tabler/icons-react';
+import type { MetricsSnapshot, LabeledCount, DonutChartDataItem, HeavyHitter, IPStat } from '../../types/metrics';
 
 interface CountryData {
   country: string;
@@ -148,6 +148,43 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                     </Table.Td>
                   </Table.Tr>
                 ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Card>
+
+        <Card withBorder radius="md">
+          <Title order={4} mb="md">Kernel-Level Network Telemetry</Title>
+          <Text size="xs" c="dimmed" mb="sm">Top IPs tracked via eBPF/XDP offloading</Text>
+          <Table.ScrollContainer minWidth={300}>
+            <Table>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Source IP</Table.Th>
+                  <Table.Th ta="right">Packet Count</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {metrics?.security?.ebpf_top_ips?.map((s: IPStat) => (
+                  <Table.Tr key={s.ip}>
+                    <Table.Td>
+                      <Group gap="sm">
+                        <ThemeIcon size="sm" radius="xl" color="teal" variant="light"><IconCpu size={14} /></ThemeIcon>
+                        <Text size="sm" fw={700} ff="monospace">{s.ip}</Text>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td ta="right">
+                      <Text size="sm" fw={500}>{s.count.toLocaleString()}</Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+                {(!metrics?.security?.ebpf_top_ips || metrics.security.ebpf_top_ips.length === 0) && (
+                  <Table.Tr>
+                    <Table.Td colSpan={2} ta="center" py="xl">
+                      <Text size="sm" c="dimmed">No kernel telemetry available (eBPF might be disabled).</Text>
+                    </Table.Td>
+                  </Table.Tr>
+                )}
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>

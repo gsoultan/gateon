@@ -210,6 +210,14 @@ SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 15" "id:900012,phase:2,nolog,pa
 SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900013,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=4"
 SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 80" "id:900011,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
 SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 95" "id:900010,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
+
+# Adaptive Body Inspection Depth
+# Trustworthy clients (Reputation > 90) are allowed massive bodies (up to 1GB for Git pushes).
+# Standard clients (Reputation > 40) are capped at 100MB.
+# Unknown or low-reputation clients are strictly capped at 1MB to prevent DoS via WAF buffering.
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 90" "id:900400,phase:1,nolog,pass,ctl:requestBodyLimit=1073741824"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900401,phase:1,nolog,pass,ctl:requestBodyLimit=104857600"
+SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 40" "id:900402,phase:1,nolog,pass,ctl:requestBodyLimit=1048576"
 `)
 
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
@@ -463,6 +471,7 @@ SecAuditLog "%s"
 			r.Header.Del("X-Gateon-Anomaly-Score")
 			r.Header.Del("X-Gateon-Threat-Type")
 			r.Header.Del("X-Gateon-WAF-Matched")
+			r.Header.Del("X-Gateon-JA4")
 
 			if IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
@@ -491,6 +500,16 @@ SecAuditLog "%s"
 			reputation := telemetry.GetReputationScore(fingerprint)
 			// Use cached string to avoid allocation
 			r.Header.Set("X-Gateon-Reputation", getReputationString(reputation))
+			r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
+
+			// GitLab Git-over-HTTP Bypass: Git pushes can be massive (GBs) and are
+			// structurally incompatible with the buffering required for deep body
+			// inspection. We trust highly reputable clients (>90) for these specific
+			// paths/content-types.
+			if reputation > 90 && isGitTraffic(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 
 			// Deterministic Fast Path: Aho-Corasick & Entropy
 			// We check the URI (which includes the query string) plus the two
@@ -604,7 +623,7 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 		category = "bot"
 	}
 
-	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:        typeStr,
 		SourceIP:    clientIP,
 		Score:       100,
@@ -617,7 +636,7 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 		Category:    category,
 		Severity:    "critical",
 		ActionTaken: "blocked",
-	})
+	}))
 }
 
 func isSafeHeader(name string) bool {
@@ -650,6 +669,15 @@ func isSafeHeader(name string) bool {
 	}
 
 	return false
+}
+
+func isGitTraffic(r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	if ct == "application/x-git-receive-pack-request" || ct == "application/x-git-upload-pack-request" {
+		return true
+	}
+	path := r.URL.Path
+	return strings.HasSuffix(path, "/git-receive-pack") || strings.HasSuffix(path, "/git-upload-pack")
 }
 
 func hasPrefixFold(s, prefix string) bool {
@@ -803,6 +831,24 @@ func (t *txWrapper) ProcessLogging() {
 
 		// Record security threat for telemetry and UI
 		// We use ActionTaken: "blocked" which will be picked up by the Mitigated Attacks page.
+		// We can't easily use RecordSecurityThreatWithJA4 here because we don't have the original *http.Request easily accessible
+		// in txhttp.WrapHandler callback, BUT txWrapper has access to the transaction which might have it.
+		// Actually, txhttp.WrapHandler usually puts the transaction in context.
+		// However, t.cfg has EbpfManager, and t.Transaction has JA4 in its collections if Coraza is configured to extract it.
+		// For now, since JA4 is calculated from the request, and we are in ProcessLogging which is phase 5,
+		// we should ensure JA4 is passed down.
+
+		ja4 := ""
+		if ca, ok := t.Transaction.(interface {
+			GetCollection(variables.RuleVariable) collection.Collection
+		}); ok {
+			if c, ok := ca.GetCollection(variables.RequestHeaders).(collection.Keyed); ok {
+				if vals := c.Get("X-Gateon-JA4"); len(vals) > 0 {
+					ja4 = vals[0]
+				}
+			}
+		}
+
 		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 			ID:          fmt.Sprintf("waf-block-%s", t.ID()),
 			Type:        "waf_block",
@@ -815,6 +861,7 @@ func (t *txWrapper) ProcessLogging() {
 			Category:    category,
 			Severity:    severity,
 			ActionTaken: "blocked",
+			JA4:         ja4,
 		})
 	}
 	t.Transaction.ProcessLogging()

@@ -112,6 +112,7 @@ func main() {
 	// pointer or forcing a restart. The supervisor's first reconcile applies the
 	// boot-time config (privilege gating, Start, poll loop).
 	ebpfHolder := ebpf.NewHolder(nil)
+	telemetry.SetEbpfManager(&ebpfAdapter{ebpfHolder})
 	var wafUpdater *middleware.WAFUpdater
 	var clamavManager *security.ClamAVManager
 
@@ -333,4 +334,20 @@ func version() string {
 		return v
 	}
 	return "dev"
+}
+
+type ebpfAdapter struct {
+	*ebpf.Holder
+}
+
+func (a *ebpfAdapter) GetTopIPs(limit int) ([]telemetry.IPStat, error) {
+	ips, err := a.Holder.GetTopIPs(limit)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]telemetry.IPStat, len(ips))
+	for i, ip := range ips {
+		res[i] = telemetry.IPStat{IP: ip.IP, Count: ip.Count}
+	}
+	return res, nil
 }

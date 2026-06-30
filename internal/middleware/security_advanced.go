@@ -108,7 +108,7 @@ func serveTrollResponse(w http.ResponseWriter) {
 
 func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string) {
 	logger.SecurityEvent(ttype, r, details)
-	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		ID:         fmt.Sprintf("adv-%s-%d", ttype, time.Now().UnixNano()),
 		Type:       ttype,
 		SourceIP:   request.GetClientIP(r, true),
@@ -118,7 +118,7 @@ func recordAdvancedThreat(r *http.Request, ttype string, score float64, details 
 		RouteID:    routeID,
 		RequestURI: r.URL.Path,
 		Category:   "xss", // Default to xss category for XSS threats
-	})
+	}))
 }
 
 // XSSRecognition middleware scans request for common XSS patterns.

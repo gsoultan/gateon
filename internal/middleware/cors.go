@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/rs/cors"
@@ -30,6 +31,19 @@ func CORS(cfg CORSConfig) Middleware {
 	})
 
 	return func(next http.Handler) http.Handler {
-		return c.Handler(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Context().Value(CORSHandledContextKey) != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Mark as handled for downstream middlewares
+			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r = r.WithContext(context.WithValue(r.Context(), CORSHandledContextKey, true))
+				next.ServeHTTP(w, r)
+			})
+
+			c.Handler(wrappedNext).ServeHTTP(w, r)
+		})
 	}
 }

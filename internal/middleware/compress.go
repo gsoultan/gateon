@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -90,17 +89,13 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 	if minBytes <= 0 {
 		minBytes = defaultMinResponseBodyBytes
 	}
-	maxBuf := cfg.MaxBufferBytes
-	if maxBuf <= 0 {
-		maxBuf = defaultMaxBufferBytes
-	}
 	algorithm := normalizeCompressionAlgorithm(cfg.Algorithm)
 	excluded := parseContentTypes(cfg.ExcludedContentTypes)
 	included := parseContentTypes(cfg.IncludedContentTypes)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) || ShouldSkipMetrics(r) {
+			if IsCorsPreflight(r) || ShouldSkipMetrics(r) || r.Header.Get("Upgrade") != "" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -118,65 +113,152 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 				return
 			}
 
-			bodyBuf, ok := compressBodyPool.Get().(*[]byte)
-			if !ok {
-				b := make([]byte, 0, 4096)
-				bodyBuf = &b
+			cw := &compressWriter{
+				ResponseWriter: w,
+				encoding:       encoding,
+				minBytes:       minBytes,
+				excluded:       excluded,
+				included:       included,
+				status:         http.StatusOK,
 			}
-			*bodyBuf = (*bodyBuf)[:0]
-			rec := &compressRecorder{ResponseWriter: w, status: 200, maxBytes: maxBuf, body: bodyBuf}
-			next.ServeHTTP(rec, r)
+			defer cw.Close()
 
-			// Already compressed or error - pass through
-			if rec.Header().Get("Content-Encoding") != "" || rec.status >= 300 {
-				rec.flushRaw(false)
-				rec.returnBody()
-				return
-			}
-
-			contentType := strings.ToLower(strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0]))
-			if excluded[contentType] {
-				rec.flushRaw(false)
-				rec.returnBody()
-				return
-			}
-			if len(included) > 0 && !included[contentType] {
-				rec.flushRaw(false)
-				rec.returnBody()
-				return
-			}
-			if len(*rec.body) < minBytes {
-				rec.flushRaw(false)
-				rec.returnBody()
-				return
-			}
-
-			for k, v := range rec.Header() {
-				for _, vv := range v {
-					w.Header().Add(k, vv)
-				}
-			}
-
-			w.Header().Set("Content-Encoding", encoding)
-			w.Header().Del("Content-Length")
-			w.WriteHeader(rec.status)
-
-			if encoding == "br" {
-				bw := brotliWriterPool.Get().(*brotli.Writer)
-				bw.Reset(w)
-				_, _ = bw.Write(*rec.body)
-				bw.Close()
-				brotliWriterPool.Put(bw)
-			} else if encoding == "gzip" {
-				gz := gzipWriterPool.Get().(*gzip.Writer)
-				gz.Reset(w)
-				_, _ = gz.Write(*rec.body)
-				gz.Close()
-				gzipWriterPool.Put(gz)
-			}
-			rec.returnBody()
+			next.ServeHTTP(cw, r)
 		})
 	}
+}
+
+type compressWriter struct {
+	http.ResponseWriter
+	encoding string
+	minBytes int
+	excluded map[string]bool
+	included map[string]bool
+
+	status      int
+	wroteHeader bool
+	buf         []byte
+	compressor  io.WriteCloser
+	decided     bool
+	should      bool
+}
+
+func (w *compressWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.status = status
+	w.wroteHeader = true
+}
+
+func (w *compressWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.decided {
+		if w.should {
+			return w.compressor.Write(b)
+		}
+		return w.ResponseWriter.Write(b)
+	}
+
+	w.buf = append(w.buf, b...)
+	if len(w.buf) >= w.minBytes {
+		w.decide()
+	}
+	return len(b), nil
+}
+
+func (w *compressWriter) decide() {
+	if w.decided {
+		return
+	}
+	w.decided = true
+
+	h := w.ResponseWriter.Header()
+	// Skip if already encoded, or error, or small, or excluded type
+	if h.Get("Content-Encoding") != "" || w.status >= 300 || w.status == http.StatusNoContent || w.status == http.StatusNotModified {
+		w.should = false
+	} else {
+		contentType := strings.ToLower(strings.TrimSpace(strings.Split(h.Get("Content-Type"), ";")[0]))
+		if excluded := w.excluded[contentType]; excluded {
+			w.should = false
+		} else if len(w.included) > 0 && !w.included[contentType] {
+			w.should = false
+		} else {
+			w.should = true
+		}
+	}
+
+	if w.should {
+		h.Set("Content-Encoding", w.encoding)
+		h.Del("Content-Length")
+		h.Add("Vary", "Accept-Encoding")
+		w.ResponseWriter.WriteHeader(w.status)
+		if w.encoding == "br" {
+			bw := brotliWriterPool.Get().(*brotli.Writer)
+			bw.Reset(w.ResponseWriter)
+			w.compressor = bw
+		} else {
+			gz := gzipWriterPool.Get().(*gzip.Writer)
+			gz.Reset(w.ResponseWriter)
+			w.compressor = gz
+		}
+		if len(w.buf) > 0 {
+			_, _ = w.compressor.Write(w.buf)
+		}
+	} else {
+		w.ResponseWriter.WriteHeader(w.status)
+		if len(w.buf) > 0 {
+			_, _ = w.ResponseWriter.Write(w.buf)
+		}
+	}
+	w.buf = nil
+}
+
+func (w *compressWriter) Close() error {
+	if !w.decided {
+		w.decide()
+	}
+	if w.should && w.compressor != nil {
+		err := w.compressor.Close()
+		if w.encoding == "br" {
+			brotliWriterPool.Put(w.compressor)
+		} else {
+			gzipWriterPool.Put(w.compressor)
+		}
+		w.compressor = nil
+		return err
+	}
+	return nil
+}
+
+func (w *compressWriter) Flush() {
+	if !w.decided {
+		w.decide()
+	}
+	if w.should && w.compressor != nil {
+		if f, ok := w.compressor.(interface{ Flush() error }); ok {
+			_ = f.Flush()
+		}
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func (w *compressWriter) Push(target string, opts *http.PushOptions) error {
+	if p, ok := w.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
 
 func parseContentTypes(ct []string) map[string]bool {
@@ -226,92 +308,4 @@ func selectCompressionEncoding(acceptEncoding string, algorithm string) string {
 	}
 
 	return ""
-}
-
-type compressRecorder struct {
-	http.ResponseWriter
-	status     int
-	body       *[]byte
-	maxBytes   int
-	header     http.Header
-	wrote      bool
-	overflowed bool // true once we exceeded buffer and switched to pass-through
-}
-
-func (r *compressRecorder) Header() http.Header {
-	if r.header == nil {
-		r.header = make(http.Header)
-	}
-	return r.header
-}
-
-func (r *compressRecorder) WriteHeader(code int) {
-	if r.wrote {
-		return
-	}
-	r.status = code
-	r.wrote = true
-}
-
-func (r *compressRecorder) Write(b []byte) (int, error) {
-	if !r.wrote {
-		r.WriteHeader(http.StatusOK)
-	}
-	if r.header == nil {
-		r.header = make(http.Header)
-	}
-	if r.overflowed {
-		return r.ResponseWriter.Write(b)
-	}
-	if len(*r.body)+len(b) <= r.maxBytes {
-		*r.body = append(*r.body, b...)
-		return len(b), nil
-	}
-	// Exceeded buffer: flush buffered data raw (no Content-Length; streaming), then pass through
-	r.overflowed = true
-	r.flushRaw(true)
-	return r.ResponseWriter.Write(b)
-}
-
-func (r *compressRecorder) Flush() {
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (r *compressRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
-		return h.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
-}
-
-func (r *compressRecorder) Push(target string, opts *http.PushOptions) error {
-	if p, ok := r.ResponseWriter.(http.Pusher); ok {
-		return p.Push(target, opts)
-	}
-	return http.ErrNotSupported
-}
-
-func (r *compressRecorder) flushRaw(streaming bool) {
-	if r.header != nil {
-		for k, v := range r.header {
-			for _, vv := range v {
-				r.ResponseWriter.Header().Add(k, vv)
-			}
-		}
-	}
-	if !streaming {
-		r.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(len(*r.body)))
-	}
-	r.ResponseWriter.WriteHeader(r.status)
-	_, _ = r.ResponseWriter.Write(*r.body)
-}
-
-// returnBody returns the body buffer to the pool for reuse.
-func (r *compressRecorder) returnBody() {
-	if r.body != nil {
-		compressBodyPool.Put(r.body)
-		r.body = nil
-	}
 }

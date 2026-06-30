@@ -5,11 +5,22 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
+
+type EbpfProvider interface {
+	GetTopIPs(limit int) ([]IPStat, error)
+}
+
+var globalEbpfManager atomic.Pointer[EbpfProvider]
+
+func SetEbpfManager(m EbpfProvider) {
+	globalEbpfManager.Store(&m)
+}
 
 // MetricsSnapshot holds a structured view of all Prometheus metrics for the UI.
 type MetricsSnapshot struct {
@@ -102,6 +113,12 @@ type SecurityInsights struct {
 	MitigatedToday    int               `json:"mitigated_today"`
 	HeavyHitters      []HeavyHitter     `json:"heavy_hitters,omitzero"`
 	GlobalThreatScore float64           `json:"global_threat_score"`
+	EbpfTopIPs        []IPStat          `json:"ebpf_top_ips,omitzero"`
+}
+
+type IPStat struct {
+	IP    string `json:"ip"`
+	Count uint64 `json:"count"`
 }
 
 // GoldenSignals represents the four golden signals of monitoring.
@@ -246,6 +263,11 @@ func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
 	snap.System = buildSystemMetrics(idx)
 	snap.Security = buildSecurityInsights(ctx, idx, limit, offset)
+	if m := globalEbpfManager.Load(); m != nil {
+		if ips, err := (*m).GetTopIPs(5); err == nil {
+			snap.Security.EbpfTopIPs = ips
+		}
+	}
 	snap.MitigationFunnel = buildMitigationFunnel(idx)
 
 	// Build active threat metrics

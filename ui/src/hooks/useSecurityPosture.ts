@@ -44,6 +44,14 @@ export interface FimStatus {
   total_drift?: number;
 }
 
+export interface EbpfPosture {
+  enabled: boolean;
+  attached: boolean;
+  interface?: string;
+  attach_mode?: string;
+  shunned_ips: number;
+}
+
 export interface SecurityPosture {
   version: string;
   generated_at: string;
@@ -52,6 +60,7 @@ export interface SecurityPosture {
   signatures: SignaturePosture;
   siem: SiemStatus;
   fim?: FimStatus;
+  ebpf: EbpfPosture;
 }
 
 export function useSecurityPosture(refetchIntervalMs = 15000) {

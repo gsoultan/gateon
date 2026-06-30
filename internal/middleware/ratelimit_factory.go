@@ -24,7 +24,7 @@ func (f *Factory) createRateLimit(cfg map[string]string) (Middleware, error) {
 		if burst <= 0 {
 			burst = 5
 		}
-		limiter = NewRateLimiter(xrate.Limit(rateVal), burst)
+		limiter = NewRateLimiterWithEbpf(xrate.Limit(rateVal), burst, f.ebpfManager)
 	}
 
 	trust := request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"])

@@ -46,6 +46,7 @@ const (
 // Shunner hard-blocks a source IP (satisfied by *ebpf.Holder / ebpf.Manager).
 type Shunner interface {
 	ShunIP(ip string) error
+	ShunJA4(ja4 string) error
 }
 
 // Config tunes the responder. Zero value is usable via Normalize().
@@ -145,6 +146,9 @@ func (r *Responder) Handle(inc correlation.Incident) Action {
 		if r.cfg.AutoShun && r.shun != nil && inc.SourceIP != "" &&
 			distinct >= r.cfg.MinDistinctSignalsForShun {
 			if err := r.shun.ShunIP(inc.SourceIP); err == nil {
+				if inc.JA4 != "" {
+					_ = r.shun.ShunJA4(inc.JA4)
+				}
 				r.degradeRep(inc, r.cfg.RestrictPenalty)
 				if r.mark != nil {
 					r.mark(inc.SourceIP, "correlated critical incident: "+strings.Join(inc.SignalTypes, ","))

@@ -99,7 +99,7 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 		// Analyze IAT for robotic regularity (low variance)
 		if len(state.IATs) >= 5 {
 			if isRoboticTiming(state.IATs, highTrafficFactor) {
-				RecordSecurityThreat(SecurityThreat{
+				RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
 					Type:        "behavioral_anomaly",
 					Fingerprint: fingerprint,
 					Score:       30 / highTrafficFactor,
@@ -107,10 +107,10 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 					RequestURI:  path,
 					ActionTaken: "flagged",
 					Severity:    "low",
-				})
+				}))
 			}
 			if isHeartbeatPattern(state.IATs, highTrafficFactor) {
-				RecordSecurityThreat(SecurityThreat{
+				RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
 					Type:        "behavioral_anomaly",
 					Fingerprint: fingerprint,
 					Score:       40 / highTrafficFactor,
@@ -118,7 +118,7 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 					RequestURI:  path,
 					ActionTaken: "flagged",
 					Severity:    "medium",
-				})
+				}))
 			}
 		}
 	}
@@ -135,7 +135,7 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 
 	// Analyze for API Fuzzing / Scanning
 	if isFuzzing(state.StatusCodes, highTrafficFactor) {
-		RecordSecurityThreat(SecurityThreat{
+		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
 			Type:        "api_fuzzing",
 			Fingerprint: fingerprint,
 			Score:       60 / highTrafficFactor,
@@ -143,12 +143,12 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 			RequestURI:  path,
 			ActionTaken: "flagged",
 			Severity:    "high",
-		})
+		}))
 	}
 
 	// Analyze Sequence for jump-to-critical-path
 	if isSuspiciousSequence(state.Sequence) {
-		RecordSecurityThreat(SecurityThreat{
+		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
 			Type:        "behavioral_anomaly",
 			Fingerprint: fingerprint,
 			Score:       50,
@@ -156,12 +156,12 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 			RequestURI:  path,
 			ActionTaken: "flagged",
 			Severity:    "medium",
-		})
+		}))
 	}
 
 	// Analyze for Directory Traversal / Probe
 	if isProbePattern(path) {
-		RecordSecurityThreat(SecurityThreat{
+		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
 			Type:        "probe_detected",
 			Fingerprint: fingerprint,
 			Score:       70,
@@ -169,7 +169,7 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 			RequestURI:  path,
 			ActionTaken: "flagged",
 			Severity:    "high",
-		})
+		}))
 	}
 
 	state.LastPath = path
@@ -182,14 +182,14 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 		hostname = hostname[:idx]
 	}
 	if isDGAPattern(hostname) {
-		RecordSecurityThreat(SecurityThreat{
+		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
 			Type:        "dga_detected",
 			Fingerprint: fingerprint,
 			Score:       40,
 			Details:     "Potential DGA hostname detected: " + hostname,
 			RequestURI:  path,
 			ActionTaken: "flagged",
-		})
+		}))
 	}
 }
 

@@ -37,6 +37,7 @@ type Signal struct {
 	Type        string
 	SourceIP    string
 	Fingerprint string
+	JA4         string
 	Score       float64
 	Severity    string
 	Category    string
@@ -54,6 +55,7 @@ type Incident struct {
 	SourceKey   string      `json:"source_key"`
 	SourceIP    string      `json:"source_ip"`
 	Fingerprint string      `json:"fingerprint,omitzero"`
+	JA4         string      `json:"ja4,omitzero"`
 	FirstSeen   time.Time   `json:"first_seen,omitzero"`
 	LastSeen    time.Time   `json:"last_seen,omitzero"`
 	Severity    string      `json:"severity"`
@@ -241,6 +243,7 @@ func (e *Engine) buildIncident(key string, signals []Signal) Incident {
 	first := signals[0].Time
 	last := signals[0].Time
 	fingerprint := ""
+	ja4 := ""
 	sourceIP := ""
 
 	for _, sig := range signals {
@@ -264,6 +267,9 @@ func (e *Engine) buildIncident(key string, signals []Signal) Incident {
 		if fingerprint == "" && sig.Fingerprint != "" {
 			fingerprint = sig.Fingerprint
 		}
+		if ja4 == "" && sig.JA4 != "" {
+			ja4 = sig.JA4
+		}
 		if sourceIP == "" && sig.SourceIP != "" {
 			sourceIP = sig.SourceIP
 		}
@@ -274,6 +280,7 @@ func (e *Engine) buildIncident(key string, signals []Signal) Incident {
 		SourceKey:   key,
 		SourceIP:    sourceIP,
 		Fingerprint: fingerprint,
+		JA4:         ja4,
 		FirstSeen:   first,
 		LastSeen:    last,
 		Severity:    topSev,

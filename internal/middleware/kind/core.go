@@ -33,6 +33,7 @@ const (
 	IsManagementContextKey ContextKey = "is_management"
 	DebugInfoContextKey    ContextKey = "debug_info"
 	FingerprintContextKey  ContextKey = "fingerprint"
+	CORSHandledContextKey  ContextKey = "cors_handled"
 )
 
 // GetRouteName returns the route ID from the request context, or empty if not set.

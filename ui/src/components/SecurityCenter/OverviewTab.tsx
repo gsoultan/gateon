@@ -16,7 +16,17 @@ import {
   Button 
 } from '@mantine/core';
 import { DonutChart } from '@mantine/charts';
-import { IconShieldCheck, IconShieldOff, IconActivity, IconHistory, IconFingerprint, IconArrowUpRight, IconRefresh, IconClock } from '@tabler/icons-react';
+import { 
+  IconShieldCheck, 
+  IconShieldOff, 
+  IconActivity, 
+  IconHistory, 
+  IconFingerprint, 
+  IconArrowUpRight, 
+  IconRefresh, 
+  IconClock,
+  IconCpu
+} from '@tabler/icons-react';
 import { Alert, Anchor } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { format } from 'date-fns';
@@ -129,7 +139,7 @@ export function OverviewTab({
           </Group>
         </Alert>
       )}
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 5 }}>
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
           <Group justify="space-between">
             <Stack gap={0}>
@@ -172,6 +182,28 @@ export function OverviewTab({
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
           <Group justify="space-between">
             <Stack gap={0}>
+              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Kernel Protection</Text>
+              <Title order={3}>{posture?.ebpf?.attached ? 'Active' : 'Inactive'}</Title>
+            </Stack>
+            <ThemeIcon color={posture?.ebpf?.attached ? 'teal' : 'gray'} variant="light" size="lg" radius="md">
+              <IconCpu size={20} />
+            </ThemeIcon>
+          </Group>
+          <Group gap={4} mt="sm" wrap="nowrap">
+            <Text size="xs" c="dimmed" truncate="end">
+              {posture?.ebpf?.attached ? `Offloading to ${posture.ebpf.interface}` : 'eBPF offloading disabled'}
+            </Text>
+            {posture?.ebpf?.shunned_ips && posture.ebpf.shunned_ips > 0 ? (
+              <Badge size="xs" variant="filled" color="red">
+                {posture.ebpf.shunned_ips} Shunned
+              </Badge>
+            ) : null}
+          </Group>
+        </Card>
+
+        <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
+          <Group justify="space-between">
+            <Stack gap={0}>
               <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated Today</Text>
               <AnimatedTitle value={metrics?.security?.mitigated_today ?? 0} />
             </Stack>
@@ -197,7 +229,8 @@ export function OverviewTab({
             </ThemeIcon>
           </Group>
           <Group gap={4} mt="sm">
-            <Text size="xs" c="dimmed">Global fingerprinting active</Text>
+            <Badge size="xs" color="blue" variant="dot">JA4 & Fingerprinting Active</Badge>
+            <Text size="xs" c="dimmed">Adaptive Acceleration Enabled</Text>
           </Group>
         </Card>
       </SimpleGrid>
