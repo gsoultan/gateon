@@ -7,6 +7,8 @@ import type {
   GetDiagnosticsResponse,
   GetCloudflareIPsResponse,
   TraceRouteResponse,
+  ValidateCORSRequest,
+  ValidateCORSResponse,
   RemoveMitigatedThreatResponse,
   InstallClamavRequest,
   InstallClamavResponse,
@@ -166,6 +168,16 @@ export async function traceRoute(ip: string): Promise<TraceRouteResponse> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ip }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function validateCORS(req: ValidateCORSRequest): Promise<ValidateCORSResponse> {
+  const res = await apiFetch("/v1/diagnostics/cors-validator", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

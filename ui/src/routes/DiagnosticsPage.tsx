@@ -31,6 +31,7 @@ import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Ano
 // is only fetched when the Diagnostics anomaly map is actually rendered.
 const AnomalyMap = lazy(() => import("../components/Diagnostics/AnomalyMap"));
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
+import CORSValidator from "../components/Diagnostics/CORSValidator";
 import {
   IconActivity,
   IconAlertTriangle,
@@ -726,6 +727,31 @@ const DiagnosticsPage: React.FC = () => {
             </ScrollArea>
           </Card>
         </SimpleGrid>
+
+        {/* Diagnostic Tools */}
+        <Card withBorder radius="lg" shadow="sm" p="lg">
+          <Stack gap="md">
+            <Group justify="space-between">
+              <Group gap="xs">
+                <IconShield size={24} color={theme.colors.blue[6]} />
+                <Title order={3} fw={900}>Diagnostic Tools</Title>
+              </Group>
+              <Badge variant="light" color="blue" size="lg">Self-Service Validation</Badge>
+            </Group>
+
+            <Tabs defaultValue="cors" variant="outline" radius="md">
+              <Tabs.List mb="md">
+                <Tabs.Tab value="cors" leftSection={<IconShield size={14} />}>
+                  CORS Validator
+                </Tabs.Tab>
+              </Tabs.List>
+
+              <Tabs.Panel value="cors">
+                <CORSValidator />
+              </Tabs.Panel>
+            </Tabs>
+          </Stack>
+        </Card>
       </Stack>
       <TraceVisualizer 
         opened={visualizerOpened} 

@@ -761,6 +761,23 @@ export type TraceRouteResponse = {
   hops: TraceHop[];
 };
 
+export type ValidateCORSRequest = {
+  url: string;
+  origin: string;
+  method: string;
+  headers: Record<string, string>;
+};
+
+export type ValidateCORSResponse = {
+  is_allowed: boolean;
+  message: string;
+  response_headers: Record<string, string>;
+  checks: string[];
+  is_preflight: boolean;
+  middleware_config: Record<string, string>;
+  route_name: string;
+};
+
 export type RemoveMitigatedThreatResponse = {
   success: boolean;
   message: string;
