@@ -2,27 +2,30 @@ package api
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
 type ThreatPatterns struct {
-	SuspiciousPath    string   `json:"suspicious_path"`
-	SQLI              string   `json:"sqli"`
-	XSS               string   `json:"xss"`
-	Traversal         string   `json:"traversal"`
-	RCE               string   `json:"rce"`
-	SuspiciousAgent   string   `json:"suspicious_agent"`
-	SuspiciousReferer string   `json:"suspicious_referer"`
-	SSRF              string   `json:"ssrf"`
-	NoSQLI            string   `json:"nosqli"`
-	CommandInjection  string   `json:"command_injection"`
-	ProtoPollution    string   `json:"proto_pollution"`
-	HoneypotPaths     []string `json:"honeypot_paths"`
+	SuspiciousPath    string         `json:"suspicious_path"`
+	SQLI              string         `json:"sqli"`
+	XSS               string         `json:"xss"`
+	Traversal         string         `json:"traversal"`
+	RCE               string         `json:"rce"`
+	SuspiciousAgent   string         `json:"suspicious_agent"`
+	SuspiciousReferer string         `json:"suspicious_referer"`
+	SSRF              string         `json:"ssrf"`
+	NoSQLI            string         `json:"nosqli"`
+	CommandInjection  string         `json:"command_injection"`
+	ProtoPollution    string         `json:"proto_pollution"`
+	HoneypotPaths     []string       `json:"honeypot_paths,omitzero"`
+	CriticalPaths     map[string]int `json:"critical_paths,omitzero"`
 }
 
 var (
@@ -48,6 +51,15 @@ var (
 			"/server-status",
 			"/phpmyadmin/index.php",
 		},
+		CriticalPaths: map[string]int{
+			"/login":         10,
+			"/admin":         20,
+			"/api/v1/auth":   15,
+			"/api/v1/admin":  25,
+			"/config":        30,
+			"/settings":      15,
+			"/change-passwd": 20,
+		},
 	}
 
 	activePatterns   ThreatPatterns
@@ -64,6 +76,7 @@ var (
 		nosqlI            *regexp.Regexp
 		commandInjection  *regexp.Regexp
 		protoPollution    *regexp.Regexp
+		combinedAttack    *regexp.Regexp
 	}
 )
 
@@ -98,6 +111,19 @@ func LoadPatterns(path string) {
 	compiledPatterns.commandInjection = regexp.MustCompile(patterns.CommandInjection)
 	compiledPatterns.protoPollution = regexp.MustCompile(patterns.ProtoPollution)
 
+	// Build Combined Fast-Pass Regex
+	combined := strings.Join([]string{
+		patterns.SQLI,
+		patterns.XSS,
+		patterns.Traversal,
+		patterns.RCE,
+		patterns.SSRF,
+		patterns.NoSQLI,
+		patterns.CommandInjection,
+		patterns.ProtoPollution,
+	}, "|")
+	compiledPatterns.combinedAttack = regexp.MustCompile(combined)
+
 	logger.L.LogInfo("Security threat patterns loaded")
 }
 
@@ -113,7 +139,9 @@ func GetCompiledPatterns() (p struct {
 	NoSQLI            *regexp.Regexp
 	CommandInjection  *regexp.Regexp
 	ProtoPollution    *regexp.Regexp
+	CombinedAttack    *regexp.Regexp
 	HoneypotPaths     []string
+	CriticalPaths     map[string]int
 }) {
 	compiledPatterns.RLock()
 	defer compiledPatterns.RUnlock()
@@ -129,6 +157,8 @@ func GetCompiledPatterns() (p struct {
 	p.NoSQLI = compiledPatterns.nosqlI
 	p.CommandInjection = compiledPatterns.commandInjection
 	p.ProtoPollution = compiledPatterns.protoPollution
+	p.CombinedAttack = compiledPatterns.combinedAttack
 	p.HoneypotPaths = slices.Clone(activePatterns.HoneypotPaths)
+	p.CriticalPaths = maps.Clone(activePatterns.CriticalPaths)
 	return
 }

@@ -63,7 +63,7 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 			}
 
 			// Protocol Check: Only for gRPC routes, verify gRPC-Web requirements
-			if strings.EqualFold(rt.Type, "grpc") && internalAPI != nil {
+			if (strings.EqualFold(rt.Type, "grpc") || strings.EqualFold(rt.Type, "grpc-web")) && internalAPI != nil {
 				// We use a stricter check here for actual gRPC-Web payloads
 				if internalAPI.IsGrpcWebRequest(r) || internalAPI.IsGrpcWebSocketRequest(r) {
 					if !router.RouteHasMiddlewareType(r.Context(), rt, s.MwStore, "grpcweb") {

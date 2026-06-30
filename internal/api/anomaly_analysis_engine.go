@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"hash/maphash"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -13,6 +15,12 @@ import (
 // AnomalyAnalysisEngine orchestrates different detectors.
 type AnomalyAnalysisEngine struct {
 	detectors []AnomalyDetector
+}
+
+var hashPool = sync.Pool{
+	New: func() any {
+		return new(maphash.Hash)
+	},
 }
 
 func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *reputation.IPReputationStore) *AnomalyAnalysisEngine {
@@ -49,22 +57,36 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 	// Pre-process traces for performance - single pass
 	data.IPStats = make(map[string]*IPStats)
 	data.FingerprintStats = make(map[string]*FingerprintStats)
+	data.PathMap = make(map[uint64]string)
+	data.SequenceStats = make(map[[3]uint64]*SequenceStats)
+
 	routeMap := make(map[string]*gateonv1.Route)
 	for _, r := range data.Routes {
 		routeMap[r.Id] = r
 	}
 
-	// For burst detection
+	// For burst detection and hashing
 	type ipTime struct {
 		ip   string
 		slot int64
 	}
 	burstTracker := make(map[ipTime]int)
+	hasher := hashPool.Get().(*maphash.Hash)
+	defer hashPool.Put(hasher)
 
 	for _, tr := range data.Traces {
 		if tr == nil || tr.SourceIP == "" {
 			continue
 		}
+
+		// 1. Path Hashing & Mapping
+		hasher.Reset()
+		hasher.WriteString(tr.Path)
+		h := hasher.Sum64()
+		if _, ok := data.PathMap[h]; !ok {
+			data.PathMap[h] = tr.Path
+		}
+
 		stats, ok := data.IPStats[tr.SourceIP]
 		if !ok {
 			stats = &IPStats{
@@ -100,6 +122,56 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		}
 		if tr.JA4 != "" {
 			stats.JA4s[tr.JA4]++
+		}
+
+		// 2. Behavioral Signals: IAT (Inter-Arrival Time)
+		if !stats.LastRequestAt.IsZero() {
+			iat := tr.Timestamp.Sub(stats.LastRequestAt).Seconds() * 1000 // ms
+			if iat > 0 {
+				stats.IATSum += iat
+				stats.IATSumSq += iat * iat
+				stats.IATCount++
+			}
+		}
+		stats.LastRequestAt = tr.Timestamp
+
+		// 3. Coordination Signals: Sequence Aggregation
+		// Skip consecutive duplicate paths (polling)
+		if h != stats.LastPathHash {
+			if stats.PrevPathHash != 0 && stats.LastPathHash != 0 {
+				sig := [3]uint64{stats.PrevPathHash, stats.LastPathHash, h}
+				sStats, ok := data.SequenceStats[sig]
+				if !ok {
+					sStats = &SequenceStats{
+						IPs:        make(map[string]struct{}),
+						UserAgents: make(map[string]int),
+						JA3s:       make(map[string]int),
+						JA4s:       make(map[string]int),
+						Countries:  make(map[string]struct{}),
+					}
+					data.SequenceStats[sig] = sStats
+				}
+				if _, seen := sStats.IPs[tr.SourceIP]; !seen {
+					sStats.IPs[tr.SourceIP] = struct{}{}
+					if tr.UserAgent != "" {
+						sStats.UserAgents[tr.UserAgent]++
+						sStats.UACount++
+					}
+					if tr.JA3 != "" {
+						sStats.JA3s[tr.JA3]++
+						sStats.JA3Count++
+					}
+					if tr.JA4 != "" {
+						sStats.JA4s[tr.JA4]++
+						sStats.JA4Count++
+					}
+					if tr.CountryCode != "" {
+						sStats.Countries[tr.CountryCode] = struct{}{}
+					}
+				}
+			}
+			stats.PrevPathHash = stats.LastPathHash
+			stats.LastPathHash = h
 		}
 
 		// Burst detection: 10-second slots
@@ -167,24 +239,11 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 
 func (e *AnomalyAnalysisEngine) checkHeaderConsistency(tr *telemetry.TraceRecord, route *gateonv1.Route, stats *IPStats) {
 	if tr.RequestHeaders == "" {
-		return // Cannot check if headers were not recorded
+		return
 	}
 
-	ua := tr.UserAgent
-	isMozilla := false
-	// Case-insensitive check for mozilla in UA (usually short)
-	for i := 0; i < len(ua)-6; i++ {
-		if (ua[i] == 'm' || ua[i] == 'M') &&
-			(ua[i+1] == 'o' || ua[i+1] == 'O') &&
-			(ua[i+2] == 'z' || ua[i+2] == 'Z') &&
-			(ua[i+3] == 'i' || ua[i+3] == 'I') &&
-			(ua[i+4] == 'l' || ua[i+4] == 'L') &&
-			(ua[i+5] == 'l' || ua[i+5] == 'L') &&
-			(ua[i+6] == 'a' || ua[i+6] == 'A') {
-			isMozilla = true
-			break
-		}
-	}
+	uaLower := strings.ToLower(tr.UserAgent)
+	isMozilla := strings.Contains(uaLower, "mozilla")
 
 	routeType := "http"
 	if route != nil {
@@ -193,9 +252,6 @@ func (e *AnomalyAnalysisEngine) checkHeaderConsistency(tr *telemetry.TraceRecord
 
 	headers := tr.RequestHeaders
 	if routeType == "grpc" {
-		// gRPC routes should have gRPC content-type
-		// Use strings.Contains on raw headers. Since Content-Type is canonicalized and
-		// application/grpc is standard, this is reasonably safe and fast.
 		if !strings.Contains(headers, "application/grpc") {
 			if isMozilla {
 				stats.HeaderAnomaly++
@@ -210,10 +266,7 @@ func (e *AnomalyAnalysisEngine) checkHeaderConsistency(tr *telemetry.TraceRecord
 			stats.HeaderAnomaly++
 		}
 	} else {
-		// HTTP specific checks
 		if isMozilla {
-			// Real browsers send Accept, Accept-Language and Accept-Encoding
-			// Search for canonicalized keys
 			if !strings.Contains(headers, "Accept-Language:") || !strings.Contains(headers, "Accept-Encoding:") {
 				stats.HeaderAnomaly++
 			}

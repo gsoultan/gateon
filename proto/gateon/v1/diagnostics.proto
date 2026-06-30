@@ -40,6 +40,9 @@ message Anomaly {
   string response_body = 21;
   string user_agent = 22;
   string http_method = 23;
+  double confidence = 24;
+  double entropy = 25;
+  int32 cluster_size = 26;
 }
 
 message GossipStatus {
