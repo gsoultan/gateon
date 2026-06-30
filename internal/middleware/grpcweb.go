@@ -111,14 +111,6 @@ func serveGRPCWeb(w http.ResponseWriter, r *http.Request, detector *grpcweb.Wrap
 		r.Body = io.NopCloser(base64.NewDecoder(base64.StdEncoding, r.Body))
 	}
 
-	// gRPC requires HTTP/2. We upgrade the request metadata
-	// so the proxy knows to treat it as a gRPC call.
-	// We only do this for actual gRPC requests, not for CORS preflights.
-	if r.Method == http.MethodPost && r.ProtoMajor < 2 {
-		r.ProtoMajor = 2
-		r.ProtoMinor = 0
-	}
-
 	if strings.HasPrefix(contentType, "application/grpc-web") {
 		// Translate gRPC-Web content type to standard gRPC
 		newType := contentType
