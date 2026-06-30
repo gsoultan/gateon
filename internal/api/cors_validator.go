@@ -33,6 +33,13 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 	// Create a dummy http.Request for matching
 	dummyReq, _ := http.NewRequest(req.Method, req.Url, nil)
 	// Propagate headers to dummy request for proper route matching (e.g., Access-Control-Request-Method)
+	if req.Headers == nil {
+		req.Headers = make(map[string]string)
+	}
+	if req.AuthBearerToken != "" {
+		req.Headers["Authorization"] = "Bearer " + req.AuthBearerToken
+	}
+
 	for k, v := range req.Headers {
 		dummyReq.Header.Set(k, v)
 	}
@@ -99,11 +106,86 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 			IsAllowed: true, // If no CORS middleware, browser default applies (usually blocked unless same-origin)
 			Message:   "No CORS middleware found on the matched route. Standard browser same-origin policy applies.",
 			Checks:    []string{"Route matched: " + rt.Name, "CORS middleware: Not found"},
+			RouteName: rt.Name,
+			RouteId:   rt.Id,
 		}, nil
 	}
 
 	// 3. Simulate CORS logic
-	return s.simulateCORS(req, corsMW, rt.Name)
+	resp, err := s.simulateCORS(req, corsMW, rt.Name)
+	if err == nil && resp != nil {
+		resp.RouteId = rt.Id
+		resp.Suggestions = s.analyzeRoute(ctx, rt, req)
+	}
+	return resp, err
+}
+
+func (s *ApiService) analyzeRoute(ctx context.Context, rt *gateonv1.Route, req *gateonv1.ValidateCORSRequest) []string {
+	var suggestions []string
+
+	// 1. Analyze Matcher for required headers
+	m := router.GetMatcher(rt.Rule)
+	for h := range m.RequiredHeaders() {
+		if _, ok := req.Headers[h]; !ok {
+			suggestions = append(suggestions, fmt.Sprintf("Add header: %s", h))
+		}
+	}
+
+	// 2. Analyze Middlewares
+	for _, mwID := range rt.Middlewares {
+		mw, ok := s.Middlewares.Get(ctx, mwID)
+		if !ok {
+			continue
+		}
+		switch mw.Type {
+		case "auth":
+			authType := mw.Config["type"]
+			switch authType {
+			case "jwt", "paseto", "oidc", "oauth2":
+				if _, ok := req.Headers["Authorization"]; !ok && req.AuthBearerToken == "" {
+					suggestions = append(suggestions, "Missing Auth: Consider providing a Bearer Token")
+				}
+			case "apikey":
+				header := mw.Config["header"]
+				if header == "" {
+					header = "X-API-Key"
+				}
+				if _, ok := req.Headers[header]; !ok {
+					suggestions = append(suggestions, fmt.Sprintf("Add header: %s", header))
+				}
+			case "basic":
+				if _, ok := req.Headers["Authorization"]; !ok {
+					suggestions = append(suggestions, "Add header: Authorization (Basic)")
+				}
+			}
+		case "forward-auth":
+			suggestions = append(suggestions, "Forward Auth active: might need specific headers")
+		case "hmac":
+			header := mw.Config["header"]
+			if header == "" {
+				header = "X-Signature"
+			}
+			if _, ok := req.Headers[header]; !ok {
+				suggestions = append(suggestions, fmt.Sprintf("Add header: %s", header))
+			}
+		}
+	}
+
+	// 3. Generic suggestions based on method
+	if slices.Contains([]string{"POST", "PUT", "PATCH"}, req.Method) {
+		hasContentType := false
+		for h := range req.Headers {
+			if strings.EqualFold(h, "Content-Type") {
+				hasContentType = true
+				break
+			}
+		}
+		if !hasContentType {
+			suggestions = append(suggestions, "This is a write request (POST/PUT/PATCH). Consider adding a 'Content-Type' header (e.g., 'application/json').")
+		}
+	}
+
+	return suggestions
 }
 
 func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv1.Middleware, routeName string) (*gateonv1.ValidateCORSResponse, error) {

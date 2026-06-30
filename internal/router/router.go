@@ -154,6 +154,10 @@ matchMethod:
 	return true
 }
 
+func (m Matcher) RequiredHeaders() map[string]string {
+	return m.headers
+}
+
 // HostFromRule returns the host part of a rule if it contains Host(`...`), otherwise "".
 // Used by SNI to select certificates for multi-host TLS.
 func HostFromRule(rule string) string {
