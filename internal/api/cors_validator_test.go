@@ -162,6 +162,24 @@ func TestValidateCORS(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			name: "Leading Space in URL",
+			req: &gateonv1.ValidateCORSRequest{
+				Url:    " https://gateon/api/test",
+				Origin: "https://example.com",
+				Method: "GET",
+			},
+			expected: true,
+		},
+		{
+			name: "Missing Scheme",
+			req: &gateonv1.ValidateCORSRequest{
+				Url:    "api.example.com/api/test",
+				Origin: "https://example.com",
+				Method: "GET",
+			},
+			expected: false,
+		},
 	}
 
 	// Attach auth middleware to rt
@@ -178,6 +196,10 @@ func TestValidateCORS(t *testing.T) {
 			assert.Equal(t, tc.expected, resp.IsAllowed)
 			if tc.message != "" {
 				assert.Contains(t, resp.Message, tc.message)
+			}
+			if !tc.expected && tc.name == "Blocked Origin" {
+				assert.NotEmpty(t, resp.Suggestions)
+				assert.Contains(t, resp.Suggestions[0], "Add 'https://evil.com' to Allowed Origins")
 			}
 			if tc.name == "Exposed Headers and Max Age" {
 				assert.Equal(t, "X-Custom-Response", resp.ResponseHeaders["Access-Control-Expose-Headers"])

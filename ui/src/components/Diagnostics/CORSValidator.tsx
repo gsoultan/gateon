@@ -66,11 +66,11 @@ const CORSValidator: React.FC = () => {
       }
 
       const res = await validateCORS({
-        url,
-        origin,
+        url: url.trim(),
+        origin: origin.trim(),
         method,
         headers: headerMap,
-        auth_bearer_token: bearerToken,
+        auth_bearer_token: bearerToken.trim(),
       });
       setResult(res);
     } catch (err: any) {

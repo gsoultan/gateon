@@ -14,6 +14,10 @@ import (
 )
 
 func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCORSRequest) (*gateonv1.ValidateCORSResponse, error) {
+	req.Url = strings.TrimSpace(req.Url)
+	req.Origin = strings.TrimSpace(req.Origin)
+	req.AuthBearerToken = strings.TrimSpace(req.AuthBearerToken)
+
 	if req.Url == "" {
 		return &gateonv1.ValidateCORSResponse{
 			IsAllowed: false,
@@ -22,11 +26,20 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 	}
 
 	// 1. Find the matching route
-	_, err := url.Parse(req.Url)
+	u, err := url.Parse(req.Url)
 	if err != nil {
 		return &gateonv1.ValidateCORSResponse{
-			IsAllowed: false,
-			Message:   fmt.Sprintf("Invalid URL: %v", err),
+			IsAllowed:   false,
+			Message:     fmt.Sprintf("Invalid URL: %v", err),
+			Suggestions: []string{"Ensure the URL is valid and doesn't contain accidental spaces.", "Check if you included the protocol (e.g., http:// or https://)."},
+		}, nil
+	}
+
+	if u.Scheme == "" {
+		return &gateonv1.ValidateCORSResponse{
+			IsAllowed:   false,
+			Message:     "URL is missing a protocol (e.g., http:// or https://)",
+			Suggestions: []string{fmt.Sprintf("Try changing the URL to: https://%s", req.Url)},
 		}, nil
 	}
 
@@ -115,7 +128,7 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 	resp, err := s.simulateCORS(req, corsMW, rt.Name)
 	if err == nil && resp != nil {
 		resp.RouteId = rt.Id
-		resp.Suggestions = s.analyzeRoute(ctx, rt, req)
+		resp.Suggestions = append(resp.Suggestions, s.analyzeRoute(ctx, rt, req)...)
 	}
 	return resp, err
 }
@@ -211,6 +224,7 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 	respHeaders := make(map[string]string)
 	isAllowed := true
 	message := "CORS validation successful"
+	var suggestions []string
 
 	origin := req.Origin
 	if origin == "" {
@@ -231,6 +245,7 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 		isAllowed = false
 		message = fmt.Sprintf("Origin '%s' is not allowed", origin)
 		checks = append(checks, fmt.Sprintf("Origin check: FAILED (%s not in %v)", origin, allowedOrigins))
+		suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Origins in CORS middleware configuration.", origin))
 	}
 
 	if isAllowed {
@@ -246,6 +261,7 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 				isAllowed = false
 				message = "AllowCredentials cannot be used with AllowedOrigins: *"
 				checks = append(checks, "Credentials check: FAILED (cannot use credentials with *)")
+				suggestions = append(suggestions, "Change Allowed Origins to specific domains (not '*') if you need to use Credentials.")
 			} else {
 				respHeaders["Access-Control-Allow-Credentials"] = "true"
 				checks = append(checks, "Credentials check: Allowed")
@@ -264,6 +280,7 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 			isAllowed = false
 			message = fmt.Sprintf("Method '%s' is not allowed", reqMethod)
 			checks = append(checks, fmt.Sprintf("Method check: FAILED (%s not in %v)", reqMethod, allowedMethods))
+			suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Methods in CORS middleware configuration.", reqMethod))
 		}
 
 		if isAllowed {
@@ -286,6 +303,7 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 						isAllowed = false
 						message = fmt.Sprintf("Header '%s' is not allowed", h)
 						checks = append(checks, fmt.Sprintf("Header check: FAILED (%s not in %v)", h, allowedHeaders))
+						suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Headers in CORS middleware configuration.", h))
 						break
 					}
 				}
@@ -311,11 +329,10 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 		if slices.Contains(allowedMethods, req.Method) || slices.Contains(allowedMethods, "*") {
 			checks = append(checks, fmt.Sprintf("Method check: Allowed (%s)", req.Method))
 		} else {
-			// Some simple methods are allowed by default even if not in AllowedMethods?
-			// rs/cors documentation says AllowedMethods are methods that are allowed for actual requests.
 			isAllowed = false
 			message = fmt.Sprintf("Method '%s' is not allowed", req.Method)
 			checks = append(checks, fmt.Sprintf("Method check: FAILED (%s not in %v)", req.Method, allowedMethods))
+			suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Methods in CORS middleware configuration.", req.Method))
 		}
 	}
 
@@ -327,6 +344,7 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 		IsPreflight:      isPreflight,
 		MiddlewareConfig: mw.Config,
 		RouteName:        routeName,
+		Suggestions:      suggestions,
 	}, nil
 }
 
