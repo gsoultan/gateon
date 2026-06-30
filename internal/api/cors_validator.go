@@ -46,10 +46,42 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 	routes := s.Routes.List(ctx)
 	rt := router.SelectRouteFromSlice(dummyReq, routes)
 	if rt == nil {
-		return &gateonv1.ValidateCORSResponse{
-			IsAllowed: false,
-			Message:   "No route matched the provided URL and Host",
-		}, nil
+		// Try to find why it didn't match
+		var reasons []string
+		for _, r := range routes {
+			if r.Disabled {
+				continue
+			}
+			m := router.GetMatcher(r.Rule)
+
+			// Check if host matches
+			routeHost := router.HostFromRule(r.Rule)
+			hostMatched := router.HostMatches(routeHost, dummyReq.Host)
+
+			// Check if rule matches in general (ignoring entrypoints)
+			if m.Match(dummyReq) {
+				reasons = append(reasons, fmt.Sprintf("Route '%s' matches the rule but is restricted to entrypoints %v. Your test request has no entrypoint context.", r.Name, r.Entrypoints))
+				// If it matches ignoring entrypoints, we can actually use it for CORS validation
+				// but let's inform the user.
+				rt = r
+				break
+			} else if hostMatched {
+				reasons = append(reasons, fmt.Sprintf("Route '%s' matches the Host but failed other rule parts (Path/Method/Headers). Rule: %s", r.Name, r.Rule))
+			} else if routeHost != "" {
+				reasons = append(reasons, fmt.Sprintf("Route '%s' Host mismatch: expected '%s', got '%s'", r.Name, routeHost, dummyReq.Host))
+			}
+		}
+
+		if rt == nil {
+			msg := "No route matched the provided URL and Host"
+			if len(reasons) > 0 {
+				msg += ":\n- " + strings.Join(reasons, "\n- ")
+			}
+			return &gateonv1.ValidateCORSResponse{
+				IsAllowed: false,
+				Message:   msg,
+			}, nil
+		}
 	}
 
 	// 2. Find CORS middleware
