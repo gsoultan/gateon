@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -486,6 +487,26 @@ func (r *bodyRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+func (r *bodyRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *bodyRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func (r *bodyRecorder) Push(target string, opts *http.PushOptions) error {
+	if p, ok := r.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
+}
+
 var bodyRecorderPool = sync.Pool{
 	New: func() any {
 		return &bodyRecorder{
@@ -508,11 +529,17 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 				maxBodySize = 64 * 1024
 			}
 
-			// Capture Request Body
-			var reqBody []byte
+			// Capture Request Body without consuming it (using TeeReader)
+			var reqBodyBuf bytes.Buffer
 			if r.Body != nil {
-				reqBody, _ = io.ReadAll(io.LimitReader(r.Body, int64(maxBodySize)))
-				r.Body = io.NopCloser(bytes.NewReader(reqBody))
+				// We wrap the body in a TeeReader that writes to our buffer as it's being read by downstream.
+				// However, we only want to capture up to maxBodySize.
+				r.Body = &requestBodyCapture{
+					ReadCloser: r.Body,
+					tee:        io.MultiWriter(&reqBodyBuf, io.Discard), // Use MultiWriter with Discard to bound the capture
+					limit:      maxBodySize,
+					captured:   &reqBodyBuf,
+				}
 			}
 
 			reqHeaders := telemetry.FormatHeaders(r.Header, r.Trailer)
@@ -526,7 +553,6 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 
 			dinfo := &DebugInfo{
 				RequestHeaders: string(reqHeaders),
-				RequestBody:    string(reqBody),
 			}
 
 			if rs := GetRequestState(r); rs != nil {
@@ -536,6 +562,9 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 			}
 
 			next.ServeHTTP(rec, r)
+
+			// Populate captured request body after next.ServeHTTP because it might have been read then.
+			dinfo.RequestBody = reqBodyBuf.String()
 
 			respHeaders := telemetry.FormatHeaders(rec.Header())
 			var activeDebugInfo *DebugInfo
@@ -551,4 +580,27 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 			}
 		})
 	}
+}
+
+type requestBodyCapture struct {
+	io.ReadCloser
+	tee      io.Writer
+	limit    int
+	n        int
+	captured *bytes.Buffer
+}
+
+func (c *requestBodyCapture) Read(p []byte) (n int, err error) {
+	n, err = c.ReadCloser.Read(p)
+	if n > 0 {
+		if c.n < c.limit {
+			toWrite := n
+			if c.n+toWrite > c.limit {
+				toWrite = c.limit - c.n
+			}
+			_, _ = c.tee.Write(p[:toWrite])
+			c.n += toWrite
+		}
+	}
+	return n, err
 }
