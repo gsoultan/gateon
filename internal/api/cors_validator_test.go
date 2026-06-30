@@ -49,8 +49,16 @@ func TestValidateCORS(t *testing.T) {
 		Middlewares: []string{"mw1"},
 	}
 
+	rtHost := &gateonv1.Route{
+		Id:          "rt2",
+		Name:        "host-route",
+		Rule:        "Host(`api.example.com`)",
+		Middlewares: []string{"mw1"},
+		Entrypoints: []string{"http"},
+	}
+
 	apiSvc := &ApiService{
-		Routes:      &mockRouteStore{routes: []*gateonv1.Route{rt}},
+		Routes:      &mockRouteStore{routes: []*gateonv1.Route{rt, rtHost}},
 		Middlewares: &mockMiddlewareStore{middlewares: map[string]*gateonv1.Middleware{"mw1": mw}},
 	}
 
@@ -114,6 +122,15 @@ func TestValidateCORS(t *testing.T) {
 				Headers: map[string]string{
 					"Access-Control-Request-Method": "POST",
 				},
+			},
+			expected: true,
+		},
+		{
+			name: "Host Route with Entrypoints",
+			req: &gateonv1.ValidateCORSRequest{
+				Url:    "http://api.example.com/some/path",
+				Origin: "https://example.com",
+				Method: "GET",
 			},
 			expected: true,
 		},

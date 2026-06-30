@@ -23,22 +23,22 @@ import (
 )
 
 var (
-	ruleCache sync.Map // map[string]matcher
+	ruleCache sync.Map // map[string]Matcher
 )
 
-func getMatcher(rule string) matcher {
+func GetMatcher(rule string) Matcher {
 	if m, ok := ruleCache.Load(rule); ok {
-		return m.(matcher)
+		return m.(Matcher)
 	}
 
 	m := parseRule(rule)
 	if actual, loaded := ruleCache.LoadOrStore(rule, m); loaded {
-		return actual.(matcher)
+		return actual.(Matcher)
 	}
 	return m
 }
 
-type matcher struct {
+type Matcher struct {
 	host       string
 	path       string
 	pathPrefix string
@@ -47,8 +47,8 @@ type matcher struct {
 	headers    map[string]string // header name -> expected value
 }
 
-func parseRule(rule string) matcher {
-	m := matcher{}
+func parseRule(rule string) Matcher {
+	m := Matcher{}
 	if strings.Contains(rule, "Host(`") {
 		m.host = extractValue(rule, "Host(`", "`)")
 	}
@@ -114,7 +114,7 @@ func parseRule(rule string) matcher {
 	return m
 }
 
-func (m matcher) Match(r *http.Request) bool {
+func (m Matcher) Match(r *http.Request) bool {
 	if m.host != "" && !HostMatches(m.host, r.Host) {
 		return false
 	}
@@ -157,7 +157,7 @@ matchMethod:
 // HostFromRule returns the host part of a rule if it contains Host(`...`), otherwise "".
 // Used by SNI to select certificates for multi-host TLS.
 func HostFromRule(rule string) string {
-	return getMatcher(rule).host
+	return GetMatcher(rule).host
 }
 
 // RouteHostIsExact returns true if routeHost is an exact host (e.g. api.example.com),
@@ -244,7 +244,7 @@ func SelectRouteFromSlice(r *http.Request, routes []*gateonv1.Route) *gateonv1.R
 			continue
 		}
 
-		m := getMatcher(rt.Rule)
+		m := GetMatcher(rt.Rule)
 		if m.Match(r) {
 			// 3. Selection based on Priority and then Rule length (specificity)
 			if best == nil {

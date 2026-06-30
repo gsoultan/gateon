@@ -162,7 +162,7 @@ const CORSValidator: React.FC = () => {
             radius="lg"
             variant="light"
           >
-            <Text fw={700} size="lg">{result.message}</Text>
+            <Text fw={700} size="lg" style={{ whiteSpace: 'pre-wrap' }}>{result.message}</Text>
           </Alert>
 
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
@@ -214,13 +214,13 @@ const CORSValidator: React.FC = () => {
                 </Card>
 
                 {result.middleware_config && (
-                    <Card withBorder radius="lg" p="md" bg="gray.0">
+                    <Card withBorder radius="lg" p="md">
                       <Title order={4} mb="sm">Middleware Configuration</Title>
                       <Stack gap="xs">
                         {Object.entries(result.middleware_config).map(([k, v]) => (
                           <Group key={k} justify="space-between" wrap="nowrap">
                             <Text size="xs" fw={700}>{k.replace(/_/g, " ").toUpperCase()}</Text>
-                            <Text size="xs" ff="monospace" c="dimmed" truncate>{v || "(empty)"}</Text>
+                            <Text size="xs" ff="monospace" truncate>{v || "(empty)"}</Text>
                           </Group>
                         ))}
                       </Stack>
@@ -230,15 +230,42 @@ const CORSValidator: React.FC = () => {
           </SimpleGrid>
 
           {!result.is_allowed && (
-             <Paper withBorder p="md" radius="md" bg="var(--mantine-color-red-0)">
-                <Title order={5} c="red" mb="xs">How to fix this?</Title>
-                <Text size="sm">
-                  To allow this request, you need to update your CORS middleware configuration.
-                  {result.message.includes("Origin") && " Add the origin to 'Allowed Origins'."}
-                  {result.message.includes("Method") && " Add the method to 'Allowed Methods'."}
-                  {result.message.includes("Header") && " Add the header to 'Allowed Headers'."}
-                </Text>
-             </Paper>
+             <Alert 
+               variant="light" 
+               color="red" 
+               title="How to fix this?" 
+               icon={<IconInfoCircle size={18} />}
+               radius="md"
+             >
+                <Stack gap="xs" mt="sm">
+                    {result.message.includes("No route matched") && (
+                        <Text size="sm">
+                            Make sure the <b>URL</b> and <b>Host</b> match one of your defined routes. 
+                            Check your route <b>Rules</b> (Host, Path, PathPrefix) and <b>Entrypoints</b>.
+                        </Text>
+                    )}
+                    {result.message.includes("Origin") && (
+                        <Text size="sm">
+                            Add <b>{origin || "the origin"}</b> to the <b>Allowed Origins</b> list in your CORS middleware.
+                        </Text>
+                    )}
+                    {result.message.includes("Method") && (
+                        <Text size="sm">
+                            Add the requested method to the <b>Allowed Methods</b> list in your CORS middleware.
+                        </Text>
+                    )}
+                    {result.message.includes("Header") && (
+                        <Text size="sm">
+                            Add the requested header to the <b>Allowed Headers</b> list in your CORS middleware.
+                        </Text>
+                    )}
+                    {result.message.includes("entrypoint context") && (
+                        <Text size="sm">
+                            This route is restricted to specific entrypoints. Ensure you are accessing it through the correct port/protocol.
+                        </Text>
+                    )}
+                </Stack>
+             </Alert>
           )}
         </Stack>
       )}
