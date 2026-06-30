@@ -59,6 +59,7 @@ service ApiService {
   rpc ApplyRecommendation(ApplyRecommendationRequest) returns (ApplyRecommendationResponse);
   rpc TriggerWafUpdate(TriggerWafUpdateRequest) returns (TriggerWafUpdateResponse);
   rpc TraceRoute(TraceRouteRequest) returns (TraceRouteResponse);
+  rpc ValidateCORS(ValidateCORSRequest) returns (ValidateCORSResponse);
   rpc InstallClamav(InstallClamavRequest) returns (InstallClamavResponse);
   rpc UninstallClamav(UninstallClamavRequest) returns (UninstallClamavResponse);
   rpc RunDeepScan(RunDeepScanRequest) returns (RunDeepScanResponse);

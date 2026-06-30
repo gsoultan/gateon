@@ -123,6 +123,23 @@ message TriggerWafUpdateResponse {
   string message = 2;
 }
 
+message ValidateCORSRequest {
+  string url = 1;
+  string origin = 2;
+  string method = 3;
+  map<string, string> headers = 4;
+}
+
+message ValidateCORSResponse {
+  bool is_allowed = 1;
+  string message = 2;
+  map<string, string> response_headers = 3;
+  repeated string checks = 4;
+  bool is_preflight = 5;
+  map<string, string> middleware_config = 6;
+  string route_name = 7;
+}
+
 message TraceHop {
   int32 hop = 1;
   string ip = 2;
