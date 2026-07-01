@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -48,12 +50,59 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		epNames[ep.Id] = ep.Name
 	}
 
-	diagEPs := s.buildEntryPointDiagnostics(entrypoints, epToRoutes, serviceMap, middlewareMap)
-	anomalies := s.detectAnomalies(ctx, routes)
+	var (
+		diagEPs    []*gateonv1.EntryPointDiagnostic
+		anomalies  []*gateonv1.Anomaly
+		systemInfo *gateonv1.SystemInfo
+		deps       []*gateonv1.DependencyHealth
+		diagErrors []*gateonv1.HandshakeError
+		threats    []*telemetry.SecurityThreat
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		diagEPs = s.buildEntryPointDiagnostics(entrypoints, epToRoutes, serviceMap, middlewareMap)
+		return nil
+	})
+
+	g.Go(func() error {
+		if cached := s.anomaliesCache.Load(); cached != nil {
+			anomalies = *cached
+		} else {
+			// Fallback if cache is empty
+			anomalies = s.detectAnomalies(gctx, routes)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		// Use lite variant to avoid request/response body blobs which are huge and slow
+		threats = telemetry.GetSecurityThreatsLite(gctx, 50, 0)
+		return nil
+	})
+
+	g.Go(func() error {
+		systemInfo = s.getSystemInfo(gctx)
+		return nil
+	})
+
+	g.Go(func() error {
+		deps = s.checkDependencies(gctx)
+		return nil
+	})
+
+	g.Go(func() error {
+		diagErrors = s.getRecentTLSErrors(epNames)
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
 
 	// Add recently mitigated threats from database to ensure they show up in Diagnostics
 	// even if they are no longer producing traces (e.g. shunned at XDP level)
-	threats := telemetry.GetSecurityThreats(ctx, 50, 0)
 	seen := make(map[string]bool)
 	for _, a := range anomalies {
 		seen[a.Source+a.Type] = true
@@ -67,10 +116,6 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 			}
 		}
 	}
-
-	systemInfo := s.getSystemInfo(ctx)
-	deps := s.checkDependencies(ctx)
-	diagErrors := s.getRecentTLSErrors(epNames)
 
 	return &gateonv1.GetDiagnosticsResponse{
 		Entrypoints:     diagEPs,
@@ -182,22 +227,41 @@ func (s *ApiService) RunSecurityAnalysisLoop(ctx context.Context, interval time.
 	if interval <= 0 {
 		interval = time.Minute
 	}
+
+	// Separate ticker for network checks (every 10 minutes)
+	networkTicker := time.NewTicker(10 * time.Minute)
+	defer networkTicker.Stop()
+
+	// Initial network check
+	s.refreshNetworkStatus(ctx)
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-networkTicker.C:
+			s.refreshNetworkStatus(ctx)
 		case <-ticker.C:
 			if s.Routes == nil {
 				continue
 			}
 			routes := s.Routes.List(ctx)
-			// The return value is for the Diagnostics UI; here we run it purely
-			// for its threat-recording side effects.
-			_ = s.detectAnomalies(ctx, routes)
+			// Store results in cache so Diagnostics UI is instantaneous
+			anomalies := s.detectAnomalies(ctx, routes)
+			s.anomaliesCache.Store(&anomalies)
 		}
 	}
+}
+
+func (s *ApiService) refreshNetworkStatus(ctx context.Context) {
+	ip := getPublicIP(ctx)
+	s.publicIPCache.Store(&ip)
+
+	reachable, latency := isCloudflareReachable()
+	s.cfReachableCache.Store(reachable)
+	s.cfLatencyCache.Store(&latency)
 }
 
 func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Route) []*gateonv1.Anomaly {
@@ -244,7 +308,7 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 	sysStats := telemetry.GetSystemStats()
 	uptime := time.Since(telemetry.GetStartTime()).Round(time.Second).String()
 
-	cfReachable, _ := isCloudflareReachable()
+	cfReachable := s.cfReachableCache.Load()
 
 	var ebpfStats *gateonv1.EbpfStats
 	if s.EbpfManager != nil {
@@ -261,8 +325,13 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 		}
 	}
 
+	publicIP := "unknown"
+	if p := s.publicIPCache.Load(); p != nil {
+		publicIP = *p
+	}
+
 	return &gateonv1.SystemInfo{
-		PublicIp:            getPublicIP(ctx),
+		PublicIp:            publicIP,
 		CloudflareReachable: cfReachable,
 		Uptime:              uptime,
 		Goroutines:          int64(runtime.NumGoroutine()),
@@ -275,7 +344,12 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 }
 
 func (s *ApiService) checkDependencies(ctx context.Context) []*gateonv1.DependencyHealth {
-	cfReachable, cfLatency := isCloudflareReachable()
+	cfReachable := s.cfReachableCache.Load()
+	cfLatency := time.Duration(0)
+	if p := s.cfLatencyCache.Load(); p != nil {
+		cfLatency = *p
+	}
+
 	deps := []*gateonv1.DependencyHealth{
 		{
 			Name:      "Internet (Cloudflare)",
@@ -549,43 +623,31 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 }
 
 func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error) {
-	// Trigger detection pass to ensure threats are up to date in the DB
-	// whenever the UI requests the latest list.
-	routes := s.Routes.List(ctx)
-	_ = s.detectAnomalies(ctx, routes)
-
 	limit := int(req.GetLimit())
 	if limit <= 0 {
 		limit = 50
 	}
 	offset := int(req.GetOffset())
-	threats := telemetry.GetSecurityThreats(ctx, limit, offset)
+
+	// Use Lite variant to avoid fetching massive request/response body blobs
+	// for the list view, which is what typically causes timeouts in the UI.
+	threats := telemetry.GetSecurityThreatsLite(ctx, limit, offset)
 	res := make([]*gateonv1.Anomaly, 0, len(threats))
 	for _, t := range threats {
 		res = append(res, s.threatToAnomaly(ctx, t))
 	}
-	return &gateonv1.ListSecurityThreatsResponse{Threats: res}, nil
+	return &gateonv1.ListSecurityThreatsResponse{
+		Threats: res,
+	}, nil
 }
 
 func (s *ApiService) ListReputations(ctx context.Context, req *gateonv1.ListReputationsRequest) (*gateonv1.ListReputationsResponse, error) {
-	reps := telemetry.GetAllReputations()
-	res := make([]*gateonv1.Reputation, 0, len(reps))
-
-	// Sort by score (ascending) to show problematic ones first
-	slices.SortFunc(reps, func(a, b telemetry.ReputationRecord) int {
-		if a.Score < b.Score {
-			return -1
-		}
-		if a.Score > b.Score {
-			return 1
-		}
-		return 0
-	})
-
 	limit := int(req.GetLimit())
-	if limit > 0 && len(reps) > limit {
-		reps = reps[:limit]
+	if limit <= 0 {
+		limit = 50
 	}
+	reps := telemetry.GetWorstReputations(limit)
+	res := make([]*gateonv1.Reputation, 0, len(reps))
 
 	for _, r := range reps {
 		res = append(res, &gateonv1.Reputation{

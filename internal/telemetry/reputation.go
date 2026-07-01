@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"cmp"
 	"math"
 	"net"
 	"net/http"
@@ -43,6 +44,7 @@ const (
 type reputationShard struct {
 	cache *lru.ARCCache
 	mu    sync.RWMutex
+	dirty map[string]struct{}
 }
 
 var (
@@ -58,6 +60,7 @@ func init() {
 		cache, _ := lru.NewARC(perShard)
 		repShards[i] = &reputationShard{
 			cache: cache,
+			dirty: make(map[string]struct{}),
 		}
 	}
 }
@@ -159,6 +162,12 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	r.LastEvent = time.Now()
 	shard.cache.Add(fingerprint, r)
 
+	if r.Score < 100 {
+		shard.dirty[fingerprint] = struct{}{}
+	} else {
+		delete(shard.dirty, fingerprint)
+	}
+
 	// Automated eBPF Shunning: If reputation is very low, push to XDP layer.
 	if r.Score < 20.0 {
 		if m := globalEbpfManager.Load(); m != nil {
@@ -201,6 +210,11 @@ func ApplyRemoteReputation(fingerprint string, score float64, violations int, hi
 	}
 
 	shard.cache.Add(fingerprint, r)
+	if r.Score < 100 {
+		shard.dirty[fingerprint] = struct{}{}
+	} else {
+		delete(shard.dirty, fingerprint)
+	}
 }
 
 func ResetReputation(fingerprint string) {
@@ -212,6 +226,7 @@ func ResetReputation(fingerprint string) {
 	defer shard.mu.Unlock()
 
 	shard.cache.Remove(fingerprint)
+	delete(shard.dirty, fingerprint)
 	// Automated eBPF Unshun: Restore access at XDP layer.
 	if m := globalEbpfManager.Load(); m != nil {
 		_ = (*m).UnshunIP(fingerprint)
@@ -240,32 +255,73 @@ func UpdateReputationMetrics() {
 		return
 	}
 
+	var totalScore float64
+	totalCount := 0
 	for _, shard := range repShards {
-		shard.mu.RLock()
-		keys := shard.cache.Keys()
-		for _, k := range keys {
-			if val, ok := shard.cache.Peek(k); ok {
+		shard.mu.Lock()
+		shardCount := shard.cache.Len()
+		totalCount += shardCount
+		dirtySum := 0.0
+		dirtyCount := 0
+		for k := range shard.dirty {
+			if val, ok := shard.cache.Get(k); ok {
 				r := val.(*Reputation)
-				ActiveAnomalyScore.Observe(r.Score)
+				// Check for recovery
+				rate := r.RecoveryRate
+				if rate <= 0 {
+					rate = 1.0
+				}
+				elapsed := time.Since(r.LastEvent).Hours()
+				if elapsed > 1 {
+					r.Score = math.Min(100, r.Score+(elapsed*rate))
+					if elapsed > 24 {
+						r.ViolationCount = 0
+					}
+					r.LastEvent = time.Now()
+				}
+
+				if r.Score >= 100 {
+					delete(shard.dirty, k)
+				} else {
+					dirtySum += r.Score
+					dirtyCount++
+				}
+			} else {
+				delete(shard.dirty, k)
 			}
 		}
-		shard.mu.RUnlock()
+		shard.mu.Unlock()
+
+		// Perfect ones contribute 100 each
+		totalScore += dirtySum + float64(shardCount-dirtyCount)*100
+	}
+
+	if totalCount > 0 {
+		ActiveAnomalyScoreAverage.Set(totalScore / float64(totalCount))
 	}
 }
 
-// GetAllReputations returns all reputations in the cache.
-func GetAllReputations() []ReputationRecord {
+// GetWorstReputations returns the top N reputations with the lowest scores.
+// It is optimized to primarily scan the "dirty" set of low-reputation IPs,
+// making it extremely fast even with millions of total reputation entries.
+func GetWorstReputations(limit int) []ReputationRecord {
 	UpdateReputationMetrics()
 
-	var res []ReputationRecord
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	var dirtyRecords []ReputationRecord
 	for _, shard := range repShards {
 		shard.mu.RLock()
-		keys := shard.cache.Keys()
-		for _, k := range keys {
+		for k := range shard.dirty {
 			if val, ok := shard.cache.Peek(k); ok {
 				r := val.(*Reputation)
-				res = append(res, ReputationRecord{
-					Fingerprint:    k.(string),
+				dirtyRecords = append(dirtyRecords, ReputationRecord{
+					Fingerprint:    k,
 					Score:          r.Score,
 					LastEvent:      r.LastEvent,
 					ViolationCount: r.ViolationCount,
@@ -275,5 +331,46 @@ func GetAllReputations() []ReputationRecord {
 		}
 		shard.mu.RUnlock()
 	}
+
+	// Sort by score ascending (worst first)
+	slices.SortFunc(dirtyRecords, func(a, b ReputationRecord) int {
+		return cmp.Compare(a.Score, b.Score)
+	})
+
+	if len(dirtyRecords) >= limit {
+		return dirtyRecords[:limit]
+	}
+
+	// If we have fewer dirty records than the limit, fill with perfect reputations
+	// from the cache until we reach the limit.
+	res := dirtyRecords
+	for _, shard := range repShards {
+		if len(res) >= limit {
+			break
+		}
+		shard.mu.RLock()
+		keys := shard.cache.Keys()
+		for _, k := range keys {
+			if len(res) >= limit {
+				break
+			}
+			fingerprint := k.(string)
+			if _, isDirty := shard.dirty[fingerprint]; isDirty {
+				continue
+			}
+			if val, ok := shard.cache.Peek(k); ok {
+				r := val.(*Reputation)
+				res = append(res, ReputationRecord{
+					Fingerprint:    fingerprint,
+					Score:          r.Score,
+					LastEvent:      r.LastEvent,
+					ViolationCount: r.ViolationCount,
+					History:        slices.Clone(r.History),
+				})
+			}
+		}
+		shard.mu.RUnlock()
+	}
+
 	return res
 }

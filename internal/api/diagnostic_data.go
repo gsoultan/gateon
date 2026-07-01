@@ -18,6 +18,8 @@ type DiagnosticData struct {
 	FingerprintStats map[string]*FingerprintStats
 	PathMap          map[uint64]string            // Hash -> Original path
 	SequenceStats    map[[3]uint64]*SequenceStats // [3]PathHash -> Aggregated signals
+	PathPopularity   map[string]int               // Case-insensitive path popularity
+	PathIPs          map[string]map[string]struct{}
 }
 
 type SequenceStats struct {

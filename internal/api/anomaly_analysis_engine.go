@@ -59,6 +59,8 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 	data.FingerprintStats = make(map[string]*FingerprintStats)
 	data.PathMap = make(map[uint64]string)
 	data.SequenceStats = make(map[[3]uint64]*SequenceStats)
+	data.PathPopularity = make(map[string]int)
+	data.PathIPs = make(map[string]map[string]struct{})
 
 	routeMap := make(map[string]*gateonv1.Route)
 	for _, r := range data.Routes {
@@ -108,6 +110,13 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 			stats.LastTrace = tr
 		}
 		stats.UniquePaths[tr.Path] = struct{}{}
+		lp := strings.ToLower(tr.Path)
+		data.PathPopularity[lp]++
+		if _, ok := data.PathIPs[lp]; !ok {
+			data.PathIPs[lp] = make(map[string]struct{})
+		}
+		data.PathIPs[lp][tr.SourceIP] = struct{}{}
+
 		if tr.UserAgent != "" {
 			stats.UserAgents[tr.UserAgent] = struct{}{}
 		}

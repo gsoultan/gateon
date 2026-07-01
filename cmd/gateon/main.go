@@ -291,6 +291,9 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 	if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
 		logger.L.LogError("failed to init path stats store", "error", err, "database_url", databaseURL)
 	}
+
+	// Start background metrics snapshotting
+	go telemetry.StartSnapshotLoop(ctx)
 }
 
 func startK8sController(ctx context.Context, s *server.Server) {

@@ -5,11 +5,13 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"golang.org/x/sync/errgroup"
 )
 
 type EbpfProvider interface {
@@ -19,10 +21,38 @@ type EbpfProvider interface {
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 }
 
-var globalEbpfManager atomic.Pointer[EbpfProvider]
+var (
+	globalEbpfManager atomic.Pointer[EbpfProvider]
+	lastSnapshot      atomic.Pointer[MetricsSnapshot]
+	snapshotMu        sync.Mutex
+)
 
 func SetEbpfManager(m EbpfProvider) {
 	globalEbpfManager.Store(&m)
+}
+
+// StartSnapshotLoop starts a background goroutine to periodically refresh the
+// global metrics snapshot, ensuring the UI remains fast even under load.
+func StartSnapshotLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	// Initial snapshot
+	if snap, err := collectMetricsSnapshot(ctx, 50, 0); err == nil {
+		lastSnapshot.Store(snap)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			snap, err := collectMetricsSnapshot(ctx, 50, 0)
+			if err == nil {
+				lastSnapshot.Store(snap)
+			}
+		}
+	}
 }
 
 // MetricsSnapshot holds a structured view of all Prometheus metrics for the UI.
@@ -240,8 +270,19 @@ type SystemMetrics struct {
 }
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
+// It returns a cached snapshot if available and the request matches default parameters.
 func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
-	UpdateReputationMetrics()
+	if limit == 50 && offset == 0 {
+		if snap := lastSnapshot.Load(); snap != nil {
+			return snap, nil
+		}
+	}
+
+	// Fallback to synchronous collection if no cache or non-default parameters
+	return collectMetricsSnapshot(ctx, limit, offset)
+}
+
+func collectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
 	families, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		return nil, err
@@ -278,16 +319,9 @@ func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap.ActiveUnverifiedClients = gaugeValue(idx, "gateon_active_unverified_clients_total")
 	snap.ActiveShunnedEntities = collectLabeledCounts(idx, "gateon_active_shunned_entities_total", "type")
 
-	if fam, ok := idx["gateon_active_anomaly_score"]; ok {
-		var sum float64
-		var count uint64
-		for _, m := range fam.GetMetric() {
-			h := m.GetHistogram()
-			sum += h.GetSampleSum()
-			count += h.GetSampleCount()
-		}
-		if count > 0 {
-			snap.ActiveAnomalyScoreAverage = sum / float64(count)
+	if fam, ok := idx["gateon_active_anomaly_score_average"]; ok {
+		if m := fam.GetMetric(); len(m) > 0 {
+			snap.ActiveAnomalyScoreAverage = m[0].GetGauge().GetValue()
 		}
 	}
 
@@ -858,24 +892,67 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 }
 
 func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily, limit, offset int) SecurityInsights {
-	// Use the lite (no-blob) query: RecentAnomalies on the dashboard never renders
-	// the full request/response header+body blobs, and fetching them on this hot,
-	// frequently-polled snapshot path is what trips the request deadline.
-	threats := GetSecurityThreatsLite(ctx, limit, offset)
-	total := CountSecurityThreats(ctx)
-	activeCount := int(GetActiveThreatsToday())
+	// Parallelize database queries to minimize latency on the metrics path.
+	var (
+		threats     []*SecurityThreat
+		total       int64
+		activeCount int
+		mitigated   int
+		sources     []LabeledCount
+		types       []LabeledCount
+		byCountry   []LabeledCount
+		trend       []TrafficSample
+	)
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		threats = GetSecurityThreatsLite(ctx, limit, offset)
+		return nil
+	})
+	g.Go(func() error {
+		total = CountSecurityThreats(ctx)
+		return nil
+	})
+	g.Go(func() error {
+		activeCount = int(GetActiveThreatsToday())
+		return nil
+	})
+	g.Go(func() error {
+		mitigated = int(GetMitigatedToday())
+		return nil
+	})
+	g.Go(func() error {
+		sources = GetTopThreatSources(ctx, 5)
+		return nil
+	})
+	g.Go(func() error {
+		types = GetTopThreatTypes(ctx, 5)
+		return nil
+	})
+	g.Go(func() error {
+		byCountry = GetThreatsByCountry(ctx, 10)
+		return nil
+	})
+	g.Go(func() error {
+		trend = GetAttackTrend(ctx, dashboardTrendWindowDays())
+		return nil
+	})
+
+	_ = g.Wait()
 
 	return SecurityInsights{
-		TopThreatSources:  GetTopThreatSources(ctx, 5),
-		TopThreatTypes:    GetTopThreatTypes(ctx, 5),
-		ThreatsByCountry:  GetThreatsByCountry(ctx, 10),
-		AttackTrend:       GetAttackTrend(ctx, dashboardTrendWindowDays()),
+		TopThreatSources:  sources,
+		TopThreatTypes:    types,
+		ThreatsByCountry:  byCountry,
+		AttackTrend:       trend,
 		RecentAnomalies:   threats,
 		TotalAnomalies:    total,
 		ActiveThreats:     activeCount,
-		MitigatedToday:    int(GetMitigatedToday()),
+		MitigatedToday:    mitigated,
 		HeavyHitters:      GlobalHHH.GetHeavyHitters(10), // Threshold of 10 threat events
 		GlobalThreatScore: float64(GlobalCMS.Estimate("global")),
+		EbpfTopIPs:        nil, // Filled by caller
 	}
 }
 
