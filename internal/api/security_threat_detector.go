@@ -38,7 +38,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 	threshold := d.getAdaptiveThreshold(d.Threshold, data)
 
 	// 1. Coordinated scan detection
-	pathIPs := d.detectCoordinatedScans(data)
+	pathIPs := data.PathIPs
 	totalIPs := len(data.IPStats)
 
 	if d.Config == nil || d.Config.EnableSequenceValidation {
@@ -81,11 +81,8 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 
 			// Associate fingerprint if available
 			var fingerprint string
-			for _, tr := range data.Traces {
-				if tr.SourceIP == ip && tr.Fingerprint != "" {
-					fingerprint = tr.Fingerprint
-					break
-				}
+			if stats.LastTrace != nil {
+				fingerprint = stats.LastTrace.Fingerprint
 			}
 
 			// Analysis pipeline
@@ -161,30 +158,13 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 }
 
 func (d *SecurityThreatDetector) detectCoordinatedScans(data *DiagnosticData) map[string]map[string]struct{} {
-	pathIPs := make(map[string]map[string]struct{})
-	for ip, stats := range data.IPStats {
-		for path := range stats.UniquePaths {
-			lp := strings.ToLower(path)
-			if _, ok := pathIPs[lp]; !ok {
-				pathIPs[lp] = make(map[string]struct{})
-			}
-			pathIPs[lp][ip] = struct{}{}
-		}
-	}
-	return pathIPs
+	return data.PathIPs
 }
 
 func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	totalIPs := len(data.IPStats)
-	// Re-calculation of pathPopularity is better done with strings for now to stay compatible
-	// but I'll use hashes where possible.
-	pathPopularityStr := make(map[string]int)
-	for _, stats := range data.IPStats {
-		for path := range stats.UniquePaths {
-			pathPopularityStr[strings.ToLower(path)]++
-		}
-	}
+	pathPopularityStr := data.PathPopularity
 
 	patterns := GetCompiledPatterns()
 

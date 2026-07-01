@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
@@ -36,6 +37,12 @@ type ApiService struct {
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 	WafRules           *waf.Store
+
+	// Performance caches for Diagnostics & Security Hub
+	publicIPCache    atomic.Pointer[string]
+	cfReachableCache atomic.Bool
+	cfLatencyCache   atomic.Pointer[time.Duration]
+	anomaliesCache   atomic.Pointer[[]*gateonv1.Anomaly]
 }
 
 // GetGlobals returns the global config store for REST handlers.

@@ -329,11 +329,10 @@ var ActiveShunnedEntitiesTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Help: "Total number of entries currently in the eBPF/XDP blocklists.",
 }, []string{"type"})
 
-// ActiveAnomalyScore tracks current anomaly scores across all active clients.
-var ActiveAnomalyScore = promauto.NewHistogram(prometheus.HistogramOpts{
-	Name:    "gateon_active_anomaly_score",
-	Help:    "Histogram of current anomaly scores across all active clients.",
-	Buckets: []float64{0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
+// ActiveAnomalyScoreAverage tracks the average anomaly score across all active clients.
+var ActiveAnomalyScoreAverage = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "gateon_active_anomaly_score_average",
+	Help: "Average anomaly score across all active clients.",
 })
 
 // ActiveUnverifiedClientsTotal tracks the number of clients currently in a challenge state.
