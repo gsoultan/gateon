@@ -15,6 +15,7 @@ import {
   Tooltip,
   Center,
   Pagination,
+  ThemeIcon,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -24,6 +25,12 @@ import {
   IconAlertTriangle,
   IconRefresh,
   IconUserCheck,
+  IconBrain,
+  IconRobot,
+  IconUsers,
+  IconBug,
+  IconShieldLock,
+  IconBolt,
 } from "@tabler/icons-react";
 import { useSecurityThreats, useRemoveMitigation } from "../../hooks/useGateon";
 import { useTableDensity } from "../../hooks/useTableDensity";
@@ -95,6 +102,16 @@ export function ThreatExplorerTab() {
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE,
   );
+
+  const getThreatIcon = (type: string) => {
+    const t = type.toLowerCase();
+    if (t.includes('waf') || t.includes('sqli') || t.includes('xss')) return <IconShieldLock size={16} />;
+    if (t.includes('bot') || t.includes('scanner')) return <IconRobot size={16} />;
+    if (t.includes('brute') || t.includes('impossible_travel')) return <IconUsers size={16} />;
+    if (t.includes('exploit') || t.includes('rce') || t.includes('lfi')) return <IconBug size={16} />;
+    if (t.includes('entropy') || t.includes('fingerprint')) return <IconBolt size={16} />;
+    return <IconAlertTriangle size={16} />;
+  };
 
   const handleUnmitigate = async (e: React.MouseEvent, ip: string) => {
     e.stopPropagation();
@@ -211,10 +228,29 @@ export function ThreatExplorerTab() {
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Stack gap={0}>
-                        <Text size="sm" fw={600}>{threat.type.replace(/_/g, ' ').toUpperCase()}</Text>
-                        <Text size="xs" c="dimmed">{threat.category || 'N/A'}</Text>
-                      </Stack>
+                      <Group gap="sm" wrap="nowrap">
+                        <ThemeIcon 
+                          variant="light" 
+                          color={getSeverityColor(threat.severity)} 
+                          size="md" 
+                          radius="md"
+                        >
+                          {getThreatIcon(threat.type)}
+                        </ThemeIcon>
+                        <Stack gap={0}>
+                          <Group gap={4}>
+                            <Text size="sm" fw={600}>{threat.type.replace(/_/g, ' ').toUpperCase()}</Text>
+                            {threat.recommendation?.includes("Smart Insight:") && (
+                              <Tooltip label="Deep intelligence analysis available">
+                                <Badge size="xs" color="blue" variant="outline" p={4} style={{ borderStyle: 'dashed' }}>
+                                  <IconBrain size={10} />
+                                </Badge>
+                              </Tooltip>
+                            )}
+                          </Group>
+                          <Text size="xs" c="dimmed">{threat.category || 'N/A'}</Text>
+                        </Stack>
+                      </Group>
                     </Table.Td>
                     <Table.Td>
                       <Badge color={getSeverityColor(threat.severity)} variant="filled" size="sm">

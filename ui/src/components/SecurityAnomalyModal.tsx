@@ -15,6 +15,7 @@ import {
   ActionIcon,
   Button,
   Alert,
+  List,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -31,6 +32,9 @@ import {
   IconDeviceLaptop,
   IconDatabase,
   IconNotes,
+  IconBrain,
+  IconInfoCircle,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 import { useRemoveMitigation, useApplyRecommendation } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
@@ -51,6 +55,20 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
   const applyRecommendation = useApplyRecommendation();
 
   if (!anomaly) return null;
+
+  const parseRecommendation = (rec: string) => {
+    if (!rec) return { general: "", insight: null };
+    const parts = rec.split("Smart Insight:");
+    if (parts.length > 1) {
+      return {
+        general: parts[0].trim(),
+        insight: parts[1].trim(),
+      };
+    }
+    return { general: rec, insight: null };
+  };
+
+  const { general, insight } = parseRecommendation(anomaly.recommendation);
 
   const handleApplyFalsePositive = async () => {
     try {
@@ -275,36 +293,51 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
 
         {(anomaly.confidence !== undefined || anomaly.entropy !== undefined || (anomaly.cluster_size ?? 0) > 0) && (
           <>
-            <Divider label="Advanced Metrics" labelPosition="center" />
+            <Divider label="Security Intelligence Metrics" labelPosition="center" />
             <Grid grow>
               {anomaly.confidence !== undefined && (
                 <Grid.Col span={{ base: 6, sm: 4 }}>
-                  <Stack gap={2} align="center">
-                    <Text size="xs" c="dimmed" fw={700}>CONFIDENCE</Text>
-                    <Badge variant="light" color={anomaly.confidence > 0.8 ? "red" : "orange"} size="lg">
-                      {Math.round(anomaly.confidence * 100)}%
-                    </Badge>
-                  </Stack>
+                  <Tooltip label="Likelihood that this detection is accurate based on statistical patterns.">
+                    <Stack gap={2} align="center">
+                      <Group gap={4}>
+                        <IconInfoCircle size={10} color="dimmed" />
+                        <Text size="xs" c="dimmed" fw={700}>CONFIDENCE</Text>
+                      </Group>
+                      <Badge variant="light" color={anomaly.confidence > 0.8 ? "red" : "orange"} size="lg">
+                        {Math.round(anomaly.confidence * 100)}%
+                      </Badge>
+                    </Stack>
+                  </Tooltip>
                 </Grid.Col>
               )}
               {anomaly.entropy !== undefined && anomaly.entropy > 0 && (
                 <Grid.Col span={{ base: 6, sm: 4 }}>
-                  <Stack gap={2} align="center">
-                    <Text size="xs" c="dimmed" fw={700}>ENTROPY (UA)</Text>
-                    <Badge variant="light" color={anomaly.entropy < 1.0 ? "red" : "blue"} size="lg">
-                      {anomaly.entropy.toFixed(2)}
-                    </Badge>
-                  </Stack>
+                  <Tooltip label="Measures randomness in the payload. High entropy often indicates encrypted/encoded tokens, while low entropy is typical for common text.">
+                    <Stack gap={2} align="center">
+                      <Group gap={4}>
+                        <IconInfoCircle size={10} color="dimmed" />
+                        <Text size="xs" c="dimmed" fw={700}>ENTROPY</Text>
+                      </Group>
+                      <Badge variant="light" color={anomaly.entropy < 1.0 ? "red" : anomaly.entropy > 5.0 ? "blue" : "teal"} size="lg">
+                        {anomaly.entropy.toFixed(2)}
+                      </Badge>
+                    </Stack>
+                  </Tooltip>
                 </Grid.Col>
               )}
               {(anomaly.cluster_size ?? 0) > 0 && (
                 <Grid.Col span={{ base: 6, sm: 4 }}>
-                  <Stack gap={2} align="center">
-                    <Text size="xs" c="dimmed" fw={700}>CLUSTER SIZE</Text>
-                    <Badge variant="light" color="violet" size="lg">
-                      {anomaly.cluster_size} IPs
-                    </Badge>
-                  </Stack>
+                  <Tooltip label="Number of unique IPs involved in this specific threat pattern across the network.">
+                    <Stack gap={2} align="center">
+                      <Group gap={4}>
+                        <IconInfoCircle size={10} color="dimmed" />
+                        <Text size="xs" c="dimmed" fw={700}>CLUSTER SIZE</Text>
+                      </Group>
+                      <Badge variant="light" color="violet" size="lg">
+                        {anomaly.cluster_size} IPs
+                      </Badge>
+                    </Stack>
+                  </Tooltip>
                 </Grid.Col>
               )}
             </Grid>
@@ -392,6 +425,51 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
 
         <Divider />
 
+        {insight && (
+          <>
+            <Divider 
+              label={
+                <Group gap={4}>
+                  <IconBrain size={14} />
+                  <Text size="xs" fw={700}>SMART INSIGHTS</Text>
+                </Group>
+              } 
+              labelPosition="center" 
+              color="blue"
+            />
+            <Alert 
+              variant="light" 
+              color="blue" 
+              title="Intelligence Analysis" 
+              icon={<IconBrain size={16} />}
+              radius="md"
+            >
+              <Stack gap="xs">
+                {insight.includes("•") ? (
+                  <List size="sm" spacing="xs" icon={<ThemeIcon color="blue" size={16} radius="xl"><IconCheck size={10} /></ThemeIcon>}>
+                    {insight.split("\n").filter(l => l.trim().startsWith("•")).map((line, i) => (
+                      <List.Item key={i}>
+                        <Text size="sm">{line.replace("•", "").trim()}</Text>
+                      </List.Item>
+                    ))}
+                  </List>
+                ) : (
+                  <Text size="sm">{insight}</Text>
+                )}
+                
+                {insight.toLowerCase().includes("false positive") && (
+                  <Alert color="teal" variant="outline" p="xs" mt="xs">
+                    <Group gap="xs">
+                      <IconShieldCheck size={16} />
+                      <Text size="xs" fw={600}>Smart engine suggests this might be a false positive. Auto-fix is recommended.</Text>
+                    </Group>
+                  </Alert>
+                )}
+              </Stack>
+            </Alert>
+          </>
+        )}
+
         <Stack gap="xs">
           <Group gap="xs">
             <IconAlertCircle size={16} color="var(--mantine-color-blue-6)" />
@@ -400,7 +478,7 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
             </Text>
           </Group>
           <Paper withBorder p="sm" radius="md" bg="var(--mantine-color-blue-light)">
-            <Text size="sm">{anomaly.recommendation}</Text>
+            <Text size="sm">{general || "No specific recommendation available."}</Text>
           </Paper>
         </Stack>
 
