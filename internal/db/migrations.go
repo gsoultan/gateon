@@ -958,4 +958,23 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(35, "add_recommendation_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS recommendation TEXT NOT NULL DEFAULT '';`
+		case DriverMySQL:
+			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS recommendation TEXT NOT NULL DEFAULT '';`
+		default: // sqlite
+			query = `ALTER TABLE security_threats ADD COLUMN recommendation TEXT NOT NULL DEFAULT '';`
+		}
+		if _, err := db.Exec(query); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 }
