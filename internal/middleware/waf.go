@@ -192,6 +192,10 @@ var crsRuleExplanations = map[int]struct {
 		Explanation:    "The HTTP method used (e.g., PUT, DELETE) is not allowed by your security policy for this path.",
 		Recommendation: "Ensure you are using standard methods like GET or POST, or update the 'Allowed Methods' in Gateon settings.",
 	},
+	920170: {
+		Explanation:    "The request is a GET or HEAD but includes a message body, which is technically non-standard and often blocked by security policies.",
+		Recommendation: "Ensure your client is not sending a body with GET requests. If this is required by your API, use the 'Mark as False Positive' button to allow it for this path.",
+	},
 	920180: {
 		Explanation:    "The request is missing a mandatory size header (Content-Length) for a POST operation.",
 		Recommendation: "Ensure your client or proxy sends a proper Content-Length header for all POST/PUT requests.",
@@ -203,6 +207,10 @@ var crsRuleExplanations = map[int]struct {
 	932100: {
 		Explanation:    "A system command execution pattern (RCE) was detected. The request looks like an attempt to run commands on the server.",
 		Recommendation: "If this is a false positive, it might be due to shell-like characters in your input. Consider whitelisting this specific field.",
+	},
+	941010: {
+		Explanation:    "The request path (URI) triggered a security filter for suspicious characters or restricted file extensions.",
+		Recommendation: "This often happens with complex identifiers like UUIDs in the path. If the path is legitimate, use the 'Mark as False Positive' button.",
 	},
 	941100: {
 		Explanation:    "A script injection pattern (XSS) was detected. The input contains characters that could be executed by a browser.",
@@ -288,12 +296,18 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 
 		// Group by category for better readability
 		byCategory := make(map[string][]string)
+		highParanoia := false
 
 		for _, mr := range matchedRules {
 			id := mr.Rule().ID()
 			// Skip internal/setup/reporting rules to avoid noise
 			if id == 949110 || (id >= 900000 && id <= 901999) || (id >= 949000 && id <= 949999) || (id >= 980000 && id <= 980999) {
 				continue
+			}
+
+			// Detect high paranoia level rules (usually ending in 13, 14, 15... or having it in the msg)
+			if strings.Contains(strings.ToLower(mr.Message()), "paranoia") || id%100 >= 13 {
+				highParanoia = true
 			}
 
 			attackRules = append(attackRules, id)
@@ -338,11 +352,6 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 			}
 		}
 
-		if len(attackRules) == 0 {
-			// Fallback if we filtered everything but it still blocked
-			detailsSb.WriteString("• Multiple internal security policies triggered an anomaly score overflow.")
-		}
-
 		explanation = detailsSb.String()
 
 		// Context-aware recommendation
@@ -350,12 +359,26 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 		if len(matchedRules) > 0 {
 			uri = matchedRules[0].URI()
 		}
-
 		uriLower := strings.ToLower(uri)
+
+		// Path-specific recommendations
+		pathRec := ""
 		if strings.Contains(uriLower, "token") || strings.Contains(uriLower, "refresh") || strings.Contains(uriLower, "login") || strings.Contains(uriLower, "auth") {
-			recommendation = "This endpoint handles sensitive authentication data. Cryptographic tokens often look like database or script attacks. If this is legitimate traffic, click 'Mark as False Positive' to automatically whitelist these patterns for this path."
+			pathRec = "This endpoint handles sensitive authentication data. Cryptographic tokens often look like database or script attacks. If this is legitimate traffic, click 'Mark as False Positive' to automatically whitelist these patterns for this path."
+		} else if containsUUID(uri) {
+			pathRec = "This path contains a UUID or complex identifier. These can sometimes trigger false positives in path-based security rules (like Rule 941010). If this is legitimate traffic, use the 'Mark as False Positive' button to create a targeted exclusion."
 		} else {
-			recommendation = "Review the violations above. If these are expected behaviors for your application, use the 'Mark as False Positive' button to create a targeted exclusion and restore the client's reputation."
+			pathRec = "Review the violations above. If these are expected behaviors for your application, use the 'Mark as False Positive' button to create a targeted exclusion and restore the client's reputation."
+		}
+
+		if pathRec != "" {
+			recommendation = pathRec
+		}
+
+		if highParanoia {
+			recommendation += "\n\nHint: Multiple high-paranoia rules were triggered. These rules are very strict and often cause false positives. If this traffic is legitimate, consider lowering the CRS Paranoia Level in settings."
+		} else if len(attackRules) > 3 {
+			recommendation += "\n\nHint: Multiple security violations detected. This usually indicates either a complex false positive or a multi-stage attack."
 		}
 	} else {
 		// Single rule block
@@ -1529,4 +1552,26 @@ func isBase64URL(s string) bool {
 		}
 	}
 	return true
+}
+
+func containsUUID(s string) bool {
+	// A standard UUID has 36 characters and 4 hyphens: 8-4-4-4-12
+	// We look for this pattern heuristically.
+	count := 0
+	for _, r := range s {
+		if r == '-' {
+			count++
+		}
+	}
+	if count < 4 {
+		return false
+	}
+	// Check for hex segments
+	parts := strings.Split(s, "/")
+	for _, p := range parts {
+		if len(p) == 36 && strings.Count(p, "-") == 4 {
+			return true
+		}
+	}
+	return false
 }
