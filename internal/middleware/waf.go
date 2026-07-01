@@ -129,8 +129,16 @@ SecRuleUpdateTargetById 942260 "!REQUEST_HEADERS:X-Api-Key"
 SecRuleUpdateTargetById 941100 "!REQUEST_HEADERS:Authorization"
 SecRuleUpdateTargetById 941100 "!REQUEST_HEADERS:X-Api-Key"
 
+# Exclude refresh token endpoint from heavy SQLi/XSS checks
+# High-entropy tokens in the request body/headers often trigger false positives.
+SecRule REQUEST_URI "@beginsWith /v1/employees/refresh-token" \
+    "id:900500,phase:1,nolog,pass,t:none,ctl:ruleRemoveById=942100-942999,ctl:ruleRemoveById=941100-941999"
+
 # Redact sensitive headers from Coraza audit log
 SecAction "id:900300,phase:1,nolog,pass,setvar:tx.redact_headers=Authorization,setvar:tx.redact_headers=X-Api-Key,setvar:tx.redact_headers=Cookie,setvar:tx.redact_headers=Set-Cookie"
+
+# Ensure server_name is set from Host header for better logging
+SecRule REQUEST_HEADERS:Host "^(.+)$" "id:900015,phase:1,nolog,pass,t:none,setvar:tx.server_name=%{MATCHED_VAR}"
 `
 
 var (
@@ -153,6 +161,43 @@ var (
 		"log4j", "jndi:ldap", "jndi:rmi", "${jndi:", // Log4j
 	})
 )
+
+var crsRuleExplanations = map[int]struct {
+	Explanation    string
+	Recommendation string
+}{
+	920180: {
+		Explanation:    "Request is missing Content-Length or Transfer-Encoding for a POST request, which is required by HTTP standards.",
+		Recommendation: "Ensure your client sends a proper Content-Length header or uses Chunked Transfer Encoding for POST requests.",
+	},
+	941100: {
+		Explanation:    "Potential Cross-Site Scripting (XSS) attack detected via pattern matching. This occurs when input looks like malicious scripts.",
+		Recommendation: "Verify if the input contains special characters like <, >, or script tags. If this is a false positive, consider whitelisting the specific field.",
+	},
+	941110: {
+		Explanation:    "Direct script tag detected in the request. This is a common indicator of an XSS attack.",
+		Recommendation: "Remove HTML tags from your input or ensure they are properly encoded.",
+	},
+	942100: {
+		Explanation:    "Potential SQL Injection (SQLi) attack detected. The request contains patterns common in database attacks.",
+		Recommendation: "Avoid using SQL keywords or special characters like single quotes in your request data unless necessary.",
+	},
+	942270: {
+		Explanation:    "Classic SQL injection pattern (UNION SELECT) detected. This is a high-confidence indicator of an exploit attempt.",
+		Recommendation: "Check your request for accidental SQL-like syntax. If this is legitimate data, it may need to be base64 encoded.",
+	},
+	949110: {
+		Explanation:    "The total anomaly score of this request exceeded the security threshold due to multiple small violations.",
+		Recommendation: "Review the individual violations above. If these are false positives, you can adjust the Anomaly Sensitivity in Gateon settings.",
+	},
+}
+
+func getWAFDetails(ruleID int, originalDetails string) (explanation, recommendation string) {
+	if info, ok := crsRuleExplanations[ruleID]; ok {
+		return info.Explanation, info.Recommendation
+	}
+	return originalDetails, "Review the security logs for more details or contact your administrator if you believe this is a false positive."
+}
 
 func init() {
 	for i := 0; i <= 100; i++ {
@@ -466,6 +511,18 @@ SecAuditLog "%s"
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(wrappedWaf, next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Ensure Host header is correctly set for Coraza and downstream services.
+			// If r.Host is empty, Coraza logs empty hostname.
+			if r.Host == "" && r.Header.Get("Host") != "" {
+				r.Host = r.Header.Get("Host")
+			}
+			if r.Host != "" {
+				// Standard Go http.Request.Header usually omits the Host header,
+				// but Coraza's txhttp wrapper iterates over the Header map.
+				// We force it here to ensure Coraza sees the hostname.
+				r.Header["Host"] = []string{r.Host}
+			}
+
 			// Security Header Spoofing Prevention: clear internal headers from incoming request.
 			r.Header.Del("X-Gateon-Reputation")
 			r.Header.Del("X-Gateon-Anomaly-Score")
@@ -615,27 +672,33 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	clientIP := request.GetClientIP(r, true)
 	category := "general"
 	lowerDetails := strings.ToLower(details)
+	recommendation := "Review your request for suspicious patterns. If this is legitimate traffic, consider adjusting the Fast-Path sensitivity."
+
 	if strings.Contains(lowerDetails, "sql") || strings.Contains(lowerDetails, "union") {
 		category = "sqli"
+		recommendation = "SQL patterns were detected in the request. Ensure you are not sending raw SQL fragments in your headers or parameters."
 	} else if strings.Contains(lowerDetails, "script") || strings.Contains(lowerDetails, "xss") {
 		category = "xss"
+		recommendation = "Script-like patterns were detected. Avoid using <script> tags or common XSS vectors in headers like Referer or User-Agent."
 	} else if strings.Contains(lowerDetails, "scanner") || strings.Contains(lowerDetails, "nmap") || strings.Contains(lowerDetails, "sqlmap") {
 		category = "bot"
+		recommendation = "Your request was flagged as a known automated scanner or bot. If you are a developer, ensure your tool uses a legitimate User-Agent."
 	}
 
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-		Type:        typeStr,
-		SourceIP:    clientIP,
-		Score:       100,
-		Details:     details,
-		Time:        time.Now(),
-		RouteID:     routeID,
-		RequestURI:  r.RequestURI,
-		UserAgent:   r.UserAgent(),
-		Method:      r.Method,
-		Category:    category,
-		Severity:    "critical",
-		ActionTaken: "blocked",
+		Type:           typeStr,
+		SourceIP:       clientIP,
+		Score:          100,
+		Details:        details,
+		Recommendation: recommendation,
+		Time:           time.Now(),
+		RouteID:        routeID,
+		RequestURI:     r.RequestURI,
+		UserAgent:      r.UserAgent(),
+		Method:         r.Method,
+		Category:       category,
+		Severity:       "critical",
+		ActionTaken:    "blocked",
 	}))
 }
 
@@ -849,19 +912,22 @@ func (t *txWrapper) ProcessLogging() {
 			}
 		}
 
+		explanation, recommendation := getWAFDetails(it.RuleID, details)
+
 		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
-			ID:          fmt.Sprintf("waf-block-%s", t.ID()),
-			Type:        "waf_block",
-			SourceIP:    clientIP,
-			Score:       100, // Explicit block is a high priority threat
-			Details:     fmt.Sprintf("WAF blocked request (Rule %s): %s", ruleID, details),
-			Time:        time.Now(),
-			RouteID:     t.routeID,
-			RequestURI:  uri,
-			Category:    category,
-			Severity:    severity,
-			ActionTaken: "blocked",
-			JA4:         ja4,
+			ID:             fmt.Sprintf("waf-block-%s", t.ID()),
+			Type:           "waf_block",
+			SourceIP:       clientIP,
+			Score:          100, // Explicit block is a high priority threat
+			Details:        explanation,
+			Recommendation: recommendation,
+			Time:           time.Now(),
+			RouteID:        t.routeID,
+			RequestURI:     uri,
+			Category:       category,
+			Severity:       severity,
+			ActionTaken:    "blocked",
+			JA4:            ja4,
 		})
 	}
 	t.Transaction.ProcessLogging()

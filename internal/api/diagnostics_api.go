@@ -513,6 +513,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		Type:            t.Type,
 		Severity:        severity,
 		Description:     t.Details,
+		Recommendation:  t.Recommendation,
 		Timestamp:       t.Time.Format(time.RFC3339),
 		Source:          t.SourceIP,
 		Score:           t.Score,

@@ -171,8 +171,9 @@ func ApplyRemoteReputation(fingerprint string, score float64, violations int, hi
 	var r *Reputation
 	if val, ok := shard.cache.Get(fingerprint); ok {
 		r = val.(*Reputation)
-		// Only take the remote score if it's worse (lower) than ours.
-		if score < r.Score {
+		// Only take the remote score if it's worse (lower) than ours,
+		// OR if it's a perfect score (manual reset).
+		if score < r.Score || score >= 100.0 {
 			r.Score = score
 			r.ViolationCount = violations
 			r.History = history
@@ -200,6 +201,8 @@ func ResetReputation(fingerprint string) {
 	defer shard.mu.Unlock()
 
 	shard.cache.Remove(fingerprint)
+	// Broadcast a reset (score 100) to the cluster to ensure reputation is back green everywhere.
+	BroadcastReputation(fingerprint, 100, 0, []string{"Manual reset"})
 }
 
 type ReputationRecord struct {
