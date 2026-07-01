@@ -26,6 +26,8 @@ func buildTierWAF(t *testing.T, waf *gateonv1.WafConfig) http.Handler {
 func doGet(t *testing.T, h http.Handler, url string) int {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, url, strings.NewReader(""))
+	// Force low reputation for security tests that expect blocks at score 5.
+	req.Header.Set("X-Gateon-Test-Reputation", "0")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	return rr.Code

@@ -108,6 +108,52 @@ func (s *Store) GetAllRules() []Rule {
 	return res
 }
 
+// ListRules returns a paginated list of WAF rules from the database with optional search.
+func (s *Store) ListRules(ctx context.Context, limit, offset int, search string) ([]Rule, int, error) {
+	var rules []Rule
+	var total int
+
+	query := "SELECT id, name, directive, enabled, paranoia_level, category, created_at, updated_at FROM waf_rules"
+	countQuery := "SELECT COUNT(*) FROM waf_rules"
+	var args []any
+
+	if search != "" {
+		where := " WHERE id LIKE ? OR name LIKE ? OR directive LIKE ? OR category LIKE ?"
+		query += where
+		countQuery += where
+		searchArg := "%" + search + "%"
+		args = append(args, searchArg, searchArg, searchArg, searchArg)
+	}
+
+	// Get total count
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(countQuery), args...).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query += " ORDER BY id ASC"
+	if limit > 0 {
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, limit, offset)
+	}
+
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(query), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var r Rule
+		if err := rows.Scan(&r.ID, &r.Name, &r.Directive, &r.Enabled, &r.ParanoiaLevel, &r.Category, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		rules = append(rules, r)
+	}
+
+	return rules, total, nil
+}
+
 func (s *Store) SetInvalidator(i Invalidator) {
 	s.mu.Lock()
 	s.invalidator = i
@@ -205,6 +251,14 @@ func (s *Store) Seed(ctx context.Context) error {
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "Initialization",
+		},
+		{
+			ID:            "900001",
+			Name:          "Default Anomaly Threshold",
+			Directive:     `SecAction "id:900001,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5,setvar:tx.outbound_anomaly_score_threshold=4"`,
+			Enabled:       true,
+			ParanoiaLevel: 1,
+			Category:      "Adaptive",
 		},
 		{
 			ID:            "900012",

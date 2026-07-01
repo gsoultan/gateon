@@ -7,15 +7,27 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func (s *ApiService) ListWafRules(ctx context.Context, _ *gateonv1.ListWafRulesRequest) (*gateonv1.ListWafRulesResponse, error) {
+func (s *ApiService) ListWafRules(ctx context.Context, req *gateonv1.ListWafRulesRequest) (*gateonv1.ListWafRulesResponse, error) {
 	if s.WafRules == nil {
 		return &gateonv1.ListWafRulesResponse{}, nil
 	}
 
-	allRules := s.WafRules.GetAllRules()
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := int(req.GetOffset())
+	search := req.GetSearch()
 
-	resp := &gateonv1.ListWafRulesResponse{}
-	for _, r := range allRules {
+	rules, total, err := s.WafRules.ListRules(ctx, limit, offset, search)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &gateonv1.ListWafRulesResponse{
+		Total: int32(total),
+	}
+	for _, r := range rules {
 		resp.Rules = append(resp.Rules, &gateonv1.WafRule{
 			Id:            r.ID,
 			Name:          r.Name,

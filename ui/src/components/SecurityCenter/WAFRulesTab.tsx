@@ -17,16 +17,39 @@ import {
   Code,
   Tooltip,
   Title,
+  Pagination,
+  Box,
 } from '@mantine/core';
-import { IconEdit, IconTrash, IconPlus, IconShieldCheck, IconInfoCircle } from '@tabler/icons-react';
+import { IconEdit, IconTrash, IconPlus, IconShieldCheck, IconInfoCircle, IconSearch } from '@tabler/icons-react';
 import { useWafRules } from '../../hooks/useWafRules';
 import type {WafRule} from '../../types/gateon';
 import { notifications } from '@mantine/notifications';
 
 export function WAFRulesTab() {
-  const { rules, isLoading, createRule, updateRule, deleteRule } = useWafRules();
+  const [activePage, setActivePage] = useState(1);
+  const pageSize = 10;
+  const [search, setSearch] = useState('');
+
+  const { rules, total, params, setParams, isLoading, createRule, updateRule, deleteRule } = useWafRules({
+    limit: pageSize,
+    offset: (activePage - 1) * pageSize,
+    search: search
+  });
   const [opened, setOpened] = useState(false);
   const [editingRule, setEditingRule] = useState<Partial<WafRule> | null>(null);
+
+  const totalPages = Math.ceil(total / pageSize);
+
+  const handlePageChange = (page: number) => {
+    setActivePage(page);
+    setParams({ ...params, offset: (page - 1) * pageSize });
+  };
+
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    setActivePage(1);
+    setParams({ ...params, search: value, offset: 0 });
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,21 +140,30 @@ export function WAFRulesTab() {
           <Title order={4}>WAF Security Rules</Title>
           <Text size="sm" c="dimmed">Manage custom and adaptive Coraza SecLang rules in the database.</Text>
         </Stack>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          onClick={() => {
-            setEditingRule({
-              name: '',
-              directive: '',
-              enabled: true,
-              paranoia_level: 1,
-              category: 'custom',
-            });
-            setOpened(true);
-          }}
-        >
-          Add Rule
-        </Button>
+        <Group>
+          <TextInput
+            placeholder="Search rules..."
+            leftSection={<IconSearch size={16} />}
+            value={search}
+            onChange={(e) => handleSearch(e.currentTarget.value)}
+            w={250}
+          />
+          <Button
+            leftSection={<IconPlus size={16} />}
+            onClick={() => {
+              setEditingRule({
+                name: '',
+                directive: '',
+                enabled: true,
+                paranoia_level: 1,
+                category: 'custom',
+              });
+              setOpened(true);
+            }}
+          >
+            Add Rule
+          </Button>
+        </Group>
       </Group>
 
       <Card withBorder padding="0">
@@ -160,7 +192,7 @@ export function WAFRulesTab() {
                 <Table.Td colSpan={6}>
                   <Stack align="center" py="xl" gap="xs">
                     <IconShieldCheck size={48} color="var(--mantine-color-dimmed)" stroke={1} />
-                    <Text c="dimmed">No rules found in database.</Text>
+                    <Text c="dimmed">{search ? `No rules matching "${search}"` : "No rules found in database."}</Text>
                   </Stack>
                 </Table.Td>
               </Table.Tr>
@@ -168,6 +200,12 @@ export function WAFRulesTab() {
           </Table.Tbody>
         </Table>
       </Card>
+
+      {totalPages > 1 && (
+        <Group justify="center">
+          <Pagination total={totalPages} value={activePage} onChange={handlePageChange} />
+        </Group>
+      )}
 
       <Modal
         opened={opened}

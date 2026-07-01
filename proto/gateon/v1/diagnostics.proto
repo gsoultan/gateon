@@ -236,10 +236,15 @@ message WafRule {
   string updated_at = 8;
 }
 
-message ListWafRulesRequest {}
+message ListWafRulesRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  string search = 3;
+}
 
 message ListWafRulesResponse {
   repeated WafRule rules = 1;
+  int32 total = 2;
 }
 
 message CreateWafRuleRequest {
