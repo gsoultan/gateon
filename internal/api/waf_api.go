@@ -23,8 +23,8 @@ func (s *ApiService) ListWafRules(ctx context.Context, _ *gateonv1.ListWafRulesR
 			Enabled:       r.Enabled,
 			ParanoiaLevel: int32(r.ParanoiaLevel),
 			Category:      r.Category,
-			CreatedAt:     r.CreatedAt.String(),
-			UpdatedAt:     r.UpdatedAt.String(),
+			CreatedAt:     r.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:     r.UpdatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
 	return resp, nil
@@ -57,8 +57,8 @@ func (s *ApiService) CreateWafRule(ctx context.Context, req *gateonv1.CreateWafR
 			Enabled:       r.Enabled,
 			ParanoiaLevel: int32(r.ParanoiaLevel),
 			Category:      r.Category,
-			CreatedAt:     r.CreatedAt.String(),
-			UpdatedAt:     r.UpdatedAt.String(),
+			CreatedAt:     r.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:     r.UpdatedAt.Format("2006-01-02 15:04:05"),
 		},
 	}, nil
 }
