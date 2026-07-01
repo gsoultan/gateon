@@ -18,6 +18,7 @@ type Invalidator interface {
 
 type Store struct {
 	db          *sql.DB
+	dialect     db.Dialect
 	cache       []Rule
 	mu          sync.RWMutex
 	invalidator Invalidator
@@ -37,12 +38,15 @@ func NewStore(db *sql.DB) *Store {
 func InitStore(databaseURL string) error {
 	var err error
 	storeOnce.Do(func() {
-		d, _, openErr := db.Open(databaseURL)
+		d, dialect, openErr := db.Open(databaseURL)
 		if openErr != nil {
 			err = openErr
 			return
 		}
-		globalStore = &Store{db: d}
+		globalStore = &Store{db: d, dialect: dialect}
+		if migrateErr := db.Migrate(d, dialect); migrateErr != nil {
+			logger.L.LogError("failed to migrate WAF rules table", "error", migrateErr)
+		}
 		if reloadErr := globalStore.Reload(context.Background()); reloadErr != nil {
 			logger.L.LogWarn("failed to load initial WAF rules", "error", reloadErr)
 		}
@@ -60,7 +64,7 @@ func GetStore() *Store {
 
 // Reload refreshes the in-memory cache from the database.
 func (s *Store) Reload(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, directive, enabled, paranoia_level, category, created_at, updated_at FROM waf_rules ORDER BY created_at ASC")
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name, directive, enabled, paranoia_level, category, created_at, updated_at FROM waf_rules ORDER BY id ASC")
 	if err != nil {
 		return err
 	}
@@ -125,8 +129,8 @@ func (s *Store) AddRule(ctx context.Context, r *Rule) error {
 		r.ID = uuid.New().String()
 	}
 	now := time.Now()
-	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO waf_rules (id, name, directive, enabled, paranoia_level, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+	query := s.dialect.Rebind("INSERT INTO waf_rules (id, name, directive, enabled, paranoia_level, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+	_, err := s.db.ExecContext(ctx, query,
 		r.ID, r.Name, r.Directive, r.Enabled, r.ParanoiaLevel, r.Category, now, now)
 	if err != nil {
 		return err
@@ -143,8 +147,8 @@ func (s *Store) AddRule(ctx context.Context, r *Rule) error {
 // UpdateRule updates an existing rule in the database and reloads the cache.
 func (s *Store) UpdateRule(ctx context.Context, r *Rule) error {
 	now := time.Now()
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE waf_rules SET name = ?, directive = ?, enabled = ?, paranoia_level = ?, category = ?, updated_at = ? WHERE id = ?",
+	query := s.dialect.Rebind("UPDATE waf_rules SET name = ?, directive = ?, enabled = ?, paranoia_level = ?, category = ?, updated_at = ? WHERE id = ?")
+	_, err := s.db.ExecContext(ctx, query,
 		r.Name, r.Directive, r.Enabled, r.ParanoiaLevel, r.Category, now, r.ID)
 	if err != nil {
 		return err
@@ -159,7 +163,8 @@ func (s *Store) UpdateRule(ctx context.Context, r *Rule) error {
 
 // DeleteRule removes a rule from the database and reloads the cache.
 func (s *Store) DeleteRule(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM waf_rules WHERE id = ?", id)
+	query := s.dialect.Rebind("DELETE FROM waf_rules WHERE id = ?")
+	_, err := s.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return err
 	}
@@ -175,7 +180,10 @@ func (s *Store) Seed(ctx context.Context) error {
 	count := 0
 	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM waf_rules").Scan(&count)
 	if err != nil {
-		return err
+		// If table doesn't exist, we expect an error here, but we should handle it gracefully
+		// if we want to wait for migrations. However, InitStore is called after Migrations.
+		// Let's just return the error so it shows up in logs.
+		return fmt.Errorf("check waf_rules count: %w", err)
 	}
 	if count > 0 {
 		return nil
@@ -199,17 +207,9 @@ func (s *Store) Seed(ctx context.Context) error {
 			Category:      "Initialization",
 		},
 		{
-			ID:            "900001",
-			Name:          "Adaptive Threshold: Reputation 0+",
-			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 0"  "id:900001,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=2"`,
-			Enabled:       true,
-			ParanoiaLevel: 1,
-			Category:      "Adaptive",
-		},
-		{
 			ID:            "900012",
 			Name:          "Adaptive Threshold: Reputation 15+",
-			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 15" "id:900012,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=3"`,
+			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 15" "id:900012,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=7"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "Adaptive",
@@ -217,7 +217,7 @@ func (s *Store) Seed(ctx context.Context) error {
 		{
 			ID:            "900013",
 			Name:          "Adaptive Threshold: Reputation 40+",
-			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900013,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=4"`,
+			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900013,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=10"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "Adaptive",
@@ -225,7 +225,7 @@ func (s *Store) Seed(ctx context.Context) error {
 		{
 			ID:            "900011",
 			Name:          "Adaptive Threshold: Reputation 80+",
-			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 80" "id:900011,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"`,
+			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 80" "id:900011,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=12"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "Adaptive",
@@ -233,7 +233,7 @@ func (s *Store) Seed(ctx context.Context) error {
 		{
 			ID:            "900010",
 			Name:          "Adaptive Threshold: Reputation 95+",
-			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 95" "id:900010,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"`,
+			Directive:     `SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 95" "id:900010,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=15"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "Adaptive",
@@ -289,15 +289,16 @@ func (s *Store) Seed(ctx context.Context) error {
 		{
 			ID:            "900200",
 			Name:          "gRPC Content-Type Compatibility",
-			Directive:     `SecAction "id:900200,phase:1,nolog,pass,t:none,setvar:'tx.allowed_request_content_type=|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/grpc| |application/grpc+proto| |application/grpc+json|'"`,
+			Directive:     `SecRule TX:grpc_mode "@eq 1" "id:900200,phase:1,nolog,pass,t:none,setvar:'tx.allowed_request_content_type=|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/cloudevents-batch+json| |application/grpc| |application/grpc+proto| |application/grpc+json| |application/grpc-web| |application/grpc-web+proto| |application/grpc-web+json| |application/grpc-web-text| |application/grpc-web-text+proto|'"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "gRPC",
 		},
 		{
-			ID:            "900201",
-			Name:          "gRPC Body Access Control",
-			Directive:     `SecRule REQUEST_HEADERS:Content-Type "@rx ^application/grpc" "id:900201,phase:1,nolog,pass,t:lowercase,ctl:ruleRemoveById=920180,ctl:requestBodyAccess=Off"`,
+			ID:   "900201",
+			Name: "gRPC Body Access Control",
+			Directive: `SecRule TX:grpc_mode "@eq 1" "id:900201,phase:1,nolog,pass,t:none,chain"
+  SecRule REQUEST_HEADERS:Content-Type "@rx ^application/grpc" "t:lowercase,ctl:ruleRemoveById=920180,ctl:requestBodyAccess=Off"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "gRPC",
@@ -395,9 +396,9 @@ func (s *Store) Seed(ctx context.Context) error {
 	}
 
 	now := time.Now()
+	query := s.dialect.Rebind("INSERT INTO waf_rules (id, name, directive, enabled, paranoia_level, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
 	for _, r := range initialRules {
-		_, err := s.db.ExecContext(ctx,
-			"INSERT INTO waf_rules (id, name, directive, enabled, paranoia_level, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		_, err := s.db.ExecContext(ctx, query,
 			r.ID, r.Name, r.Directive, r.Enabled, r.ParanoiaLevel, r.Category, now, now)
 		if err != nil {
 			return fmt.Errorf("seed rule %s: %w", r.ID, err)

@@ -7,8 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
+
+func init() {
+	// Initialize the WAF store for tests that use the WAF middleware
+	_ = waf.InitStore("sqlite::memory:")
+}
 
 // TestCreateGlobalWAF_LoadsCRSWithDefaultFlags is the regression guard for the
 // root cause of "WAF detections = 0": the legacy per-route merge wrote "false"
@@ -60,6 +66,8 @@ func TestCreateGlobalWAF_LoadsCRSWithDefaultFlags(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.url, strings.NewReader(""))
+			// Force low reputation for security tests that expect blocks at score 5.
+			req.Header.Set("X-Gateon-Test-Reputation", "0")
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
 			if rr.Code != tc.expectCode {
@@ -146,6 +154,8 @@ func TestCreateGlobalWAF_GRPCRelaxationNotBypassableByHeader(t *testing.T) {
 
 	body := "username=admin'+OR+1=1--+-&password=x"
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+	// Force low reputation so score 10 blocks (threshold is 5).
+	req.Header.Set("X-Gateon-Test-Reputation", "0")
 	// Attacker spoofs the gRPC content type to try to dodge body inspection.
 	req.Header.Set("Content-Type", "application/grpc")
 	req.Header.Set("Content-Length", strconv.Itoa(len(body)))

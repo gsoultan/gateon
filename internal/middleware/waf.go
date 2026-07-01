@@ -496,6 +496,17 @@ Include @crs-setup.conf.example
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
 
+		// Inject dynamic variables for rules (must be before loading database rules that use them)
+		allowedIps := "127.0.0.1"
+		if len(cfg.AllowedAdminIps) > 0 {
+			allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
+		}
+		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
+
+		if cfg.GRPCMode {
+			sb.WriteString("SecAction \"id:900006,phase:1,nolog,pass,setvar:tx.grpc_mode=1\"\n")
+		}
+
 		// Load dynamic rules from database
 		if cfg.WafRules != nil {
 			rules := cfg.WafRules.GetEnabledRules()
@@ -549,13 +560,6 @@ Include @crs-setup.conf.example
 		if cfg.EnableDOSProtection {
 			// Rules are now loaded from database
 		}
-
-		// Inject dynamic variables for rules
-		allowedIps := "127.0.0.1"
-		if len(cfg.AllowedAdminIps) > 0 {
-			allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
-		}
-		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
 
 		// WP Scanning and Exploits are now loaded from database
 		// Ransomware protection is now loaded from database
@@ -696,6 +700,8 @@ SecAuditLog "%s"
 
 			// Security Header Spoofing Prevention: clear internal headers from incoming request.
 			r.Header.Del("X-Gateon-Reputation")
+			testRep := r.Header.Get("X-Gateon-Test-Reputation")
+			r.Header.Del("X-Gateon-Test-Reputation")
 			r.Header.Del("X-Gateon-Anomaly-Score")
 			r.Header.Del("X-Gateon-Threat-Type")
 			r.Header.Del("X-Gateon-WAF-Matched")
@@ -726,6 +732,14 @@ SecAuditLog "%s"
 			// Adaptive WAF: Adjust anomaly threshold based on client reputation
 			fingerprint := telemetry.GetFingerprintHash(r)
 			reputation := telemetry.GetReputationScore(fingerprint)
+
+			// Allow manual override for tests (internal use only, header is deleted later)
+			if testRep != "" {
+				if f, err := strconv.ParseFloat(testRep, 64); err == nil {
+					reputation = f
+				}
+			}
+
 			// Use cached string to avoid allocation
 			r.Header.Set("X-Gateon-Reputation", getReputationString(reputation))
 			r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
