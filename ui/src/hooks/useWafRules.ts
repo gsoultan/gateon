@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
-import { WafRule, ListWafRulesResponse, CreateWafRuleRequest, UpdateWafRuleRequest, DeleteWafRuleRequest } from "../types/gateon";
+import type { WafRule, ListWafRulesResponse, CreateWafRuleRequest, UpdateWafRuleRequest } from "../types/gateon";
 
 export function useWafRules() {
   const queryClient = useQueryClient();
