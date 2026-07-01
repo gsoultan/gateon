@@ -32,7 +32,8 @@ import {
   IconDatabase,
   IconNotes,
 } from "@tabler/icons-react";
-import { useRemoveMitigation } from "../hooks/useGateon";
+import { useRemoveMitigation, useApplyRecommendation } from "../hooks/useGateon";
+import { notifications } from "@mantine/notifications";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
 import { getSeverityColor } from "../utils/security";
@@ -47,8 +48,39 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
   const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
   const [confirmOpened, { open: openConfirm, close: closeConfirm }] = useDisclosure(false);
   const removeMitigation = useRemoveMitigation();
+  const applyRecommendation = useApplyRecommendation();
 
   if (!anomaly) return null;
+
+  const handleApplyFalsePositive = async () => {
+    try {
+      const res = await applyRecommendation.mutateAsync({
+        anomaly_type: anomaly.type,
+        source: anomaly.source,
+        threat_id: anomaly.id,
+      });
+      if (res.success) {
+        notifications.show({
+          title: "Recommendation Applied",
+          message: res.message,
+          color: "green",
+        });
+        onClose();
+      } else {
+        notifications.show({
+          title: "Failed to Apply",
+          message: res.message,
+          color: "red",
+        });
+      }
+    } catch (err) {
+      notifications.show({
+        title: "Error",
+        message: err instanceof Error ? err.message : "An unexpected error occurred",
+        color: "red",
+      });
+    }
+  };
 
   return (
     <Modal
@@ -83,16 +115,25 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
           </Text>
 
           {anomaly.mitigated && (
-            <Button
-              mt="md"
-              variant="light"
-              color="red"
-              leftSection={<IconShieldOff size={16} />}
-              onClick={openConfirm}
-              fullWidth
-            >
-              Remove Mitigation / Allow IP
-            </Button>
+            <Group grow mt="md">
+              <Button
+                variant="light"
+                color="red"
+                leftSection={<IconShieldOff size={16} />}
+                onClick={openConfirm}
+              >
+                Remove Mitigation / Allow IP
+              </Button>
+              <Button
+                variant="light"
+                color="blue"
+                leftSection={<IconCheck size={16} />}
+                onClick={handleApplyFalsePositive}
+                loading={applyRecommendation.isPending}
+              >
+                Mark as False Positive (Auto-Fix)
+              </Button>
+            </Group>
           )}
         </Paper>
 

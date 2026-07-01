@@ -14,6 +14,9 @@ import (
 
 type EbpfProvider interface {
 	GetTopIPs(limit int) ([]IPStat, error)
+	ShunIP(ip string) error
+	UnshunIP(ip string) error
+	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 }
 
 var globalEbpfManager atomic.Pointer[EbpfProvider]

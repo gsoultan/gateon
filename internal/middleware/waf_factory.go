@@ -110,25 +110,27 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		// Opt-in, false-positive-prone groups honour the explicit proto flag:
 		DisableWordPress: !w.GetWordpress(), // WP admin lockdown breaks legit /wp-admin
 		// Robust extras — malware & ransomware on by default for the global WAF:
-		EnableMalwareDetection:    true,
-		EnableRansomwareDetection: true,
-		EnableIPReputation:        w.GetIpReputation(),
-		EnableDOSProtection:       w.GetDosProtection(),
-		EnableDLP:                 w.GetDlp(),
-		AnomalyThreshold:          int(w.GetAnomalyThreshold()),
-		RequestBodyLimit:          int(w.GetRequestBodyLimit()),
-		ResponseBodyLimit:         int(w.GetResponseBodyLimit()),
-		AuditLogPath:              w.GetAuditLogPath(),
-		AuditLogRelevantOnly:      w.GetAuditLogRelevantOnly(),
-		AllowedAdminIps:           w.GetAllowedAdminIps(),
-		EntropyThreshold:          w.GetEntropyThreshold(),
-		DisableEntropy:            w.GetDisableEntropy(),
-		TrustCloudflare:           w.GetTrustCloudflareHeaders(),
-		GlobalDirectives:          w.GetCustomDirectives(),
-		RouteID:                   "gateon-global-waf",
-		EbpfManager:               f.ebpfManager,
-		Reputation:                f.reputation,
-		GRPCMode:                  grpcMode,
+		EnableMalwareDetection:      true,
+		EnableRansomwareDetection:   true,
+		EnableIPReputation:          w.GetIpReputation(),
+		EnableDOSProtection:         w.GetDosProtection(),
+		EnableDLP:                   w.GetDlp(),
+		AnomalyThreshold:            int(w.GetAnomalyThreshold()),
+		RequestBodyLimit:            int(w.GetRequestBodyLimit()),
+		ResponseBodyLimit:           int(w.GetResponseBodyLimit()),
+		AuditLogPath:                w.GetAuditLogPath(),
+		AuditLogRelevantOnly:        w.GetAuditLogRelevantOnly(),
+		AllowedAdminIps:             w.GetAllowedAdminIps(),
+		EntropyThreshold:            w.GetEntropyThreshold(),
+		DisableEntropy:              w.GetDisableEntropy(),
+		EnableBodyEntropy:           w.GetEnableBodyEntropy(),
+		EnableFingerprintValidation: w.GetEnableFingerprintValidation(),
+		TrustCloudflare:             w.GetTrustCloudflareHeaders(),
+		GlobalDirectives:            w.GetCustomDirectives(),
+		RouteID:                     "gateon-global-waf",
+		EbpfManager:                 f.ebpfManager,
+		Reputation:                  f.reputation,
+		GRPCMode:                    grpcMode,
 	}
 	// Apply the resolved tier baseline, then honour an explicit DLP opt-in as an
 	// upgrade: a user who deliberately enabled DLP gets response inspection even
@@ -219,6 +221,12 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				}
 				if _, ok := cfg["trust_cloudflare_headers"]; !ok {
 					cfg["trust_cloudflare_headers"] = strconv.FormatBool(global.Waf.TrustCloudflareHeaders)
+				}
+				if _, ok := cfg["enable_body_entropy"]; !ok {
+					cfg["enable_body_entropy"] = strconv.FormatBool(global.Waf.EnableBodyEntropy)
+				}
+				if _, ok := cfg["enable_fingerprint_validation"]; !ok {
+					cfg["enable_fingerprint_validation"] = strconv.FormatBool(global.Waf.EnableFingerprintValidation)
 				}
 
 				if global.Waf.AutoUpdateRules {

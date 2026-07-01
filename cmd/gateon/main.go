@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
@@ -111,7 +112,7 @@ func main() {
 	// manager when Ebpf.Enabled toggles — without invalidating any captured
 	// pointer or forcing a restart. The supervisor's first reconcile applies the
 	// boot-time config (privilege gating, Start, poll loop).
-	ebpfHolder := ebpf.NewHolder(nil)
+	ebpfHolder := ebpf.GlobalHolder
 	telemetry.SetEbpfManager(&ebpfAdapter{ebpfHolder})
 	var wafUpdater *middleware.WAFUpdater
 	var clamavManager *security.ClamAVManager
@@ -350,4 +351,16 @@ func (a *ebpfAdapter) GetTopIPs(limit int) ([]telemetry.IPStat, error) {
 		res[i] = telemetry.IPStat{IP: ip.IP, Count: ip.Count}
 	}
 	return res, nil
+}
+
+func (a *ebpfAdapter) ShunIP(ip string) error {
+	return a.Holder.ShunIP(ip)
+}
+
+func (a *ebpfAdapter) UnshunIP(ip string) error {
+	return a.Holder.UnshunIP(ip)
+}
+
+func (a *ebpfAdapter) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
+	return a.Holder.SetAdaptiveRateLimit(ip, interval)
 }

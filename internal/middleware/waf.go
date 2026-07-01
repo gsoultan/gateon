@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"bytes"
 	"cmp"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -60,18 +62,20 @@ type WAFConfig struct {
 	// expensive part of the WAF in CPU, latency and memory, so it is off outside
 	// the enterprise tier. When false, no RESPONSE-* rules are loaded and response
 	// body access stays off.
-	EnableResponseInspection bool
-	AnomalyThreshold         int
-	EntropyThreshold         float64 // Threshold for Shannon entropy check (default 5.8)
-	DisableEntropy           bool    // If true, skip fast-path entropy check
-	RequestBodyLimit         int     // Maximum request body size in bytes
-	ResponseBodyLimit        int     // Maximum response body size in bytes
-	AuditLogPath             string  // Path to audit log file
-	AuditLogRelevantOnly     bool    // Only log relevant transactions
-	EbpfManager              ebpf.Manager
-	Reputation               *reputation.IPReputationStore
-	AllowedAdminIps          []string // IPs allowed to access WP admin
-	RulesPath                string   // Path to external WAF rules (CRS)
+	EnableResponseInspection    bool
+	AnomalyThreshold            int
+	EntropyThreshold            float64 // Threshold for Shannon entropy check (default 5.8)
+	DisableEntropy              bool    // If true, skip fast-path entropy check
+	EnableBodyEntropy           bool    // Enable entropy check on request body
+	EnableFingerprintValidation bool    // Enable JA3/JA4 fingerprint consistency check
+	RequestBodyLimit            int     // Maximum request body size in bytes
+	ResponseBodyLimit           int     // Maximum response body size in bytes
+	AuditLogPath                string  // Path to audit log file
+	AuditLogRelevantOnly        bool    // Only log relevant transactions
+	EbpfManager                 ebpf.Manager
+	Reputation                  *reputation.IPReputationStore
+	AllowedAdminIps             []string // IPs allowed to access WP admin
+	RulesPath                   string   // Path to external WAF rules (CRS)
 
 	// GRPCMode relaxes the CRS Protocol-Enforcement rules that are structurally
 	// incompatible with the gRPC/HTTP-2 transport (see grpcCompatDirective) and
@@ -264,6 +268,33 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 				val = val[:47] + "..."
 			}
 			explanation = fmt.Sprintf("Rule %d was triggered: %s. The value '%s' at %s matched a security signature.", ruleID, mr.Message(), val, md.Variable().Name())
+		}
+	}
+
+	// Add fingerprint/entropy insights if recorded in context (for fast-path threats)
+	if ca, ok := t.(interface {
+		GetCollection(variables.RuleVariable) collection.Collection
+	}); ok {
+		if tx, ok := ca.GetCollection(variables.TX).(collection.Keyed); ok {
+			if typeStr := tx.Get("fast_path_type"); len(typeStr) > 0 {
+				switch typeStr[0] {
+				case "fast_path_entropy":
+					explanation = "High Shannon Entropy detected in request components, suggesting obfuscated shellcode, encrypted payloads, or binary injection."
+					recommendation = "Review the flagged field for unusual character distributions. If this is legitimate binary data, consider whitelisting the field or endpoint."
+				case "fast_path_fingerprint":
+					explanation = "Client fingerprint mismatch: The TLS/HTTP fingerprint does not match the declared User-Agent, indicating a spoofed client or automated bot."
+					recommendation = "The request appears to be coming from a tool masquerading as a browser. Verify the legitimacy of the client or enforce CAPTCHA/JS challenges."
+				case "fast_path_protocol_violation":
+					explanation = "HTTP/2 or HTTP/3 protocol violation detected (e.g., forbidden 'Connection' header). This is common in poorly implemented bots or exploit scripts."
+					recommendation = "Check if the client is using an outdated or non-standard HTTP library. Legitimate browsers do not violate these protocol rules."
+				case "fast_path_suspicious_client":
+					explanation = "The client claims to be a modern browser but is missing mandatory headers like 'Accept-Encoding', suggesting a scripted attack."
+					recommendation = "Review the client's traffic patterns. If this is a legitimate automated tool, ensure it sends standard browser-like headers."
+				case "fast_path_malformed_token":
+					explanation = "Malformed security token (JWT) structure detected in the Authorization header."
+					recommendation = "Ensure your client is sending a valid JWT. If you are using a custom token format, you may need to adjust the Gateon Fast-Path settings."
+				}
+			}
 		}
 	}
 
@@ -718,6 +749,83 @@ SecAuditLog "%s"
 				}
 			}
 
+			// 1. Fingerprint Consistency Check (Spoofing Prevention)
+			if cfg.EnableFingerprintValidation {
+				ua := r.Header.Get("User-Agent")
+				if isBrowserUA(ua) {
+					// TLS Check
+					if r.TLS != nil && isSuspiciousTLS(r) {
+						details := fmt.Sprintf("Fingerprint mismatch: Browser UA '%s' with suspicious TLS profile (v%x)", ua, r.TLS.Version)
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_fingerprint", details)
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_fingerprint").Inc()
+						http.Error(w, "Forbidden by Security (Client Spoofing Detected)", http.StatusForbidden)
+						return
+					}
+
+					// H2/H3 Consistency Check
+					if (r.ProtoMajor == 2 || r.ProtoMajor == 3) && r.Header.Get("Connection") != "" {
+						// Connection header is forbidden in HTTP/2 and HTTP/3
+						details := fmt.Sprintf("Protocol violation: %s request from '%s' contains forbidden 'Connection' header", r.Proto, ua)
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_protocol_violation", details)
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_protocol_violation").Inc()
+						http.Error(w, "Forbidden by Security (Protocol Violation)", http.StatusForbidden)
+						return
+					}
+
+					// Modern browsers always send certain headers
+					if r.ProtoMajor >= 2 && r.Header.Get("Accept-Encoding") == "" {
+						details := fmt.Sprintf("Suspicious client: %s request from '%s' missing 'Accept-Encoding'", r.Proto, ua)
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_suspicious_client", details)
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_suspicious_client").Inc()
+						http.Error(w, "Forbidden by Security (Suspicious Client)", http.StatusForbidden)
+						return
+					}
+				}
+			}
+
+			// 2. Body Entropy Check (Fast-Path)
+			if cfg.EnableBodyEntropy && !grpcRequest && r.ContentLength > 0 && r.ContentLength < 1024*1024 {
+				peeked, err := peekBody(r, 2048)
+				if err == nil && len(peeked) > 64 {
+					threshold := cfg.EntropyThreshold
+					if threshold <= 0 {
+						threshold = 5.8
+					}
+					// Adaptive Entropy: Content-Type awareness
+					ct := strings.ToLower(r.Header.Get("Content-Type"))
+					if strings.Contains(ct, "json") || strings.Contains(ct, "xml") || strings.Contains(ct, "form") {
+						threshold += 0.2 // Allow slightly higher entropy for structured data
+					}
+
+					if reputation > 90 {
+						threshold += 0.5
+					} else if reputation < 20 {
+						threshold -= 0.5
+					}
+
+					if entropy.IsSuspiciousBytes(peeked, threshold) {
+						ent := entropy.Calculate(peeked)
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", fmt.Sprintf("High entropy in request body: %.2f (threshold %.2f)", ent, threshold))
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_entropy").Inc()
+						http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
+						return
+					}
+				}
+			}
+
+			// 3. JWT Fast-Check
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				token := auth[7:]
+				// JWTs are usually > 32 chars and follow 3-part structure.
+				// If it's malformed, it's either an error or an injection attempt.
+				if len(token) > 32 && isMalformedJWT(token) {
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_malformed_token", "Malformed JWT structure in Authorization header")
+					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_malformed_token").Inc()
+					http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
+					return
+				}
+			}
+
 			// Deterministic Trace Correlation
 			traceID := telemetry.GetCachedJA4H(r) // Use JA4H as a deterministic trace correlation component if OTel is missing
 			r.Header.Set("X-Gateon-Fingerprint", traceID)
@@ -1107,37 +1215,39 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		strings.TrimSpace(strings.ToLower(cfg["disable_entropy"])) == "1"
 
 	return WAFConfig{
-		UseCRS:                    useCRS,
-		ParanoiaLevel:             pl,
-		Directives:                strings.TrimSpace(cfg["directives"]),
-		DirectivesFile:            strings.TrimSpace(cfg["directives_file"]),
-		TrustCloudflare:           request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
-		AuditOnly:                 auditOnly,
-		DisableSQLI:               isFalse("sqli"),
-		DisableXSS:                isFalse("xss"),
-		DisableLFI:                isFalse("lfi"),
-		DisableRCE:                isFalse("rce"),
-		DisablePHP:                isFalse("php"),
-		DisableScanner:            isFalse("scanner"),
-		DisableProtocol:           isFalse("protocol"),
-		DisableJava:               isFalse("java"),
-		DisableNodeJS:             isFalse("nodejs"),
-		DisableWordPress:          isFalse("wordpress"),
-		EnableIPReputation:        strings.TrimSpace(strings.ToLower(cfg["ip_reputation"])) == "true",
-		EnableDOSProtection:       strings.TrimSpace(strings.ToLower(cfg["dos_protection"])) == "true",
-		EnableMalwareDetection:    strings.TrimSpace(strings.ToLower(cfg["malware_detection"])) == "true",
-		EnableRansomwareDetection: strings.TrimSpace(strings.ToLower(cfg["ransomware_detection"])) == "true",
-		EnableDLP:                 strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
-		AnomalyThreshold:          anomalyThreshold,
-		EntropyThreshold:          entropyThreshold,
-		DisableEntropy:            disableEntropy,
-		RequestBodyLimit:          intVal(cfg["request_body_limit"]),
-		ResponseBodyLimit:         intVal(cfg["response_body_limit"]),
-		AuditLogPath:              strings.TrimSpace(cfg["audit_log_path"]),
-		AuditLogRelevantOnly:      strings.TrimSpace(strings.ToLower(cfg["audit_log_relevant_only"])) != "false",
-		RouteID:                   routeID,
-		AllowedAdminIps:           allowedAdminIps,
-		RulesPath:                 strings.TrimSpace(cfg["rules_path"]),
+		UseCRS:                      useCRS,
+		ParanoiaLevel:               pl,
+		Directives:                  strings.TrimSpace(cfg["directives"]),
+		DirectivesFile:              strings.TrimSpace(cfg["directives_file"]),
+		TrustCloudflare:             request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
+		AuditOnly:                   auditOnly,
+		DisableSQLI:                 isFalse("sqli"),
+		DisableXSS:                  isFalse("xss"),
+		DisableLFI:                  isFalse("lfi"),
+		DisableRCE:                  isFalse("rce"),
+		DisablePHP:                  isFalse("php"),
+		DisableScanner:              isFalse("scanner"),
+		DisableProtocol:             isFalse("protocol"),
+		DisableJava:                 isFalse("java"),
+		DisableNodeJS:               isFalse("nodejs"),
+		DisableWordPress:            isFalse("wordpress"),
+		EnableIPReputation:          strings.TrimSpace(strings.ToLower(cfg["ip_reputation"])) == "true",
+		EnableDOSProtection:         strings.TrimSpace(strings.ToLower(cfg["dos_protection"])) == "true",
+		EnableMalwareDetection:      strings.TrimSpace(strings.ToLower(cfg["malware_detection"])) == "true",
+		EnableRansomwareDetection:   strings.TrimSpace(strings.ToLower(cfg["ransomware_detection"])) == "true",
+		EnableDLP:                   strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
+		EnableBodyEntropy:           strings.TrimSpace(strings.ToLower(cfg["enable_body_entropy"])) == "true",
+		EnableFingerprintValidation: strings.TrimSpace(strings.ToLower(cfg["enable_fingerprint_validation"])) == "true",
+		AnomalyThreshold:            anomalyThreshold,
+		EntropyThreshold:            entropyThreshold,
+		DisableEntropy:              disableEntropy,
+		RequestBodyLimit:            intVal(cfg["request_body_limit"]),
+		ResponseBodyLimit:           intVal(cfg["response_body_limit"]),
+		AuditLogPath:                strings.TrimSpace(cfg["audit_log_path"]),
+		AuditLogRelevantOnly:        strings.TrimSpace(strings.ToLower(cfg["audit_log_relevant_only"])) != "false",
+		RouteID:                     routeID,
+		AllowedAdminIps:             allowedAdminIps,
+		RulesPath:                   strings.TrimSpace(cfg["rules_path"]),
 	}
 }
 
@@ -1147,4 +1257,66 @@ func intVal(v string) int {
 	}
 	n, _ := strconv.Atoi(strings.TrimSpace(v))
 	return n
+}
+
+// peekBody reads up to n bytes from the request body and restores it.
+// It is used for fast-path inspection without consuming the body for downstream.
+func peekBody(r *http.Request, n int64) ([]byte, error) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil, nil
+	}
+	peeked, err := io.ReadAll(io.LimitReader(r.Body, n))
+	if err != nil {
+		return nil, err
+	}
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+		Closer: r.Body,
+	}
+	return peeked, nil
+}
+
+func isBrowserUA(ua string) bool {
+	return strings.Contains(ua, "Mozilla/5.0")
+}
+
+func isSuspiciousTLS(r *http.Request) bool {
+	if r.TLS == nil {
+		return false
+	}
+	// Modern browsers use TLS 1.2 or 1.3
+	if r.TLS.Version < 0x0303 { // < TLS 1.2
+		return true
+	}
+	return false
+}
+
+// isMalformedJWT checks if a token that claims to be a JWT (via Bearer)
+// has a valid 3-part base64url structure.
+func isMalformedJWT(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return true
+	}
+	for _, p := range parts {
+		if !isBase64URL(p) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBase64URL(s string) bool {
+	if s == "" {
+		return true // Allow empty parts (e.g. signature for some testing)
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }

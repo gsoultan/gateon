@@ -93,6 +93,10 @@ func GetReputation(fingerprint string) float64 {
 		elapsed := time.Since(r.LastEvent).Hours()
 		if elapsed > 1 {
 			r.Score = math.Min(100, r.Score+(elapsed*rate))
+			// Reset violation count if no events for a long time
+			if elapsed > 24 {
+				r.ViolationCount = 0
+			}
 			r.LastEvent = time.Now()
 		}
 		return r.Score
@@ -155,6 +159,13 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	r.LastEvent = time.Now()
 	shard.cache.Add(fingerprint, r)
 
+	// Automated eBPF Shunning: If reputation is very low, push to XDP layer.
+	if r.Score < 20.0 {
+		if m := globalEbpfManager.Load(); m != nil {
+			_ = (*m).ShunIP(fingerprint)
+		}
+	}
+
 	// Broadcast the update to the cluster via Gossip.
 	BroadcastReputation(fingerprint, r.Score, r.ViolationCount, r.History)
 }
@@ -201,6 +212,10 @@ func ResetReputation(fingerprint string) {
 	defer shard.mu.Unlock()
 
 	shard.cache.Remove(fingerprint)
+	// Automated eBPF Unshun: Restore access at XDP layer.
+	if m := globalEbpfManager.Load(); m != nil {
+		_ = (*m).UnshunIP(fingerprint)
+	}
 	// Broadcast a reset (score 100) to the cluster to ensure reputation is back green everywhere.
 	BroadcastReputation(fingerprint, 100, 0, []string{"Manual reset"})
 }
