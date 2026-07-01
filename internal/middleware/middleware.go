@@ -36,6 +36,7 @@ const (
 	DebugInfoContextKey    = kind.DebugInfoContextKey
 	FingerprintContextKey  = kind.FingerprintContextKey
 	CORSHandledContextKey  = kind.CORSHandledContextKey
+	NonceContextKey        = kind.NonceContextKey
 )
 
 var (
@@ -58,6 +59,9 @@ var (
 	PutStatusResponseWriter = kind.PutStatusResponseWriter
 	RealIP                  = kind.RealIP
 	GetRequestID            = kind.GetRequestID
+	GenerateNonce           = kind.GenerateNonce
+	Nonce                   = kind.Nonce
+	GetNonce                = kind.GetNonce
 
 	// getStatusString is kept as an unexported alias so internal callers
 	// (e.g. standard.go) continue to compile without importing kind directly.

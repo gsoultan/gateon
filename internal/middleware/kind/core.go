@@ -11,6 +11,10 @@
 package kind
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -34,7 +38,35 @@ const (
 	DebugInfoContextKey    ContextKey = "debug_info"
 	FingerprintContextKey  ContextKey = "fingerprint"
 	CORSHandledContextKey  ContextKey = "cors_handled"
+	NonceContextKey        ContextKey = "nonce"
 )
+
+// GenerateNonce generates a secure random nonce for CSP.
+func GenerateNonce() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// Nonce returns a middleware that generates a unique nonce for each request
+// and stores it in the request context.
+func Nonce() Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nonce := GenerateNonce()
+			ctx := context.WithValue(r.Context(), NonceContextKey, nonce)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// GetNonce retrieves the nonce from the request context.
+func GetNonce(r *http.Request) string {
+	if nonce, ok := r.Context().Value(NonceContextKey).(string); ok {
+		return nonce
+	}
+	return ""
+}
 
 // GetRouteName returns the route ID from the request context, or empty if not set.
 func GetRouteName(r *http.Request) string {
@@ -166,12 +198,10 @@ type SecurityHeadersConfig struct {
 
 // SecurityHeaders returns a middleware that adds standard security headers to all responses based on a preset.
 func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
-	cspHTTP := contentSecurityPolicy(false, cfg.ExtraImgSrc)
-	cspHTTPS := contentSecurityPolicy(true, cfg.ExtraImgSrc)
-
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			secure := isSecureRequest(r)
+			nonce := GetNonce(r)
 			h := w.Header()
 
 			switch cfg.Preset {
@@ -181,10 +211,10 @@ func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
 				h.Set("X-XSS-Protection", "0")
 				h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 				if secure {
-					h.Set("Content-Security-Policy", cspHTTPS)
+					h.Set("Content-Security-Policy", contentSecurityPolicy(true, cfg.ExtraImgSrc, nonce))
 					h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 				} else {
-					h.Set("Content-Security-Policy", cspHTTP)
+					h.Set("Content-Security-Policy", contentSecurityPolicy(false, cfg.ExtraImgSrc, nonce))
 				}
 				h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 			case "strict":
@@ -193,10 +223,10 @@ func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
 				h.Set("X-XSS-Protection", "0")
 				h.Set("Referrer-Policy", "no-referrer")
 				if secure {
-					h.Set("Content-Security-Policy", cspHTTPS)
+					h.Set("Content-Security-Policy", contentSecurityPolicy(true, cfg.ExtraImgSrc, nonce))
 					h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
 				} else {
-					h.Set("Content-Security-Policy", cspHTTP)
+					h.Set("Content-Security-Policy", contentSecurityPolicy(false, cfg.ExtraImgSrc, nonce))
 				}
 				h.Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
 			default:
@@ -216,12 +246,18 @@ func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
 // requests; emitting it over plain HTTP would force browsers to upgrade
 // same-origin asset requests to https://, which fails against an HTTP-only
 // listener (e.g. the management UI on http://localhost) and breaks the page.
-func contentSecurityPolicy(secure bool, extraImgSrc []string) string {
+func contentSecurityPolicy(secure bool, extraImgSrc []string, nonce string) string {
 	imgSrc := "'self' data:"
 	if len(extraImgSrc) > 0 {
 		imgSrc += " " + strings.Join(extraImgSrc, " ")
 	}
-	csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src " + imgSrc + "; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+
+	scriptSrc := "'self'"
+	if nonce != "" {
+		scriptSrc += fmt.Sprintf(" 'nonce-%s'", nonce)
+	}
+
+	csp := fmt.Sprintf("default-src 'self'; script-src %s; style-src 'self' 'unsafe-inline'; img-src %s; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';", scriptSrc, imgSrc)
 	if secure {
 		csp += " upgrade-insecure-requests;"
 	}
