@@ -321,7 +321,13 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 	}
 
 	switch req.AnomalyType {
-	case "high_traffic", "brute_force_attempt", "security_scan", "security_threat", "slow_client_anomaly":
+	case "waf_block", "security_threat":
+		if req.ThreatId != "" {
+			return s.applyWafExclusionRecommendation(ctx, req.ThreatId)
+		}
+		return s.applyBlockIPRecommendation(ctx, req.Source)
+
+	case "high_traffic", "brute_force_attempt", "security_scan", "slow_client_anomaly":
 		return s.applyBlockIPRecommendation(ctx, req.Source)
 
 	case "management_access_violation":
@@ -644,6 +650,67 @@ func (s *ApiService) applyCreateRouteRecommendation(ctx context.Context, path st
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
 		Message: fmt.Sprintf("Route for '%s' has been flagged. Please complete the registration in the Routes panel.", path),
+	}, nil
+}
+
+func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threatID string) (*gateonv1.ApplyRecommendationResponse, error) {
+	threat, err := telemetry.GetSecurityThreatByID(ctx, threatID)
+	if err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat not found: " + err.Error()}, nil
+	}
+
+	if s.Globals == nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Global config service not available"}, nil
+	}
+
+	// Extract Rule ID from details or type
+	ruleID := ""
+	if strings.Contains(threat.Details, "Rule ") {
+		parts := strings.Split(threat.Details, "Rule ")
+		if len(parts) > 1 {
+			ruleID = strings.Split(parts[1], ")")[0]
+			ruleID = strings.Split(ruleID, ":")[0]
+		}
+	}
+	if ruleID == "" && strings.Contains(threat.Details, "[id \"") {
+		parts := strings.Split(threat.Details, "[id \"")
+		if len(parts) > 1 {
+			ruleID = strings.Split(parts[1], "\"")[0]
+		}
+	}
+
+	if ruleID == "" {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Could not identify the specific WAF rule to exclude from threat details."}, nil
+	}
+
+	globalCfg := s.Globals.Get(ctx)
+	if globalCfg.Waf == nil {
+		globalCfg.Waf = &gateonv1.WafConfig{Enabled: true, UseCrs: true}
+	}
+
+	// Build a targeted exclusion directive
+	// SecRule REQUEST_URI "@beginsWith /path" "id:1000,phase:1,pass,nolog,ctl:ruleRemoveById=942100"
+	exclusionID := 100000 + (time.Now().Unix() % 100000)
+	uri := threat.RequestURI
+	if uri == "" {
+		uri = "/"
+	}
+
+	directive := fmt.Sprintf("\n# Auto-generated exclusion for false positive (Rule %s at %s)\nSecRule REQUEST_URI \"@beginsWith %s\" \"id:%d,phase:1,pass,nolog,ctl:ruleRemoveById=%s\"\n",
+		ruleID, uri, uri, exclusionID, ruleID)
+
+	globalCfg.Waf.CustomDirectives += directive
+
+	if err := s.Globals.Update(ctx, globalCfg); err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update config: %v", err)}, nil
+	}
+
+	// Reset reputation for the source IP as it was a false positive
+	telemetry.ResetReputation(threat.SourceIP)
+
+	return &gateonv1.ApplyRecommendationResponse{
+		Success: true,
+		Message: fmt.Sprintf("Rule %s has been excluded for path '%s'. IP reputation reset.", ruleID, uri),
 	}, nil
 }
 

@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+var (
+	// GlobalHolder is the system-wide eBPF manager instance.
+	GlobalHolder = NewHolder(nil)
+)
+
 // Holder is a thread-safe Manager that delegates every call to a swappable
 // underlying Manager. It lets the security supervisor hot-reload the eBPF
 // subsystem at runtime without invalidating the Manager reference captured by

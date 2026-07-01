@@ -95,6 +95,7 @@ message DependencyHealth {
 message ApplyRecommendationRequest {
   string anomaly_type = 1;
   string source = 2;
+  string threat_id = 3;
 }
 
 message ApplyRecommendationResponse {

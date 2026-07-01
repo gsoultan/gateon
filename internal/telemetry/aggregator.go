@@ -2,12 +2,48 @@ package telemetry
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 )
+
+// RunningStats implements Welford's Online Algorithm for computing running
+// mean and variance with high numerical stability and O(1) space/time.
+type RunningStats struct {
+	Count int64
+	Mean  float64
+	M2    float64
+}
+
+func (s *RunningStats) Update(x float64) {
+	s.Count++
+	delta := x - s.Mean
+	s.Mean += delta / float64(s.Count)
+	delta2 := x - s.Mean
+	s.M2 += delta * delta2
+}
+
+func (s *RunningStats) Variance() float64 {
+	if s.Count < 2 {
+		return 0
+	}
+	return s.M2 / float64(s.Count-1)
+}
+
+func (s *RunningStats) StdDev() float64 {
+	return math.Sqrt(s.Variance())
+}
+
+func (s *RunningStats) ZScore(x float64) float64 {
+	std := s.StdDev()
+	if std <= 0.0001 { // Avoid division by zero and noisy tiny stddevs
+		return 0
+	}
+	return (x - s.Mean) / std
+}
 
 // MetricPoint holds a single point in time for various metrics.
 type MetricPoint struct {
@@ -38,6 +74,11 @@ type LocalMetricsAggregator struct {
 
 	maxBuckets int
 	cachedQPS  atomic.Uint64
+
+	// Advanced Stats for Z-Score anomaly detection
+	StatsRequests *RunningStats
+	StatsErrors   *RunningStats
+	StatsLatency  *RunningStats
 }
 
 var (
@@ -48,9 +89,12 @@ var (
 func GetAggregator() *LocalMetricsAggregator {
 	aggOnce.Do(func() {
 		GlobalAggregator = &LocalMetricsAggregator{
-			buckets:    make([]MetricPoint, 0, 60),
-			ipStats:    &sync.Map{},
-			maxBuckets: 60,
+			buckets:       make([]MetricPoint, 0, 60),
+			ipStats:       &sync.Map{},
+			maxBuckets:    60,
+			StatsRequests: &RunningStats{},
+			StatsErrors:   &RunningStats{},
+			StatsLatency:  &RunningStats{},
 		}
 	})
 	return GlobalAggregator
@@ -83,6 +127,11 @@ func (a *LocalMetricsAggregator) takeSnapshot(ctx context.Context) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Update running stats for Z-Score anomaly detection
+	a.StatsRequests.Update(snap.GoldenSignals.RequestsTotal)
+	a.StatsErrors.Update(snap.GoldenSignals.ErrorsTotal)
+	a.StatsLatency.Update(snap.GoldenSignals.P99LatencyMs / 1000.0)
 
 	// 1. Golden Signals
 	point := MetricPoint{

@@ -116,8 +116,11 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 					Time:        now,
 					Category:    "brute_force",
 					Severity:    "medium",
-					ActionTaken: "flagged",
+					ActionTaken: "throttled",
 				})
+				if ad.ebpfManager != nil {
+					_ = ad.ebpfManager.SetAdaptiveRateLimit(s.IP, 1*time.Second) // Limit to 1 req/sec
+				}
 			}
 		}
 	}
@@ -166,8 +169,11 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 					Time:        now,
 					Category:    "exploit_scanning",
 					Severity:    "high",
-					ActionTaken: "flagged",
+					ActionTaken: "throttled",
 				})
+				if ad.ebpfManager != nil {
+					_ = ad.ebpfManager.SetAdaptiveRateLimit(s.IP, 500*time.Millisecond) // Limit to 2 req/sec
+				}
 			}
 		}
 	}
@@ -181,8 +187,6 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 		return
 	}
 
-	errorRate := currentErrors / currentRequests
-
 	// Baseline: last 1 hour
 	baselineErrors := ad.aggregator.GetRate("errors", 1*time.Hour)
 	baselineRequests := ad.aggregator.GetRate("requests", 1*time.Hour)
@@ -194,19 +198,18 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 			baselineRate = 0.01
 		}
 
-		ratio := errorRate / baselineRate
-		// If current rate is > 3x the baseline, it's an anomaly
-		if ratio > 3.0/ad.config.Sensitivity && errorRate > 0.05 {
-			logger.L.LogWarn("ANOMALY DETECTED: 5xx error rate is significantly higher than historical baseline",
-				"current_rate", fmt.Sprintf("%.2f%%", errorRate*100),
-				"baseline_rate", fmt.Sprintf("%.2f%%", baselineRate*100),
-				"deviation_ratio", ratio)
+		z := ad.aggregator.StatsErrors.ZScore(currentErrors)
+		// If Z-Score is > 3.0 (standard statistical anomaly threshold)
+		if z > 3.0/ad.config.Sensitivity && currentErrors > 5 {
+			logger.L.LogWarn("ANOMALY DETECTED: 5xx error rate is statistically anomalous",
+				"current_rate", fmt.Sprintf("%.2f eps", currentErrors),
+				"z_score", fmt.Sprintf("%.2f", z))
 
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-error-rate-%d", now.Unix()),
 				Type:        "error_rate_spike",
-				Score:       math.Min(100, ratio*20),
-				Details:     fmt.Sprintf("Error rate spike: %.2f%% (baseline %.2f%%)", errorRate*100, baselineRate*100),
+				Score:       math.Min(100, z*20),
+				Details:     fmt.Sprintf("Error rate spike detected: Z-Score %.2f (Current %.2f eps)", z, currentErrors),
 				Time:        now,
 				Category:    "service_instability",
 				Severity:    "high",
@@ -226,19 +229,18 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 	baselineP99 := ad.aggregator.GetP99Latency(1 * time.Hour)
 
 	if baselineP99 > 0 {
-		ratio := currentP99 / baselineP99
-		// If current P99 is > 2x the baseline
-		if ratio > 2.0/ad.config.Sensitivity && currentP99 > 0.5 { // ignore spikes below 500ms
-			logger.L.LogWarn("ANOMALY DETECTED: Unusually high P99 latency compared to historical baseline",
+		z := ad.aggregator.StatsLatency.ZScore(currentP99)
+		// If Z-Score is > 3.0
+		if z > 3.0/ad.config.Sensitivity && currentP99 > 0.5 { // ignore spikes below 500ms
+			logger.L.LogWarn("ANOMALY DETECTED: P99 latency is statistically anomalous",
 				"current_p99", fmt.Sprintf("%.2f s", currentP99),
-				"baseline_p99", fmt.Sprintf("%.2f s", baselineP99),
-				"deviation_ratio", ratio)
+				"z_score", fmt.Sprintf("%.2f", z))
 
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-latency-%d", now.Unix()),
 				Type:        "latency_spike",
-				Score:       math.Min(100, ratio*25),
-				Details:     fmt.Sprintf("High latency spike: %.2fs (baseline %.2fs)", currentP99, baselineP99),
+				Score:       math.Min(100, z*25),
+				Details:     fmt.Sprintf("High latency spike detected: Z-Score %.2f (Current %.2fs)", z, currentP99),
 				Time:        now,
 				Category:    "latency_spike",
 				Severity:    "medium",

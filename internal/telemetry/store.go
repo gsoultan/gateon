@@ -1419,6 +1419,29 @@ func GetMitigatedToday() uint64 {
 	return s.currentMitigatedToday.Load()
 }
 
+// GetSecurityThreatByID returns a single security threat by its unique ID.
+func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, error) {
+	s := getStore()
+	if s == nil {
+		return nil, errors.New("telemetry store not initialized")
+	}
+	if id == "" {
+		return nil, errors.New("threat ID is required")
+	}
+
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, '') FROM security_threats WHERE id = ?")
+	th := &SecurityThreat{}
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("threat with ID %s not found", id)
+		}
+		return nil, err
+	}
+	th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
+	return th, nil
+}
+
 // GetSecurityThreats returns a paged list of security threats from the store.
 func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThreat {
 	s := getStore()

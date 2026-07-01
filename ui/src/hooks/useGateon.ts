@@ -43,3 +43,4 @@ export { useUsers } from "./useUsers";
 export { useMetricsSnapshot } from "./useMetricsSnapshot";
 export { useAuditLogs } from "./useAuditLogs";
 export { useDiagnostics } from "./useDiagnostics";
+export { useApplyRecommendation } from "./useApplyRecommendation";
