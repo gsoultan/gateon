@@ -118,21 +118,19 @@ func isGRPCRequest(r *http.Request) bool {
 }
 
 const securityExclusionsDirective = `
-# CRS Exclusions for sensitive high-entropy headers (JWTs, API Keys)
-# These rules often false-positive on long base64 strings or crypt hashes.
-SecRuleUpdateTargetById 942100 "!REQUEST_HEADERS:Authorization"
-SecRuleUpdateTargetById 942100 "!REQUEST_HEADERS:X-Api-Key"
-SecRuleUpdateTargetById 942200 "!REQUEST_HEADERS:Authorization"
-SecRuleUpdateTargetById 942200 "!REQUEST_HEADERS:X-Api-Key"
-SecRuleUpdateTargetById 942260 "!REQUEST_HEADERS:Authorization"
-SecRuleUpdateTargetById 942260 "!REQUEST_HEADERS:X-Api-Key"
-SecRuleUpdateTargetById 941100 "!REQUEST_HEADERS:Authorization"
-SecRuleUpdateTargetById 941100 "!REQUEST_HEADERS:X-Api-Key"
-
-# Exclude refresh token endpoint from heavy SQLi/XSS checks
-# High-entropy tokens in the request body/headers often trigger false positives.
-SecRule REQUEST_URI "@beginsWith /v1/employees/refresh-token" \
-    "id:900500,phase:1,nolog,pass,t:none,ctl:ruleRemoveById=942100-942999,ctl:ruleRemoveById=941100-941999"
+# CRS Exclusions for sensitive high-entropy targets (JWTs, API Keys, Tokens)
+# These rules often false-positive on long base64 strings or cryptographic hashes.
+# We exclude common token fields from all SQLi and XSS rules globally by tag.
+SecRule REQUEST_URI "@unconditionalMatch" \
+    "id:900501,phase:1,nolog,pass,t:none, \
+    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:refresh_token, \
+    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:refresh_token, \
+    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:access_token, \
+    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:access_token, \
+    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:id_token, \
+    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:id_token, \
+    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:token, \
+    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:token"
 
 # Redact sensitive headers from Coraza audit log
 SecAction "id:900300,phase:1,nolog,pass,setvar:tx.redact_headers=Authorization,setvar:tx.redact_headers=X-Api-Key,setvar:tx.redact_headers=Cookie,setvar:tx.redact_headers=Set-Cookie"
@@ -196,7 +194,80 @@ func getWAFDetails(ruleID int, originalDetails string) (explanation, recommendat
 	if info, ok := crsRuleExplanations[ruleID]; ok {
 		return info.Explanation, info.Recommendation
 	}
+	if originalDetails == "" {
+		originalDetails = fmt.Sprintf("Rule %d triggered a security block.", ruleID)
+	}
 	return originalDetails, "Review the security logs for more details or contact your administrator if you believe this is a false positive."
+}
+
+func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanation, recommendation string) {
+	if it == nil {
+		return "", ""
+	}
+	matchedRules := t.MatchedRules()
+	ruleID := it.RuleID
+
+	// Default values
+	explanation, recommendation = getWAFDetails(ruleID, "")
+
+	var detailsSb strings.Builder
+
+	// If it's the Anomaly Score rule, we aggregate everything.
+	if ruleID == 949110 {
+		detailsSb.WriteString("Request blocked due to high Anomaly Score. Multiple rules were triggered:\n")
+		for _, mr := range matchedRules {
+			if mr.Rule().ID() == 949110 {
+				continue
+			}
+
+			location := "unknown location"
+			if len(mr.MatchedDatas()) > 0 {
+				md := mr.MatchedDatas()[0]
+				varName := md.Variable().Name()
+				if key := md.Key(); key != "" {
+					location = fmt.Sprintf("%s in %s", key, varName)
+				} else {
+					location = varName
+				}
+			}
+
+			fmt.Fprintf(&detailsSb, "• Rule %d: %s (Detected at %s)\n", mr.Rule().ID(), mr.Message(), location)
+		}
+		explanation = detailsSb.String()
+
+		// Context-aware recommendation
+		uri := ""
+		if len(matchedRules) > 0 {
+			uri = matchedRules[0].URI()
+		}
+
+		uriLower := strings.ToLower(uri)
+		if strings.Contains(uriLower, "token") || strings.Contains(uriLower, "refresh") || strings.Contains(uriLower, "login") || strings.Contains(uriLower, "auth") {
+			recommendation = "This endpoint appears to handle authentication or tokens. The block was likely caused by high-entropy strings matching SQLi/XSS signatures. If this traffic is legitimate, consider adding exclusions for the specific fields or rules mentioned above."
+		} else {
+			recommendation = "Review the triggered rules above. If these patterns are legitimate for your application, you can whitelist the specific fields or adjust the Anomaly Sensitivity in Gateon settings."
+		}
+	} else {
+		// Single rule block
+		var mr types.MatchedRule
+		for _, r := range matchedRules {
+			if r.Rule().ID() == ruleID {
+				mr = r
+				break
+			}
+		}
+
+		if mr != nil && len(mr.MatchedDatas()) > 0 {
+			md := mr.MatchedDatas()[0]
+			val := md.Value()
+			if len(val) > 50 {
+				val = val[:47] + "..."
+			}
+			explanation = fmt.Sprintf("Rule %d was triggered: %s. The value '%s' at %s matched a security signature.", ruleID, mr.Message(), val, md.Variable().Name())
+		}
+	}
+
+	return explanation, recommendation
 }
 
 func init() {
@@ -912,7 +983,7 @@ func (t *txWrapper) ProcessLogging() {
 			}
 		}
 
-		explanation, recommendation := getWAFDetails(it.RuleID, details)
+		explanation, recommendation := generateSmartInsight(t.Transaction, it)
 
 		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 			ID:             fmt.Sprintf("waf-block-%s", t.ID()),
