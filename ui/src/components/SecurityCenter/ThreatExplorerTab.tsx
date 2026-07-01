@@ -103,13 +103,16 @@ export function ThreatExplorerTab() {
     currentPage * PAGE_SIZE,
   );
 
-  const getThreatIcon = (type: string) => {
+  const getThreatIcon = (type: string, category?: string) => {
     const t = type.toLowerCase();
-    if (t.includes('waf') || t.includes('sqli') || t.includes('xss')) return <IconShieldLock size={16} />;
-    if (t.includes('bot') || t.includes('scanner')) return <IconRobot size={16} />;
+    const cat = (category || "").toLowerCase();
+    
+    if (t.includes('waf') || t.includes('sqli') || t.includes('xss') || cat === 'injection') return <IconShieldLock size={16} />;
+    if (t.includes('bot') || t.includes('scanner') || cat === 'scanner') return <IconRobot size={16} />;
     if (t.includes('brute') || t.includes('impossible_travel')) return <IconUsers size={16} />;
-    if (t.includes('exploit') || t.includes('rce') || t.includes('lfi')) return <IconBug size={16} />;
-    if (t.includes('entropy') || t.includes('fingerprint')) return <IconBolt size={16} />;
+    if (t.includes('exploit') || t.includes('rce') || t.includes('lfi') || cat === 'malware') return <IconBug size={16} />;
+    if (cat === 'dlp' || t.includes('leak')) return <IconShieldCheck size={16} />;
+    if (cat === 'dos' || t.includes('ddos') || t.includes('flood')) return <IconBolt size={16} />;
     return <IconAlertTriangle size={16} />;
   };
 
@@ -235,7 +238,7 @@ export function ThreatExplorerTab() {
                           size="md" 
                           radius="md"
                         >
-                          {getThreatIcon(threat.type)}
+                          {getThreatIcon(threat.type, threat.category)}
                         </ThemeIcon>
                         <Stack gap={0}>
                           <Group gap={4}>
