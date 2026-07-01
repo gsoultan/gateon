@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -539,6 +541,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		ResponseBody:    t.ResponseBody,
 		UserAgent:       t.UserAgent,
 		HttpMethod:      t.Method,
+		TriggeredRules:  t.TriggeredRules,
 	}
 	populateAnomalyGeo(ctx, a, t.SourceIP)
 	return a
@@ -663,23 +666,38 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Global config service not available"}, nil
 	}
 
-	// Extract Rule ID from details or type
-	ruleID := ""
-	if strings.Contains(threat.Details, "Rule ") {
-		parts := strings.Split(threat.Details, "Rule ")
-		if len(parts) > 1 {
-			ruleID = strings.Split(parts[1], ")")[0]
-			ruleID = strings.Split(ruleID, ":")[0]
-		}
-	}
-	if ruleID == "" && strings.Contains(threat.Details, "[id \"") {
-		parts := strings.Split(threat.Details, "[id \"")
-		if len(parts) > 1 {
-			ruleID = strings.Split(parts[1], "\"")[0]
+	ruleIDs := make([]string, 0)
+	if threat.TriggeredRules != "" {
+		var ids []int
+		if err := json.Unmarshal([]byte(threat.TriggeredRules), &ids); err == nil {
+			for _, id := range ids {
+				ruleIDs = append(ruleIDs, strconv.Itoa(id))
+			}
 		}
 	}
 
-	if ruleID == "" {
+	if len(ruleIDs) == 0 {
+		// Fallback to parsing from details (for legacy logs)
+		ruleID := ""
+		if strings.Contains(threat.Details, "Rule ") {
+			parts := strings.Split(threat.Details, "Rule ")
+			if len(parts) > 1 {
+				ruleID = strings.Split(parts[1], ")")[0]
+				ruleID = strings.Split(ruleID, ":")[0]
+			}
+		}
+		if ruleID == "" && strings.Contains(threat.Details, "[id \"") {
+			parts := strings.Split(threat.Details, "[id \"")
+			if len(parts) > 1 {
+				ruleID = strings.Split(parts[1], "\"")[0]
+			}
+		}
+		if ruleID != "" {
+			ruleIDs = append(ruleIDs, ruleID)
+		}
+	}
+
+	if len(ruleIDs) == 0 {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Could not identify the specific WAF rule to exclude from threat details."}, nil
 	}
 
@@ -689,15 +707,24 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 	}
 
 	// Build a targeted exclusion directive
-	// SecRule REQUEST_URI "@beginsWith /path" "id:1000,phase:1,pass,nolog,ctl:ruleRemoveById=942100"
 	exclusionID := 100000 + (time.Now().Unix() % 100000)
 	uri := threat.RequestURI
 	if uri == "" {
 		uri = "/"
 	}
 
-	directive := fmt.Sprintf("\n# Auto-generated exclusion for false positive (Rule %s at %s)\nSecRule REQUEST_URI \"@beginsWith %s\" \"id:%d,phase:1,pass,nolog,ctl:ruleRemoveById=%s\"\n",
-		ruleID, uri, uri, exclusionID, ruleID)
+	// Construct the ctl actions
+	var ctlActions strings.Builder
+	for i, id := range ruleIDs {
+		if i > 0 {
+			ctlActions.WriteString(",")
+		}
+		fmt.Fprintf(&ctlActions, "ctl:ruleRemoveById=%s", id)
+	}
+
+	idsStr := strings.Join(ruleIDs, ", ")
+	directive := fmt.Sprintf("\n# Auto-generated exclusion for false positive (Rules: %s at %s)\nSecRule REQUEST_URI \"@beginsWith %s\" \"id:%d,phase:1,pass,nolog,%s\"\n",
+		idsStr, uri, uri, exclusionID, ctlActions.String())
 
 	globalCfg.Waf.CustomDirectives += directive
 
@@ -705,12 +732,13 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update config: %v", err)}, nil
 	}
 
-	// Reset reputation for the source IP as it was a false positive
+	// Reset reputation and mark as unmitigated
 	telemetry.ResetReputation(threat.SourceIP)
+	telemetry.MarkIPUnmitigated(threat.SourceIP)
 
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
-		Message: fmt.Sprintf("Rule %s has been excluded for path '%s'. IP reputation reset.", ruleID, uri),
+		Message: fmt.Sprintf("Rules [%s] have been excluded for path '%s'. IP reputation reset.", idsStr, uri),
 	}, nil
 }
 

@@ -720,6 +720,7 @@ export type Anomaly = {
   confidence?: number;
   entropy?: number;
   cluster_size?: number;
+  triggered_rules?: string;
 };
 
 export type Reputation = {

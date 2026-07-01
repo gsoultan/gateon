@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -186,30 +188,75 @@ var crsRuleExplanations = map[int]struct {
 	Explanation    string
 	Recommendation string
 }{
+	911100: {
+		Explanation:    "The HTTP method used (e.g., PUT, DELETE) is not allowed by your security policy for this path.",
+		Recommendation: "Ensure you are using standard methods like GET or POST, or update the 'Allowed Methods' in Gateon settings.",
+	},
 	920180: {
-		Explanation:    "Request is missing Content-Length or Transfer-Encoding for a POST request, which is required by HTTP standards.",
-		Recommendation: "Ensure your client sends a proper Content-Length header or uses Chunked Transfer Encoding for POST requests.",
+		Explanation:    "The request is missing a mandatory size header (Content-Length) for a POST operation.",
+		Recommendation: "Ensure your client or proxy sends a proper Content-Length header for all POST/PUT requests.",
+	},
+	920420: {
+		Explanation:    "The 'Content-Type' header value is not permitted by the security policy.",
+		Recommendation: "Check if the application expects this specific content type. If legitimate, add it to the allowed list.",
+	},
+	932100: {
+		Explanation:    "A system command execution pattern (RCE) was detected. The request looks like an attempt to run commands on the server.",
+		Recommendation: "If this is a false positive, it might be due to shell-like characters in your input. Consider whitelisting this specific field.",
 	},
 	941100: {
-		Explanation:    "Potential Cross-Site Scripting (XSS) attack detected via pattern matching. This occurs when input looks like malicious scripts.",
-		Recommendation: "Verify if the input contains special characters like <, >, or script tags. If this is a false positive, consider whitelisting the specific field.",
+		Explanation:    "A script injection pattern (XSS) was detected. The input contains characters that could be executed by a browser.",
+		Recommendation: "Sanitize your input by removing HTML tags or use the 'Mark as False Positive' button if this is expected data.",
 	},
 	941110: {
-		Explanation:    "Direct script tag detected in the request. This is a common indicator of an XSS attack.",
-		Recommendation: "Remove HTML tags from your input or ensure they are properly encoded.",
+		Explanation:    "A direct script tag (<script>) was detected. This is a very high-confidence indicator of a script injection attempt.",
+		Recommendation: "Do not include raw HTML or script tags in request parameters unless absolutely necessary and encoded.",
 	},
 	942100: {
-		Explanation:    "Potential SQL Injection (SQLi) attack detected. The request contains patterns common in database attacks.",
-		Recommendation: "Avoid using SQL keywords or special characters like single quotes in your request data unless necessary.",
+		Explanation:    "A database query pattern (SQLi) was detected. The request contains keywords like 'SELECT', 'DROP', or '--' that look like database commands.",
+		Recommendation: "Avoid using SQL keywords or special characters like single quotes in your request data. For tokens/hashes, use the auto-fix button.",
 	},
 	942270: {
-		Explanation:    "Classic SQL injection pattern (UNION SELECT) detected. This is a high-confidence indicator of an exploit attempt.",
-		Recommendation: "Check your request for accidental SQL-like syntax. If this is legitimate data, it may need to be base64 encoded.",
+		Explanation:    "A classic SQL 'UNION' attack pattern was detected, commonly used to steal data from databases.",
+		Recommendation: "Verify if the request data contains accidental SQL-like syntax. This is a high-risk violation.",
 	},
 	949110: {
-		Explanation:    "The total anomaly score of this request exceeded the security threshold due to multiple small violations.",
-		Recommendation: "Review the individual violations above. If these are false positives, you can adjust the Anomaly Sensitivity in Gateon settings.",
+		Explanation:    "This request was blocked because its total 'Anomaly Score' exceeded the threshold after triggering multiple security rules.",
+		Recommendation: "Review the individual violations categorized below. For legitimate traffic, use the one-click resolution to whitelist the specific rules.",
 	},
+}
+
+func getRuleCategory(id int) string {
+	switch {
+	case id >= 911000 && id <= 911999:
+		return "Access Policy"
+	case id >= 920000 && id <= 920999:
+		return "Protocol Compliance"
+	case id >= 921000 && id <= 921999:
+		return "Request Integrity"
+	case id >= 930000 && id <= 930999:
+		return "File System Protection"
+	case id >= 931000 && id <= 931999:
+		return "Remote Resource Access"
+	case id >= 932000 && id <= 932999:
+		return "Command Execution (RCE)"
+	case id >= 933000 && id <= 933999:
+		return "PHP Security"
+	case id >= 934000 && id <= 934999:
+		return "NodeJS Security"
+	case id >= 941000 && id <= 941999:
+		return "Script Injection (XSS)"
+	case id >= 942000 && id <= 942999:
+		return "Database Injection (SQLi)"
+	case id >= 943000 && id <= 943999:
+		return "Session Security"
+	case id >= 944000 && id <= 944999:
+		return "Java Security"
+	case id >= 950000 && id <= 959999:
+		return "Data Leakage (DLP)"
+	default:
+		return "Security Policy"
+	}
 }
 
 func getWAFDetails(ruleID int, originalDetails string) (explanation, recommendation string) {
@@ -222,39 +269,80 @@ func getWAFDetails(ruleID int, originalDetails string) (explanation, recommendat
 	return originalDetails, "Review the security logs for more details or contact your administrator if you believe this is a false positive."
 }
 
-func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanation, recommendation string) {
+func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanation, recommendation, triggeredRules string) {
 	if it == nil {
-		return "", ""
+		return "", "", ""
 	}
 	matchedRules := t.MatchedRules()
 	ruleID := it.RuleID
 
 	// Default values
 	explanation, recommendation = getWAFDetails(ruleID, "")
+	attackRules := make([]int, 0)
 
 	var detailsSb strings.Builder
 
 	// If it's the Anomaly Score rule, we aggregate everything.
 	if ruleID == 949110 {
-		detailsSb.WriteString("Request blocked due to high Anomaly Score. Multiple rules were triggered:\n")
+		detailsSb.WriteString("Request blocked due to suspicious patterns. The following violations were found:\n")
+
+		// Group by category for better readability
+		byCategory := make(map[string][]string)
+
 		for _, mr := range matchedRules {
-			if mr.Rule().ID() == 949110 {
+			id := mr.Rule().ID()
+			// Skip internal/setup/reporting rules to avoid noise
+			if id == 949110 || (id >= 900000 && id <= 901999) || (id >= 949000 && id <= 949999) || (id >= 980000 && id <= 980999) {
 				continue
 			}
+
+			attackRules = append(attackRules, id)
 
 			location := "unknown location"
 			if len(mr.MatchedDatas()) > 0 {
 				md := mr.MatchedDatas()[0]
 				varName := md.Variable().Name()
 				if key := md.Key(); key != "" {
-					location = fmt.Sprintf("%s in %s", key, varName)
+					location = fmt.Sprintf("'%s' in %s", key, varName)
 				} else {
 					location = varName
 				}
 			}
 
-			fmt.Fprintf(&detailsSb, "• Rule %d: %s (Detected at %s)\n", mr.Rule().ID(), mr.Message(), location)
+			msg := mr.Message()
+			if msg == "" {
+				if info, ok := crsRuleExplanations[id]; ok {
+					msg = info.Explanation
+				}
+			}
+			if msg == "" {
+				msg = "Suspicious pattern detected"
+			}
+
+			cat := getRuleCategory(id)
+			item := fmt.Sprintf("• %s (Rule %d, at %s)", msg, id, location)
+			byCategory[cat] = append(byCategory[cat], item)
 		}
+
+		// Sort categories to have consistent output
+		cats := make([]string, 0, len(byCategory))
+		for k := range byCategory {
+			cats = append(cats, k)
+		}
+		slices.Sort(cats)
+
+		for _, cat := range cats {
+			fmt.Fprintf(&detailsSb, "\n[%s]\n", cat)
+			for _, item := range byCategory[cat] {
+				detailsSb.WriteString(item + "\n")
+			}
+		}
+
+		if len(attackRules) == 0 {
+			// Fallback if we filtered everything but it still blocked
+			detailsSb.WriteString("• Multiple internal security policies triggered an anomaly score overflow.")
+		}
+
 		explanation = detailsSb.String()
 
 		// Context-aware recommendation
@@ -265,9 +353,9 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 
 		uriLower := strings.ToLower(uri)
 		if strings.Contains(uriLower, "token") || strings.Contains(uriLower, "refresh") || strings.Contains(uriLower, "login") || strings.Contains(uriLower, "auth") {
-			recommendation = "This endpoint appears to handle authentication or tokens. The block was likely caused by high-entropy strings matching SQLi/XSS signatures. If this traffic is legitimate, consider adding exclusions for the specific fields or rules mentioned above."
+			recommendation = "This endpoint handles sensitive authentication data. Cryptographic tokens often look like database or script attacks. If this is legitimate traffic, click 'Mark as False Positive' to automatically whitelist these patterns for this path."
 		} else {
-			recommendation = "Review the triggered rules above. If these patterns are legitimate for your application, you can whitelist the specific fields or adjust the Anomaly Sensitivity in Gateon settings."
+			recommendation = "Review the violations above. If these are expected behaviors for your application, use the 'Mark as False Positive' button to create a targeted exclusion and restore the client's reputation."
 		}
 	} else {
 		// Single rule block
@@ -279,28 +367,41 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 			}
 		}
 
-		if mr != nil && len(mr.MatchedDatas()) > 0 {
-			md := mr.MatchedDatas()[0]
-			val := md.Value()
-			if len(val) > 50 {
-				val = val[:47] + "..."
-			}
-			explanation = fmt.Sprintf("Rule %d was triggered: %s. The value '%s' at %s matched a security signature.", ruleID, mr.Message(), val, md.Variable().Name())
+		if mr != nil {
+			attackRules = append(attackRules, ruleID)
 
-			// Smart Token Detection in matched data:
-			// If the blocked value looks like a JWT or high-entropy token,
-			// explicitly suggest the False Positive auto-fix.
-			for _, md := range mr.MatchedDatas() {
-				v := md.Value()
-				if len(v) > 80 && (isJWT(v) || entropy.CalculateString(v) > 4.5) {
-					recommendation += "\nSmart Insight: The blocked value appears to be a legitimate security token or cryptographic hash. Use the 'Mark as False Positive' button to automatically create a targeted exclusion for this field."
-					break
+			msg := mr.Message()
+			if msg == "" {
+				if info, ok := crsRuleExplanations[ruleID]; ok {
+					msg = info.Explanation
+				}
+			}
+			if msg == "" {
+				msg = "Security signature match"
+			}
+
+			if len(mr.MatchedDatas()) > 0 {
+				md := mr.MatchedDatas()[0]
+				val := md.Value()
+				if len(val) > 50 {
+					val = val[:47] + "..."
+				}
+				explanation = fmt.Sprintf("Security violation: %s (Rule %d). The value '%s' at %s matched a known threat signature.", msg, ruleID, val, md.Variable().Name())
+
+				// Smart Token Detection in matched data:
+				for _, md := range mr.MatchedDatas() {
+					v := md.Value()
+					if len(v) > 80 && (isJWT(v) || entropy.CalculateString(v) > 4.5) {
+						recommendation += "\nSmart Insight: The blocked value appears to be a legitimate security token or cryptographic hash. Use the 'Mark as False Positive' button to automatically create a targeted exclusion for this field."
+						break
+					}
 				}
 			}
 		}
 	}
 
 	// Add fingerprint/entropy insights if recorded in context (for fast-path threats)
+	// ... (rest of the switch stays the same)
 	if ca, ok := t.(interface {
 		GetCollection(variables.RuleVariable) collection.Collection
 	}); ok {
@@ -327,7 +428,13 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 		}
 	}
 
-	return explanation, recommendation
+	if len(attackRules) > 0 {
+		if b, err := json.Marshal(attackRules); err == nil {
+			triggeredRules = string(b)
+		}
+	}
+
+	return explanation, recommendation, triggeredRules
 }
 
 func init() {
@@ -1169,7 +1276,7 @@ func (t *txWrapper) ProcessLogging() {
 			}
 		}
 
-		explanation, recommendation := generateSmartInsight(t.Transaction, it)
+		explanation, recommendation, triggeredRules := generateSmartInsight(t.Transaction, it)
 
 		confidence := 0.8 // Default high confidence for WAF blocks
 		ent := 0.0
@@ -1208,6 +1315,7 @@ func (t *txWrapper) ProcessLogging() {
 			Method:         method,
 			Confidence:     confidence,
 			Entropy:        ent,
+			TriggeredRules: triggeredRules,
 		})
 	}
 	t.Transaction.ProcessLogging()
