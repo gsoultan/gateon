@@ -29,6 +29,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/entropy"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/scanner"
+	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -79,6 +80,7 @@ type WAFConfig struct {
 	Reputation                  *reputation.IPReputationStore
 	AllowedAdminIps             []string // IPs allowed to access WP admin
 	RulesPath                   string   // Path to external WAF rules (CRS)
+	WafRules                    *waf.Store
 
 	// GRPCMode relaxes the CRS Protocol-Enforcement rules that are structurally
 	// incompatible with the gRPC/HTTP-2 transport (see grpcCompatDirective) and
@@ -111,9 +113,6 @@ type WAFConfig struct {
 // CRS cannot parse (it would only yield false positives on the SQLi/XSS/RCE body
 // rules) and buffering it would break gRPC streaming. CRS still inspects the
 // (text) gRPC request headers and URI, preserving real attack coverage.
-const grpcCompatDirective = `SecAction "id:900200,phase:1,nolog,pass,t:none,setvar:'tx.allowed_request_content_type=|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/cloudevents-batch+json| |application/grpc| |application/grpc+proto| |application/grpc+json| |application/grpc-web| |application/grpc-web+proto| |application/grpc-web+json| |application/grpc-web-text| |application/grpc-web-text+proto|'"
-SecRule REQUEST_HEADERS:Content-Type "@rx ^application/grpc" "id:900201,phase:1,nolog,pass,t:lowercase,ctl:ruleRemoveById=920180,ctl:requestBodyAccess=Off"
-`
 
 // isGRPCRequest reports whether the request carries a gRPC or gRPC-Web payload.
 // gRPC frames are binary protobuf with high Shannon entropy and binary "-bin"
@@ -123,14 +122,6 @@ SecRule REQUEST_HEADERS:Content-Type "@rx ^application/grpc" "id:900201,phase:1,
 func isGRPCRequest(r *http.Request) bool {
 	return strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 }
-
-const securityExclusionsDirective = `
-# Redact sensitive headers from Coraza audit log
-SecAction "id:900300,phase:1,nolog,pass,setvar:tx.redact_headers=Authorization,setvar:tx.redact_headers=X-Api-Key,setvar:tx.redact_headers=Cookie,setvar:tx.redact_headers=Set-Cookie"
-
-# Ensure server_name is set from Host header for better logging
-SecRule REQUEST_HEADERS:Host "^(.+)$" "id:900015,phase:1,nolog,pass,t:none,setvar:tx.server_name=%{MATCHED_VAR}"
-`
 
 var (
 	reputationStrings [101]string
@@ -505,45 +496,20 @@ Include @crs-setup.conf.example
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
 
-		// Adaptive WAF: Adjust anomaly thresholds based on Gateon Reputation.
-		// Trustworthy clients (Reputation > 90) are given more room for high-entropy headers (JWTs).
-		// Unknown or low reputation clients are subject to strict enforcement.
-		// Rules are ordered progressively so the most specific match (highest reputation) wins.
-		sb.WriteString(`
-# Adaptive Anomaly Thresholds (Progressive Override)
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 0"  "id:900001,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=2"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 15" "id:900012,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=3"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900013,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=4"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 80" "id:900011,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 95" "id:900010,phase:2,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=5"
-
-# Adaptive Body Inspection Depth
-# Trustworthy clients (Reputation > 90) are allowed massive bodies (up to 1GB for Git pushes).
-# Standard clients (Reputation > 40) are capped at 100MB.
-# Unknown or low-reputation clients are strictly capped at 1MB to prevent DoS via WAF buffering.
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 90" "id:900400,phase:1,nolog,pass,ctl:requestBodyLimit=1073741824"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@ge 40" "id:900401,phase:1,nolog,pass,ctl:requestBodyLimit=104857600"
-SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 40" "id:900402,phase:1,nolog,pass,ctl:requestBodyLimit=1048576"
-`)
+		// Load dynamic rules from database
+		if cfg.WafRules != nil {
+			rules := cfg.WafRules.GetEnabledRules()
+			for _, r := range rules {
+				if r.ParanoiaLevel <= pl {
+					sb.WriteString(r.Directive)
+					sb.WriteByte('\n')
+				}
+			}
+		}
 
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
 
-		// gRPC compatibility: REQUEST-901-INITIALIZATION sets a default
-		// tx.allowed_request_content_type list that does NOT include the gRPC
-		// content types, so REQUEST-920 Protocol Enforcement rule 920420
-		// ("Request content type is not allowed by policy") adds a critical
-		// anomaly score for every gRPC / gRPC-Web request. With the default
-		// inbound anomaly threshold of 5 that single hit trips
-		// REQUEST-949-BLOCKING-EVALUATION -> 403. We extend the allow-list with
-		// the gRPC family before 920 is included (phase:1 directives run in load
-		// order, so this overrides the 901 default before 920420 evaluates).
-		// This keeps full CRS coverage for gRPC headers/URI while letting the
-		// legitimate gRPC transport through. See grpcCompatDirective for details.
-		// Only emitted for routes the operator typed as gRPC — never on HTTP/
-		// GraphQL routes — so it cannot be used to weaken their inspection.
-		if cfg.GRPCMode {
-			sb.WriteString(grpcCompatDirective)
-		}
+		// gRPC compatibility is now loaded from database
 
 		if !cfg.DisableProtocol {
 			sb.WriteString("Include @owasp_crs/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
@@ -578,77 +544,21 @@ SecRule REQUEST_HEADERS:X-Gateon-Reputation "@lt 40" "id:900402,phase:1,nolog,pa
 			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf\n")
 		}
 		if cfg.EnableIPReputation {
-			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-IP-Reputation-Block \"@eq 1\" \"id:910000,phase:1,nolog,pass,setvar:tx.ip_reputation_block_flag=1\"\n")
-			// REQUEST-910-IP-REPUTATION.conf is missing in some CRS 4.0 distributions.
-			// We provide a basic rule that blocks based on the ip_reputation_block_flag.
-			// We use phase:2 to ensure it catches variables set in phase:1 directives.
-			sb.WriteString("SecRule TX:ip_reputation_block_flag \"@eq 1\" \"id:910001,phase:2,deny,status:403,msg:'IP Reputation block',tag:'reputation',severity:CRITICAL\"\n")
+			// Rules are now loaded from database
 		}
 		if cfg.EnableDOSProtection {
-			sb.WriteString(`SecAction "id:900002,phase:1,nolog,pass,setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
-`)
-			// REQUEST-912-DOS-PROTECTION.conf is missing in some CRS 4.0 distributions
-			// sb.WriteString("Include @owasp_crs/REQUEST-912-DOS-PROTECTION.conf\n")
+			// Rules are now loaded from database
 		}
 
-		// WP Scanning and Exploits
-		if !cfg.DisableWordPress {
-			// Basic WP protection rules if CRS doesn't have them enabled by default
-			allowedIps := "127.0.0.1"
-			if len(cfg.AllowedAdminIps) > 0 {
-				allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
-			}
-
-			sb.WriteString(fmt.Sprintf(`
-SecRule REQUEST_URI "@contains /wp-admin" "id:100001,phase:1,deny,status:403,msg:'WordPress admin access attempt',tag:'wp_scan',severity:CRITICAL,chain"
-  SecRule REMOTE_ADDR "!@ipMatch %s"
-SecRule REQUEST_URI "@contains /wp-login.php" "id:100002,phase:1,deny,status:403,msg:'WordPress login attempt',tag:'wp_scan',severity:CRITICAL,chain"
-  SecRule REMOTE_ADDR "!@ipMatch %s"
-SecRule REQUEST_URI "@rx /wp-content/plugins/.*\.php" "id:100003,phase:1,deny,status:403,msg:'WordPress plugin execution attempt',tag:'wp_scan',severity:CRITICAL"
-`, allowedIps, allowedIps))
+		// Inject dynamic variables for rules
+		allowedIps := "127.0.0.1"
+		if len(cfg.AllowedAdminIps) > 0 {
+			allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
 		}
+		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
 
-		// Malware and File Upload protection
-		if cfg.EnableMalwareDetection {
-			sb.WriteString(`
-SecRule FILES_NAMES "@rx \.(exe|php|phtml|sh|py|pl|rb|jsp|asp|aspx)$" \
-    "id:100004,phase:2,deny,status:403,msg:'Suspicious file upload extension',tag:'malware',severity:CRITICAL"
-SecRule FILES "@contains <?php" \
-    "id:100005,phase:2,deny,status:403,msg:'PHP code injection in file upload',tag:'malware',severity:CRITICAL"
-SecRule FILES "@rx %PDF-1\.[0-7].*obj.*<<.*\/JS.*>>.*endobj" \
-    "id:100006,phase:2,deny,status:403,msg:'PDF with JavaScript detected',tag:'malware',severity:CRITICAL"
-`)
-		}
-
-		// Additional protections for Golang and Java
-		sb.WriteString(`
-# Golang specific injection patterns
-SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (os/exec|net/http/httputil|reflect\.ValueOf|unsafe\.Pointer|go\s+func\()" \
-    "id:100010,phase:2,deny,status:403,msg:'Potential Golang code injection',tag:'rce',tag:'golang',severity:CRITICAL"
-
-# Java specific injection patterns (supplemental to CRS)
-SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (runtime\.exec|java\.lang\.Runtime|java\.lang\.ProcessBuilder|javax\.crypto|javax\.script|ognl\.|java\.net\.URLClassLoader)" \
-    "id:100011,phase:2,deny,status:403,msg:'Potential Java code injection',tag:'rce',tag:'java',severity:CRITICAL"
-
-# Java/Log4j protection
-SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx \$\{jndi:(ldap|rmi|dns|nis|iiop|corba|nds|http):" \
-    "id:100013,phase:2,deny,status:403,msg:'Potential Log4Shell (CVE-2021-44228) attempt',tag:'rce',tag:'java',severity:CRITICAL"
-
-# WordPress additional scan protection
-SecRule REQUEST_URI "@rx (wp-json/wp/v2/users|wp-links-opml\.php|wp-config-sample\.php|wp-content/debug\.log|readme\.html|license\.txt|wp-content/uploads/.*\.php)" \
-    "id:100012,phase:1,deny,status:403,msg:'WordPress enumeration/info leak attempt',tag:'wp_scan',severity:CRITICAL"
-`)
-
-		// Ransomware protection
-		if cfg.EnableRansomwareDetection {
-			sb.WriteString(`
-SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lockbit|clop|conti|ryuk|cerber|gandcrab|pysa)$" \
-    "id:100007,phase:2,deny,status:403,msg:'Ransomware file extension detected',tag:'ransomware',severity:CRITICAL"
-`)
-		}
-		sb.WriteString(securityExclusionsDirective)
-
-		// Blocking evaluation
+		// WP Scanning and Exploits are now loaded from database
+		// Ransomware protection is now loaded from database
 		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
 		// Explicitly set the block status to 403 for the evaluation rules to avoid status 0 in audit logs
 		// and 520 errors in Cloudflare.

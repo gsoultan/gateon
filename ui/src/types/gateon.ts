@@ -1,7 +1,28 @@
-export type LimitStats = {
-  rate_limit_rejected: Record<string, number>;
-  inflight_rejected: Record<string, number>;
-  buffering_rejected: Record<string, number>;
+export type WafRule = {
+  id: string;
+  name: string;
+  directive: string;
+  enabled: boolean;
+  paranoia_level: number;
+  category: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ListWafRulesResponse = {
+  rules: WafRule[];
+};
+
+export type CreateWafRuleRequest = {
+  rule: Partial<WafRule>;
+};
+
+export type UpdateWafRuleRequest = {
+  rule: WafRule;
+};
+
+export type DeleteWafRuleRequest = {
+  id: string;
 };
 
 export type MiddlewarePresetItem = {

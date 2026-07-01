@@ -63,6 +63,11 @@ service ApiService {
   rpc InstallClamav(InstallClamavRequest) returns (InstallClamavResponse);
   rpc UninstallClamav(UninstallClamavRequest) returns (UninstallClamavResponse);
   rpc RunDeepScan(RunDeepScanRequest) returns (RunDeepScanResponse);
+
+  rpc ListWafRules(ListWafRulesRequest) returns (ListWafRulesResponse);
+  rpc CreateWafRule(CreateWafRuleRequest) returns (CreateWafRuleResponse);
+  rpc UpdateWafRule(UpdateWafRuleRequest) returns (UpdateWafRuleResponse);
+  rpc DeleteWafRule(DeleteWafRuleRequest) returns (DeleteWafRuleResponse);
 }
 
 message RunDeepScanRequest {}

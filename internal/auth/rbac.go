@@ -33,6 +33,7 @@ const (
 	// configuration editor) so a read-only Viewer can watch the system without
 	// being able to read or change global settings.
 	ResourceDiagnostics Resource = "diagnostics"
+	ResourceWafRules    Resource = "waf_rules"
 )
 
 var globalConfigGetter interface {
@@ -88,7 +89,7 @@ func allowedHardcoded(role string, action Action, resource Resource) bool {
 		}
 		switch resource {
 		case ResourceRoutes, ResourceServices, ResourceEntryPoints,
-			ResourceMiddlewares, ResourceTLSOptions, ResourceConfig:
+			ResourceMiddlewares, ResourceTLSOptions, ResourceConfig, ResourceWafRules:
 			return true
 		}
 		return false
@@ -103,7 +104,7 @@ func allowedHardcoded(role string, action Action, resource Resource) bool {
 		switch resource {
 		case ResourceRoutes, ResourceServices, ResourceEntryPoints,
 			ResourceMiddlewares, ResourceTLSOptions, ResourceCerts,
-			ResourceDiagnostics:
+			ResourceDiagnostics, ResourceWafRules:
 			return true
 		}
 		return false

@@ -996,4 +996,33 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(37, "create_waf_rules_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite {
+			query = `CREATE TABLE IF NOT EXISTS waf_rules (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				directive TEXT NOT NULL,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				paranoia_level INTEGER NOT NULL DEFAULT 1,
+				category TEXT NOT NULL DEFAULT 'custom',
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			);`
+		} else {
+			query = `CREATE TABLE IF NOT EXISTS waf_rules (
+				id VARCHAR(255) PRIMARY KEY,
+				name TEXT NOT NULL,
+				directive TEXT NOT NULL,
+				enabled BOOLEAN NOT NULL DEFAULT TRUE,
+				paranoia_level INTEGER NOT NULL DEFAULT 1,
+				category VARCHAR(255) NOT NULL DEFAULT 'custom',
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`
+		}
+		_, err := db.Exec(query)
+		return err
+	})
 }

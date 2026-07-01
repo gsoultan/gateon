@@ -26,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/tui"
@@ -106,6 +107,16 @@ func main() {
 
 	initTelemetry(globalReg, ctx)
 
+	// Initialize WAF rules store
+	if gc := globalReg.Get(ctx); gc != nil {
+		databaseURL := db.AuthDatabaseURL(gc.Auth)
+		if err := waf.InitStore(databaseURL); err != nil {
+			logger.L.LogError("failed to init waf rules store", "error", err)
+		} else {
+			waf.GetStore().SetInvalidator(middleware.WAFCacheInvalidator{})
+		}
+	}
+
 	// The eBPF subsystem is driven through a Holder: an atomic indirection that
 	// every consumer (alerting, the request-path server, the metrics poll loop)
 	// references, so the security supervisor can hot-swap the underlying eBPF
@@ -182,6 +193,7 @@ func main() {
 		server.WithEntryPointRegistry(config.NewEntryPointRegistry(getEnvDefault("ENTRYPOINTS_FILE", "entrypoints.json"))),
 		server.WithMiddlewareRegistry(config.NewMiddlewareRegistry(getEnvDefault("MIDDLEWARES_FILE", "middlewares.json"))),
 		server.WithTLSOptionRegistry(config.NewTLSOptionRegistry(getEnvDefault("TLS_OPTIONS_FILE", "tls_options.json"))),
+		server.WithWafRules(waf.GetStore()),
 	)
 	if err != nil {
 		logger.Fatal("failed to create server", "error", err)

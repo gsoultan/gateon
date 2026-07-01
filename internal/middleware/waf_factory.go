@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -132,6 +133,7 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		EbpfManager:                 f.ebpfManager,
 		Reputation:                  f.reputation,
 		GRPCMode:                    grpcMode,
+		WafRules:                    waf.GetStore(),
 	}
 	// Apply the resolved tier baseline, then honour an explicit DLP opt-in as an
 	// upgrade: a user who deliberately enabled DLP gets response inspection even
@@ -253,6 +255,7 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 	wafCfg.EbpfManager = f.ebpfManager
 	wafCfg.Reputation = f.reputation
 	wafCfg.GRPCMode = grpcMode
+	wafCfg.WafRules = waf.GetStore()
 
 	mw, err := WAF(wafCfg)
 	if err != nil {

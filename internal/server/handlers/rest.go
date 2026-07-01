@@ -22,4 +22,5 @@ func RegisterRESTHandlers(mux *http.ServeMux, apiService *api.ApiService, d *Dep
 	registerTracesHandlers(mux, apiService)
 	registerSecurityHandlers(mux, d)
 	registerAIAdvisoryHandlers(mux, apiService, d)
+	registerWafRuleHandlers(mux, apiService)
 }
