@@ -11,6 +11,13 @@ export type WafRule = {
 
 export type ListWafRulesResponse = {
   rules: WafRule[];
+  total: number;
+};
+
+export type ListWafRulesRequest = {
+  limit?: number;
+  offset?: number;
+  search?: string;
 };
 
 export type CreateWafRuleRequest = {

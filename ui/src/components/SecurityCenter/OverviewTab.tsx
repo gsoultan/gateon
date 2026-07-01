@@ -32,6 +32,7 @@ import {
   IconBug,
   IconShieldLock,
   IconBolt,
+  IconAlertTriangle,
 } from '@tabler/icons-react';
 import { Alert, Anchor } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
