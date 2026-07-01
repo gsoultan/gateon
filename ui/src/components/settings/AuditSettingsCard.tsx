@@ -10,8 +10,9 @@ import {
   ThemeIcon,
   Divider,
   Button,
+  NumberInput,
 } from "@mantine/core";
-import { IconHistory, IconFingerprint, IconRefresh } from "@tabler/icons-react";
+import { IconHistory, IconFingerprint, IconRefresh, IconArchive } from "@tabler/icons-react";
 import type { GlobalConfig, AuditConfig } from "../../types/gateon";
 
 // generateSignatureKey returns a cryptographically-random 256-bit key as hex,
@@ -44,6 +45,9 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
       },
     });
   };
+
+  const retentionDays = audit.retention_days || 0;
+  const archiveOnRetention = !!audit.archive_on_retention;
 
   return (
     <Card withBorder radius="md" p="xl" shadow="sm">
@@ -111,6 +115,43 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                   </Group>
                 </Stack>
               )}
+
+              <Divider variant="dashed" />
+
+              <Stack gap="md">
+                <Group justify="space-between">
+                  <Stack gap={0}>
+                    <Text fw={500}>Log Retention</Text>
+                    <Text size="xs" c="dimmed">Number of days to keep audit logs in the active database.</Text>
+                  </Stack>
+                  <NumberInput
+                    min={0}
+                    max={3650}
+                    value={retentionDays}
+                    onChange={(val) => updateAudit({ retention_days: Number(val) })}
+                    disabled={disabled}
+                    w={100}
+                    suffix=" days"
+                  />
+                </Group>
+
+                <Group justify="space-between">
+                  <Stack gap={0}>
+                    <Group gap="xs">
+                      <IconArchive size={16} color="var(--mantine-color-grape-6)" />
+                      <Text fw={500}>Archive on Retention</Text>
+                    </Group>
+                    <Text size="xs" c="dimmed">
+                      Compress and archive old logs as Brotli-encoded files when they are removed from the database.
+                    </Text>
+                  </Stack>
+                  <Switch
+                    checked={archiveOnRetention}
+                    onChange={(e) => updateAudit({ archive_on_retention: e.currentTarget.checked })}
+                    disabled={disabled || retentionDays === 0}
+                  />
+                </Group>
+              </Stack>
             </Stack>
           </>
         )}

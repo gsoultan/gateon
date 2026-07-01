@@ -80,6 +80,8 @@ message AuditConfig {
   // database_config.
   string database_url = 4;             // sqlite:path, postgres://..., mysql://...
   DatabaseConfig database_config = 5;
+  int32 retention_days = 6;
+  bool archive_on_retention = 7;
 }
 
 message SecurityAdvancedConfig {

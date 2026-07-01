@@ -397,6 +397,8 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Request is required"}, nil
 	}
 
+	s.logAudit(ctx, "apply_recommendation", "diagnostics", fmt.Sprintf("Applied resolution for %s: %s", req.AnomalyType, req.Source))
+
 	switch req.AnomalyType {
 	case "waf_block", "security_threat":
 		if req.ThreatId != "" {
@@ -861,6 +863,8 @@ func (s *ApiService) TriggerWafUpdate(ctx context.Context, _ *gateonv1.TriggerWa
 	if err := s.WafUpdater.PerformUpdate(true); err != nil {
 		return &gateonv1.TriggerWafUpdateResponse{Success: false, Message: fmt.Sprintf("WAF update failed: %v", err)}, nil
 	}
+
+	s.logAudit(ctx, "update", "waf", "Triggered manual WAF rules update")
 
 	return &gateonv1.TriggerWafUpdateResponse{Success: true, Message: "WAF rules updated successfully"}, nil
 }

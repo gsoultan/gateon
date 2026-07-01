@@ -1006,7 +1006,7 @@ func RecordSecurityThreat(t SecurityThreat) {
 	}
 
 	// Log to audit trail before potentially returning to pool or enqueuing
-	audit.Log(context.Background(), "system", "security_threat", st.RequestURI, fmt.Sprintf("Type: %s, Severity: %s, Details: %s, Action: %s", st.Type, st.Severity, st.Details, st.ActionTaken), st.SourceIP)
+	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
 
 	// Alerting and Broadcasting should work even without a persistent store (e.g. in tests)
 	alertMu.RLock()

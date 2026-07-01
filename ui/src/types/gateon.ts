@@ -504,6 +504,8 @@ export type AuditConfig = {
   enabled: boolean;
   sign_entries: boolean;
   signature_key?: string;
+  retention_days?: number;
+  archive_on_retention?: boolean;
 };
 
 export type SecurityAdvancedConfig = {
@@ -858,4 +860,18 @@ export type AuditLog = {
   timestamp: string;
   ip_address: string;
   signature: string;
+};
+
+export type AuditArchive = {
+  filename: string;
+  size: number;
+  created_at: string;
+};
+
+export type ListAuditArchivesResponse = {
+  archives: AuditArchive[];
+};
+
+export type GetAuditArchiveResponse = {
+  logs: AuditLog[];
 };

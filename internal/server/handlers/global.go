@@ -138,6 +138,31 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			}
 		}
 	})
+	mux.HandleFunc("GET /v1/audit/archives", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		archives, err := audit.ListArchives()
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"archives": archives})
+	})
+	mux.HandleFunc("GET /v1/audit/archives/{filename}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		filename := r.PathValue("filename")
+		data, err := audit.GetArchive(filename)
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+	})
 	handleUpdateGlobal := func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
 			return
@@ -167,6 +192,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		audit.Log(r.Context(), userID, "update", "global_config", "Updated global configuration", request.GetClientIP(r, true))
 
 		// Apply settings that require immediate action
+		if conf.Audit != nil {
+			audit.UpdateConfig(conf.Audit)
+		}
 		if conf.Log != nil && conf.Log.PathStatsRetentionDays > 0 {
 			telemetry.ConfigureRetention(int(conf.Log.PathStatsRetentionDays))
 		}

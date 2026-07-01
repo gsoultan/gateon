@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -23,6 +24,7 @@ func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteR
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateRoute(req.Route.Id)
 	}
+	s.logAudit(ctx, "update", "route", fmt.Sprintf("Updated route %s", req.Route.Id))
 	return &gateonv1.UpdateRouteResponse{Success: true}, nil
 }
 
@@ -36,5 +38,6 @@ func (s *ApiService) DeleteRoute(ctx context.Context, req *gateonv1.DeleteRouteR
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateRoute(req.Id)
 	}
+	s.logAudit(ctx, "delete", "route", fmt.Sprintf("Deleted route %s", req.Id))
 	return &gateonv1.DeleteRouteResponse{Success: true}, nil
 }

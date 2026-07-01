@@ -28,3 +28,23 @@ message ListAuditLogsResponse {
   int32 page = 3;
   int32 page_size = 4;
 }
+
+message ListAuditArchivesRequest {}
+
+message ListAuditArchivesResponse {
+  repeated AuditArchive archives = 1;
+}
+
+message AuditArchive {
+  string filename = 1;
+  int64 size = 2;
+  string created_at = 3;
+}
+
+message GetAuditArchiveRequest {
+  string filename = 1;
+}
+
+message GetAuditArchiveResponse {
+  repeated AuditLog logs = 1;
+}

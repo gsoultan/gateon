@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -25,6 +26,7 @@ func (s *ApiService) UpdateService(ctx context.Context, req *gateonv1.UpdateServ
 			return r.ServiceId == req.Service.Id
 		})
 	}
+	s.logAudit(ctx, "update", "service", fmt.Sprintf("Updated service %s", req.Service.Id))
 	return &gateonv1.UpdateServiceResponse{Success: true}, nil
 }
 
@@ -40,5 +42,6 @@ func (s *ApiService) DeleteService(ctx context.Context, req *gateonv1.DeleteServ
 			return r.ServiceId == req.Id
 		})
 	}
+	s.logAudit(ctx, "delete", "service", fmt.Sprintf("Deleted service %s", req.Id))
 	return &gateonv1.DeleteServiceResponse{Success: true}, nil
 }

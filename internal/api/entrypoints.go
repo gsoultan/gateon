@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -36,6 +37,7 @@ func (s *ApiService) UpdateEntryPoint(ctx context.Context, req *gateonv1.UpdateE
 			s.Invalidator.InvalidateTLS()
 		}
 	}
+	s.logAudit(ctx, "update", "entrypoint", fmt.Sprintf("Updated entrypoint %s", req.EntryPoint.Id))
 	return &gateonv1.UpdateEntryPointResponse{Success: true}, nil
 }
 
@@ -57,5 +59,6 @@ func (s *ApiService) DeleteEntryPoint(ctx context.Context, req *gateonv1.DeleteE
 		})
 		s.Invalidator.InvalidateTLS()
 	}
+	s.logAudit(ctx, "delete", "entrypoint", fmt.Sprintf("Deleted entrypoint %s", req.Id))
 	return &gateonv1.DeleteEntryPointResponse{Success: true}, nil
 }

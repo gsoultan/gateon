@@ -109,5 +109,7 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	// 3. Update Auth Manager key in-memory
 	s.Auth.UpdateSymmetricKey(req.PasetoSecret)
 
+	s.logAudit(ctx, "setup", "system", "System initial setup completed")
+
 	return &gateonv1.SetupResponse{Success: true}, nil
 }

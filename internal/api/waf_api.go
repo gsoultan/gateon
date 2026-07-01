@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -60,6 +61,8 @@ func (s *ApiService) CreateWafRule(ctx context.Context, req *gateonv1.CreateWafR
 		return &gateonv1.CreateWafRuleResponse{Success: false}, err
 	}
 
+	s.logAudit(ctx, "create", "waf_rule", fmt.Sprintf("Created WAF rule: %s", r.ID))
+
 	return &gateonv1.CreateWafRuleResponse{
 		Success: true,
 		Rule: &gateonv1.WafRule{
@@ -93,6 +96,8 @@ func (s *ApiService) UpdateWafRule(ctx context.Context, req *gateonv1.UpdateWafR
 		return &gateonv1.UpdateWafRuleResponse{Success: false}, err
 	}
 
+	s.logAudit(ctx, "update", "waf_rule", fmt.Sprintf("Updated WAF rule: %s", r.ID))
+
 	return &gateonv1.UpdateWafRuleResponse{Success: true}, nil
 }
 
@@ -104,6 +109,8 @@ func (s *ApiService) DeleteWafRule(ctx context.Context, req *gateonv1.DeleteWafR
 	if err := s.WafRules.DeleteRule(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteWafRuleResponse{Success: false}, err
 	}
+
+	s.logAudit(ctx, "delete", "waf_rule", fmt.Sprintf("Deleted WAF rule: %s", req.Id))
 
 	return &gateonv1.DeleteWafRuleResponse{Success: true}, nil
 }
