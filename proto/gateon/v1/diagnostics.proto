@@ -224,3 +224,45 @@ message EbpfStats {
   int32 shunned_ips_count = 2;
   map<string, uint64> dropped_packets = 3;
 }
+
+message WafRule {
+  string id = 1;
+  string name = 2;
+  string directive = 3;
+  bool enabled = 4;
+  int32 paranoia_level = 5;
+  string category = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+message ListWafRulesRequest {}
+
+message ListWafRulesResponse {
+  repeated WafRule rules = 1;
+}
+
+message CreateWafRuleRequest {
+  WafRule rule = 1;
+}
+
+message CreateWafRuleResponse {
+  bool success = 1;
+  WafRule rule = 2;
+}
+
+message UpdateWafRuleRequest {
+  WafRule rule = 1;
+}
+
+message UpdateWafRuleResponse {
+  bool success = 1;
+}
+
+message DeleteWafRuleRequest {
+  string id = 1;
+}
+
+message DeleteWafRuleResponse {
+  bool success = 1;
+}

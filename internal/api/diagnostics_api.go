@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -723,13 +724,31 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 	}
 
 	idsStr := strings.Join(ruleIDs, ", ")
-	directive := fmt.Sprintf("\n# Auto-generated exclusion for false positive (Rules: %s at %s)\nSecRule REQUEST_URI \"@beginsWith %s\" \"id:%d,phase:1,pass,nolog,%s\"\n",
-		idsStr, uri, uri, exclusionID, ctlActions.String())
+	finalDirective := fmt.Sprintf("SecRule REQUEST_URI \"@beginsWith %s\" \"id:%d,phase:1,pass,nolog,%s\"",
+		uri, exclusionID, ctlActions.String())
 
-	globalCfg.Waf.CustomDirectives += directive
-
-	if err := s.Globals.Update(ctx, globalCfg); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update config: %v", err)}, nil
+	if s.WafRules != nil {
+		err := s.WafRules.AddRule(ctx, &waf.Rule{
+			ID:            strconv.Itoa(int(exclusionID)),
+			Name:          fmt.Sprintf("Auto-Exclusion: %s", uri),
+			Directive:     finalDirective,
+			Enabled:       true,
+			ParanoiaLevel: 1,
+			Category:      "Exclusion",
+		})
+		if err != nil {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to save exclusion to database: %v", err)}, nil
+		}
+	} else {
+		// Fallback to global config if store is not available
+		globalCfg := s.Globals.Get(ctx)
+		if globalCfg.Waf == nil {
+			globalCfg.Waf = &gateonv1.WafConfig{Enabled: true, UseCrs: true}
+		}
+		globalCfg.Waf.CustomDirectives += "\n" + finalDirective + "\n"
+		if err := s.Globals.Update(ctx, globalCfg); err != nil {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update global config: %v", err)}, nil
+		}
 	}
 
 	// Reset reputation and mark as unmitigated

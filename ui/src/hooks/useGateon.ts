@@ -44,3 +44,4 @@ export { useMetricsSnapshot } from "./useMetricsSnapshot";
 export { useAuditLogs } from "./useAuditLogs";
 export { useDiagnostics } from "./useDiagnostics";
 export { useApplyRecommendation } from "./useApplyRecommendation";
+export { useWafRules } from "./useWafRules";

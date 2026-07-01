@@ -29,6 +29,7 @@ type Server struct {
 	IPReputation  any // reputation.IPReputationStore
 	WafUpdater    any // middleware.WAFUpdater (interface to avoid cyclic import)
 	ClamAVManager any // security.ClamAVManager
+	WafRules      any // waf.Store
 	Logger        logger.Logger
 	Port          string
 	Version       string

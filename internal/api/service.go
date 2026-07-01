@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/security/waf"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -34,6 +35,7 @@ type ApiService struct {
 	WafUpdater         *middleware.WAFUpdater
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
+	WafRules           *waf.Store
 }
 
 // GetGlobals returns the global config store for REST handlers.
@@ -183,6 +185,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		EbpfManager:        cfg.EbpfManager,
 		WafUpdater:         cfg.WafUpdater,
 		ClamAVManager:      cfg.ClamAVManager,
+		WafRules:           cfg.WafRules,
 	}
 
 	if cfg.IPReputation != nil {

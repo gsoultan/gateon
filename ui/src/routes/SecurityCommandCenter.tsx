@@ -28,7 +28,8 @@ import {
   IconSearch,
   IconActivity,
   IconBrain,
-  IconAlertTriangle
+  IconAlertTriangle,
+  IconCode
 } from '@tabler/icons-react';
 import { useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
@@ -41,6 +42,7 @@ import { ThreatExplorerTab } from '../components/SecurityCenter/ThreatExplorerTa
 import { IncidentsTab } from '../components/SecurityCenter/IncidentsTab';
 import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
+import { WAFRulesTab } from '../components/SecurityCenter/WAFRulesTab';
 import { TimeDisplay } from '../components/TimeDisplay';
 import { getThreatColor } from '../utils/security';
 import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
@@ -331,6 +333,7 @@ export default function SecurityCommandCenter() {
             <Tabs.Tab value="incidents" leftSection={<IconAlertTriangle size={16} />}>Incidents</Tabs.Tab>
             <Tabs.Tab value="analytics" leftSection={<IconActivity size={16} />}>Analytics & Trends</Tabs.Tab>
             <Tabs.Tab value="advisory" leftSection={<IconBrain size={16} />}>AI Advisory</Tabs.Tab>
+            <Tabs.Tab value="waf-rules" leftSection={<IconCode size={16} />}>WAF Rules</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="overview">
@@ -374,6 +377,10 @@ export default function SecurityCommandCenter() {
 
           <Tabs.Panel value="advisory">
             <AIAdvisoryTab />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="waf-rules">
+            <WAFRulesTab />
           </Tabs.Panel>
         </Tabs>
       </Stack>

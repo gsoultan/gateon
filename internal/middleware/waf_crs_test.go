@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/security/waf"
 )
 
 func TestWAF_PHPAttacks(t *testing.T) {
@@ -94,16 +97,26 @@ func TestWAF_NodeJSAttacks(t *testing.T) {
 }
 
 func TestWAF_IPReputation(t *testing.T) {
-	// IP Reputation usually needs data to work.
-	// In CRS, it might be checking against some variables that are not set here.
-	// However, we can check if it blocks if we manually set the reputation variables via Directives.
+	// Initialize a test store with the IP reputation rule
+	d, _, _ := db.Open("sqlite::memory:")
+	// Manually create table for test
+	_, _ = d.Exec(`CREATE TABLE waf_rules (id TEXT PRIMARY KEY, name TEXT, directive TEXT, enabled INTEGER, paranoia_level INTEGER, category TEXT, created_at DATETIME, updated_at DATETIME)`)
+
+	store := waf.NewStore(d)
+	_ = store.AddRule(t.Context(), &waf.Rule{
+		ID:            "910001",
+		Name:          "IP Reputation Blocking",
+		Directive:     `SecRule TX:ip_reputation_block_flag "@eq 1" "id:910001,phase:2,deny,status:403,msg:'IP Reputation block',tag:'reputation',severity:CRITICAL"`,
+		Enabled:       true,
+		ParanoiaLevel: 1,
+		Category:      "Reputation",
+	})
+
 	mw, err := WAF(WAFConfig{
 		UseCRS:             true,
 		EnableIPReputation: true,
+		WafRules:           store,
 		// Set the flag in phase 1, and the rule in waf.go is also phase 1.
-		// To ensure the flag is set before it's checked, we can use a lower ID or just a different phase.
-		// However, Coraza processed directives in order.
-		// Let's try to use a header to trigger it and check in phase 2.
 		Directives: `SecRule REQUEST_HEADERS:X-Block-Me "@eq 1" "id:2000,phase:1,nolog,pass,setvar:tx.ip_reputation_block_flag=1"`,
 	})
 	if err != nil {

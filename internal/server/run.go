@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -61,6 +62,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		ipReputation = s.IPReputation.(*reputation.IPReputationStore)
 	}
 
+	var wafRules *waf.Store
+	if s.WafRules != nil {
+		wafRules = s.WafRules.(*waf.Store)
+	}
+
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Version:            s.Version,
 		Routes:             s.RouteStore,
@@ -77,6 +83,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		WafUpdater:         wafUpdater,
 		IPReputation:       ipReputation,
 		ClamAVManager:      clamavManager,
+		WafRules:           wafRules,
 	})
 	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)

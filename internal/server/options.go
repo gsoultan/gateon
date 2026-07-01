@@ -117,6 +117,14 @@ func WithClamAVManager(m any) ServerOption {
 	}
 }
 
+// WithWafRules sets the WAF rules store.
+func WithWafRules(m any) ServerOption {
+	return func(s *Server) error {
+		s.WafRules = m
+		return nil
+	}
+}
+
 func WithIPReputation(r any) ServerOption {
 	return func(s *Server) error {
 		s.IPReputation = r

@@ -1,0 +1,97 @@
+package api
+
+import (
+	"context"
+
+	"github.com/gsoultan/gateon/internal/security/waf"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
+
+func (s *ApiService) ListWafRules(ctx context.Context, _ *gateonv1.ListWafRulesRequest) (*gateonv1.ListWafRulesResponse, error) {
+	if s.WafRules == nil {
+		return &gateonv1.ListWafRulesResponse{}, nil
+	}
+
+	allRules := s.WafRules.GetAllRules()
+
+	resp := &gateonv1.ListWafRulesResponse{}
+	for _, r := range allRules {
+		resp.Rules = append(resp.Rules, &gateonv1.WafRule{
+			Id:            r.ID,
+			Name:          r.Name,
+			Directive:     r.Directive,
+			Enabled:       r.Enabled,
+			ParanoiaLevel: int32(r.ParanoiaLevel),
+			Category:      r.Category,
+			CreatedAt:     r.CreatedAt.String(),
+			UpdatedAt:     r.UpdatedAt.String(),
+		})
+	}
+	return resp, nil
+}
+
+func (s *ApiService) CreateWafRule(ctx context.Context, req *gateonv1.CreateWafRuleRequest) (*gateonv1.CreateWafRuleResponse, error) {
+	if s.WafRules == nil || req.Rule == nil {
+		return &gateonv1.CreateWafRuleResponse{Success: false}, nil
+	}
+
+	r := &waf.Rule{
+		ID:            req.Rule.Id,
+		Name:          req.Rule.Name,
+		Directive:     req.Rule.Directive,
+		Enabled:       req.Rule.Enabled,
+		ParanoiaLevel: int(req.Rule.ParanoiaLevel),
+		Category:      req.Rule.Category,
+	}
+
+	if err := s.WafRules.AddRule(ctx, r); err != nil {
+		return &gateonv1.CreateWafRuleResponse{Success: false}, err
+	}
+
+	return &gateonv1.CreateWafRuleResponse{
+		Success: true,
+		Rule: &gateonv1.WafRule{
+			Id:            r.ID,
+			Name:          r.Name,
+			Directive:     r.Directive,
+			Enabled:       r.Enabled,
+			ParanoiaLevel: int32(r.ParanoiaLevel),
+			Category:      r.Category,
+			CreatedAt:     r.CreatedAt.String(),
+			UpdatedAt:     r.UpdatedAt.String(),
+		},
+	}, nil
+}
+
+func (s *ApiService) UpdateWafRule(ctx context.Context, req *gateonv1.UpdateWafRuleRequest) (*gateonv1.UpdateWafRuleResponse, error) {
+	if s.WafRules == nil || req.Rule == nil {
+		return &gateonv1.UpdateWafRuleResponse{Success: false}, nil
+	}
+
+	r := &waf.Rule{
+		ID:            req.Rule.Id,
+		Name:          req.Rule.Name,
+		Directive:     req.Rule.Directive,
+		Enabled:       req.Rule.Enabled,
+		ParanoiaLevel: int(req.Rule.ParanoiaLevel),
+		Category:      req.Rule.Category,
+	}
+
+	if err := s.WafRules.UpdateRule(ctx, r); err != nil {
+		return &gateonv1.UpdateWafRuleResponse{Success: false}, err
+	}
+
+	return &gateonv1.UpdateWafRuleResponse{Success: true}, nil
+}
+
+func (s *ApiService) DeleteWafRule(ctx context.Context, req *gateonv1.DeleteWafRuleRequest) (*gateonv1.DeleteWafRuleResponse, error) {
+	if s.WafRules == nil {
+		return &gateonv1.DeleteWafRuleResponse{Success: false}, nil
+	}
+
+	if err := s.WafRules.DeleteRule(ctx, req.Id); err != nil {
+		return &gateonv1.DeleteWafRuleResponse{Success: false}, err
+	}
+
+	return &gateonv1.DeleteWafRuleResponse{Success: true}, nil
+}
