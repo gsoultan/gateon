@@ -287,6 +287,7 @@ message WafConfig {
   bool trust_cloudflare_headers = 35;
   bool enable_body_entropy = 36;
   bool enable_fingerprint_validation = 37;
+  bool enable_confidence_scoring = 38;
 }
 
 message ClamavConfig {

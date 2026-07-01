@@ -125,6 +125,7 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		DisableEntropy:              w.GetDisableEntropy(),
 		EnableBodyEntropy:           w.GetEnableBodyEntropy(),
 		EnableFingerprintValidation: w.GetEnableFingerprintValidation(),
+		EnableConfidenceScoring:     w.GetEnableConfidenceScoring(),
 		TrustCloudflare:             w.GetTrustCloudflareHeaders(),
 		GlobalDirectives:            w.GetCustomDirectives(),
 		RouteID:                     "gateon-global-waf",
@@ -227,6 +228,9 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				}
 				if _, ok := cfg["enable_fingerprint_validation"]; !ok {
 					cfg["enable_fingerprint_validation"] = strconv.FormatBool(global.Waf.EnableFingerprintValidation)
+				}
+				if _, ok := cfg["enable_confidence_scoring"]; !ok {
+					cfg["enable_confidence_scoring"] = strconv.FormatBool(global.Waf.EnableConfidenceScoring)
 				}
 
 				if global.Waf.AutoUpdateRules {

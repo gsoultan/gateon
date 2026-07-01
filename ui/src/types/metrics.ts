@@ -200,6 +200,10 @@ export type SecurityThreat = {
   response_body?: string;
   user_agent?: string;
   http_method?: string;
+  recommendation?: string;
+  confidence?: number;
+  entropy?: number;
+  cluster_size?: number;
 };
 
 export type TrafficSample = {

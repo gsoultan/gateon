@@ -68,6 +68,7 @@ type WAFConfig struct {
 	DisableEntropy              bool    // If true, skip fast-path entropy check
 	EnableBodyEntropy           bool    // Enable entropy check on request body
 	EnableFingerprintValidation bool    // Enable JA3/JA4 fingerprint consistency check
+	EnableConfidenceScoring     bool    // Enable confidence score calculation
 	RequestBodyLimit            int     // Maximum request body size in bytes
 	ResponseBodyLimit           int     // Maximum response body size in bytes
 	AuditLogPath                string  // Path to audit log file
@@ -122,20 +123,6 @@ func isGRPCRequest(r *http.Request) bool {
 }
 
 const securityExclusionsDirective = `
-# CRS Exclusions for sensitive high-entropy targets (JWTs, API Keys, Tokens)
-# These rules often false-positive on long base64 strings or cryptographic hashes.
-# We exclude common token fields from all SQLi and XSS rules globally by tag.
-SecRule REQUEST_URI "@unconditionalMatch" \
-    "id:900501,phase:1,nolog,pass,t:none, \
-    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:refresh_token, \
-    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:refresh_token, \
-    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:access_token, \
-    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:access_token, \
-    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:id_token, \
-    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:id_token, \
-    ctl:ruleRemoveTargetByTag=attack-sqli;ARGS:token, \
-    ctl:ruleRemoveTargetByTag=attack-xss;ARGS:token"
-
 # Redact sensitive headers from Coraza audit log
 SecAction "id:900300,phase:1,nolog,pass,setvar:tx.redact_headers=Authorization,setvar:tx.redact_headers=X-Api-Key,setvar:tx.redact_headers=Cookie,setvar:tx.redact_headers=Set-Cookie"
 
@@ -162,6 +149,37 @@ var (
 		"wp-links-opml.php", "wp-config-sample.php", "readme.html", "license.txt", // WP info
 		"log4j", "jndi:ldap", "jndi:rmi", "${jndi:", // Log4j
 	})
+
+	safeHeaders = map[string]bool{
+		"Authorization":        true,
+		"Cookie":               true,
+		"Set-Cookie":           true,
+		"X-Csrf-Token":         true,
+		"X-Xsrf-Token":         true,
+		"Sec-Websocket-Key":    true,
+		"Sec-Websocket-Accept": true,
+		"X-Api-Key":            true,
+		"X-API-Key":            true,
+		"X-Auth-Token":         true,
+		"X-Gateon-Fingerprint": true,
+		"X-Request-Id":         true,
+		"X-Correlation-Id":     true,
+		"X-Amz-Date":           true,
+		"X-Amz-Security-Token": true,
+		"Content-Type":         true,
+		"Accept-Encoding":      true,
+		"User-Agent":           true,
+		"Referer":              true,
+		"Host":                 true,
+		"Origin":               true,
+		"Connection":           true,
+		"Upgrade":              true,
+		"Accept":               true,
+		"Accept-Language":      true,
+		"Cache-Control":        true,
+		"Pragma":               true,
+		"DNT":                  true,
+	}
 )
 
 var crsRuleExplanations = map[int]struct {
@@ -268,6 +286,17 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 				val = val[:47] + "..."
 			}
 			explanation = fmt.Sprintf("Rule %d was triggered: %s. The value '%s' at %s matched a security signature.", ruleID, mr.Message(), val, md.Variable().Name())
+
+			// Smart Token Detection in matched data:
+			// If the blocked value looks like a JWT or high-entropy token,
+			// explicitly suggest the False Positive auto-fix.
+			for _, md := range mr.MatchedDatas() {
+				v := md.Value()
+				if len(v) > 80 && (isJWT(v) || entropy.CalculateString(v) > 4.5) {
+					recommendation += "\nSmart Insight: The blocked value appears to be a legitimate security token or cryptographic hash. Use the 'Mark as False Positive' button to automatically create a targeted exclusion for this field."
+					break
+				}
+			}
 		}
 	}
 
@@ -818,7 +847,7 @@ SecAuditLog "%s"
 				token := auth[7:]
 				// JWTs are usually > 32 chars and follow 3-part structure.
 				// If it's malformed, it's either an error or an injection attempt.
-				if len(token) > 32 && isMalformedJWT(token) {
+				if len(token) > 32 && !isJWT(token) {
 					recordFastPathThreat(r, cfg.RouteID, "fast_path_malformed_token", "Malformed JWT structure in Authorization header")
 					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_malformed_token").Inc()
 					http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
@@ -882,14 +911,8 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 }
 
 func isSafeHeader(name string) bool {
-	// Fast path for canonical headers (most frequent in modern browsers)
-	// We use exact case matching for performance, then fallback to EqualFold.
-	switch name {
-	case "Authorization", "Cookie", "Set-Cookie", "X-Csrf-Token", "X-Xsrf-Token",
-		"Sec-Websocket-Key", "Sec-Websocket-Accept", "X-Api-Key", "X-API-Key", "X-Auth-Token",
-		"X-Gateon-Fingerprint", "X-Request-Id", "X-Correlation-Id",
-		"X-Amz-Date", "X-Amz-Security-Token", "Content-Type", "Accept-Encoding",
-		"User-Agent", "Referer", "Host", "Origin", "Connection", "Upgrade":
+	// Fast path for canonical headers
+	if safeHeaders[name] {
 		return true
 	}
 
@@ -899,18 +922,50 @@ func isSafeHeader(name string) bool {
 		hasPrefixFold(name, "X-Apple-") ||
 		hasPrefixFold(name, "X-Ms-") ||
 		hasPrefixFold(name, "Grpc-") ||
-		hasPrefixFold(name, "Access-Control-") {
+		hasPrefixFold(name, "Access-Control-") ||
+		hasPrefixFold(name, "Sec-Ch-") {
 		return true
 	}
 
 	// Fallback for non-canonical forms or mixed case
 	lname := strings.ToLower(name)
-	switch lname {
-	case "authorization", "cookie", "set-cookie", "x-api-key", "x-csrf-token", "x-xsrf-token":
+	if safeHeaders[lname] {
 		return true
 	}
 
 	return false
+}
+
+func calculateConfidence(reputation float64, severity string, anomalyScore int, isFastPath bool) float64 {
+	base := 0.5
+	if isFastPath {
+		base = 0.9 // Deterministic matches are high confidence
+	} else {
+		// Severity impact
+		switch severity {
+		case "critical":
+			base += 0.3
+		case "high":
+			base += 0.2
+		case "medium":
+			base += 0.1
+		}
+
+		// Anomaly score impact (Threshold is usually 5)
+		if anomalyScore >= 20 {
+			base += 0.2
+		} else if anomalyScore >= 10 {
+			base += 0.1
+		}
+	}
+
+	// Reputation impact: High reputation reduces confidence of it being a real threat (Likely FP)
+	// Reputation 100 -> -0.4 impact
+	// Reputation 0 -> +0.1 impact
+	repImpact := (50.0 - reputation) / 100.0 * 0.5
+	confidence := base + repImpact
+
+	return min(max(confidence, 0.1), 0.99)
 }
 
 func isGitTraffic(r *http.Request) bool {
@@ -1081,6 +1136,11 @@ func (t *txWrapper) ProcessLogging() {
 		// we should ensure JA4 is passed down.
 
 		ja4 := ""
+		ua := ""
+		method := ""
+		repScore := 100.0
+		anomalyScore := 0
+
 		if ca, ok := t.Transaction.(interface {
 			GetCollection(variables.RuleVariable) collection.Collection
 		}); ok {
@@ -1088,10 +1148,47 @@ func (t *txWrapper) ProcessLogging() {
 				if vals := c.Get("X-Gateon-JA4"); len(vals) > 0 {
 					ja4 = vals[0]
 				}
+				if vals := c.Get("User-Agent"); len(vals) > 0 {
+					ua = vals[0]
+				}
+				if vals := c.Get("X-Gateon-Reputation"); len(vals) > 0 {
+					if f, err := strconv.ParseFloat(vals[0], 64); err == nil {
+						repScore = f
+					}
+				}
+			}
+			if c, ok := ca.GetCollection(variables.RequestMethod).(collection.Single); ok {
+				method = c.Get()
+			}
+			if c, ok := ca.GetCollection(variables.TX).(collection.Keyed); ok {
+				if vals := c.Get("inbound_anomaly_score"); len(vals) > 0 {
+					if s, err := strconv.Atoi(vals[0]); err == nil {
+						anomalyScore = s
+					}
+				}
 			}
 		}
 
 		explanation, recommendation := generateSmartInsight(t.Transaction, it)
+
+		confidence := 0.8 // Default high confidence for WAF blocks
+		ent := 0.0
+		if len(t.MatchedRules()) > 0 {
+			for _, mr := range t.MatchedRules() {
+				for _, md := range mr.MatchedDatas() {
+					if v := md.Value(); len(v) > 0 {
+						e := entropy.CalculateString(v)
+						if e > ent {
+							ent = e
+						}
+					}
+				}
+			}
+		}
+
+		if t.cfg.EnableConfidenceScoring {
+			confidence = calculateConfidence(repScore, severity, anomalyScore, false)
+		}
 
 		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 			ID:             fmt.Sprintf("waf-block-%s", t.ID()),
@@ -1107,6 +1204,10 @@ func (t *txWrapper) ProcessLogging() {
 			Severity:       severity,
 			ActionTaken:    "blocked",
 			JA4:            ja4,
+			UserAgent:      ua,
+			Method:         method,
+			Confidence:     confidence,
+			Entropy:        ent,
 		})
 	}
 	t.Transaction.ProcessLogging()
@@ -1238,6 +1339,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		EnableDLP:                   strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
 		EnableBodyEntropy:           strings.TrimSpace(strings.ToLower(cfg["enable_body_entropy"])) == "true",
 		EnableFingerprintValidation: strings.TrimSpace(strings.ToLower(cfg["enable_fingerprint_validation"])) == "true",
+		EnableConfidenceScoring:     strings.TrimSpace(strings.ToLower(cfg["enable_confidence_scoring"])) != "false", // Default true
 		AnomalyThreshold:            anomalyThreshold,
 		EntropyThreshold:            entropyThreshold,
 		DisableEntropy:              disableEntropy,
@@ -1294,24 +1396,24 @@ func isSuspiciousTLS(r *http.Request) bool {
 	return false
 }
 
-// isMalformedJWT checks if a token that claims to be a JWT (via Bearer)
-// has a valid 3-part base64url structure.
-func isMalformedJWT(token string) bool {
+// isJWT checks if a token has a valid 3-part base64url structure.
+func isJWT(token string) bool {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return true
+		return false
 	}
 	for _, p := range parts {
 		if !isBase64URL(p) {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
+// isBase64URL checks if a string is a valid base64url encoded string.
 func isBase64URL(s string) bool {
 	if s == "" {
-		return true // Allow empty parts (e.g. signature for some testing)
+		return true // Allow empty parts
 	}
 	for _, r := range s {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
