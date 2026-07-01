@@ -223,6 +223,50 @@ var crsRuleExplanations = map[int]struct {
 		Explanation:    "This request was blocked because its total 'Anomaly Score' exceeded the threshold after triggering multiple security rules.",
 		Recommendation: "Review the individual violations categorized below. For legitimate traffic, use the one-click resolution to whitelist the specific rules.",
 	},
+	100008: {
+		Explanation:    "A common web shell filename (e.g., c99.php, shell.php) was detected in the request URI.",
+		Recommendation: "This is a high-confidence indicator of a malware or compromise attempt. If this is a legitimate file, ensure it is properly registered.",
+	},
+	100009: {
+		Explanation:    "A ransomware-related filename (e.g., README_FOR_DECRYPT.txt) was detected in the request URI.",
+		Recommendation: "This strongly suggests a ransomware presence or scan. Investigate the client source immediately.",
+	},
+	110000: {
+		Explanation:    "A known vulnerability scanner (e.g., Nikto, sqlmap, Acunetix) was detected based on its User-Agent or headers.",
+		Recommendation: "Block this IP if it's not an authorized security scan. Automated tools are often the first step in an attack.",
+	},
+	120010: {
+		Explanation:    "A 'Header Flood' (DDoS) attempt was detected. The request contains an excessive number of headers.",
+		Recommendation: "This is likely a denial-of-service attempt. The IP has been automatically mitigated to protect service availability.",
+	},
+	130000: {
+		Explanation:    "Sensitive data (Credit Card Number) was detected in the response body, triggering a Data Leakage Prevention (DLP) block.",
+		Recommendation: "Ensure your application is not accidentally exposing sensitive customer data. Check the response logs to identify the source.",
+	},
+	130001: {
+		Explanation:    "Sensitive data (US Social Security Number) was detected in the response body, triggering a DLP block.",
+		Recommendation: "Exposure of PII like SSNs is a critical compliance violation. Audit the backend service for data leaks.",
+	},
+	130005: {
+		Explanation:    "A Slack Webhook URL was detected in the response body, which could allow unauthorized message posting.",
+		Recommendation: "Revoke the Slack Webhook immediately and ensure it is not hardcoded in the application response.",
+	},
+	130006: {
+		Explanation:    "A GitHub Personal Access Token (PAT) was detected in the response body.",
+		Recommendation: "Revoke the GitHub token immediately and check for accidental exposure in logs or API responses.",
+	},
+	130007: {
+		Explanation:    "A Google OAuth Client Secret was detected in the response body.",
+		Recommendation: "Rotate the OAuth Client Secret in the Google Cloud Console and audit the backend logic.",
+	},
+	140000: {
+		Explanation:    "A time-based 'Blind SQL Injection' attempt was detected (e.g., using sleep() or waitfor delay).",
+		Recommendation: "The attacker is trying to infer database content based on response delays. This is a highly sophisticated attack.",
+	},
+	100014: {
+		Explanation:    "A 'Shellshock' (CVE-2014-6271) exploit attempt was detected in the request headers.",
+		Recommendation: "Ensure your environment is patched against old RCE vulnerabilities. This is a classic automated exploit attempt.",
+	},
 }
 
 func getRuleCategory(id int) string {
@@ -490,6 +534,8 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 
 		sb.WriteString(engineDirective)
 		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
+SecWebAppId gateon
+SecAction "id:900002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
 Include @crs-setup.conf.example
 `, pl)
 
@@ -660,6 +706,9 @@ SecAuditLog "%s"
 	if cfg.EnableResponseInspection && cfg.ResponseBodyLimit > 0 {
 		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
 		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
+		// In Coraza, we must explicitly allow mime types for response body inspection.
+		// We include common text and application types.
+		wafConfig = wafConfig.WithDirectives(`SecResponseBodyMimeType text/plain text/html text/xml application/json application/xml application/xhtml+xml`)
 	}
 
 	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
