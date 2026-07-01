@@ -324,6 +324,7 @@ type SecurityThreat struct {
 	Entropy         float64   `json:"entropy,omitzero"`
 	ClusterSize     int       `json:"cluster_size,omitzero"`
 	Recommendation  string    `json:"recommendation"`
+	TriggeredRules  string    `json:"triggered_rules"`
 }
 
 type pathStatsStore struct {
@@ -624,7 +625,7 @@ func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -705,7 +706,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules); err != nil {
 							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
@@ -1429,9 +1430,9 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 		return nil, errors.New("threat ID is required")
 	}
 
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, '') FROM security_threats WHERE id = ?")
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, '') FROM security_threats WHERE id = ?")
 	th := &SecurityThreat{}
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation)
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("threat with ID %s not found", id)
@@ -1457,7 +1458,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThrea
 	if offset < 0 {
 		offset = 0
 	}
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
 	rows, err := s.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
@@ -1470,7 +1471,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThrea
 			break
 		}
 		th := &SecurityThreat{}
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules); err != nil {
 			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
@@ -1501,7 +1502,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityT
 	if offset < 0 {
 		offset = 0
 	}
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(recommendation, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(recommendation, ''), COALESCE(triggered_rules, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
 	rows, err := s.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
@@ -1514,7 +1515,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityT
 			break
 		}
 		th := &SecurityThreat{}
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.UserAgent, &th.Method, &th.Recommendation); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules); err != nil {
 			continue
 		}
 		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"

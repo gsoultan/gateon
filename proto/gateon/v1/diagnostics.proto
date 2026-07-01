@@ -43,6 +43,7 @@ message Anomaly {
   double confidence = 24;
   double entropy = 25;
   int32 cluster_size = 26;
+  string triggered_rules = 27;
 }
 
 message GossipStatus {

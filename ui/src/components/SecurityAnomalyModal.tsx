@@ -18,6 +18,7 @@ import {
   List,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import { useMemo } from "react";
 import {
   IconShieldExclamation,
   IconClock,
@@ -70,6 +71,15 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
 
   const { general, insight } = parseRecommendation(anomaly.recommendation);
 
+  const triggeredRules = useMemo(() => {
+    if (!anomaly.triggered_rules) return [];
+    try {
+      return JSON.parse(anomaly.triggered_rules) as number[];
+    } catch {
+      return [];
+    }
+  }, [anomaly.triggered_rules]);
+
   const handleApplyFalsePositive = async () => {
     try {
       const res = await applyRecommendation.mutateAsync({
@@ -116,6 +126,34 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
       radius="md"
     >
       <Stack gap="md">
+        {triggeredRules.length > 0 && anomaly.mitigated && (
+          <Alert
+            variant="light"
+            color="blue"
+            title="One-Click Resolution Available"
+            icon={<IconShieldCheck size={18} />}
+            mb="md"
+          >
+            <Stack gap="xs">
+              <Text size="sm">
+                Gateon has identified {triggeredRules.length} specific security rule{triggeredRules.length > 1 ? 's' : ''} that might be causing a false positive. Click below to whitelist these rules for this path and restore the client's reputation.
+              </Text>
+              <Group>
+                <Button
+                  variant="filled"
+                  size="xs"
+                  color="blue"
+                  leftSection={<IconCheck size={14} />}
+                  loading={applyRecommendation.isPending}
+                  onClick={handleApplyFalsePositive}
+                >
+                  Whitelist Rules & Allow IP
+                </Button>
+              </Group>
+            </Stack>
+          </Alert>
+        )}
+
         <Paper withBorder p="md" radius="md" bg="var(--mantine-color-default-hover)">
           <Group justify="space-between" align="flex-start" wrap="nowrap">
             <Stack gap={4}>
@@ -128,9 +166,31 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
               {(anomaly.severity || 'unknown').toUpperCase()}
             </Badge>
           </Group>
-          <Text size="sm" mt="sm">
-            {anomaly.description}
-          </Text>
+          <Box mt="sm">
+            {anomaly.description.includes("•") || anomaly.description.includes("[") ? (
+              <Stack gap={4}>
+                {anomaly.description.split("\n").filter(l => l.trim() !== "").map((line, i) => {
+                  const isHeader = line.startsWith("[") && line.endsWith("]");
+                  const isBullet = line.startsWith("•");
+                  return (
+                    <Text
+                      key={i}
+                      size={isHeader ? "xs" : "sm"}
+                      ff={isBullet ? "monospace" : undefined}
+                      fw={isHeader ? 700 : undefined}
+                      tt={isHeader ? "uppercase" : undefined}
+                      c={isHeader ? "dimmed" : (isBullet ? undefined : "dimmed")}
+                      mt={isHeader && i > 0 ? "xs" : undefined}
+                    >
+                      {isHeader ? line.replace(/[\[\]]/g, "") : line}
+                    </Text>
+                  );
+                })}
+              </Stack>
+            ) : (
+              <Text size="sm">{anomaly.description}</Text>
+            )}
+          </Box>
 
           {anomaly.mitigated && (
             <Group grow mt="md">
