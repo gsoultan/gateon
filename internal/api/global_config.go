@@ -67,5 +67,7 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 		s.EbpfManager.SetPortKnockingSequence(req.Config.Ebpf.KnockingSequence)
 	}
 
+	s.logAudit(ctx, "update", "global_config", "Updated global configuration")
+
 	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
 }

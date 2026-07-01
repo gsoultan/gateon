@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -23,6 +24,7 @@ func (s *ApiService) UpdateTLSOption(ctx context.Context, req *gateonv1.UpdateTL
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateTLS()
 	}
+	s.logAudit(ctx, "update", "tls_option", fmt.Sprintf("Updated TLS option %s", req.TlsOption.Id))
 	return &gateonv1.UpdateTLSOptionResponse{Success: true}, nil
 }
 
@@ -36,5 +38,6 @@ func (s *ApiService) DeleteTLSOption(ctx context.Context, req *gateonv1.DeleteTL
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateTLS()
 	}
+	s.logAudit(ctx, "delete", "tls_option", fmt.Sprintf("Deleted TLS option %s", req.Id))
 	return &gateonv1.DeleteTLSOptionResponse{Success: true}, nil
 }

@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
@@ -16,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/peer"
 )
 
 // ApiService implements gateonv1.ApiServiceServer.
@@ -81,6 +84,20 @@ func (s *ApiService) Close() error {
 	return nil
 }
 
+func (s *ApiService) logAudit(ctx context.Context, action, resource, details string) {
+	userID := "system"
+	if claims, ok := ctx.Value(middleware.UserContextKey).(*auth.Claims); ok && claims != nil {
+		userID = claims.ID
+	}
+
+	ip := "0.0.0.0"
+	if p, ok := peer.FromContext(ctx); ok {
+		ip = p.Addr.String()
+	}
+
+	audit.Log(ctx, userID, action, resource, details, ip)
+}
+
 func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error) {
 	if s.ClamAVManager == nil {
 		return &gateonv1.InstallClamavResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
@@ -120,6 +137,8 @@ func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallCla
 		}
 	}()
 
+	s.logAudit(ctx, "install", "clamav", fmt.Sprintf("ClamAV installation initiated (mode: %s)", req.Mode))
+
 	return &gateonv1.InstallClamavResponse{Success: true, Message: "Installation started successfully"}, nil
 }
 
@@ -143,6 +162,8 @@ func (s *ApiService) UninstallClamav(ctx context.Context, _ *gateonv1.UninstallC
 		}
 	}()
 
+	s.logAudit(ctx, "uninstall", "clamav", "ClamAV uninstallation initiated")
+
 	return &gateonv1.UninstallClamavResponse{Success: true, Message: "Uninstallation started successfully"}, nil
 }
 
@@ -159,6 +180,7 @@ func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanReq
 	if !status.IsRunning {
 		// Run scan in background as it can take a long time
 		go s.ClamAVManager.RunFullScan(context.Background())
+		s.logAudit(ctx, "run_scan", "clamav", "Deep scan initiated")
 		// Refresh status to show it's now running
 		status = s.ClamAVManager.GetScanStatus()
 	}

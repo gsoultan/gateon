@@ -3,12 +3,13 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func (s *ApiService) Login(_ context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error) {
+func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error) {
 	if s.Auth == nil {
 		return &gateonv1.LoginResponse{}, nil
 	}
@@ -28,12 +29,14 @@ func (s *ApiService) Login(_ context.Context, req *gateonv1.LoginRequest) (*gate
 				TwoFactorSetupRequired: true,
 			}, nil
 		}
+		s.logAudit(ctx, "login_failed", "auth", fmt.Sprintf("Failed login attempt for user: %s", req.Username))
 		return nil, err
 	}
+	s.logAudit(ctx, "login_success", "auth", fmt.Sprintf("User logged in: %s", req.Username))
 	return &gateonv1.LoginResponse{Token: token, User: user}, nil
 }
 
-func (s *ApiService) Setup2FA(_ context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error) {
+func (s *ApiService) Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error) {
 	if s.Auth == nil {
 		return nil, errors.New("auth service not initialized")
 	}
@@ -41,6 +44,7 @@ func (s *ApiService) Setup2FA(_ context.Context, req *gateonv1.Setup2FARequest) 
 	if err != nil {
 		return nil, err
 	}
+	s.logAudit(ctx, "setup_2fa", "user", fmt.Sprintf("User initiated 2FA setup: %s", req.Id))
 	return &gateonv1.Setup2FAResponse{
 		Secret:        secret,
 		QrCodeUrl:     qr,
@@ -48,13 +52,19 @@ func (s *ApiService) Setup2FA(_ context.Context, req *gateonv1.Setup2FARequest) 
 	}, nil
 }
 
-func (s *ApiService) Verify2FA(_ context.Context, req *gateonv1.Verify2FARequest) (*gateonv1.Verify2FAResponse, error) {
+func (s *ApiService) Verify2FA(ctx context.Context, req *gateonv1.Verify2FARequest) (*gateonv1.Verify2FAResponse, error) {
 	if s.Auth == nil {
 		return nil, errors.New("auth service not initialized")
 	}
 	success, token, user, err := s.Auth.Verify2FA(req.Id, req.Code)
 	if err != nil {
+		s.logAudit(ctx, "verify_2fa_failed", "user", fmt.Sprintf("Failed 2FA verification for user: %s", req.Id))
 		return nil, err
+	}
+	if success {
+		s.logAudit(ctx, "verify_2fa_success", "user", fmt.Sprintf("Successful 2FA verification for user: %s", req.Id))
+	} else {
+		s.logAudit(ctx, "verify_2fa_failed", "user", fmt.Sprintf("Invalid 2FA code for user: %s", req.Id))
 	}
 	return &gateonv1.Verify2FAResponse{
 		Success: success,

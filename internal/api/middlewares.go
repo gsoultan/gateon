@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -30,6 +31,7 @@ func (s *ApiService) UpdateMiddleware(ctx context.Context, req *gateonv1.UpdateM
 			return false
 		})
 	}
+	s.logAudit(ctx, "update", "middleware", fmt.Sprintf("Updated middleware %s", req.Middleware.Id))
 	return &gateonv1.UpdateMiddlewareResponse{Success: true}, nil
 }
 
@@ -50,5 +52,6 @@ func (s *ApiService) DeleteMiddleware(ctx context.Context, req *gateonv1.DeleteM
 			return false
 		})
 	}
+	s.logAudit(ctx, "delete", "middleware", fmt.Sprintf("Deleted middleware %s", req.Id))
 	return &gateonv1.DeleteMiddlewareResponse{Success: true}, nil
 }

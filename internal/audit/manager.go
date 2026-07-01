@@ -7,12 +7,19 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/andybalholm/brotli"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -37,6 +44,7 @@ type AuditManager struct {
 	dialect     db.Dialect
 	Broadcaster *Broadcaster
 	lastHash    string
+	stop        chan struct{}
 }
 
 // GenerateSignatureKey returns a cryptographically-random 256-bit key as a hex
@@ -114,10 +122,18 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 			Broadcaster: &Broadcaster{
 				subscribers: make(map[chan AuditEntry]struct{}),
 			},
+			stop: make(chan struct{}),
 		}
 		manager.loadLastHash()
+		go manager.runRetentionTask()
 	})
 	return err
+}
+
+func Stop() {
+	if manager != nil {
+		close(manager.stop)
+	}
 }
 
 func (m *AuditManager) loadLastHash() {
@@ -241,6 +257,161 @@ func GetLogs(ctx context.Context, limit int) ([]AuditEntry, error) {
 // GetLogsPaginated returns a page of audit logs (newest first) along with the
 // total number of rows matching the optional case-insensitive search across
 // action, resource, user_id and details. page is 0-indexed.
+func (m *AuditManager) runRetentionTask() {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	// Run once at start
+	m.checkRetention()
+
+	for {
+		select {
+		case <-ticker.C:
+			m.checkRetention()
+		case <-m.stop:
+			return
+		}
+	}
+}
+
+func (m *AuditManager) checkRetention() {
+	m.mu.RLock()
+	retentionDays := m.config.RetentionDays
+	archiveOnRetention := m.config.ArchiveOnRetention
+	m.mu.RUnlock()
+
+	if retentionDays <= 0 {
+		return
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -int(retentionDays))
+
+	if archiveOnRetention {
+		if err := m.archiveLogs(cutoff); err != nil {
+			logger.L.LogError("audit: failed to archive logs", "error", err)
+			// Continue to deletion anyway? Maybe safer not to if archive failed.
+			return
+		}
+	}
+
+	query := m.dialect.Rebind("DELETE FROM audit_logs WHERE timestamp < ?")
+	result, err := m.db.Exec(query, cutoff)
+	if err != nil {
+		logger.L.LogError("audit: failed to delete old logs", "error", err)
+	} else {
+		rows, _ := result.RowsAffected()
+		if rows > 0 {
+			logger.L.LogInfo("audit: retention task completed", "deleted_rows", rows)
+		}
+	}
+}
+
+func (m *AuditManager) archiveLogs(cutoff time.Time) error {
+	// Query logs to archive
+	query := m.dialect.Rebind("SELECT id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash FROM audit_logs WHERE timestamp < ? ORDER BY timestamp ASC")
+	rows, err := m.db.Query(query, cutoff)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var logs []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.Details, &e.Timestamp, &e.IPAddress, &e.Signature, &e.PreviousHash); err != nil {
+			continue
+		}
+		logs = append(logs, e)
+	}
+
+	if len(logs) == 0 {
+		return nil
+	}
+
+	// Create archive directory
+	archiveDir := filepath.Join(config.DataDir(), "audit", "archives")
+	if err := os.MkdirAll(archiveDir, 0o750); err != nil {
+		return err
+	}
+
+	// Filename: audit_archive_2024-01-01_to_2024-02-01.json.br
+	first := logs[0].Timestamp.Format("2006-01-02")
+	last := logs[len(logs)-1].Timestamp.Format("2006-01-02")
+	filename := fmt.Sprintf("audit_archive_%s_to_%s_%s.json.br", first, last, uuid.NewString()[:8])
+	path := filepath.Join(archiveDir, filename)
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// Use Brotli for best smallest algorithm as requested
+	bw := brotli.NewWriterLevel(f, brotli.BestCompression)
+	defer bw.Close()
+
+	enc := json.NewEncoder(bw)
+	if err := enc.Encode(logs); err != nil {
+		return err
+	}
+
+	logger.L.LogInfo("audit: logs archived", "filename", filename, "count", len(logs))
+	return nil
+}
+
+func ListArchives() ([]*gateonv1.AuditArchive, error) {
+	archiveDir := filepath.Join(config.DataDir(), "audit", "archives")
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []*gateonv1.AuditArchive{}, nil
+		}
+		return nil, err
+	}
+
+	var archives []*gateonv1.AuditArchive
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json.br") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		archives = append(archives, &gateonv1.AuditArchive{
+			Filename:  entry.Name(),
+			Size:      info.Size(),
+			CreatedAt: info.ModTime().Format(time.RFC3339),
+		})
+	}
+	// Sort by newest first
+	slices.SortFunc(archives, func(a, b *gateonv1.AuditArchive) int {
+		return strings.Compare(b.CreatedAt, a.CreatedAt)
+	})
+	return archives, nil
+}
+
+func GetArchive(filename string) ([]byte, error) {
+	// Sanitize filename
+	filename = filepath.Base(filename)
+	path := filepath.Join(config.DataDir(), "audit", "archives", filename)
+
+	// Open and read (we return raw bytes, decompression is handled by UI or we could decompress here)
+	// The user said "open it through gateon ui", usually UI can handle decompression if it's small,
+	// but Brotli in JS might be heavy. Let's decompress here to make it easier for UI to display.
+	// Actually, "open it through gateon ui" might mean download or view.
+	// If it's a JSON archive, viewing it in UI is better.
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	br := brotli.NewReader(f)
+	return io.ReadAll(br)
+}
+
 func GetLogsPaginated(ctx context.Context, page, pageSize int, search string) ([]AuditEntry, int, error) {
 	if manager == nil {
 		return nil, 0, fmt.Errorf("audit manager not initialized")

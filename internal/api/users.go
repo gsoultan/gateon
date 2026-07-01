@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -56,6 +57,7 @@ func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserReq
 			return &gateonv1.UpdateUserResponse{Success: false}, err
 		}
 	}
+	s.logAudit(ctx, "update", "user", fmt.Sprintf("Updated user %s (%s)", req.User.Id, req.User.Username))
 	return &gateonv1.UpdateUserResponse{Success: true}, nil
 }
 
@@ -69,6 +71,7 @@ func (s *ApiService) DeleteUser(ctx context.Context, req *gateonv1.DeleteUserReq
 	if err := s.Auth.DeleteUser(req.Id); err != nil {
 		return &gateonv1.DeleteUserResponse{Success: false}, err
 	}
+	s.logAudit(ctx, "delete", "user", fmt.Sprintf("Deleted user %s", req.Id))
 	return &gateonv1.DeleteUserResponse{Success: true}, nil
 }
 
@@ -86,6 +89,7 @@ func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePas
 	if err := s.Auth.ChangePassword(req.Id, req.Password); err != nil {
 		return &gateonv1.ChangePasswordResponse{Success: false}, err
 	}
+	s.logAudit(ctx, "change_password", "user", fmt.Sprintf("Changed password for user %s", req.Id))
 	return &gateonv1.ChangePasswordResponse{Success: true}, nil
 }
 
