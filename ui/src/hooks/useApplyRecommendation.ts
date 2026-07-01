@@ -17,11 +17,14 @@ export function useApplyRecommendation() {
 
   return useMutation({
     mutationFn: async (req: ApplyRecommendationRequest) => {
-      const response = await apiFetch<ApplyRecommendationResponse>("/gateon.v1.ApiService/ApplyRecommendation", {
+      const response = await apiFetch("/gateon.v1.ApiService/ApplyRecommendation", {
         method: "POST",
         body: JSON.stringify(req),
       });
-      return response;
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      return response.json() as Promise<ApplyRecommendationResponse>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["security-threats"] });

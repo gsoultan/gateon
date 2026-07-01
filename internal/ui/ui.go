@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
 //go:embed all:dist
@@ -30,10 +33,26 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 		})
 	}
 	fileServer := http.FileServer(http.FS(dist))
+
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		data, err := fs.ReadFile(dist, "index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			return
+		}
+		nonce := kind.GetNonce(r)
+		if nonce != "" {
+			data = bytes.ReplaceAll(data, []byte("NONCE_PLACEHOLDER"), []byte(nonce))
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
-		if cleanPath == "" {
-			cleanPath = "index.html"
+		if cleanPath == "" || cleanPath == "index.html" {
+			serveIndex(w, r)
+			return
 		}
 
 		f, err := dist.Open(cleanPath)
@@ -59,7 +78,8 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 				fmt.Fprintf(w, "Asset not found: %s\n", cleanPath)
 				return
 			}
-			r.URL.Path = "/"
+			serveIndex(w, r)
+			return
 		} else {
 			f.Close()
 		}

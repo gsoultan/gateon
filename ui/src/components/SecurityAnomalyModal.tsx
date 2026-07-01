@@ -55,6 +55,15 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
   const removeMitigation = useRemoveMitigation();
   const applyRecommendation = useApplyRecommendation();
 
+  const triggeredRules = useMemo(() => {
+    if (!anomaly?.triggered_rules) return [];
+    try {
+      return JSON.parse(anomaly.triggered_rules) as number[];
+    } catch {
+      return [];
+    }
+  }, [anomaly?.triggered_rules]);
+
   if (!anomaly) return null;
 
   const parseRecommendation = (rec: string) => {
@@ -70,15 +79,6 @@ export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnoma
   };
 
   const { general, insight } = parseRecommendation(anomaly.recommendation);
-
-  const triggeredRules = useMemo(() => {
-    if (!anomaly.triggered_rules) return [];
-    try {
-      return JSON.parse(anomaly.triggered_rules) as number[];
-    } catch {
-      return [];
-    }
-  }, [anomaly.triggered_rules]);
 
   const handleApplyFalsePositive = async () => {
     try {

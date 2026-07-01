@@ -59,6 +59,7 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 }
 
 func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
+	nonce := GenerateNonce()
 	salt := strconv.FormatInt(time.Now().UnixNano(), 36)
 	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), telemetry.GetDetailedFingerprint(r).Hash, salt)
 
@@ -76,6 +77,7 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 
 	// For standard browser requests, serve a simple HTML page that solves it via JS.
 	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", nonce))
 	w.WriteHeader(http.StatusTooManyRequests)
 	fmt.Fprintf(w, `
 <html>
@@ -85,7 +87,7 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 		<h2 style="color: #333;">Security Check</h2>
 		<p style="color: #666;">Your connection exhibits unusual patterns. Please wait while we verify your browser...</p>
 		<div id="loader" style="margin: 20px auto; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%%; width: 30px; height: 30px; animation: spin 2s linear infinite;"></div>
-		<script>
+		<script nonce="%s">
 			async function solve() {
 				const id = "%s";
 				const difficulty = %d;
@@ -118,7 +120,7 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 		<style>@keyframes spin { 0%% { transform: rotate(0deg); } 100%% { transform: rotate(360deg); } }</style>
 	</div>
 </body>
-</html>`, challengeID, difficulty)
+</html>`, nonce, challengeID, difficulty)
 }
 
 func verifyPoW(id, nonce, solution string, difficulty int) bool {

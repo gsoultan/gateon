@@ -132,6 +132,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 }
 
 func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
+	nonce := GenerateNonce()
 	// A simple stealthy JS challenge.
 	// In a real implementation, this would be more complex and obfuscated.
 	html := fmt.Sprintf(`
@@ -153,7 +154,7 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
             <input type="hidden" name="redirect" value="%s">
         </form>
     </div>
-    <script>
+    <script nonce="%s">
         (function() {
             // Simple proof of work or just a delay to foil simple scrapers
             setTimeout(function() {
@@ -170,9 +171,10 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
         })();
     </script>
 </body>
-</html>`, r.URL.String())
+</html>`, r.URL.String(), nonce)
 
 	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", nonce))
 	w.WriteHeader(http.StatusForbidden) // Or 403 to indicate challenge required
 	_, _ = w.Write([]byte(html))
 }

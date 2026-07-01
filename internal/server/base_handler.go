@@ -60,6 +60,7 @@ func CreateBaseHandler(
 	// Pre-chain middlewares to avoid per-request allocations.
 	finalInternal := middleware.Chain(
 		middleware.Recovery(),
+		middleware.Nonce(),
 		func(next http.Handler) http.Handler {
 			if deps.MgmtCORS != nil {
 				return deps.MgmtCORS.Handler(next)
