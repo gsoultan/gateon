@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,11 +24,11 @@ func buildTierWAF(t *testing.T, waf *gateonv1.WafConfig) http.Handler {
 	return mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 }
 
-func doGet(t *testing.T, h http.Handler, url string) int {
+func doGet(t *testing.T, h http.Handler, url string, reputation int) int {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, url, strings.NewReader(""))
-	// Force low reputation for security tests that expect blocks at score 5.
-	req.Header.Set("X-Gateon-Test-Reputation", "0")
+	// Use explicit reputation to control reputation block rule (910002)
+	req.Header.Set("X-Gateon-Test-Reputation", strconv.Itoa(reputation))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	return rr.Code
@@ -39,13 +40,13 @@ func doGet(t *testing.T, h http.Handler, url string) int {
 func TestWAFTier_MinimalStillBlocksCoreAttacks(t *testing.T) {
 	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true, Tier: "minimal"})
 
-	if code := doGet(t, h, "/?name=test"); code != http.StatusOK {
+	if code := doGet(t, h, "/?name=test", 100); code != http.StatusOK {
 		t.Errorf("safe request: expected 200, got %d", code)
 	}
-	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20"); code != http.StatusForbidden {
+	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20", 0); code != http.StatusForbidden {
 		t.Errorf("SQLi under minimal tier: expected 403, got %d", code)
 	}
-	if code := doGet(t, h, "/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"); code != http.StatusForbidden {
+	if code := doGet(t, h, "/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", 0); code != http.StatusForbidden {
 		t.Errorf("XSS under minimal tier: expected 403, got %d", code)
 	}
 }
@@ -55,7 +56,7 @@ func TestWAFTier_MinimalStillBlocksCoreAttacks(t *testing.T) {
 // request-phase attacks.
 func TestWAFTier_EnterpriseBuildsAndBlocks(t *testing.T) {
 	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true, Tier: "enterprise"})
-	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20"); code != http.StatusForbidden {
+	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20", 0); code != http.StatusForbidden {
 		t.Errorf("SQLi under enterprise tier: expected 403, got %d", code)
 	}
 }
@@ -65,7 +66,7 @@ func TestWAFTier_EnterpriseBuildsAndBlocks(t *testing.T) {
 func TestWAFTier_ProfileEnvDrivesTier(t *testing.T) {
 	t.Setenv("GATEON_PROFILE", "minimal")
 	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true})
-	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20"); code != http.StatusForbidden {
+	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20", 0); code != http.StatusForbidden {
 		t.Errorf("SQLi with profile=minimal: expected 403, got %d", code)
 	}
 }

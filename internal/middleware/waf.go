@@ -745,8 +745,9 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 				token := auth[7:]
 				// JWTs are usually > 32 chars and follow 3-part structure.
-				// If it's malformed, it's either an error or an injection attempt.
-				if len(token) > 32 && !isJWT(token) {
+				// If it contains dots, we assume it's a JWT and validate its structure.
+				// Opaque tokens (no dots) are allowed regardless of length.
+				if len(token) > 32 && strings.Contains(token, ".") && !isJWT(token) {
 					recordFastPathThreat(r, cfg.RouteID, "fast_path_malformed_token", "Malformed JWT structure in Authorization header")
 					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_malformed_token").Inc()
 					http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
@@ -793,6 +794,10 @@ func createWAFInstance(cfg WAFConfig) (coraza.WAF, error) {
 		}
 
 		sb.WriteString(engineDirective)
+		threshold := cfg.AnomalyThreshold
+		if threshold <= 0 {
+			threshold = 5
+		}
 		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
 SecWebAppId gateon
 SecAction "id:900002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
@@ -801,6 +806,8 @@ Include @crs-setup.conf.example
 
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
+		// Override defaults from CRS initialization with our configured thresholds
+		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900099,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d\"\n", threshold, threshold)
 
 		// Inject dynamic variables for rules (must be before loading database rules that use them)
 		allowedIps := "127.0.0.1"
