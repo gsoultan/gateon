@@ -81,6 +81,21 @@ const (
 	QueryGetMitigatedThreatsToday = `SELECT COUNT(*) FROM security_threats
 		WHERE timestamp >= ? AND action_taken IN ('blocked', 'challenged', 'shunned')`
 
+	QueryGetTotalTrafficRolling24h = `SELECT SUM(req_count), SUM(bytes_total)
+		FROM domain_stats
+		WHERE (day = ? AND hour <= ?) OR (day = ? AND hour > ?)`
+
+	QueryGetDomainStatsRolling24h = `SELECT domain, SUM(req_count) AS rc, SUM(latency_sum_s) AS lsum, SUM(bytes_total) AS bsum
+		FROM domain_stats
+		WHERE (day = ? AND hour <= ?) OR (day = ? AND hour > ?)
+		GROUP BY domain`
+
+	QueryGetActiveThreatsRolling24h = `SELECT COUNT(*) FROM security_threats
+		WHERE timestamp >= ? AND action_taken NOT IN ('blocked', 'challenged', 'shunned')`
+
+	QueryGetMitigatedThreatsRolling24h = `SELECT COUNT(*) FROM security_threats
+		WHERE timestamp >= ? AND action_taken IN ('blocked', 'challenged', 'shunned')`
+
 	// QueryGetWAFBlockCounts returns the number of persisted WAF block events
 	// grouped by route. It is used at startup to restore the in-memory
 	// gateon_middleware_waf_blocked_total counter so the dashboard does not

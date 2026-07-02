@@ -14,6 +14,8 @@ import {
   Loader, 
   Tabs,
   Select,
+  Modal,
+  PasswordInput,
 } from '@mantine/core';
 import { 
   IconShieldCheck, 
@@ -68,6 +70,9 @@ export default function SecurityCommandCenter() {
   const [scanStatus, setScanStatus] = React.useState<DeepScanStatus | null>(null);
   const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [trendRange, setTrendRange] = React.useState<string>('last24h');
+  const [sudoOpened, setSudoOpened] = React.useState(false);
+  const [pendingMode, setPendingMode] = React.useState<number | null>(null);
+  const [sudoPassword, setSudoPassword] = React.useState("");
 
   const pollScanStatus = async () => {
     try {
@@ -126,13 +131,20 @@ export default function SecurityCommandCenter() {
     }
   };
 
-  const handleInstall = async (mode: number) => {
+  const handleInstall = async (mode: number, password?: string) => {
+    if (mode === 1 && !password) {
+      setPendingMode(mode);
+      setSudoOpened(true);
+      return;
+    }
+
     setInstalling(true);
+    setSudoOpened(false);
     try {
       const res = await apiFetch("/v1/security/clamav/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode })
+        body: JSON.stringify({ mode, sudo_password: password })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -384,6 +396,42 @@ export default function SecurityCommandCenter() {
           </Tabs.Panel>
         </Tabs>
       </Stack>
+
+      <Modal
+        opened={sudoOpened}
+        onClose={() => {
+          setSudoOpened(false);
+          setSudoPassword("");
+        }}
+        title="Administrative Privileges Required"
+        radius="md"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Local ClamAV installation requires root privileges. Please provide your sudo password to proceed.
+          </Text>
+          <PasswordInput
+            label="Sudo Password"
+            placeholder="Your password"
+            value={sudoPassword}
+            onChange={(e) => setSudoPassword(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleInstall(pendingMode || 1, sudoPassword);
+                setSudoPassword("");
+              }
+            }}
+            autoFocus
+          />
+          <Group justify="flex-end">
+            <Button variant="light" onClick={() => setSudoOpened(false)}>Cancel</Button>
+            <Button onClick={() => {
+              handleInstall(pendingMode || 1, sudoPassword);
+              setSudoPassword("");
+            }}>Install</Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Container>
   );
 }

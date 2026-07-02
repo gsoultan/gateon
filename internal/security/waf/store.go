@@ -653,6 +653,46 @@ func (s *Store) Seed(ctx context.Context) error {
 			ParanoiaLevel: 1,
 			Category:      "Ransomware",
 		},
+		{
+			ID:            "150000",
+			Name:          "RCE: Log4Shell (CVE-2021-44228)",
+			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI|REQUEST_BODY "@rx \$\{jndi:(?:ldap|rmi|dns|nis|iiop|corba|nds|http):" "id:150000,phase:2,deny,status:403,msg:'Log4Shell RCE attempt',tag:'attack-rce',tag:'cve-2021-44228',severity:CRITICAL"`,
+			Enabled:       true,
+			ParanoiaLevel: 1,
+			Category:      "RCE",
+		},
+		{
+			ID:            "150001",
+			Name:          "RCE: Spring4Shell (CVE-2022-22965)",
+			Directive:     `SecRule ARGS|REQUEST_BODY "@rx class\.module\.classLoader" "id:150001,phase:2,deny,status:403,msg:'Spring4Shell RCE attempt',tag:'attack-rce',tag:'cve-2022-22965',severity:CRITICAL"`,
+			Enabled:       true,
+			ParanoiaLevel: 1,
+			Category:      "RCE",
+		},
+		{
+			ID:            "150002",
+			Name:          "RCE: Generic Command Injection",
+			Directive:     `SecRule ARGS|REQUEST_BODY "@rx (?:;|\||&|\$|\n|\r)\s*(?:cat|ls|id|whoami|pwd|uname|netcat|nc|curl|wget|bash|sh|zsh|powershell|cmd\.exe)\b" "id:150002,phase:2,deny,status:403,msg:'Generic RCE attempt',tag:'attack-rce',severity:CRITICAL"`,
+			Enabled:       true,
+			ParanoiaLevel: 1,
+			Category:      "RCE",
+		},
+		{
+			ID:            "160000",
+			Name:          "NoSQL: MongoDB Injection",
+			Directive:     `SecRule ARGS|REQUEST_BODY "@rx (\$where|\$gt|\$ne|\$lt|\$in|\$nin|\$exists|\$regex)" "id:160000,phase:2,deny,status:403,msg:'NoSQL Injection attempt',tag:'attack-nosql',severity:CRITICAL"`,
+			Enabled:       true,
+			ParanoiaLevel: 1,
+			Category:      "Injection",
+		},
+		{
+			ID:            "170000",
+			Name:          "Generic: Prototype Pollution",
+			Directive:     `SecRule ARGS|REQUEST_BODY "@rx (__proto__|constructor\.prototype)" "id:170000,phase:2,deny,status:403,msg:'Prototype Pollution attempt',tag:'attack-generic',severity:CRITICAL"`,
+			Enabled:       true,
+			ParanoiaLevel: 1,
+			Category:      "Exploit",
+		},
 	}
 
 	now := time.Now()

@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -426,16 +427,22 @@ var (
 	startTimeOnce sync.Once
 
 	// System metrics gauges (global so they can be accessed by GetSystemStats)
-	goroutinesGauge  prometheus.Gauge
-	memoryAllocGauge prometheus.Gauge
-	memoryTotalGauge prometheus.Gauge
-	memorySysGauge   prometheus.Gauge
-	cpuUsageGauge    prometheus.Gauge
-	memoryUsageGauge prometheus.Gauge
+	goroutinesGauge      prometheus.Gauge
+	memoryAllocGauge     prometheus.Gauge
+	memoryTotalGauge     prometheus.Gauge
+	memorySysGauge       prometheus.Gauge
+	cpuUsageGauge        prometheus.Gauge
+	memoryUsageGauge     prometheus.Gauge
+	storageUsageGauge    prometheus.Gauge
+	storageTotalGauge    prometheus.Gauge
+	storageUsagePctGauge prometheus.Gauge
 
 	// Latest values for API
-	lastCPUUsage    atomic.Pointer[float64]
-	lastMemoryUsage atomic.Pointer[float64]
+	lastCPUUsage     atomic.Pointer[float64]
+	lastMemoryUsage  atomic.Pointer[float64]
+	lastStorageUsage atomic.Pointer[float64]
+	lastStorageTotal atomic.Pointer[float64]
+	lastStoragePct   atomic.Pointer[float64]
 )
 
 // InitStartTime records the gateway start time for uptime tracking.
@@ -452,8 +459,12 @@ func GetStartTime() time.Time {
 
 // SystemStats holds current system-level metrics.
 type SystemStats struct {
-	CPUUsage           float64
-	MemoryUsagePercent float64
+	CPUUsage            float64
+	MemoryUsagePercent  float64
+	StorageUsagePercent float64
+	StorageUsageBytes   uint64
+	StorageTotalBytes   uint64
+	MemoryTotalBytes    uint64
 }
 
 // GetSystemStats returns the current system metrics.
@@ -464,6 +475,18 @@ func GetSystemStats() SystemStats {
 	}
 	if v := lastMemoryUsage.Load(); v != nil {
 		stats.MemoryUsagePercent = *v
+	}
+	if v := lastStoragePct.Load(); v != nil {
+		stats.StorageUsagePercent = *v
+	}
+	if v := lastStorageUsage.Load(); v != nil {
+		stats.StorageUsageBytes = uint64(*v)
+	}
+	if v := lastStorageTotal.Load(); v != nil {
+		stats.StorageTotalBytes = uint64(*v)
+	}
+	if v, err := mem.VirtualMemory(); err == nil {
+		stats.MemoryTotalBytes = v.Total
 	}
 	return stats
 }
@@ -495,6 +518,18 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 		Name: "gateon_memory_usage_percent",
 		Help: "Current system memory usage percentage.",
 	})
+	storageUsageGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gateon_storage_usage_bytes",
+		Help: "Current system storage usage in bytes.",
+	})
+	storageTotalGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gateon_storage_total_bytes",
+		Help: "Total system storage in bytes.",
+	})
+	storageUsagePctGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gateon_storage_usage_percent",
+		Help: "Current system storage usage percentage.",
+	})
 
 	proc, _ := process.NewProcess(int32(os.Getpid()))
 
@@ -522,6 +557,14 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 				if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
 					cpuUsageGauge.Set(c[0])
 					lastCPUUsage.Store(new(c[0]))
+				}
+				if d, err := disk.Usage("/"); err == nil {
+					storageUsageGauge.Set(float64(d.Used))
+					storageTotalGauge.Set(float64(d.Total))
+					storageUsagePctGauge.Set(d.UsedPercent)
+					lastStorageUsage.Store(new(float64(d.Used)))
+					lastStorageTotal.Store(new(float64(d.Total)))
+					lastStoragePct.Store(new(d.UsedPercent))
 				}
 
 				// Process-specific metrics

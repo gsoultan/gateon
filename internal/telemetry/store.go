@@ -1247,12 +1247,27 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	if s == nil {
 		return nil
 	}
-	if days <= 0 {
-		days = int(s.retentionDays.Load())
+
+	var q string
+	var args []any
+
+	if days == 1 {
+		now := time.Now().UTC()
+		today := now.Format("2006-01-02")
+		yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+		bucket := now.Hour()*2 + now.Minute()/30
+		q = s.dialect.Rebind(QueryGetDomainStatsRolling24h)
+		args = []any{today, bucket, yesterday, bucket}
+	} else {
+		if days <= 0 {
+			days = int(s.retentionDays.Load())
+		}
+		cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
+		q = s.dialect.Rebind(QueryGetDomainStatsWin)
+		args = []any{cutoff}
 	}
-	cutoff := time.Now().AddDate(0, 0, -days+1).UTC().Format("2006-01-02")
-	q := s.dialect.Rebind(QueryGetDomainStatsWin)
-	rows, err := s.db.QueryContext(ctx, q, cutoff)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		logQueryErr(ctx, "domain stats: query failed", err)
 		return nil
@@ -1283,13 +1298,27 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	return stats
 }
 
-// GetSystemTrafficToday returns total requests and bandwidth for the current day.
-func GetSystemTrafficToday(ctx context.Context) (uint64, uint64) {
+// GetSystemTrafficRolling24h returns total requests and bandwidth for the last 24 hours.
+func GetSystemTrafficRolling24h(ctx context.Context) (uint64, uint64) {
 	s := getStore()
 	if s == nil {
 		return 0, 0
 	}
-	return s.currentReqToday.Load(), s.currentBytesToday.Load()
+
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+	bucket := now.Hour()*2 + now.Minute()/30
+
+	q := s.dialect.Rebind(QueryGetTotalTrafficRolling24h)
+	var rc, bsum sql.NullInt64
+	err := s.db.QueryRowContext(ctx, q, today, bucket, yesterday, bucket).Scan(&rc, &bsum)
+	if err != nil {
+		logQueryErr(ctx, "traffic rolling 24h: query failed", err)
+		return 0, 0
+	}
+
+	return uint64(rc.Int64), uint64(max(bsum.Int64, 0))
 }
 
 // logQueryErr logs a query failure unless it was caused by the caller's
@@ -1401,23 +1430,37 @@ func GetDomainStatsHourly(day string, hour int) []DomainStats {
 	return stats
 }
 
-// GetActiveThreatsToday returns the count of active threats for the current day.
-func GetActiveThreatsToday() uint64 {
+// GetActiveThreatsRolling24h returns the count of active threats for the last 24 hours.
+func GetActiveThreatsRolling24h(ctx context.Context) int {
 	s := getStore()
 	if s == nil {
 		return 0
 	}
-	return s.currentActiveToday.Load()
+	cutoff := time.Now().Add(-24 * time.Hour)
+	q := s.dialect.Rebind(QueryGetActiveThreatsRolling24h)
+	var count int
+	if err := s.db.QueryRowContext(ctx, q, cutoff).Scan(&count); err != nil {
+		logQueryErr(ctx, "active threats rolling 24h: query failed", err)
+		return 0
+	}
+	return count
 }
 
-// GetMitigatedToday returns the count of threats actively mitigated
-// (blocked/challenged/shunned) for the current day.
-func GetMitigatedToday() uint64 {
+// GetMitigatedRolling24h returns the count of threats actively mitigated
+// (blocked/challenged/shunned) for the last 24 hours.
+func GetMitigatedRolling24h(ctx context.Context) int {
 	s := getStore()
 	if s == nil {
 		return 0
 	}
-	return s.currentMitigatedToday.Load()
+	cutoff := time.Now().Add(-24 * time.Hour)
+	q := s.dialect.Rebind(QueryGetMitigatedThreatsRolling24h)
+	var count int
+	if err := s.db.QueryRowContext(ctx, q, cutoff).Scan(&count); err != nil {
+		logQueryErr(ctx, "mitigated threats rolling 24h: query failed", err)
+		return 0
+	}
+	return count
 }
 
 // GetSecurityThreatByID returns a single security threat by its unique ID.
@@ -1572,9 +1615,11 @@ const maxDashboardTrendWindowDays = 366
 func dashboardTrendWindowDays() int {
 	days := CurrentRetentionDays()
 	if days <= 0 {
-		days = 1
+		days = 2
 	}
-	return min(days, maxDashboardTrendWindowDays)
+	// Always return at least 2 days so rolling 24h charts have coverage
+	// even when called at the start of a calendar day.
+	return min(max(days, 2), maxDashboardTrendWindowDays)
 }
 
 // GetTopThreatSources returns the most frequent attacking IP addresses.

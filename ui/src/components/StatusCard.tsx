@@ -8,9 +8,9 @@ export default function StatusCard() {
 
   const stats = [
     { label: 'Version', value: statusData?.version || 'N/A', icon: IconVersions, color: 'blue' },
-    { label: 'System Uptime', value: statusData?.uptime ? formatUptime(statusData.uptime) : '0s', icon: IconClock, color: 'teal' },
-    { label: 'CPU Usage', value: statusData?.cpu_usage !== undefined ? `${statusData.cpu_usage.toFixed(1)}%` : '0%', icon: IconActivity, color: 'blue' },
-    { label: 'Memory Usage', value: statusData?.memory_usage_percent !== undefined ? `${statusData.memory_usage_percent.toFixed(1)}%` : '0%', icon: IconActivity, color: 'orange' },
+    { label: 'System Uptime', value: statusData?.uptime ? formatUptime(Number(statusData.uptime)) : '0s', icon: IconClock, color: 'teal' },
+    { label: 'CPU Cores', value: statusData?.cpu_cores || 'N/A', icon: IconCpu, color: 'indigo' },
+    { label: 'Total Memory', value: statusData?.memory_total_gb ? `${statusData.memory_total_gb.toFixed(1)} GB` : 'N/A', icon: IconDeviceDesktop, color: 'grape' },
   ]
 
   const counts = [
@@ -71,7 +71,7 @@ export default function StatusCard() {
             </Badge>
           </Group>
 
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
             <Box>
               <Group justify="space-between" mb={6}>
                 <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>CPU Load</Text>
@@ -85,6 +85,13 @@ export default function StatusCard() {
                 <Text size="xs" fw={700}>{statusData?.memory_usage_percent?.toFixed(1) || 0}%</Text>
               </Group>
               <Progress value={statusData?.memory_usage_percent || 0} size="md" radius="xl" color="orange" animated />
+            </Box>
+            <Box>
+              <Group justify="space-between" mb={6}>
+                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Storage ({statusData?.storage_usage_gb?.toFixed(1)}GB / {statusData?.storage_total_gb?.toFixed(1)}GB)</Text>
+                <Text size="xs" fw={700}>{statusData?.storage_usage_percent?.toFixed(1) || 0}%</Text>
+              </Group>
+              <Progress value={statusData?.storage_usage_percent || 0} size="md" radius="xl" color="teal" animated />
             </Box>
           </SimpleGrid>
 

@@ -17,4 +17,9 @@ message GetStatusResponse {
   int32 middlewares_count = 8;
   double cpu_usage = 9;
   double memory_usage_percent = 10;
+  int32 cpu_cores = 11;
+  double memory_total_gb = 12;
+  double storage_usage_gb = 13;
+  double storage_total_gb = 14;
+  double storage_usage_percent = 15;
 }
