@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/corazawaf/coraza-coreruleset"
@@ -515,222 +516,17 @@ func getReputationString(score float64) string {
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
 func WAF(cfg WAFConfig) (Middleware, error) {
-	wafConfig := coraza.NewWAFConfig()
-	var sb strings.Builder
-
-	if cfg.UseCRS {
-		pl := cfg.ParanoiaLevel
-		if pl < 1 {
-			pl = 1
-		}
-		if pl > 4 {
-			pl = 4
-		}
-		engineDirective := "SecRuleEngine On\n"
-		if cfg.AuditOnly {
-			engineDirective = `SecRuleEngine DetectionOnly
-`
-		}
-
-		sb.WriteString(engineDirective)
-		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
-SecWebAppId gateon
-SecAction "id:900002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
-Include @crs-setup.conf.example
-`, pl)
-
-		// Basic enforcement and common rules
-		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
-
-		// Inject dynamic variables for rules (must be before loading database rules that use them)
-		allowedIps := "127.0.0.1"
-		if len(cfg.AllowedAdminIps) > 0 {
-			allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
-		}
-		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
-
-		if cfg.GRPCMode {
-			sb.WriteString("SecAction \"id:900006,phase:1,nolog,pass,setvar:tx.grpc_mode=1\"\n")
-		}
-
-		// Load dynamic rules from database
-		if cfg.WafRules != nil {
-			rules := cfg.WafRules.GetEnabledRules()
-			for _, r := range rules {
-				if r.ParanoiaLevel <= pl {
-					sb.WriteString(r.Directive)
-					sb.WriteByte('\n')
-				}
-			}
-		}
-
-		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
-
-		// gRPC compatibility is now loaded from database
-
-		if !cfg.DisableProtocol {
-			sb.WriteString("Include @owasp_crs/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
-			sb.WriteString("Include @owasp_crs/REQUEST-920-PROTOCOL-ENFORCEMENT.conf\n")
-			sb.WriteString("Include @owasp_crs/REQUEST-921-PROTOCOL-ATTACK.conf\n")
-		}
-		if !cfg.DisableScanner {
-			sb.WriteString("Include @owasp_crs/REQUEST-913-SCANNER-DETECTION.conf\n")
-		}
-		if !cfg.DisableLFI {
-			sb.WriteString("Include @owasp_crs/REQUEST-930-APPLICATION-ATTACK-LFI.conf\n")
-			sb.WriteString("Include @owasp_crs/REQUEST-931-APPLICATION-ATTACK-RFI.conf\n")
-		}
-		if !cfg.DisableRCE {
-			sb.WriteString("Include @owasp_crs/REQUEST-932-APPLICATION-ATTACK-RCE.conf\n")
-		}
-		if !cfg.DisablePHP {
-			sb.WriteString("Include @owasp_crs/REQUEST-933-APPLICATION-ATTACK-PHP.conf\n")
-		}
-		if !cfg.DisableXSS {
-			sb.WriteString("Include @owasp_crs/REQUEST-941-APPLICATION-ATTACK-XSS.conf\n")
-		}
-		if !cfg.DisableSQLI {
-			sb.WriteString("Include @owasp_crs/REQUEST-942-APPLICATION-ATTACK-SQLI.conf\n")
-		}
-		sb.WriteString("Include @owasp_crs/REQUEST-943-APPLICATION-ATTACK-SESSION-FIXATION.conf\n")
-		if !cfg.DisableJava {
-			sb.WriteString("Include @owasp_crs/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
-		}
-		if !cfg.DisableNodeJS {
-			// In CRS 4.0, NodeJS attacks are covered by the Generic Attacks ruleset
-			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf\n")
-		}
-		if cfg.EnableIPReputation {
-			// Rules are now loaded from database
-		}
-		if cfg.EnableDOSProtection {
-			// Rules are now loaded from database
-		}
-
-		// WP Scanning and Exploits are now loaded from database
-		// Ransomware protection is now loaded from database
-		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
-		// Explicitly set the block status to 403 for the evaluation rules to avoid status 0 in audit logs
-		// and 520 errors in Cloudflare.
-		sb.WriteString("SecRuleUpdateActionById 949110 \"deny,status:403\"\n")
-
-		// Response rules (RESPONSE-phase). These buffer response bodies, the most
-		// expensive part of the WAF, so they are only loaded when response
-		// inspection is enabled (enterprise tier). When off we skip the whole
-		// response phase, avoiding response buffering entirely.
-		if cfg.EnableResponseInspection {
-			if cfg.EnableDLP {
-				sb.WriteString("Include @owasp_crs/RESPONSE-950-DATA-LEAKAGES.conf\n")
-			}
-			if !cfg.DisableSQLI {
-				sb.WriteString("Include @owasp_crs/RESPONSE-951-DATA-LEAKAGES-SQL.conf\n")
-			}
-			if !cfg.DisableJava {
-				sb.WriteString("Include @owasp_crs/RESPONSE-952-DATA-LEAKAGES-JAVA.conf\n")
-			}
-			if !cfg.DisablePHP {
-				sb.WriteString("Include @owasp_crs/RESPONSE-953-DATA-LEAKAGES-PHP.conf\n")
-			}
-			sb.WriteString("Include @owasp_crs/RESPONSE-954-DATA-LEAKAGES-IIS.conf\n")
-			sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
-			sb.WriteString("SecRuleUpdateActionById 959100 \"deny,status:403\"\n")
-			sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
-		}
-
-		if cfg.RulesPath != "" {
-			wafConfig = wafConfig.WithRootFS(os.DirFS(cfg.RulesPath))
-		} else {
-			wafConfig = wafConfig.WithRootFS(fsWrapper{coreruleset.FS})
-		}
-	}
-
-	// Coraza will not create the audit log's directory or file on its own; if the
-	// path doesn't already exist it silently fails to write. So Gateon resolves a
-	// sensible default when the operator leaves the field blank and provisions the
-	// folder + file here. A provisioning failure only disables the audit directive
-	// (e.g. read-only filesystem) — it never fails the whole WAF.
-	if auditPath := resolveAuditLogPath(cfg); auditPath != "" {
-		if err := ensureAuditLogFile(auditPath); err != nil {
-			logger.L.LogError("waf: could not provision audit log; auditing disabled for this WAF",
-				"path", auditPath, "route", cfg.RouteID, "error", err)
-		} else {
-			auditEngine := "On"
-			if cfg.AuditLogRelevantOnly {
-				auditEngine = "RelevantOnly"
-			}
-			_, _ = fmt.Fprintf(&sb, `
-SecAuditEngine %s
-SecAuditLogParts ABIJDEFHKZ
-SecAuditLogType Serial
-SecAuditLog "%s"
-`, auditEngine, strings.ReplaceAll(auditPath, "\\", "/"))
-		}
-	}
-
-	if sb.Len() > 0 {
-		wafConfig = wafConfig.WithDirectives(sb.String())
-	}
-
-	if cfg.GlobalDirectives != "" {
-		wafConfig = wafConfig.WithDirectives(cfg.GlobalDirectives)
-	}
-
-	if cfg.Directives != "" {
-		wafConfig = wafConfig.WithDirectives(cfg.Directives)
-	}
-
-	if cfg.DirectivesFile != "" {
-		wafConfig = wafConfig.WithDirectivesFromFile(cfg.DirectivesFile)
-	} else if !cfg.UseCRS && cfg.Directives == "" {
-		// Minimal pass-through when neither CRS nor custom directives
-		wafConfig = wafConfig.WithDirectives(`SecRuleEngine Off`)
-	}
-
-	if cfg.RequestBodyLimit > 0 || cfg.EnableMalwareDetection || cfg.EnableRansomwareDetection {
-		limit := cfg.RequestBodyLimit
-		if limit <= 0 {
-			limit = 10 * 1024 * 1024 // Default to 10MB if malware detection is on but no limit set
-		}
-		wafConfig = wafConfig.WithRequestBodyLimit(limit)
-		// Also set in-memory limit to 10% of total limit or 1MB min, but not exceeding the total limit
-		memLimit := int64(limit) / 10
-		if memLimit < 1024*1024 {
-			memLimit = 1024 * 1024
-		}
-		memLimit = min(memLimit, int64(limit))
-		wafConfig = wafConfig.WithRequestBodyInMemoryLimit(int(memLimit))
-		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
-	}
-	// Response body access is only meaningful (and only worth its buffering cost)
-	// when the RESPONSE-phase rules are loaded.
-	if cfg.EnableResponseInspection && cfg.ResponseBodyLimit > 0 {
-		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
-		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
-		// In Coraza, we must explicitly allow mime types for response body inspection.
-		// We include common text and application types.
-		wafConfig = wafConfig.WithDirectives(`SecResponseBodyMimeType text/plain text/html text/xml application/json application/xml application/xhtml+xml`)
-	}
-
-	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
-		ruleID := strconv.Itoa(mr.Rule().ID())
-		logger.L.LogWarn("WAF matched rule",
-			"event", "waf_match",
-			"rule_id", ruleID,
-			"client_ip", mr.ClientIPAddress(),
-			"uri", mr.URI(),
-			"severity", mr.Rule().Severity().String(),
-			"message", mr.ErrorLog())
-
-		// Shunning is now handled in txWrapper.Close() with better heuristics
-		// to avoid false-positive L3/L4 blocks for reputable users.
-	})
-
-	waf, err := coraza.NewWAF(wafConfig)
+	waf, err := createWAFInstance(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create WAF: %w", err)
+		return nil, err
 	}
 
-	wrappedWaf := &wafWrapper{WAF: waf, routeID: cfg.RouteID, cfg: cfg}
+	wrappedWaf := &wafWrapper{waf: waf, routeID: cfg.RouteID, cfg: cfg}
+
+	// Register the wrapper as an invalidator in the rule store to enable instant updates.
+	if cfg.WafRules != nil {
+		cfg.WafRules.SetInvalidator(wrappedWaf)
+	}
 
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(wrappedWaf, next)
@@ -978,6 +774,184 @@ SecAuditLog "%s"
 	}, nil
 }
 
+func createWAFInstance(cfg WAFConfig) (coraza.WAF, error) {
+	wafConfig := coraza.NewWAFConfig()
+	var sb strings.Builder
+
+	if cfg.UseCRS {
+		pl := cfg.ParanoiaLevel
+		if pl < 1 {
+			pl = 1
+		}
+		if pl > 4 {
+			pl = 4
+		}
+		engineDirective := "SecRuleEngine On\n"
+		if cfg.AuditOnly {
+			engineDirective = `SecRuleEngine DetectionOnly
+`
+		}
+
+		sb.WriteString(engineDirective)
+		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
+SecWebAppId gateon
+SecAction "id:900002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
+Include @crs-setup.conf.example
+`, pl)
+
+		// Basic enforcement and common rules
+		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
+
+		// Inject dynamic variables for rules (must be before loading database rules that use them)
+		allowedIps := "127.0.0.1"
+		if len(cfg.AllowedAdminIps) > 0 {
+			allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
+		}
+		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
+
+		if cfg.GRPCMode {
+			sb.WriteString("SecAction \"id:900006,phase:1,nolog,pass,setvar:tx.grpc_mode=1\"\n")
+		}
+
+		// Load dynamic rules from database
+		if cfg.WafRules != nil {
+			rules := cfg.WafRules.GetEnabledRules()
+			for _, r := range rules {
+				if r.ParanoiaLevel <= pl {
+					sb.WriteString(r.Directive)
+					sb.WriteByte('\n')
+				}
+			}
+		}
+
+		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
+
+		if !cfg.DisableProtocol {
+			sb.WriteString("Include @owasp_crs/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-920-PROTOCOL-ENFORCEMENT.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-921-PROTOCOL-ATTACK.conf\n")
+		}
+		if !cfg.DisableScanner {
+			sb.WriteString("Include @owasp_crs/REQUEST-913-SCANNER-DETECTION.conf\n")
+		}
+		if !cfg.DisableLFI {
+			sb.WriteString("Include @owasp_crs/REQUEST-930-APPLICATION-ATTACK-LFI.conf\n")
+			sb.WriteString("Include @owasp_crs/REQUEST-931-APPLICATION-ATTACK-RFI.conf\n")
+		}
+		if !cfg.DisableRCE {
+			sb.WriteString("Include @owasp_crs/REQUEST-932-APPLICATION-ATTACK-RCE.conf\n")
+		}
+		if !cfg.DisablePHP {
+			sb.WriteString("Include @owasp_crs/REQUEST-933-APPLICATION-ATTACK-PHP.conf\n")
+		}
+		if !cfg.DisableXSS {
+			sb.WriteString("Include @owasp_crs/REQUEST-941-APPLICATION-ATTACK-XSS.conf\n")
+		}
+		if !cfg.DisableSQLI {
+			sb.WriteString("Include @owasp_crs/REQUEST-942-APPLICATION-ATTACK-SQLI.conf\n")
+		}
+		sb.WriteString("Include @owasp_crs/REQUEST-943-APPLICATION-ATTACK-SESSION-FIXATION.conf\n")
+		if !cfg.DisableJava {
+			sb.WriteString("Include @owasp_crs/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
+		}
+		if !cfg.DisableNodeJS {
+			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf\n")
+		}
+
+		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
+		sb.WriteString("SecRuleUpdateActionById 949110 \"deny,status:403\"\n")
+
+		if cfg.EnableResponseInspection {
+			if cfg.EnableDLP {
+				sb.WriteString("Include @owasp_crs/RESPONSE-950-DATA-LEAKAGES.conf\n")
+			}
+			if !cfg.DisableSQLI {
+				sb.WriteString("Include @owasp_crs/RESPONSE-951-DATA-LEAKAGES-SQL.conf\n")
+			}
+			if !cfg.DisableJava {
+				sb.WriteString("Include @owasp_crs/RESPONSE-952-DATA-LEAKAGES-JAVA.conf\n")
+			}
+			if !cfg.DisablePHP {
+				sb.WriteString("Include @owasp_crs/RESPONSE-953-DATA-LEAKAGES-PHP.conf\n")
+			}
+			sb.WriteString("Include @owasp_crs/RESPONSE-954-DATA-LEAKAGES-IIS.conf\n")
+			sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
+			sb.WriteString("SecRuleUpdateActionById 959100 \"deny,status:403\"\n")
+			sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
+		}
+
+		if cfg.RulesPath != "" {
+			wafConfig = wafConfig.WithRootFS(os.DirFS(cfg.RulesPath))
+		} else {
+			wafConfig = wafConfig.WithRootFS(fsWrapper{coreruleset.FS})
+		}
+	}
+
+	if auditPath := resolveAuditLogPath(cfg); auditPath != "" {
+		if err := ensureAuditLogFile(auditPath); err == nil {
+			auditEngine := "On"
+			if cfg.AuditLogRelevantOnly {
+				auditEngine = "RelevantOnly"
+			}
+			_, _ = fmt.Fprintf(&sb, `
+SecAuditEngine %s
+SecAuditLogParts ABIJDEFHKZ
+SecAuditLogType Serial
+SecAuditLog "%s"
+`, auditEngine, strings.ReplaceAll(auditPath, "\\", "/"))
+		}
+	}
+
+	if sb.Len() > 0 {
+		wafConfig = wafConfig.WithDirectives(sb.String())
+	}
+	if cfg.GlobalDirectives != "" {
+		wafConfig = wafConfig.WithDirectives(cfg.GlobalDirectives)
+	}
+	if cfg.Directives != "" {
+		wafConfig = wafConfig.WithDirectives(cfg.Directives)
+	}
+	if cfg.DirectivesFile != "" {
+		wafConfig = wafConfig.WithDirectivesFromFile(cfg.DirectivesFile)
+	} else if !cfg.UseCRS && cfg.Directives == "" {
+		wafConfig = wafConfig.WithDirectives(`SecRuleEngine Off`)
+	}
+
+	if cfg.RequestBodyLimit > 0 || cfg.EnableMalwareDetection || cfg.EnableRansomwareDetection {
+		limit := cfg.RequestBodyLimit
+		if limit <= 0 {
+			limit = 10 * 1024 * 1024
+		}
+		wafConfig = wafConfig.WithRequestBodyLimit(limit)
+		memLimit := int64(limit) / 10
+		if memLimit < 1024*1024 {
+			memLimit = 1024 * 1024
+		}
+		memLimit = min(memLimit, int64(limit))
+		wafConfig = wafConfig.WithRequestBodyInMemoryLimit(int(memLimit))
+		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
+	}
+
+	if cfg.EnableResponseInspection && cfg.ResponseBodyLimit > 0 {
+		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
+		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
+		wafConfig = wafConfig.WithDirectives(`SecResponseBodyMimeType text/plain text/html text/xml application/json application/xml application/xhtml+xml`)
+	}
+
+	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
+		ruleID := strconv.Itoa(mr.Rule().ID())
+		logger.L.LogWarn("WAF matched rule",
+			"event", "waf_match",
+			"rule_id", ruleID,
+			"client_ip", mr.ClientIPAddress(),
+			"uri", mr.URI(),
+			"severity", mr.Rule().Severity().String(),
+			"message", mr.ErrorLog())
+	})
+
+	return coraza.NewWAF(wafConfig)
+}
+
 // recordFastPathThreat records a security threat detected by the fast-path.
 func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	clientIP := request.GetClientIP(r, true)
@@ -1088,25 +1062,42 @@ func hasPrefixFold(s, prefix string) bool {
 }
 
 type wafWrapper struct {
-	coraza.WAF
+	mu      sync.RWMutex
+	waf     coraza.WAF
 	routeID string
 	cfg     WAFConfig
 }
 
 func (w *wafWrapper) NewTransaction() types.Transaction {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	return &txWrapper{
-		Transaction: w.WAF.NewTransaction(),
+		Transaction: w.waf.NewTransaction(),
 		routeID:     w.routeID,
 		cfg:         w.cfg,
 	}
 }
 
 func (w *wafWrapper) NewTransactionWithID(id string) types.Transaction {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	return &txWrapper{
-		Transaction: w.WAF.NewTransactionWithID(id),
+		Transaction: w.waf.NewTransactionWithID(id),
 		routeID:     w.routeID,
 		cfg:         w.cfg,
 	}
+}
+
+func (w *wafWrapper) Invalidate() {
+	newWaf, err := createWAFInstance(w.cfg)
+	if err != nil {
+		logger.L.LogError("waf: failed to reload rules", "route", w.routeID, "error", err)
+		return
+	}
+	w.mu.Lock()
+	w.waf = newWaf
+	w.mu.Unlock()
+	logger.L.LogInfo("waf: rules reloaded successfully", "route", w.routeID)
 }
 
 type txWrapper struct {
@@ -1156,6 +1147,10 @@ func (t *txWrapper) ProcessLogging() {
 					category = "protocol"
 				} else if strings.Contains(tag, "wordpress") || strings.Contains(tag, "wp_scan") {
 					category = "wp_scan"
+				} else if strings.Contains(tag, "malware") {
+					category = "malware"
+				} else if strings.Contains(tag, "ransomware") {
+					category = "ransomware"
 				}
 			}
 

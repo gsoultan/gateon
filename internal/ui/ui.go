@@ -45,6 +45,9 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 			data = bytes.ReplaceAll(data, []byte("NONCE_PLACEHOLDER"), []byte(nonce))
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		w.Write(data)
 	}
 

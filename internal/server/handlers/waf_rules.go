@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
@@ -13,7 +14,35 @@ func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceWafRules) {
 			return
 		}
-		res, err := apiService.ListWafRules(r.Context(), &gateonv1.ListWafRulesRequest{})
+
+		query := r.URL.Query()
+		limitStr := query.Get("limit")
+		offsetStr := query.Get("offset")
+		search := query.Get("search")
+
+		var limit, offset int
+		if limitStr != "" {
+			var err error
+			limit, err = strconv.Atoi(limitStr)
+			if err != nil {
+				WriteHTTPError(w, http.StatusBadRequest, "Invalid limit")
+				return
+			}
+		}
+		if offsetStr != "" {
+			var err error
+			offset, err = strconv.Atoi(offsetStr)
+			if err != nil {
+				WriteHTTPError(w, http.StatusBadRequest, "Invalid offset")
+				return
+			}
+		}
+
+		res, err := apiService.ListWafRules(r.Context(), &gateonv1.ListWafRulesRequest{
+			Limit:  int32(limit),
+			Offset: int32(offset),
+			Search: search,
+		})
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return

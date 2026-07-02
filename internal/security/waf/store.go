@@ -221,20 +221,9 @@ func (s *Store) DeleteRule(ctx context.Context, id string) error {
 	return nil
 }
 
-// Seed populates the database with default rules if it's currently empty.
+// Seed populates the database with default rules. It ensures all initial rules exist
+// and adds any missing ones, even if the table is not empty.
 func (s *Store) Seed(ctx context.Context) error {
-	count := 0
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM waf_rules").Scan(&count)
-	if err != nil {
-		// If table doesn't exist, we expect an error here, but we should handle it gracefully
-		// if we want to wait for migrations. However, InitStore is called after Migrations.
-		// Let's just return the error so it shows up in logs.
-		return fmt.Errorf("check waf_rules count: %w", err)
-	}
-	if count > 0 {
-		return nil
-	}
-
 	initialRules := []Rule{
 		{
 			ID:            "900300",
@@ -363,7 +352,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (os/exec|net/http/httputil|reflect\.ValueOf|unsafe\.Pointer|go\s+func\()" "id:100010,phase:2,deny,status:403,msg:'Potential Golang code injection',tag:'rce',tag:'golang',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "RCE",
 		},
 		{
 			ID:            "100011",
@@ -371,7 +360,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (runtime\.exec|java\.lang\.Runtime|java\.lang\.ProcessBuilder|javax\.crypto|javax\.script|ognl\.|java\.net\.URLClassLoader)" "id:100011,phase:2,deny,status:403,msg:'Potential Java code injection',tag:'rce',tag:'java',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "RCE",
 		},
 		{
 			ID:            "100013",
@@ -379,7 +368,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx \$\{jndi:(ldap|rmi|dns|nis|iiop|corba|nds|http):" "id:100013,phase:2,deny,status:403,msg:'Potential Log4Shell (CVE-2021-44228) attempt',tag:'rce',tag:'java',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "RCE",
 		},
 		{
 			ID:            "100014",
@@ -387,7 +376,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule REQUEST_HEADERS|REQUEST_HEADERS_NAMES|ARGS|ARGS_NAMES "@rx \(\)\s*\{\s*[:;]\s*\}" "id:100014,phase:1,deny,status:403,msg:'CVE-2014-6271 - Shellshock attempt',tag:'rce',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "RCE",
 		},
 		{
 			ID:   "100001",
@@ -453,7 +442,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule FILES_NAMES "@rx \.(locky|crypt|wncry|cryptolocker|zepto|aesir|thor|lockbit|clop|conti|ryuk|cerber|gandcrab|pysa)$" "id:100007,phase:2,deny,status:403,msg:'Ransomware file extension detected',tag:'ransomware',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Malware",
+			Category:      "Ransomware",
 		},
 		{
 			ID:            "100008",
@@ -469,7 +458,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule REQUEST_URI "@rx (READ_ME|DECRYPT_FILES|YOUR_FILES_ARE_ENCRYPTED|RECOVER_FILES|README_FOR_DECRYPT)\.(txt|html|htm|png)" "id:100009,phase:1,deny,status:403,msg:'Ransomware note filename detected',tag:'ransomware',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Malware",
+			Category:      "Ransomware",
 		},
 		{
 			ID:            "110000",
@@ -524,7 +513,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			ID:            "130000",
 			Name:          "DLP: Credit Card Number Detection",
 			Directive:     `SecRule RESPONSE_BODY "@rx \b4[0-9]{12}(?:[0-9]{3})?\b" "id:130000,phase:4,deny,status:403,msg:'Credit card number detected in response',tag:'dlp',tag:'compliance',severity:CRITICAL"`,
-			Enabled:       false, // Disabled by default as it requires response body buffering
+			Enabled:       false,
 			ParanoiaLevel: 1,
 			Category:      "DLP",
 		},
@@ -590,7 +579,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (sleep\(|benchmark\(|pg_sleep\(|dbms_lock\.sleep\(|waitfor\s+delay)" "id:140000,phase:2,deny,status:403,msg:'Blind SQL Injection (Time-based) attempt',tag:'attack-sqli',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "SQLi",
 		},
 		{
 			ID:            "140002",
@@ -598,7 +587,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS "@rx (information_schema\.|sys\.tables|sys\.objects|pg_catalog\.|mysql\.db|@@version)" "id:140002,phase:2,deny,status:403,msg:'SQL Schema enumeration attempt',tag:'attack-sqli',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "SQLi",
 		},
 		{
 			ID:            "140001",
@@ -606,7 +595,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS "@rx \b('?\s+or\s+'?1'?\s*=\s*'?1|'?\s+or\s+true|--|#|\/\*)" "id:140001,phase:2,deny,status:403,msg:'Common SQLi Authentication Bypass',tag:'attack-sqli',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "SQLi",
 		},
 		{
 			ID:            "141000",
@@ -614,7 +603,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (?i)(<script|on(load|error|click|mouseover|focus|submit|keydown|change)\s*=)" "id:141000,phase:2,deny,status:403,msg:'Cross-site Scripting (XSS) attempt',tag:'attack-xss',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "XSS",
 		},
 		{
 			ID:            "141002",
@@ -622,7 +611,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS "@rx (String\.fromCharCode|eval\(.*atob\(|eval\(.*base64|document\.write\(|unescape\()" "id:141002,phase:2,deny,status:403,msg:'XSS Obfuscation detected',tag:'attack-xss',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "XSS",
 		},
 		{
 			ID:            "141001",
@@ -630,7 +619,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@rx (<svg|<iframe|<object|<embed|<base|<applet|<meta)" "id:141001,phase:2,deny,status:403,msg:'HTML Tag Injection (XSS potential)',tag:'attack-xss',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Injection",
+			Category:      "XSS",
 		},
 		{
 			ID:            "150000",
@@ -638,7 +627,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule REQUEST_URI "@rx (/[^/]+){15,}" "id:150000,phase:1,deny,status:403,msg:'Excessive path depth (DDoS/Scanner)',tag:'protocol',severity:WARNING"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "General",
+			Category:      "Protocol",
 		},
 		{
 			ID:            "150001",
@@ -646,7 +635,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI "@contains \x00" "id:150001,phase:1,deny,status:403,msg:'Null byte injection attempt',tag:'attack-generic',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "General",
+			Category:      "Protocol",
 		},
 		{
 			ID:            "150002",
@@ -654,7 +643,7 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule &REQUEST_HEADERS:Content-Type "@gt 1" "id:150002,phase:1,deny,status:400,msg:'Multiple Content-Type headers detected',tag:'protocol',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "General",
+			Category:      "Protocol",
 		},
 		{
 			ID:            "142000",
@@ -662,17 +651,26 @@ func (s *Store) Seed(ctx context.Context) error {
 			Directive:     `SecRule FILES "@rx (encrypt|decrypt|ransom|key|payment|bitcoin|tor|onion|vault|lock)" "id:142000,phase:2,deny,status:403,msg:'Ransomware keywords in file upload',tag:'ransomware',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
-			Category:      "Malware",
+			Category:      "Ransomware",
 		},
 	}
 
 	now := time.Now()
 	query := s.dialect.Rebind("INSERT INTO waf_rules (id, name, directive, enabled, paranoia_level, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+	checkQuery := s.dialect.Rebind("SELECT COUNT(*) FROM waf_rules WHERE id = ?")
+
 	for _, r := range initialRules {
-		_, err := s.db.ExecContext(ctx, query,
-			r.ID, r.Name, r.Directive, r.Enabled, r.ParanoiaLevel, r.Category, now, now)
+		var count int
+		err := s.db.QueryRowContext(ctx, checkQuery, r.ID).Scan(&count)
 		if err != nil {
-			return fmt.Errorf("seed rule %s: %w", r.ID, err)
+			return fmt.Errorf("check rule %s: %w", r.ID, err)
+		}
+		if count == 0 {
+			_, err := s.db.ExecContext(ctx, query,
+				r.ID, r.Name, r.Directive, r.Enabled, r.ParanoiaLevel, r.Category, now, now)
+			if err != nil {
+				return fmt.Errorf("seed rule %s: %w", r.ID, err)
+			}
 		}
 	}
 

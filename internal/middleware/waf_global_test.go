@@ -66,8 +66,13 @@ func TestCreateGlobalWAF_LoadsCRSWithDefaultFlags(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.url, strings.NewReader(""))
-			// Force low reputation for security tests that expect blocks at score 5.
-			req.Header.Set("X-Gateon-Test-Reputation", "0")
+			// Force reputation based on test case. Safe requests need > 20 reputation
+			// to avoid the reputation block rule (910002).
+			if tc.expectCode == http.StatusOK {
+				req.Header.Set("X-Gateon-Test-Reputation", "100")
+			} else {
+				req.Header.Set("X-Gateon-Test-Reputation", "0")
+			}
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
 			if rr.Code != tc.expectCode {
