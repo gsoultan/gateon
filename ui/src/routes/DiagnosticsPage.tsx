@@ -361,7 +361,7 @@ const DiagnosticsPage: React.FC = () => {
     const key = `${anomaly.type}-${anomaly.source}`;
     try {
       setApplying(key);
-      const res = await applyRecommendation(anomaly.type, anomaly.source);
+      const res = await applyRecommendation(anomaly.type, anomaly.source, anomaly.id);
       if (res.success) {
         notifications.show({
           title: "Recommendation Applied",

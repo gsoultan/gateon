@@ -619,6 +619,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		UserAgent:       t.UserAgent,
 		HttpMethod:      t.Method,
 		TriggeredRules:  t.TriggeredRules,
+		Id:              t.ID,
 	}
 	populateAnomalyGeo(ctx, a, t.SourceIP)
 	return a

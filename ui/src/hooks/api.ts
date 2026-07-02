@@ -137,11 +137,11 @@ export async function getDiagnostics(): Promise<GetDiagnosticsResponse> {
   return res.json();
 }
 
-export async function applyRecommendation(anomalyType: string, source: string): Promise<{ success: boolean; message: string }> {
+export async function applyRecommendation(anomalyType: string, source: string, threatId?: string): Promise<{ success: boolean; message: string }> {
   const res = await apiFetch("/v1/diagnostics/recommendation", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ anomaly_type: anomalyType, source: source }),
+    body: JSON.stringify({ anomaly_type: anomalyType, source: source, threat_id: threatId }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
