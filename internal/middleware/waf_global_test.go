@@ -192,3 +192,81 @@ func TestCreateGlobalWAF_DisabledReturnsNil(t *testing.T) {
 		})
 	}
 }
+
+func TestWAF_JWTFastCheck(t *testing.T) {
+	// Initialize store for WAF rules
+	_ = waf.InitStore("sqlite::memory:")
+
+	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
+		Waf: &gateonv1.WafConfig{
+			Enabled:       true,
+			UseCrs:        true,
+			ParanoiaLevel: 1,
+		},
+	}}
+	f := NewFactory(nil, store, nil, nil, ".")
+
+	mw, err := f.CreateGlobalWAF()
+	if err != nil {
+		t.Fatalf("CreateGlobalWAF: %v", err)
+	}
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tests := []struct {
+		name       string
+		authHeader string
+		expectCode int
+	}{
+		{
+			name:       "valid 3-part JWT passes",
+			authHeader: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+			expectCode: http.StatusOK,
+		},
+		{
+			name:       "short Bearer token passes",
+			authHeader: "Bearer short-token",
+			expectCode: http.StatusOK,
+		},
+		{
+			name:       "long opaque Bearer token passes",
+			authHeader: "Bearer this-is-a-very-long-opaque-token-that-exceeds-thirty-two-characters",
+			expectCode: http.StatusOK,
+		},
+		{
+			name:       "malformed JWT (invalid chars) blocked",
+			authHeader: "Bearer abc.def!.ghi.jkl.mno.pqr.stu.vwx.yz1234567890",
+			expectCode: http.StatusForbidden,
+		},
+		{
+			name:       "malformed JWT (wrong parts) blocked",
+			authHeader: "Bearer abc.def.ghi.jkl.mno.pqr.stu.vwx.yz1234567890",
+			expectCode: http.StatusForbidden,
+		},
+		{
+			name:       "malformed JWT (3 parts, invalid char) blocked",
+			authHeader: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5!",
+			expectCode: http.StatusForbidden,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			// Use high reputation to avoid reputation block
+			req.Header.Set("X-Gateon-Test-Reputation", "100")
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != tc.expectCode {
+				t.Errorf("%s: expected status %d, got %d", tc.name, tc.expectCode, rr.Code)
+			}
+		})
+	}
+}

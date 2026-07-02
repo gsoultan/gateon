@@ -1241,6 +1241,11 @@ func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 	return res
 }
 
+// GetDomainStatsRolling24h returns aggregated domain statistics for the last 24 hours.
+func GetDomainStatsRolling24h(ctx context.Context) []DomainStats {
+	return GetDomainStatsWindow(ctx, 1)
+}
+
 // GetDomainStatsWindow returns aggregated domain statistics for the last N days.
 func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	s := getStore()
