@@ -89,6 +89,9 @@ type MetricsSnapshot struct {
 	// Hourly domain metrics (current hour)
 	HourlyDomainMetrics []DomainStats `json:"hourly_domain_metrics,omitzero"`
 
+	// Rolling 24h domain metrics
+	DomainStatsRolling24h []DomainStats `json:"domain_stats_rolling24h,omitzero"`
+
 	// Traffic history for charts (last 24-48 hours)
 	TrafficHistory []TrafficSample `json:"traffic_history,omitzero"`
 
@@ -311,6 +314,7 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
 	snap.DomainMetrics = buildDomainMetrics(idx)
 	snap.HourlyDomainMetrics = GetDomainStatsWindow(ctx, 1)
+	snap.DomainStatsRolling24h = GetDomainStatsRolling24h(ctx)
 	snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
 	snap.System = buildSystemMetrics(idx)
 	snap.Security = buildSecurityInsights(ctx, idx, limit, offset)
