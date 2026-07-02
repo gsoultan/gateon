@@ -128,6 +128,7 @@ export type MetricsSnapshot = {
   protocol_metrics: LabeledCount[] | null;
   domain_metrics: DomainMetric[] | null;
   hourly_domain_metrics: DomainStats[] | null;
+  domain_stats_rolling24h: DomainStats[] | null;
   traffic_history: TrafficSample[] | null;
   active_suspicious_sessions: number;
   active_unverified_clients: number;

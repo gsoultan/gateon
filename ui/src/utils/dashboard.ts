@@ -373,27 +373,29 @@ export function filterTrafficSamplesByRange(
 
 export function buildHourlyTrafficData(
   samples: RequestDeltaSample[],
+  resolutionMinutes = 60,
   range: TrafficRangeBounds | null = null,
 ): HourlyTrafficDatum[] {
+  const stepMs = resolutionMinutes * MINUTE_MS;
   const grouped = new Map<number, number>();
 
   for (const sample of samples) {
-    const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
-    grouped.set(hourStartTs, (grouped.get(hourStartTs) ?? 0) + sample.requests);
+    const bucketTs = Math.floor(sample.ts / stepMs) * stepMs;
+    grouped.set(bucketTs, (grouped.get(bucketTs) ?? 0) + sample.requests);
   }
 
   if (range) {
     const result: HourlyTrafficDatum[] = [];
-    let currentTs = Math.floor(range.startTs / HOUR_MS) * HOUR_MS;
+    let currentTs = Math.floor(range.startTs / stepMs) * stepMs;
     const endTs = range.endTs;
 
     while (currentTs < endTs) {
       result.push({
         hourStartTs: currentTs,
-        hour: formatHourLabel(currentTs),
+        hour: formatTimeLabel(currentTs, resolutionMinutes),
         requests: grouped.get(currentTs) ?? 0,
       });
-      currentTs += HOUR_MS;
+      currentTs += stepMs;
     }
     return result;
   }
@@ -402,7 +404,7 @@ export function buildHourlyTrafficData(
     .sort((a, b) => a[0] - b[0])
     .map(([hourStartTs, requests]) => ({
       hourStartTs,
-      hour: formatHourLabel(hourStartTs),
+      hour: formatTimeLabel(hourStartTs, resolutionMinutes),
       requests,
     }));
 }
@@ -527,16 +529,18 @@ export function buildTrafficByServiceData(
 
 export function buildHourlyBandwidthData(
   samples: BandwidthDeltaSample[],
+  resolutionMinutes = 60,
   range: TrafficRangeBounds | null = null,
 ): HourlyBandwidthDatum[] {
+  const stepMs = resolutionMinutes * MINUTE_MS;
   const grouped = new Map<
     number,
     { totalBytes: number; routerBytes: number; serviceBytes: number }
   >();
 
   for (const sample of samples) {
-    const hourStartTs = Math.floor(sample.ts / HOUR_MS) * HOUR_MS;
-    const existing = grouped.get(hourStartTs) ?? {
+    const bucketTs = Math.floor(sample.ts / stepMs) * stepMs;
+    const existing = grouped.get(bucketTs) ?? {
       totalBytes: 0,
       routerBytes: 0,
       serviceBytes: 0,
@@ -549,7 +553,7 @@ export function buildHourlyBandwidthData(
       (sum, value) => sum + value,
       0,
     );
-    grouped.set(hourStartTs, {
+    grouped.set(bucketTs, {
       totalBytes: existing.totalBytes + sample.totalBytes,
       routerBytes: existing.routerBytes + routerTotal,
       serviceBytes: existing.serviceBytes + serviceTotal,
@@ -558,7 +562,7 @@ export function buildHourlyBandwidthData(
 
   if (range) {
     const result: HourlyBandwidthDatum[] = [];
-    let currentTs = Math.floor(range.startTs / HOUR_MS) * HOUR_MS;
+    let currentTs = Math.floor(range.startTs / stepMs) * stepMs;
     const endTs = range.endTs;
 
     while (currentTs < endTs) {
@@ -569,12 +573,12 @@ export function buildHourlyBandwidthData(
       };
       result.push({
         hourStartTs: currentTs,
-        hour: formatHourLabel(currentTs),
+        hour: formatTimeLabel(currentTs, resolutionMinutes),
         totalBytes: values.totalBytes,
         routerBytes: values.routerBytes,
         serviceBytes: values.serviceBytes,
       });
-      currentTs += HOUR_MS;
+      currentTs += stepMs;
     }
     return result;
   }
@@ -583,7 +587,7 @@ export function buildHourlyBandwidthData(
     .sort((a, b) => a[0] - b[0])
     .map(([hourStartTs, values]) => ({
       hourStartTs,
-      hour: formatHourLabel(hourStartTs),
+      hour: formatTimeLabel(hourStartTs, resolutionMinutes),
       totalBytes: values.totalBytes,
       routerBytes: values.routerBytes,
       serviceBytes: values.serviceBytes,
