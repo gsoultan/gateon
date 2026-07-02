@@ -533,57 +533,64 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 
 	proc, _ := process.NewProcess(int32(os.Getpid()))
 
+	collect := func() {
+		if !startTime.IsZero() {
+			UptimeSeconds.Set(time.Since(startTime).Seconds())
+		}
+		goroutinesGauge.Set(float64(runtime.NumGoroutine()))
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		memoryAllocGauge.Set(float64(m.Alloc))
+		memoryTotalGauge.Set(float64(m.TotalAlloc))
+		memorySysGauge.Set(float64(m.Sys))
+
+		// System-wide metrics
+		if v, err := mem.VirtualMemory(); err == nil {
+			memoryUsageGauge.Set(v.UsedPercent)
+			lastMemoryUsage.Store(new(v.UsedPercent))
+		}
+		if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
+			cpuUsageGauge.Set(c[0])
+			lastCPUUsage.Store(new(c[0]))
+		}
+		if d, err := disk.Usage("/"); err == nil {
+			storageUsageGauge.Set(float64(d.Used))
+			storageTotalGauge.Set(float64(d.Total))
+			storageUsagePctGauge.Set(d.UsedPercent)
+			lastStorageUsage.Store(new(float64(d.Used)))
+			lastStorageTotal.Store(new(float64(d.Total)))
+			lastStoragePct.Store(new(d.UsedPercent))
+		}
+
+		// Process-specific metrics
+		if proc != nil {
+			if n, err := proc.NumFDs(); err == nil {
+				OpenFileDescriptors.Set(float64(n))
+			}
+		}
+
+		// SQLite WAL metrics - optimized to check only specific files
+		for _, dbFile := range []string{"gateon.db"} {
+			walPath := dbFile + "-wal"
+			if info, err := os.Stat(walPath); err == nil && !info.IsDir() {
+				SQLiteWALSize.WithLabelValues(dbFile).Set(float64(info.Size()))
+			}
+		}
+
+		// Reputation metrics
+		UpdateReputationMetrics()
+	}
+
+	// Initial collection
+	collect()
+
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				if !startTime.IsZero() {
-					UptimeSeconds.Set(time.Since(startTime).Seconds())
-				}
-				goroutinesGauge.Set(float64(runtime.NumGoroutine()))
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				memoryAllocGauge.Set(float64(m.Alloc))
-				memoryTotalGauge.Set(float64(m.TotalAlloc))
-				memorySysGauge.Set(float64(m.Sys))
-
-				// System-wide metrics
-				if v, err := mem.VirtualMemory(); err == nil {
-					memoryUsageGauge.Set(v.UsedPercent)
-					lastMemoryUsage.Store(new(v.UsedPercent))
-				}
-				if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
-					cpuUsageGauge.Set(c[0])
-					lastCPUUsage.Store(new(c[0]))
-				}
-				if d, err := disk.Usage("/"); err == nil {
-					storageUsageGauge.Set(float64(d.Used))
-					storageTotalGauge.Set(float64(d.Total))
-					storageUsagePctGauge.Set(d.UsedPercent)
-					lastStorageUsage.Store(new(float64(d.Used)))
-					lastStorageTotal.Store(new(float64(d.Total)))
-					lastStoragePct.Store(new(d.UsedPercent))
-				}
-
-				// Process-specific metrics
-				if proc != nil {
-					if n, err := proc.NumFDs(); err == nil {
-						OpenFileDescriptors.Set(float64(n))
-					}
-				}
-
-				// SQLite WAL metrics - optimized to check only specific files
-				for _, dbFile := range []string{"gateon.db"} {
-					walPath := dbFile + "-wal"
-					if info, err := os.Stat(walPath); err == nil && !info.IsDir() {
-						SQLiteWALSize.WithLabelValues(dbFile).Set(float64(info.Size()))
-					}
-				}
-
-				// Reputation metrics
-				UpdateReputationMetrics()
+				collect()
 			case <-stop:
 				return
 			}

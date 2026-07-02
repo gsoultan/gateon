@@ -22,4 +22,5 @@ message GetStatusResponse {
   double storage_usage_gb = 13;
   double storage_total_gb = 14;
   double storage_usage_percent = 15;
+  bool clamav_installed = 16;
 }

@@ -125,7 +125,7 @@ func TestClamAVManagerReconfigureNilSafe(t *testing.T) {
 func TestClamAVManagerPreflight(t *testing.T) {
 	t.Run("NilConfig", func(t *testing.T) {
 		mgr := NewClamAVManager(nil)
-		err := mgr.Preflight()
+		err := mgr.Preflight("")
 		if err == nil || !strings.Contains(err.Error(), "not configured") {
 			t.Fatalf("expected not-configured error, got %v", err)
 		}
@@ -135,7 +135,7 @@ func TestClamAVManagerPreflight(t *testing.T) {
 		mgr := NewClamAVManager(&gateonv1.ClamavConfig{
 			InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_UNSPECIFIED,
 		})
-		err := mgr.Preflight()
+		err := mgr.Preflight("")
 		if err == nil || !strings.Contains(err.Error(), "unsupported installation mode") {
 			t.Fatalf("expected unsupported-mode error, got %v", err)
 		}
@@ -149,7 +149,7 @@ func TestClamAVManagerPreflight(t *testing.T) {
 		// preflight must pass. Either way it must not panic and must agree with
 		// docker availability on this host.
 		_, dockerErr := exec.LookPath("docker")
-		err := mgr.Preflight()
+		err := mgr.Preflight("")
 		if dockerErr != nil {
 			if err == nil || !strings.Contains(err.Error(), "docker not found") {
 				t.Fatalf("expected docker-not-found error, got %v", err)
@@ -163,7 +163,7 @@ func TestClamAVManagerPreflight(t *testing.T) {
 func TestClamAVManagerPreflightUninstall(t *testing.T) {
 	t.Run("NilConfig", func(t *testing.T) {
 		mgr := NewClamAVManager(nil)
-		err := mgr.PreflightUninstall()
+		err := mgr.PreflightUninstall("")
 		if err == nil || !strings.Contains(err.Error(), "not configured") {
 			t.Fatalf("expected not-configured error, got %v", err)
 		}
@@ -173,7 +173,7 @@ func TestClamAVManagerPreflightUninstall(t *testing.T) {
 		mgr := NewClamAVManager(&gateonv1.ClamavConfig{
 			InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_UNSPECIFIED,
 		})
-		err := mgr.PreflightUninstall()
+		err := mgr.PreflightUninstall("")
 		if err == nil || !strings.Contains(err.Error(), "unsupported installation mode") {
 			t.Fatalf("expected unsupported-mode error, got %v", err)
 		}
@@ -184,7 +184,7 @@ func TestClamAVManagerPreflightUninstall(t *testing.T) {
 			InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER,
 		})
 		_, dockerErr := exec.LookPath("docker")
-		err := mgr.PreflightUninstall()
+		err := mgr.PreflightUninstall("")
 		if dockerErr != nil {
 			if err == nil || !strings.Contains(err.Error(), "docker not found") {
 				t.Fatalf("expected docker-not-found error, got %v", err)
@@ -199,7 +199,7 @@ func TestClamAVManagerUninstallIdempotent(t *testing.T) {
 	// Uninstalling an unconfigured manager must be a safe no-op and must not
 	// panic or leave the scheduler running.
 	mgr := NewClamAVManager(nil)
-	if err := mgr.Uninstall(t.Context()); err != nil {
+	if err := mgr.Uninstall(t.Context(), ""); err != nil {
 		t.Fatalf("uninstall on nil config should be a no-op, got %v", err)
 	}
 }

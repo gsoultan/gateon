@@ -110,6 +110,11 @@ export type SystemMetrics = {
   memory_sys_bytes: number;
   cpu_usage_percent: number;
   memory_usage_percent: number;
+  cpu_cores: number;
+  memory_total_gb: number;
+  storage_usage_gb: number;
+  storage_total_gb: number;
+  storage_usage_percent: number;
 };
 
 export type MetricsSnapshot = {

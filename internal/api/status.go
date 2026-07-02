@@ -51,6 +51,7 @@ func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest
 		StorageUsageGb:      float64(stats.StorageUsageBytes) / (1024 * 1024 * 1024),
 		StorageTotalGb:      float64(stats.StorageTotalBytes) / (1024 * 1024 * 1024),
 		StorageUsagePercent: stats.StorageUsagePercent,
+		ClamavInstalled:     s.ClamAVManager != nil && s.ClamAVManager.IsInstalled(ctx),
 	}, nil
 }
 

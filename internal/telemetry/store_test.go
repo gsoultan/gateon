@@ -249,38 +249,32 @@ func wafRestoredCounterValue(t *testing.T, route string) float64 {
 	return 0
 }
 
-func TestGetMitigatedToday(t *testing.T) {
+func TestGetMitigatedRolling24h(t *testing.T) {
+	ctx := context.Background()
 	// Own the singleton so the daily counters are isolated to this test.
-	_ = ClosePathStatsStore(context.Background())
+	_ = ClosePathStatsStore(ctx)
 
-	dbPath := filepath.Join(t.TempDir(), "mitigated_today.db")
+	dbPath := filepath.Join(t.TempDir(), "mitigated_rolling.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
-	defer ClosePathStatsStore(context.Background())
+	defer ClosePathStatsStore(ctx)
 	time.Sleep(100 * time.Millisecond)
 
-	start := GetMitigatedToday()
+	start := GetMitigatedRolling24h(ctx)
 
 	// Mitigating actions increment the counter; detected/observed do not.
 	RecordSecurityThreat(SecurityThreat{ID: "m-1", Type: "waf_block", SourceIP: "9.9.9.1", Category: "sqli", Severity: "high", ActionTaken: "blocked", Time: time.Now()})
 	RecordSecurityThreat(SecurityThreat{ID: "m-2", Type: "bot", SourceIP: "9.9.9.2", Category: "bot", Severity: "medium", ActionTaken: "challenged", Time: time.Now()})
 	RecordSecurityThreat(SecurityThreat{ID: "m-3", Type: "shun", SourceIP: "9.9.9.3", Category: "abuse", Severity: "high", ActionTaken: "shunned", Time: time.Now()})
-	// Non-mitigating: must NOT count toward "mitigated today".
+	// Non-mitigating: must NOT count toward "mitigated rolling 24h".
 	RecordSecurityThreat(SecurityThreat{ID: "m-4", Type: "scan", SourceIP: "9.9.9.4", Category: "recon", Severity: "low", ActionTaken: "detected", Time: time.Now()})
 
-	if got := GetMitigatedToday() - start; got != 3 {
-		t.Fatalf("GetMitigatedToday delta = %d, want 3 (only blocked/challenged/shunned)", got)
-	}
+	// Wait for async persistence
+	time.Sleep(1500 * time.Millisecond)
 
-	// Seeding: simulate a restart by zeroing the in-memory current
-	// counter and re-deriving it from persisted threats.
-	time.Sleep(1500 * time.Millisecond) // allow async batch flush to persist
-	store.currentMitigatedToday.Store(0)
-	store.syncDailyBaselines(false)
-
-	if got := GetMitigatedToday(); got < 3 {
-		t.Errorf("GetMitigatedToday after reload = %d, want >= 3 (seeded from DB)", got)
+	if got := GetMitigatedRolling24h(ctx) - start; got != 3 {
+		t.Fatalf("GetMitigatedRolling24h delta = %d, want 3 (only blocked/challenged/shunned)", got)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"runtime"
 	"strconv"
 	"time"
 
@@ -247,33 +246,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		_, routesCount := d.RouteService.ListPaginated(r.Context(), 0, 0, "", nil)
-		_, servicesCount := d.ServiceService.ListPaginated(r.Context(), 0, 0, "")
-		_, epsCount := d.EpService.ListPaginated(r.Context(), 0, 0, "")
-		_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
-
-		var cpuUsage, memUsage float64
-		if snap, err := telemetry.CollectMetricsSnapshot(r.Context(), 50, 0); err == nil {
-			cpuUsage = snap.System.CPUUsage
-			memUsage = snap.System.MemoryUsage
+		res, err := svc.GetStatus(r.Context(), &gateonv1.GetStatusRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
-
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":               "running",
-			"version":              d.Version,
-			"uptime":               time.Since(d.StartTime).Seconds(),
-			"memory_usage":         m.Alloc,
-			"cpu_usage":            cpuUsage,
-			"memory_usage_percent": memUsage,
-			"routes_count":         routesCount,
-			"services_count":       servicesCount,
-			"entry_points_count":   epsCount,
-			"middlewares_count":    mwsCount,
-			"clamav_installed":     svc.GetClamAVStatus(r.Context()),
-		})
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := ProtojsonOptions().Marshal(res)
+		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /v1/status/watch", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
@@ -293,33 +273,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		for {
 			select {
 			case <-ticker.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				_, routesCount := d.RouteService.ListPaginated(r.Context(), 0, 0, "", nil)
-				_, servicesCount := d.ServiceService.ListPaginated(r.Context(), 0, 0, "")
-				_, epsCount := d.EpService.ListPaginated(r.Context(), 0, 0, "")
-				_, mwsCount := d.MwService.ListPaginated(r.Context(), 0, 0, "")
-
-				var cpuUsage, memUsage float64
-				if snap, err := telemetry.CollectMetricsSnapshot(r.Context(), 50, 0); err == nil {
-					cpuUsage = snap.System.CPUUsage
-					memUsage = snap.System.MemoryUsage
+				res, err := svc.GetStatus(r.Context(), &gateonv1.GetStatusRequest{})
+				if err != nil {
+					return
 				}
-
-				status := map[string]any{
-					"status":               "running",
-					"version":              d.Version,
-					"uptime":               time.Since(d.StartTime).Seconds(),
-					"memory_usage":         m.Alloc,
-					"cpu_usage":            cpuUsage,
-					"memory_usage_percent": memUsage,
-					"routes_count":         routesCount,
-					"services_count":       servicesCount,
-					"entry_points_count":   epsCount,
-					"middlewares_count":    mwsCount,
-					"clamav_installed":     svc.GetClamAVStatus(r.Context()),
-				}
-				data, _ := json.Marshal(status)
+				data, _ := ProtojsonOptions().Marshal(res)
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
 				flusher.Flush()
 			case <-r.Context().Done():
