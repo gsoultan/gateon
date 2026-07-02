@@ -89,6 +89,7 @@ message DeepScanStatus {
 
 message InstallClamavRequest {
   ClamavConfig.InstallationMode mode = 1;
+  string sudo_password = 2;
 }
 
 message InstallClamavResponse {
@@ -96,7 +97,9 @@ message InstallClamavResponse {
   string message = 2;
 }
 
-message UninstallClamavRequest {}
+message UninstallClamavRequest {
+  string sudo_password = 1;
+}
 
 message UninstallClamavResponse {
   bool success = 1;

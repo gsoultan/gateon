@@ -57,7 +57,7 @@ func (m *ClamAVManager) Start(ctx context.Context) error {
 
 	if c.AutoInstall {
 		go func() {
-			if err := m.EnsureInstalled(context.Background()); err != nil {
+			if err := m.EnsureInstalled(context.Background(), ""); err != nil {
 				logger.L.LogError("failed to auto-install ClamAV", "error", err)
 			}
 		}()
@@ -130,7 +130,7 @@ func (m *ClamAVManager) Reconfigure(ctx context.Context, cfg *gateonv1.ClamavCon
 
 	if cfg != nil && cfg.AutoInstall {
 		go func() {
-			if err := m.EnsureInstalled(context.Background()); err != nil {
+			if err := m.EnsureInstalled(context.Background(), ""); err != nil {
 				logger.L.LogError("failed to auto-install ClamAV", "error", err)
 			}
 		}()
@@ -178,7 +178,7 @@ func (m *ClamAVManager) IsInstalled(ctx context.Context) bool {
 // installation. It lets callers surface actionable errors synchronously before
 // kicking off a background install. A nil error means EnsureInstalled has a
 // realistic chance of succeeding.
-func (m *ClamAVManager) Preflight() error {
+func (m *ClamAVManager) Preflight(sudoPassword string) error {
 	c := m.cfg()
 	if c == nil {
 		return errors.New("ClamAV is not configured")
@@ -199,7 +199,7 @@ func (m *ClamAVManager) Preflight() error {
 				return nil
 			}
 		}
-		return m.preflightLocalPackageManager()
+		return m.preflightLocalPackageManager(sudoPassword)
 	default:
 		return errors.New("unsupported installation mode")
 	}
@@ -207,7 +207,7 @@ func (m *ClamAVManager) Preflight() error {
 
 // preflightLocalPackageManager verifies a supported package manager is present
 // and that the process has the privileges that manager requires.
-func (m *ClamAVManager) preflightLocalPackageManager() error {
+func (m *ClamAVManager) preflightLocalPackageManager(sudoPassword string) error {
 	managers := []struct {
 		bin       string
 		needsRoot bool
@@ -221,8 +221,8 @@ func (m *ClamAVManager) preflightLocalPackageManager() error {
 		if _, err := exec.LookPath(p.bin); err != nil {
 			continue
 		}
-		if p.needsRoot && os.Geteuid() != 0 {
-			return fmt.Errorf("auto-installation with %s requires root privileges; run Gateon as root or pre-install ClamAV", p.bin)
+		if p.needsRoot && os.Geteuid() != 0 && sudoPassword == "" {
+			return fmt.Errorf("auto-installation with %s requires root privileges; please provide sudo password", p.bin)
 		}
 		return nil
 	}
@@ -234,7 +234,7 @@ func (m *ClamAVManager) preflightLocalPackageManager() error {
 // callers surface actionable errors synchronously before kicking off a
 // background uninstall. When ClamAV is already absent the preflight succeeds so
 // uninstall remains idempotent.
-func (m *ClamAVManager) PreflightUninstall() error {
+func (m *ClamAVManager) PreflightUninstall(sudoPassword string) error {
 	c := m.cfg()
 	if c == nil {
 		return errors.New("ClamAV is not configured")
@@ -253,13 +253,13 @@ func (m *ClamAVManager) PreflightUninstall() error {
 		if !m.IsInstalled(context.Background()) {
 			return nil
 		}
-		return m.preflightLocalPackageManager()
+		return m.preflightLocalPackageManager(sudoPassword)
 	default:
 		return errors.New("unsupported installation mode")
 	}
 }
 
-func (m *ClamAVManager) EnsureInstalled(ctx context.Context) error {
+func (m *ClamAVManager) EnsureInstalled(ctx context.Context, sudoPassword string) error {
 	c := m.cfg()
 	if c == nil {
 		return nil
@@ -268,7 +268,7 @@ func (m *ClamAVManager) EnsureInstalled(ctx context.Context) error {
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
 		return m.ensureDocker(ctx)
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
-		return m.ensureLocal(ctx)
+		return m.ensureLocal(ctx, sudoPassword)
 	default:
 		return nil
 	}
@@ -278,7 +278,7 @@ func (m *ClamAVManager) EnsureInstalled(ctx context.Context) error {
 // any scheduled jobs so no scan fires mid-removal, then tears down the
 // installation for the configured mode. The operation is idempotent: removing
 // something already gone is treated as success.
-func (m *ClamAVManager) Uninstall(ctx context.Context) error {
+func (m *ClamAVManager) Uninstall(ctx context.Context, sudoPassword string) error {
 	// Stop scheduled jobs so a scan/update cannot race the removal.
 	m.Stop()
 
@@ -290,7 +290,7 @@ func (m *ClamAVManager) Uninstall(ctx context.Context) error {
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER:
 		return m.uninstallDocker(ctx)
 	case gateonv1.ClamavConfig_INSTALLATION_MODE_LOCAL:
-		return m.uninstallLocal(ctx)
+		return m.uninstallLocal(ctx, sudoPassword)
 	default:
 		return nil
 	}
@@ -322,7 +322,7 @@ func (m *ClamAVManager) uninstallDocker(ctx context.Context) error {
 // uninstallLocal stops the ClamAV services and removes the packages installed
 // by Gateon using the detected package manager. It is a no-op when ClamAV is
 // not present.
-func (m *ClamAVManager) uninstallLocal(ctx context.Context) error {
+func (m *ClamAVManager) uninstallLocal(ctx context.Context, sudoPassword string) error {
 	if runtime.GOOS == "windows" {
 		return fmt.Errorf("local uninstall not supported on Windows, use Docker")
 	}
@@ -333,30 +333,21 @@ func (m *ClamAVManager) uninstallLocal(ctx context.Context) error {
 
 	// Stop and disable services before removing packages so no daemon lingers.
 	if _, err := exec.LookPath("systemctl"); err == nil {
-		_ = exec.CommandContext(ctx, "systemctl", "disable", "--now", "clamav-daemon").Run()
-		_ = exec.CommandContext(ctx, "systemctl", "disable", "--now", "clamav-freshclam").Run()
+		_ = m.commandWithSudo(ctx, sudoPassword, "systemctl", "disable", "--now", "clamav-daemon").Run()
+		_ = m.commandWithSudo(ctx, sudoPassword, "systemctl", "disable", "--now", "clamav-freshclam").Run()
 	}
 
 	var cmd *exec.Cmd
 	switch {
 	case lookPath("apt-get"):
-		if os.Geteuid() != 0 {
-			return fmt.Errorf("removing packages with apt-get requires root privileges. Please run Gateon as root")
-		}
-		cmd = exec.CommandContext(ctx, "apt-get", "remove", "--purge", "-y", "clamav-daemon", "clamav-freshclam")
+		cmd = m.commandWithSudo(ctx, sudoPassword, "apt-get", "remove", "--purge", "-y", "clamav-daemon", "clamav-freshclam")
 		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 	case lookPath("yum"):
-		if os.Geteuid() != 0 {
-			return fmt.Errorf("removing packages with yum requires root privileges. Please run Gateon as root")
-		}
-		cmd = exec.CommandContext(ctx, "yum", "remove", "-y", "clamav", "clamav-update")
+		cmd = m.commandWithSudo(ctx, sudoPassword, "yum", "remove", "-y", "clamav", "clamav-update")
 	case lookPath("brew"):
 		cmd = exec.CommandContext(ctx, "brew", "uninstall", "--force", "clamav")
 	case lookPath("apk"):
-		if os.Geteuid() != 0 {
-			return fmt.Errorf("removing packages with apk requires root privileges. Please run Gateon as root")
-		}
-		cmd = exec.CommandContext(ctx, "apk", "del", "clamav", "clamav-daemon", "freshclam")
+		cmd = m.commandWithSudo(ctx, sudoPassword, "apk", "del", "clamav", "clamav-daemon", "freshclam")
 	default:
 		return fmt.Errorf("no supported package manager found (apt, yum, brew, apk)")
 	}
@@ -415,7 +406,7 @@ func (m *ClamAVManager) ensureDocker(ctx context.Context) error {
 	return nil
 }
 
-func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
+func (m *ClamAVManager) ensureLocal(ctx context.Context, sudoPassword string) error {
 	if runtime.GOOS == "windows" {
 		return fmt.Errorf("local installation not supported on Windows, use Docker")
 	}
@@ -428,34 +419,25 @@ func (m *ClamAVManager) ensureLocal(ctx context.Context) error {
 
 	var cmd *exec.Cmd
 	if _, err := exec.LookPath("apt-get"); err == nil {
-		if os.Geteuid() != 0 {
-			return fmt.Errorf("auto-installation with apt-get requires root privileges. Please run Gateon as root or pre-install ClamAV")
-		}
 		// Update repository first
-		updateCmd := exec.CommandContext(ctx, "apt-get", "update")
+		updateCmd := m.commandWithSudo(ctx, sudoPassword, "apt-get", "update")
 		updateCmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 		if out, err := updateCmd.CombinedOutput(); err != nil {
 			logger.L.LogWarn("apt-get update failed", "error", err, "output", string(out))
 		}
 
-		cmd = exec.CommandContext(ctx, "apt-get", "install", "-y", "clamav-daemon", "clamav-freshclam")
+		cmd = m.commandWithSudo(ctx, sudoPassword, "apt-get", "install", "-y", "clamav-daemon", "clamav-freshclam")
 		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 	} else if _, err := exec.LookPath("yum"); err == nil {
-		if os.Geteuid() != 0 {
-			return fmt.Errorf("auto-installation with yum requires root privileges. Please run Gateon as root or pre-install ClamAV")
-		}
-		cmd = exec.CommandContext(ctx, "yum", "install", "-y", "clamav", "clamav-update")
+		cmd = m.commandWithSudo(ctx, sudoPassword, "yum", "install", "-y", "clamav", "clamav-update")
 	} else if _, err := exec.LookPath("brew"); err == nil {
 		cmd = exec.CommandContext(ctx, "brew", "install", "clamav")
 	} else if _, err := exec.LookPath("apk"); err == nil {
-		if os.Geteuid() != 0 {
-			return fmt.Errorf("auto-installation with apk requires root privileges. Please run Gateon as root or pre-install ClamAV")
-		}
-		updateCmd := exec.CommandContext(ctx, "apk", "update")
+		updateCmd := m.commandWithSudo(ctx, sudoPassword, "apk", "update")
 		if out, err := updateCmd.CombinedOutput(); err != nil {
 			logger.L.LogWarn("apk update failed", "error", err, "output", string(out))
 		}
-		cmd = exec.CommandContext(ctx, "apk", "add", "clamav", "clamav-daemon", "freshclam")
+		cmd = m.commandWithSudo(ctx, sudoPassword, "apk", "add", "clamav", "clamav-daemon", "freshclam")
 	} else {
 		return fmt.Errorf("no supported package manager found (apt, yum, brew, apk)")
 	}
@@ -820,6 +802,18 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 		logger.L.LogInfo("ClamAV full scan completed successfully", "duration", time.Since(start))
 	}
 	m.mu.Unlock()
+}
+
+func (m *ClamAVManager) commandWithSudo(ctx context.Context, password string, name string, args ...string) *exec.Cmd {
+	if os.Geteuid() == 0 || password == "" {
+		return exec.CommandContext(ctx, name, args...)
+	}
+
+	// Use sudo -S to read password from stdin
+	sudoArgs := append([]string{"-S", name}, args...)
+	cmd := exec.CommandContext(ctx, "sudo", sudoArgs...)
+	cmd.Stdin = strings.NewReader(password + "\n")
+	return cmd
 }
 
 func (m *ClamAVManager) formatExecError(ctx string, err error, out []byte) error {

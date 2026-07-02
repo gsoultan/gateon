@@ -3,6 +3,7 @@ package telemetry
 import (
 	"cmp"
 	"context"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/shirou/gopsutil/v3/mem"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -267,6 +269,11 @@ type SystemMetrics struct {
 	MemorySysBytes   float64 `json:"memory_sys_bytes"`
 	CPUUsage         float64 `json:"cpu_usage_percent"`
 	MemoryUsage      float64 `json:"memory_usage_percent"`
+	CPUCores         int     `json:"cpu_cores"`
+	MemoryTotalGB    float64 `json:"memory_total_gb"`
+	StorageUsageGB   float64 `json:"storage_usage_gb"`
+	StorageTotalGB   float64 `json:"storage_total_gb"`
+	StorageUsagePct  float64 `json:"storage_usage_percent"`
 }
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
@@ -358,10 +365,10 @@ func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) G
 	// summed independently of the request-series filter above.
 	gs.ActiveConnTotal = sumGauge(idx, "gateon_active_connections", nil)
 
-	// Populate daily totals from store
-	reqToday, bytesToday := GetSystemTrafficToday(ctx)
-	gs.RequestsToday = reqToday
-	gs.BytesToday = bytesToday
+	// Populate rolling 24h totals from store
+	req24h, bytes24h := GetSystemTrafficRolling24h(ctx)
+	gs.RequestsToday = req24h
+	gs.BytesToday = bytes24h
 
 	return gs
 }
@@ -880,7 +887,7 @@ func getOrCreateDomain(m map[string]*DomainMetric, domain string) *DomainMetric 
 }
 
 func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
-	return SystemMetrics{
+	sm := SystemMetrics{
 		UptimeSeconds:    gaugeValue(idx, "gateon_uptime_seconds"),
 		Goroutines:       gaugeValue(idx, "gateon_goroutines"),
 		MemoryAllocBytes: gaugeValue(idx, "gateon_memory_alloc_bytes"),
@@ -888,7 +895,21 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 		MemorySysBytes:   gaugeValue(idx, "gateon_memory_sys_bytes"),
 		CPUUsage:         gaugeValue(idx, "gateon_cpu_usage_percent"),
 		MemoryUsage:      gaugeValue(idx, "gateon_memory_usage_percent"),
+		CPUCores:         runtime.NumCPU(),
 	}
+
+	if fam, ok := idx["gateon_memory_sys_bytes"]; ok && len(fam.GetMetric()) > 0 {
+		// Total system memory in GB
+		if v, err := mem.VirtualMemory(); err == nil {
+			sm.MemoryTotalGB = float64(v.Total) / (1024 * 1024 * 1024)
+		}
+	}
+
+	sm.StorageUsageGB = gaugeValue(idx, "gateon_storage_usage_bytes") / (1024 * 1024 * 1024)
+	sm.StorageTotalGB = gaugeValue(idx, "gateon_storage_total_bytes") / (1024 * 1024 * 1024)
+	sm.StorageUsagePct = gaugeValue(idx, "gateon_storage_usage_percent")
+
+	return sm
 }
 
 func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily, limit, offset int) SecurityInsights {
@@ -915,11 +936,11 @@ func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily
 		return nil
 	})
 	g.Go(func() error {
-		activeCount = int(GetActiveThreatsToday())
+		activeCount = GetActiveThreatsRolling24h(ctx)
 		return nil
 	})
 	g.Go(func() error {
-		mitigated = int(GetMitigatedToday())
+		mitigated = GetMitigatedRolling24h(ctx)
 		return nil
 	})
 	g.Go(func() error {

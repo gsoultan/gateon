@@ -33,6 +33,7 @@ var mapNames = []string{
 	"ja4_blocklist",
 	"cuckoo_filter",
 	"global_ebpf_config",
+	"ip_telemetry",
 }
 
 // ebpfConfigVal mirrors `struct ebpf_config` in bpf/xdp_rate_limit.c. cilium/ebpf

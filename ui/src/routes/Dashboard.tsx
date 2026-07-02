@@ -475,14 +475,14 @@ export default function Dashboard() {
 
   const trafficMetrics = [
     {
-      label: "Requests / Day",
+      label: "Requests / 24h",
       value: formatCompact(requestsToday),
       icon: IconActivity,
       color: "teal" as const,
       description: "Total requests in the last 24h",
     },
     {
-      label: "Bandwidth / Day",
+      label: "Bandwidth / 24h",
       value: formatBytes(bytesToday),
       icon: IconTransferIn,
       color: "cyan" as const,
@@ -493,21 +493,21 @@ export default function Dashboard() {
       value: formatCompact(metricsSnap?.security?.mitigated_today || 0),
       icon: IconShieldExclamation,
       color: "red" as const,
-      description: "Security threats blocked today",
+      description: "Threats blocked in last 24h",
     },
     {
       label: "Active Threats",
       value: formatCompact(metricsSnap?.security?.active_threats || 0),
       icon: IconAlertCircle,
       color: "orange" as const,
-      description: "Ongoing suspicious activities",
+      description: "Active risks detected in last 24h",
     },
     {
       label: "eBPF Drops",
       value: formatCompact(metricsSnap?.middleware?.ebpf_dropped_packets?.reduce((acc, val) => acc + val.value, 0) || 0),
       icon: IconShieldOff,
       color: "violet" as const,
-      description: "Packets dropped by kernel",
+      description: "Kernel-level drops in last 24h",
     },
   ];
 

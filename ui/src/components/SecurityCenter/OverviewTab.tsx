@@ -185,7 +185,7 @@ export function OverviewTab({
             />
           </Group>
           <Text size="xs" c="dimmed" mt="sm">
-            Based on {metrics?.active_suspicious_sessions || 0} active sessions
+            Overall health based on active sessions and detected threats. Higher is better.
           </Text>
         </Card>
 
@@ -199,10 +199,9 @@ export function OverviewTab({
               <IconActivity size={24} />
             </ThemeIcon>
           </Group>
-          <Group gap={4} mt="sm">
-            <IconHistory size={14} color="orange" />
-            <Text size="xs" c="dimmed">Deterministic anomaly estimation</Text>
-          </Group>
+          <Text size="xs" c="dimmed" mt="sm">
+            Real-time estimate of system-wide risk level. Lower is safer.
+          </Text>
         </Card>
 
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
@@ -215,33 +214,24 @@ export function OverviewTab({
               <IconCpu size={20} />
             </ThemeIcon>
           </Group>
-          <Group gap={4} mt="sm" wrap="nowrap">
-            <Text size="xs" c="dimmed" truncate="end">
-              {posture?.ebpf?.attached ? `Offloading to ${posture.ebpf.interface}` : 'eBPF offloading disabled'}
-            </Text>
-            {posture?.ebpf?.shunned_ips && posture.ebpf.shunned_ips > 0 ? (
-              <Badge size="xs" variant="filled" color="red">
-                {posture.ebpf.shunned_ips} Shunned
-              </Badge>
-            ) : null}
-          </Group>
+          <Text size="xs" c="dimmed" mt="sm">
+            Hardware-accelerated filtering (eBPF). Stops attacks before they reach the CPU.
+          </Text>
         </Card>
 
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
           <Group justify="space-between">
             <Stack gap={0}>
-              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated Today</Text>
+              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated in 24h</Text>
               <AnimatedTitle value={metrics?.security?.mitigated_today ?? 0} />
             </Stack>
             <ThemeIcon color="teal" variant="light" size="lg" radius="md">
               <IconShieldCheck size={20} />
             </ThemeIcon>
           </Group>
-          <Group gap={4} mt="sm">
-            <IconArrowUpRight size={14} color="teal" />
-            <Text size="xs" c="teal" fw={700}>Active</Text>
-            <Text size="xs" c="dimmed">defense operational</Text>
-          </Group>
+          <Text size="xs" c="dimmed" mt="sm">
+            Number of malicious requests successfully blocked or challenged.
+          </Text>
         </Card>
 
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
@@ -254,10 +244,9 @@ export function OverviewTab({
               <IconFingerprint size={20} />
             </ThemeIcon>
           </Group>
-          <Group gap={4} mt="sm">
-            <Badge size="xs" color="blue" variant="dot">JA4 & Fingerprinting Active</Badge>
-            <Text size="xs" c="dimmed">Adaptive Acceleration Enabled</Text>
-          </Group>
+          <Text size="xs" c="dimmed" mt="sm">
+            Analysis of client behavioral patterns and browser fingerprints.
+          </Text>
         </Card>
       </SimpleGrid>
 

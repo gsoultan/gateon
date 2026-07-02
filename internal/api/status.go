@@ -36,16 +36,21 @@ func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest
 	stats := telemetry.GetSystemStats()
 
 	return &gateonv1.GetStatusResponse{
-		Status:             "running",
-		Version:            s.Version,
-		Uptime:             int64(time.Since(telemetry.GetStartTime()).Seconds()),
-		MemoryUsage:        int64(m.Alloc),
-		RoutesCount:        int32(routesCount),
-		ServicesCount:      int32(servicesCount),
-		EntryPointsCount:   int32(entryPointsCount),
-		MiddlewaresCount:   int32(middlewaresCount),
-		CpuUsage:           stats.CPUUsage,
-		MemoryUsagePercent: stats.MemoryUsagePercent,
+		Status:              "running",
+		Version:             s.Version,
+		Uptime:              int64(time.Since(telemetry.GetStartTime()).Seconds()),
+		MemoryUsage:         int64(m.Alloc),
+		RoutesCount:         int32(routesCount),
+		ServicesCount:       int32(servicesCount),
+		EntryPointsCount:    int32(entryPointsCount),
+		MiddlewaresCount:    int32(middlewaresCount),
+		CpuUsage:            stats.CPUUsage,
+		MemoryUsagePercent:  stats.MemoryUsagePercent,
+		CpuCores:            int32(runtime.NumCPU()),
+		MemoryTotalGb:       float64(stats.MemoryTotalBytes) / (1024 * 1024 * 1024),
+		StorageUsageGb:      float64(stats.StorageUsageBytes) / (1024 * 1024 * 1024),
+		StorageTotalGb:      float64(stats.StorageTotalBytes) / (1024 * 1024 * 1024),
+		StorageUsagePercent: stats.StorageUsagePercent,
 	}, nil
 }
 

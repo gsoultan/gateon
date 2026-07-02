@@ -298,6 +298,9 @@ func UpdateReputationMetrics() {
 
 	if totalCount > 0 {
 		ActiveAnomalyScoreAverage.Set(totalScore / float64(totalCount))
+		ActiveSuspiciousSessionsTotal.Set(float64(totalCount))
+	} else {
+		ActiveSuspiciousSessionsTotal.Set(0)
 	}
 }
 

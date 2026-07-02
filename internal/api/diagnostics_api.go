@@ -635,10 +635,24 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 	// Use Lite variant to avoid fetching massive request/response body blobs
 	// for the list view, which is what typically causes timeouts in the UI.
 	threats := telemetry.GetSecurityThreatsLite(ctx, limit, offset)
-	res := make([]*gateonv1.Anomaly, 0, len(threats))
-	for _, t := range threats {
-		res = append(res, s.threatToAnomaly(ctx, t))
+	res := make([]*gateonv1.Anomaly, len(threats))
+
+	// Parallelize GeoIP enrichment and conversion. Since ResolveIPInfo involves
+	// potential HTTP lookups (with 1s rate limit) or DB scans, serial processing
+	// of 50-100 threats can easily blow the UI timeout.
+	g, gctx := errgroup.WithContext(ctx)
+	for i, t := range threats {
+		i, t := i, t // closure capture
+		g.Go(func() error {
+			res[i] = s.threatToAnomaly(gctx, t)
+			return nil
+		})
 	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
 	return &gateonv1.ListSecurityThreatsResponse{
 		Threats: res,
 	}, nil
