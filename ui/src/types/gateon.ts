@@ -177,6 +177,11 @@ export type StatusResponse = {
   services_count: number;
   entry_points_count: number;
   middlewares_count: number;
+  cpu_cores?: number;
+  memory_total_gb?: number;
+  storage_usage_gb?: number;
+  storage_total_gb?: number;
+  storage_usage_percent?: number;
   clamav_installed?: boolean;
 };
 

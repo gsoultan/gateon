@@ -81,11 +81,11 @@ const (
 	QueryGetMitigatedThreatsToday = `SELECT COUNT(*) FROM security_threats
 		WHERE timestamp >= ? AND action_taken IN ('blocked', 'challenged', 'shunned')`
 
-	QueryGetTotalTrafficRolling24h = `SELECT SUM(req_count), SUM(bytes_total)
+	QueryGetTotalTrafficRolling24h = `SELECT COALESCE(SUM(req_count), 0), COALESCE(SUM(bytes_total), 0)
 		FROM domain_stats
 		WHERE (day = ? AND hour <= ?) OR (day = ? AND hour > ?)`
 
-	QueryGetDomainStatsRolling24h = `SELECT domain, SUM(req_count) AS rc, SUM(latency_sum_s) AS lsum, SUM(bytes_total) AS bsum
+	QueryGetDomainStatsRolling24h = `SELECT domain, COALESCE(SUM(req_count), 0) AS rc, COALESCE(SUM(latency_sum_s), 0) AS lsum, COALESCE(SUM(bytes_total), 0) AS bsum
 		FROM domain_stats
 		WHERE (day = ? AND hour <= ?) OR (day = ? AND hour > ?)
 		GROUP BY domain`

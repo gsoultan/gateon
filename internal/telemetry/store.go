@@ -1311,14 +1311,23 @@ func GetSystemTrafficRolling24h(ctx context.Context) (uint64, uint64) {
 	bucket := now.Hour()*2 + now.Minute()/30
 
 	q := s.dialect.Rebind(QueryGetTotalTrafficRolling24h)
-	var rc, bsum sql.NullInt64
+	var rc, bsum int64
 	err := s.db.QueryRowContext(ctx, q, today, bucket, yesterday, bucket).Scan(&rc, &bsum)
 	if err != nil {
 		logQueryErr(ctx, "traffic rolling 24h: query failed", err)
-		return 0, 0
+		// Fallback to in-memory today counters if DB fails or is empty
+		return s.currentReqToday.Load(), s.currentBytesToday.Load()
 	}
 
-	return uint64(rc.Int64), uint64(max(bsum.Int64, 0))
+	reqs := uint64(rc)
+	bytes := uint64(max(bsum, 0))
+
+	// If DB has no rolling data (e.g. newly installed), use in-memory today's counters
+	if reqs == 0 {
+		return s.currentReqToday.Load(), s.currentBytesToday.Load()
+	}
+
+	return reqs, bytes
 }
 
 // logQueryErr logs a query failure unless it was caused by the caller's
