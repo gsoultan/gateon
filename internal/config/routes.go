@@ -17,11 +17,12 @@ import (
 )
 
 type RouteRegistry struct {
-	mu        sync.RWMutex
-	routes    map[string]*gateonv1.Route
-	sorted    []*gateonv1.Route            // Cached sorted list
-	hostIndex map[string][]*gateonv1.Route // host -> routes for O(1) lookup
-	path      string
+	mu             sync.RWMutex
+	routes         map[string]*gateonv1.Route
+	sorted         []*gateonv1.Route            // Cached sorted list
+	hostIndex      map[string][]*gateonv1.Route // host -> routes for O(1) lookup
+	wildcardRoutes []*gateonv1.Route            // host wildcards or path-only routes
+	path           string
 }
 
 func NewRouteRegistry(path string) *RouteRegistry {
@@ -78,14 +79,17 @@ func (r *RouteRegistry) rebuildSortedLocked() {
 		return strings.Compare(a.Id, b.Id)
 	})
 
+	r.wildcardRoutes = nil
 	clear(r.hostIndex)
-	for _, rt := range r.routes {
+	for _, rt := range r.sorted {
 		if rt.Rule == "" {
 			continue
 		}
 		host := hostFromRule(rt.Rule)
-		if host != "" {
+		if host != "" && RouteHostIsExact(host) {
 			r.hostIndex[host] = append(r.hostIndex[host], rt)
+		} else {
+			r.wildcardRoutes = append(r.wildcardRoutes, rt)
 		}
 	}
 
@@ -137,6 +141,12 @@ func (r *RouteRegistry) GetByHost(host string) []*gateonv1.Route {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.hostIndex[strings.ToLower(host)]
+}
+
+func (r *RouteRegistry) ListWildcards(ctx context.Context) []*gateonv1.Route {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.wildcardRoutes
 }
 
 func hostFromRule(rule string) string {

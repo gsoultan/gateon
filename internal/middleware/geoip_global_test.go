@@ -16,6 +16,16 @@ type mockGlobalConfigStore struct {
 func (m *mockGlobalConfigStore) Get(ctx context.Context) *gateonv1.GlobalConfig {
 	return m.config
 }
+func (m *mockGlobalConfigStore) GetCertificate(id string) (*gateonv1.Certificate, bool) {
+	if m.config != nil && m.config.Tls != nil {
+		for _, c := range m.config.Tls.Certificates {
+			if c.Id == id {
+				return c, true
+			}
+		}
+	}
+	return nil, false
+}
 func (m *mockGlobalConfigStore) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error {
 	m.config = conf
 	return nil

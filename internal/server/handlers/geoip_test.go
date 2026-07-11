@@ -27,6 +27,7 @@ func (m *mockGlobalStore) Get(ctx context.Context) *gateonv1.GlobalConfig {
 		},
 	}
 }
+func (m *mockGlobalStore) GetCertificate(id string) (*gateonv1.Certificate, bool)        { return nil, false }
 func (m *mockGlobalStore) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error { return nil }
 func (m *mockGlobalStore) ConfigFileExists() bool                                        { return true }
 

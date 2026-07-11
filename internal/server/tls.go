@@ -158,7 +158,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 				list  []*gateonv1.Route
 			}{
 				{true, exactRoutes},
-				{false, deps.RouteStore.List(ctx)}, // Fallback to linear scan for wildcards
+				{false, deps.RouteStore.ListWildcards(ctx)}, // Optimized: only wildcard routes
 			} {
 				for _, rt := range pass.list {
 					if rt.Disabled || rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
@@ -182,10 +182,6 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					}
 
 					var certs []tls.Certificate
-					gc := deps.GlobalStore.Get(ctx)
-					if gc == nil || gc.Tls == nil {
-						continue
-					}
 					for _, certId := range rt.Tls.CertificateIds {
 						// Cache check
 						if cached, ok := certCache.Load(certId); ok {
@@ -193,10 +189,8 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 							continue
 						}
 
-						for _, c := range gc.Tls.Certificates {
-							if c.Id != certId {
-								continue
-							}
+						// O(1) certificate lookup
+						if c, ok := deps.GlobalStore.GetCertificate(certId); ok {
 							cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
 							if err == nil {
 								certs = append(certs, *cert)
@@ -207,7 +201,6 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 									Str("cert_file", c.CertFile).
 									Msg("Failed to load certificate for route")
 							}
-							break
 						}
 					}
 					if len(certs) == 0 {
@@ -283,6 +276,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 		if gc != nil && gc.Tls != nil && len(gc.Tls.Certificates) > 0 {
 			var certs []tls.Certificate
 			for _, c := range gc.Tls.Certificates {
+				// Use O(1) certificate load via tlsManager's internal cache if possible
 				cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
 				if err == nil {
 					certs = append(certs, *cert)

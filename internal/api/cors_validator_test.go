@@ -18,6 +18,10 @@ func (m *mockRouteStore) List(ctx context.Context) []*gateonv1.Route {
 	return m.routes
 }
 
+func (m *mockRouteStore) ListWildcards(ctx context.Context) []*gateonv1.Route {
+	return nil
+}
+
 type mockMiddlewareStore struct {
 	config.MiddlewareStore
 	middlewares map[string]*gateonv1.Middleware
