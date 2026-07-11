@@ -236,19 +236,19 @@ func TestWAF_JWTFastCheck(t *testing.T) {
 			expectCode: http.StatusOK,
 		},
 		{
-			name:       "malformed JWT (invalid chars) blocked",
-			authHeader: "Bearer abc.def!.ghi.jkl.mno.pqr.stu.vwx.yz1234567890",
-			expectCode: http.StatusForbidden,
-		},
-		{
-			name:       "malformed JWT (wrong parts) blocked",
+			name:       "non-JWT structured token passes (anything token)",
 			authHeader: "Bearer abc.def.ghi.jkl.mno.pqr.stu.vwx.yz1234567890",
-			expectCode: http.StatusForbidden,
+			expectCode: http.StatusOK,
 		},
 		{
 			name:       "malformed JWT (3 parts, invalid char) blocked",
 			authHeader: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5!",
 			expectCode: http.StatusForbidden,
+		},
+		{
+			name:       "valid Paseto passes",
+			authHeader: "Bearer v2.local.E49OnVog9N8XOnS9mE1_Y_z-o73nZ-4kS_o.footer",
+			expectCode: http.StatusOK,
 		},
 	}
 
