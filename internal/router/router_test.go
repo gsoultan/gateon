@@ -1,8 +1,10 @@
 package router
 
 import (
+	"cmp"
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -78,6 +80,14 @@ func TestSelectRoute_RuleBased(t *testing.T) {
 			Priority: 20,
 		},
 	}
+
+	// SelectRouteFromSlice expects sorted routes (Priority DESC, Rule length DESC)
+	slices.SortFunc(routes, func(a, b *gateonv1.Route) int {
+		if a.Priority != b.Priority {
+			return cmp.Compare(b.Priority, a.Priority)
+		}
+		return cmp.Compare(len(b.Rule), len(a.Rule))
+	})
 
 	tests := []struct {
 		name     string

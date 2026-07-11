@@ -51,65 +51,94 @@ func parseRule(rule string) Matcher {
 	m := Matcher{}
 	if strings.Contains(rule, "Host(`") {
 		m.host = extractValue(rule, "Host(`", "`)")
+	} else if strings.Contains(rule, "Host(\"") {
+		m.host = extractValue(rule, "Host(\"", "\")")
 	}
 	if strings.Contains(rule, "PathPrefix(`") {
 		m.pathPrefix = extractValue(rule, "PathPrefix(`", "`)")
+	} else if strings.Contains(rule, "PathPrefix(\"") {
+		m.pathPrefix = extractValue(rule, "PathPrefix(\"", "\")")
 	}
 	if strings.Contains(rule, "Path(`") {
 		m.path = extractValue(rule, "Path(`", "`)")
+	} else if strings.Contains(rule, "Path(\"") {
+		m.path = extractValue(rule, "Path(\"", "\")")
 	}
 	if s := extractValue(rule, "PathRegex(`", "`)"); s != "" {
 		if re, err := regexp.Compile(s); err == nil {
 			m.pathRegex = re
 		}
+	} else if s := extractValue(rule, "PathRegex(\"", "\")"); s != "" {
+		if re, err := regexp.Compile(s); err == nil {
+			m.pathRegex = re
+		}
 	}
-	// Methods(`GET`, `POST`) - extract content between Methods(` and `), split by `, `
-	if i := strings.Index(rule, "Methods(`"); i >= 0 {
-		tail := rule[i+9:]
-		end := strings.Index(tail, "`)")
+	// Methods(`GET`, `POST`) or Methods("GET", "POST")
+	methodsPrefix := ""
+	if strings.Contains(rule, "Methods(`") {
+		methodsPrefix = "Methods(`"
+	} else if strings.Contains(rule, "Methods(\"") {
+		methodsPrefix = "Methods(\""
+	}
+
+	if methodsPrefix != "" {
+		i := strings.Index(rule, methodsPrefix)
+		tail := rule[i+len(methodsPrefix):]
+		// Find the correct end by matching parentheses or the specific suffix
+		end := strings.Index(tail, ")")
 		if end > 0 {
-			inner := tail[:end]
+			inner := strings.TrimSuffix(tail[:end], "\"")
+			inner = strings.TrimSuffix(inner, "`")
 			m.methods = make(map[string]bool)
-			for _, part := range strings.Split(inner, "`, `") {
-				method := strings.TrimSpace(strings.ToUpper(strings.Trim(part, "`")))
+			// Split by either `, ` or ", "
+			sep := "`, `"
+			if methodsPrefix == "Methods(\"" {
+				sep = "\", \""
+			}
+			for _, part := range strings.Split(inner, sep) {
+				method := strings.TrimSpace(strings.ToUpper(strings.Trim(part, "`\"")))
 				if method != "" {
 					m.methods[method] = true
 				}
 			}
 		}
 	}
-	// Headers(`Name`, `value`) - name ends at `, value ends at `)
-	for {
-		idx := strings.Index(rule, "Headers(`")
-		if idx < 0 {
-			break
+	// Headers support is complex, let's just add basic support for both quote types
+	for _, q := range []string{"`", "\""} {
+		prefix := "Headers(" + q
+		rulePtr := rule
+		for {
+			idx := strings.Index(rulePtr, prefix)
+			if idx < 0 {
+				break
+			}
+			rest := rulePtr[idx+len(prefix):]
+			qIdx := strings.Index(rest, q)
+			if qIdx < 0 {
+				break
+			}
+			name := rest[:qIdx]
+			rest = strings.TrimLeft(rest[qIdx+1:], " ")
+			if !strings.HasPrefix(rest, ",") {
+				break
+			}
+			rest = strings.TrimLeft(rest[1:], " ")
+			if !strings.HasPrefix(rest, q) {
+				break
+			}
+			rest = rest[1:]
+			endSuffix := q + ")"
+			end := strings.Index(rest, endSuffix)
+			if end < 0 {
+				break
+			}
+			value := rest[:end]
+			if m.headers == nil {
+				m.headers = make(map[string]string)
+			}
+			m.headers[http.CanonicalHeaderKey(name)] = value
+			rulePtr = rest[end+len(endSuffix):]
 		}
-		rest := rule[idx+9:]
-		backtick := strings.Index(rest, "`")
-		if backtick < 0 {
-			break
-		}
-		name := rest[:backtick]
-		rest = strings.TrimLeft(rest[backtick+1:], " ")
-		if !strings.HasPrefix(rest, ",") {
-			break
-		}
-		rest = strings.TrimLeft(rest[1:], " ")
-		// value is between ` and `)
-		if !strings.HasPrefix(rest, "`") {
-			break
-		}
-		rest = rest[1:]
-		end := strings.Index(rest, "`)")
-		if end < 0 {
-			break
-		}
-		value := rest[:end]
-		if m.headers == nil {
-			m.headers = make(map[string]string)
-		}
-		m.headers[http.CanonicalHeaderKey(name)] = value
-		rule = rest[end+2:]
 	}
 	return m
 }

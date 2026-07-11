@@ -140,23 +140,31 @@ func (r *RouteRegistry) GetByHost(host string) []*gateonv1.Route {
 }
 
 func hostFromRule(rule string) string {
-	if idx := strings.Index(rule, "Host(`"); idx >= 0 {
-		rest := rule[idx+6:]
-		end := strings.Index(rest, "`)")
-		if end > 0 {
-			return strings.ToLower(rest[:end])
+	for _, q := range []string{"`", "\""} {
+		prefix := "Host(" + q
+		if idx := strings.Index(rule, prefix); idx >= 0 {
+			rest := rule[idx+len(prefix):]
+			suffix := q + ")"
+			end := strings.Index(rest, suffix)
+			if end > 0 {
+				return strings.ToLower(rest[:end])
+			}
 		}
 	}
 	return ""
 }
 
 func pathFromRule(rule string) string {
-	for _, prefix := range []string{"PathPrefix(`", "Path(`", "PathRegex(`"} {
-		if idx := strings.Index(rule, prefix); idx >= 0 {
-			rest := rule[idx+len(prefix):]
-			end := strings.Index(rest, "`)")
-			if end > 0 {
-				return strings.ToLower(rest[:end])
+	for _, q := range []string{"`", "\""} {
+		for _, prefix := range []string{"PathPrefix(", "Path(", "PathRegex("} {
+			p := prefix + q
+			if idx := strings.Index(rule, p); idx >= 0 {
+				rest := rule[idx+len(p):]
+				suffix := q + ")"
+				end := strings.Index(rest, suffix)
+				if end > 0 {
+					return strings.ToLower(rest[:end])
+				}
 			}
 		}
 	}
