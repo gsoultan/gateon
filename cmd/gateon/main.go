@@ -40,6 +40,7 @@ import (
 func main() {
 	uiPath := flag.String("ui-path", "", "Path to UI assets (serves from disk instead of embed)")
 	buildUI := flag.Bool("build-ui", false, "Build UI assets before starting")
+	builtUI := flag.Bool("built-ui", false, "Alias for build-ui")
 	flag.Parse()
 
 	if len(os.Args) >= 2 {
@@ -69,7 +70,7 @@ func main() {
 		}
 	}
 
-	if *buildUI {
+	if *buildUI || *builtUI {
 		buildUIAssets(uiPath)
 	}
 

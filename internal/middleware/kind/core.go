@@ -15,12 +15,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
 // ContextKey is the type used for values stored in a request's context by the
@@ -168,8 +170,8 @@ func Recovery() Middleware {
 					// Try to send 500 if headers haven't been sent yet.
 					// We use a type assertion to check for our StatusResponseWriter
 					// which tracks this.
-					if sw, ok := w.(*StatusResponseWriter); ok {
-						if !sw.ttfbRecorded {
+					if sw, ok := w.(*httputil.StatusResponseWriter); ok {
+						if !sw.StatusRecorded() {
 							w.WriteHeader(http.StatusInternalServerError)
 						}
 					} else {
@@ -308,9 +310,10 @@ func RealIP(trustCloudflare bool) Middleware {
 
 			// Maintain the original port if present in RemoteAddr, as some components
 			// (like PROXY protocol generation) expect a host:port format.
-			if last := strings.LastIndexByte(r.RemoteAddr, ':'); last != -1 && !strings.HasSuffix(r.RemoteAddr, "]") {
-				r.RemoteAddr = clientIP + r.RemoteAddr[last:]
+			if _, port, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				r.RemoteAddr = net.JoinHostPort(clientIP, port)
 			} else {
+				// Fallback if RemoteAddr was just an IP or malformed
 				r.RemoteAddr = clientIP
 			}
 			next.ServeHTTP(w, r)

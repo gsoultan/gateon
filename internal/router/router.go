@@ -216,6 +216,8 @@ func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
 }
 
 // SelectRouteFromSlice finds the best matching route from a provided slice of routes.
+// The input slice is expected to be sorted by Priority DESC and Rule specificity DESC,
+// allowing us to short-circuit and return the first match (O(1) on average).
 func SelectRouteFromSlice(r *http.Request, routes []*gateonv1.Route) *gateonv1.Route {
 	epID := ""
 	if rs := request.GetRequestState(r); rs != nil {
@@ -224,7 +226,6 @@ func SelectRouteFromSlice(r *http.Request, routes []*gateonv1.Route) *gateonv1.R
 		epID = val
 	}
 
-	var best *gateonv1.Route
 	for _, rt := range routes {
 		if rt.Disabled {
 			continue
@@ -250,19 +251,12 @@ func SelectRouteFromSlice(r *http.Request, routes []*gateonv1.Route) *gateonv1.R
 
 		m := GetMatcher(rt.Rule)
 		if m.Match(r) {
-			// 3. Selection based on Priority and then Rule length (specificity)
-			if best == nil {
-				best = rt
-			} else if rt.Priority > best.Priority {
-				best = rt
-			} else if rt.Priority == best.Priority {
-				if len(rt.Rule) > len(best.Rule) {
-					best = rt
-				}
-			}
+			// Since routes are pre-sorted by Priority and Rule length,
+			// the first match is guaranteed to be the "best" one.
+			return rt
 		}
 	}
-	return best
+	return nil
 }
 
 // extractValue is a helper to pull string literals from rule definitions.

@@ -194,6 +194,18 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return TlsBinding(cookieName), nil
 	case "security_headers":
 		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
+	case "circuit_breaker":
+		errorThreshold, _ := strconv.ParseFloat(cfg["error_threshold"], 64)
+		minRequests, _ := strconv.ParseInt(cfg["min_requests"], 10, 64)
+		windowSize, _ := time.ParseDuration(cfg["window_size"])
+		sleepWindow, _ := time.ParseDuration(cfg["sleep_window"])
+		return CircuitBreaker(CircuitBreakerConfig{
+			ErrorThreshold: errorThreshold,
+			MinRequests:    minRequests,
+			WindowSize:     windowSize,
+			SleepWindow:    sleepWindow,
+			RouteID:        routeID,
+		}), nil
 	case "wasm":
 		return Wasm(context.Background(), m.WasmBlob)
 	default:

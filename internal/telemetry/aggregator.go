@@ -119,7 +119,8 @@ func (a *LocalMetricsAggregator) Start(ctx context.Context) {
 }
 
 func (a *LocalMetricsAggregator) takeSnapshot(ctx context.Context) {
-	snap, err := CollectMetricsSnapshot(ctx, 10, 0)
+	// Use limit=50 to hit the background-refreshed snapshot cache.
+	snap, err := CollectMetricsSnapshot(ctx, 50, 0)
 	if err != nil {
 		logger.L.LogError("failed to collect metrics snapshot for aggregator", "error", err)
 		return

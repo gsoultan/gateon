@@ -24,7 +24,7 @@ type targetState struct {
 	alive           atomic.Bool
 	requestCount    uint64
 	errorCount      uint64
-	latencySumMs    uint64
+	latencySumUs    uint64
 	activeConn      int32
 	activeConnGuage prometheus.Gauge
 }

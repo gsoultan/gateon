@@ -171,7 +171,9 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	// Automated eBPF Shunning: If reputation is very low, push to XDP layer.
 	if r.Score < 20.0 {
 		if m := globalEbpfManager.Load(); m != nil {
-			_ = (*m).ShunIP(fingerprint)
+			if prov, ok := m.(EbpfProvider); ok {
+				_ = prov.ShunIP(fingerprint)
+			}
 		}
 	}
 
@@ -229,7 +231,9 @@ func ResetReputation(fingerprint string) {
 	delete(shard.dirty, fingerprint)
 	// Automated eBPF Unshun: Restore access at XDP layer.
 	if m := globalEbpfManager.Load(); m != nil {
-		_ = (*m).UnshunIP(fingerprint)
+		if prov, ok := m.(EbpfProvider); ok {
+			_ = prov.UnshunIP(fingerprint)
+		}
 	}
 	// Broadcast a reset (score 100) to the cluster to ensure reputation is back green everywhere.
 	BroadcastReputation(fingerprint, 100, 0, []string{"Manual reset"})
