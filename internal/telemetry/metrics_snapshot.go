@@ -967,11 +967,11 @@ func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		threats = GetSecurityThreatsLite(ctx, limit, offset)
+		threats = GetSecurityThreatsLite(ctx, limit, offset, nil)
 		return nil
 	})
 	g.Go(func() error {
-		total = CountSecurityThreats(ctx)
+		total = CountSecurityThreats(ctx, nil)
 		return nil
 	})
 	g.Go(func() error {

@@ -5,16 +5,35 @@ import type { Anomaly } from "../types/gateon";
 
 export interface SecurityThreatsResponse {
   threats: Anomaly[];
+  totalCount: number;
 }
 
-export function useSecurityThreats(limit = 50) {
+export interface SecurityThreatsParams {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  category?: string;
+  status?: string;
+}
+
+export function useSecurityThreats(params: SecurityThreatsParams | number = 50) {
   const queryClient = useQueryClient();
-  const queryKey = ["security-threats", limit];
+  const p: SecurityThreatsParams = typeof params === "number" ? { limit: params } : params;
+  const { limit = 50, offset = 0, search = "", category = "", status = "" } = p;
+  
+  const queryKey = ["security-threats", limit, offset, search, category, status];
 
   const query = useQuery<SecurityThreatsResponse>({
     queryKey,
     queryFn: async () => {
-      const res = await apiFetch(`/v1/diag/security-threats?limit=${limit}`);
+      const qs = new URLSearchParams();
+      qs.set("limit", limit.toString());
+      qs.set("offset", offset.toString());
+      if (search) qs.set("search", search);
+      if (category && category !== "all") qs.set("category", category);
+      if (status && status !== "all") qs.set("status", status);
+
+      const res = await apiFetch(`/v1/diag/security-threats?${qs.toString()}`);
       if (!res.ok) {
         throw new Error("Failed to fetch security threats");
       }
@@ -23,6 +42,12 @@ export function useSecurityThreats(limit = 50) {
   });
 
   useEffect(() => {
+    // Only subscribe to SSE for the first page/unfiltered view or generic dashboard view
+    // to avoid complex cache reconciliation for now.
+    if (offset !== 0 || search || (category && category !== "all") || (status && status !== "all")) {
+      return;
+    }
+
     const url = getApiUrl(`/v1/diag/security-threats/watch`);
     const eventSource = new EventSource(url, { withCredentials: true });
 
@@ -35,6 +60,7 @@ export function useSecurityThreats(limit = 50) {
           if (exists) return old;
           return {
             threats: [newThreat, ...old.threats].slice(0, limit),
+            totalCount: (old.totalCount || old.threats.length) + 1,
           };
         });
       } catch (err) {
@@ -48,4 +74,19 @@ export function useSecurityThreats(limit = 50) {
   }, [limit, queryClient, queryKey]);
 
   return query;
+}
+
+export function useSecurityThreat(id: string | null) {
+  return useQuery<Anomaly>({
+    queryKey: ["security-threat", id],
+    queryFn: async () => {
+      const res = await apiFetch(`/v1/diag/security-threats/${id}`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch security threat details");
+      }
+      const data = await res.json();
+      return data.threat;
+    },
+    enabled: !!id,
+  });
 }

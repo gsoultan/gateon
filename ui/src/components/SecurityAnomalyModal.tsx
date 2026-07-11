@@ -37,7 +37,7 @@ import {
   IconInfoCircle,
   IconShieldCheck,
 } from "@tabler/icons-react";
-import { useRemoveMitigation, useApplyRecommendation } from "../hooks/useGateon";
+import { useRemoveMitigation, useApplyRecommendation, useSecurityThreat } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
@@ -49,7 +49,10 @@ interface SecurityAnomalyModalProps {
   onClose: () => void;
 }
 
-export function SecurityAnomalyModal({ anomaly, opened, onClose }: SecurityAnomalyModalProps) {
+export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose }: SecurityAnomalyModalProps) {
+  const { data: fullAnomaly } = useSecurityThreat(opened ? initialAnomaly?.id || null : null);
+  const anomaly = fullAnomaly || initialAnomaly;
+
   const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
   const [confirmOpened, { open: openConfirm, close: closeConfirm }] = useDisclosure(false);
   const removeMitigation = useRemoveMitigation();

@@ -31,7 +31,7 @@ export { usePathStats } from "./usePathStats";
 export { useRequestsPerSecond } from "./useRequestsPerSecond";
 export { useRouteStats } from "./useRouteStats";
 export { useRoutes } from "./useRoutes";
-export { useSecurityThreats } from "./useSecurityThreats";
+export { useSecurityThreats, useSecurityThreat } from "./useSecurityThreats";
 export { useRemoveMitigation } from "./useRemoveMitigation";
 export { useReputations } from "./useReputations";
 export { useServices } from "./useServices";

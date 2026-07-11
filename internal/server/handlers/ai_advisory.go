@@ -203,7 +203,7 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig) aiAnalysisRe
 	}
 
 	// --- Observed threat telemetry ---
-	if total := telemetry.CountSecurityThreats(ctx); total > 0 {
+	if total := telemetry.CountSecurityThreats(ctx, nil); total > 0 {
 		if types := telemetry.GetTopThreatTypes(ctx, 3); len(types) > 0 {
 			top := types[0]
 			insights = append(insights, aiInsight{
