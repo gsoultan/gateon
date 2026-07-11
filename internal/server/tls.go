@@ -140,10 +140,6 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	}
 	ctx := context.Background()
 	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-		// Calculate and store TLS fingerprints as early as possible
-		f := middleware.CalcFingerprints(hello)
-		middleware.SetFingerprints(hello.Conn, f)
-
 		sniHost := strings.TrimSpace(hello.ServerName)
 		if sniHost != "" {
 			// Strip port from SNI if present (RFC 6066 allows hostname only; some clients may send host:port)
@@ -173,7 +169,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 						continue
 					}
 					isExactMatch := router.RouteHostIsExact(routeHost)
-					if isExactMatch != pass.exact {
+					if pass.exact && !isExactMatch {
 						continue
 					}
 					// If the route references a TLS option with SNI strict, do not allow wildcard matches
@@ -219,6 +215,10 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					}
 					newCfg := tlsConfig.Clone()
 					newCfg.Certificates = certs
+
+					// Calculate and store TLS fingerprints
+					f := middleware.CalcFingerprints(hello)
+					middleware.SetFingerprints(hello.Conn, f)
 
 					if rt.Tls.OptionId != "" {
 						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
@@ -296,6 +296,11 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 			if len(certs) > 0 {
 				newCfg := tlsConfig.Clone()
 				newCfg.Certificates = certs
+
+				// Calculate and store TLS fingerprints
+				f := middleware.CalcFingerprints(hello)
+				middleware.SetFingerprints(hello.Conn, f)
+
 				if gc.Tls.MinTlsVersion != "" {
 					newCfg.MinVersion = gtls.ParseTLSVersion(gc.Tls.MinTlsVersion, tls.VersionTLS12)
 				}
