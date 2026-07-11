@@ -1,4 +1,4 @@
-package kind
+package httputil
 
 import (
 	"bufio"
@@ -88,6 +88,11 @@ func (w *StatusResponseWriter) TTFB() time.Duration {
 		return 0
 	}
 	return w.firstByte.Sub(w.start)
+}
+
+// StatusRecorded reports whether Write or WriteHeader has been called.
+func (w *StatusResponseWriter) StatusRecorded() bool {
+	return w.ttfbRecorded
 }
 
 func (w *StatusResponseWriter) Flush() {

@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -96,7 +98,13 @@ func (c *ProxyCache) GetOrCreate(rt *gateonv1.Route) http.Handler {
 			return h, nil
 		}
 
-		transportCfg := transportConfigFromGlobal(c.globalStore.Get(context.Background()))
+		var transportCfg *proxy.TransportConfig
+		if c.globalStore != nil {
+			if gc := c.globalStore.Get(context.Background()); gc != nil {
+				transportCfg = transportConfigFromGlobal(gc)
+			}
+		}
+
 		stripCORS := router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "cors") ||
 			router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "grpcweb")
 		pHandler := proxy.NewProxyHandlerBuilder(rt, c.serviceStore, nil).
@@ -106,18 +114,22 @@ func (c *ProxyCache) GetOrCreate(rt *gateonv1.Route) http.Handler {
 
 		h := router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)
 
+		if h == nil {
+			return nil, fmt.Errorf("failed to apply route middlewares")
+		}
+
 		// Atomic update: swap maps
-		newProxies := make(map[string]http.Handler, len(m)+1)
-		for k, v := range m {
-			newProxies[k] = v
+		newProxies := maps.Clone(m)
+		if newProxies == nil {
+			newProxies = make(map[string]http.Handler)
 		}
 		newProxies[rt.Id] = h
 		c.proxies.Store(newProxies)
 
 		phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
-		newPhMap := make(map[string]*proxy.ProxyHandler, len(phMap)+1)
-		for k, v := range phMap {
-			newPhMap[k] = v
+		newPhMap := maps.Clone(phMap)
+		if newPhMap == nil {
+			newPhMap = make(map[string]*proxy.ProxyHandler)
 		}
 		newPhMap[rt.Id] = pHandler
 		c.proxyHandlers.Store(newPhMap)
@@ -158,27 +170,19 @@ func (c *ProxyCache) invalidateLocked(id string) {
 	phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
 	m := c.proxies.Load().(map[string]http.Handler)
 
-	ph := phMap[id]
-	old := m[id]
+	ph, ok1 := phMap[id]
+	old, ok2 := m[id]
 
-	if ph == nil && old == nil {
+	if !ok1 && !ok2 {
 		return
 	}
 
-	newM := make(map[string]http.Handler, len(m))
-	for k, v := range m {
-		if k != id {
-			newM[k] = v
-		}
-	}
+	newM := maps.Clone(m)
+	delete(newM, id)
 	c.proxies.Store(newM)
 
-	newPhMap := make(map[string]*proxy.ProxyHandler, len(phMap))
-	for k, v := range phMap {
-		if k != id {
-			newPhMap[k] = v
-		}
-	}
+	newPhMap := maps.Clone(phMap)
+	delete(newPhMap, id)
 	c.proxyHandlers.Store(newPhMap)
 
 	if ph != nil {
@@ -212,10 +216,46 @@ func (c *ProxyCache) GetRouteStats(routeID string) []proxy.TargetStats {
 	return ph.GetStats()
 }
 
-// Sync runs periodic proxy cache maintenance (e.g. metrics).
+// Sync runs periodic proxy cache maintenance: pre-warms new routes and cleans up orphans.
 func (c *ProxyCache) Sync() {
+	// 1. Pre-warm: Ensure all active routes have a compiled proxy handler.
+	// This eliminates the first-request latency penalty and validates configs early.
+	for _, rt := range c.routeStore.List(context.Background()) {
+		if !rt.Disabled {
+			_ = c.GetOrCreate(rt)
+		}
+	}
+
+	// 2. Cleanup: Remove cached proxies for routes that no longer exist.
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	m := c.proxies.Load().(map[string]http.Handler)
-	_ = len(m)
+
+	proxies := c.proxies.Load().(map[string]http.Handler)
+	handlers := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
+
+	activeRoutes := make(map[string]bool)
+	for _, rt := range c.routeStore.List(context.Background()) {
+		activeRoutes[rt.Id] = true
+	}
+
+	orphans := make([]string, 0)
+	for id := range proxies {
+		if !activeRoutes[id] {
+			orphans = append(orphans, id)
+		}
+	}
+
+	if len(orphans) > 0 {
+		newProxies := maps.Clone(proxies)
+		newHandlers := maps.Clone(handlers)
+		for _, id := range orphans {
+			delete(newProxies, id)
+			if ph, ok := newHandlers[id]; ok {
+				delete(newHandlers, id)
+				go ph.DrainAndClose(drainTimeout)
+			}
+		}
+		c.proxies.Store(newProxies)
+		c.proxyHandlers.Store(newHandlers)
+	}
 }

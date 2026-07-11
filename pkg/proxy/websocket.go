@@ -210,7 +210,7 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 
 	// 101 Switching Protocols: record metrics, then tunnel
 	atomic.AddUint64(&state.requestCount, 1)
-	atomic.AddUint64(&state.latencySumMs, uint64(time.Since(start).Milliseconds()))
+	atomic.AddUint64(&state.latencySumUs, uint64(time.Since(start).Microseconds()))
 
 	// Forward headers to client, then tunnel
 	if err := resp.Write(clientConn); err != nil {

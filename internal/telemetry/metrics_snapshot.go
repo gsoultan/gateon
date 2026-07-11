@@ -24,13 +24,38 @@ type EbpfProvider interface {
 }
 
 var (
-	globalEbpfManager atomic.Pointer[EbpfProvider]
+	globalEbpfManager atomic.Value // stores EbpfProvider (interface)
 	lastSnapshot      atomic.Pointer[MetricsSnapshot]
 	snapshotMu        sync.Mutex
+
+	snapshotPool = sync.Pool{
+		New: func() any {
+			return &MetricsSnapshot{}
+		},
+	}
 )
 
+func (s *MetricsSnapshot) Reset() {
+	if s == nil {
+		return
+	}
+	// Use reflection or manual clear for complex structs.
+	// For now, just re-initialize the slices to reuse capacity.
+	s.RouteMetrics = s.RouteMetrics[:0]
+	s.TLSCertificates = s.TLSCertificates[:0]
+	s.Targets = s.Targets[:0]
+	s.IPMetrics = s.IPMetrics[:0]
+	s.CountryMetrics = s.CountryMetrics[:0]
+	s.ProtocolMetrics = s.ProtocolMetrics[:0]
+	s.DomainMetrics = s.DomainMetrics[:0]
+	s.HourlyDomainMetrics = s.HourlyDomainMetrics[:0]
+	s.DomainStatsRolling24h = s.DomainStatsRolling24h[:0]
+	s.TrafficHistory = s.TrafficHistory[:0]
+	s.ActiveShunnedEntities = s.ActiveShunnedEntities[:0]
+}
+
 func SetEbpfManager(m EbpfProvider) {
-	globalEbpfManager.Store(&m)
+	globalEbpfManager.Store(m)
 }
 
 // StartSnapshotLoop starts a background goroutine to periodically refresh the
@@ -41,7 +66,10 @@ func StartSnapshotLoop(ctx context.Context) {
 
 	// Initial snapshot
 	if snap, err := collectMetricsSnapshot(ctx, 50, 0); err == nil {
-		lastSnapshot.Store(snap)
+		old := lastSnapshot.Swap(snap)
+		if old != nil {
+			snapshotPool.Put(old)
+		}
 	}
 
 	for {
@@ -51,7 +79,10 @@ func StartSnapshotLoop(ctx context.Context) {
 		case <-ticker.C:
 			snap, err := collectMetricsSnapshot(ctx, 50, 0)
 			if err == nil {
-				lastSnapshot.Store(snap)
+				old := lastSnapshot.Swap(snap)
+				if old != nil {
+					snapshotPool.Put(old)
+				}
 			}
 		}
 	}
@@ -303,7 +334,9 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 		idx[f.GetName()] = f
 	}
 
-	snap := &MetricsSnapshot{}
+	snap := snapshotPool.Get().(*MetricsSnapshot)
+	snap.Reset()
+
 	snap.GoldenSignals = buildGoldenSignals(ctx, idx)
 	snap.RouteMetrics = buildRouteMetrics(idx)
 	snap.Middleware = buildMiddlewareMetrics(idx)
@@ -319,8 +352,10 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap.System = buildSystemMetrics(idx)
 	snap.Security = buildSecurityInsights(ctx, idx, limit, offset)
 	if m := globalEbpfManager.Load(); m != nil {
-		if ips, err := (*m).GetTopIPs(5); err == nil {
-			snap.Security.EbpfTopIPs = ips
+		if prov, ok := m.(EbpfProvider); ok {
+			if ips, err := prov.GetTopIPs(5); err == nil {
+				snap.Security.EbpfTopIPs = ips
+			}
 		}
 	}
 	snap.MitigationFunnel = buildMitigationFunnel(idx)

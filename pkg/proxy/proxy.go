@@ -77,13 +77,26 @@ func (h *ProxyHandler) Close() {
 
 // DrainAndClose waits for in-flight requests to complete (up to timeout), then closes.
 func (h *ProxyHandler) DrainAndClose(timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
 		if h.activeConnCount() == 0 {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ticker.C:
+			continue
+		case <-timer.C:
+			h.routeName = h.routeName + " (drain timeout)"
+			goto finish
+		}
 	}
+
+finish:
 	h.Close()
 }
 

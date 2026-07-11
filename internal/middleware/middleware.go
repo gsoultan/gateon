@@ -3,6 +3,7 @@ package middleware
 import (
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
 // The cycle-free core middleware primitives now live in the leaf package
@@ -17,7 +18,7 @@ type (
 	Middleware            = kind.Middleware
 	ContextKey            = kind.ContextKey
 	SecurityHeadersConfig = kind.SecurityHeadersConfig
-	StatusResponseWriter  = kind.StatusResponseWriter
+	StatusResponseWriter  = httputil.StatusResponseWriter
 	ErrorsConfig          = kind.ErrorsConfig
 	RequestState          = request.RequestState
 	DebugInfo             = request.DebugInfo
@@ -55,8 +56,8 @@ var (
 	IsDashboardPath         = kind.IsDashboardPath
 	ShouldSkipMetrics       = kind.ShouldSkipMetrics
 	IsCorsPreflight         = kind.IsCorsPreflight
-	GetStatusResponseWriter = kind.GetStatusResponseWriter
-	PutStatusResponseWriter = kind.PutStatusResponseWriter
+	GetStatusResponseWriter = httputil.GetStatusResponseWriter
+	PutStatusResponseWriter = httputil.PutStatusResponseWriter
 	RealIP                  = kind.RealIP
 	GetRequestID            = kind.GetRequestID
 	GenerateNonce           = kind.GenerateNonce
@@ -65,5 +66,5 @@ var (
 
 	// getStatusString is kept as an unexported alias so internal callers
 	// (e.g. standard.go) continue to compile without importing kind directly.
-	getStatusString = kind.StatusString
+	getStatusString = httputil.StatusString
 )

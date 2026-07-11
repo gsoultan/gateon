@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -66,7 +67,14 @@ func (r *RouteRegistry) load() {
 }
 
 func (r *RouteRegistry) rebuildSortedLocked() {
+	// Sort by Priority DESC, then by Rule length DESC (more specific first), then by Id
 	r.sorted = slices.SortedFunc(maps.Values(r.routes), func(a, b *gateonv1.Route) int {
+		if a.Priority != b.Priority {
+			return cmp.Compare(b.Priority, a.Priority)
+		}
+		if len(a.Rule) != len(b.Rule) {
+			return cmp.Compare(len(b.Rule), len(a.Rule))
+		}
 		return strings.Compare(a.Id, b.Id)
 	})
 
@@ -79,6 +87,19 @@ func (r *RouteRegistry) rebuildSortedLocked() {
 		if host != "" {
 			r.hostIndex[host] = append(r.hostIndex[host], rt)
 		}
+	}
+
+	// Also sort per-host slices
+	for _, items := range r.hostIndex {
+		slices.SortFunc(items, func(a, b *gateonv1.Route) int {
+			if a.Priority != b.Priority {
+				return cmp.Compare(b.Priority, a.Priority)
+			}
+			if len(a.Rule) != len(b.Rule) {
+				return cmp.Compare(len(b.Rule), len(a.Rule))
+			}
+			return strings.Compare(a.Id, b.Id)
+		})
 	}
 }
 

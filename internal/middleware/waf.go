@@ -128,8 +128,8 @@ var (
 	reputationStrings [101]string
 
 	fastScanner = scanner.NewScanner([]string{
-		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ", "EXEC ", // SQLi
-		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(", "alert(", // XSS
+		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ", "EXEC ", "sleep(", "benchmark(", "waitfor delay", // SQLi
+		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(", "alert(", "confirm(", "prompt(", // XSS
 		"/etc/passwd", "/etc/shadow", "/bin/sh", "cmd.exe", "/proc/self/", "/windows/system32", // LFI/RCE
 		"<?php", "base64_decode", "shell_exec", "system(", "passthru(", "exec(", // PHP
 		"authorized_keys", "id_rsa", "id_dsa", ".ssh/", // Creds
@@ -142,6 +142,9 @@ var (
 		"wp-admin", "wp-login", "wp-config.php", "xmlrpc.php", "wp-json", // WordPress
 		"wp-links-opml.php", "wp-config-sample.php", "readme.html", "license.txt", // WP info
 		"log4j", "jndi:ldap", "jndi:rmi", "${jndi:", // Log4j
+		"{{", "#{", "<%", "spring.datasource", "spring.cloud", // SSTI / Spring
+		"fs.readFile", "child_process", "process.env", // NodeJS
+		"metadata.google.internal", "169.254.169.254", // SSRF
 	})
 
 	safeHeaders = map[string]bool{
@@ -1227,6 +1230,11 @@ func (t *txWrapper) ProcessLogging() {
 
 				if shouldShun {
 					_ = t.cfg.EbpfManager.ShunIP(clientIP)
+				} else if anomalyScore >= 10 {
+					// Adaptive Rate Limit: Slow down suspicious IPs at XDP layer (packet level)
+					// rather than completely shunning them. This is less aggressive but
+					// highly effective at mitigating slow scanners and DoS.
+					_ = t.cfg.EbpfManager.SetAdaptiveRateLimit(clientIP, time.Second)
 				}
 			}
 		}
@@ -1498,6 +1506,20 @@ func isSuspiciousTLS(r *http.Request) bool {
 	// Modern browsers use TLS 1.2 or 1.3
 	if r.TLS.Version < 0x0303 { // < TLS 1.2
 		return true
+	}
+
+	// Browser consistency check:
+	// Most modern browsers support a large number of cipher suites,
+	// but automated tools often use a very limited or old set.
+	ua := r.Header.Get("User-Agent")
+	if isBrowserUA(ua) {
+		// If UA claims to be a modern browser but only supports few/old ciphers, it's suspicious.
+		negotiated := r.TLS.CipherSuite
+		// Some very old/weak ciphers that modern browsers would never negotiate if anything else is available:
+		switch negotiated {
+		case 0x0005, 0x0004, 0x000a: // RSA_WITH_RC4_128_SHA, RSA_WITH_RC4_128_MD5, RSA_WITH_3DES_EDE_CBC_SHA
+			return true
+		}
 	}
 	return false
 }

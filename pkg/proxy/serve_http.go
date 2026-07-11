@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,15 +46,15 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.handleGRPCAndHTTP2(r, state.url)
 
-	sw, ok := w.(*middleware.StatusResponseWriter)
+	sw, ok := w.(*httputil.StatusResponseWriter)
 	var pooled bool
 	if !ok {
-		sw = middleware.GetStatusResponseWriter(w)
+		sw = httputil.GetStatusResponseWriter(w)
 		w = sw
 		pooled = true
 	}
 	if pooled {
-		defer middleware.PutStatusResponseWriter(sw)
+		defer httputil.PutStatusResponseWriter(sw)
 	}
 
 	proxy := h.getOrCreateProxy(state)
@@ -140,7 +140,7 @@ func (h *ProxyHandler) handleGRPCAndHTTP2(r *http.Request, origURL string) {
 func (h *ProxyHandler) recordMetrics(state *targetState, start time.Time, status int) {
 	duration := time.Since(start)
 	atomic.AddUint64(&state.requestCount, 1)
-	atomic.AddUint64(&state.latencySumMs, uint64(duration.Milliseconds()))
+	atomic.AddUint64(&state.latencySumUs, uint64(duration.Microseconds()))
 	if status >= 500 {
 		atomic.AddUint64(&state.errorCount, 1)
 	}

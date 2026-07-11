@@ -18,13 +18,14 @@ type TargetStats struct {
 	RequestCount uint64 `json:"request_count"`
 	ErrorCount   uint64 `json:"error_count"`
 	AvgLatencyMs uint64 `json:"avg_latency_ms"`
+	AvgLatencyUs uint64 `json:"avg_latency_us"`
 	ActiveConn   int32  `json:"active_conn"`
 }
 
 func targetStatsFromState(t *targetState) TargetStats {
-	avg := uint64(0)
+	avgUs := uint64(0)
 	if atomic.LoadUint64(&t.requestCount) > 0 {
-		avg = atomic.LoadUint64(&t.latencySumMs) / atomic.LoadUint64(&t.requestCount)
+		avgUs = atomic.LoadUint64(&t.latencySumUs) / atomic.LoadUint64(&t.requestCount)
 	}
 	alive := t.alive.Load()
 	circuit := CircuitClosed
@@ -37,7 +38,8 @@ func targetStatsFromState(t *targetState) TargetStats {
 		CircuitState: circuit,
 		RequestCount: atomic.LoadUint64(&t.requestCount),
 		ErrorCount:   atomic.LoadUint64(&t.errorCount),
-		AvgLatencyMs: avg,
+		AvgLatencyMs: avgUs / 1000,
+		AvgLatencyUs: avgUs,
 		ActiveConn:   atomic.LoadInt32(&t.activeConn),
 	}
 }
