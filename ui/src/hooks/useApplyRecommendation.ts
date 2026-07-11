@@ -17,8 +17,9 @@ export function useApplyRecommendation() {
 
   return useMutation({
     mutationFn: async (req: ApplyRecommendationRequest) => {
-      const response = await apiFetch("/gateon.v1.ApiService/ApplyRecommendation", {
+      const response = await apiFetch("/v1/diagnostics/recommendation", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
       if (!response.ok) {

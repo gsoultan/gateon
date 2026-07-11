@@ -453,7 +453,7 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 				// Smart Token Detection in matched data:
 				for _, md := range mr.MatchedDatas() {
 					v := md.Value()
-					if len(v) > 80 && (isJWT(v) || entropy.CalculateString(v) > 4.5) {
+					if len(v) > 80 && (isJWT(v) || isPaseto(v) || entropy.CalculateString(v) > 4.5) {
 						recommendation += "\nSmart Insight: The blocked value appears to be a legitimate security token or cryptographic hash. Use the 'Mark as False Positive' button to automatically create a targeted exclusion for this field."
 						break
 					}
@@ -483,8 +483,8 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 					explanation = "The client claims to be a modern browser but is missing mandatory headers like 'Accept-Encoding', suggesting a scripted attack."
 					recommendation = "Review the client's traffic patterns. If this is a legitimate automated tool, ensure it sends standard browser-like headers."
 				case "fast_path_malformed_token":
-					explanation = "Malformed security token (JWT) structure detected in the Authorization header."
-					recommendation = "Ensure your client is sending a valid JWT. If you are using a custom token format, you may need to adjust the Gateon Fast-Path settings."
+					explanation = "Malformed security token structure detected in the Authorization header."
+					recommendation = "Ensure your client is sending a valid security token (JWT, Paseto). If you are using a custom token format, you may need to adjust the Gateon Fast-Path settings."
 				}
 			}
 		}
@@ -744,17 +744,29 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				}
 			}
 
-			// 3. JWT Fast-Check
+			// 3. Security Token Fast-Check
 			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 				token := auth[7:]
-				// JWTs are usually > 32 chars and follow 3-part structure.
-				// If it contains dots, we assume it's a JWT and validate its structure.
-				// Opaque tokens (no dots) are allowed regardless of length.
-				if len(token) > 32 && strings.Contains(token, ".") && !isJWT(token) {
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_malformed_token", "Malformed JWT structure in Authorization header")
-					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_malformed_token").Inc()
-					http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
-					return
+				// We enforce structure only for tokens that claim to be a known format (JWT, Paseto).
+				// "Anything tokens" with dots are allowed to pass to the main WAF engine.
+				if len(token) > 32 && strings.Contains(token, ".") {
+					isMalformed := false
+					if isLikelyJWT(token) {
+						if !isJWT(token) {
+							isMalformed = true
+						}
+					} else if isLikelyPaseto(token) {
+						if !isPaseto(token) {
+							isMalformed = true
+						}
+					}
+
+					if isMalformed {
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_malformed_token", "Malformed security token structure in Authorization header")
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_malformed_token").Inc()
+						http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
+						return
+					}
 				}
 			}
 
@@ -1528,6 +1540,39 @@ func isSuspiciousTLS(r *http.Request) bool {
 func isJWT(token string) bool {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if !isBase64URL(p) {
+			return false
+		}
+	}
+	return true
+}
+
+// isLikelyJWT reports whether the token starts with common JWT header prefixes.
+func isLikelyJWT(token string) bool {
+	// JWT headers are JSON objects. Base64url of '{"' is 'eyJ'.
+	return strings.HasPrefix(token, "eyJ")
+}
+
+// isLikelyPaseto reports whether the token starts with a Paseto version prefix.
+func isLikelyPaseto(token string) bool {
+	return len(token) > 9 && (strings.HasPrefix(token, "v1.") || strings.HasPrefix(token, "v2.") ||
+		strings.HasPrefix(token, "v3.") || strings.HasPrefix(token, "v4."))
+}
+
+// isPaseto checks if a token has a valid Paseto structure (3 or 4 parts).
+func isPaseto(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) < 3 || len(parts) > 4 {
+		return false
+	}
+	// Paseto uses a version (v1-v4) and purpose (local/public) header.
+	if !strings.HasPrefix(parts[0], "v") || len(parts[0]) != 2 {
+		return false
+	}
+	if parts[1] != "local" && parts[1] != "public" {
 		return false
 	}
 	for _, p := range parts {
