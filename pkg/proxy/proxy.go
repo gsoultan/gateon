@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -10,7 +12,9 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -138,12 +142,31 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 		}
 	}
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if errors.Is(err, context.Canceled) {
+			// Client disconnected, not a proxy error.
+			// Use 499 (Client Closed Request) to avoid counting as 5xx error.
+			w.WriteHeader(499)
+			return
+		}
+
+		status := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+
 		atomic.AddUint64(&state.errorCount, 1)
 		routeID := middleware.GetRouteName(r)
 		if routeID != "" {
 			telemetry.RequestFailuresTotal.WithLabelValues(routeID, "service_down").Inc()
 		}
-		w.WriteHeader(http.StatusBadGateway)
+		logger.L.LogError("Proxy error",
+			"error", err,
+			"target", state.url,
+			"route", routeID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"request_id", request.GetID(r))
+		w.WriteHeader(status)
 	}
 	if v, loaded := h.proxyPool.LoadOrStore(state.cacheKey, rp); loaded {
 		return v.(*httputil.ReverseProxy)
