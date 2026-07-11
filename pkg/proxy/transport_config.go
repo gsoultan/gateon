@@ -13,7 +13,7 @@ type TransportConfig struct {
 const (
 	DefaultMaxIdleConns        = 10000
 	DefaultMaxIdleConnsPerHost = 1000
-	DefaultIdleConnTimeout     = 90 * time.Second
+	DefaultIdleConnTimeout     = 60 * time.Second
 )
 
 func (c *TransportConfig) maxIdleConns() int {

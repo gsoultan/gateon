@@ -116,6 +116,7 @@ func (h *ProxyHandler) prepareRequest(r *http.Request, state *targetState, targe
 func (h *ProxyHandler) handleGRPCAndHTTP2(r *http.Request, origURL string) {
 	isH2C := strings.HasPrefix(origURL, "h2c://")
 	isH3 := strings.HasPrefix(origURL, "h3://")
+	isHTTPS := strings.HasPrefix(origURL, "https://") || strings.HasPrefix(origURL, "h2://")
 	contentType := r.Header.Get("Content-Type")
 	isGRPC := len(contentType) >= 16 && strings.EqualFold(contentType[:16], "application/grpc")
 
@@ -124,9 +125,14 @@ func (h *ProxyHandler) handleGRPCAndHTTP2(r *http.Request, origURL string) {
 		r.ProtoMinor = 0
 		r.Proto = "HTTP/3.0"
 	} else if isGRPC || isH2C {
-		r.ProtoMajor = 2
-		r.ProtoMinor = 0
-		r.Proto = "HTTP/2.0"
+		// Only force HTTP/2 if the transport is likely to support it.
+		// For cleartext http://, forcing HTTP/2 (without H2C) causes Transport errors.
+		if isH2C || isHTTPS {
+			r.ProtoMajor = 2
+			r.ProtoMinor = 0
+			r.Proto = "HTTP/2.0"
+		}
+
 		if isGRPC {
 			r.Header.Del("Content-Length")
 			r.ContentLength = -1
