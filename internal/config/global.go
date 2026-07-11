@@ -22,6 +22,7 @@ type ConfigChangeFunc func(oldCfg, newCfg *gateonv1.GlobalConfig)
 type GlobalRegistry struct {
 	mu        sync.RWMutex
 	config    *gateonv1.GlobalConfig
+	certIndex map[string]*gateonv1.Certificate // cert ID -> certificate for O(1) lookup
 	path      string
 	listeners []ConfigChangeFunc
 }
@@ -82,7 +83,8 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 			Alerting: &gateonv1.AlertingConfig{},
 			Audit:    &gateonv1.AuditConfig{},
 		},
-		path: path,
+		certIndex: make(map[string]*gateonv1.Certificate),
+		path:      path,
 	}
 	reg.load()
 	globalMu.Lock()
@@ -124,7 +126,17 @@ func (r *GlobalRegistry) load() {
 		}
 	}
 	decryptSensitiveFields(r.config)
+	r.rebuildCertIndexLocked()
 	logger.L.LogInfo("loaded global config", "path", r.path)
+}
+
+func (r *GlobalRegistry) rebuildCertIndexLocked() {
+	r.certIndex = make(map[string]*gateonv1.Certificate)
+	if r.config.Tls != nil {
+		for _, c := range r.config.Tls.Certificates {
+			r.certIndex[c.Id] = c
+		}
+	}
 }
 
 func (r *GlobalRegistry) saveLocked() error {
@@ -191,6 +203,13 @@ func (r *GlobalRegistry) Get(ctx context.Context) *gateonv1.GlobalConfig {
 	return r.config
 }
 
+func (r *GlobalRegistry) GetCertificate(id string) (*gateonv1.Certificate, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.certIndex[id]
+	return c, ok
+}
+
 // Subscribe registers a listener that is notified after every successful
 // configuration update. Listeners are invoked synchronously (in registration
 // order) with clones of the old and new config, so they must not block for long
@@ -208,6 +227,7 @@ func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig
 	r.mu.Lock()
 	oldCfg := r.config
 	r.config = conf
+	r.rebuildCertIndexLocked()
 	if err := r.saveLocked(); err != nil {
 		r.config = oldCfg
 		r.mu.Unlock()

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
 func TestIsInternalPath(t *testing.T) {
@@ -132,7 +133,7 @@ func TestStatusString(t *testing.T) {
 		{700, "700"}, // outside cached range, still correct
 	}
 	for _, tc := range tests {
-		if got := StatusString(tc.code); got != tc.want {
+		if got := httputil.StatusString(tc.code); got != tc.want {
 			t.Errorf("StatusString(%d) = %q; want %q", tc.code, got, tc.want)
 		}
 	}
@@ -140,8 +141,8 @@ func TestStatusString(t *testing.T) {
 
 func TestStatusResponseWriterCapturesStatusAndBytes(t *testing.T) {
 	rec := httptest.NewRecorder()
-	sw := GetStatusResponseWriter(rec)
-	defer PutStatusResponseWriter(sw)
+	sw := httputil.GetStatusResponseWriter(rec)
+	defer httputil.PutStatusResponseWriter(sw)
 
 	// Ensure a measurable, non-zero gap between writer creation (start) and the
 	// first write so TTFB is deterministically > 0 regardless of monotonic-clock
@@ -200,8 +201,8 @@ func TestRecovery(t *testing.T) {
 
 	t.Run("panic after header sent", func(t *testing.T) {
 		h := Recovery()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			sw := GetStatusResponseWriter(w)
-			defer PutStatusResponseWriter(sw)
+			sw := httputil.GetStatusResponseWriter(w)
+			defer httputil.PutStatusResponseWriter(sw)
 			sw.WriteHeader(http.StatusOK)
 			panic("test panic after write")
 		}))

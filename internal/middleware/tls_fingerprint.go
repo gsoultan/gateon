@@ -31,7 +31,6 @@ var (
 
 type fingerprintShard struct {
 	conns map[net.Conn]Fingerprints
-	addrs map[string]Fingerprints
 	mu    sync.RWMutex
 }
 
@@ -39,7 +38,6 @@ func init() {
 	for i := 0; i < numShards; i++ {
 		shards[i] = &fingerprintShard{
 			conns: make(map[net.Conn]Fingerprints),
-			addrs: make(map[string]Fingerprints),
 		}
 	}
 }
@@ -49,15 +47,6 @@ func getShard(conn net.Conn) *fingerprintShard {
 	// An interface is two words: (itab/type, data). We use the data pointer for sharding.
 	p := uintptr((*[2]unsafe.Pointer)(unsafe.Pointer(&conn))[1])
 	return shards[p%numShards]
-}
-
-func getShardForAddr(addr string) *fingerprintShard {
-	var h uint64 = 14695981039346656037
-	for i := 0; i < len(addr); i++ {
-		h ^= uint64(addr[i])
-		h *= 1099511628211
-	}
-	return shards[h%numShards]
 }
 
 type Fingerprints struct {
@@ -71,29 +60,15 @@ func GetFingerprints(conn net.Conn) Fingerprints {
 	}
 	s := getShard(conn)
 	s.mu.RLock()
-	f, ok := s.conns[conn]
+	f := s.conns[conn]
 	s.mu.RUnlock()
-	if ok {
-		return f
-	}
-
-	// Fallback to remote address if pointer identity is lost due to wrapping.
-	// We avoid the String() allocation if possible, but RemoteAddr().String() is standard.
-	addr := conn.RemoteAddr().String()
-	as := getShardForAddr(addr)
-	as.mu.RLock()
-	defer as.mu.RUnlock()
-	return as.addrs[addr]
+	return f
 }
 
 func GetFingerprintsByAddr(addr string) Fingerprints {
-	if addr == "" {
-		return Fingerprints{}
-	}
-	s := getShardForAddr(addr)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.addrs[addr]
+	// This was only for the IP fallback which we've removed for performance and correctness
+	// behind proxies like Cloudflare.
+	return Fingerprints{}
 }
 
 func SetFingerprints(conn net.Conn, f Fingerprints) {
@@ -104,14 +79,6 @@ func SetFingerprints(conn net.Conn, f Fingerprints) {
 	s.mu.Lock()
 	s.conns[conn] = f
 	s.mu.Unlock()
-
-	if ra := conn.RemoteAddr(); ra != nil {
-		addr := ra.String()
-		as := getShardForAddr(addr)
-		as.mu.Lock()
-		as.addrs[addr] = f
-		as.mu.Unlock()
-	}
 }
 
 func RemoveFingerprints(conn net.Conn) {
@@ -122,14 +89,6 @@ func RemoveFingerprints(conn net.Conn) {
 	s.mu.Lock()
 	delete(s.conns, conn)
 	s.mu.Unlock()
-
-	if ra := conn.RemoteAddr(); ra != nil {
-		addr := ra.String()
-		as := getShardForAddr(addr)
-		as.mu.Lock()
-		delete(as.addrs, addr)
-		as.mu.Unlock()
-	}
 }
 
 // CalcFingerprints calculates a JA3-like fingerprint from ClientHelloInfo.

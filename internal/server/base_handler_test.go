@@ -19,6 +19,10 @@ func (m *mockRouteStore) List(ctx context.Context) []*gateonv1.Route {
 	return nil
 }
 
+func (m *mockRouteStore) ListWildcards(ctx context.Context) []*gateonv1.Route {
+	return nil
+}
+
 func (m *mockRouteStore) ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *config.RouteFilter) ([]*gateonv1.Route, int32) {
 	return nil, 0
 }
@@ -49,6 +53,17 @@ type mockGlobalReg struct {
 
 func (m *mockGlobalReg) Get(ctx context.Context) *gateonv1.GlobalConfig {
 	return m.config
+}
+
+func (m *mockGlobalReg) GetCertificate(id string) (*gateonv1.Certificate, bool) {
+	if m.config != nil && m.config.Tls != nil {
+		for _, c := range m.config.Tls.Certificates {
+			if c.Id == id {
+				return c, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func (m *mockGlobalReg) Update(ctx context.Context, config *gateonv1.GlobalConfig) error {

@@ -220,49 +220,43 @@ func GenerateFingerprint(r *http.Request) *ClientFingerprint {
 // GenerateJA4H generates a JA4H HTTP fingerprint.
 // Format: [method(1)][version(1)][cookie(1)][referer(1)][header_count(2)][header_hash(12)]
 func GenerateJA4H(r *http.Request) string {
-	methodChar := "o" // other
+	methodChar := byte('o') // other
 	switch r.Method {
 	case "GET":
-		methodChar = "g"
+		methodChar = 'g'
 	case "POST":
-		methodChar = "p"
+		methodChar = 'p'
 	}
 
-	versionChar := "2"
+	versionChar := byte('2')
 	if strings.Contains(r.Proto, "1.1") {
-		versionChar = "1"
+		versionChar = '1'
 	} else if strings.Contains(r.Proto, "3") {
-		versionChar = "3"
+		versionChar = '3'
 	}
 
-	cookieChar := "n"
+	cookieChar := byte('n')
 	if r.Header.Get("Cookie") != "" {
-		cookieChar = "c"
+		cookieChar = 'c'
 	}
 
-	refererChar := "n"
+	refererChar := byte('n')
 	if r.Header.Get("Referer") != "" {
-		refererChar = "r"
+		refererChar = 'r'
 	}
 
 	headerCount := len(r.Header)
 
 	// Collect and sort headers for stable hashing
-	headerKeys := headerKeysPool.Get().([]string)
-	headerKeys = headerKeys[:0]
+	headerKeysRaw := headerKeysPool.Get().([]string)
+	headerKeys := headerKeysRaw[:0]
 	for k := range r.Header {
 		headerKeys = append(headerKeys, k)
 	}
 	slices.Sort(headerKeys)
-	defer func() {
-		if cap(headerKeys) <= 128 {
-			headerKeysPool.Put(headerKeys)
-		}
-	}()
 
 	h := hashPool.Get().(hash.Hash)
 	h.Reset()
-	defer hashPool.Put(h)
 
 	for _, k := range headerKeys {
 		if k == "Cookie" || k == "Referer" {
@@ -271,14 +265,21 @@ func GenerateJA4H(r *http.Request) string {
 		io.WriteString(h, k)
 		io.WriteString(h, ",")
 	}
-	headerHash := hex.EncodeToString(h.Sum(nil))[:12]
+	headerHashBytes := h.Sum(nil)
+	headerHash := hex.EncodeToString(headerHashBytes)[:12]
+
+	// Put back to pools
+	if cap(headerKeys) <= 128 {
+		headerKeysPool.Put(headerKeysRaw)
+	}
+	hashPool.Put(h)
 
 	// method(1) + version(1) + cookie(1) + referer(1) + count(2) + hash(12) = 18 chars
 	var buf [18]byte
-	buf[0] = methodChar[0]
-	buf[1] = versionChar[0]
-	buf[2] = cookieChar[0]
-	buf[3] = refererChar[0]
+	buf[0] = methodChar
+	buf[1] = versionChar
+	buf[2] = cookieChar
+	buf[3] = refererChar
 	if headerCount < 10 {
 		buf[4] = '0'
 		buf[5] = byte('0' + headerCount)
