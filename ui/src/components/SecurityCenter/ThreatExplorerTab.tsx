@@ -44,7 +44,19 @@ import { notifications } from "@mantine/notifications";
 const PAGE_SIZE = 15;
 
 export function ThreatExplorerTab() {
-  const { data, isLoading, error, refetch } = useSecurityThreats(1000);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
+  const [mitigatedFilter, setMitigatedFilter] = useState<string | null>("all");
+  const [page, setPage] = useState(1);
+
+  const { data, isLoading, error, refetch } = useSecurityThreats({
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+    search,
+    category: categoryFilter || "all",
+    status: mitigatedFilter || "all",
+  });
+
   const density = useTableDensity();
   const removeMitigation = useRemoveMitigation();
   const [unmitigating, setUnmitigating] = useState<string | null>(null);
@@ -53,55 +65,21 @@ export function ThreatExplorerTab() {
   const [traceIp, setTraceIp] = useState<string>("");
   const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
 
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
-  const [mitigatedFilter, setMitigatedFilter] = useState<string | null>("all");
-  const [page, setPage] = useState(1);
-
-  const filteredThreats = useMemo(() => {
-    if (!data?.threats) return [];
-    return data.threats
-      .filter((t) => {
-        const source = t.source || "";
-        const description = t.description || "";
-        const type = t.type || "";
-
-        const matchesSearch =
-          source.toLowerCase().includes(search.toLowerCase()) ||
-          description.toLowerCase().includes(search.toLowerCase()) ||
-          type.toLowerCase().includes(search.toLowerCase());
-
-        const matchesCategory =
-          categoryFilter === "all" || t.category === categoryFilter;
-
-        const matchesMitigated =
-          mitigatedFilter === "all" ||
-          (mitigatedFilter === "mitigated" && t.mitigated) ||
-          (mitigatedFilter === "detected" && !t.mitigated);
-
-        return matchesSearch && matchesCategory && matchesMitigated;
-      })
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [data?.threats, search, categoryFilter, mitigatedFilter]);
+  const threats = data?.threats || [];
+  const totalCount = data?.totalCount || 0;
 
   const categories = useMemo(() => {
-    if (!data?.threats) return [];
-    const cats = new Set(data.threats.map((t) => t.category).filter((c): c is string => !!c));
+    if (!threats) return ["all"];
+    const cats = new Set(threats.map((t) => t.category).filter((c): c is string => !!c));
     return ["all", ...Array.from(cats)];
-  }, [data?.threats]);
+  }, [threats]);
 
-  // Reset to the first page whenever the filtered result set changes (new filter,
-  // search term, or refreshed data) so the user never lands on an empty page.
+  // Reset to the first page whenever the search or filters change
   useEffect(() => {
     setPage(1);
   }, [search, categoryFilter, mitigatedFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredThreats.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pagedThreats = filteredThreats.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE,
-  );
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const getThreatIcon = (type: string, category?: string) => {
     const t = type.toLowerCase();
@@ -212,8 +190,8 @@ export function ThreatExplorerTab() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {filteredThreats.length > 0 ? (
-                pagedThreats.map((threat, index) => (
+              {threats.length > 0 ? (
+                threats.map((threat, index) => (
                   <Table.Tr key={index} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(threat)}>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
@@ -304,16 +282,16 @@ export function ThreatExplorerTab() {
           </Table>
         </Table.ScrollContainer>
 
-        {filteredThreats.length > PAGE_SIZE && (
+        {totalCount > PAGE_SIZE && (
           <Group justify="space-between" align="center" mt="md">
             <Text size="xs" c="dimmed">
-              Showing {(currentPage - 1) * PAGE_SIZE + 1}–
-              {Math.min(currentPage * PAGE_SIZE, filteredThreats.length)} of{" "}
-              {filteredThreats.length}
+              Showing {(page - 1) * PAGE_SIZE + 1}–
+              {Math.min(page * PAGE_SIZE, totalCount)} of{" "}
+              {totalCount}
             </Text>
             <Pagination
               total={totalPages}
-              value={currentPage}
+              value={page}
               onChange={setPage}
               size="sm"
               radius="md"

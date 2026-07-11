@@ -327,6 +327,12 @@ type SecurityThreat struct {
 	TriggeredRules  string    `json:"triggered_rules"`
 }
 
+type ThreatFilter struct {
+	Search   string
+	Category string
+	Status   string // all, mitigated, detected
+}
+
 type pathStatsStore struct {
 	db                          *sql.DB
 	pebble                      *pebble.DB
@@ -1500,8 +1506,41 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 	return th, nil
 }
 
+func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix bool) (string, []any) {
+	if filter == nil {
+		return "", nil
+	}
+	var conditions []string
+	var args []any
+	prefix := ""
+	if usePrefix {
+		prefix = "t."
+	}
+
+	if filter.Search != "" {
+		s := "%" + filter.Search + "%"
+		conditions = append(conditions, fmt.Sprintf("(%ssource_ip LIKE ? OR %sdetails LIKE ? OR %stype LIKE ? OR %scategory LIKE ?)", prefix, prefix, prefix, prefix))
+		args = append(args, s, s, s, s)
+	}
+	if filter.Category != "" && filter.Category != "all" {
+		conditions = append(conditions, prefix+"category = ?")
+		args = append(args, filter.Category)
+	}
+	if filter.Status == "mitigated" {
+		conditions = append(conditions, prefix+"action_taken IN ('blocked', 'challenged', 'shunned')")
+		conditions = append(conditions, "(m.status IS NULL OR m.status != 'unmitigated')")
+	} else if filter.Status == "detected" {
+		conditions = append(conditions, fmt.Sprintf("(%saction_taken NOT IN ('blocked', 'challenged', 'shunned') OR m.status = 'unmitigated')", prefix))
+	}
+
+	if len(conditions) == 0 {
+		return "", nil
+	}
+	return " WHERE " + strings.Join(conditions, " AND "), args
+}
+
 // GetSecurityThreats returns a paged list of security threats from the store.
-func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThreat {
+func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
 	s := getStore()
 	if s == nil {
 		return nil
@@ -1515,8 +1554,20 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThrea
 	if offset < 0 {
 		offset = 0
 	}
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
-	rows, err := s.db.QueryContext(ctx, query, limit, offset)
+
+	useJoin := filter != nil && filter.Status != "" && filter.Status != "all"
+	where, args := buildThreatFilterQuery(s.dialect, filter, useJoin)
+	var query string
+	if useJoin {
+		query = s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, COALESCE(t.request_headers, ''), COALESCE(t.request_body, ''), COALESCE(t.response_headers, ''), COALESCE(t.response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), t.confidence, t.entropy, t.cluster_size, COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, '') " +
+			"FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip " +
+			where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
+	} else {
+		query = s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, '') FROM security_threats " + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	}
+	args = append(args, limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
 		return nil
@@ -1545,7 +1596,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int) []*SecurityThrea
 // which under load blows the snapshot's request deadline ("threats: scan failed:
 // context deadline exceeded") and bloats the SSE payload. The full-blob variant
 // (GetSecurityThreats) remains for the detail/Threat-Explorer endpoint.
-func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityThreat {
+func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
 	s := getStore()
 	if s == nil {
 		return nil
@@ -1559,8 +1610,20 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityT
 	if offset < 0 {
 		offset = 0
 	}
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(recommendation, ''), COALESCE(triggered_rules, '') FROM security_threats ORDER BY timestamp DESC LIMIT ? OFFSET ?")
-	rows, err := s.db.QueryContext(ctx, query, limit, offset)
+
+	useJoin := filter != nil && filter.Status != "" && filter.Status != "all"
+	where, args := buildThreatFilterQuery(s.dialect, filter, useJoin)
+	var query string
+	if useJoin {
+		query = s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, '') " +
+			"FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip " +
+			where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
+	} else {
+		query = s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(recommendation, ''), COALESCE(triggered_rules, '') FROM security_threats " + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+	}
+	args = append(args, limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
 		return nil
@@ -1582,14 +1645,21 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int) []*SecurityT
 }
 
 // CountSecurityThreats returns the total number of security threats in the store.
-func CountSecurityThreats(ctx context.Context) int64 {
+func CountSecurityThreats(ctx context.Context, filter *ThreatFilter) int64 {
 	s := getStore()
 	if s == nil {
 		return 0
 	}
+	useJoin := filter != nil && filter.Status != "" && filter.Status != "all"
+	where, args := buildThreatFilterQuery(s.dialect, filter, useJoin)
+	var query string
+	if useJoin {
+		query = s.dialect.Rebind("SELECT COUNT(*) FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip " + where)
+	} else {
+		query = s.dialect.Rebind("SELECT COUNT(*) FROM security_threats " + where)
+	}
 	var count int64
-	query := s.dialect.Rebind("SELECT COUNT(*) FROM security_threats")
-	err := s.db.QueryRowContext(ctx, query).Scan(&count)
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0
 	}

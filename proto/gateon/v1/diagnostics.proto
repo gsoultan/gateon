@@ -65,10 +65,22 @@ message ReputationSyncPayload {
 message ListSecurityThreatsRequest {
   int32 limit = 1;
   int32 offset = 2;
+  string search = 3;
+  string category = 4;
+  string status = 5; // all, mitigated, detected
 }
 
 message ListSecurityThreatsResponse {
   repeated Anomaly threats = 1;
+  int32 total_count = 2;
+}
+
+message GetSecurityThreatRequest {
+  string id = 1;
+}
+
+message GetSecurityThreatResponse {
+  Anomaly threat = 1;
 }
 
 message ListReputationsRequest {
