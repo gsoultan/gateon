@@ -660,7 +660,23 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 				limit = l
 			}
 		}
-		res, err := svc.ListSecurityThreats(r.Context(), &gateonv1.ListSecurityThreatsRequest{Limit: int32(limit)})
+		offset := 0
+		if oStr := r.URL.Query().Get("offset"); oStr != "" {
+			if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+				offset = o
+			}
+		}
+		search := r.URL.Query().Get("search")
+		category := r.URL.Query().Get("category")
+		status := r.URL.Query().Get("status")
+
+		res, err := svc.ListSecurityThreats(r.Context(), &gateonv1.ListSecurityThreatsRequest{
+			Limit:    int32(limit),
+			Offset:   int32(offset),
+			Search:   search,
+			Category: category,
+			Status:   status,
+		})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
