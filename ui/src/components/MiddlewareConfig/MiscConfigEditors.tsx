@@ -1,5 +1,40 @@
-import { Stack, TextInput, Group, NumberInput, Switch, TagsInput } from "@mantine/core";
+import { Stack, TextInput, Group, NumberInput, Switch, TagsInput, Select } from "@mantine/core";
 import { KeyValueList } from "./KeyValueList";
+
+export const CORS_PRESETS: Record<string, Record<string, string>> = {
+  permissive: {
+    allowed_origins: "*",
+    allowed_methods: "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
+    allowed_headers: "*",
+    exposed_headers: "*",
+    allow_credentials: "true",
+    max_age: "86400",
+  },
+  standard: {
+    allowed_origins: "*",
+    allowed_methods: "GET, POST, OPTIONS",
+    allowed_headers: "Content-Type, Authorization, Accept",
+    exposed_headers: "Content-Length, Content-Type",
+    allow_credentials: "true",
+    max_age: "3600",
+  },
+  "grpc-web": {
+    allowed_origins: "*",
+    allowed_methods: "POST, OPTIONS",
+    allowed_headers: "Content-Type, X-User-Agent, X-Grpc-Web, Grpc-Timeout",
+    exposed_headers: "Grpc-Status, Grpc-Message, Grpc-Encoding, Grpc-Accept-Encoding, X-Grpc-Web, X-Accept-Content-Transfer-Encoding, X-Accept-Response-Streaming",
+    allow_credentials: "true",
+    max_age: "86400",
+  },
+  restricted: {
+    allowed_origins: "",
+    allowed_methods: "GET",
+    allowed_headers: "Accept",
+    exposed_headers: "",
+    allow_credentials: "false",
+    max_age: "600",
+  },
+};
 
 interface EditorProps {
   config: Record<string, string>;
@@ -42,12 +77,42 @@ export function RewriteConfigEditor({ config, updateConfig, onChange }: EditorPr
   );
 }
 
-export function CORSConfigEditor({ config, updateConfig }: Omit<EditorProps, 'onChange'>) {
+export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps) {
   const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
   const joinTags = (tags: string[]) => tags.join(", ");
 
+  const applyPreset = (presetName: string) => {
+    if (!presetName) {
+      updateConfig("preset", "");
+      return;
+    }
+    const preset = CORS_PRESETS[presetName];
+    if (preset) {
+      onChange({
+        ...config,
+        ...preset,
+        preset: presetName,
+      });
+    }
+  };
+
   return (
     <Stack gap="md">
+      <Select
+        label="CORS Preset"
+        placeholder="Select a preset to auto-fill"
+        data={[
+          { value: "permissive", label: "Permissive (Allow All)" },
+          { value: "standard", label: "Standard HTTP" },
+          { value: "grpc-web", label: "gRPC-Web Standard" },
+          { value: "restricted", label: "Restricted" },
+        ]}
+        value={config.preset || ""}
+        onChange={(val) => applyPreset(val || "")}
+        clearable
+        description="Choosing a preset will populate fields below with common defaults."
+      />
+
       <TagsInput
         label="Allowed Origins"
         placeholder="*, https://example.com"

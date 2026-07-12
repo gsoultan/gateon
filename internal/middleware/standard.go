@@ -518,6 +518,10 @@ var bodyRecorderPool = sync.Pool{
 func Debugger(globalStore config.GlobalConfigStore) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if globalStore == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
 			conf := globalStore.Get(r.Context())
 			if conf == nil || conf.Debugger == nil || !conf.Debugger.Enabled {
 				next.ServeHTTP(w, r)
