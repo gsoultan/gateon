@@ -142,8 +142,18 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	ctx := context.Background()
 	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		sniHost := strings.TrimSpace(hello.ServerName)
+		var fingerprints *middleware.Fingerprints // lazy-calc fingerprints
+
+		getFp := func() middleware.Fingerprints {
+			if fingerprints == nil {
+				f := middleware.CalcFingerprints(hello)
+				fingerprints = &f
+			}
+			return *fingerprints
+		}
+
 		if sniHost != "" {
-			// Strip port from SNI if present (RFC 6066 allows hostname only; some clients may send host:port)
+			// Strip port from SNI if present
 			if idx := strings.LastIndex(sniHost, ":"); idx > 0 {
 				sniHost = sniHost[:idx]
 			}
@@ -152,23 +162,16 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 			// Fast-path: O(1) exact host lookup
 			exactRoutes := deps.RouteStore.GetByHost(sniHost)
 			for _, rt := range exactRoutes {
-				if rt.Disabled || rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
-					continue
-				}
-				routeHost := router.HostFromRule(rt.Rule)
-				if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
-					continue
-				}
-				if !router.RouteHostIsExact(routeHost) {
+				if rt.Disabled || rt.Tls == nil {
 					continue
 				}
 
 				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
-					middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+					middleware.SetFingerprints(hello.Conn, getFp())
 					return cached.(*tls.Config), nil
 				}
 
-				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps); newCfg != nil {
+				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
 					tlsConfigCache.Store(rt.Id, newCfg)
 					return newCfg, nil
 				}
@@ -188,10 +191,10 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					}
 				}
 				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
-					middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+					middleware.SetFingerprints(hello.Conn, getFp())
 					return cached.(*tls.Config), nil
 				}
-				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps); newCfg != nil {
+				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
 					tlsConfigCache.Store(rt.Id, newCfg)
 					return newCfg, nil
 				}
@@ -202,11 +205,11 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 		gc := deps.GlobalStore.Get(context.Background())
 		if gc != nil && gc.Tls != nil {
 			if cached, ok := tlsConfigCache.Load("fallback"); ok {
-				middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+				middleware.SetFingerprints(hello.Conn, getFp())
 				return cached.(*tls.Config), nil
 			}
 
-			if newCfg := buildFallbackTLSConfig(hello, gc, tlsConfig, tlsManager); newCfg != nil {
+			if newCfg := buildFallbackTLSConfig(hello, gc, tlsConfig, tlsManager, getFp); newCfg != nil {
 				tlsConfigCache.Store("fallback", newCfg)
 				return newCfg, nil
 			}
@@ -215,7 +218,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	}
 }
 
-func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base *tls.Config, manager gtls.TLSManager, deps SNIDeps) *tls.Config {
+func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base *tls.Config, manager gtls.TLSManager, deps SNIDeps, getFp func() middleware.Fingerprints) *tls.Config {
 	ctx := context.Background()
 	var certs []tls.Certificate
 
@@ -223,7 +226,7 @@ func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base
 	if rt.Tls.AcmeEnabled && len(rt.Tls.CertificateIds) == 0 {
 		cfg := base.Clone()
 		cfg.GetCertificate = manager.GetCertificate
-		middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+		middleware.SetFingerprints(hello.Conn, getFp())
 		return cfg
 	}
 
@@ -243,7 +246,7 @@ func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base
 
 	cfg := base.Clone()
 	cfg.Certificates = certs
-	middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+	middleware.SetFingerprints(hello.Conn, getFp())
 
 	if rt.Tls.OptionId != "" {
 		if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
@@ -292,12 +295,12 @@ func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base
 	return cfg
 }
 
-func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfig, base *tls.Config, manager gtls.TLSManager) *tls.Config {
+func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfig, base *tls.Config, manager gtls.TLSManager, getFp func() middleware.Fingerprints) *tls.Config {
 	// Handle global ACME if enabled and no manual certificates are provided
 	if gc.Tls.Acme != nil && gc.Tls.Acme.Enabled && len(gc.Tls.Certificates) == 0 {
 		cfg := base.Clone()
 		cfg.GetCertificate = manager.GetCertificate
-		middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+		middleware.SetFingerprints(hello.Conn, getFp())
 		return cfg
 	}
 
@@ -315,6 +318,6 @@ func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfi
 	}
 	cfg := base.Clone()
 	cfg.Certificates = certs
-	middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+	middleware.SetFingerprints(hello.Conn, getFp())
 	return cfg
 }

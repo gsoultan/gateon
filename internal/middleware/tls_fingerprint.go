@@ -4,13 +4,13 @@ import (
 	"crypto/md5"
 	"crypto/tls"
 	"encoding/hex"
+	"fmt"
 	"hash"
 	"net"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"unsafe"
 )
 
 type tlsContextKey string
@@ -37,23 +37,40 @@ var (
 )
 
 type fingerprintShard struct {
-	conns map[net.Conn]Fingerprints
+	conns map[string]Fingerprints
 	mu    sync.RWMutex
 }
 
 func init() {
 	for i := 0; i < numShards; i++ {
 		shards[i] = &fingerprintShard{
-			conns: make(map[net.Conn]Fingerprints),
+			conns: make(map[string]Fingerprints),
 		}
 	}
 }
 
-func getShard(conn net.Conn) *fingerprintShard {
-	// Extract the data pointer from the interface to avoid reflect.
-	// An interface is two words: (itab/type, data). We use the data pointer for sharding.
-	p := uintptr((*[2]unsafe.Pointer)(unsafe.Pointer(&conn))[1])
-	return shards[p%numShards]
+func getAddr(conn net.Conn) string {
+	if conn == nil {
+		return ""
+	}
+	ra := conn.RemoteAddr()
+	if ra == nil {
+		return fmt.Sprintf("%p", conn)
+	}
+	return ra.String()
+}
+
+func getShard(addr string) *fingerprintShard {
+	if addr == "" {
+		return shards[0]
+	}
+	// FNV-1a hash for robust sharding
+	var h uint64 = 14695981039346656037
+	for i := 0; i < len(addr); i++ {
+		h ^= uint64(addr[i])
+		h *= 1099511628211
+	}
+	return shards[h%numShards]
 }
 
 type Fingerprints struct {
@@ -62,39 +79,47 @@ type Fingerprints struct {
 }
 
 func GetFingerprints(conn net.Conn) Fingerprints {
-	if conn == nil {
+	addr := getAddr(conn)
+	if addr == "" {
 		return Fingerprints{}
 	}
-	s := getShard(conn)
+	s := getShard(addr)
 	s.mu.RLock()
-	f := s.conns[conn]
+	f := s.conns[addr]
 	s.mu.RUnlock()
 	return f
 }
 
 func GetFingerprintsByAddr(addr string) Fingerprints {
-	// This was only for the IP fallback which we've removed for performance and correctness
-	// behind proxies like Cloudflare.
-	return Fingerprints{}
+	if addr == "" {
+		return Fingerprints{}
+	}
+	s := getShard(addr)
+	s.mu.RLock()
+	f := s.conns[addr]
+	s.mu.RUnlock()
+	return f
 }
 
 func SetFingerprints(conn net.Conn, f Fingerprints) {
-	if conn == nil {
+	addr := getAddr(conn)
+	if addr == "" {
 		return
 	}
-	s := getShard(conn)
+	s := getShard(addr)
 	s.mu.Lock()
-	s.conns[conn] = f
+	s.conns[addr] = f
 	s.mu.Unlock()
 }
 
 func RemoveFingerprints(conn net.Conn) {
-	if conn == nil {
+	addr := getAddr(conn)
+	if addr == "" {
 		return
 	}
-	s := getShard(conn)
+	s := getShard(addr)
 	s.mu.Lock()
-	delete(s.conns, conn)
+	delete(s.conns, addr)
 	s.mu.Unlock()
 }
 
@@ -148,7 +173,7 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 		h.Write(strconv.AppendUint(buf[:0], uint64(p), 10))
 	}
 
-	ja3Hash := hex.EncodeToString(h.Sum(nil))
+	ja3Sum := h.Sum(nil)
 
 	// JA4 Calculation
 	version := "13"
@@ -173,7 +198,6 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 
 	h.Reset()
 	// ja4_b is hash of sorted ciphers
-	// We use a small local slice for sorting to avoid excessive allocations
 	var localCiphers [64]uint16
 	var ciphers []uint16
 	if len(hello.CipherSuites) <= 64 {
@@ -184,15 +208,15 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 		copy(ciphers, hello.CipherSuites)
 	}
 
-	sort.Slice(ciphers, func(i, j int) bool { return ciphers[i] < ciphers[j] })
+	slices.Sort(ciphers)
 	for _, c := range ciphers {
 		h.Write(strconv.AppendUint(buf[:0], uint64(c), 10))
 	}
-	ja4_b := hex.EncodeToString(h.Sum(nil))[:12]
+	ja4Sum := h.Sum(nil)
 
 	return Fingerprints{
-		JA3: ja3Hash,
-		JA4: ja4_a + "_" + ja4_b,
+		JA3: hex.EncodeToString(ja3Sum),
+		JA4: ja4_a + "_" + hex.EncodeToString(ja4Sum)[:12],
 	}
 }
 
