@@ -1,6 +1,7 @@
 package request
 
 import (
+	"context"
 	"net/http"
 	"sync"
 )
@@ -26,6 +27,7 @@ type RequestState struct {
 	ClientRemoteAddr string
 	Fingerprint      any
 	JA4H             string
+	Recommendation   string
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.
@@ -38,7 +40,12 @@ type DebugInfo struct {
 
 // GetRequestState returns the RequestState from the context, or nil if not set.
 func GetRequestState(r *http.Request) *RequestState {
-	if val, ok := r.Context().Value(RequestStateContextKey{}).(*RequestState); ok {
+	return GetRequestStateFromContext(r.Context())
+}
+
+// GetRequestStateFromContext returns the RequestState from the context, or nil if not set.
+func GetRequestStateFromContext(ctx context.Context) *RequestState {
+	if val, ok := ctx.Value(RequestStateContextKey{}).(*RequestState); ok {
 		return val
 	}
 	return nil
@@ -56,4 +63,5 @@ func (rs *RequestState) Reset() {
 	rs.ClientRemoteAddr = ""
 	rs.Fingerprint = nil
 	rs.JA4H = ""
+	rs.Recommendation = ""
 }

@@ -20,6 +20,8 @@ export interface Trace {
   request_body?: string;
   response_headers?: Record<string, string>;
   response_body?: string;
+  recommendation?: string;
+  reputation?: number;
 }
 
 export function useTraces(limit: number = 100) {

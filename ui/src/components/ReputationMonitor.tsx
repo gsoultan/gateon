@@ -68,7 +68,7 @@ export function ReputationMonitor() {
           </ThemeIcon>
           <Stack gap={0}>
             <Text fw={700}>Actor Reputation Monitor</Text>
-            <Text size="xs" c="dimmed">Adaptive threat score for unique client fingerprints</Text>
+            <Text size="xs" c="dimmed">Adaptive trust scores for client fingerprints. High trust (≥80%) receive false-positive discounts.</Text>
           </Stack>
         </Group>
         <Badge variant="light" leftSection={<IconActivity size={12} />}>

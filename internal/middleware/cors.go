@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/rs/cors"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // CORSConfig defines the configuration for the CORS middleware.
@@ -20,22 +22,29 @@ type CORSConfig struct {
 
 // CORS returns a middleware that handles Cross-Origin Resource Sharing (CORS).
 func CORS(cfg CORSConfig) Middleware {
-	c := cors.New(cors.Options{
-		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   cfg.AllowedMethods,
-		AllowedHeaders:   cfg.AllowedHeaders,
-		ExposedHeaders:   cfg.ExposedHeaders,
-		AllowCredentials: cfg.AllowCredentials,
-		MaxAge:           cfg.MaxAge,
-		Debug:            cfg.Debug,
-	})
-
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Context().Value(CORSHandledContextKey) != nil {
 				next.ServeHTTP(w, r)
 				return
 			}
+
+			span := trace.SpanFromContext(r.Context())
+			opts := cors.Options{
+				AllowedOrigins:   cfg.AllowedOrigins,
+				AllowedMethods:   cfg.AllowedMethods,
+				AllowedHeaders:   cfg.AllowedHeaders,
+				ExposedHeaders:   cfg.ExposedHeaders,
+				AllowCredentials: cfg.AllowCredentials,
+				MaxAge:           cfg.MaxAge,
+				Debug:            cfg.Debug || span.IsRecording(),
+			}
+
+			if span.IsRecording() {
+				opts.Logger = &spanLogger{span: span, rs: request.GetRequestState(r)}
+			}
+
+			c := cors.New(opts)
 
 			// Mark as handled for downstream middlewares
 			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
