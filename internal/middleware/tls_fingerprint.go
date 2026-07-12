@@ -3,7 +3,9 @@ package middleware
 import (
 	"crypto/md5"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"net"
 	"sort"
 	"strconv"
@@ -25,6 +27,12 @@ var (
 	builderPool = sync.Pool{
 		New: func() any {
 			return &strings.Builder{}
+		},
+	}
+
+	md5Pool = sync.Pool{
+		New: func() any {
+			return md5.New()
 		},
 	}
 )
@@ -94,74 +102,85 @@ func RemoveFingerprints(conn net.Conn) {
 // CalcFingerprints calculates a JA3-like fingerprint from ClientHelloInfo.
 // Standard JA3: SSLVersion,Cipher,Extensions,EllipticCurve,EllipticCurvePointFormat
 func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
-	sb := builderPool.Get().(*strings.Builder)
-	sb.Reset()
-	defer builderPool.Put(sb)
+	h := md5Pool.Get().(hash.Hash)
+	h.Reset()
+	defer md5Pool.Put(h)
 
-	// 1. SSLVersion (Go doesn't give us the record version easily, so we use the max supported)
+	// 1. SSLVersion
 	sslVersion := uint16(tls.VersionTLS12)
 	if len(hello.SupportedVersions) > 0 {
 		sslVersion = hello.SupportedVersions[0]
 	}
 
+	// Use a small buffer to avoid fmt.Fprintf
+	var buf [16]byte
+
+	// JA3 Calculation
+	// 1. Version
+	h.Write(strconv.AppendUint(buf[:0], uint64(sslVersion), 10))
+	h.Write([]byte{','})
+
 	// 2. Ciphers
 	for i, c := range hello.CipherSuites {
 		if i > 0 {
-			sb.WriteByte('-')
+			h.Write([]byte{'-'})
 		}
-		sb.WriteString(strconv.FormatUint(uint64(c), 10))
+		h.Write(strconv.AppendUint(buf[:0], uint64(c), 10))
 	}
-	cipherStr := sb.String()
-	sb.Reset()
+	h.Write([]byte{','})
 
-	// 3. Extensions (Not exposed by standard lib ClientHelloInfo)
-	extensionStr := ""
+	// 3. Extensions (Not exposed)
+	h.Write([]byte{','})
 
 	// 4. Curves
 	for i, c := range hello.SupportedCurves {
 		if i > 0 {
-			sb.WriteByte('-')
+			h.Write([]byte{'-'})
 		}
-		sb.WriteString(strconv.FormatUint(uint64(c), 10))
+		h.Write(strconv.AppendUint(buf[:0], uint64(c), 10))
 	}
-	curveStr := sb.String()
-	sb.Reset()
+	h.Write([]byte{','})
 
 	// 5. Points
 	for i, p := range hello.SupportedPoints {
 		if i > 0 {
-			sb.WriteByte('-')
+			h.Write([]byte{'-'})
 		}
-		sb.WriteString(strconv.FormatUint(uint64(p), 10))
+		h.Write(strconv.AppendUint(buf[:0], uint64(p), 10))
 	}
-	pointStr := sb.String()
-	sb.Reset()
 
-	ja3Raw := fmt.Sprintf("%d,%s,%s,%s,%s", sslVersion, cipherStr, extensionStr, curveStr, pointStr)
-	ja3Hash := fmt.Sprintf("%x", md5.Sum([]byte(ja3Raw)))
+	ja3Hash := hex.EncodeToString(h.Sum(nil))
 
-	// JA4 is more modern and includes Alpn, etc.
+	// JA4 Calculation
 	version := "13"
 	if sslVersion == tls.VersionTLS12 {
 		version = "12"
 	}
-
-	sni := "i" // indicated
+	sni := "i"
 	if hello.ServerName == "" {
-		sni = "d" // default
+		sni = "d"
 	}
 
 	ja4_a := fmt.Sprintf("t%s%s%02d%02d%02d", version, sni, len(hello.CipherSuites), 0, len(hello.SupportedCurves))
 
+	h.Reset()
 	// ja4_b is hash of sorted ciphers
-	sortedCiphers := make([]uint16, len(hello.CipherSuites))
-	copy(sortedCiphers, hello.CipherSuites)
-	sort.Slice(sortedCiphers, func(i, j int) bool { return sortedCiphers[i] < sortedCiphers[j] })
-	ja4_b_raw := ""
-	for _, c := range sortedCiphers {
-		ja4_b_raw += strconv.FormatUint(uint64(c), 10)
+	// We use a small local slice for sorting to avoid excessive allocations
+	var localCiphers [64]uint16
+	var ciphers []uint16
+	if len(hello.CipherSuites) <= 64 {
+		ciphers = localCiphers[:len(hello.CipherSuites)]
+		copy(ciphers, hello.CipherSuites)
+	} else {
+		ciphers = make([]uint16, len(hello.CipherSuites))
+		copy(ciphers, hello.CipherSuites)
 	}
-	ja4_b := fmt.Sprintf("%x", md5.Sum([]byte(ja4_b_raw)))[:12]
+
+	sort.Slice(ciphers, func(i, j int) bool { return ciphers[i] < ciphers[j] })
+	for _, c := range ciphers {
+		h.Write(strconv.AppendUint(buf[:0], uint64(c), 10))
+	}
+	ja4_b := hex.EncodeToString(h.Sum(nil))[:12]
 
 	return Fingerprints{
 		JA3: ja3Hash,

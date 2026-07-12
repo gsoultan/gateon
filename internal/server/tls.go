@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	certCache     sync.Map // string (certId) -> *tls.Certificate
-	certPoolCache sync.Map // string (joined IDs) -> *x509.CertPool
+	certCache      sync.Map // string (certId) -> *tls.Certificate
+	certPoolCache  sync.Map // string (joined IDs) -> *x509.CertPool
+	tlsConfigCache sync.Map // string (routeId or "fallback") -> *tls.Config
 )
 
 // InvalidateTLSCache clears the certificate and pool caches.
@@ -26,6 +27,7 @@ var (
 func InvalidateTLSCache() {
 	certCache.Clear()
 	certPoolCache.Clear()
+	tlsConfigCache.Clear()
 }
 
 // CreateTLSManager builds the TLS manager from global config.
@@ -172,6 +174,13 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					if pass.exact && !isExactMatch {
 						continue
 					}
+
+					// Fast-path: check if we have a fully prepared config for this route
+					if cached, ok := tlsConfigCache.Load(rt.Id); ok {
+						middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+						return cached.(*tls.Config), nil
+					}
+
 					// If the route references a TLS option with SNI strict, do not allow wildcard matches
 					if rt.Tls.OptionId != "" {
 						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
@@ -266,6 +275,8 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 							}
 						}
 					}
+
+					tlsConfigCache.Store(rt.Id, newCfg)
 					return newCfg, nil
 				}
 			}
@@ -274,12 +285,18 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 		// Fallback: use global TLS config (dynamic certificates)
 		gc := deps.GlobalStore.Get(ctx)
 		if gc != nil && gc.Tls != nil && len(gc.Tls.Certificates) > 0 {
+			if cached, ok := tlsConfigCache.Load("fallback"); ok {
+				middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+				return cached.(*tls.Config), nil
+			}
+
 			var certs []tls.Certificate
 			for _, c := range gc.Tls.Certificates {
-				// Use O(1) certificate load via tlsManager's internal cache if possible
-				cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
-				if err == nil {
+				if cached, ok := certCache.Load(c.Id); ok {
+					certs = append(certs, *cached.(*tls.Certificate))
+				} else if cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile); err == nil {
 					certs = append(certs, *cert)
+					certCache.Store(c.Id, cert)
 				} else {
 					logger.L.Error().Err(err).
 						Str("cert_id", c.Id).
@@ -329,6 +346,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 					}
 				}
 
+				tlsConfigCache.Store("fallback", newCfg)
 				return newCfg, nil
 			}
 		}
