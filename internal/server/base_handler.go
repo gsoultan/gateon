@@ -77,7 +77,7 @@ func CreateBaseHandler(
 		authInternal = middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return middleware.Telemetry("gateon")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Limit request body size to prevent DoS via large payloads.
 		// Default is 10MB, but GeoIP database uploads can be much larger.
 		limit := int64(10 * 1024 * 1024)
@@ -159,5 +159,5 @@ func CreateBaseHandler(
 		}
 
 		finalInternal.ServeHTTP(w, r)
-	})
+	}))
 }

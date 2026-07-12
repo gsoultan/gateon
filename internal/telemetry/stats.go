@@ -116,7 +116,7 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, respHeaders string) {
+func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, respHeaders, recommendation string, reputation float64) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -137,10 +137,15 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	tr.JA4 = ja4
 	tr.RequestHeaders = reqHeaders
 	tr.ResponseHeaders = respHeaders
+	if recommendation == "" {
+		recommendation = GetRecommendation(id)
+	}
+	tr.Recommendation = recommendation
+	tr.Reputation = reputation
 	recordTraceToStore(tr)
 }
 
-func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody string) {
+func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody, recommendation string, reputation float64) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -163,6 +168,11 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 	tr.RequestBody = reqBody
 	tr.ResponseHeaders = respHeaders
 	tr.ResponseBody = respBody
+	if recommendation == "" {
+		recommendation = GetRecommendation(id)
+	}
+	tr.Recommendation = recommendation
+	tr.Reputation = reputation
 	recordTraceToStore(tr)
 }
 

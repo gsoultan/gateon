@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/rs/cors"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // grpcWebTrailerFlag is the gRPC frame flag indicating a trailer frame.
@@ -38,42 +40,6 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 	// We set WithCorsForRegisteredEndpointsOnly(false) to avoid panics with nil server.
 	detector := grpcweb.WrapServer(nil, grpcweb.WithCorsForRegisteredEndpointsOnly(false))
 
-	var c *cors.Cors
-	if len(cfg) > 0 && len(cfg[0].AllowedOrigins) > 0 {
-		options := cors.Options{
-			AllowedOrigins:   cfg[0].AllowedOrigins,
-			AllowedMethods:   []string{"POST", "OPTIONS"},
-			AllowedHeaders:   []string{"*"}, // Default for gRPC-Web
-			ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
-			AllowCredentials: cfg[0].AllowCredentials,
-			MaxAge:           cfg[0].MaxAge,
-			Debug:            cfg[0].Debug,
-		}
-
-		// Allow overrides from config if explicitly provided
-		if len(cfg[0].AllowedMethods) > 0 {
-			options.AllowedMethods = cfg[0].AllowedMethods
-		}
-		if len(cfg[0].AllowedHeaders) > 0 {
-			options.AllowedHeaders = cfg[0].AllowedHeaders
-		}
-		if len(cfg[0].ExposedHeaders) > 0 {
-			options.ExposedHeaders = cfg[0].ExposedHeaders
-		}
-
-		c = cors.New(options)
-	} else {
-		// Default permissive CORS for gRPC-Web (restores v1.5.0 behavior)
-		c = cors.New(cors.Options{
-			AllowOriginFunc:  func(origin string) bool { return true },
-			AllowedMethods:   []string{"POST", "OPTIONS"},
-			AllowedHeaders:   []string{"*"},
-			ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
-			AllowCredentials: true,
-			MaxAge:           86400,
-		})
-	}
-
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			isGRPCWeb := detector.IsGrpcWebRequest(r) || (r.Method == http.MethodOptions && detector.IsAcceptableGrpcCorsRequest(r))
@@ -83,6 +49,51 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 					// CORS already handled by a previous middleware.
 					serveGRPCWeb(w, r, detector, next)
 					return
+				}
+
+				span := trace.SpanFromContext(r.Context())
+				var c *cors.Cors
+				if len(cfg) > 0 && len(cfg[0].AllowedOrigins) > 0 {
+					options := cors.Options{
+						AllowedOrigins:   cfg[0].AllowedOrigins,
+						AllowedMethods:   []string{"POST", "OPTIONS"},
+						AllowedHeaders:   []string{"*"}, // Default for gRPC-Web
+						ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
+						AllowCredentials: cfg[0].AllowCredentials,
+						MaxAge:           cfg[0].MaxAge,
+						Debug:            cfg[0].Debug || span.IsRecording(),
+					}
+
+					// Allow overrides from config if explicitly provided
+					if len(cfg[0].AllowedMethods) > 0 {
+						options.AllowedMethods = cfg[0].AllowedMethods
+					}
+					if len(cfg[0].AllowedHeaders) > 0 {
+						options.AllowedHeaders = cfg[0].AllowedHeaders
+					}
+					if len(cfg[0].ExposedHeaders) > 0 {
+						options.ExposedHeaders = cfg[0].ExposedHeaders
+					}
+
+					if span.IsRecording() {
+						options.Logger = &spanLogger{span: span, rs: request.GetRequestState(r)}
+					}
+					c = cors.New(options)
+				} else {
+					// Default permissive CORS for gRPC-Web (restores v1.5.0 behavior)
+					options := cors.Options{
+						AllowOriginFunc:  func(origin string) bool { return true },
+						AllowedMethods:   []string{"POST", "OPTIONS"},
+						AllowedHeaders:   []string{"*"},
+						ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
+						AllowCredentials: true,
+						MaxAge:           86400,
+						Debug:            span.IsRecording(),
+					}
+					if span.IsRecording() {
+						options.Logger = &spanLogger{span: span, rs: request.GetRequestState(r)}
+					}
+					c = cors.New(options)
 				}
 
 				if c != nil {
@@ -101,13 +112,33 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 			// Special case: if it's an OPTIONS request and we have CORS config,
 			// let the CORS handler handle it even if the detector didn't recognize it
 			// as gRPC-Web. Browsers might vary in their preflight headers.
-			if r.Method == http.MethodOptions && c != nil {
-				if r.Context().Value(CORSHandledContextKey) != nil {
-					next.ServeHTTP(w, r)
+			if r.Method == http.MethodOptions {
+				span := trace.SpanFromContext(r.Context())
+				var c *cors.Cors
+				if len(cfg) > 0 && len(cfg[0].AllowedOrigins) > 0 {
+					options := cors.Options{
+						AllowedOrigins:   cfg[0].AllowedOrigins,
+						AllowedMethods:   []string{"POST", "OPTIONS"},
+						AllowedHeaders:   []string{"*"},
+						ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
+						AllowCredentials: cfg[0].AllowCredentials,
+						MaxAge:           cfg[0].MaxAge,
+						Debug:            cfg[0].Debug || span.IsRecording(),
+					}
+					if span.IsRecording() {
+						options.Logger = &spanLogger{span: span, rs: request.GetRequestState(r)}
+					}
+					c = cors.New(options)
+				}
+
+				if c != nil {
+					if r.Context().Value(CORSHandledContextKey) != nil {
+						next.ServeHTTP(w, r)
+						return
+					}
+					c.Handler(next).ServeHTTP(w, r)
 					return
 				}
-				c.Handler(next).ServeHTTP(w, r)
-				return
 			}
 
 			next.ServeHTTP(w, r)

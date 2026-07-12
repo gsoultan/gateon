@@ -45,6 +45,7 @@ message Anomaly {
   int32 cluster_size = 26;
   string triggered_rules = 27;
   string id = 28;
+  double reputation = 34;
 }
 
 message GossipStatus {

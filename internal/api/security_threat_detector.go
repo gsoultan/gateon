@@ -93,6 +93,20 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			score += d.analyzeBehavior(stats, &reasons)
 			score += d.analyzeDirectoryBusting(stats, &reasons)
 
+			// Reputation-based Smart Discount: Reduces false positives for trusted clients.
+			// High reputation clients (score > 80) get up to a 50% discount on the calculated threat score.
+			// This ensures that legitimate high-traffic sources (e.g. offices, known bots/proxies)
+			// don't get flagged for minor behavioral oddities.
+			rep := telemetry.GetReputation(ip)
+			if rep > 80 {
+				discount := (rep - 80) / 40.0 // 80 -> 0%, 100 -> 50%
+				originalScore := score
+				score = int(float64(score) * (1.0 - discount))
+				if originalScore >= int(threshold) && score < int(threshold) {
+					reasons = append(reasons, fmt.Sprintf("Threat score discounted due to high reputation (%.1f)", rep))
+				}
+			}
+
 			// External Threat Intelligence
 			if d.Reputation != nil && (score > 0 || stats.TotalRequests > 10) {
 				if abuseScore, provider := d.Reputation.GetExternalScore(ctx, ip); abuseScore > 20 {
@@ -116,6 +130,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 					Mitigated:      mitigated,
 					Score:          float64(score),
 					Confidence:     math.Min(1.0, float64(score)/threshold),
+					Reputation:     rep,
 				}
 				populateAnomalyGeo(ctx, anomaly, ip)
 				mu.Lock()
@@ -136,6 +151,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 					Time:        stats.LastSeen,
 					ActionTaken: actionTaken,
 					Confidence:  math.Min(1.0, float64(score)/threshold),
+					Reputation:  rep,
 				}
 
 				if stats.LastTrace != nil {

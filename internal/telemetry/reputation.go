@@ -48,8 +48,9 @@ type reputationShard struct {
 }
 
 var (
-	repShards         []*reputationShard
-	lastMetricsUpdate atomic.Int64 // Unix timestamp in seconds
+	repShards           []*reputationShard
+	lastMetricsUpdate   atomic.Int64 // Unix timestamp in seconds
+	recommendationCache *lru.ARCCache
 )
 
 func init() {
@@ -63,6 +64,24 @@ func init() {
 			dirty: make(map[string]struct{}),
 		}
 	}
+	recommendationCache, _ = lru.NewARC(10000) // Buffer for request-specific recommendations
+}
+
+func RegisterRecommendation(requestID, recommendation string) {
+	if requestID == "" || recommendation == "" || recommendationCache == nil {
+		return
+	}
+	recommendationCache.Add(requestID, recommendation)
+}
+
+func GetRecommendation(requestID string) string {
+	if requestID == "" || recommendationCache == nil {
+		return ""
+	}
+	if val, ok := recommendationCache.Get(requestID); ok {
+		return val.(string)
+	}
+	return ""
 }
 
 func getRepShard(fingerprint string) *reputationShard {
@@ -104,13 +123,13 @@ func GetReputation(fingerprint string) float64 {
 		}
 		return r.Score
 	}
-	return 100
+	return 50 // Unknown/New client gets neutral score
 }
 
 // GetReputationScore returns the current score for a fingerprint.
 func GetReputationScore(fingerprint string) float64 {
 	if fingerprint == "" {
-		return 100.0
+		return 50.0
 	}
 	shard := getRepShard(fingerprint)
 	shard.mu.RLock()
@@ -118,7 +137,7 @@ func GetReputationScore(fingerprint string) float64 {
 	if val, ok := shard.cache.Get(fingerprint); ok {
 		return val.(*Reputation).Score
 	}
-	return 100.0
+	return 50.0
 }
 
 func DecreaseReputation(fingerprint string, penalty float64, reason string) {

@@ -124,6 +124,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 			// Use explicit routeID if provided, otherwise fallback to context.
 			activeRouteID := routeID
+			rs := GetRequestState(r)
 			if activeRouteID == "" {
 				activeRouteID = GetRouteName(r)
 			}
@@ -222,6 +223,17 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					}
 				}
 
+				recommendation := ""
+				if rs != nil {
+					recommendation = rs.Recommendation
+				}
+
+				repID := fingerprint
+				if repID == "" {
+					repID = clientIP
+				}
+				reputation := telemetry.GetReputation(repID)
+
 				if recordDetailed {
 					telemetry.RecordTraceDetailed(
 						id,
@@ -245,6 +257,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						debug.RequestBody,
 						debug.ResponseHeaders,
 						debug.ResponseBody,
+						recommendation,
+						reputation,
 					)
 				} else {
 					reqHeaders := telemetry.FormatHeaders(r.Header, r.Trailer)
@@ -270,6 +284,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						ja4,
 						reqHeaders,
 						respHeaders,
+						recommendation,
+						reputation,
 					)
 				}
 			}

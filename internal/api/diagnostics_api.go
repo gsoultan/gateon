@@ -406,7 +406,7 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 		}
 		return s.applyBlockIPRecommendation(ctx, req.Source)
 
-	case "high_traffic", "brute_force_attempt", "security_scan", "slow_client_anomaly":
+	case "high_traffic", "brute_force_attempt", "security_scan", "slow_client_anomaly", "security_block_recommendation":
 		return s.applyBlockIPRecommendation(ctx, req.Source)
 
 	case "management_access_violation":
@@ -619,6 +619,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		UserAgent:       t.UserAgent,
 		HttpMethod:      t.Method,
 		TriggeredRules:  t.TriggeredRules,
+		Reputation:      t.Reputation,
 		Id:              t.ID,
 	}
 	populateAnomalyGeo(ctx, a, t.SourceIP)

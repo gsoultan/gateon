@@ -513,6 +513,19 @@ export default function TracesPage() {
               </Grid.Col>
             </Grid>
 
+            {selectedTrace.reputation !== undefined && (
+              <Stack gap={4}>
+                <Text size="xs" fw={700} c="dimmed">TRUST SCORE</Text>
+                <Badge
+                  variant="light"
+                  size="lg"
+                  color={selectedTrace.reputation >= 80 ? "teal" : selectedTrace.reputation >= 50 ? "yellow" : "red"}
+                >
+                  {selectedTrace.reputation.toFixed(0)}%
+                </Badge>
+              </Stack>
+            )}
+
             <Divider />
 
             <Stack gap={4}>
@@ -548,6 +561,16 @@ export default function TracesPage() {
               <Text size="xs" fw={700} c="dimmed">TIMESTAMP</Text>
               <Text size="sm">{new Date(selectedTrace.timestamp).toLocaleString()}</Text>
             </Stack>
+
+            {selectedTrace.recommendation && (
+              <Paper withBorder p="sm" radius="md" style={{ borderLeft: '4px solid var(--mantine-color-blue-6)', backgroundColor: 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.1))' }}>
+                <Group gap="xs" mb={4}>
+                  <IconInfoCircle size={16} color="var(--mantine-color-blue-6)" />
+                  <Text size="sm" fw={700} c="blue.7">SMART RECOMMENDATION</Text>
+                </Group>
+                <Text size="sm" c="blue.9" fw={500}>{selectedTrace.recommendation}</Text>
+              </Paper>
+            )}
 
             <Divider label="Metadata" labelPosition="center" />
 

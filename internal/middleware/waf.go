@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +33,9 @@ import (
 	"github.com/gsoultan/gateon/internal/security/scanner"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // WAFConfig configures the WAF middleware.
@@ -992,6 +996,23 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 		recommendation = "Your request was flagged as a known automated scanner or bot. If you are a developer, ensure your tool uses a legitimate User-Agent."
 	}
 
+	// Record in OpenTelemetry span
+	if span := trace.SpanFromContext(r.Context()); span.IsRecording() {
+		span.SetAttributes(
+			attribute.Bool("security.blocked", true),
+			attribute.String("security.threat_type", typeStr),
+			attribute.String("security.details", details),
+			attribute.String("security.category", category),
+			attribute.String("security.recommendation", recommendation),
+		)
+		span.SetStatus(codes.Error, "Blocked by Security Fast-Path: "+typeStr)
+	}
+
+	if rs := request.GetRequestState(r); rs != nil {
+		rs.Recommendation = recommendation
+	}
+	telemetry.RegisterRecommendation(GetRequestID(r), recommendation)
+
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:           typeStr,
 		SourceIP:       clientIP,
@@ -1124,6 +1145,7 @@ func (w *wafWrapper) Invalidate() {
 
 type txWrapper struct {
 	types.Transaction
+	ctx     context.Context
 	routeID string
 	cfg     WAFConfig
 }
@@ -1295,6 +1317,7 @@ func (t *txWrapper) ProcessLogging() {
 		}
 
 		explanation, recommendation, triggeredRules := generateSmartInsight(t.Transaction, it)
+		telemetry.RegisterRecommendation(t.ID(), recommendation)
 
 		confidence := 0.8 // Default high confidence for WAF blocks
 		ent := 0.0

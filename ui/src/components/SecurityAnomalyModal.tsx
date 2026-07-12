@@ -569,7 +569,20 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                 variant="outline"
                 color={anomaly.score > 70 ? "red" : anomaly.score > 40 ? "orange" : "blue"}
               >
-                {anomaly.score}/100
+                {anomaly.score.toFixed(0)}/100
+              </Badge>
+            </Group>
+          )}
+          {anomaly.reputation !== undefined && (
+            <Group gap="xs">
+              <Text size="xs" c="dimmed">
+                Trust Score:
+              </Text>
+              <Badge
+                variant="light"
+                color={anomaly.reputation >= 80 ? "teal" : anomaly.reputation >= 50 ? "yellow" : "red"}
+              >
+                {anomaly.reputation.toFixed(0)}%
               </Badge>
             </Group>
           )}

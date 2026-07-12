@@ -49,6 +49,7 @@ func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *reputat
 			&ShadowedRouteDetector{},
 			&GeofenceDetector{BlockedCountries: blockedCountries},
 			&IntegrityDetector{},
+			&RecommendationDetector{},
 		},
 	}
 }
