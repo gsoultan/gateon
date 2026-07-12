@@ -25,6 +25,7 @@ type Manager struct {
 	cache  map[string]*tls.Certificate
 	pools  map[string]*x509.CertPool
 	caData map[string][]byte
+	acme   *autocert.Manager
 }
 
 // NewManager creates a new TLS Manager.
@@ -342,6 +343,16 @@ func (m *Manager) applyAcmeTLSConfig(baseConfig *tls.Config) (*tls.Config, error
 		cache = autocert.DirCache(cacheDir)
 	}
 
+	m.mu.Lock()
+	if m.acme == nil {
+		m.acme = &autocert.Manager{
+			Prompt: autocert.AcceptTOS,
+			Cache:  cache,
+		}
+	}
+	certManager := m.acme
+	m.mu.Unlock()
+
 	hp := m.config.HostPolicy
 	if hp == nil && len(m.config.Domains) > 0 {
 		hp = func(_ context.Context, host string) error {
@@ -354,12 +365,8 @@ func (m *Manager) applyAcmeTLSConfig(baseConfig *tls.Config) (*tls.Config, error
 		}
 	}
 
-	certManager := autocert.Manager{
-		Prompt:     autocert.AcceptTOS,
-		HostPolicy: autocert.HostPolicy(hp),
-		Email:      m.config.Acme.Email,
-		Cache:      cache,
-	}
+	certManager.HostPolicy = autocert.HostPolicy(hp)
+	certManager.Email = m.config.Acme.Email
 	if m.config.Acme.CAServer != "" {
 		certManager.Client = &acme.Client{DirectoryURL: m.config.Acme.CAServer}
 	}
@@ -410,33 +417,28 @@ func (m *Manager) HTTPChallengeHandler(fallback http.Handler) http.Handler {
 		return fallback
 	}
 
-	cache := m.config.Cache
-	if cache == nil {
-		cacheDir := config.ResolvePath(m.config.CacheDir)
-		cache = autocert.DirCache(cacheDir)
+	m.mu.RLock()
+	acme := m.acme
+	m.mu.RUnlock()
+	if acme == nil {
+		// This will trigger initialization if called, but usually applyAcmeTLSConfig is called first
+		_, _ = m.GetTLSConfig()
+		m.mu.RLock()
+		acme = m.acme
+		m.mu.RUnlock()
 	}
+	if acme != nil {
+		return acme.HTTPHandler(fallback)
+	}
+	return fallback
+}
 
-	hp := m.config.HostPolicy
-	if hp == nil && len(m.config.Domains) > 0 {
-		hp = func(_ context.Context, host string) error {
-			for _, d := range m.config.Domains {
-				if host == d {
-					return nil
-				}
-			}
-			return fmt.Errorf("host %q not in whitelist", host)
-		}
+func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	m.mu.RLock()
+	acme := m.acme
+	m.mu.RUnlock()
+	if acme == nil {
+		return nil, fmt.Errorf("ACME not initialized")
 	}
-
-	certManager := autocert.Manager{
-		Prompt:     autocert.AcceptTOS,
-		HostPolicy: autocert.HostPolicy(hp),
-		Email:      m.config.Acme.Email,
-		Cache:      cache,
-	}
-	if m.config.Acme.CAServer != "" {
-		certManager.Client = &acme.Client{DirectoryURL: m.config.Acme.CAServer}
-	}
-
-	return certManager.HTTPHandler(fallback)
+	return acme.GetCertificate(hello)
 }

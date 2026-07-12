@@ -16,6 +16,7 @@ type TLSManager interface {
 	LoadCertificate(certFile, keyFile, caFile string) (*tls.Certificate, *x509.CertPool, error)
 	LoadCA(caFile string) (*x509.CertPool, error)
 	LoadCAData(caFile string) ([]byte, error)
+	GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error)
 	Certificates() []CertificateConfig
 	ValidateCertificateFiles(certFile, keyFile, caFile string) (*gateonv1.CertificateValidation, error)
 	ClearCache()
