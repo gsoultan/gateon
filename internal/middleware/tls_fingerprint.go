@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"crypto/tls"
 	"encoding/hex"
-	"fmt"
 	"hash"
 	"net"
 	"sort"
@@ -161,7 +160,16 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 		sni = "d"
 	}
 
-	ja4_a := fmt.Sprintf("t%s%s%02d%02d%02d", version, sni, len(hello.CipherSuites), 0, len(hello.SupportedCurves))
+	// Optimized ja4_a calculation to avoid fmt.Sprintf
+	var ja4a_buf [12]byte
+	ja4a_buf[0] = 't'
+	ja4a_buf[1] = version[0]
+	ja4a_buf[2] = version[1]
+	ja4a_buf[3] = sni[0]
+	writeTwoDigits(ja4a_buf[4:6], len(hello.CipherSuites))
+	writeTwoDigits(ja4a_buf[6:8], 0) // extensions not exposed
+	writeTwoDigits(ja4a_buf[8:10], len(hello.SupportedCurves))
+	ja4_a := string(ja4a_buf[:10])
 
 	h.Reset()
 	// ja4_b is hash of sorted ciphers
@@ -186,4 +194,15 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 		JA3: ja3Hash,
 		JA4: ja4_a + "_" + ja4_b,
 	}
+}
+
+func writeTwoDigits(buf []byte, n int) {
+	if n > 99 {
+		n = 99
+	}
+	if n < 0 {
+		n = 0
+	}
+	buf[0] = byte('0' + (n / 10))
+	buf[1] = byte('0' + (n % 10))
 }

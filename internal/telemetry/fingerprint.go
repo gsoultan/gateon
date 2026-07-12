@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -183,32 +182,33 @@ func GenerateFingerprint(r *http.Request) *ClientFingerprint {
 		val := r.Header.Get(k)
 		if val != "" {
 			fp.Attributes[k] = val
-			io.WriteString(h, k)
-			io.WriteString(h, ":")
-			io.WriteString(h, val)
-			io.WriteString(h, "|")
+			h.Write([]byte(k))
+			h.Write([]byte{':'})
+			h.Write([]byte(val))
+			h.Write([]byte{'|'})
 		}
 	}
 
 	// 2. TLS properties (if available)
 	if r.TLS != nil {
-		v := strconv.FormatUint(uint64(r.TLS.Version), 16)
-		c := strconv.FormatUint(uint64(r.TLS.CipherSuite), 16)
+		var buf [16]byte
+		v := hex.EncodeToString(binary.BigEndian.AppendUint16(buf[:0], r.TLS.Version))
+		c := hex.EncodeToString(binary.BigEndian.AppendUint16(buf[:0], r.TLS.CipherSuite))
 		fp.Attributes["tls_version"] = v
 		fp.Attributes["cipher_suite"] = c
-		io.WriteString(h, "tls:")
-		io.WriteString(h, v)
-		io.WriteString(h, ":")
-		io.WriteString(h, c)
-		io.WriteString(h, "|")
+		h.Write([]byte("tls:"))
+		h.Write([]byte(v))
+		h.Write([]byte{':'})
+		h.Write([]byte(c))
+		h.Write([]byte{'|'})
 	}
 
 	// 3. Negotiated Protocol
 	if r.Proto != "" {
 		fp.Attributes["proto"] = r.Proto
-		io.WriteString(h, "proto:")
-		io.WriteString(h, r.Proto)
-		io.WriteString(h, "|")
+		h.Write([]byte("proto:"))
+		h.Write([]byte(r.Proto))
+		h.Write([]byte{'|'})
 	}
 
 	sum := h.Sum(nil)
@@ -247,31 +247,26 @@ func GenerateJA4H(r *http.Request) string {
 
 	headerCount := len(r.Header)
 
-	// Collect and sort headers for stable hashing
-	headerKeysRaw := headerKeysPool.Get().([]string)
-	headerKeys := headerKeysRaw[:0]
-	for k := range r.Header {
-		headerKeys = append(headerKeys, k)
-	}
-	slices.Sort(headerKeys)
-
+	// Optimized header stable hashing
 	h := hashPool.Get().(hash.Hash)
 	h.Reset()
 
-	for _, k := range headerKeys {
-		if k == "Cookie" || k == "Referer" {
-			continue
+	// Collect keys into a local buffer if small enough
+	var localKeys [32]string
+	keys := localKeys[:0]
+	for k := range r.Header {
+		if k != "Cookie" && k != "Referer" {
+			keys = append(keys, k)
 		}
-		io.WriteString(h, k)
-		io.WriteString(h, ",")
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		h.Write([]byte(k))
+		h.Write([]byte{','})
 	}
 	headerHashBytes := h.Sum(nil)
 	headerHash := hex.EncodeToString(headerHashBytes)[:12]
 
-	// Put back to pools
-	if cap(headerKeys) <= 128 {
-		headerKeysPool.Put(headerKeysRaw)
-	}
 	hashPool.Put(h)
 
 	// method(1) + version(1) + cookie(1) + referer(1) + count(2) + hash(12) = 18 chars

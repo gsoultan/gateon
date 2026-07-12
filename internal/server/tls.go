@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/router"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -152,205 +151,170 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 
 			// Fast-path: O(1) exact host lookup
 			exactRoutes := deps.RouteStore.GetByHost(sniHost)
+			for _, rt := range exactRoutes {
+				if rt.Disabled || rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
+					continue
+				}
+				routeHost := router.HostFromRule(rt.Rule)
+				if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
+					continue
+				}
+				if !router.RouteHostIsExact(routeHost) {
+					continue
+				}
 
-			// First pass: exact host match (e.g. Host(`api.example.com`) for api.example.com)
-			// Second pass: wildcard match (e.g. Host(`*.example.com`) for api.example.com)
-			for _, pass := range []struct {
-				exact bool
-				list  []*gateonv1.Route
-			}{
-				{true, exactRoutes},
-				{false, deps.RouteStore.ListWildcards(ctx)}, // Optimized: only wildcard routes
-			} {
-				for _, rt := range pass.list {
-					if rt.Disabled || rt.Tls == nil || len(rt.Tls.CertificateIds) == 0 {
+				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
+					middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+					return cached.(*tls.Config), nil
+				}
+
+				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps); newCfg != nil {
+					tlsConfigCache.Store(rt.Id, newCfg)
+					return newCfg, nil
+				}
+			}
+
+			for _, rt := range deps.RouteStore.ListWildcards(ctx) {
+				if rt.Disabled || rt.Tls == nil {
+					continue
+				}
+				routeHost := router.HostFromRule(rt.Rule)
+				if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
+					continue
+				}
+				if rt.Tls.OptionId != "" {
+					if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok && opt.SniStrict {
 						continue
 					}
-					routeHost := router.HostFromRule(rt.Rule)
-					if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
-						continue
-					}
-					isExactMatch := router.RouteHostIsExact(routeHost)
-					if pass.exact && !isExactMatch {
-						continue
-					}
-
-					// Fast-path: check if we have a fully prepared config for this route
-					if cached, ok := tlsConfigCache.Load(rt.Id); ok {
-						middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
-						return cached.(*tls.Config), nil
-					}
-
-					// If the route references a TLS option with SNI strict, do not allow wildcard matches
-					if rt.Tls.OptionId != "" {
-						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
-							if opt.SniStrict && !pass.exact {
-								continue
-							}
-						}
-					}
-
-					var certs []tls.Certificate
-					for _, certId := range rt.Tls.CertificateIds {
-						// Cache check
-						if cached, ok := certCache.Load(certId); ok {
-							certs = append(certs, *cached.(*tls.Certificate))
-							continue
-						}
-
-						// O(1) certificate lookup
-						if c, ok := deps.GlobalStore.GetCertificate(certId); ok {
-							cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile)
-							if err == nil {
-								certs = append(certs, *cert)
-								certCache.Store(certId, cert)
-							} else {
-								logger.L.Error().Err(err).
-									Str("cert_id", c.Id).
-									Str("cert_file", c.CertFile).
-									Msg("Failed to load certificate for route")
-							}
-						}
-					}
-					if len(certs) == 0 {
-						continue
-					}
-					newCfg := tlsConfig.Clone()
-					newCfg.Certificates = certs
-
-					// Calculate and store TLS fingerprints
-					f := middleware.CalcFingerprints(hello)
-					middleware.SetFingerprints(hello.Conn, f)
-
-					if rt.Tls.OptionId != "" {
-						if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
-							if opt.MinTlsVersion != "" {
-								newCfg.MinVersion = gtls.ParseTLSVersion(opt.MinTlsVersion, tls.VersionTLS12)
-							}
-							if opt.MaxTlsVersion != "" {
-								newCfg.MaxVersion = gtls.ParseTLSVersion(opt.MaxTlsVersion, 0)
-							}
-							if len(opt.CipherSuites) > 0 && newCfg.MinVersion <= tls.VersionTLS12 {
-								newCfg.CipherSuites = gtls.ParseCipherSuites(opt.CipherSuites)
-							}
-							// PreferServerCipherSuites is deprecated and ignored by the Go runtime since Go 1.18.
-							if len(opt.AlpnProtocols) > 0 {
-								newCfg.NextProtos = opt.AlpnProtocols
-							}
-							if opt.ClientAuthType != "" {
-								newCfg.ClientAuth = gtls.ParseClientAuthType(opt.ClientAuthType)
-							}
-							// Bind Client Authorities to tls.Config when present on TLS Option
-							if len(opt.ClientAuthorityIds) > 0 {
-								// Cache check for CertPool
-								poolKey := "pool:" + strings.Join(opt.ClientAuthorityIds, ",")
-								if cached, ok := certPoolCache.Load(poolKey); ok {
-									newCfg.ClientCAs = cached.(*x509.CertPool)
-								} else {
-									// Build a CertPool from referenced Client Authorities in Global TLS config
-									if gc := deps.GlobalStore.Get(ctx); gc != nil && gc.Tls != nil {
-										var pool *x509.CertPool
-										for _, wantID := range opt.ClientAuthorityIds {
-											for _, ca := range gc.Tls.ClientAuthorities {
-												if ca.Id != wantID {
-													continue
-												}
-												if pool == nil {
-													pool = x509.NewCertPool()
-												}
-												// Read PEM file and append certs; errors ignored here to avoid handshake crash
-												// The manager-level validation will surface issues via API/logs.
-												if caData, err := tlsManager.LoadCAData(ca.CaFile); err == nil && caData != nil {
-													pool.AppendCertsFromPEM(caData)
-												}
-												break
-											}
-										}
-										if pool != nil {
-											newCfg.ClientCAs = pool
-											certPoolCache.Store(poolKey, pool)
-										}
-									}
-								}
-							}
-						}
-					}
-
+				}
+				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
+					middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+					return cached.(*tls.Config), nil
+				}
+				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps); newCfg != nil {
 					tlsConfigCache.Store(rt.Id, newCfg)
 					return newCfg, nil
 				}
 			}
 		}
 
-		// Fallback: use global TLS config (dynamic certificates)
-		gc := deps.GlobalStore.Get(ctx)
-		if gc != nil && gc.Tls != nil && len(gc.Tls.Certificates) > 0 {
+		// Fallback: use global TLS config
+		gc := deps.GlobalStore.Get(context.Background())
+		if gc != nil && gc.Tls != nil {
 			if cached, ok := tlsConfigCache.Load("fallback"); ok {
 				middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
 				return cached.(*tls.Config), nil
 			}
 
-			var certs []tls.Certificate
-			for _, c := range gc.Tls.Certificates {
-				if cached, ok := certCache.Load(c.Id); ok {
-					certs = append(certs, *cached.(*tls.Certificate))
-				} else if cert, _, err := tlsManager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile); err == nil {
-					certs = append(certs, *cert)
-					certCache.Store(c.Id, cert)
-				} else {
-					logger.L.Error().Err(err).
-						Str("cert_id", c.Id).
-						Str("cert_file", c.CertFile).
-						Msg("Failed to load global certificate")
-				}
-			}
-			if len(certs) > 0 {
-				newCfg := tlsConfig.Clone()
-				newCfg.Certificates = certs
-
-				// Calculate and store TLS fingerprints
-				f := middleware.CalcFingerprints(hello)
-				middleware.SetFingerprints(hello.Conn, f)
-
-				if gc.Tls.MinTlsVersion != "" {
-					newCfg.MinVersion = gtls.ParseTLSVersion(gc.Tls.MinTlsVersion, tls.VersionTLS12)
-				}
-				if gc.Tls.MaxTlsVersion != "" {
-					newCfg.MaxVersion = gtls.ParseTLSVersion(gc.Tls.MaxTlsVersion, 0)
-				}
-				if gc.Tls.ClientAuthType != "" {
-					newCfg.ClientAuth = gtls.ParseClientAuthType(gc.Tls.ClientAuthType)
-				}
-				if len(gc.Tls.ClientAuthorities) > 0 {
-					ids := make([]string, 0, len(gc.Tls.ClientAuthorities))
-					for _, ca := range gc.Tls.ClientAuthorities {
-						ids = append(ids, ca.Id)
-					}
-					poolKey := "global-pool:" + strings.Join(ids, ",")
-					if cached, ok := certPoolCache.Load(poolKey); ok {
-						newCfg.ClientCAs = cached.(*x509.CertPool)
-					} else {
-						var pool *x509.CertPool
-						for _, ca := range gc.Tls.ClientAuthorities {
-							if caData, err := tlsManager.LoadCAData(ca.CaFile); err == nil && caData != nil {
-								if pool == nil {
-									pool = x509.NewCertPool()
-								}
-								pool.AppendCertsFromPEM(caData)
-							}
-						}
-						if pool != nil {
-							newCfg.ClientCAs = pool
-							certPoolCache.Store(poolKey, pool)
-						}
-					}
-				}
-
+			if newCfg := buildFallbackTLSConfig(hello, gc, tlsConfig, tlsManager); newCfg != nil {
 				tlsConfigCache.Store("fallback", newCfg)
 				return newCfg, nil
 			}
 		}
-
 		return nil, nil
 	}
+}
+
+func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base *tls.Config, manager gtls.TLSManager, deps SNIDeps) *tls.Config {
+	ctx := context.Background()
+	var certs []tls.Certificate
+
+	// Handle ACME if enabled for this route
+	if rt.Tls.AcmeEnabled && len(rt.Tls.CertificateIds) == 0 {
+		cfg := base.Clone()
+		cfg.GetCertificate = manager.GetCertificate
+		middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+		return cfg
+	}
+
+	for _, id := range rt.Tls.CertificateIds {
+		if cached, ok := certCache.Load(id); ok {
+			certs = append(certs, *cached.(*tls.Certificate))
+		} else if c, ok := deps.GlobalStore.GetCertificate(id); ok {
+			if cert, _, err := manager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile); err == nil {
+				certs = append(certs, *cert)
+				certCache.Store(id, cert)
+			}
+		}
+	}
+	if len(certs) == 0 {
+		return nil
+	}
+
+	cfg := base.Clone()
+	cfg.Certificates = certs
+	middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+
+	if rt.Tls.OptionId != "" {
+		if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
+			if opt.MinTlsVersion != "" {
+				cfg.MinVersion = gtls.ParseTLSVersion(opt.MinTlsVersion, tls.VersionTLS12)
+			}
+			if opt.MaxTlsVersion != "" {
+				cfg.MaxVersion = gtls.ParseTLSVersion(opt.MaxTlsVersion, 0)
+			}
+			if len(opt.CipherSuites) > 0 && cfg.MinVersion <= tls.VersionTLS12 {
+				cfg.CipherSuites = gtls.ParseCipherSuites(opt.CipherSuites)
+			}
+			if len(opt.AlpnProtocols) > 0 {
+				cfg.NextProtos = opt.AlpnProtocols
+			}
+			if opt.ClientAuthType != "" {
+				cfg.ClientAuth = gtls.ParseClientAuthType(opt.ClientAuthType)
+			}
+			if len(opt.ClientAuthorityIds) > 0 {
+				poolKey := "pool:" + strings.Join(opt.ClientAuthorityIds, ",")
+				if cached, ok := certPoolCache.Load(poolKey); ok {
+					cfg.ClientCAs = cached.(*x509.CertPool)
+				} else if gc := deps.GlobalStore.Get(ctx); gc != nil && gc.Tls != nil {
+					var pool *x509.CertPool
+					for _, wantID := range opt.ClientAuthorityIds {
+						for _, ca := range gc.Tls.ClientAuthorities {
+							if ca.Id == wantID {
+								if data, err := manager.LoadCAData(ca.CaFile); err == nil && data != nil {
+									if pool == nil {
+										pool = x509.NewCertPool()
+									}
+									pool.AppendCertsFromPEM(data)
+								}
+								break
+							}
+						}
+					}
+					if pool != nil {
+						cfg.ClientCAs = pool
+						certPoolCache.Store(poolKey, pool)
+					}
+				}
+			}
+		}
+	}
+	return cfg
+}
+
+func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfig, base *tls.Config, manager gtls.TLSManager) *tls.Config {
+	// Handle global ACME if enabled and no manual certificates are provided
+	if gc.Tls.Acme != nil && gc.Tls.Acme.Enabled && len(gc.Tls.Certificates) == 0 {
+		cfg := base.Clone()
+		cfg.GetCertificate = manager.GetCertificate
+		middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+		return cfg
+	}
+
+	var certs []tls.Certificate
+	for _, c := range gc.Tls.Certificates {
+		if cached, ok := certCache.Load(c.Id); ok {
+			certs = append(certs, *cached.(*tls.Certificate))
+		} else if cert, _, err := manager.LoadCertificate(c.CertFile, c.KeyFile, c.CaFile); err == nil {
+			certs = append(certs, *cert)
+			certCache.Store(c.Id, cert)
+		}
+	}
+	if len(certs) == 0 {
+		return nil
+	}
+	cfg := base.Clone()
+	cfg.Certificates = certs
+	middleware.SetFingerprints(hello.Conn, middleware.CalcFingerprints(hello))
+	return cfg
 }
