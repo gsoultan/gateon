@@ -40,14 +40,37 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 
 	var c *cors.Cors
 	if len(cfg) > 0 && len(cfg[0].AllowedOrigins) > 0 {
-		c = cors.New(cors.Options{
+		options := cors.Options{
 			AllowedOrigins:   cfg[0].AllowedOrigins,
 			AllowedMethods:   []string{"POST", "OPTIONS"},
-			AllowedHeaders:   []string{"*"}, // Allow any requested header for gRPC-Web
+			AllowedHeaders:   []string{"*"}, // Default for gRPC-Web
 			ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
 			AllowCredentials: cfg[0].AllowCredentials,
 			MaxAge:           cfg[0].MaxAge,
 			Debug:            cfg[0].Debug,
+		}
+
+		// Allow overrides from config if explicitly provided
+		if len(cfg[0].AllowedMethods) > 0 {
+			options.AllowedMethods = cfg[0].AllowedMethods
+		}
+		if len(cfg[0].AllowedHeaders) > 0 {
+			options.AllowedHeaders = cfg[0].AllowedHeaders
+		}
+		if len(cfg[0].ExposedHeaders) > 0 {
+			options.ExposedHeaders = cfg[0].ExposedHeaders
+		}
+
+		c = cors.New(options)
+	} else {
+		// Default permissive CORS for gRPC-Web (restores v1.5.0 behavior)
+		c = cors.New(cors.Options{
+			AllowOriginFunc:  func(origin string) bool { return true },
+			AllowedMethods:   []string{"POST", "OPTIONS"},
+			AllowedHeaders:   []string{"*"},
+			ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
+			AllowCredentials: true,
+			MaxAge:           86400,
 		})
 	}
 

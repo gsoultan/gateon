@@ -312,6 +312,13 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		middleware.Debugger(globalStore),
 	)
 
+	// Default CORS Bypass for preflight requests if no CORS middleware is configured.
+	// This restores v1.5.0 behavior where OPTIONS requests were automatically allowed.
+	if !RouteHasMiddlewareType(context.Background(), rt, mwStore, "cors") &&
+		!RouteHasMiddlewareType(context.Background(), rt, mwStore, "grpcweb") {
+		chain = append(chain, middleware.BypassCORS())
+	}
+
 	// Advanced Security Middlewares
 	if globalStore != nil {
 		if gcfg := globalStore.Get(context.Background()); gcfg != nil && gcfg.SecurityAdvanced != nil {

@@ -215,18 +215,29 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 
 func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 	origins := parseListStrict(cfg["allowed_origins"])
-	if len(origins) == 0 {
-		return GRPCWeb(), nil
-	}
-
 	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
 	maxAge, _ := strconv.Atoi(cfg["max_age"])
 
-	return GRPCWeb(CORSConfig{
+	corsCfg := CORSConfig{
 		AllowedOrigins:   origins,
 		AllowCredentials: allowCredentials,
 		MaxAge:           maxAge,
-	}), nil
+	}
+
+	// For grpcweb, we use the "grpc-web" preset as a starting point if no preset is specified
+	// but only if it's explicitly configured or if origins are provided.
+	if cfg["preset"] == "" && len(origins) > 0 {
+		cfg["preset"] = "grpc-web"
+	}
+
+	corsCfg = ApplyCORSPreset(cfg, corsCfg)
+
+	// If after applying presets and config we still have no origins, return default permissive
+	if len(corsCfg.AllowedOrigins) == 0 && cfg["preset"] == "" {
+		return GRPCWeb(), nil
+	}
+
+	return GRPCWeb(corsCfg), nil
 }
 
 func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {

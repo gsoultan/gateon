@@ -46,6 +46,7 @@ import {
   StripPrefixRegexConfigEditor,
   ReplacePathConfigEditor,
   ReplacePathRegexConfigEditor,
+  CORS_PRESETS,
 } from "./MiscConfigEditors";
 
 interface MiddlewareConfigEditorProps {
@@ -127,7 +128,7 @@ export function MiddlewareConfigEditor({
       return <ReplacePathRegexConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "cors":
-      return <CORSConfigEditor config={config} updateConfig={updateConfig} />;
+      return <CORSConfigEditor config={config} updateConfig={updateConfig} onChange={onChange} />;
 
     case "retry":
       return (
@@ -342,12 +343,38 @@ export function MiddlewareConfigEditor({
       const splitGrpcTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
       const joinGrpcTags = (tags: string[]) => tags.join(", ");
 
+      const applyGrpcPreset = (presetName: string) => {
+        if (!presetName) {
+          updateConfig("preset", "");
+          return;
+        }
+        const preset = CORS_PRESETS[presetName];
+        if (preset) {
+          onChange({
+            ...config,
+            ...preset,
+            preset: presetName,
+          });
+        }
+      };
+
       return (
         <Stack gap="md">
           <Text size="sm" c="dimmed">
             Required for grpc routes when clients run in the browser. Converts
             gRPC-Web requests to standard gRPC before proxying.
           </Text>
+          <Select
+            label="gRPC-Web Preset"
+            placeholder="Select a preset"
+            data={[
+              { value: "grpc-web", label: "Standard gRPC-Web" },
+              { value: "permissive", label: "Permissive (Allow All)" },
+            ]}
+            value={config.preset || ""}
+            onChange={(val) => applyGrpcPreset(val || "")}
+            clearable
+          />
           <TagsInput
             label="Allowed Origins"
             placeholder="*, https://example.com"
