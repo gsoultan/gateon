@@ -1044,4 +1044,40 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(39, "add_breakdown_timings_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS entrypoint_delay_ms DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_delay_ms DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS middleware_delay_ms DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS service_delay_ms DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS entrypoint_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS middleware_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS service_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN entrypoint_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN route_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN middleware_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+				`ALTER TABLE traces ADD COLUMN service_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
+			}
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

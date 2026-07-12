@@ -28,6 +28,14 @@ type RequestState struct {
 	Fingerprint      any
 	JA4H             string
 	Recommendation   string
+	Reputation       float64
+	// Breakdown timings (nanoseconds for precision)
+	TEntrypoint      int64
+	TRoute           int64
+	TMiddlewareStart int64
+	TServiceStart    int64
+	TServiceEnd      int64
+	TMiddlewareEnd   int64
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.
@@ -64,4 +72,11 @@ func (rs *RequestState) Reset() {
 	rs.Fingerprint = nil
 	rs.JA4H = ""
 	rs.Recommendation = ""
+	rs.Reputation = 0
+	rs.TEntrypoint = 0
+	rs.TRoute = 0
+	rs.TMiddlewareStart = 0
+	rs.TServiceStart = 0
+	rs.TServiceEnd = 0
+	rs.TMiddlewareEnd = 0
 }

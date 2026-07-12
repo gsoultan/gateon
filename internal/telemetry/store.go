@@ -296,6 +296,11 @@ type TraceRecord struct {
 	RouteID         string    `json:"route_id"`
 	Recommendation  string    `json:"recommendation"`
 	Reputation      float64   `json:"reputation"`
+	// Breakdown timings in milliseconds
+	EntrypointDelay float64 `json:"entrypoint_delay_ms"`
+	RouteDelay      float64 `json:"route_delay_ms"`
+	MiddlewareDelay float64 `json:"middleware_delay_ms"`
+	ServiceDelay    float64 `json:"service_delay_ms"`
 }
 
 type SecurityThreat struct {

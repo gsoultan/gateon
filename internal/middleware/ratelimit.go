@@ -155,7 +155,9 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 	s := rl.getShard(key)
 
 	// Adjust base rate and burst based on reputation (0-100)
-	factor := reputation * 0.01
+	// Neutral reputation (50) gives 100% of the configured rate.
+	// High trust (100) gives 200%, and malicious (0) gives minimum.
+	factor := reputation / 50.0
 	adjRate := rl.rate * rate.Limit(factor)
 	adjBurst := int32(float64(rl.burst) * factor)
 	if adjBurst < 1 {

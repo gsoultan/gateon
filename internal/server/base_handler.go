@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -90,7 +91,11 @@ func CreateBaseHandler(
 
 		// On the management entrypoint, we do NOT serve user-defined proxy routes.
 		if epID != "management" {
-			if rt := router.SelectRoute(r, deps.RouteStore); rt != nil {
+			rt := router.SelectRoute(r, deps.RouteStore)
+			if rs := middleware.GetRequestState(r); rs != nil {
+				rs.TRoute = time.Now().UnixNano()
+			}
+			if rt != nil {
 				// Avoid double-routing in HandleProxyOrLocal by passing the matched route in context.
 				if rs := middleware.GetRequestState(r); rs != nil {
 					rs.MatchedRoute = rt

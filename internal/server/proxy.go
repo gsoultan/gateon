@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -44,6 +45,9 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 		}
 		if rt == nil {
 			rt = router.SelectRoute(r, s.RouteStore)
+			if rs := middleware.GetRequestState(r); rs != nil {
+				rs.TRoute = time.Now().UnixNano()
+			}
 		}
 
 		if rt != nil {

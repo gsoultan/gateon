@@ -22,6 +22,10 @@ export interface Trace {
   response_body?: string;
   recommendation?: string;
   reputation?: number;
+  entrypoint_delay_ms?: number;
+  route_delay_ms?: number;
+  middleware_delay_ms?: number;
+  service_delay_ms?: number;
 }
 
 export function useTraces(limit: number = 100) {

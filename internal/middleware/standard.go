@@ -234,6 +234,25 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				}
 				reputation := telemetry.GetReputation(repID)
 
+				var entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64
+				if rs != nil {
+					if rs.TEntrypoint > 0 && rs.TRoute > 0 {
+						entrypointDelay = float64(rs.TRoute-rs.TEntrypoint) / 1e6
+					}
+					if rs.TRoute > 0 && rs.TMiddlewareStart > 0 {
+						routeDelay = float64(rs.TMiddlewareStart-rs.TRoute) / 1e6
+					}
+					if rs.TMiddlewareStart > 0 && rs.TServiceStart > 0 {
+						middlewareDelay = float64(rs.TServiceStart-rs.TMiddlewareStart) / 1e6
+					}
+					if rs.TServiceEnd > 0 && rs.TMiddlewareEnd > 0 {
+						middlewareDelay += float64(rs.TMiddlewareEnd-rs.TServiceEnd) / 1e6
+					}
+					if rs.TServiceStart > 0 && rs.TServiceEnd > 0 {
+						serviceDelay = float64(rs.TServiceEnd-rs.TServiceStart) / 1e6
+					}
+				}
+
 				if recordDetailed {
 					telemetry.RecordTraceDetailed(
 						id,
@@ -259,6 +278,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						debug.ResponseBody,
 						recommendation,
 						reputation,
+						entrypointDelay,
+						routeDelay,
+						middlewareDelay,
+						serviceDelay,
 					)
 				} else {
 					reqHeaders := telemetry.FormatHeaders(r.Header, r.Trailer)
@@ -286,6 +309,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						respHeaders,
 						recommendation,
 						reputation,
+						entrypointDelay,
+						routeDelay,
+						middlewareDelay,
+						serviceDelay,
 					)
 				}
 			}

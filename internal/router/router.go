@@ -216,8 +216,8 @@ func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
 		}
 	}
 
-	// 2. Fallback to all routes (wildcards, Path-only rules, etc.)
-	return SelectRouteFromSlice(r, store.List(r.Context()))
+	// 2. Fallback to wildcard routes (wildcards, Path-only rules, etc.)
+	return SelectRouteFromSlice(r, store.ListWildcards(r.Context()))
 }
 
 // SelectRouteFromSlice finds the best matching route from a provided slice of routes.
@@ -306,6 +306,17 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
 	chain = append(chain,
+		func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if rs := request.GetRequestState(r); rs != nil {
+					rs.TMiddlewareStart = time.Now().UnixNano()
+				}
+				next.ServeHTTP(w, r)
+				if rs := request.GetRequestState(r); rs != nil {
+					rs.TMiddlewareEnd = time.Now().UnixNano()
+				}
+			})
+		},
 		middleware.Recovery(),
 		middleware.AccessLog(routeLabel),
 		middleware.Metrics(routeLabel),
@@ -420,6 +431,19 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	} else if gwaf != nil {
 		chain = append(chain, gwaf)
 	}
+
+	// Final Service Timing Wrapper (placed last in chain, closest to proxy)
+	chain = append(chain, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if rs := request.GetRequestState(r); rs != nil {
+				rs.TServiceStart = time.Now().UnixNano()
+			}
+			next.ServeHTTP(w, r)
+			if rs := request.GetRequestState(r); rs != nil {
+				rs.TServiceEnd = time.Now().UnixNano()
+			}
+		})
+	})
 
 	if len(chain) > 0 {
 		return middleware.Chain(chain...)(h)
