@@ -526,6 +526,35 @@ export default function TracesPage() {
               </Stack>
             )}
 
+            <Divider label="TIMING BREAKDOWN" labelPosition="center" />
+
+            <Grid columns={4}>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">ENTRYPOINT</Text>
+                  <Text size="sm">{selectedTrace.entrypoint_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                </Stack>
+              </Grid.Col>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">ROUTING</Text>
+                  <Text size="sm">{selectedTrace.route_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                </Stack>
+              </Grid.Col>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">MIDDLEWARE</Text>
+                  <Text size="sm">{selectedTrace.middleware_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                </Stack>
+              </Grid.Col>
+              <Grid.Col span={1}>
+                <Stack gap={4}>
+                  <Text size="xs" fw={700} c="dimmed">SERVICE</Text>
+                  <Text size="sm">{selectedTrace.service_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                </Stack>
+              </Grid.Col>
+            </Grid>
+
             <Divider />
 
             <Stack gap={4}>

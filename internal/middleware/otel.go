@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -34,6 +35,7 @@ func Telemetry(serviceName string) Middleware {
 			rs := request.GetRequestState(r)
 			if rs != nil {
 				rs.RequestID = span.SpanContext().TraceID().String()
+				rs.TEntrypoint = time.Now().UnixNano()
 			}
 
 			sw, ok := w.(*StatusResponseWriter)
