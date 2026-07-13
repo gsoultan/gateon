@@ -100,6 +100,32 @@ type WAFConfig struct {
 	GRPCMode bool
 }
 
+// Fingerprint returns a unique hash representing the WAF policy configuration.
+// RouteID is excluded as it is a metadata field that differs between global
+// and route-specific instances even when the security policy is identical.
+func (c WAFConfig) Fingerprint() string {
+	h := sha256.New()
+	// Boolean and integer fields
+	fmt.Fprintf(h, "b:%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v\n",
+		c.UseCRS, c.TrustCloudflare, c.AuditOnly, c.DisableSQLI, c.DisableXSS,
+		c.DisableLFI, c.DisableRCE, c.DisablePHP, c.DisableScanner, c.DisableProtocol,
+		c.DisableJava, c.DisableNodeJS, c.DisableWordPress, c.EnableIPReputation,
+		c.EnableDOSProtection, c.EnableMalwareDetection, c.EnableRansomwareDetection,
+		c.EnableDLP, c.EnableResponseInspection, c.DisableEntropy, c.EnableBodyEntropy,
+		c.EnableFingerprintValidation, c.EnableConfidenceScoring)
+	fmt.Fprintf(h, "i:%d%d%d%d%d%t\n",
+		c.ParanoiaLevel, c.AnomalyThreshold, c.RequestBodyLimit,
+		c.ResponseBodyLimit, int(c.EntropyThreshold*100), c.GRPCMode)
+	// String fields
+	fmt.Fprintf(h, "s:%s|%s|%s|%s|%s\n",
+		c.DirectivesFile, c.GlobalDirectives, c.Directives, c.AuditLogPath, c.RulesPath)
+	// Slices
+	if len(c.AllowedAdminIps) > 0 {
+		fmt.Fprintf(h, "a:%s\n", strings.Join(c.AllowedAdminIps, ","))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // grpcCompatDirective makes the OWASP CRS Protocol-Enforcement rules compatible
 // with the gRPC / gRPC-Web transport. It MUST be loaded after
 // REQUEST-901-INITIALIZATION (which seeds the defaults it overrides) and before
@@ -542,6 +568,20 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(wrappedWaf, next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Deduplication: Avoid double-checking if an identical WAF setup has already run.
+			rs := request.GetRequestState(r)
+			if rs != nil {
+				fp := cfg.Fingerprint()
+				for _, executed := range rs.ExecutedWAFs {
+					if executed == fp {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+				rs.ExecutedWAFs = append(rs.ExecutedWAFs, fp)
+				rs.ExecutedXSS = true
+			}
+
 			// Ensure Host header is correctly set for Coraza and downstream services.
 			// If r.Host is empty, Coraza logs empty hostname.
 			if r.Host == "" && r.Header.Get("Host") != "" {
@@ -727,6 +767,9 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			if cfg.EnableBodyEntropy && !grpcRequest && r.ContentLength > 0 && r.ContentLength < 1024*1024 {
 				peeked, err := peekBody(r, 2048)
 				if err == nil && len(peeked) > 64 {
+					if rs != nil {
+						rs.ExecutedEntropy = true
+					}
 					threshold := cfg.EntropyThreshold
 					if threshold <= 0 {
 						threshold = 5.8

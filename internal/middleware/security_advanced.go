@@ -55,6 +55,12 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) Middlewar
 func Entropy(threshold float64, routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rs := request.GetRequestState(r)
+			if rs != nil && rs.ExecutedEntropy {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			if r.Body != nil && r.Body != http.NoBody {
 				// We limit entropy check to 1MB to avoid memory issues and latency
 				limit := int64(1024 * 1024)
@@ -76,6 +82,9 @@ func Entropy(threshold float64, routeID string) Middleware {
 					if e > threshold {
 						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID)
 					}
+				}
+				if rs != nil {
+					rs.ExecutedEntropy = true
 				}
 			}
 			next.ServeHTTP(w, r)
@@ -126,6 +135,12 @@ func recordAdvancedThreat(r *http.Request, ttype string, score float64, details 
 func XSSRecognition(routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rs := request.GetRequestState(r)
+			if rs != nil && rs.ExecutedXSS {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			var details string
 			found := false
 
@@ -180,6 +195,10 @@ func XSSRecognition(routeID string) Middleware {
 
 			if found {
 				recordAdvancedThreat(r, "xss_detected", 50, details, routeID)
+			}
+
+			if rs != nil {
+				rs.ExecutedXSS = true
 			}
 
 			next.ServeHTTP(w, r)
