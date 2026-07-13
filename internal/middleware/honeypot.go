@@ -129,7 +129,6 @@ func recordHoneypotThreat(r *http.Request, trapPath string) {
 	}
 
 	logger.SecurityEvent("honeypot_triggered", r, "access to trap path: "+trapPath+"; IP blocked for 24h")
-	telemetry.MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, trapPath).Inc()
 
 	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 		Type:        "honeypot_triggered",

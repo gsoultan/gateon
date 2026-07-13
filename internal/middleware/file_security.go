@@ -185,7 +185,7 @@ func FileSecurity(cfg FileSecurityConfig) Middleware {
 				logger.L.LogWarn("ClamAV scan failed (fail-open), forwarding upload", "error", res.scannerErr, "client_ip", r.RemoteAddr)
 			} else if res.blocked {
 				recordFileSecurityThreat(r, cfg.RouteID, "file_security_block", res.message)
-				telemetry.MiddlewareFileSecurityBlockedTotal.WithLabelValues(cfg.RouteID, "policy_violation").Inc()
+
 				http.Error(w, res.message, res.status)
 				return
 			}
