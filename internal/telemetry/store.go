@@ -1202,8 +1202,37 @@ func GetMitigatedIPs(ctx context.Context) []string {
 	return ips
 }
 
+// GetTrace returns a single trace record by timestamp and ID.
+// Optimized O(1) lookup using the exact Pebble key.
+func GetTrace(ts time.Time, id string) *TraceRecord {
+	s := getStore()
+	if s == nil || s.pebble == nil {
+		return nil
+	}
+	key := makeTraceKey(ts, id)
+	val, closer, err := s.pebble.Get(key)
+	if err != nil {
+		return nil
+	}
+	defer closer.Close()
+
+	tr := GetTraceRecord()
+	if err := json.Unmarshal(val, tr); err != nil {
+		tr.Reset()
+		tracePool.Put(tr)
+		return nil
+	}
+	return tr
+}
+
 // GetTraces returns the last N traces from the store.
 func GetTraces(ctx context.Context, limit int) []*TraceRecord {
+	return GetTracesFiltered(ctx, limit, false)
+}
+
+// GetTracesFiltered returns the last N traces with an optional summary mode.
+// In summary mode, large fields (bodies, headers) are omitted from unmarshaling.
+func GetTracesFiltered(ctx context.Context, limit int, summary bool) []*TraceRecord {
 	s := getStore()
 	if s == nil || s.pebble == nil {
 		return nil
@@ -1214,27 +1243,90 @@ func GetTraces(ctx context.Context, limit int) []*TraceRecord {
 	if limit > 1000 {
 		limit = 1000
 	}
+
 	iter, _ := s.pebble.NewIter(&pebble.IterOptions{})
 	defer iter.Close()
 	res := make([]*TraceRecord, 0, min(limit, 100))
 	seen := make(map[string]struct{})
+
 	// Start from the end (most recent)
 	for ok := iter.Last(); ok && len(res) < limit; ok = iter.Prev() {
 		tr := GetTraceRecord()
-		if err := json.Unmarshal(iter.Value(), tr); err == nil {
-			if _, ok := seen[tr.ID]; ok {
+		if summary {
+			// Use a specialized summary unmarshaler to avoid CPU overhead on large bodies
+			if err := unmarshalTraceSummary(iter.Value(), tr); err == nil {
+				if _, ok := seen[tr.ID]; ok {
+					tr.Reset()
+					tracePool.Put(tr)
+					continue
+				}
+				seen[tr.ID] = struct{}{}
+				res = append(res, tr)
+			} else {
 				tr.Reset()
 				tracePool.Put(tr)
-				continue
 			}
-			seen[tr.ID] = struct{}{}
-			res = append(res, tr)
 		} else {
-			tr.Reset()
-			tracePool.Put(tr)
+			if err := json.Unmarshal(iter.Value(), tr); err == nil {
+				if _, ok := seen[tr.ID]; ok {
+					tr.Reset()
+					tracePool.Put(tr)
+					continue
+				}
+				seen[tr.ID] = struct{}{}
+				res = append(res, tr)
+			} else {
+				tr.Reset()
+				tracePool.Put(tr)
+			}
 		}
 	}
 	return res
+}
+
+// unmarshalTraceSummary unmarshals basic fields but omits heavy payloads.
+func unmarshalTraceSummary(data []byte, tr *TraceRecord) error {
+	// We use a temporary struct with only the fields we need to avoid unmarshaling
+	// large body/header strings into the final TraceRecord.
+	type summary struct {
+		ID              string    `json:"id"`
+		OperationName   string    `json:"operation_name"`
+		ServiceName     string    `json:"service_name"`
+		DurationMs      float64   `json:"duration_ms"`
+		Timestamp       time.Time `json:"timestamp"`
+		Status          string    `json:"status"`
+		Path            string    `json:"path"`
+		SourceIP        string    `json:"source_ip"`
+		Method          string    `json:"method"`
+		UserAgent       string    `json:"user_agent"`
+		RouteID         string    `json:"route_id"`
+		Reputation      float64   `json:"reputation"`
+		EntrypointDelay float64   `json:"entrypoint_delay_ms"`
+		RouteDelay      float64   `json:"route_delay_ms"`
+		MiddlewareDelay float64   `json:"middleware_delay_ms"`
+		ServiceDelay    float64   `json:"service_delay_ms"`
+	}
+	var s summary
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	tr.ID = s.ID
+	tr.OperationName = s.OperationName
+	tr.ServiceName = s.ServiceName
+	tr.DurationMs = s.DurationMs
+	tr.Timestamp = s.Timestamp
+	tr.Status = s.Status
+	tr.Path = s.Path
+	tr.SourceIP = s.SourceIP
+	tr.Method = s.Method
+	tr.UserAgent = s.UserAgent
+	tr.RouteID = s.RouteID
+	tr.Reputation = s.Reputation
+	tr.EntrypointDelay = s.EntrypointDelay
+	tr.RouteDelay = s.RouteDelay
+	tr.MiddlewareDelay = s.MiddlewareDelay
+	tr.ServiceDelay = s.ServiceDelay
+	return nil
 }
 
 // GetPathStatsWindow returns aggregated stats from storage for the last `days` days.

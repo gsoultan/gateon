@@ -59,18 +59,21 @@ func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesReq
 	if req == nil {
 		return nil, errors.New("request is required")
 	}
-	traces := telemetry.GetTraces(ctx, int(req.Limit))
+	traces := telemetry.GetTracesFiltered(ctx, int(req.Limit), req.Summary)
 	res := make([]*gateonv1.Trace, 0, len(traces))
 	for _, t := range traces {
-		reqHeaders := telemetry.ParseHeaders(t.RequestHeaders)
-		respHeaders := telemetry.ParseHeaders(t.ResponseHeaders)
+		var reqHeaders, respHeaders map[string]string
+		if !req.Summary {
+			reqHeaders = telemetry.ParseHeaders(t.RequestHeaders)
+			respHeaders = telemetry.ParseHeaders(t.ResponseHeaders)
+		}
 
 		res = append(res, &gateonv1.Trace{
 			Id:                t.ID,
 			OperationName:     t.OperationName,
 			ServiceName:       t.ServiceName,
 			DurationMs:        t.DurationMs,
-			Timestamp:         t.Timestamp.Format(time.RFC3339),
+			Timestamp:         t.Timestamp.Format(time.RFC3339Nano),
 			Status:            t.Status,
 			Path:              t.Path,
 			SourceIp:          t.SourceIP,
@@ -93,6 +96,57 @@ func (s *ApiService) ListTraces(ctx context.Context, req *gateonv1.ListTracesReq
 		})
 	}
 	return &gateonv1.ListTracesResponse{Traces: res}, nil
+}
+
+func (s *ApiService) GetTrace(ctx context.Context, req *gateonv1.GetTraceRequest) (*gateonv1.GetTraceResponse, error) {
+	if req.Id == "" {
+		return nil, status.Error(codes.InvalidArgument, "ID is required")
+	}
+	if req.Timestamp == "" {
+		return nil, status.Error(codes.InvalidArgument, "Timestamp is required for O(1) lookup")
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, req.Timestamp)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid timestamp format: %v", err)
+	}
+
+	t := telemetry.GetTrace(ts, req.Id)
+	if t == nil {
+		return nil, status.Error(codes.NotFound, "trace not found")
+	}
+
+	reqHeaders := telemetry.ParseHeaders(t.RequestHeaders)
+	respHeaders := telemetry.ParseHeaders(t.ResponseHeaders)
+
+	return &gateonv1.GetTraceResponse{
+		Trace: &gateonv1.Trace{
+			Id:                t.ID,
+			OperationName:     t.OperationName,
+			ServiceName:       t.ServiceName,
+			DurationMs:        t.DurationMs,
+			Timestamp:         t.Timestamp.Format(time.RFC3339Nano),
+			Status:            t.Status,
+			Path:              t.Path,
+			SourceIp:          t.SourceIP,
+			UserAgent:         t.UserAgent,
+			Method:            t.Method,
+			Referer:           t.Referer,
+			RequestUri:        t.RequestURI,
+			RequestHeaders:    reqHeaders,
+			RequestBody:       t.RequestBody,
+			ResponseHeaders:   respHeaders,
+			ResponseBody:      t.ResponseBody,
+			Ja3:               t.JA3,
+			Ja4:               t.JA4,
+			Recommendation:    t.Recommendation,
+			Reputation:        t.Reputation,
+			EntrypointDelayMs: t.EntrypointDelay,
+			RouteDelayMs:      t.RouteDelay,
+			MiddlewareDelayMs: t.MiddlewareDelay,
+			ServiceDelayMs:    t.ServiceDelay,
+		},
+	}, nil
 }
 
 func (s *ApiService) TraceRoute(ctx context.Context, req *gateonv1.TraceRouteRequest) (*gateonv1.TraceRouteResponse, error) {

@@ -37,7 +37,7 @@ export { useReputations } from "./useReputations";
 export { useServices } from "./useServices";
 export { useTLSOptions } from "./useTLSOptions";
 export { useClientAuthorities } from "./useClientAuthorities";
-export { useTraces } from "./useTraces";
+export { useTraces, useTrace } from "./useTraces";
 export type { Trace } from "./useTraces";
 export { useUsers } from "./useUsers";
 export { useMetricsSnapshot } from "./useMetricsSnapshot";

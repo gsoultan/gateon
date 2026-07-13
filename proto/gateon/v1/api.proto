@@ -19,6 +19,7 @@ import "gateon/v1/audit.proto";
 service ApiService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   rpc ListTraces(ListTracesRequest) returns (ListTracesResponse);
+  rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
   rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse);
   rpc UpdateRoute(UpdateRouteRequest) returns (UpdateRouteResponse);
   rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
