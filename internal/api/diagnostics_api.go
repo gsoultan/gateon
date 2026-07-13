@@ -613,7 +613,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		RequestUri:      t.RequestURI,
 		Category:        t.Category,
 		ActionTaken:     t.ActionTaken,
-		Mitigated:       (t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned") && !telemetry.IsIPUnmitigated(t.SourceIP),
+		Mitigated:       telemetry.IsIPMitigated(t.SourceIP) || ((t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned") && !telemetry.IsIPUnmitigated(t.SourceIP)),
 		RequestHeaders:  t.RequestHeaders,
 		RequestBody:     t.RequestBody,
 		ResponseHeaders: t.ResponseHeaders,

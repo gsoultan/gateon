@@ -1118,6 +1118,32 @@ func IsIPUnmitigated(ip string) bool {
 	return unmitigated
 }
 
+// IsIPMitigated returns true if the IP is currently marked as mitigated in the store.
+func IsIPMitigated(ip string) bool {
+	s := getStore()
+	if s == nil {
+		return false
+	}
+	if s.unmitigatedCache != nil {
+		if val, ok := s.unmitigatedCache.Get(ip); ok {
+			return !val.(bool)
+		}
+	}
+
+	var status string
+	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
+	err := s.db.QueryRow(query, ip).Scan(&status)
+	if err != nil {
+		return false
+	}
+
+	mitigated := status == "mitigated"
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Add(ip, !mitigated)
+	}
+	return mitigated
+}
+
 // MarkIPMitigated records that an IP has been mitigated.
 func MarkIPMitigated(ip string, reason string) {
 	s := getStore()
@@ -1596,7 +1622,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
-		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
+		th.Mitigated = IsIPMitigated(th.SourceIP) || ((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") && !IsIPUnmitigated(th.SourceIP))
 		res = append(res, th)
 	}
 	return res
@@ -1652,7 +1678,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 			logQueryErr(ctx, "threats lite: scan failed", err)
 			continue
 		}
-		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
+		th.Mitigated = IsIPMitigated(th.SourceIP) || ((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") && !IsIPUnmitigated(th.SourceIP))
 		res = append(res, th)
 	}
 	return res
