@@ -36,6 +36,11 @@ type RequestState struct {
 	TServiceStart    int64
 	TServiceEnd      int64
 	TMiddlewareEnd   int64
+
+	// Deduplication tracking to avoid redundant security checks
+	ExecutedWAFs    []string // config fingerprints
+	ExecutedEntropy bool     // Shannon entropy check result already recorded?
+	ExecutedXSS     bool     // XSS recognition already recorded?
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.
@@ -79,4 +84,7 @@ func (rs *RequestState) Reset() {
 	rs.TServiceStart = 0
 	rs.TServiceEnd = 0
 	rs.TMiddlewareEnd = 0
+	rs.ExecutedWAFs = nil
+	rs.ExecutedEntropy = false
+	rs.ExecutedXSS = false
 }
