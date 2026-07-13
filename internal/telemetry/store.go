@@ -1032,6 +1032,49 @@ func RecordSecurityThreat(t SecurityThreat) {
 
 	ThreatBroadcaster.Broadcast(*st)
 
+	// funnel increments: map category/type to specific funnel counters
+	if st.Mitigated {
+		routeID := cmp.Or(st.RouteID, "global")
+		cat := strings.ToLower(st.Category)
+		typ := strings.ToLower(st.Type)
+
+		switch {
+		case cat == "waf" || typ == "waf_block" || typ == "waf_violation" || strings.HasPrefix(typ, "fast_path_"):
+			ruleID := "unknown"
+			if st.TriggeredRules != "" {
+				ruleID = st.TriggeredRules
+			} else if typ != "" {
+				ruleID = typ
+			}
+			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, ruleID).Inc()
+
+		case typ == "rate_limit" || cat == "abuse":
+			MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "behavioral").Inc()
+
+		case cat == "deception" || typ == "honeypot_triggered" || typ == "honeypot_hit":
+			trap := "unknown"
+			if st.RequestURI != "" {
+				trap = st.RequestURI
+			}
+			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, trap).Inc()
+
+		case typ == "reputation_hit" || typ == "advanced_security" || cat == "advanced":
+			MiddlewareAdvancedSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
+
+		case cat == "geoip" || cat == "geofencing":
+			MiddlewareGeoIPBlockedTotal.WithLabelValues(routeID, st.CountryCode).Inc()
+
+		case cat == "auth" || typ == "brute_force_attempt":
+			MiddlewareAuthFailuresTotal.WithLabelValues(routeID, typ).Inc()
+
+		case cat == "bot":
+			MiddlewareBotManagementTotal.WithLabelValues(routeID, "blocked").Inc()
+
+		case cat == "filesecurity" || cat == "malware":
+			MiddlewareFileSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
+		}
+	}
+
 	s := getStore()
 	if s == nil {
 		st.Reset()
@@ -1062,7 +1105,7 @@ func RecordSecurityThreat(t SecurityThreat) {
 		GlobalHHH.Add(st.SourceIP)
 	}
 
-	// Increment Prometheus counter
+	// Legacy global counters (per category/severity)
 	if st.Mitigated {
 		MitigatedThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium"), cmp.Or(st.ActionTaken, "blocked")).Inc()
 		s.currentMitigatedToday.Add(1)

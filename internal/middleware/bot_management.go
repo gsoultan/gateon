@@ -45,8 +45,6 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 			if cfg.EnableBrowserIntegrity {
 				if !checkBrowserIntegrity(r) {
 					logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
-					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "integrity_failed").Inc()
-					telemetry.BotMitigationTotal.WithLabelValues("integrity_fail").Inc()
 
 					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 						ID:          fmt.Sprintf("bot-integrity-%s-%s", cfg.RouteID, clientIP),
@@ -92,8 +90,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 					http.Redirect(w, r, r.FormValue("redirect"), http.StatusFound)
 					return
 				}
-				telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_failed").Inc()
-				telemetry.BotMitigationTotal.WithLabelValues("js_challenge_fail").Inc()
+
 				telemetry.ActiveUnverifiedClientsTotal.Dec()
 				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 					ID:          fmt.Sprintf("bot-challenge-fail-%s-%s", cfg.RouteID, clientIP),

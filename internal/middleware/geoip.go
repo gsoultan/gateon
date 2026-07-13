@@ -89,7 +89,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 			_, allowed := allowSet[country]
 
 			if denied {
-				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues(activeRouteID, country).Inc()
+
 				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 					Type:        "geoip_block",
 					SourceIP:    clientIP,
@@ -110,7 +110,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 			}
 
 			if len(allowSet) > 0 && !allowed {
-				telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues(activeRouteID, country).Inc()
+
 				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 					Type:        "geoip_block",
 					SourceIP:    clientIP,
@@ -225,7 +225,7 @@ func GeoIPGlobalWithResolver(globalStore config.GlobalConfigStore, resolver func
 }
 
 func recordGlobalBlock(r *http.Request, clientIP, country, reason string) {
-	telemetry.MiddlewareGeoIPBlockedTotal.WithLabelValues("global", country).Inc()
+
 	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 		Type:        "geoip_block",
 		SourceIP:    clientIP,

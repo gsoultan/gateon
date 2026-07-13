@@ -236,7 +236,7 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				if !ShouldSkipMetrics(r) {
 					routeID := GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("local").Inc()
-					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "local").Inc()
+
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:local").Inc()
 					telemetry.IncRateLimitRejected("local")
 
@@ -351,7 +351,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				if !ShouldSkipMetrics(r) {
 					routeID := GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("redis").Inc()
-					telemetry.MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "redis").Inc()
+
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:redis").Inc()
 					telemetry.IncRateLimitRejected("redis")
 

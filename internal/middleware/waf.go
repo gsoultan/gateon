@@ -663,7 +663,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				if matches := fastScanner.FindAll(rawURI); len(matches) > 0 {
 					details := "Request URI match: " + strings.Join(matches, ", ")
 					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+
 					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 					return
 				}
@@ -673,7 +673,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if matches := fastScanner.FindAll(unescapedURI); len(matches) > 0 {
 						details := "Unescaped Request URI match: " + strings.Join(matches, ", ")
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+
 						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 						return
 					}
@@ -683,7 +683,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if matches := fastScanner.FindAll(referer); len(matches) > 0 {
 						details := "Referer header match: " + strings.Join(matches, ", ")
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+
 						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 						return
 					}
@@ -692,7 +692,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if matches := fastScanner.FindAll(ua); len(matches) > 0 {
 						details := "User-Agent header match: " + strings.Join(matches, ", ")
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+
 						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
 						return
 					}
@@ -721,7 +721,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 						// High entropy in unknown headers is still suspicious.
 						if len(val) > 64 && entropy.IsSuspicious(val, threshold) {
 							recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", fmt.Sprintf("High entropy in header %s: %.2f (threshold %.2f)", key, entropy.CalculateString(val), threshold))
-							telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_entropy").Inc()
+
 							http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
 							return
 						}
@@ -737,7 +737,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if r.TLS != nil && isSuspiciousTLS(r) {
 						details := fmt.Sprintf("Fingerprint mismatch: Browser UA '%s' with suspicious TLS profile (v%x)", ua, r.TLS.Version)
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_fingerprint", details)
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_fingerprint").Inc()
+
 						http.Error(w, "Forbidden by Security (Client Spoofing Detected)", http.StatusForbidden)
 						return
 					}
@@ -747,7 +747,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 						// Connection header is forbidden in HTTP/2 and HTTP/3
 						details := fmt.Sprintf("Protocol violation: %s request from '%s' contains forbidden 'Connection' header", r.Proto, ua)
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_protocol_violation", details)
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_protocol_violation").Inc()
+
 						http.Error(w, "Forbidden by Security (Protocol Violation)", http.StatusForbidden)
 						return
 					}
@@ -756,7 +756,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if r.ProtoMajor >= 2 && r.Header.Get("Accept-Encoding") == "" {
 						details := fmt.Sprintf("Suspicious client: %s request from '%s' missing 'Accept-Encoding'", r.Proto, ua)
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_suspicious_client", details)
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_suspicious_client").Inc()
+
 						http.Error(w, "Forbidden by Security (Suspicious Client)", http.StatusForbidden)
 						return
 					}
@@ -789,7 +789,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if entropy.IsSuspiciousBytes(peeked, threshold) {
 						ent := entropy.Calculate(peeked)
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", fmt.Sprintf("High entropy in request body: %.2f (threshold %.2f)", ent, threshold))
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_entropy").Inc()
+
 						http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
 						return
 					}
@@ -815,7 +815,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 
 					if isMalformed {
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_malformed_token", "Malformed security token structure in Authorization header")
-						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_malformed_token").Inc()
+
 						http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
 						return
 					}
@@ -898,6 +898,10 @@ Include @crs-setup.conf.example
 					sb.WriteByte('\n')
 				}
 			}
+		}
+
+		if cfg.EnableIPReputation {
+			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-IP-Reputation-Block \"@eq 1\" \"id:200001,phase:1,deny,status:403,msg:'IP Reputation block',tag:'reputation',severity:CRITICAL\"\n")
 		}
 
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
@@ -1226,7 +1230,7 @@ func (t *txWrapper) ProcessLogging() {
 	if t.IsInterrupted() {
 		it := t.Interruption()
 		ruleID := strconv.Itoa(it.RuleID)
-		telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(t.routeID, ruleID).Inc()
+
 		telemetry.RequestFailuresTotal.WithLabelValues(t.routeID, "waf:"+ruleID).Inc()
 
 		category := "general"
