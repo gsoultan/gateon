@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"go.opentelemetry.io/otel"
@@ -35,7 +36,9 @@ func Telemetry(serviceName string) Middleware {
 			rs := request.GetRequestState(r)
 			if rs != nil {
 				rs.RequestID = span.SpanContext().TraceID().String()
-				rs.TEntrypoint = time.Now().UnixNano()
+				if rs.TEntrypoint == 0 {
+					rs.TEntrypoint = time.Now().UnixNano()
+				}
 			}
 
 			sw, ok := w.(*StatusResponseWriter)
@@ -92,20 +95,21 @@ func (l *spanLogger) Printf(format string, v ...interface{}) {
 	))
 
 	recommendation := ""
-	// Smart Recommendations based on common CORS failure messages
-	if strings.Contains(msg, "Origin not allowed") {
+	// Smart Recommendations based on common CORS failure messages (case-insensitive)
+	lowerMsg := strings.ToLower(msg)
+	if strings.Contains(lowerMsg, "origin") && strings.Contains(lowerMsg, "not allowed") {
 		recommendation = "The request origin is not permitted. Update the CORS 'Allowed Origins' to include it."
 		l.span.SetAttributes(
 			attribute.Bool("cors.blocked", true),
 			attribute.String("security.recommendation", recommendation),
 		)
-	} else if strings.Contains(msg, "Method not allowed") {
+	} else if strings.Contains(lowerMsg, "method") && strings.Contains(lowerMsg, "not allowed") {
 		recommendation = "The HTTP method is not permitted for CORS. Update 'Allowed Methods' in your CORS configuration."
 		l.span.SetAttributes(
 			attribute.Bool("cors.blocked", true),
 			attribute.String("security.recommendation", recommendation),
 		)
-	} else if strings.Contains(msg, "Header not allowed") {
+	} else if strings.Contains(lowerMsg, "header") && strings.Contains(lowerMsg, "not allowed") {
 		recommendation = "The request includes headers not permitted by CORS. Update 'Allowed Headers' in your configuration."
 		l.span.SetAttributes(
 			attribute.Bool("cors.blocked", true),
@@ -115,5 +119,6 @@ func (l *spanLogger) Printf(format string, v ...interface{}) {
 
 	if recommendation != "" && l.rs != nil {
 		l.rs.Recommendation = recommendation
+		logger.L.LogDebug("Captured CORS recommendation", "recommendation", recommendation, "request_id", l.rs.RequestID)
 	}
 }

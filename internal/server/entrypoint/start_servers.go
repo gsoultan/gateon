@@ -127,13 +127,14 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	}
 
 	handler := middleware.Chain(
+		middleware.WithRequestState("management", "management", true),
 		middleware.RequestID(), // Added
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HostFilter(mgmtHost),
 		middleware.IPFilter(allowedIPs, nil),
 		middleware.MaxConnections(500),
-	)(injectEntryPointID("management", "management", true, deps.BaseHandler))
+	)(deps.BaseHandler)
 
 	server := &http.Server{
 		Addr:    addr,

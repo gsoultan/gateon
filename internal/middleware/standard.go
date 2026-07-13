@@ -33,6 +33,38 @@ func Fingerprinting() Middleware {
 	}
 }
 
+// WithRequestState returns a middleware that initializes the RequestState and puts it in the context.
+// It should be the outermost middleware to ensure downstream middlewares can access the state.
+func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Get or create state from pool
+			rs := RequestStatePool.Get().(*request.RequestState)
+			rs.Reset()
+			rs.EntryPointID = epID
+			rs.RouteName = "gateon-" + epLabel
+			rs.IsManagement = isMgmt
+			rs.TEntrypoint = time.Now().UnixNano()
+			defer RequestStatePool.Put(rs)
+
+			ctx := context.WithValue(r.Context(), RequestStateContextKey, rs)
+			r = r.WithContext(ctx)
+
+			// Log arrival for proxy traffic only
+			if !isMgmt && !IsInternalPath(r.URL.Path) {
+				logger.L.LogInfo("Proxy request received",
+					"flow_step", "entrypoint_arrival",
+					"request_id", GetRequestID(r),
+					"entrypoint", epID,
+					"method", r.Method,
+					"path", r.URL.Path)
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // AccessLog returns a middleware that logs request details.
 func AccessLog(routeID string) Middleware {
 	return AccessLogSampled(routeID, accessLogSampleRate())
@@ -198,6 +230,15 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 			if recordDetailed || recordSampled {
+				// Avoid double-tracing: if this is an entrypoint-level metrics
+				// middleware (prefixed with "gateon-") but a specific user route
+				// has matched, skip recording this trace as the route-level
+				// middleware will record its own more specific trace. This prevents
+				// false-positive "UNLISTED ROUTE" anomalies.
+				if strings.HasPrefix(activeRouteID, "gateon-") && rs != nil && rs.MatchedRoute != nil {
+					goto skipTrace
+				}
+
 				id := GetRequestID(r)
 
 				// JA3/JA4 fingerprints are only consumed by trace records, so resolve
@@ -317,6 +358,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				}
 			}
 
+		skipTrace:
 			// Rich Prometheus metrics
 			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, method, statusStr).Inc()
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
