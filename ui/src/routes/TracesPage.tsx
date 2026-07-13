@@ -42,7 +42,7 @@ import {
 } from "@tabler/icons-react";
 import { useState, useMemo, useTransition } from "react";
 
-import { useTraces } from "../hooks/useGateon";
+import { useTraces, useTrace } from "../hooks/useGateon";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { useUrlFilters } from "../hooks/useUrlFilters";
 import type { Trace } from "../hooks/useGateon";
@@ -85,7 +85,13 @@ export default function TracesPage() {
 
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
   const [visualizerOpened, setVisualizerOpened] = useState(false);
-  const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
+  
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
+  const [selectedTraceTs, setSelectedTraceTs] = useState<string | null>(null);
+  const { data: fullTrace, isLoading: isFullTraceLoading } = useTrace(
+    selectedTraceId || undefined,
+    selectedTraceTs || undefined
+  );
   const [detailsOpened, setDetailsOpened] = useState(false);
 
   const openVisualizer = (ip: string) => {
@@ -95,7 +101,8 @@ export default function TracesPage() {
   };
 
   const openDetails = (trace: Trace) => {
-    setSelectedTrace(trace);
+    setSelectedTraceId(trace.id);
+    setSelectedTraceTs(trace.timestamp);
     setDetailsOpened(true);
   };
 
@@ -458,12 +465,23 @@ export default function TracesPage() {
         title={<Text fw={700}>Trace Details</Text>}
         size="lg"
       >
-        {selectedTrace && (
+        {isFullTraceLoading ? (
+          <Stack gap="md">
+            <Skeleton height={50} radius="md" />
+            <Grid columns={2}>
+              <Grid.Col span={1}><Skeleton height={40} radius="md" /></Grid.Col>
+              <Grid.Col span={1}><Skeleton height={40} radius="md" /></Grid.Col>
+            </Grid>
+            <Skeleton height={60} radius="md" />
+            <Skeleton height={100} radius="md" />
+            <Skeleton height={200} radius="md" />
+          </Stack>
+        ) : fullTrace ? (
           <Stack gap="md">
             <Paper withBorder p="sm" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
               <Group justify="space-between">
                 <Text size="sm" fw={700} c="dimmed">TRACE ID</Text>
-                <Code color="blue" variant="light">{selectedTrace.id}</Code>
+                <Code color="blue" variant="light">{fullTrace.id}</Code>
               </Group>
             </Paper>
 
@@ -471,7 +489,7 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">METHOD</Text>
-                  <Badge variant="filled" color="blue">{selectedTrace.method || "N/A"}</Badge>
+                  <Badge variant="filled" color="blue">{fullTrace.method || "N/A"}</Badge>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
@@ -479,9 +497,9 @@ export default function TracesPage() {
                   <Text size="xs" fw={700} c="dimmed">STATUS</Text>
                   <Badge 
                     variant="filled" 
-                    color={getStatusColor(selectedTrace.status)}
+                    color={getStatusColor(fullTrace.status)}
                   >
-                    {selectedTrace.status}
+                    {fullTrace.status}
                   </Badge>
                 </Stack>
               </Grid.Col>
@@ -491,7 +509,7 @@ export default function TracesPage() {
               <Text size="xs" fw={700} c="dimmed">REQUEST URI</Text>
               <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                 <Text size="sm" style={{ wordBreak: 'break-all' }}>
-                  {selectedTrace.request_uri || selectedTrace.path}
+                  {fullTrace.request_uri || fullTrace.path}
                 </Text>
               </Paper>
             </Stack>
@@ -502,26 +520,26 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">SOURCE IP</Text>
-                  <Text size="sm" ff="monospace">{selectedTrace.source_ip || "-"}</Text>
+                  <Text size="sm" ff="monospace">{fullTrace.source_ip || "-"}</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">DURATION</Text>
-                  <Text size="sm">{selectedTrace.duration_ms.toFixed(3)} ms</Text>
+                  <Text size="sm">{fullTrace.duration_ms.toFixed(3)} ms</Text>
                 </Stack>
               </Grid.Col>
             </Grid>
 
-            {selectedTrace.reputation !== undefined && (
+            {fullTrace.reputation !== undefined && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">TRUST SCORE</Text>
                 <Badge
                   variant="light"
                   size="lg"
-                  color={selectedTrace.reputation >= 80 ? "teal" : selectedTrace.reputation >= 50 ? "yellow" : "red"}
+                  color={fullTrace.reputation >= 80 ? "teal" : fullTrace.reputation >= 50 ? "yellow" : "red"}
                 >
-                  {selectedTrace.reputation.toFixed(0)}%
+                  {fullTrace.reputation.toFixed(0)}%
                 </Badge>
               </Stack>
             )}
@@ -532,25 +550,25 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">ENTRYPOINT</Text>
-                  <Text size="sm">{selectedTrace.entrypoint_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.entrypoint_delay_ms?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">ROUTING</Text>
-                  <Text size="sm">{selectedTrace.route_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.route_delay_ms?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">MIDDLEWARE</Text>
-                  <Text size="sm">{selectedTrace.middleware_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.middleware_delay_ms?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">SERVICE</Text>
-                  <Text size="sm">{selectedTrace.service_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.service_delay_ms?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
             </Grid>
@@ -560,7 +578,7 @@ export default function TracesPage() {
             <Stack gap={4}>
               <Text size="xs" fw={700} c="dimmed">USER AGENT</Text>
               <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                {selectedTrace.user_agent || "N/A"}
+                {fullTrace.user_agent || "N/A"}
               </Text>
             </Stack>
 
@@ -568,13 +586,13 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">TLS JA3 FINGERPRINT</Text>
-                  <Text size="xs" ff="monospace" c="dimmed">{selectedTrace.ja3 || "N/A"}</Text>
+                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja3 || "N/A"}</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">TLS JA4 FINGERPRINT</Text>
-                  <Text size="xs" ff="monospace" c="dimmed">{selectedTrace.ja4 || "N/A"}</Text>
+                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja4 || "N/A"}</Text>
                 </Stack>
               </Grid.Col>
             </Grid>
@@ -582,33 +600,33 @@ export default function TracesPage() {
             <Stack gap={4}>
               <Text size="xs" fw={700} c="dimmed">REFERER</Text>
               <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                {selectedTrace.referer || "N/A"}
+                {fullTrace.referer || "N/A"}
               </Text>
             </Stack>
 
             <Stack gap={4}>
               <Text size="xs" fw={700} c="dimmed">TIMESTAMP</Text>
-              <Text size="sm">{new Date(selectedTrace.timestamp).toLocaleString()}</Text>
+              <Text size="sm">{new Date(fullTrace.timestamp).toLocaleString()}</Text>
             </Stack>
 
-            {selectedTrace.recommendation && (
+            {fullTrace.recommendation && (
               <Paper withBorder p="sm" radius="md" style={{ borderLeft: '4px solid var(--mantine-color-blue-6)', backgroundColor: 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.1))' }}>
                 <Group gap="xs" mb={4}>
                   <IconInfoCircle size={16} color="var(--mantine-color-blue-6)" />
                   <Text size="sm" fw={700} c="blue.7">SMART RECOMMENDATION</Text>
                 </Group>
-                <Text size="sm" c="blue.9" fw={500}>{selectedTrace.recommendation}</Text>
+                <Text size="sm" c="blue.9" fw={500}>{fullTrace.recommendation}</Text>
               </Paper>
             )}
 
             <Divider label="Metadata" labelPosition="center" />
 
-            {selectedTrace.request_headers && Object.keys(selectedTrace.request_headers).length > 0 && (
+            {fullTrace.request_headers && Object.keys(fullTrace.request_headers).length > 0 && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">REQUEST HEADERS</Text>
                 <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                   <Stack gap={2}>
-                    {Object.entries(selectedTrace.request_headers).map(([key, value]) => (
+                    {Object.entries(fullTrace.request_headers).map(([key, value]) => (
                       <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
                         <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
                         <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
@@ -619,23 +637,23 @@ export default function TracesPage() {
               </Stack>
             )}
 
-            {selectedTrace.request_body && (
+            {fullTrace.request_body && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">REQUEST BODY</Text>
                 <ScrollArea.Autosize maxHeight={200}>
                   <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {selectedTrace.request_body}
+                    {fullTrace.request_body}
                   </Code>
                 </ScrollArea.Autosize>
               </Stack>
             )}
 
-            {selectedTrace.response_headers && Object.keys(selectedTrace.response_headers).length > 0 && (
+            {fullTrace.response_headers && Object.keys(fullTrace.response_headers).length > 0 && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">RESPONSE HEADERS</Text>
                 <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                   <Stack gap={2}>
-                    {Object.entries(selectedTrace.response_headers).map(([key, value]) => (
+                    {Object.entries(fullTrace.response_headers).map(([key, value]) => (
                       <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
                         <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
                         <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
@@ -646,12 +664,12 @@ export default function TracesPage() {
               </Stack>
             )}
 
-            {selectedTrace.response_body && (
+            {fullTrace.response_body && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">RESPONSE BODY</Text>
                 <ScrollArea.Autosize maxHeight={200}>
                   <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {selectedTrace.response_body}
+                    {fullTrace.response_body}
                   </Code>
                 </ScrollArea.Autosize>
               </Stack>

@@ -32,10 +32,23 @@ export function useTraces(limit: number = 100) {
   return useQuery({
     queryKey: ["traces", limit],
     queryFn: async () => {
-      const response = await apiFetch(`/v1/traces?limit=${limit}`);
+      const response = await apiFetch(`/v1/traces?limit=${limit}&summary=true`);
       const data = await response.json();
       return (data.traces || []) as Trace[];
     },
     refetchInterval: 5000,
+  });
+}
+
+export function useTrace(id?: string, timestamp?: string) {
+  return useQuery({
+    queryKey: ["trace", id, timestamp],
+    queryFn: async () => {
+      if (!id || !timestamp) return null;
+      const response = await apiFetch(`/v1/traces/detail?id=${id}&timestamp=${encodeURIComponent(timestamp)}`);
+      const data = await response.json();
+      return data.trace as Trace;
+    },
+    enabled: !!id && !!timestamp,
   });
 }

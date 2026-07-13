@@ -33,8 +33,18 @@ message Trace {
 
 message ListTracesRequest {
   int32 limit = 1;
+  bool summary = 2;
 }
 
 message ListTracesResponse {
   repeated Trace traces = 1;
+}
+
+message GetTraceRequest {
+  string id = 1;
+  string timestamp = 2; // RFC3339
+}
+
+message GetTraceResponse {
+  Trace trace = 1;
 }
