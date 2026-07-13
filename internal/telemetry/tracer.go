@@ -18,10 +18,7 @@ func InitTracer(serviceName string) (func(context.Context) error, error) {
 	ctx := context.Background()
 
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		// If no endpoint is provided, we use a no-op tracer provider
-		return func(context.Context) error { return nil }, nil
-	}
+	var tracerProvider *sdktrace.TracerProvider
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
@@ -32,17 +29,27 @@ func InitTracer(serviceName string) (func(context.Context) error, error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(endpoint), otlptracehttp.WithInsecure())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create trace exporter: %w", err)
+	if endpoint == "" {
+		// If no endpoint is provided, we still create a provider to generate unique IDs
+		// for internal telemetry and diagnostics, even if we don't export to OTLP.
+		tracerProvider = sdktrace.NewTracerProvider(
+			sdktrace.WithResource(res),
+			sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		)
+	} else {
+		traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(endpoint), otlptracehttp.WithInsecure())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create trace exporter: %w", err)
+		}
+
+		bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
+		tracerProvider = sdktrace.NewTracerProvider(
+			sdktrace.WithSampler(sdktrace.AlwaysSample()),
+			sdktrace.WithResource(res),
+			sdktrace.WithSpanProcessor(bsp),
+		)
 	}
 
-	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
-	tracerProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithResource(res),
-		sdktrace.WithSpanProcessor(bsp),
-	)
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 

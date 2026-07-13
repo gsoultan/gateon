@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"net/http"
@@ -130,7 +133,12 @@ func isGRPCRequest(r *http.Request) bool {
 
 var (
 	reputationStrings [101]string
-
+	wafInstanceCache  sync.Map // map[string]coraza.WAF
+	hashPool          = sync.Pool{
+		New: func() any {
+			return sha256.New()
+		},
+	}
 	fastScanner = scanner.NewScanner([]string{
 		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ", "EXEC ", "sleep(", "benchmark(", "waitfor delay", // SQLi
 		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(", "alert(", "confirm(", "prompt(", // XSS
@@ -523,17 +531,13 @@ func getReputationString(score float64) string {
 
 // WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
 func WAF(cfg WAFConfig) (Middleware, error) {
+	// createWAFInstance correctly uses WafRules if provided.
 	waf, err := createWAFInstance(cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	wrappedWaf := &wafWrapper{waf: waf, routeID: cfg.RouteID, cfg: cfg}
-
-	// Register the wrapper as an invalidator in the rule store to enable instant updates.
-	if cfg.WafRules != nil {
-		cfg.WafRules.SetInvalidator(wrappedWaf)
-	}
 
 	return func(next http.Handler) http.Handler {
 		wafHandler := txhttp.WrapHandler(wrappedWaf, next)
@@ -614,10 +618,10 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			// (e.g. "UNION ", "<script") that legitimate values rarely match.
 			if !grpcRequest {
 				// We scan the raw RequestURI AND the unescaped version to catch obfuscated attacks.
+				// Optimized: Use FindAll directly to get matches in a single pass.
 				rawURI := r.RequestURI
-				if fastScanner.Scan(rawURI) {
-					match := fastScanner.FindAll(rawURI)
-					details := "Request URI match: " + strings.Join(match, ", ")
+				if matches := fastScanner.FindAll(rawURI); len(matches) > 0 {
+					details := "Request URI match: " + strings.Join(matches, ", ")
 					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
 					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
@@ -626,9 +630,8 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 
 				unescapedURI, _ := url.PathUnescape(rawURI)
 				if unescapedURI != "" && unescapedURI != rawURI {
-					if fastScanner.Scan(unescapedURI) {
-						match := fastScanner.FindAll(unescapedURI)
-						details := "Unescaped Request URI match: " + strings.Join(match, ", ")
+					if matches := fastScanner.FindAll(unescapedURI); len(matches) > 0 {
+						details := "Unescaped Request URI match: " + strings.Join(matches, ", ")
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
 						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
 						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
@@ -636,21 +639,23 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					}
 				}
 
-				if referer := r.Header.Get("Referer"); referer != "" && fastScanner.Scan(referer) {
-					match := fastScanner.FindAll(referer)
-					details := "Referer header match: " + strings.Join(match, ", ")
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
-					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-					return
+				if referer := r.Header.Get("Referer"); referer != "" {
+					if matches := fastScanner.FindAll(referer); len(matches) > 0 {
+						details := "Referer header match: " + strings.Join(matches, ", ")
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+						return
+					}
 				}
-				if ua := r.Header.Get("User-Agent"); ua != "" && fastScanner.Scan(ua) {
-					match := fastScanner.FindAll(ua)
-					details := "User-Agent header match: " + strings.Join(match, ", ")
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-					telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
-					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-					return
+				if ua := r.Header.Get("User-Agent"); ua != "" {
+					if matches := fastScanner.FindAll(ua); len(matches) > 0 {
+						details := "User-Agent header match: " + strings.Join(matches, ", ")
+						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
+						telemetry.MiddlewareWAFBlockedTotal.WithLabelValues(cfg.RouteID, "fast_path_signature").Inc()
+						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+						return
+					}
 				}
 			}
 
@@ -797,6 +802,8 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 func createWAFInstance(cfg WAFConfig) (coraza.WAF, error) {
 	wafConfig := coraza.NewWAFConfig()
 	var sb strings.Builder
+
+	// Build directives string... (existing logic)
 
 	if cfg.UseCRS {
 		pl := cfg.ParanoiaLevel
@@ -964,6 +971,30 @@ SecAuditLog "%s"
 		wafConfig = wafConfig.WithDirectives(`SecResponseBodyMimeType text/plain text/html text/xml application/json application/xml application/xhtml+xml`)
 	}
 
+	// Create a unique key for the compiled WAF instance based on all directives
+	// and critical settings. This allows multiple routes to share the same
+	// expensive-to-compile WAF instance.
+	h := hashPool.Get().(hash.Hash)
+	h.Reset()
+	defer hashPool.Put(h)
+
+	// Hash all directives in order
+	io.WriteString(h, sb.String())
+	io.WriteString(h, cfg.GlobalDirectives)
+	io.WriteString(h, cfg.Directives)
+	io.WriteString(h, cfg.DirectivesFile)
+	if cfg.RequestBodyLimit > 0 {
+		_, _ = fmt.Fprintf(h, "|reqLimit:%d", cfg.RequestBodyLimit)
+	}
+	if cfg.ResponseBodyLimit > 0 {
+		_, _ = fmt.Fprintf(h, "|respLimit:%d", cfg.ResponseBodyLimit)
+	}
+	key := hex.EncodeToString(h.Sum(nil))
+
+	if val, ok := wafInstanceCache.Load(key); ok {
+		return val.(coraza.WAF), nil
+	}
+
 	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
 		ruleID := strconv.Itoa(mr.Rule().ID())
 		logger.L.LogWarn("WAF matched rule",
@@ -975,7 +1006,17 @@ SecAuditLog "%s"
 			"message", mr.ErrorLog())
 	})
 
-	return coraza.NewWAF(wafConfig)
+	instance, err := coraza.NewWAF(wafConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache (or use existing if someone beat us to it)
+	if actual, loaded := wafInstanceCache.LoadOrStore(key, instance); loaded {
+		return actual.(coraza.WAF), nil
+	}
+
+	return instance, nil
 }
 
 // recordFastPathThreat records a security threat detected by the fast-path.
@@ -1129,18 +1170,6 @@ func (w *wafWrapper) NewTransactionWithID(id string) types.Transaction {
 		routeID:     w.routeID,
 		cfg:         w.cfg,
 	}
-}
-
-func (w *wafWrapper) Invalidate() {
-	newWaf, err := createWAFInstance(w.cfg)
-	if err != nil {
-		logger.L.LogError("waf: failed to reload rules", "route", w.routeID, "error", err)
-		return
-	}
-	w.mu.Lock()
-	w.waf = newWaf
-	w.mu.Unlock()
-	logger.L.LogInfo("waf: rules reloaded successfully", "route", w.routeID)
 }
 
 type txWrapper struct {

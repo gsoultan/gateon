@@ -5,6 +5,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
+	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -54,5 +55,23 @@ func (p *serverProxyInvalidator) InvalidateTLS() {
 	if p.server.TLSManager != nil {
 		p.server.TLSManager.UpdateConfig(BuildGtlsConfig(p.server))
 		p.server.TLSManager.ClearCache()
+	}
+}
+
+// InvalidateWAF implements proxy.Invalidator.
+func (p *serverProxyInvalidator) InvalidateWAF() {
+	middleware.InvalidateWAFCache()
+	// Force rebuild of all proxies to pick up new WAF instances/rules
+	p.server.InvalidateRouteProxies(func(r *gateonv1.Route) bool { return true })
+}
+
+// WafToProxyInvalidator bridges waf.Store.Invalidator to proxy.Invalidator.
+type WafToProxyInvalidator struct {
+	ProxyInv proxy.Invalidator
+}
+
+func (b *WafToProxyInvalidator) Invalidate() {
+	if b.ProxyInv != nil {
+		b.ProxyInv.InvalidateWAF()
 	}
 }

@@ -65,6 +65,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	var wafRules *waf.Store
 	if s.WafRules != nil {
 		wafRules = s.WafRules.(*waf.Store)
+		wafRules.SetInvalidator(&WafToProxyInvalidator{proxyInvalidator})
 	}
 
 	apiService := api.NewApiService(api.ApiServiceConfig{

@@ -240,6 +240,30 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		e.checkHeaderConsistency(tr, routeMap[tr.ServiceName], stats)
 	}
 
+	for _, th := range data.SecurityThreats {
+		if th == nil || th.SourceIP == "" {
+			continue
+		}
+		stats, ok := data.IPStats[th.SourceIP]
+		if !ok {
+			stats = &IPStats{
+				UniquePaths: make(map[string]struct{}),
+				UserAgents:  make(map[string]struct{}),
+				Methods:     make(map[string]int),
+				Referers:    make(map[string]int),
+				JA3s:        make(map[string]int),
+				JA4s:        make(map[string]int),
+				PathErrors:  make(map[string]int),
+				CountryCode: th.CountryCode,
+			}
+			data.IPStats[th.SourceIP] = stats
+		}
+		stats.WAFHits++
+		if th.Time.After(stats.LastSeen) {
+			stats.LastSeen = th.Time
+		}
+	}
+
 	var allAnomalies []*gateonv1.Anomaly
 	for _, d := range e.detectors {
 		allAnomalies = append(allAnomalies, d.Detect(ctx, data)...)

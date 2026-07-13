@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
@@ -265,7 +266,8 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 	return mw, nil
 }
 
-// InvalidateWAFCache clears all cached WAF instances. Call when a WAF middleware is saved or deleted.
+// InvalidateWAFCache clears all cached WAF instances and middlewares.
+// Call when a WAF configuration or rule is saved or deleted.
 func InvalidateWAFCache() {
 	wafCache.Range(func(key, _ any) bool {
 		wafCache.Delete(key)
@@ -275,6 +277,11 @@ func InvalidateWAFCache() {
 		globalWAFCache.Delete(key)
 		return true
 	})
+	wafInstanceCache.Range(func(key, _ any) bool {
+		wafInstanceCache.Delete(key)
+		return true
+	})
+	logger.L.LogInfo("Global WAF and instance caches invalidated")
 }
 
 // WAFCacheInvalidator implements domain.WAFCacheInvalidator by clearing the WAF cache.

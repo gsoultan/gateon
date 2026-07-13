@@ -35,7 +35,13 @@ func Telemetry(serviceName string) Middleware {
 			// Inject trace ID into request state if available
 			rs := request.GetRequestState(r)
 			if rs != nil {
-				rs.RequestID = span.SpanContext().TraceID().String()
+				tid := span.SpanContext().TraceID()
+				if tid.IsValid() {
+					rs.RequestID = tid.String()
+				} else {
+					// Fallback if the tracer failed to generate a valid ID (e.g. no-op tracer)
+					rs.RequestID = request.GenerateID()
+				}
 				if rs.TEntrypoint == 0 {
 					rs.TEntrypoint = time.Now().UnixNano()
 				}

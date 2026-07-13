@@ -154,6 +154,40 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 	}
 }
 
+func TestSecurityThreatDetector_WAFHits(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+
+	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
+		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
+			SecurityThreatThreshold: 10.0,
+		},
+	}, nil)
+
+	data := &DiagnosticData{
+		Traces: []*telemetry.TraceRecord{
+			{SourceIP: "8.8.8.8", Path: "/api", Method: "POST", Status: "403 Forbidden", Timestamp: now},
+		},
+		SecurityThreats: []*telemetry.SecurityThreat{
+			{SourceIP: "8.8.8.8", Type: "waf_violation", Time: now},
+		},
+	}
+
+	anomalies := engine.Analyze(ctx, data)
+
+	var wafAnom *gateonv1.Anomaly
+	for _, a := range anomalies {
+		if a.Source == "8.8.8.8" && a.Type == "waf_violation" {
+			wafAnom = a
+			break
+		}
+	}
+
+	assert.NotNil(t, wafAnom, "Should detect waf_violation anomaly")
+	assert.Contains(t, wafAnom.Description, "WAF security rules triggered")
+	assert.GreaterOrEqual(t, wafAnom.Score, 40.0)
+}
+
 func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
