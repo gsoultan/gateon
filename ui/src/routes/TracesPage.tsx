@@ -675,7 +675,7 @@ export default function TracesPage() {
               </Stack>
             )}
           </Stack>
-        )}
+        ) : null}
       </Modal>
     </Stack>
   );
