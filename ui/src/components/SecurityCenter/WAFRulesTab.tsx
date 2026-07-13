@@ -51,6 +51,11 @@ export function WAFRulesTab() {
     setParams({ ...params, search: value, offset: 0 });
   };
 
+  const handleCategoryFilter = (value: string | null) => {
+    setActivePage(1);
+    setParams({ ...params, category: value || 'all', offset: 0 });
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRule) return;
@@ -147,6 +152,29 @@ export function WAFRulesTab() {
             value={search}
             onChange={(e) => handleSearch(e.currentTarget.value)}
             w={250}
+          />
+          <Select
+            placeholder="Category"
+            data={[
+              { value: 'all', label: 'All Categories' },
+              { value: 'Compliance', label: 'COMPLIANCE' },
+              { value: 'Initialization', label: 'INITIALIZATION' },
+              { value: 'Adaptive', label: 'ADAPTIVE' },
+              { value: 'Reputation', label: 'REPUTATION' },
+              { value: 'DoS', label: 'DOS' },
+              { value: 'Injection', label: 'INJECTION' },
+              { value: 'WordPress', label: 'WORDPRESS' },
+              { value: 'Malware', label: 'MALWARE' },
+              { value: 'Scanner', label: 'SCANNER' },
+              { value: 'Protocol', label: 'PROTOCOL' },
+              { value: 'Ransomware', label: 'RANSOMWARE' },
+              { value: 'RCE', label: 'RCE' },
+              { value: 'gRPC', label: 'GRPC' },
+              { value: 'custom', label: 'CUSTOM' },
+            ]}
+            value={params.category || 'all'}
+            onChange={handleCategoryFilter}
+            w={150}
           />
           <Button
             leftSection={<IconPlus size={16} />}

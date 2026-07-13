@@ -254,6 +254,7 @@ message ListWafRulesRequest {
   int32 limit = 1;
   int32 offset = 2;
   string search = 3;
+  string category = 4;
 }
 
 message ListWafRulesResponse {

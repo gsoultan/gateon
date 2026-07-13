@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -113,21 +114,31 @@ func (s *Store) GetAllRules() []Rule {
 	return res
 }
 
-// ListRules returns a paginated list of WAF rules from the database with optional search.
-func (s *Store) ListRules(ctx context.Context, limit, offset int, search string) ([]Rule, int, error) {
+// ListRules returns a paginated list of WAF rules from the database with optional search and category filter.
+func (s *Store) ListRules(ctx context.Context, limit, offset int, search, category string) ([]Rule, int, error) {
 	var rules []Rule
 	var total int
 
 	query := "SELECT id, name, directive, enabled, paranoia_level, category, created_at, updated_at FROM waf_rules"
 	countQuery := "SELECT COUNT(*) FROM waf_rules"
 	var args []any
+	var conditions []string
 
 	if search != "" {
-		where := " WHERE id LIKE ? OR name LIKE ? OR directive LIKE ? OR category LIKE ?"
-		query += where
-		countQuery += where
+		conditions = append(conditions, "(id LIKE ? OR name LIKE ? OR directive LIKE ? OR category LIKE ?)")
 		searchArg := "%" + search + "%"
 		args = append(args, searchArg, searchArg, searchArg, searchArg)
+	}
+
+	if category != "" && category != "all" {
+		conditions = append(conditions, "category = ?")
+		args = append(args, category)
+	}
+
+	if len(conditions) > 0 {
+		where := " WHERE " + strings.Join(conditions, " AND ")
+		query += where
+		countQuery += where
 	}
 
 	// Get total count
@@ -659,25 +670,25 @@ func (s *Store) Seed(ctx context.Context) error {
 			Category:      "Ransomware",
 		},
 		{
-			ID:            "150000",
+			ID:            "151000",
 			Name:          "RCE: Log4Shell (CVE-2021-44228)",
-			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI|REQUEST_BODY "@rx \$\{jndi:(?:ldap|rmi|dns|nis|iiop|corba|nds|http):" "id:150000,phase:2,deny,status:403,msg:'Log4Shell RCE attempt',tag:'attack-rce',tag:'cve-2021-44228',severity:CRITICAL"`,
+			Directive:     `SecRule ARGS|REQUEST_HEADERS|REQUEST_URI|REQUEST_BODY "@rx \$\{jndi:(?:ldap|rmi|dns|nis|iiop|corba|nds|http):" "id:151000,phase:2,deny,status:403,msg:'Log4Shell RCE attempt',tag:'attack-rce',tag:'cve-2021-44228',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "RCE",
 		},
 		{
-			ID:            "150001",
+			ID:            "151001",
 			Name:          "RCE: Spring4Shell (CVE-2022-22965)",
-			Directive:     `SecRule ARGS|REQUEST_BODY "@rx class\.module\.classLoader" "id:150001,phase:2,deny,status:403,msg:'Spring4Shell RCE attempt',tag:'attack-rce',tag:'cve-2022-22965',severity:CRITICAL"`,
+			Directive:     `SecRule ARGS|REQUEST_BODY "@rx class\.module\.classLoader" "id:151001,phase:2,deny,status:403,msg:'Spring4Shell RCE attempt',tag:'attack-rce',tag:'cve-2022-22965',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "RCE",
 		},
 		{
-			ID:            "150002",
+			ID:            "151002",
 			Name:          "RCE: Generic Command Injection",
-			Directive:     `SecRule ARGS|REQUEST_BODY "@rx (?:;|\||&|\$|\n|\r)\s*(?:cat|ls|id|whoami|pwd|uname|netcat|nc|curl|wget|bash|sh|zsh|powershell|cmd\.exe)\b" "id:150002,phase:2,deny,status:403,msg:'Generic RCE attempt',tag:'attack-rce',severity:CRITICAL"`,
+			Directive:     `SecRule ARGS|REQUEST_BODY "@rx (?:;|\||&|\$|\n|\r)\s*(?:cat|ls|id|whoami|pwd|uname|netcat|nc|curl|wget|bash|sh|zsh|powershell|cmd\.exe)\b" "id:151002,phase:2,deny,status:403,msg:'Generic RCE attempt',tag:'attack-rce',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "RCE",

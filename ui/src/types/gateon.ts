@@ -18,6 +18,7 @@ export type ListWafRulesRequest = {
   limit?: number;
   offset?: number;
   search?: string;
+  category?: string;
 };
 
 export type CreateWafRuleRequest = {

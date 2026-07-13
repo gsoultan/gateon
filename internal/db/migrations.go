@@ -1110,4 +1110,19 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(41, "add_indices_for_threat_explorer", func(db *sql.DB, dialect Dialect) error {
+		queries := []string{
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_source_ip ON security_threats(source_ip);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_category ON security_threats(category);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_action_taken ON security_threats(action_taken);`,
+			`CREATE INDEX IF NOT EXISTS idx_ip_mitigations_status ON ip_mitigations(status);`,
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
