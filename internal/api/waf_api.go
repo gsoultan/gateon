@@ -19,8 +19,9 @@ func (s *ApiService) ListWafRules(ctx context.Context, req *gateonv1.ListWafRule
 	}
 	offset := int(req.GetOffset())
 	search := req.GetSearch()
+	category := req.GetCategory()
 
-	rules, total, err := s.WafRules.ListRules(ctx, limit, offset, search)
+	rules, total, err := s.WafRules.ListRules(ctx, limit, offset, search, category)
 	if err != nil {
 		return nil, err
 	}

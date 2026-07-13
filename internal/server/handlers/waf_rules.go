@@ -19,6 +19,7 @@ func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 		limitStr := query.Get("limit")
 		offsetStr := query.Get("offset")
 		search := query.Get("search")
+		category := query.Get("category")
 
 		var limit, offset int
 		if limitStr != "" {
@@ -39,9 +40,10 @@ func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 		}
 
 		res, err := apiService.ListWafRules(r.Context(), &gateonv1.ListWafRulesRequest{
-			Limit:  int32(limit),
-			Offset: int32(offset),
-			Search: search,
+			Limit:    int32(limit),
+			Offset:   int32(offset),
+			Search:   search,
+			Category: category,
 		})
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, err.Error())

@@ -14,6 +14,7 @@ export function useWafRules(initialParams: ListWafRulesRequest = { limit: 10, of
       if (params.limit) queryParams.set("limit", params.limit.toString());
       if (params.offset) queryParams.set("offset", params.offset.toString());
       if (params.search) queryParams.set("search", params.search);
+      if (params.category && params.category !== "all") queryParams.set("category", params.category);
 
       const resp = await apiFetch(`/v1/waf/rules?${queryParams.toString()}`);
       const data: ListWafRulesResponse = await resp.json();

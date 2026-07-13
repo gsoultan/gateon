@@ -1535,10 +1535,15 @@ func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix 
 		args = append(args, filter.Category)
 	}
 	if filter.Status == "mitigated" {
-		conditions = append(conditions, prefix+"action_taken IN ('blocked', 'challenged', 'shunned')")
-		conditions = append(conditions, "(m.status IS NULL OR m.status != 'unmitigated')")
+		// Mitigated if:
+		// 1. Current status is 'mitigated' (regardless of what happened at the time)
+		// 2. OR it was blocked at the time AND current status is NOT 'unmitigated'
+		conditions = append(conditions, fmt.Sprintf("(m.status = 'mitigated' OR (%saction_taken IN ('blocked', 'challenged', 'shunned') AND (m.status IS NULL OR m.status != 'unmitigated')))", prefix))
 	} else if filter.Status == "detected" {
-		conditions = append(conditions, fmt.Sprintf("(%saction_taken NOT IN ('blocked', 'challenged', 'shunned') OR m.status = 'unmitigated')", prefix))
+		// Detected (not currently mitigated) if:
+		// 1. Current status is 'unmitigated'
+		// 2. OR it was NOT blocked at the time AND current status is NOT 'mitigated'
+		conditions = append(conditions, fmt.Sprintf("(m.status = 'unmitigated' OR (%saction_taken NOT IN ('blocked', 'challenged', 'shunned') AND (m.status IS NULL OR m.status != 'mitigated')))", prefix))
 	}
 
 	if len(conditions) == 0 {
@@ -1644,6 +1649,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		}
 		th := &SecurityThreat{}
 		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation); err != nil {
+			logQueryErr(ctx, "threats lite: scan failed", err)
 			continue
 		}
 		th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
