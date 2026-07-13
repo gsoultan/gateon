@@ -87,6 +87,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 
 			// Analysis pipeline
 			score += d.analyzeTraffic(stats, &reasons, &primaryType)
+			score += d.analyzeWAF(stats, &reasons, &primaryType)
 			score += d.analyzeErrors(stats, &reasons, &primaryType)
 			score += d.analyzePatterns(stats, pathIPs, totalIPs, &reasons, &primaryType)
 			score += d.analyzeHeaders(stats, &reasons)
@@ -444,6 +445,20 @@ func (d *SecurityThreatDetector) analyzeTraffic(stats *IPStats, reasons *[]strin
 		*reasons = append(*reasons, fmt.Sprintf("Request burst detected (%d requests in 10s)", stats.BurstCount))
 	} else if stats.BurstCount > 10 {
 		score += 15
+	}
+	return score
+}
+
+func (d *SecurityThreatDetector) analyzeWAF(stats *IPStats, reasons *[]string, primaryType *string) int {
+	score := 0
+	if stats.WAFHits > 0 {
+		// WAF hits are high-confidence signals.
+		// Each hit adds significant weight, especially if they accumulate.
+		score += stats.WAFHits * 40
+		*reasons = append(*reasons, fmt.Sprintf("WAF security rules triggered (%d times)", stats.WAFHits))
+		if *primaryType == "security_threat" {
+			*primaryType = "waf_violation"
+		}
 	}
 	return score
 }

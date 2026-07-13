@@ -14,7 +14,7 @@ import (
 const InvalidationChannel = "gateon:config:invalidation"
 
 type InvalidationMessage struct {
-	Type   string `json:"type"` // "route", "all", "tls"
+	Type   string `json:"type"` // "route", "all", "tls", "waf"
 	ID     string `json:"id,omitzero"`
 	NodeID string `json:"node_id"`
 }
@@ -62,6 +62,14 @@ func (i *distributedProxyInvalidator) InvalidateTLS() {
 	}
 }
 
+func (i *distributedProxyInvalidator) InvalidateWAF() {
+	i.local.InvalidateWAF()
+	if i.redis != nil {
+		msg, _ := json.Marshal(InvalidationMessage{Type: "waf", NodeID: i.nodeID})
+		i.redis.Publish(context.Background(), InvalidationChannel, msg)
+	}
+}
+
 // StartListener listens for invalidation events from other nodes.
 func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, redisClient redis.Client) {
 	if redisClient == nil {
@@ -96,6 +104,9 @@ func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, red
 			case "tls":
 				logger.L.LogDebug("Received remote TLS invalidation", "from", inv.NodeID)
 				local.InvalidateTLS()
+			case "waf":
+				logger.L.LogDebug("Received remote WAF invalidation", "from", inv.NodeID)
+				local.InvalidateWAF()
 			}
 		}
 	}

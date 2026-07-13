@@ -34,6 +34,11 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
+// NewStoreWithDialect creates a new WAF rule store with a specific dialect.
+func NewStoreWithDialect(db *sql.DB, dialect db.Dialect) *Store {
+	return &Store{db: db, dialect: dialect}
+}
+
 // InitStore initializes the WAF rule store and loads rules into memory.
 func InitStore(databaseURL string) error {
 	var err error
@@ -714,5 +719,9 @@ func (s *Store) Seed(ctx context.Context) error {
 		}
 	}
 
-	return s.Reload(ctx)
+	if err := s.Reload(ctx); err != nil {
+		return err
+	}
+	s.notifyInvalidation()
+	return nil
 }

@@ -13,6 +13,7 @@ type DiagnosticData struct {
 	Traces           []*telemetry.TraceRecord
 	Routes           []*gateonv1.Route
 	Middlewares      []*gateonv1.Middleware
+	SecurityThreats  []*telemetry.SecurityThreat
 	ManagementHosts  []string
 	IPStats          map[string]*IPStats
 	FingerprintStats map[string]*FingerprintStats

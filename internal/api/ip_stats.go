@@ -25,6 +25,7 @@ type IPStats struct {
 	JA3s          map[string]int // Track JA3 fingerprints per IP
 	JA4s          map[string]int // Track JA4 fingerprints per IP
 	PathErrors    map[string]int // Track 401/403 errors per path
+	WAFHits       int            // Count of requests blocked by WAF rules
 	HeaderAnomaly int            // Count of requests with suspicious header combinations
 	LastTrace     *telemetry.TraceRecord
 

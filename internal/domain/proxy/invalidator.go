@@ -9,4 +9,5 @@ type Invalidator interface {
 	InvalidateRoute(id string)
 	InvalidateRoutes(strategy func(*gateonv1.Route) bool)
 	InvalidateTLS()
+	InvalidateWAF()
 }

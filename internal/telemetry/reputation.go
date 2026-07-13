@@ -134,7 +134,9 @@ func GetReputationScore(fingerprint string) float64 {
 	shard := getRepShard(fingerprint)
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
-	if val, ok := shard.cache.Get(fingerprint); ok {
+	// Use Peek instead of Get to avoid updating LRU and internal mutex contention
+	// during the high-frequency WAF check.
+	if val, ok := shard.cache.Peek(fingerprint); ok {
 		return val.(*Reputation).Score
 	}
 	return 50.0
