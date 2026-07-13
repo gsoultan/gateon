@@ -34,8 +34,11 @@ type SequenceStats struct {
 	JA4Count   int
 }
 
-// IsIPMitigated checks if an IP is currently blocked or shunned by any middleware.
+// IsIPMitigated checks if an IP is currently blocked or shunned by any middleware or the shunning engine.
 func (d *DiagnosticData) IsIPMitigated(ip string) bool {
+	if telemetry.IsIPMitigated(ip) {
+		return true
+	}
 	for _, mw := range d.Middlewares {
 		if mw.Type == "ipfilter" {
 			if denyList, ok := mw.Config["deny_list"]; ok {
