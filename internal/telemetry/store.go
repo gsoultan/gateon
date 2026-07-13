@@ -492,7 +492,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 
 	logger.Default().LogInfo("telemetry: migrating existing traces to Pebble", "count", count)
 
-	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(route_id, '') FROM traces")
+	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(route_id, ''), COALESCE(recommendation, ''), reputation, entrypoint_delay_ms, route_delay_ms, middleware_delay_ms, service_delay_ms FROM traces")
 	if err != nil {
 		return
 	}
@@ -502,7 +502,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 	n := 0
 	for rows.Next() {
 		var tr TraceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID); err != nil {
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID, &tr.Recommendation, &tr.Reputation, &tr.EntrypointDelay, &tr.RouteDelay, &tr.MiddlewareDelay, &tr.ServiceDelay); err != nil {
 			continue
 		}
 

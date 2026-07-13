@@ -306,6 +306,8 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
 	chain = append(chain,
+		middleware.AccessLog(routeLabel),
+		middleware.Metrics(routeLabel),
 		func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if rs := request.GetRequestState(r); rs != nil {
@@ -318,8 +320,6 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 			})
 		},
 		middleware.Recovery(),
-		middleware.AccessLog(routeLabel),
-		middleware.Metrics(routeLabel),
 		middleware.Debugger(globalStore),
 	)
 

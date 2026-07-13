@@ -1080,4 +1080,34 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(40, "add_recommendation_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS recommendation TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS reputation DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS recommendation TEXT;`,
+				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS reputation DOUBLE NOT NULL DEFAULT 0;`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE traces ADD COLUMN recommendation TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE traces ADD COLUMN reputation DOUBLE NOT NULL DEFAULT 0;`,
+			}
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

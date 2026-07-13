@@ -96,8 +96,8 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	var epHandler http.Handler = deps.BaseHandler
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	isMgmt := IsManagementAddress(ep.Address, deps)
-	epHandler = injectEntryPointID(ep.Id, epLabel, isMgmt, epHandler)
 	chain := []middleware.Middleware{
+		middleware.WithRequestState(ep.Id, epLabel, isMgmt),
 		middleware.RealIPGlobal(),
 		middleware.RequestID(), // Added for global correlation
 		middleware.Recovery(),
@@ -214,30 +214,6 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 			MaxIncomingUniStreams: quicMaxIncomingUniStreams,
 		},
 	}
-}
-
-func injectEntryPointID(epID, epLabel string, isMgmt bool, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rs := middleware.RequestStatePool.Get().(*middleware.RequestState)
-		rs.Reset()
-		rs.EntryPointID = epID
-		rs.RouteName = "gateon-" + epLabel
-		rs.IsManagement = isMgmt
-		defer middleware.RequestStatePool.Put(rs)
-
-		ctx := context.WithValue(r.Context(), middleware.RequestStateContextKey, rs)
-
-		// Log arrival for proxy traffic only
-		if !isMgmt && !middleware.IsInternalPath(r.URL.Path) {
-			logger.L.LogInfo("Proxy request received",
-				"flow_step", "entrypoint_arrival",
-				"request_id", middleware.GetRequestID(r),
-				"entrypoint", epID,
-				"method", r.Method,
-				"path", r.URL.Path)
-		}
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
 }
 
 func protocols(ep *gateonv1.EntryPoint) (hasTCP, hasUDP bool) {
