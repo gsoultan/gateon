@@ -6,6 +6,7 @@ type L4Config struct {
 	LoadBalancer        string
 	HealthCheckInterval int  // ms, 0 = disabled
 	HealthCheckTimeout  int  // ms
+	EnableHealthCheck   bool // New field
 	UDPSessionTimeout   int  // seconds
 	ProxyProtocol       bool // send HAProxy PROXY protocol v1 header (TCP only)
 }

@@ -33,7 +33,7 @@ import {
   IconAlertTriangle,
   IconCode
 } from '@tabler/icons-react';
-import { useGateonStatus, apiFetch, useMetricsSnapshot } from '../hooks/useGateon';
+import { useGateonStatus, apiFetch, useMetricsSnapshot, installClamav, uninstallClamav } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
 import { Link } from '@tanstack/react-router';
 import type { GlobalConfig, DeepScanStatus } from '../types/gateon';
@@ -141,13 +141,8 @@ export default function SecurityCommandCenter() {
     setInstalling(true);
     setSudoOpened(false);
     try {
-      const res = await apiFetch("/v1/security/clamav/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, sudo_password: password })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await installClamav({ mode, sudo_password: password });
+      if (data.success) {
         notifications.show({
           title: 'Installation Started',
           message: 'ClamAV installation has been initiated. This might take a few minutes.',
@@ -169,12 +164,19 @@ export default function SecurityCommandCenter() {
     }
   };
 
-  const handleUninstall = async () => {
+  const handleUninstall = async (password?: string) => {
+    const mode = globalConfig?.waf?.clamav?.installation_mode;
+    if (mode === 1 && !password) {
+      setPendingMode(3); // 3 for uninstall
+      setSudoOpened(true);
+      return;
+    }
+
     setUninstalling(true);
+    setSudoOpened(false);
     try {
-      const res = await apiFetch("/v1/security/clamav/uninstall", { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await uninstallClamav({ sudo_password: password });
+      if (data.success) {
         notifications.show({
           title: 'Uninstallation Started',
           message: 'ClamAV removal has been initiated. This might take a few minutes.',
@@ -194,6 +196,15 @@ export default function SecurityCommandCenter() {
     } finally {
       setUninstalling(false);
     }
+  };
+
+  const handleSudoConfirm = () => {
+    if (pendingMode === 3) {
+      handleUninstall(sudoPassword);
+    } else if (pendingMode) {
+      handleInstall(pendingMode, sudoPassword);
+    }
+    setSudoPassword("");
   };
 
   React.useEffect(() => {
@@ -305,7 +316,7 @@ export default function SecurityCommandCenter() {
                     variant="subtle"
                     color="red"
                     leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
-                    onClick={handleUninstall}
+                    onClick={() => handleUninstall()}
                     disabled={uninstalling}
                   >
                     Uninstall ClamAV
@@ -408,7 +419,7 @@ export default function SecurityCommandCenter() {
       >
         <Stack gap="md">
           <Text size="sm">
-            Local ClamAV installation requires root privileges. Please provide your sudo password to proceed.
+            This operation requires root privileges. Please provide your sudo password to proceed.
           </Text>
           <PasswordInput
             label="Sudo Password"
@@ -417,18 +428,13 @@ export default function SecurityCommandCenter() {
             onChange={(e) => setSudoPassword(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                handleInstall(pendingMode || 1, sudoPassword);
-                setSudoPassword("");
+                handleSudoConfirm();
               }
             }}
-            autoFocus
           />
           <Group justify="flex-end">
             <Button variant="light" onClick={() => setSudoOpened(false)}>Cancel</Button>
-            <Button onClick={() => {
-              handleInstall(pendingMode || 1, sudoPassword);
-              setSudoPassword("");
-            }}>Install</Button>
+            <Button onClick={handleSudoConfirm}>{pendingMode === 3 ? 'Uninstall' : 'Confirm'}</Button>
           </Group>
         </Stack>
       </Modal>

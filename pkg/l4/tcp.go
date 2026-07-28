@@ -106,6 +106,16 @@ func (p *TCPBackendPool) Pick() string {
 		return ""
 	}
 
+	aliveCount := 0
+	for i := range alive {
+		if alive[i].Load() {
+			aliveCount++
+		}
+	}
+	if aliveCount == 0 {
+		return ""
+	}
+
 	switch policy {
 	case "least_conn":
 		var bestIdx int = -1
@@ -175,6 +185,7 @@ func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
 
 	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		// Attempt Splice for Zero-Copy on Linux, fallback to io.Copy
 		if _, err := SpliceCopy(backend, client); err != nil {
 			_, _ = io.Copy(backend, client)
@@ -182,7 +193,6 @@ func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
 		if c, ok := backend.(interface{ CloseWrite() error }); ok {
 			_ = c.CloseWrite()
 		}
-		close(done)
 	}()
 	if _, err := SpliceCopy(client, backend); err != nil {
 		_, _ = io.Copy(client, backend)

@@ -19,6 +19,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 const (
@@ -145,12 +146,17 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		})
 	}
 
+	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
+	// Standard http.Server only supports HTTP/2 via TLS.
+	h2cHandler := h2c.NewHandler(dynamicTimeouts(ep, deps, tcpHandler), &http2.Server{
+		MaxConcurrentStreams: h2MaxConcurrentStreams,
+		MaxReadFrameSize:     h2MaxReadFrameSize,
+		IdleTimeout:          h2IdleTimeout,
+	})
+
 	server := &http.Server{
-		Addr: addr,
-		// Read/write timeouts are applied per request via dynamicTimeouts so
-		// configuration changes take effect immediately (no restart needed).
-		// They are intentionally left unset on the server here.
-		Handler:   dynamicTimeouts(ep, deps, tcpHandler),
+		Addr:      addr,
+		Handler:   h2cHandler,
 		TLSConfig: epTLSConfig,
 		ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
 			telemetry.GlobalDiagnostics.RecordTLSError(ep.Id, addr, err)

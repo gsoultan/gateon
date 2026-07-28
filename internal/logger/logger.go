@@ -8,6 +8,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -258,6 +259,25 @@ func Init(prod bool) error {
 	if !prod {
 		level = slog.LevelDebug
 	}
+	return initInternal(level, prod)
+}
+
+func InitWithConfig(confLevel string, prod bool) error {
+	level := slog.LevelInfo
+	switch strings.ToLower(confLevel) {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	return initInternal(level, prod)
+}
+
+func initInternal(level slog.Level, prod bool) error {
 	opts := &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {

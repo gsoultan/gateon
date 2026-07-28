@@ -193,9 +193,11 @@ export async function installClamav(req: InstallClamavRequest): Promise<InstallC
   return res.json();
 }
 
-export async function uninstallClamav(): Promise<UninstallClamavResponse> {
+export async function uninstallClamav(req: { sudo_password?: string }): Promise<UninstallClamavResponse> {
   const res = await apiFetch("/v1/security/clamav/uninstall", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

@@ -108,6 +108,11 @@ func main() {
 
 	initTelemetry(globalReg, ctx)
 
+	// Configure logger with global config if present
+	if g := globalReg.Get(ctx); g != nil && g.Log != nil {
+		_ = logger.InitWithConfig(g.Log.Level, logger.IsProd())
+	}
+
 	// Initialize WAF rules store
 	if gc := globalReg.Get(ctx); gc != nil {
 		databaseURL := db.AuthDatabaseURL(gc.Auth)

@@ -7,6 +7,8 @@ export {
   setupGateon,
   testDbConnection,
   getCloudflareIPs,
+  uninstallClamav,
+  installClamav,
 } from "./api";
 export type { PaginationParams, RouteListParams } from "./api";
 

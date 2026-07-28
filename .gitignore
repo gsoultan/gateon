@@ -55,3 +55,17 @@ test_traces.db
 test_traces.db-shm
 test_traces.db-wal
 internal/telemetry/telemetry_pebble/
+/graphify-out/
+/.serena/
+/telemetry_pebble
+/tests/
+/internal/api/telemetry_pebble/
+/internal/middleware/telemetry_pebble/
+/gateon
+/gateon.db
+/gateon.db-shm
+/gateon.db-wal
+/gateon_bin
+/gateon_test.db
+/gateon_test.db-shm
+/gateon_test.db-wal

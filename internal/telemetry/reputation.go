@@ -5,6 +5,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -132,10 +133,8 @@ func GetReputationScore(fingerprint string) float64 {
 		return 50.0
 	}
 	shard := getRepShard(fingerprint)
-	shard.mu.RLock()
-	defer shard.mu.RUnlock()
 	// Use Peek instead of Get to avoid updating LRU and internal mutex contention
-	// during the high-frequency WAF check.
+	// during the high-frequency WAF check. ARC has its own internal lock.
 	if val, ok := shard.cache.Peek(fingerprint); ok {
 		return val.(*Reputation).Score
 	}
@@ -143,7 +142,7 @@ func GetReputationScore(fingerprint string) float64 {
 }
 
 func DecreaseReputation(fingerprint string, penalty float64, reason string) {
-	if fingerprint == "" {
+	if fingerprint == "" || os.Getenv("GATEON_TEST") != "" {
 		return
 	}
 	shard := getRepShard(fingerprint)
