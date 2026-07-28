@@ -95,6 +95,7 @@ func BackendsFromService(svc *gateonv1.Service) []string {
 			addrs = append(addrs, addr)
 		}
 	}
+	fmt.Printf("L4 Resolver: Service %s has %d L4 backends: %v\n", svc.Id, len(addrs), addrs)
 	return addrs
 }
 
@@ -146,6 +147,7 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 		LoadBalancer:        lb,
 		HealthCheckInterval: interval,
 		HealthCheckTimeout:  timeout,
+		EnableHealthCheck:   svc.HealthCheckType != gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_UNSPECIFIED,
 		UDPSessionTimeout:   sessionTimeout,
 		ProxyProtocol:       svc.L4ProxyProtocol,
 	}
@@ -153,7 +155,7 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 
 // ResolveTCP resolves the TCP backend pool for an L4 entrypoint from Route → Service.
 // An optional protocol (e.g. "ssh") can be provided for more specific routing.
-func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) *TCPBackendPool {
+func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy {
 	cfg := r.resolveConfig(ep, "tcp", protocol)
 	if cfg == nil || len(cfg.Backends) == 0 {
 		return nil
@@ -169,7 +171,7 @@ func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) *TCPBack
 	r.mu.RUnlock()
 
 	pool := NewTCPBackendPool(cfg.Backends, cfg.LoadBalancer, cfg.HealthCheckInterval, cfg.HealthCheckTimeout, cfg.ProxyProtocol)
-	if pool != nil && cfg.HealthCheckInterval > 0 {
+	if pool != nil && cfg.HealthCheckInterval > 0 && cfg.EnableHealthCheck {
 		go pool.StartHealthChecks()
 	}
 	r.mu.Lock()
@@ -183,7 +185,7 @@ func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) *TCPBack
 }
 
 // ResolveUDP resolves the UDP proxy for an L4 entrypoint from Route → Service.
-func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) *UDPSessionProxy {
+func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy {
 	cfg := r.resolveConfig(ep, "udp", "")
 	if cfg == nil || len(cfg.Backends) == 0 {
 		return nil
@@ -223,7 +225,8 @@ func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, prot
 	if bt != want {
 		return nil
 	}
-	return ConfigFromRouteService(rt, svc)
+	cfg := ConfigFromRouteService(rt, svc)
+	return cfg
 }
 
 func configHash(cfg *L4Config) uint64 {

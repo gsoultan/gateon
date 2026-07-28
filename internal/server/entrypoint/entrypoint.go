@@ -3,7 +3,6 @@ package entrypoint
 import (
 	"context"
 	"crypto/tls"
-	"net"
 	"net/http"
 	"sync"
 
@@ -54,22 +53,11 @@ func (r *ShutdownRegistry) ShutdownAll(ctx context.Context) {
 	}
 }
 
-// TCPProxy proxies a single TCP connection to a backend (Interface Segregation).
-type TCPProxy interface {
-	ProxyTCP(ctx context.Context, client net.Conn)
-}
-
-// UDPProxy handles UDP packets for session-based proxying.
-type UDPProxy interface {
-	HandlePacket(conn *net.UDPConn, addr *net.UDPAddr, packet []byte)
-	Stop()
-}
-
 // L4Resolver resolves L4 backends from Route -> Service. Nil for HTTP-only setups.
 // Returns interfaces so consumers depend on abstractions (DIP).
 type L4Resolver interface {
-	ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy
-	ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy
+	ResolveTCP(ep *gateonv1.EntryPoint, protocol string) l4.TCPProxy
+	ResolveUDP(ep *gateonv1.EntryPoint) l4.UDPProxy
 }
 
 // WrapL4Resolver adapts *l4.Resolver to L4Resolver (concrete returns -> interface returns).
@@ -82,10 +70,21 @@ func WrapL4Resolver(r *l4.Resolver) L4Resolver {
 
 type l4ResolverAdapter struct{ r *l4.Resolver }
 
-func (a *l4ResolverAdapter) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy {
-	return a.r.ResolveTCP(ep, protocol)
+func (a *l4ResolverAdapter) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) l4.TCPProxy {
+	p := a.r.ResolveTCP(ep, protocol)
+	if p == nil {
+		return nil
+	}
+	return p
 }
-func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy { return a.r.ResolveUDP(ep) }
+
+func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) l4.UDPProxy {
+	p := a.r.ResolveUDP(ep)
+	if p == nil {
+		return nil
+	}
+	return p
+}
 
 // Deps holds dependencies needed to run entrypoints.
 type Deps struct {

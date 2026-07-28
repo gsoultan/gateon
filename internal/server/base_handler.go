@@ -87,7 +87,11 @@ func CreateBaseHandler(
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 
-		epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
+		rs := middleware.GetRequestState(r)
+		epID := ""
+		if rs != nil {
+			epID = rs.EntryPointID
+		}
 
 		// On the management entrypoint, we do NOT serve user-defined proxy routes.
 		if epID != "management" {

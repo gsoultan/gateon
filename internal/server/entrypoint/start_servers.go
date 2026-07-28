@@ -20,7 +20,10 @@ import (
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
+	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 // GATEON_ENTRYPOINT_RATE_LIMIT_QPS: per-IP requests per second (0 = disabled).
@@ -136,9 +139,13 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		middleware.MaxConnections(500),
 	)(deps.BaseHandler)
 
+	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
+	// Standard http.Server only supports HTTP/2 via TLS.
+	h2cHandler := h2c.NewHandler(handler, &http2.Server{})
+
 	server := &http.Server{
 		Addr:    addr,
-		Handler: handler,
+		Handler: h2cHandler,
 		ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
 			telemetry.GlobalDiagnostics.RecordTLSError("management", addr, err)
 		}),
@@ -171,7 +178,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 	logger.L.Info().Str("addr", addr).Str("ep", ep.Id).Msg("starting TCP entrypoint")
 	var l net.Listener
 	var err error
-	if deps.TLSConfig != nil {
+	if ep.Tls != nil && ep.Tls.Enabled && deps.TLSConfig != nil {
 		l, err = tls.Listen("tcp", addr, deps.TLSConfig)
 	} else {
 		l, err = net.Listen("tcp", addr)
@@ -202,7 +209,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 					handleTCPConnWithInspection(c, ep, deps, wg)
 				})
 			} else {
-				var p TCPProxy
+				var p l4.TCPProxy
 				if deps.L4Resolver != nil {
 					p = deps.L4Resolver.ResolveTCP(ep, "")
 				}
@@ -237,7 +244,7 @@ func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 			return conn.Close()
 		})
 	}
-	var proxy UDPProxy
+	var proxy l4.UDPProxy
 	if deps.L4Resolver != nil {
 		proxy = deps.L4Resolver.ResolveUDP(ep)
 	}
@@ -251,7 +258,7 @@ func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 	})
 }
 
-const peekTimeout = 200 * time.Millisecond
+const peekTimeout = 5000 * time.Millisecond
 
 var (
 	peekPool = sync.Pool{
@@ -263,18 +270,34 @@ var (
 
 func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
 	defer conn.Close()
+	logger.L.LogInfo("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
 	conn.SetReadDeadline(time.Now().Add(peekTimeout))
 	peek := peekPool.Get().([]byte)
 	defer peekPool.Put(peek)
 
 	n, err := io.ReadFull(conn, peek)
 	conn.SetReadDeadline(time.Time{})
+
+	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			logger.L.LogDebug("TCP inspection peek timeout", "ep", ep.Id, "bytes", n)
+			err = nil
+		}
+	}
+
 	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		logger.L.LogError("TCP inspection read error", "ep", ep.Id, "error", err)
 		return
 	}
-	peeked := peek[:n]
+	// Copy peeked bytes because the buffer will be put back into the pool.
+	peeked := make([]byte, n)
+	copy(peeked, peek[:n])
+	logger.L.LogDebug("TCP inspection read completed", "ep", ep.Id, "peeked_len", n)
+
 	protocol := ""
 	if n > 0 && IsTCPAppHTTP(peeked) {
+		logger.L.LogInfo("TCP inspection: HTTP detected", "ep", ep.Id)
 		serveConnAsHTTP(conn, peeked, ep, deps)
 		return
 	}
@@ -285,14 +308,16 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 		protocol = "rdp"
 		logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("RDP protocol detected on TCP entrypoint")
 	}
-	var p TCPProxy
+	var p l4.TCPProxy
 	if deps.L4Resolver != nil {
 		p = deps.L4Resolver.ResolveTCP(ep, protocol)
 	}
 	if p != nil {
+		logger.L.LogInfo("TCP inspection: Route found, proxying", "ep", ep.Id, "protocol", protocol)
 		connWithPeek := newPeekedConn(conn, peeked)
 		handleTCPProxyL4(connWithPeek, p)
 	} else {
+		logger.L.LogWarn("TCP inspection: No route found for TCP connection", "ep", ep.Id, "protocol", protocol)
 		connWithPeek := newPeekedConn(conn, peeked)
 		handleTCPConn(connWithPeek)
 	}
@@ -302,7 +327,7 @@ func handleTCPConn(conn net.Conn) {
 	_, _ = fmt.Fprintf(conn, "Gateon TCP Entrypoint - %s\n", time.Now().String())
 }
 
-func handleTCPProxyL4(client net.Conn, pool TCPProxy) {
+func handleTCPProxyL4(client net.Conn, pool l4.TCPProxy) {
 	pool.ProxyTCP(context.Background(), client)
 }
 
@@ -317,7 +342,7 @@ func handleUDPConn(conn *net.UDPConn) {
 	}
 }
 
-func handleUDPProxyL4(conn *net.UDPConn, proxy UDPProxy) {
+func handleUDPProxyL4(conn *net.UDPConn, proxy l4.UDPProxy) {
 	buf := make([]byte, 65535)
 	for {
 		n, addr, err := conn.ReadFromUDP(buf)

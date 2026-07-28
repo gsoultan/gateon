@@ -25,17 +25,16 @@ func (f *Factory) createHeaders(cfg map[string]string) (Middleware, error) {
 			}
 
 			sw := &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
-			next.ServeHTTP(sw, r)
-
 			for k, v := range cfg {
 				if strings.HasPrefix(k, "add_response_") {
-					w.Header().Add(strings.TrimPrefix(k, "add_response_"), v)
+					sw.Header().Add(strings.TrimPrefix(k, "add_response_"), v)
 				} else if strings.HasPrefix(k, "set_response_") {
-					w.Header().Set(strings.TrimPrefix(k, "set_response_"), v)
+					sw.Header().Set(strings.TrimPrefix(k, "set_response_"), v)
 				} else if strings.HasPrefix(k, "del_response_") {
-					w.Header().Del(strings.TrimPrefix(k, "del_response_"))
+					sw.Header().Del(strings.TrimPrefix(k, "del_response_"))
 				}
 			}
+			next.ServeHTTP(sw, r)
 
 			if stsSeconds > 0 && (r.TLS != nil || forceSTSHeader) {
 				val := "max-age=" + strconv.Itoa(stsSeconds)

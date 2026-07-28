@@ -114,6 +114,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                 </Text>
               </Stack>
               <Switch
+                id="deception-enabled-switch"
+                label="Honey-Potting & Deception"
                 checked={security.deception?.enabled}
                 onChange={(e) => updateSection("deception", { enabled: e.currentTarget.checked })}
                 disabled={disabled}
@@ -122,6 +124,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
             {security.deception?.enabled && (
               <Stack gap="sm" pl="lg">
                 <TagsInput
+                  id="deception-honeypot-paths"
                   label="Honeypot Paths"
                   description="Accessing these paths triggers an immediate block. Recommended: /.env, /wp-admin, /config.php"
                   placeholder="/.env, /wp-admin, /_backup"
@@ -206,6 +209,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   </Text>
                 </Stack>
                 <Switch
+                  id="tarpit-enabled-switch"
+                  label="Active Tarpitting"
                   checked={security.tarpit?.enabled}
                   onChange={(e) => updateSection("tarpit", { enabled: e.currentTarget.checked })}
                   disabled={disabled}
@@ -214,6 +219,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
               {security.tarpit?.enabled && (
                 <Stack gap="sm">
                   <NumberInput
+                    id="tarpit-delay-base"
                     label="Base Delay (ms)"
                     description="Initial delay applied to the first suspicious request. Recommended: 500ms."
                     value={security.tarpit?.delay_base_ms}

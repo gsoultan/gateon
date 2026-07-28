@@ -181,7 +181,20 @@ type targetBoundRoundTripper struct {
 }
 
 func (t *targetBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return t.factory.TransportFor(t.state, req).RoundTrip(req)
+	// Normalize schemes for the underlying transport.
+	// http2.Transport doesn't understand "h2c" or "h2", it expects "http" or "https".
+	// http3.Transport expects "https".
+	originalScheme := req.URL.Scheme
+	switch originalScheme {
+	case "h2c":
+		req.URL.Scheme = "http"
+	case "h2", "h3":
+		req.URL.Scheme = "https"
+	}
+	resp, err := t.factory.TransportFor(t.state, req).RoundTrip(req)
+	// Restore original scheme to avoid side effects if the request is reused
+	req.URL.Scheme = originalScheme
+	return resp, err
 }
 
 type tlsClientIdentity struct {

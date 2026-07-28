@@ -9,6 +9,8 @@ All generated code must follow these guidelines.
 
 ## Performance & Resource
 
+- **Algorithm Efficiency** — Always aim to improve the Big O notation (time and space complexity) of algorithms to ensure optimal performance as data scales.
+- **Continuous Optimization** — Research and apply the most efficient and performant algorithms known for each specific use case, leveraging the latest industry best practices and research.
 - **No memory leaks** — close connections, cancel contexts, release resources; avoid unbounded growth
 - **High performance** — minimize allocations, avoid unnecessary copies, use pooling where appropriate
 - **Lightweight** — keep dependencies minimal; avoid heavy abstractions that add overhead
