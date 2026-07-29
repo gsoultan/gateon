@@ -2,7 +2,6 @@ package httputil
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -65,7 +64,6 @@ func PutStatusResponseWriter(sw *StatusResponseWriter) {
 }
 
 func (w *StatusResponseWriter) WriteHeader(code int) {
-	fmt.Printf("STATUS WRITER %p WriteHeader: %d, prev: %d\n", w, code, w.Status)
 	if !w.ttfbRecorded {
 		w.firstByte = time.Now()
 		w.ttfbRecorded = true

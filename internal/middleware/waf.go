@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -11,6 +12,7 @@ import (
 	"hash"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -645,8 +647,10 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				if matches := fastScanner.FindAll(rawURI); len(matches) > 0 {
 					details := "Request URI match: " + strings.Join(matches, ", ")
 					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-					http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-					return
+					if !cfg.AuditOnly {
+						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+						return
+					}
 				}
 
 				unescapedURI, _ := url.PathUnescape(rawURI)
@@ -654,8 +658,10 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if matches := fastScanner.FindAll(unescapedURI); len(matches) > 0 {
 						details := "Unescaped Request URI match: " + strings.Join(matches, ", ")
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-						return
+						if !cfg.AuditOnly {
+							http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+							return
+						}
 					}
 				}
 
@@ -663,16 +669,20 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					if matches := fastScanner.FindAll(referer); len(matches) > 0 {
 						details := "Referer header match: " + strings.Join(matches, ", ")
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-						return
+						if !cfg.AuditOnly {
+							http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+							return
+						}
 					}
 				}
 				if ua := r.Header.Get("User-Agent"); ua != "" {
 					if matches := fastScanner.FindAll(ua); len(matches) > 0 {
 						details := "User-Agent header match: " + strings.Join(matches, ", ")
 						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-						return
+						if !cfg.AuditOnly {
+							http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
+							return
+						}
 					}
 				}
 			}
@@ -820,7 +830,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if it != nil {
+			if it != nil && !cfg.AuditOnly {
 				status := it.Status
 				if status == 0 {
 					status = http.StatusForbidden
@@ -841,12 +851,13 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				ResponseWriter: w,
 				tx:             tx,
 				buf:            &bytes.Buffer{},
+				auditOnly:      cfg.AuditOnly,
 			}
 			next.ServeHTTP(ww, r)
 			if !ww.interrupted {
 				// Process remaining body if any
 				it, err := tx.ProcessResponseBody()
-				if err == nil && it != nil {
+				if err == nil && it != nil && !cfg.AuditOnly {
 					ww.interrupted = true
 					ww.ResponseWriter.WriteHeader(http.StatusForbidden)
 					_, _ = ww.ResponseWriter.Write([]byte("Forbidden by Security Policy (Response Blocked)"))
@@ -883,8 +894,7 @@ func createWAFInstance(cfg WAFConfig) (coraza.WAF, error) {
 		}
 		engineDirective := "SecRuleEngine On\n"
 		if cfg.AuditOnly {
-			engineDirective = `SecRuleEngine DetectionOnly
-`
+			engineDirective = "SecRuleEngine DetectionOnly\n"
 		}
 
 		sb.WriteString(engineDirective)
@@ -1133,12 +1143,20 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	}
 	telemetry.RegisterRecommendation(GetRequestID(r), recommendation)
 
+	rules := ""
+	if typeStr == "fast_path_signature" {
+		rules = "[900001]"
+	} else if typeStr == "fast_path_malformed_token" {
+		rules = "[900002]"
+	}
+
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:           typeStr,
 		SourceIP:       clientIP,
 		Fingerprint:    telemetry.GetCachedJA4H(r),
 		Score:          100,
 		Details:        details,
+		TriggeredRules: rules,
 		Recommendation: recommendation,
 		Time:           time.Now(),
 		RouteID:        routeID,
@@ -1852,6 +1870,7 @@ type wafResponseWriter struct {
 	buf           *bytes.Buffer
 	interrupted   bool
 	headerWritten bool
+	auditOnly     bool
 }
 
 func (w *wafResponseWriter) Header() http.Header {
@@ -1871,7 +1890,7 @@ func (w *wafResponseWriter) WriteHeader(status int) {
 		}
 	}
 	it := w.tx.ProcessResponseHeaders(status, "HTTP/1.1")
-	if it != nil {
+	if it != nil && !w.auditOnly {
 		w.interrupted = true
 		w.headerWritten = true
 		w.ResponseWriter.WriteHeader(http.StatusForbidden)
@@ -1892,7 +1911,7 @@ func (w *wafResponseWriter) Write(b []byte) (int, error) {
 	}
 
 	it, _, err := w.tx.WriteResponseBody(b)
-	if err == nil && it != nil {
+	if err == nil && it != nil && !w.auditOnly {
 		w.interrupted = true
 		if !w.headerWritten {
 			w.headerWritten = true
@@ -1909,6 +1928,13 @@ func (w *wafResponseWriter) Status() int {
 		return 200
 	}
 	return w.status
+}
+
+func (w *wafResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("response writer does not support hijacking")
 }
 
 func splitAddr(addr string) (string, int) {
