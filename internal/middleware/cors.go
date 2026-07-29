@@ -2,9 +2,15 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/rs/cors"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -46,6 +52,12 @@ func CORS(cfg CORSConfig) Middleware {
 
 			c := cors.New(opts)
 
+			// Detect invalid CORS request
+			origin := r.Header.Get("Origin")
+			if origin != "" && !isOriginAllowed(origin, cfg.AllowedOrigins) {
+				reportCORSViolation(r, origin, cfg)
+			}
+
 			// Mark as handled for downstream middlewares
 			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r = r.WithContext(context.WithValue(r.Context(), CORSHandledContextKey, true))
@@ -85,4 +97,42 @@ func BypassCORS() Middleware {
 			c.Handler(wrappedNext).ServeHTTP(w, r)
 		})
 	}
+}
+
+func isOriginAllowed(origin string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return false
+	}
+	for _, a := range allowed {
+		if a == "*" || strings.EqualFold(a, origin) {
+			return true
+		}
+	}
+	return false
+}
+
+func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
+	rs := request.GetRequestState(r)
+	routeName := ""
+	if rs != nil {
+		routeName = rs.RouteName
+	}
+
+	threat := telemetry.SecurityThreat{
+		ID:             uuid.New().String(),
+		Type:           "cors_violation",
+		Category:       "security",
+		Severity:       "medium",
+		SourceIP:       request.GetClientIP(r, false),
+		RequestURI:     r.RequestURI,
+		RouteID:        routeName,
+		Details:        fmt.Sprintf("Invalid CORS request from origin: %s. Allowed origins: %v", origin, cfg.AllowedOrigins),
+		Time:           time.Now(),
+		UserAgent:      r.UserAgent(),
+		Method:         r.Method,
+		Recommendation: "Verify if this origin should be allowed in the CORS configuration for this route.",
+	}
+
+	telemetry.RecordSecurityThreat(threat)
+	alerting.HandleThreat(&threat)
 }
