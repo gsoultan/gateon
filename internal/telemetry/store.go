@@ -412,7 +412,6 @@ func initStore(databaseURL string, retentionDays int) error {
 		}
 	}
 	_ = os.MkdirAll(pebbleDir, 0755)
-
 	// Size Pebble's in-memory structures by resource profile (default Pebble uses
 	// an 8 MiB cache + generous memtables) and compress trace blobs with Zstd
 	// (Pebble defaults to Snappy) for a smaller on-disk trace footprint. The cache
@@ -426,9 +425,6 @@ func initStore(databaseURL string, retentionDays int) error {
 		MaxOpenFiles: td.PebbleMaxOpenFiles,
 	}
 	pebbleOpts.EnsureDefaults()
-	for i := range pebbleOpts.Levels {
-		pebbleOpts.Levels[i].Compression = pebble.ZstdCompression
-	}
 
 	pdb, err := pebble.Open(pebbleDir, pebbleOpts)
 	if err != nil {
@@ -954,7 +950,6 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 	}
 }
 
-// recordTraceToStore attempts to enqueue a trace record.
 func recordTraceToStore(tr *TraceRecord) {
 	s := getStore()
 	if s == nil || !s.traceStoreEnabled || tr == nil {
@@ -1268,7 +1263,6 @@ func GetTrace(ts time.Time, id string) *TraceRecord {
 	return tr
 }
 
-// GetTraces returns the last N traces from the store.
 func GetTraces(ctx context.Context, limit int) []*TraceRecord {
 	return GetTracesFiltered(ctx, limit, false)
 }

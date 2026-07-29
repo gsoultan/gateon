@@ -496,7 +496,7 @@ func (d *SecurityThreatDetector) analyzeErrors(stats *IPStats, reasons *[]string
 		*primaryType = "brute_force_attempt"
 	}
 
-	if stats.Error404 > 15 {
+	if stats.Error404 > 3 {
 		score += 40
 		*reasons = append(*reasons, fmt.Sprintf("High volume of 404 errors (%d)", stats.Error404))
 		if *primaryType == "security_threat" {
@@ -647,7 +647,7 @@ func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]stri
 
 func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons *[]string) int {
 	// Require more 404s and a minimum total requests to avoid flagging low-traffic noise
-	if stats.Error404 < 20 || stats.TotalRequests < 30 {
+	if stats.Error404 < 3 || stats.TotalRequests < 5 {
 		return 0
 	}
 
@@ -671,7 +671,7 @@ func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons
 	}
 
 	// Higher threshold for modern apps
-	if maxBust > 30 {
+	if maxBust > 10 {
 		*reasons = append(*reasons, fmt.Sprintf("Directory busting detected in %s (%d unique paths)", suspiciousDir, maxBust))
 		return 60
 	}

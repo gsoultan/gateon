@@ -44,11 +44,13 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 			description := fmt.Sprintf("Request to unlisted route/host: %s", tr.Path)
 			recommendation := "Verify if this path should be registered in the proxy configuration or blocked."
 
+			score := 0.5
 			if honeypots[tr.Path] {
 				anomalyType = "honeypot_triggered"
 				severity = "critical"
 				description = fmt.Sprintf("Honeypot triggered! Access to trap route: %s", tr.Path)
 				recommendation = "This IP is likely a scanner. Block it immediately at the XDP level."
+				score = 0.9
 			}
 
 			anomaly := &gateonv1.Anomaly{
@@ -60,6 +62,7 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 				RequestUri:     tr.Path,
 				Recommendation: recommendation,
 				Mitigated:      data.IsIPMitigated(tr.SourceIP),
+				Score:          score,
 			}
 			populateAnomalyGeo(ctx, anomaly, tr.SourceIP)
 			anomalies = append(anomalies, anomaly)

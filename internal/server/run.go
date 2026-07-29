@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/api"
@@ -171,7 +172,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// Continuously run the security analysis engine so reputation / coordinated-
 	// scan / multi-IP threats are recorded even when no operator has the
 	// Diagnostics page open; these feed the correlation engine and incidents.
-	wg.Go(func() { apiService.RunSecurityAnalysisLoop(ctx, time.Minute) })
+	analysisInterval := time.Minute
+	if os.Getenv("GATEON_TEST") == "1" {
+		analysisInterval = 5 * time.Second
+	}
+	wg.Go(func() { apiService.RunSecurityAnalysisLoop(ctx, analysisInterval) })
 
 	// Start TLS certificate expiry monitoring
 	certInfos := collectCertInfos(ctx, s, s.TLSManager)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -116,6 +117,15 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 			}
 		}
 	}
+
+	// Sort anomalies by score (descending) then timestamp (descending)
+	// to ensure critical/important ones are on the first page.
+	slices.SortFunc(anomalies, func(a, b *gateonv1.Anomaly) int {
+		if a.Score != b.Score {
+			return cmp.Compare(b.Score, a.Score)
+		}
+		return cmp.Compare(b.Timestamp, a.Timestamp)
+	})
 
 	return &gateonv1.GetDiagnosticsResponse{
 		Entrypoints:     diagEPs,
@@ -426,6 +436,12 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 	case "security_vulnerability":
 		return s.applyWafHardeningRecommendation(ctx, req.Source)
 
+	case "cors_violation":
+		if req.ThreatId != "" {
+			return s.applyCORSRecommendation(ctx, req.ThreatId)
+		}
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat ID is required for CORS resolution"}, nil
+
 	default:
 		return &gateonv1.ApplyRecommendationResponse{
 			Success: false,
@@ -484,6 +500,103 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
 		Message: fmt.Sprintf("IP %s blocked via middleware and shunned at XDP level.", sourceIP),
+	}, nil
+}
+
+func (s *ApiService) applyCORSRecommendation(ctx context.Context, threatID string) (*gateonv1.ApplyRecommendationResponse, error) {
+	if threatID == "" {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat ID is required"}, nil
+	}
+
+	threat, err := telemetry.GetSecurityThreatByID(ctx, threatID)
+	if err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to find threat: " + err.Error()}, nil
+	}
+
+	if threat.Type != "cors_violation" {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat is not a CORS violation"}, nil
+	}
+
+	// Details: "Invalid CORS request from origin: http://example.com. Allowed origins: [...]"
+	prefix := "Invalid CORS request from origin: "
+	if !strings.HasPrefix(threat.Details, prefix) {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Invalid threat details format"}, nil
+	}
+	remaining := threat.Details[len(prefix):]
+	end := strings.Index(remaining, ". Allowed origins:")
+	if end == -1 {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Invalid threat details format (missing separator)"}, nil
+	}
+	origin := strings.TrimSpace(remaining[:end])
+
+	if threat.RouteID == "" {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route ID not found in threat"}, nil
+	}
+
+	rt, ok := s.Routes.Get(ctx, threat.RouteID)
+	if !ok {
+		// Try by name if ID fails
+		routes := s.Routes.List(ctx)
+		for _, r := range routes {
+			if r.Name == threat.RouteID {
+				rt = r
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route not found: " + threat.RouteID}, nil
+		}
+	}
+
+	var corsMw *gateonv1.Middleware
+	for _, mwID := range rt.Middlewares {
+		mw, ok := s.Middlewares.Get(ctx, mwID)
+		if ok && mw.Type == "cors" {
+			corsMw = mw
+			break
+		}
+	}
+
+	if corsMw == nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "No CORS middleware found for this route"}, nil
+	}
+
+	if corsMw.Config == nil {
+		corsMw.Config = make(map[string]string)
+	}
+
+	allowedOrigins := corsMw.Config["allowed_origins"]
+	origins := strings.Split(allowedOrigins, ",")
+	alreadyAllowed := false
+	for _, o := range origins {
+		if strings.TrimSpace(o) == origin || o == "*" {
+			alreadyAllowed = true
+			break
+		}
+	}
+
+	if alreadyAllowed {
+		return &gateonv1.ApplyRecommendationResponse{Success: true, Message: "Origin is already allowed or wildcard is used"}, nil
+	}
+
+	if allowedOrigins == "" {
+		corsMw.Config["allowed_origins"] = origin
+	} else {
+		corsMw.Config["allowed_origins"] = strings.TrimSpace(allowedOrigins) + "," + origin
+	}
+
+	if err := s.Middlewares.Update(ctx, corsMw); err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update middleware: " + err.Error()}, nil
+	}
+
+	if s.Invalidator != nil {
+		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool { return r.Id == rt.Id })
+	}
+
+	return &gateonv1.ApplyRecommendationResponse{
+		Success: true,
+		Message: fmt.Sprintf("Origin %s has been added to the allowed origins for route %s.", origin, rt.Id),
 	}, nil
 }
 

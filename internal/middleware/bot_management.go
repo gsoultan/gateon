@@ -34,7 +34,7 @@ const (
 func BotManagement(cfg BotManagementConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !cfg.Enabled {
+			if !cfg.Enabled || IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

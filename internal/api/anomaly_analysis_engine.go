@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -265,9 +267,23 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 	}
 
 	var allAnomalies []*gateonv1.Anomaly
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+
 	for _, d := range e.detectors {
-		allAnomalies = append(allAnomalies, d.Detect(ctx, data)...)
+		det := d
+		g.Go(func() error {
+			res := det.Detect(gctx, data)
+			if len(res) > 0 {
+				mu.Lock()
+				allAnomalies = append(allAnomalies, res...)
+				mu.Unlock()
+			}
+			return nil
+		})
 	}
+
+	_ = g.Wait()
 	return allAnomalies
 }
 
