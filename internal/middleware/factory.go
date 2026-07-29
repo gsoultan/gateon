@@ -56,8 +56,8 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		cfg[k] = config.ResolveSecret(v)
 	}
 	if routeID != "" {
-		if _, ok := cfg["_route_id"]; !ok {
-			cfg["_route_id"] = routeID
+		if _, ok := cfg["route_id"]; !ok {
+			cfg["route_id"] = routeID
 		}
 	}
 
@@ -133,6 +133,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return f.createBotManagement(cfg)
 	case "xss_recognition":
 		return XSSRecognition(routeID), nil
+	case "sqli_recognition":
+		return SQLiRecognition(routeID), nil
+	case "threat_recognition":
+		return ThreatRecognition(routeID), nil
 	case "schema_validation":
 		return SchemaValidation(SchemaValidationConfig{Schema: cfg["schema"]}), nil
 	case "honeypot":

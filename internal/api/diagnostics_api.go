@@ -411,43 +411,53 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 
 	s.logAudit(ctx, "apply_recommendation", "diagnostics", fmt.Sprintf("Applied resolution for %s: %s", req.AnomalyType, req.Source))
 
-	switch req.AnomalyType {
-	case "waf_block", "security_threat":
-		if req.ThreatId != "" {
-			return s.applyWafExclusionRecommendation(ctx, req.ThreatId)
-		}
-		return s.applyBlockIPRecommendation(ctx, req.Source)
+	var resp *gateonv1.ApplyRecommendationResponse
+	var err error
 
-	case "high_traffic", "brute_force_attempt", "security_scan", "slow_client_anomaly", "security_block_recommendation":
-		return s.applyBlockIPRecommendation(ctx, req.Source)
+	switch req.AnomalyType {
+	case "waf_block", "waf_blocked", "waf_violation", "security_threat", "sqli_detected", "xss_detected":
+		if req.ThreatId != "" {
+			resp, err = s.applyWafExclusionRecommendation(ctx, req.ThreatId)
+		} else {
+			resp, err = s.applyBlockIPRecommendation(ctx, req.Source)
+		}
+
+	case "high_traffic", "brute_force_attempt", "security_scan", "scanner", "slow_client_anomaly", "security_block_recommendation":
+		resp, err = s.applyBlockIPRecommendation(ctx, req.Source)
 
 	case "management_access_violation":
-		return s.applyDisablePublicManagementRecommendation(ctx)
+		resp, err = s.applyDisablePublicManagementRecommendation(ctx)
 
 	case "shadowed_route":
-		return s.applyFixShadowedRouteRecommendation(ctx, req.Source)
+		resp, err = s.applyFixShadowedRouteRecommendation(ctx, req.Source)
 
 	case "unlisted_route":
-		return s.applyCreateRouteRecommendation(ctx, req.Source)
+		resp, err = s.applyCreateRouteRecommendation(ctx, req.Source)
 
 	case "geofence_violation":
-		return s.applyBlockCountryRecommendation(ctx, req.Source)
+		resp, err = s.applyBlockCountryRecommendation(ctx, req.Source)
 
 	case "security_vulnerability":
-		return s.applyWafHardeningRecommendation(ctx, req.Source)
+		resp, err = s.applyWafHardeningRecommendation(ctx, req.Source)
 
 	case "cors_violation":
 		if req.ThreatId != "" {
-			return s.applyCORSRecommendation(ctx, req.ThreatId)
+			resp, err = s.applyCORSRecommendation(ctx, req.ThreatId)
+		} else {
+			resp = &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat ID is required for CORS resolution"}
 		}
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat ID is required for CORS resolution"}, nil
 
 	default:
-		return &gateonv1.ApplyRecommendationResponse{
+		resp = &gateonv1.ApplyRecommendationResponse{
 			Success: false,
 			Message: fmt.Sprintf("Automatic resolution for '%s' is not implemented yet. Please follow the recommendation manually.", req.AnomalyType),
-		}, nil
+		}
 	}
+
+	if err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: err.Error()}, nil
+	}
+	return resp, nil
 }
 
 func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP string) (*gateonv1.ApplyRecommendationResponse, error) {

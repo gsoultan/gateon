@@ -119,6 +119,9 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			if score >= int(threshold) {
 				severity := d.calculateSeverity(score, threshold)
 				mitigated := data.IsIPMitigated(ip)
+				if primaryType == "waf_block" || primaryType == "honeypot_hit" || strings.HasPrefix(primaryType, "fast_path_") {
+					mitigated = true
+				}
 				recommendation := d.getAdaptiveRecommendation(score, primaryType)
 
 				anomaly := &gateonv1.Anomaly{

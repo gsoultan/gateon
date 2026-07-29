@@ -94,13 +94,17 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 			next.ServeHTTP(sw, r)
 
 			if sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0) {
+				statusCode := sw.Status
+				if statusCode == 0 {
+					statusCode = http.StatusOK
+				}
 				duration := time.Since(start)
 				logger.L.LogInfo("access log",
 					"host", origHost,
 					"method", origMethod,
 					"path", origPath,
 					"remote_addr", remoteAddr,
-					"status", sw.Status,
+					"status", statusCode,
 					"latency", duration,
 					"route", routeID)
 			}
@@ -163,6 +167,37 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 			start := time.Now()
 
+			// Early Fingerprinting: Capture TLS fingerprints before downstream middlewares run.
+			if rs != nil && rs.JA3 == "" {
+				if r.TLS == nil {
+					// logger.L.LogDebug("TLS is nil in metrics middleware", "path", r.URL.Path)
+				} else {
+					ja3, ja4 := "", ""
+					// Try to get fingerprints from our internal map first
+					if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
+						f := GetFingerprints(conn)
+						ja3, ja4 = f.JA3, f.JA4
+					}
+					if ja3 == "" {
+						f := GetFingerprintsByAddr(r.RemoteAddr)
+						ja3, ja4 = f.JA3, f.JA4
+					}
+
+					// Fallback to headers if still empty
+					if ja3 == "" {
+						ja3 = r.Header.Get("X-JA3-Fingerprint")
+					}
+					if ja4 == "" {
+						ja4 = r.Header.Get("X-JA4-Fingerprint")
+					}
+
+					if rs != nil {
+						rs.JA3 = ja3
+						rs.JA4 = ja4
+					}
+				}
+			}
+
 			// Track in-flight requests
 			telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Inc()
 			defer telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Dec()
@@ -191,7 +226,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				defer PutStatusResponseWriter(sw)
 			}
 
+			logger.L.LogInfo("Metrics middleware CALLING NEXT", "request_id", GetRequestID(r))
 			next.ServeHTTP(sw, r)
+			logger.L.LogInfo("Metrics middleware NEXT RETURNED", "request_id", GetRequestID(r))
 
 			respOutSize := sw.BytesWritten
 			if respOutSize < 0 {
@@ -206,15 +243,20 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			trust := config.EffectiveTrustCloudflare()
 			clientIP := request.GetClientIP(r, trust)
 
+			actualStatus := sw.Status
+			if actualStatus == 0 {
+				actualStatus = http.StatusOK
+			}
+
 			// Behavioral Fingerprinting
 			fingerprint := ""
 			if gc := config.GetGlobalConfig(); gc != nil && gc.AnomalyDetection != nil && gc.AnomalyDetection.EnableBehavioralFingerprinting {
 				fp := telemetry.GetDetailedFingerprint(r)
 				fingerprint = fp.Hash
-				telemetry.TrackBehavior(fingerprint, r, sw.Status)
+				telemetry.TrackBehavior(fingerprint, r, actualStatus)
 			}
 
-			statusStr := getStatusString(sw.Status)
+			statusStr := getStatusString(actualStatus)
 			country := request.GetCountry(r, trust)
 			if sw.Country != "" {
 				country = sw.Country
@@ -244,24 +286,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				// JA3/JA4 fingerprints are only consumed by trace records, so resolve
 				// them lazily inside the recording branch.
 				ja3, ja4 := "", ""
-				if r.TLS != nil {
-					// Try to get fingerprints from our internal map first
-					if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
-						f := GetFingerprints(conn)
-						ja3, ja4 = f.JA3, f.JA4
-					}
-					if ja3 == "" {
-						f := GetFingerprintsByAddr(r.RemoteAddr)
-						ja3, ja4 = f.JA3, f.JA4
-					}
-
-					// Fallback to headers if still empty
-					if ja3 == "" {
-						ja3 = r.Header.Get("X-JA3-Fingerprint")
-					}
-					if ja4 == "" {
-						ja4 = r.Header.Get("X-JA4-Fingerprint")
-					}
+				if rs != nil {
+					ja3, ja4 = rs.JA3, rs.JA4
 				}
 
 				recommendation := ""

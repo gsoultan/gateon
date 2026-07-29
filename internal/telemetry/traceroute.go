@@ -11,10 +11,43 @@ import (
 // For production stability and to avoid requiring raw socket privileges,
 // it combines real GeoIP data for the endpoints with simulated intermediate network hops.
 func TraceRoute(ctx context.Context, targetIP string, serverIP string) ([]*gateonv1.TraceHop, error) {
+	var sCountry, sCity string
+	var sLat, sLon float64
+	var dCountry, dCity string
+	var dLat, dLon float64
+
+	type taggedResult struct {
+		isSource      bool
+		country, city string
+		lat, lon      float64
+	}
+
+	taggedChan := make(chan taggedResult, 2)
+	go func() {
+		c, city, lat, lon := ResolveIPInfo(ctx, serverIP)
+		taggedChan <- taggedResult{true, c, city, lat, lon}
+	}()
+	go func() {
+		c, city, lat, lon := ResolveIPInfo(ctx, targetIP)
+		taggedChan <- taggedResult{false, c, city, lat, lon}
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case res := <-taggedChan:
+			if res.isSource {
+				sCountry, sCity, sLat, sLon = res.country, res.city, res.lat, res.lon
+			} else {
+				dCountry, dCity, dLat, dLon = res.country, res.city, res.lat, res.lon
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
 	var hops []*gateonv1.TraceHop
 
 	// 1. Server Hop (Source)
-	sCountry, sCity, sLat, sLon := ResolveIPInfo(ctx, serverIP)
 	hops = append(hops, &gateonv1.TraceHop{
 		Hop:         1,
 		Ip:          serverIP,
@@ -24,12 +57,6 @@ func TraceRoute(ctx context.Context, targetIP string, serverIP string) ([]*gateo
 		City:        sCity,
 		RttMs:       1,
 	})
-
-	// 2. Destination Hop (Target)
-	dCountry, dCity, dLat, dLon := ResolveIPInfo(ctx, targetIP)
-
-	// If we don't have coordinates for destination, we can't really visualize it on map.
-	// But we'll still return it.
 
 	// 3. Simulated intermediate hops if they are far apart
 	// This is for visual effect in the map animation as requested "like traceroute".

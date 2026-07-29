@@ -70,6 +70,8 @@ func CreateBaseHandler(
 		},
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended", ExtraImgSrc: managementImgSrc}),
 		middleware.XSSRecognition("gateon-management"),
+		middleware.SQLiRecognition("gateon-management"),
+		middleware.ThreatRecognition("gateon-management"),
 		middleware.MaxConnections(500),
 	)(internalHandler)
 

@@ -686,6 +686,21 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("GET /v1/diag/security-threats/{id...}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
+			return
+		}
+		id := r.PathValue("id")
+		res, err := svc.GetSecurityThreat(r.Context(), &gateonv1.GetSecurityThreatRequest{Id: id})
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := ProtojsonOptions().Marshal(res)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("GET /v1/diag/security-threats/watch", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return

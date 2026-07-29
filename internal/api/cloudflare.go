@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -49,7 +50,31 @@ func (s *ApiService) GetCloudflareIPs(ctx context.Context, _ *gateonv1.GetCloudf
 	}, nil
 }
 
+var (
+	publicIPCache   string
+	lastIPFetch     time.Time
+	publicIPCacheMu sync.RWMutex
+)
+
+const publicIPCacheTTL = 1 * time.Hour
+
 func getPublicIP(ctx context.Context) string {
+	publicIPCacheMu.RLock()
+	if publicIPCache != "" && time.Since(lastIPFetch) < publicIPCacheTTL {
+		ip := publicIPCache
+		publicIPCacheMu.RUnlock()
+		return ip
+	}
+	publicIPCacheMu.RUnlock()
+
+	publicIPCacheMu.Lock()
+	defer publicIPCacheMu.Unlock()
+
+	// Double check after acquiring lock
+	if publicIPCache != "" && time.Since(lastIPFetch) < publicIPCacheTTL {
+		return publicIPCache
+	}
+
 	providers := []string{
 		"https://api.ipify.org",
 		"https://ifconfig.me/ip",
@@ -85,6 +110,8 @@ func getPublicIP(ctx context.Context) string {
 
 		ipStr := string(bytes.TrimSpace(body))
 		if net.ParseIP(ipStr) != nil {
+			publicIPCache = ipStr
+			lastIPFetch = time.Now()
 			return ipStr
 		}
 	}
