@@ -50,6 +50,7 @@ interface SecurityAnomalyModalProps {
 }
 
 export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose }: SecurityAnomalyModalProps) {
+  console.log("SecurityAnomalyModal render state:", { opened, hasInitial: !!initialAnomaly, initialId: initialAnomaly?.id });
   const { data: fullAnomaly } = useSecurityThreat(opened ? initialAnomaly?.id || null : null);
   const anomaly = fullAnomaly || initialAnomaly;
 
@@ -114,9 +115,10 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
   };
 
   return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
+    <Modal 
+      opened={opened} 
+      onClose={onClose} 
+      data-testid="security-anomaly-modal"
       title={
         <Group gap="sm">
           <ThemeIcon color={getSeverityColor(anomaly.severity)} variant="light">

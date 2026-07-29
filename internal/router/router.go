@@ -308,6 +308,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	chain = append(chain,
 		middleware.AccessLog(routeLabel),
 		middleware.Metrics(routeLabel),
+		middleware.ReputationBlocker(routeLabel),
 		func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if rs := request.GetRequestState(r); rs != nil {
@@ -400,16 +401,9 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 			if mwConf, ok := mwStore.Get(context.Background(), mid); ok {
 				mw, err := mwFactory.Create(mwConf, routeLabel)
 				if err == nil {
-					mID := mid
 					wrapped := func(next http.Handler) http.Handler {
 						h := mw(next)
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							// Debug-level: avoids a per-middleware structured log
-							// write on the hot path when running at info or above.
-							logger.L.LogDebug("Executing middleware",
-								"flow_step", "middleware_start",
-								"request_id", middleware.GetRequestID(r),
-								"middleware_id", mID)
 							h.ServeHTTP(w, r)
 						})
 					}
@@ -446,7 +440,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	})
 
 	if len(chain) > 0 {
-		return middleware.Chain(chain...)(h)
+		h = middleware.Chain(chain...)(h)
 	}
 
 	return h

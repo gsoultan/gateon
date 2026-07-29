@@ -2,6 +2,7 @@ package httputil
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -48,7 +49,7 @@ var StatusResponseWriterPool = sync.Pool{
 func GetStatusResponseWriter(w http.ResponseWriter) *StatusResponseWriter {
 	sw := StatusResponseWriterPool.Get().(*StatusResponseWriter)
 	sw.ResponseWriter = w
-	sw.Status = http.StatusOK
+	sw.Status = 0
 	sw.BytesWritten = 0
 	sw.Country = ""
 	sw.ttfbRecorded = false
@@ -64,6 +65,7 @@ func PutStatusResponseWriter(sw *StatusResponseWriter) {
 }
 
 func (w *StatusResponseWriter) WriteHeader(code int) {
+	fmt.Printf("STATUS WRITER %p WriteHeader: %d, prev: %d\n", w, code, w.Status)
 	if !w.ttfbRecorded {
 		w.firstByte = time.Now()
 		w.ttfbRecorded = true

@@ -54,7 +54,9 @@ import {
   IconShieldExclamation,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
-import { useDiagnostics } from "../hooks/useDiagnostics";
+import { useDiagnostics, useRemoveMitigation } from "../hooks/useGateon";
+import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
+import { useDisclosure } from "@mantine/hooks";
 
 const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
   <Tooltip label={mw.error || `Type: ${mw.type}`}>
@@ -187,7 +189,13 @@ const RouteTrace: React.FC<{ route: RouteDiagnostic }> = ({ route }) => {
   );
 };
 
-const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: boolean; onTrace: (ip: string) => void }> = ({ anomaly, onApply, applying, onTrace }) => {
+const AnomalyCard: React.FC<{ 
+  anomaly: Anomaly; 
+  onApply: () => void; 
+  applying: boolean; 
+  onTrace: (ip: string) => void;
+  onClick?: () => void;
+}> = ({ anomaly, onApply, applying, onTrace, onClick }) => {
   const getSeverityColor = (sev: string) => {
     switch (sev.toLowerCase()) {
       case "critical": return "red";
@@ -198,17 +206,31 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
   };
 
   const getIcon = (type: string) => {
-    if (type.includes("attack") || type.includes("hacker") || type.includes("violation")) return <IconShieldLock size={20} />;
-    if (type.includes("brute")) return <IconLock size={20} />;
-    if (type.includes("scan") || type.includes("security")) return <IconBug size={20} />;
-    if (type.includes("geofence")) return <IconGlobe size={20} />;
-    if (type.includes("integrity")) return <IconShield size={20} />;
-    if (type.includes("honeypot")) return <IconAlertTriangle size={20} />;
+    const t = type.toLowerCase();
+    if (t.includes("attack") || t.includes("hacker") || t.includes("violation") || t.includes("waf") || t.includes("sqli") || t.includes("xss")) return <IconShieldLock size={20} />;
+    if (t.includes("brute")) return <IconLock size={20} />;
+    if (t.includes("scan") || t.includes("security") || t.includes("path")) return <IconBug size={20} />;
+    if (t.includes("geofence")) return <IconGlobe size={20} />;
+    if (t.includes("integrity")) return <IconShield size={20} />;
+    if (t.includes("honeypot")) return <IconAlertTriangle size={20} />;
     return <IconActivity size={20} />;
   };
 
   return (
-    <Paper withBorder p="md" radius="lg" shadow="sm" style={{ borderLeft: `4px solid var(--mantine-color-${getSeverityColor(anomaly.severity)}-6)` }}>
+    <Paper 
+      withBorder 
+      p="md" 
+      radius="lg" 
+      shadow="sm" 
+      onClick={onClick}
+      data-testid="anomaly-card"
+      style={{ 
+        borderLeft: `4px solid var(--mantine-color-${getSeverityColor(anomaly.severity)}-6)`,
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+      }}
+      className={onClick ? "hover-elevated" : ""}
+    >
       <Stack gap="xs">
         <Group justify="space-between">
           <Group gap="sm">
@@ -278,16 +300,46 @@ const AnomalyCard: React.FC<{ anomaly: Anomaly; onApply: () => void; applying: b
 const DiagnosticsPage: React.FC = () => {
   const { data, isLoading: loading, error: queryError, refetch: fetchData } = useDiagnostics();
   const [applying, setApplying] = useState<string | null>(null);
+  const removeMitigation = useRemoveMitigation();
 
   const error = queryError instanceof Error ? queryError.message : (queryError ? String(queryError) : null);
 
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
   const [visualizerOpened, setVisualizerOpened] = useState(false);
+  const [modalOpened, setModalOpened] = useState(false);
+  const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
 
   const openVisualizer = (ip: string) => {
     if (!ip || ip === "-" || ip === "127.0.0.1") return;
     setSelectedIp(ip);
     setVisualizerOpened(true);
+  };
+
+  const onAnomalyClick = (anomaly: Anomaly) => {
+    console.log("Anomaly clicked in Diagnostics:", anomaly.type, anomaly.source, anomaly.id);
+    setSelectedAnomaly(anomaly);
+    setModalOpened(true);
+  };
+
+  const handleUnmitigate = async (ip: string) => {
+    try {
+      await removeMitigation.mutateAsync(ip);
+      notifications.show({
+        title: 'Mitigation Removed',
+        message: `IP ${ip} has been unmitigated.`,
+        color: 'teal',
+        icon: <IconCheck size={18} />,
+      });
+      fetchData();
+      setModalOpened(false);
+    } catch (err: any) {
+      notifications.show({
+        title: 'Error',
+        message: err.message || 'Failed to remove mitigation',
+        color: 'red',
+        icon: <IconX size={18} />,
+      });
+    }
   };
   const theme = useMantineTheme();
   
@@ -518,6 +570,7 @@ const DiagnosticsPage: React.FC = () => {
                             onApply={() => handleApplyRecommendation(a)}
                             applying={applying === `${a.type}-${a.source}`}
                             onTrace={openVisualizer}
+                            onClick={() => onAnomalyClick(a)}
                           />
                         ))}
                       </SimpleGrid>
@@ -565,6 +618,7 @@ const DiagnosticsPage: React.FC = () => {
                             onApply={() => handleApplyRecommendation(a)}
                             applying={applying === `${a.type}-${a.source}`}
                             onTrace={openVisualizer}
+                            onClick={() => onAnomalyClick(a)}
                           />
                         ))}
                       </SimpleGrid>
@@ -753,6 +807,11 @@ const DiagnosticsPage: React.FC = () => {
           </Stack>
         </Card>
       </Stack>
+      <SecurityAnomalyModal
+        opened={modalOpened}
+        onClose={() => setModalOpened(false)}
+        anomaly={selectedAnomaly}
+      />
       <TraceVisualizer 
         opened={visualizerOpened} 
         onClose={() => setVisualizerOpened(false)} 

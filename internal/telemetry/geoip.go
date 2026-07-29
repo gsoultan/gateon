@@ -154,12 +154,18 @@ func resolveIPPublic(ctx context.Context, ipStr string) (country, city string, l
 
 	// Rate limit: 1 request per second to public API
 	cacheMu.Lock()
-	if time.Since(lastFetch) < time.Second {
+	elapsed := time.Since(lastFetch)
+	if elapsed < time.Second {
+		wait := time.Second - elapsed
 		cacheMu.Unlock()
-		return "XX", "", 0, 0
+		time.Sleep(wait)
+		cacheMu.Lock()
+		lastFetch = time.Now()
+		cacheMu.Unlock()
+	} else {
+		lastFetch = time.Now()
+		cacheMu.Unlock()
 	}
-	lastFetch = time.Now()
-	cacheMu.Unlock()
 
 	url := fmt.Sprintf("http://ip-api.com/json/%s", ipStr)
 	resp, err := httpGet(ctx, url, 2*time.Second)

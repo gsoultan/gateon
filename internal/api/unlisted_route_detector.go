@@ -36,7 +36,10 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 		// A route is considered "unlisted" if:
 		// 1. ServiceName is empty or "unknown"
 		// 2. ServiceName starts with "gateon-" (default entrypoint name) - meaning no user route matched.
-		isUnlisted := tr.ServiceName == "" || tr.ServiceName == "unknown" || strings.HasPrefix(tr.ServiceName, "gateon-")
+		// 3. ServiceName is a known default entrypoint ID (http, https, grpc)
+		isUnlisted := tr.ServiceName == "" || tr.ServiceName == "unknown" ||
+			strings.HasPrefix(tr.ServiceName, "gateon-") ||
+			tr.ServiceName == "http" || tr.ServiceName == "https" || tr.ServiceName == "grpc"
 
 		if isUnlisted {
 			anomalyType := "unlisted_route"

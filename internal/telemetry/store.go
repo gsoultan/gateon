@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	lru "github.com/hashicorp/golang-lru"
 )
@@ -975,6 +976,14 @@ func recordTraceToStore(tr *TraceRecord) {
 
 // RecordSecurityThreatWithJA4 is a helper that populates JA4 from the request before recording.
 func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThreat {
+	if rs := request.GetRequestState(r); rs != nil {
+		if t.JA4 == "" {
+			t.JA4 = rs.JA4
+		}
+		if t.Fingerprint == "" {
+			t.Fingerprint = rs.JA4
+		}
+	}
 	if t.JA4 == "" {
 		t.JA4 = GetCachedJA4H(r)
 	}

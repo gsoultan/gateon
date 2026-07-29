@@ -565,7 +565,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 	wrappedWaf := &wafWrapper{waf: waf, routeID: cfg.RouteID, cfg: cfg}
 
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. Deduplication: Avoid double-checking if an identical WAF setup has already run.
 			rs := request.GetRequestState(r)
 			if rs != nil {
@@ -621,34 +621,20 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			grpcRequest := cfg.GRPCMode && isGRPCRequest(r)
 
 			// 5. Adaptive WAF reputation scoring
-			reputation := 50.0
-			if rs != nil && rs.Reputation != 0 {
-				reputation = rs.Reputation
-			} else {
-				fingerprint := telemetry.GetFingerprintHash(r)
-				reputation = telemetry.GetReputationScore(fingerprint)
-				if rs != nil {
-					rs.Reputation = reputation
-				}
-			}
-
-			// Lightweight L7 IP Shunning: Block extremely low reputation clients early.
-			if reputation < 2.0 && !rs.IsManagement && os.Getenv("GATEON_TEST") == "" {
-				telemetry.RequestFailuresTotal.WithLabelValues(cfg.RouteID, "l7_shun").Inc()
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte("Forbidden by Security Policy (Reputation Block)"))
-				return
+			repScore := 100.0
+			if rs != nil {
+				repScore = rs.Reputation
 			}
 
 			if testRep != "" {
 				if f, err := strconv.ParseFloat(testRep, 64); err == nil {
-					reputation = f
+					repScore = f
 				}
 			}
-			r.Header.Set("X-Gateon-Reputation", getReputationString(reputation))
+			r.Header.Set("X-Gateon-Reputation", getReputationString(repScore))
 			r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
 
-			if reputation > 90 && isGitTraffic(r) {
+			if repScore > 90 && isGitTraffic(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -698,9 +684,9 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					threshold = 5.8
 				}
 				// Adaptive Entropy: If reputation is high, increase threshold to reduce false positives
-				if reputation > 90 {
+				if repScore > 90 {
 					threshold += 0.5
-				} else if reputation < 20 {
+				} else if repScore < 20 {
 					threshold -= 0.5
 				}
 
@@ -767,9 +753,9 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 						threshold += 0.2 // Allow slightly higher entropy for structured data
 					}
 
-					if reputation > 90 {
+					if repScore > 90 {
 						threshold += 0.5
-					} else if reputation < 20 {
+					} else if repScore < 20 {
 						threshold -= 0.5
 					}
 
@@ -823,6 +809,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 
 			// Manual Transaction Management
 			tx := wrappedWaf.NewTransaction()
+			tx.(*txWrapper).r = r
 			defer tx.ProcessLogging()
 			defer tx.Close()
 
@@ -834,7 +821,11 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				return
 			}
 			if it != nil {
-				w.WriteHeader(http.StatusForbidden)
+				status := it.Status
+				if status == 0 {
+					status = http.StatusForbidden
+				}
+				w.WriteHeader(status)
 				_, _ = w.Write([]byte("Forbidden by Security Policy (WAF)"))
 				return
 			}
@@ -872,6 +863,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				_, _ = w.Write(ww.buf.Bytes())
 			}
 		})
+		return h
 	}, nil
 }
 
@@ -1144,6 +1136,7 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:           typeStr,
 		SourceIP:       clientIP,
+		Fingerprint:    telemetry.GetCachedJA4H(r),
 		Score:          100,
 		Details:        details,
 		Recommendation: recommendation,
@@ -1262,11 +1255,18 @@ func (w *wafWrapper) NewTransactionWithID(id string) types.Transaction {
 type txWrapper struct {
 	types.Transaction
 	ctx     context.Context
+	r       *http.Request
 	routeID string
 	cfg     WAFConfig
 }
 
 func (t *txWrapper) ProcessLogging() {
+	ja4 := ""
+	if t.r != nil {
+		if rs := request.GetRequestState(t.r); rs != nil {
+			ja4 = rs.JA4
+		}
+	}
 	interrupted := t.IsInterrupted()
 	var it *types.Interruption
 	if interrupted {
@@ -1282,7 +1282,6 @@ func (t *txWrapper) ProcessLogging() {
 		severity := "notice"
 		category := "general"
 		repScore := 100.0
-		ja4 := ""
 		ua := ""
 		method := ""
 		isCritical := false
@@ -1292,10 +1291,37 @@ func (t *txWrapper) ProcessLogging() {
 			GetCollection(variables.RuleVariable) collection.Collection
 		}); ok {
 			if c, ok := ca.GetCollection(variables.TX).(collection.Keyed); ok {
-				if vals := c.Get("inbound_anomaly_score"); len(vals) > 0 {
-					anomalyScore, _ = strconv.Atoi(vals[0])
-				} else if vals := c.Get("anomaly_score"); len(vals) > 0 {
-					anomalyScore, _ = strconv.Atoi(vals[0])
+				// Debug log all TX variables
+				txVars := make(map[string]string)
+				for _, k := range c.FindAll() {
+					key := k.Key()
+					if key == "" {
+						key = k.Variable().Name()
+					}
+					if vals := c.Get(key); len(vals) > 0 {
+						txVars[key] = vals[0]
+					}
+				}
+				logger.L.LogInfo("WAF TX Variables", "vars", txVars)
+
+				// Thoroughly check for anomaly scores
+				findScore := func(name string) int {
+					if vals := c.Get(name); len(vals) > 0 {
+						s, _ := strconv.Atoi(vals[0])
+						return s
+					}
+					return 0
+				}
+
+				anomalyScore = findScore("anomaly_score")
+				if s := findScore("inbound_anomaly_score"); s > anomalyScore {
+					anomalyScore = s
+				}
+				// CRS v4 specific scores
+				for i := 1; i <= 4; i++ {
+					if s := findScore(fmt.Sprintf("anomaly_score_pl%d", i)); s > anomalyScore {
+						anomalyScore = s
+					}
 				}
 			}
 
@@ -1305,8 +1331,11 @@ func (t *txWrapper) ProcessLogging() {
 						repScore = f
 					}
 				}
-				if vals := c.Get("X-Gateon-JA4"); len(vals) > 0 {
+				if vals := c.Get("X-Gateon-JA4"); len(vals) > 0 && ja4 == "" {
 					ja4 = vals[0]
+				}
+				if ja4 == "" && t.r != nil {
+					ja4 = telemetry.GetCachedJA4H(t.r)
 				}
 				if vals := c.Get("User-Agent"); len(vals) > 0 {
 					ua = vals[0]
@@ -1324,6 +1353,10 @@ func (t *txWrapper) ProcessLogging() {
 			"interrupted", interrupted,
 			"route", t.routeID,
 			"threshold", t.cfg.AnomalyThreshold)
+
+		if anomalyScore == 0 && !interrupted {
+			return
+		}
 
 		for _, rule := range matchedRules {
 			if clientIP == "" {
@@ -1419,6 +1452,7 @@ func (t *txWrapper) ProcessLogging() {
 			ID:             fmt.Sprintf("waf-%s-%s", actionTaken, t.ID()),
 			Type:           "waf_" + actionTaken,
 			SourceIP:       clientIP,
+			Fingerprint:    ja4,
 			Score:          100, // Explicit block is a high priority threat
 			Details:        explanation,
 			Recommendation: recommendation,

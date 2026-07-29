@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -98,7 +99,7 @@ func getRepShard(fingerprint string) *reputationShard {
 // Score starts at 100 (perfect). Decreases as threats are recorded.
 func GetReputation(fingerprint string) float64 {
 	if fingerprint == "" {
-		return 50 // Unknown
+		return 100 // Unknown
 	}
 	shard := getRepShard(fingerprint)
 	shard.mu.Lock()
@@ -124,25 +125,28 @@ func GetReputation(fingerprint string) float64 {
 		}
 		return r.Score
 	}
-	return 50 // Unknown/New client gets neutral score
+	return 100 // Unknown/New client gets neutral score
 }
 
 // GetReputationScore returns the current score for a fingerprint.
 func GetReputationScore(fingerprint string) float64 {
 	if fingerprint == "" {
-		return 50.0
+		return 100.0
 	}
 	shard := getRepShard(fingerprint)
 	// Use Peek instead of Get to avoid updating LRU and internal mutex contention
 	// during the high-frequency WAF check. ARC has its own internal lock.
 	if val, ok := shard.cache.Peek(fingerprint); ok {
-		return val.(*Reputation).Score
+		score := val.(*Reputation).Score
+		logger.L.LogDebug("Reputation cache HIT", "fingerprint", fingerprint, "score", score)
+		return score
 	}
-	return 50.0
+	logger.L.LogDebug("Reputation cache MISS", "fingerprint", fingerprint)
+	return 100.0
 }
 
 func DecreaseReputation(fingerprint string, penalty float64, reason string) {
-	if fingerprint == "" || os.Getenv("GATEON_TEST") != "" {
+	if fingerprint == "" || (os.Getenv("GATEON_TEST") != "" && os.Getenv("GATEON_ENABLE_TEST_REPUTATION") == "") {
 		return
 	}
 	shard := getRepShard(fingerprint)
@@ -174,6 +178,7 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	if r.Score < 0 {
 		r.Score = 0
 	}
+	logger.L.LogInfo("Reputation DECREASED", "fingerprint", fingerprint, "new_score", r.Score, "penalty", adaptivePenalty, "reason", reason)
 
 	// Adaptive Recovery: Slower recovery if many violations.
 	// rate = 1.0 / (1 + violations/5)

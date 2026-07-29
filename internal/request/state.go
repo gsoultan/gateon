@@ -26,6 +26,8 @@ type RequestState struct {
 	ForwardedProto   string
 	ClientRemoteAddr string
 	Fingerprint      any
+	JA3              string
+	JA4              string
 	JA4H             string
 	Recommendation   string
 	Reputation       float64
@@ -41,6 +43,7 @@ type RequestState struct {
 	ExecutedWAFs    []string // config fingerprints
 	ExecutedEntropy bool     // Shannon entropy check result already recorded?
 	ExecutedXSS     bool     // XSS recognition already recorded?
+	ExecutedSQLI    bool     // SQLi recognition already recorded?
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.
@@ -75,6 +78,8 @@ func (rs *RequestState) Reset() {
 	rs.ForwardedProto = ""
 	rs.ClientRemoteAddr = ""
 	rs.Fingerprint = nil
+	rs.JA3 = ""
+	rs.JA4 = ""
 	rs.JA4H = ""
 	rs.Recommendation = ""
 	rs.Reputation = 0
@@ -87,4 +92,5 @@ func (rs *RequestState) Reset() {
 	rs.ExecutedWAFs = nil
 	rs.ExecutedEntropy = false
 	rs.ExecutedXSS = false
+	rs.ExecutedSQLI = false
 }

@@ -23,6 +23,21 @@ var xssScanner = scanner.NewScanner([]string{
 	"document.cookie", "window.location",
 })
 
+var sqliScanner = scanner.NewScanner([]string{
+	"union select", "select * from", "insert into", "update ", "delete from",
+	"drop table", "truncate table", "information_schema", "--", "/*", "*/",
+	" ' or 1=1", " \" or 1=1", "sleep(", "benchmark(", "pg_sleep(", "waitfor delay",
+})
+
+var genericAttackScanner = scanner.NewScanner([]string{
+	"__proto__", "constructor.prototype", "constructor[prototype]",
+	"() { :; }", "() { :;};", // Shellshock
+	"${jndi:",                                                     // Log4Shell
+	"class.module.classLoader",                                    // Spring4Shell
+	"; cat /etc/passwd", "; id", "; whoami", "; curl ", "; wget ", // Shell Injection
+	"coinhive.min.js", "authedmine.min.js", "cryptonight.wasm", // Malicious scripts
+})
+
 var securityBufferPool = sync.Pool{
 	New: func() any {
 		return bytes.NewBuffer(make([]byte, 0, 64*1024))
@@ -80,7 +95,7 @@ func Entropy(threshold float64, routeID string) Middleware {
 
 					e := entropy.Calculate(peeked)
 					if e > threshold {
-						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID)
+						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced")
 					}
 				}
 				if rs != nil {
@@ -115,7 +130,7 @@ func serveTrollResponse(w http.ResponseWriter) {
 	}
 }
 
-func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string) {
+func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string, category string) {
 	logger.SecurityEvent(ttype, r, details)
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		ID:         fmt.Sprintf("adv-%s-%d", ttype, time.Now().UnixNano()),
@@ -126,7 +141,7 @@ func recordAdvancedThreat(r *http.Request, ttype string, score float64, details 
 		Time:       time.Now(),
 		RouteID:    routeID,
 		RequestURI: r.URL.Path,
-		Category:   "xss", // Default to xss category for XSS threats
+		Category:   category,
 	}))
 }
 
@@ -194,11 +209,119 @@ func XSSRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, "xss_detected", 50, details, routeID)
+				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss")
 			}
 
 			if rs != nil {
 				rs.ExecutedXSS = true
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// SQLiRecognition middleware scans request for common SQLi patterns.
+func SQLiRecognition(routeID string) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rs := request.GetRequestState(r)
+			if rs != nil && rs.ExecutedSQLI {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			var details string
+			found := false
+
+			if r.URL.RawQuery != "" {
+				query, _ := url.QueryUnescape(r.URL.RawQuery)
+				if matches := sqliScanner.FindAll(query); len(matches) > 0 {
+					found = true
+					details = fmt.Sprintf("SQLi pattern(s) '%s' found in query string", strings.Join(matches, ", "))
+				}
+			}
+
+			if !found && r.Body != nil && r.Body != http.NoBody {
+				peeked, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+				if err == nil && len(peeked) > 0 {
+					r.Body = struct {
+						io.Reader
+						io.Closer
+					}{
+						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+						Closer: r.Body,
+					}
+
+					if matches := sqliScanner.FindAll(string(peeked)); len(matches) > 0 {
+						found = true
+						details = fmt.Sprintf("SQLi pattern(s) '%s' found in request body", strings.Join(matches, ", "))
+					}
+				}
+			}
+
+			if found {
+				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli")
+			}
+
+			if rs != nil {
+				rs.ExecutedSQLI = true
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ThreatRecognition middleware scans request for various common attack patterns (RCE, Prototype Pollution, etc.)
+func ThreatRecognition(routeID string) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var details string
+			found := false
+			attackType := "generic_attack"
+
+			// Check common patterns in Query, Headers, and Body
+			check := func(data string, source string) bool {
+				if matches := genericAttackScanner.FindAll(data); len(matches) > 0 {
+					found = true
+					details = fmt.Sprintf("Attack pattern(s) '%s' found in %s", strings.Join(matches, ", "), source)
+					return true
+				}
+				return false
+			}
+
+			if r.URL.RawQuery != "" {
+				query, _ := url.QueryUnescape(r.URL.RawQuery)
+				check(query, "query string")
+			}
+
+			if !found {
+				for _, h := range []string{"User-Agent", "Referer", "X-Forwarded-For"} {
+					if val := r.Header.Get(h); val != "" {
+						if check(val, "header "+h) {
+							break
+						}
+					}
+				}
+			}
+
+			if !found && r.Body != nil && r.Body != http.NoBody {
+				peeked, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+				if err == nil && len(peeked) > 0 {
+					r.Body = struct {
+						io.Reader
+						io.Closer
+					}{
+						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+						Closer: r.Body,
+					}
+					check(string(peeked), "request body")
+				}
+			}
+
+			if found {
+				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced")
 			}
 
 			next.ServeHTTP(w, r)
