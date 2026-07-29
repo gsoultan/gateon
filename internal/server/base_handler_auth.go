@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	pkghttputil "github.com/gsoultan/gateon/pkg/httputil"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -41,9 +41,11 @@ func isHealthPath(path string) bool {
 func handleLoginWithRateLimit(w http.ResponseWriter, r *http.Request, internal http.Handler, deps BaseHandlerDeps) {
 	if deps.LoginLimiter != nil {
 		limited := deps.LoginLimiter.Handler(middleware.PerIP)(internal)
-		rec := &httputil.StatusRecorder{ResponseWriter: w, Status: 200}
-		limited.ServeHTTP(rec, r)
-		if rec.Status == http.StatusTooManyRequests {
+		sw := pkghttputil.GetStatusResponseWriter(w)
+		defer pkghttputil.PutStatusResponseWriter(sw)
+
+		limited.ServeHTTP(sw, r)
+		if sw.Status == http.StatusTooManyRequests {
 			logger.SecurityEvent("login_rate_limit", r, "too_many_attempts")
 		}
 		return

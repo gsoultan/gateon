@@ -24,7 +24,7 @@ func (s *Server) GetOrCreateProxy(rt *gateonv1.Route) http.Handler {
 // HandleProxyOrLocal routes the request to a proxied backend or to the local mux/gRPC.
 // gRPC-Web: conversion happens only when the route has the grpcweb middleware.
 // Internal API: no matching route -> internalAPI (dashboard); origin allow-all.
-func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, internalAPI entrypoint.GRPCWebHandler, mux *http.ServeMux) {
+func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, grpcServer http.Handler, internalAPI entrypoint.GRPCWebHandler, mux *http.ServeMux) {
 	isMgmt := false
 	if rs := middleware.GetRequestState(r); rs != nil {
 		isMgmt = rs.IsManagement
@@ -99,7 +99,16 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, inte
 		isGRPCWeb = true
 	}
 
-	if isGRPC || isGRPCWeb {
+	if isGRPC {
+		if grpcServer != nil {
+			grpcServer.ServeHTTP(w, r)
+		} else {
+			w.WriteHeader(http.StatusNotImplemented)
+		}
+		return
+	}
+
+	if isGRPCWeb {
 		if internalAPI != nil {
 			internalAPI.ServeHTTP(w, r)
 		} else {

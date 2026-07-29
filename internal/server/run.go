@@ -122,7 +122,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, internalAPI, mux)
+		s.HandleProxyOrLocal(w, r, grpcServer, internalAPI, mux)
 	})
 	// Login rate limit: 5 attempts per minute per IP to mitigate brute force.
 	loginLimiter := middleware.NewRateLimiter(rate.Every(time.Minute/5), 5)

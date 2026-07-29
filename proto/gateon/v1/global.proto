@@ -290,6 +290,7 @@ message WafConfig {
   bool enable_body_entropy = 36;
   bool enable_fingerprint_validation = 37;
   bool enable_confidence_scoring = 38;
+  bool audit_only = 39;
 }
 
 message ClamavConfig {
