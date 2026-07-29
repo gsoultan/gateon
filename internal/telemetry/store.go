@@ -321,6 +321,8 @@ type SecurityThreat struct {
 	ASN             string    `json:"asn"`
 	ActionTaken     string    `json:"action_taken"`
 	CountryCode     string    `json:"country_code"`
+	Latitude        float64   `json:"latitude"`
+	Longitude       float64   `json:"longitude"`
 	Mitigated       bool      `json:"mitigated"`
 	RequestHeaders  string    `json:"request_headers"`
 	RequestBody     string    `json:"request_body"`
@@ -636,7 +638,7 @@ func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -717,7 +719,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation); err != nil {
 							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
@@ -1016,7 +1018,7 @@ func RecordSecurityThreat(t SecurityThreat) {
 	st.Mitigated = st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
 
 	if st.CountryCode == "" && st.SourceIP != "" {
-		st.CountryCode = ResolveCountry(st.SourceIP)
+		st.CountryCode, _, st.Latitude, st.Longitude = ResolveIPInfoFast(st.SourceIP)
 	}
 
 	if st.ASN == "" && st.SourceIP != "" {
@@ -1736,11 +1738,11 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 	where, args := buildThreatFilterQuery(s.dialect, filter, useJoin)
 	var query string
 	if useJoin {
-		query = s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, COALESCE(t.request_headers, ''), COALESCE(t.request_body, ''), COALESCE(t.response_headers, ''), COALESCE(t.response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), t.confidence, t.entropy, t.cluster_size, COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation " +
+		query = s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.request_headers, ''), COALESCE(t.request_body, ''), COALESCE(t.response_headers, ''), COALESCE(t.response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), t.confidence, t.entropy, t.cluster_size, COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation " +
 			"FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip " +
 			where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	} else {
-		query = s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation FROM security_threats " + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+		query = s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation FROM security_threats " + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?")
 	}
 	args = append(args, limit, offset)
 
@@ -1756,7 +1758,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 			break
 		}
 		th := &SecurityThreat{}
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation); err != nil {
 			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
@@ -1792,11 +1794,11 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 	where, args := buildThreatFilterQuery(s.dialect, filter, useJoin)
 	var query string
 	if useJoin {
-		query = s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation " +
+		query = s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation " +
 			"FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip " +
 			where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	} else {
-		query = s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation FROM security_threats " + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?")
+		query = s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation FROM security_threats " + where + " ORDER BY timestamp DESC LIMIT ? OFFSET ?")
 	}
 	args = append(args, limit, offset)
 
@@ -1812,7 +1814,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 			break
 		}
 		th := &SecurityThreat{}
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation); err != nil {
 			logQueryErr(ctx, "threats lite: scan failed", err)
 			continue
 		}

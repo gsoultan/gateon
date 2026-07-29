@@ -85,7 +85,7 @@ func TestIntegration_ProxyRequest(t *testing.T) {
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
 
 	req := httptest.NewRequest("GET", "http://localhost/test/foo", nil)
@@ -145,7 +145,7 @@ func TestIntegration_ProxyWithIPFilterMiddleware(t *testing.T) {
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
 	wrapped := grpcweb.WrapServer(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
 
 	req := httptest.NewRequest("GET", "http://localhost/api/foo", nil)
@@ -203,7 +203,7 @@ func TestIntegration_RestApiAndProxy(t *testing.T) {
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
 
 	rt := &gateonv1.Route{
@@ -250,7 +250,7 @@ func TestIntegration_NotFound(t *testing.T) {
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 	wrapped := grpcweb.WrapServer(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
 
 	req := httptest.NewRequest("GET", "http://localhost/not-found", nil)
@@ -371,7 +371,7 @@ func TestIntegration_ProxyWithOAuth2IntrospectionMiddleware(t *testing.T) {
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
 	wrapped := grpcweb.WrapServer(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
 
 	// Valid token -> backend
@@ -462,7 +462,7 @@ func TestIntegration_ProxyWithOIDCMiddleware(t *testing.T) {
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
 	wrapped := grpcweb.WrapServer(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
 
 	// Without token -> 401 (proves OIDC middleware is in chain)

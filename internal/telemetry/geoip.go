@@ -92,6 +92,16 @@ func InitGeoIP(dbPath string) error {
 
 // ResolveIPInfo resolves an IP address to country code, city name, latitude and longitude.
 func ResolveIPInfo(ctx context.Context, ipStr string) (country, city string, lat, lon float64) {
+	return ResolveIPInfoCustom(ctx, ipStr, false)
+}
+
+// ResolveIPInfoFast resolves an IP address using only the local database.
+func ResolveIPInfoFast(ipStr string) (country, city string, lat, lon float64) {
+	return ResolveIPInfoCustom(context.Background(), ipStr, true)
+}
+
+// ResolveIPInfoCustom resolves an IP address to country code, city name, latitude and longitude.
+func ResolveIPInfoCustom(ctx context.Context, ipStr string, fastOnly bool) (country, city string, lat, lon float64) {
 	geoMu.RLock()
 	dbLoaded := geoDB != nil
 	if dbLoaded {
@@ -126,7 +136,7 @@ func ResolveIPInfo(ctx context.Context, ipStr string) (country, city string, lat
 
 	// Fallback to public API if DB is missing or IP not found in DB
 	// Only for non-local IPs
-	if isPublicIP(ipStr) {
+	if !fastOnly && isPublicIP(ipStr) {
 		return resolveIPPublic(ctx, ipStr)
 	}
 

@@ -97,8 +97,6 @@ func TestCreateBaseHandler_Security(t *testing.T) {
 		GlobalReg:    globalReg,
 	}
 
-	handler := CreateBaseHandler(uiHandler, deps, nil, nil)
-
 	tests := []struct {
 		name           string
 		path           string
@@ -173,6 +171,7 @@ func TestCreateBaseHandler_Security(t *testing.T) {
 			} else {
 				t.Setenv("GATEON_ALLOW_PUBLIC_MANAGEMENT", "false")
 			}
+			handler := CreateBaseHandler(uiHandler, deps, nil, nil)
 			req := httptest.NewRequest("GET", tt.path, nil)
 			if tt.host != "" {
 				req.Host = tt.host

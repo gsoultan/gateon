@@ -26,8 +26,8 @@ func (d *GeofenceDetector) Detect(ctx context.Context, data *DiagnosticData) []*
 	}
 
 	for _, tr := range data.Traces {
-		country, _, _, _ := telemetry.ResolveIPInfo(ctx, tr.SourceIP)
-		if country != "" && blockedMap[country] {
+		country, _, _, _ := telemetry.ResolveIPInfoFast(tr.SourceIP)
+		if country != "" && country != "XX" && blockedMap[country] {
 			mitigated := data.IsCountryMitigated(country)
 
 			anomaly := &gateonv1.Anomaly{

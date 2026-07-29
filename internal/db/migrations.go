@@ -1125,4 +1125,35 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(42, "add_lat_lon_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION DEFAULT 0;`,
+			}
+		case DriverMySQL:
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS latitude DOUBLE DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS longitude DOUBLE DEFAULT 0;`,
+			}
+		default: // sqlite
+			queries = []string{
+				`ALTER TABLE security_threats ADD COLUMN latitude REAL DEFAULT 0;`,
+				`ALTER TABLE security_threats ADD COLUMN longitude REAL DEFAULT 0;`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }
