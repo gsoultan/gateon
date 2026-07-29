@@ -66,7 +66,7 @@ func TestIntegration_ProxyRedirects(t *testing.T) {
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, wrapped, mux)
+		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
 
 	t.Run("InternalRedirect", func(t *testing.T) {

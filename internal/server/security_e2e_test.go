@@ -226,7 +226,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 
 	// 3. Handle request
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.HandleProxyOrLocal(w, r, nil, nil)
+		s.HandleProxyOrLocal(w, r, nil, nil, http.NewServeMux())
 	})
 
 	// Wrap with RequestState to ensure RouteID is captured

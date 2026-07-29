@@ -114,7 +114,7 @@ func TestGRPCWeb_E2E(t *testing.T) {
 
 	// Use the server's handler
 	mux := http.NewServeMux() // dummy mux for internal API
-	s.HandleProxyOrLocal(w, req, nil, mux)
+	s.HandleProxyOrLocal(w, req, nil, nil, mux)
 
 	// 5. Verify Response
 	resp := w.Result()
@@ -264,7 +264,7 @@ func TestGRPCWebText_E2E(t *testing.T) {
 	// 4. Handle Request
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
-	s.HandleProxyOrLocal(w, req, nil, mux)
+	s.HandleProxyOrLocal(w, req, nil, nil, mux)
 
 	// 5. Verify Response
 	resp := w.Result()
@@ -373,7 +373,7 @@ func TestGRPCWeb_CORSPreflight(t *testing.T) {
 	// Handle Request
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
-	s.HandleProxyOrLocal(w, req, nil, mux)
+	s.HandleProxyOrLocal(w, req, nil, nil, mux)
 
 	// Verify Response
 	resp := w.Result()
@@ -438,7 +438,7 @@ func TestGRPCWeb_CORS_Forbidden(t *testing.T) {
 	// Handle Request
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
-	s.HandleProxyOrLocal(w, req, nil, mux)
+	s.HandleProxyOrLocal(w, req, nil, nil, mux)
 
 	// Verify Response
 	resp := w.Result()
@@ -505,7 +505,7 @@ func TestGRPCWeb_BotManagement_403(t *testing.T) {
 	// Handle Request
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
-	s.HandleProxyOrLocal(w, req, nil, mux)
+	s.HandleProxyOrLocal(w, req, nil, nil, mux)
 
 	// Verify Response
 	resp := w.Result()
@@ -553,7 +553,7 @@ func TestGRPCWeb_HTTPS_Enforcement_403(t *testing.T) {
 	// Handle Request
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
-	s.HandleProxyOrLocal(w, req, nil, mux)
+	s.HandleProxyOrLocal(w, req, nil, nil, mux)
 
 	// Verify Response
 	resp := w.Result()

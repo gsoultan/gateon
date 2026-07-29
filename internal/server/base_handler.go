@@ -93,6 +93,8 @@ func CreateBaseHandler(
 		epID := ""
 		if rs != nil {
 			epID = rs.EntryPointID
+		} else if id, ok := r.Context().Value(middleware.EntryPointIDContextKey).(string); ok {
+			epID = id
 		}
 
 		// On the management entrypoint, we do NOT serve user-defined proxy routes.

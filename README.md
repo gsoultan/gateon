@@ -1,60 +1,54 @@
 # Gateon
 
-Production-ready, modular HTTP, gRPC, and gRPC-Web reverse proxy and load balancer. This repository provides a high-performance Go backend and a modern TypeScript UI.
+A modern, high-performance, and security-focused API Gateway, Reverse Proxy, and Service Mesh entry point. 
 
-## Features
-- API Gateway written in Go
-  - Modern HTTP reverse proxy with path/host routing
-  - Built-in load balancer (**Round Robin** and **Least Connections**) with active health checks per route
-  - **Circuit Breaker**: Automatic failure detection and target isolation (Closed, Open, Half-Open states)
-  - **WebSocket and SSE Support**: Full-duplex proxying and real-time streaming for modern applications (see [doc/websockets-sse.md](doc/websockets-sse.md))
-  - **Cloud-native Observability**:
-    - **Prometheus Metrics** (requests total, latency duration) via `/metrics` endpoint.
-    - **Structured JSON Access Logging** for all traffic.
-    - **Live Dashboard Logs**: Real-time log streaming via WebSockets.
-    - OpenTelemetry integration for distributed tracing.
-  - gRPC server on the same port as HTTP
-  - gRPC routing; add the **grpcweb** middleware to grpc routes for browser (gRPC-Web) support
-  - Minimal REST endpoints for UI parity
-  - Health and readiness endpoints
-  - **Dynamic Routing with Hot-Reload**: Host, Path, PathPrefix, PathRegex, Methods, Headers matchers (Traefik-compatible rules). Routes can be **paused** (disabled) without deletion.
-  - **Configuration**: Supports JSON and YAML for route definitions.
-  - **HTTP Management**: Advanced proxy configuration (custom headers, timeouts) and real-time metrics (request count, error rate, latency, active connections) per route.
-  - **AuthN/Z**: JWT (HMAC/JWKS) and API Key validation per route
-  - **Weighted Load Balancing**: Canary deployments and traffic splitting support.
-  - **Distributed Rate Limiting**: Redis-backed rate limiting for multitenant workloads.
-  - **Multitenant Rate Limiting**: Per-IP and Per-Tenant (context-aware)
-  - **SSL/TLS Certificate Management**: Built-in support for uploading and managing custom certificates per domain directly from the UI.
-- **TCP/UDP L4 Proxy**: TCP and UDP entrypoints forward traffic to backends via Route → Service (configure a Route with type tcp/udp and a Service with backend_type tcp/udp).
-- **Config Import/Export**: Backup and restore via `/v1/config/export` and `/v1/config/import`. Validate before import with `POST /v1/config/validate`.
-- React UI (Vite + TypeScript + Mantine + Tailwind)
-  - Status dashboard and route management
-- **Clean modular structure with protobuf generation**
-- **Traefik-compatible HTTP Middlewares**:
-  - `AddPrefix`, `StripPrefix`, `StripPrefixRegex`
-  - `ReplacePath`, `ReplacePathRegex`, `Rewrite`
-  - `Compress` (Gzip)
-  - `Errors` (Custom error pages)
-  - `Retry`
-  - `Headers` (Add/Set/Del for Request and Response)
-  - `IPFilter` (allow/deny by IP or CIDR; supports `trust_cloudflare_headers`)
-  - `WAF` (Coraza WAF with OWASP CRS)
-  - `Turnstile` (Cloudflare Turnstile bot verification)
-  - `GeoIP` (allow/deny by country using MaxMind GeoLite2)
-  - `HMAC` (webhook signature verification)
-  - `Cache` (in-memory or Redis response cache for GET)
-  - `gRPC-Web` (required for grpc routes called from browsers; converts gRPC-Web to gRPC)
+Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web support, kernel-level optimization via eBPF, and a sophisticated security suite including a multi-tier WAF and AI-powered anomaly detection.
+
+## 🚀 Core Features
+
+### 🌐 High-Performance Traffic Management
+- **Multiprotocol Proxy**: Native support for **HTTP/1.1, HTTP/2, gRPC, and gRPC-Web** on a single port.
+- **Real-time Streaming**: Full-duplex **WebSocket and SSE** proxying (see [doc/websockets-sse.md](doc/websockets-sse.md)).
+- **Layer 4 Proxy**: TCP and UDP entrypoints for low-level traffic forwarding.
+- **Dynamic Routing**: Traefik-compatible rules (Host, Path, Regex, Headers, Methods) with **Hot-Reload**.
+- **Advanced Load Balancing**: Round Robin, Least Connections, and Weighted Round Robin (WRR) for canary deployments.
+- **Resilience**: Built-in **Circuit Breakers** (Closed/Open/Half-Open) and automatic retries.
+
+### 🛡️ Enterprise-Grade Security & Shielding
+- **Advanced WAF**: Built-in **Coraza WAF** with OWASP Core Rule Set (CRS) and real-time rule updates.
+- **Kernel Offloading**: **eBPF-powered** XDP/TC for high-performance rate limiting and packet filtering at the NIC level.
+- **Bot Management**: JS Challenges, Browser Integrity checks, and Cloudflare Turnstile integration.
+- **Identity & Access**: Comprehensive AuthN/Z via **JWT (HMAC/JWKS), PASETO, API Keys**, and Forward Auth.
+- **Traffic Deception**: Honeypots and deception layers to trap and identify malicious actors.
+- **Advanced TLS**: Automatic TLS (Let's Encrypt), **mTLS** for backends, and **JA3/JA4 Fingerprinting**.
+
+### 📊 Cloud-Native Observability & AI
+- **AI Anomaly Detection**: Proactive threat detection using traffic pattern analysis and Prometheus metrics.
+- **Deep Visibility**: Prometheus metrics, OpenTelemetry tracing, and structured JSON access logs.
+- **Live Diagnostics**: Real-time log streaming and a built-in **Topology Map** of your services.
+- **Management TUI**: A terminal-based dashboard (`gateon top`) for real-time monitoring.
+
+### ⚙️ Automation & Scalability
+- **Kubernetes Native**: Full support for the **Kubernetes Gateway API** (`Gateway`, `HTTPRoute`).
+- **High Availability**: Active-Passive failover (VRRP) and multi-cluster configuration sync via Redis.
+- **Secrets Management**: Securely resolve secrets from **HashiCorp Vault, AWS Secrets Manager**, and environment variables at runtime.
+- **WASM Extensibility**: Custom traffic manipulation using WebAssembly-based middlewares.
 
 ## Repository Structure
-```
+
+Gateon follows a domain-based organization within the `internal/` directory, adhering to a layered architecture: **Transports → Middlewares → Endpoints → Services → Usecases → Repositories**.
+
+```text
 cmd/gateon/      # Application entry point (HTTP + gRPC + gRPC-Web)
-doc/             # Setup guides and documentation (e.g. doc/email-backend-setup.md)
-internal/        # Server logic and shared packages (server, logger, config, router, etc.)
-  - server/      # API Gateway implementation
-  - router/      # Routers connect incoming requests to the services that handle them.
-proto/           # Protobuf definitions (generated Go under proto/gateon/v1/)
-ui/              # React UI (Vite + TS + Mantine + Tailwind); built to internal/ui/dist for embed
-  docs/          # Documentation content (displayed in UI Docs page)
+doc/             # Setup guides and documentation
+internal/        # Domain-driven internal packages
+  - ebpf/        # Kernel-level traffic offloading
+  - ha/          # High Availability (VRRP)
+  - k8s/         # Kubernetes Gateway API Controller
+  - middleware/  # Security and traffic manipulation layers
+  - waf/         # Coraza WAF integration and rules
+proto/           # Protobuf definitions (managed via Buf)
+ui/              # React UI (Vite 8 + TS + Mantine 9 + Tailwind)
 ```
 
 ## Releases and Services
@@ -81,40 +75,51 @@ Uninstall: `gateon uninstall`. See [doc/services.md](doc/services.md) for packag
 - **Context propagation**: Domain services and config stores use `context.Context` as the first parameter for cancellation and tracing.
 - **Handler style**: REST handlers follow early returns, minimal nesting, and extracted helpers (e.g. `writeJSONError`, `decodeGlobalConfig`, `validateConfigExport`). See `.cursor/rules/backend-guidelines.mdc`.
 
-## Getting Started (Backend)
-Requirements:
-- Go 1.25+
+## Getting Started
 
-Install dependencies:
-```
-go mod tidy
-```
+### Prerequisites
+- **Go 1.26+** (Typically at `/opt/homebrew/bin/go` on macOS)
+- **Bun** (for UI builds)
+- **Buf** (for gRPC generation)
+- **rtk** (CLI proxy for token optimization - optional)
 
-Build service (with UI):
-```
-go generate ./...
-go build -o gateon ./cmd/gateon
-```
+### Development Setup
 
-Or build UI through the gateway binary (requires Go installed):
-```
-go run ./cmd/gateon --build-ui
-go build -o gateon ./cmd/gateon
-```
+1. **Install dependencies**:
+   ```bash
+   rtk go mod tidy
+   ```
 
-Run service:
-```
-ENV=development VERSION=dev PORT=8080 go run ./cmd/gateon
-```
+2. **Generate gRPC code**:
+   ```bash
+   rtk buf generate
+   ```
 
-Test endpoints:
-```
-# Health
-curl -s http://localhost:8080/healthz
+3. **Build & Run (with UI)**:
+   ```bash
+   # Build UI and Sync assets
+   rtk go run ./cmd/gateon --build-ui
+   
+   # Build the binary
+   rtk go build -o gateon ./cmd/gateon
+   
+   # Run in development mode
+   ENV=development VERSION=dev PORT=8080 ./gateon
+   ```
 
-# Status
-curl -s http://localhost:8080/v1/status | jq
-```
+4. **Verify Health**:
+   ```bash
+   curl -s http://localhost:8080/healthz
+   ```
+
+## 🧠 AI-Ready Development
+
+Gateon is built with AI-assisted development in mind. We provide several tools to optimize your workflow when working with LLMs and agents:
+
+- **Graphify**: Architecture exploration and GraphRAG-based codebase navigation.
+- **Serena**: Persistent memory for cross-session context and architectural decisions.
+- **rtk**: A CLI proxy that optimizes token usage for shell commands (go, git, test, etc.).
+- **Junie Guidelines**: Formalized standards for Clean Code and OOP in Go.
 
 ## gRPC and gRPC-Web
 
@@ -194,11 +199,13 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 | **Language** | Go | Go | C | Lua (on OpenResty) |
 | **gRPC/gRPC-Web** | **Native** (First-class) | Native | Via Module/Config | Native |
 | **Hot Reload** | Native (Dynamic Routes) | Native | Requires Reload | Native (via etcd) |
-| **Observability** | **Prometheus + JSON Logs** | Prometheus + Logs | Basic / Commercial | Prometheus + Plugins |
+| **eBPF Offloading** | **Native (XDP/TC)** | No | No (via module) | Via Plugin |
+| **AI Diagnostics** | **Native (Anomaly)** | No | No | No |
+| **Observability** | **Prometheus + OpenTelemetry** | Prometheus + Logs | Basic / Commercial | Prometheus + Plugins |
 | **Load Balancing** | **RR + LeastConn + WRR** | RR + Wrr + ... | RR + LC + IP Hash | RR + LC + ... |
 | **Config Style** | Code-first / JSON / YAML | Dynamic / Labels | Static Files | Dashboard / API |
 | **Dashboard** | Included (React + Live Logs) | Included | Commercial (Plus) | Included |
-| **Extensibility** | Go Middlewares | Go Middlewares/WASM | C Modules / Lua | Lua Plugins |
+| **Extensibility** | Go / WASM | Go / WASM | C / Lua | Lua |
 
 ### When to choose Gateon?
 - **gRPC-First Workloads**: If your services are primarily gRPC and you need seamless grpc-web proxying without complex envoy configurations.
@@ -207,31 +214,19 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 
 ## Roadmap
 
-### Implemented
-- [WAF (Web Application Firewall)](doc/waf.md) – OWASP CRS protection.
-- [WASM Middleware](doc/wasm.md) – Extensible WASM-based traffic manipulation.
-- [Redis-backed Rate Limiting](doc/rate-limiting.md) – Distributed rate limiting with Redis (see Features).
-- **Comprehensive Auth** – JWT, JWKS, PASETO, Forward Auth, and API Keys.
-- **Security Integrations** – Cloudflare Turnstile, MaxMind GeoIP, HMAC Signatures.
-- **Traffic Management** – Caching (Redis/Local/Cluster), Compression (Gzip/Brotli), Resilience (Retry, Circuit Breaker).
-- **High Availability (HA)** – Active-Passive failover (VRRP-like) with VIP management.
-- **Anomaly Detection** – AI-powered traffic pattern analysis via Prometheus.
-- **eBPF Offloading** – Kernel-level XDP rate limiting and TC filtering.
-- **Canary Deployment Wizard** – Automated gradual traffic shifting for services.
-- **FIPS 140-2 Compliance** – BoringCrypto support for regulated environments.
-- **Kubernetes Gateway API Controller** – Native support for `Gateway` and `HTTPRoute` resources.
-- **Mutual TLS (mTLS)** – End-to-end security with client certificates for backend targets.
-- **Config Sync & Discovery** – Multi-cluster synchronization (Redis) and mDNS/Eureka/Zookeeper support.
-- **External Secrets Management** – Resolution of `$vault:`, `$env:`, and `$aws-sm:` variables at runtime.
-- **Observability & AI** – Topology map, AI-powered log assistant, and `gateon top` CLI TUI.
-- **AI Optimization** – Best practices for guidelines, scenarios, and plans for AI agents ([docs/ai-optimization.md](docs/ai-optimization.md)).
-- **Backend Transport Rollout Guide** – Operations guide for protocol-aware targets, health-check modes, PROXY protocol, dynamic backend mTLS, migration, canary, and rollback ([docs/backend-transport-rollout.md](docs/backend-transport-rollout.md)).
-- **Automatic TLS (Let's Encrypt)** – Backend support via ACME/autocert in `internal/tls`; configurable via TLS config (Email + Domains).
-- **Metrics export (Prometheus/OpenTelemetry)** – Prometheus `/metrics` and OpenTelemetry tracing (see Features).
-- **Dashboard (Live logs)** – Live log streaming via WebSockets.
+Gateon is rapidly evolving. Below are our recent milestones and future plans.
+
+### Recently Added
+- **eBPF Offloading**: Kernel-level XDP/TC traffic filtering.
+- **AI Anomaly Detection**: Pattern-based threat identification.
+- **Kubernetes Gateway API**: Native K8s resource support.
+- **Advanced WAF**: Coraza integration with OWASP CRS.
+- **External Secrets**: Vault and AWS Secrets Manager integration.
+- **High Availability**: VRRP-based active-passive failover.
 
 ### Next (Enterprise & Scalability)
 - **Active-Active HA**: Gossip-based state synchronization for distributed clusters.
 - **Service Mesh Integration**: Istio/Linkerd sidecar support.
-- **Advanced WAF Rule Builder**: Visual UI for creating custom Coraza rules.
+- **Advanced WAF Rule Builder**: Visual UI for creating custom rules.
 - **Global Load Balancing (GSLB)**: DNS-based traffic steering across geographical regions.
+- **Native WASM SDK**: Simplified development for custom Go/Rust middlewares.

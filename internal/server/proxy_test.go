@@ -74,7 +74,7 @@ func TestHandleProxyOrLocal_DoesNotProxyLegacyGrpcWebRouteType(t *testing.T) {
 	req.Header.Set("Content-Type", "application/grpc-web+proto")
 	req.Header.Set("X-Grpc-Web", "1")
 	w := httptest.NewRecorder()
-	s.HandleProxyOrLocal(w, req, wrapped, mux)
+	s.HandleProxyOrLocal(w, req, wrapped, wrapped, mux)
 	if got := hits.Load(); got != 0 {
 		t.Fatalf("expected legacy grpc-web route type to be ignored, proxied requests = %d", got)
 	}
@@ -86,7 +86,7 @@ func TestHandleProxyOrLocal_ProxiesGrpcWebRequestsForGrpcRouteWithMiddleware(t *
 	req.Header.Set("Content-Type", "application/grpc-web+proto")
 	req.Header.Set("X-Grpc-Web", "1")
 	w := httptest.NewRecorder()
-	s.HandleProxyOrLocal(w, req, wrapped, mux)
+	s.HandleProxyOrLocal(w, req, wrapped, wrapped, mux)
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("expected grpc route with grpcweb middleware to proxy grpc-web request exactly once, got %d", got)
 	}
@@ -98,7 +98,7 @@ func TestHandleProxyOrLocal_GrpcWebWithoutMiddlewareReturns415(t *testing.T) {
 	req.Header.Set("Content-Type", "application/grpc-web+proto")
 	req.Header.Set("X-Grpc-Web", "1")
 	w := httptest.NewRecorder()
-	s.HandleProxyOrLocal(w, req, wrapped, mux)
+	s.HandleProxyOrLocal(w, req, wrapped, wrapped, mux)
 	if w.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("expected 415 when grpc route has no grpcweb middleware, got %d", w.Code)
 	}

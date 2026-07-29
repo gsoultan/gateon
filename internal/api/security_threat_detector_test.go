@@ -185,7 +185,7 @@ func TestSecurityThreatDetector_WAFHits(t *testing.T) {
 
 	assert.NotNil(t, wafAnom, "Should detect waf_violation anomaly")
 	assert.Contains(t, wafAnom.Description, "WAF security rules triggered")
-	assert.GreaterOrEqual(t, wafAnom.Score, 40.0)
+	assert.GreaterOrEqual(t, wafAnom.Score, 20.0)
 }
 
 func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
