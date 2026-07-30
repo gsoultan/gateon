@@ -699,9 +699,9 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 	}
 
-	// 4. Mark as unmitigated in telemetry and reset reputation
+	// 4. Mark as unmitigated in telemetry and reset reputation (including all associated fingerprints)
 	telemetry.MarkIPUnmitigated(sourceIP)
-	telemetry.ResetReputation(sourceIP)
+	s.resetReputationForIP(ctx, sourceIP)
 
 	return &gateonv1.RemoveMitigatedThreatResponse{
 		Success: true,
@@ -754,6 +754,17 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		populateAnomalyGeo(ctx, a, t.SourceIP)
 	}
 	return a
+}
+
+func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
+	// 1. Reset reputation for the IP itself
+	telemetry.ResetReputation(ip)
+
+	// 2. Find and reset reputation for all associated fingerprints (JA4, etc.)
+	fps := telemetry.GetAssociatedFingerprints(ctx, ip)
+	for _, fp := range fps {
+		telemetry.ResetReputation(fp)
+	}
 }
 
 func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error) {
@@ -979,8 +990,8 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 		}
 	}
 
-	// Reset reputation and mark as unmitigated
-	telemetry.ResetReputation(threat.SourceIP)
+	// Reset reputation (including all associated fingerprints) and mark as unmitigated
+	s.resetReputationForIP(ctx, threat.SourceIP)
 	telemetry.MarkIPUnmitigated(threat.SourceIP)
 
 	return &gateonv1.ApplyRecommendationResponse{
