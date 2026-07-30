@@ -57,15 +57,16 @@ var securityBufferPool = sync.Pool{
 	},
 }
 
-// Tarpit middleware introduces progressive delays for suspicious IPs.
+// Tarpit middleware introduces progressive delays for suspicious clients based on fingerprint reputation.
 func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := request.GetClientIP(r, true)
-			score := telemetry.GetIPThreatScore(ip)
+			fingerprint := telemetry.GetIPFingerprint(r)
+			reputation := telemetry.GetReputationScore(fingerprint)
+			threatScore := 100.0 - reputation
 
-			if score >= scoreThreshold {
-				delay := time.Duration(float64(baseDelay) * (score / scoreThreshold))
+			if threatScore >= scoreThreshold {
+				delay := time.Duration(float64(baseDelay) * (threatScore / scoreThreshold))
 				if delay > maxDelay {
 					delay = maxDelay
 				}
@@ -108,7 +109,7 @@ func Entropy(threshold float64, routeID string) Middleware {
 
 					e := entropy.Calculate(peeked)
 					if e > threshold {
-						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced", "HIGH")
+						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced", "HIGH", "detected")
 					}
 				}
 				if rs != nil {
@@ -143,21 +144,22 @@ func serveTrollResponse(w http.ResponseWriter) {
 	}
 }
 
-func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string, category string, severity string) {
+func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string, category string, severity string, actionTaken string) {
 	logger.SecurityEvent(ttype, r, details)
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-		ID:         fmt.Sprintf("adv-%s-%d", ttype, time.Now().UnixNano()),
-		Type:       ttype,
-		SourceIP:   request.GetClientIP(r, true),
-		Score:      score,
-		Details:    details,
-		Time:       time.Now(),
-		RouteID:    routeID,
-		RequestURI: r.RequestURI,
-		Category:   category,
-		Severity:   severity,
-		Method:     r.Method,
-		UserAgent:  r.UserAgent(),
+		ID:          fmt.Sprintf("adv-%s-%d", ttype, time.Now().UnixNano()),
+		Type:        ttype,
+		SourceIP:    request.GetClientIP(r, true),
+		Score:       score,
+		Details:     details,
+		Time:        time.Now(),
+		RouteID:     routeID,
+		RequestURI:  r.RequestURI,
+		Category:    category,
+		Severity:    severity,
+		ActionTaken: actionTaken,
+		Method:      r.Method,
+		UserAgent:   r.UserAgent(),
 	}))
 }
 
@@ -225,7 +227,7 @@ func XSSRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss", "CRITICAL")
+				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss", "CRITICAL", "detected")
 			}
 
 			if rs != nil {
@@ -277,7 +279,7 @@ func SQLiRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli", "CRITICAL")
+				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli", "CRITICAL", "detected")
 			}
 
 			if rs != nil {
@@ -364,7 +366,7 @@ func ThreatRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced", severity)
+				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced", severity, "detected")
 			}
 
 			next.ServeHTTP(w, r)

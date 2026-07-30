@@ -1039,7 +1039,8 @@ func RecordSecurityThreat(t SecurityThreat) {
 	ThreatBroadcaster.Broadcast(*st)
 
 	// funnel increments: map category/type to specific funnel counters
-	if st.Mitigated {
+	isMitigated := st.Mitigated || st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
+	if isMitigated {
 		routeID := cmp.Or(st.RouteID, "global")
 		cat := strings.ToLower(st.Category)
 		typ := strings.ToLower(st.Type)
@@ -1112,12 +1113,16 @@ func RecordSecurityThreat(t SecurityThreat) {
 	}
 
 	// Legacy global counters (per category/severity)
-	if st.Mitigated {
+	if isMitigated {
 		MitigatedThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium"), cmp.Or(st.ActionTaken, "blocked")).Inc()
-		s.currentMitigatedToday.Add(1)
+		if s != nil {
+			s.currentMitigatedToday.Add(1)
+		}
 	} else {
 		ActiveThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium")).Inc()
-		s.currentActiveToday.Add(1)
+		if s != nil {
+			s.currentActiveToday.Add(1)
+		}
 	}
 
 	select {
