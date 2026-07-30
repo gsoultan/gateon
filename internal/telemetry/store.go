@@ -1718,6 +1718,28 @@ func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix 
 	return " WHERE " + strings.Join(conditions, " AND "), args
 }
 
+// GetAssociatedFingerprints returns a list of unique fingerprints (including JA4) associated with an IP.
+func GetAssociatedFingerprints(ctx context.Context, ip string) []string {
+	s := getStore()
+	if s == nil || ip == "" {
+		return nil
+	}
+	query := s.dialect.Rebind("SELECT DISTINCT fingerprint FROM security_threats WHERE source_ip = ? UNION SELECT DISTINCT ja4 FROM security_threats WHERE source_ip = ?")
+	rows, err := s.db.QueryContext(ctx, query, ip, ip)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var fps []string
+	for rows.Next() {
+		var fp string
+		if err := rows.Scan(&fp); err == nil && fp != "" {
+			fps = append(fps, fp)
+		}
+	}
+	return fps
+}
+
 // GetSecurityThreats returns a paged list of security threats from the store.
 func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
 	s := getStore()
