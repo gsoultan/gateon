@@ -280,7 +280,10 @@ func ResetReputation(fingerprint string) {
 	// Automated eBPF Unshun: Restore access at XDP layer.
 	if m := globalEbpfManager.Load(); m != nil {
 		if prov, ok := m.(EbpfProvider); ok {
-			_ = prov.UnshunIP(fingerprint)
+			// ONLY unshun if it's a valid IP. Fingerprints are handled at L7.
+			if net.ParseIP(fingerprint) != nil {
+				_ = prov.UnshunIP(fingerprint)
+			}
 		}
 	}
 	// Broadcast a reset (score 100) to the cluster to ensure reputation is back green everywhere.

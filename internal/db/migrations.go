@@ -1253,7 +1253,7 @@ func init() {
 			// SQLite doesn't support ALTER TABLE DROP PRIMARY KEY
 			// We need to recreate the table
 			queries = []string{
-				`CREATE TABLE user_mitigations_new (
+				`CREATE TABLE IF NOT EXISTS user_mitigations_new (
 					fingerprint VARCHAR(255) NOT NULL,
 					ja4h VARCHAR(255) NOT NULL DEFAULT '',
 					fp_type VARCHAR(10) NOT NULL,
@@ -1265,19 +1265,23 @@ func init() {
 					updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 					PRIMARY KEY (fingerprint, ja4h)
 				);`,
-				`INSERT INTO user_mitigations_new SELECT fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at FROM user_mitigations;`,
-				`DROP TABLE user_mitigations;`,
+				`INSERT INTO user_mitigations_new (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at)
+				 SELECT fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at FROM user_mitigations;`,
+				`DROP TABLE IF EXISTS user_mitigations;`,
 				`ALTER TABLE user_mitigations_new RENAME TO user_mitigations;`,
 				`CREATE INDEX IF NOT EXISTS idx_user_mitigations_status ON user_mitigations(status);`,
 				`CREATE INDEX IF NOT EXISTS idx_user_mitigations_type ON user_mitigations(fp_type);`,
 			}
 		} else if dialect.Driver == DriverPostgres {
 			queries = []string{
-				`ALTER TABLE user_mitigations DROP CONSTRAINT user_mitigations_pkey;`,
+				`ALTER TABLE user_mitigations DROP CONSTRAINT IF EXISTS user_mitigations_pkey;`,
+				`ALTER TABLE user_mitigations DROP CONSTRAINT IF EXISTS fingerprint_mitigations_pkey;`,
+				`ALTER TABLE user_mitigations ALTER COLUMN ja4h SET NOT NULL;`,
 				`ALTER TABLE user_mitigations ADD PRIMARY KEY (fingerprint, ja4h);`,
 			}
 		} else { // MySQL
 			queries = []string{
+				`ALTER TABLE user_mitigations MODIFY ja4h VARCHAR(255) NOT NULL DEFAULT '';`,
 				`ALTER TABLE user_mitigations DROP PRIMARY KEY, ADD PRIMARY KEY (fingerprint, ja4h);`,
 			}
 		}
@@ -1285,6 +1289,36 @@ func init() {
 			if _, err := db.Exec(q); err != nil {
 				return err
 			}
+		}
+		return nil
+	})
+
+	Register(48, "add_ja4h_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite {
+			query = `ALTER TABLE security_threats ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
+		} else if dialect.Driver == DriverPostgres {
+			query = `ALTER TABLE security_threats ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
+		} else { // MySQL
+			query = `ALTER TABLE security_threats ADD COLUMN ja4h VARCHAR(255) NOT NULL DEFAULT '';`
+		}
+		if _, err := db.Exec(query); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	Register(49, "add_ja4h_to_traces", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite {
+			query = `ALTER TABLE traces ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
+		} else if dialect.Driver == DriverPostgres {
+			query = `ALTER TABLE traces ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
+		} else { // MySQL
+			query = `ALTER TABLE traces ADD COLUMN ja4h VARCHAR(255) NOT NULL DEFAULT '';`
+		}
+		if _, err := db.Exec(query); err != nil {
+			return err
 		}
 		return nil
 	})

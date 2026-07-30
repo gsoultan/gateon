@@ -741,6 +741,7 @@ export type Anomaly = {
   country_name?: string;
   ja3?: string;
   ja4?: string;
+  ja4h?: string;
   score?: number;
   route_id?: string;
   request_uri?: string;

@@ -688,52 +688,62 @@ func (s *ApiService) applyFixShadowedRouteRecommendation(ctx context.Context, ro
 
 func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error) {
 	if req.Source == "" {
-		return &gateonv1.RemoveMitigatedThreatResponse{Success: false, Message: "Source IP is required"}, nil
+		return &gateonv1.RemoveMitigatedThreatResponse{Success: false, Message: "Source identification is required"}, nil
 	}
 
-	sourceIP := req.Source
-	mwID := "block-ip-" + strings.ReplaceAll(sourceIP, ".", "-")
-	mwID = strings.ReplaceAll(mwID, ":", "-")
+	source := req.Source
+	isIP := net.ParseIP(source) != nil
 
-	// 1. Remove from eBPF shunning if enabled
-	if s.EbpfManager != nil {
-		if err := s.EbpfManager.UnshunIP(sourceIP); err != nil {
-			logger.L.LogWarn("Failed to unshun IP at XDP level (might not be shunned)", "error", err, "ip", sourceIP)
+	// 1. Remove from eBPF shunning if it's an IP and eBPF is enabled
+	if isIP && s.EbpfManager != nil {
+		if err := s.EbpfManager.UnshunIP(source); err != nil {
+			logger.L.LogWarn("Failed to unshun IP at XDP level (might not be shunned)", "error", err, "ip", source)
 		} else {
-			logger.L.LogInfo("IP unshunned at XDP level", "ip", sourceIP)
+			logger.L.LogInfo("IP unshunned at XDP level", "ip", source)
 		}
 	}
 
-	// 2. Remove middleware from all routes
-	routes := s.Routes.List(ctx)
-	for _, rt := range routes {
-		oldLen := len(rt.Middlewares)
-		rt.Middlewares = slices.DeleteFunc(rt.Middlewares, func(m string) bool {
-			return m == mwID
-		})
-		if len(rt.Middlewares) != oldLen {
-			if err := s.Routes.Update(ctx, rt); err != nil {
-				logger.L.LogError("Failed to update route while removing mitigation", "error", err, "route", rt.Id)
+	if isIP {
+		mwID := "block-ip-" + strings.ReplaceAll(source, ".", "-")
+		mwID = strings.ReplaceAll(mwID, ":", "-")
+
+		// 2. Remove middleware from all routes
+		routes := s.Routes.List(ctx)
+		for _, rt := range routes {
+			oldLen := len(rt.Middlewares)
+			rt.Middlewares = slices.DeleteFunc(rt.Middlewares, func(m string) bool {
+				return m == mwID
+			})
+			if len(rt.Middlewares) != oldLen {
+				if err := s.Routes.Update(ctx, rt); err != nil {
+					logger.L.LogError("Failed to update route while removing mitigation", "error", err, "route", rt.Id)
+				}
 			}
 		}
-	}
 
-	// 3. Delete the middleware itself
-	if err := s.Middlewares.Delete(ctx, mwID); err != nil {
-		logger.L.LogWarn("Failed to delete mitigation middleware (might not exist)", "error", err, "mwID", mwID)
+		// 3. Delete the middleware itself
+		if err := s.Middlewares.Delete(ctx, mwID); err != nil {
+			logger.L.LogWarn("Failed to delete mitigation middleware (might not exist)", "error", err, "mwID", mwID)
+		}
 	}
 
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 	}
 
-	// 4. Mark as unmitigated in telemetry and reset reputation (including all associated fingerprints)
-	telemetry.MarkIPUnmitigated(sourceIP)
-	s.resetReputationForIP(ctx, sourceIP)
+	// 4. Mark as unmitigated in telemetry and reset reputation
+	if isIP {
+		telemetry.MarkIPUnmitigated(source)
+		s.resetReputationForIP(ctx, source)
+	} else {
+		// If it's a fingerprint, mark the specific entry as unmitigated
+		telemetry.MarkUserUnmitigated(source, req.Ja4H)
+		telemetry.ResetReputation(source)
+	}
 
 	return &gateonv1.RemoveMitigatedThreatResponse{
 		Success: true,
-		Message: fmt.Sprintf("Mitigation for IP %s removed successfully.", sourceIP),
+		Message: fmt.Sprintf("Mitigation for %s removed successfully.", source),
 	}, nil
 }
 
@@ -763,6 +773,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		ClusterSize:     int32(t.ClusterSize),
 		Ja3:             t.JA3,
 		Ja4:             t.JA4,
+		Ja4H:            t.JA4H,
 		RouteId:         t.RouteID,
 		RequestUri:      t.RequestURI,
 		Category:        t.Category,
@@ -838,6 +849,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
 				Ja3:            m.Fingerprint, // Could be JA3 or JA4, we put it in both if it's the source
 				Ja4:            m.Fingerprint,
+				Ja4H:           m.JA4H,
 			})
 		}
 		if status == "user_mitigated" {
