@@ -6,7 +6,7 @@ export function useRemoveMitigation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (source: string) => removeMitigatedThreat(source),
+    mutationFn: (args: { source: string; ja4h?: string }) => removeMitigatedThreat(args.source, args.ja4h),
     onSuccess: (data) => {
       notifications.show({
         title: "Success",

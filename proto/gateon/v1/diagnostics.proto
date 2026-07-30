@@ -28,6 +28,7 @@ message Anomaly {
   double score = 10;
   string ja3 = 11;
   string ja4 = 33;
+  string ja4h = 35;
   string route_id = 12;
   string request_uri = 13;
   bool mitigated = 14;
@@ -120,6 +121,7 @@ message ApplyRecommendationResponse {
 
 message RemoveMitigatedThreatRequest {
   string source = 1;
+  string ja4h = 2;
 }
 
 message RemoveMitigatedThreatResponse {

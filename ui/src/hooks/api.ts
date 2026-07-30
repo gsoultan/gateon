@@ -147,11 +147,11 @@ export async function applyRecommendation(anomalyType: string, source: string, t
   return res.json();
 }
 
-export async function removeMitigatedThreat(source: string): Promise<RemoveMitigatedThreatResponse> {
+export async function removeMitigatedThreat(source: string, ja4h?: string): Promise<RemoveMitigatedThreatResponse> {
   const res = await apiFetch("/v1/diagnostics/remove-mitigation", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source: source }),
+    body: JSON.stringify({ source: source, ja4h: ja4h || "" }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

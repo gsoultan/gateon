@@ -100,14 +100,15 @@ export function ThreatExplorerTab() {
     return <IconAlertTriangle size={16} />;
   };
 
-  const handleUnmitigate = async (e: React.MouseEvent, ip: string) => {
+  const handleUnmitigate = async (e: React.MouseEvent, threat: Anomaly) => {
     e.stopPropagation();
-    setUnmitigating(ip);
+    const id = threat.source;
+    setUnmitigating(id);
     try {
-      await removeMitigation.mutateAsync(ip);
+      await removeMitigation.mutateAsync({ source: threat.source, ja4h: threat.ja4h });
       notifications.show({
         title: 'Mitigation Removed',
-        message: `IP ${ip} has been unmitigated.`,
+        message: `Mitigation for ${threat.source} has been removed.`,
         color: 'green',
       });
       refetch();
@@ -286,7 +287,7 @@ export function ThreatExplorerTab() {
                               variant="light" 
                               color="blue" 
                               size="sm" 
-                              onClick={(e) => handleUnmitigate(e, threat.source)}
+                              onClick={(e) => handleUnmitigate(e, threat)}
                               loading={unmitigating === threat.source}
                               disabled={!canWrite}
                             >
