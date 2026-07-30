@@ -1166,6 +1166,7 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 		Category:       category,
 		Severity:       "critical",
 		ActionTaken:    "blocked",
+		Mitigated:      true,
 	}))
 }
 
@@ -1480,6 +1481,7 @@ func (t *txWrapper) ProcessLogging() {
 			Category:       category,
 			Severity:       severity,
 			ActionTaken:    actionTaken,
+			Mitigated:      interrupted,
 			JA4:            ja4,
 			UserAgent:      ua,
 			Method:         method,

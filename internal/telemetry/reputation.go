@@ -13,12 +13,27 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	lru "github.com/hashicorp/golang-lru"
 )
 
-// GetIPFingerprint returns a unique identifier for the client (source IP).
+// GetIPFingerprint returns a unique identifier for the client (preferring JA4 fingerprint over IP).
 func GetIPFingerprint(r *http.Request) string {
-	// Simple IP extraction
+	if rs := request.GetRequestState(r); rs != nil {
+		if rs.JA4 != "" {
+			return rs.JA4
+		}
+		if rs.JA4H != "" {
+			return rs.JA4H
+		}
+	}
+
+	// Try to get from context if not in request state
+	if ja4h := GetCachedJA4H(r); ja4h != "" {
+		return ja4h
+	}
+
+	// Fallback to IP extraction
 	ip := r.RemoteAddr
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		ip = strings.Split(xff, ",")[0]

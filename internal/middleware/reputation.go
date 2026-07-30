@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
@@ -15,11 +17,7 @@ type reputationHandler struct {
 }
 
 func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	fpID := telemetry.GetFingerprintHash(r)
-	if rs := request.GetRequestState(r); rs != nil && rs.JA4 != "" {
-		fpID = rs.JA4
-	}
-
+	fpID := telemetry.GetIPFingerprint(r)
 	reputation := telemetry.GetReputationScore(fpID)
 
 	// Cache reputation in request state for downstream middlewares (like WAF)
@@ -41,6 +39,20 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"request_id", GetRequestID(r),
 				"reputation", reputation,
 				"fingerprint", fpID)
+
+			telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+				ID:          fmt.Sprintf("rep-block-%s-%s", h.routeID, fpID),
+				Type:        "reputation_block",
+				SourceIP:    request.GetClientIP(r, true),
+				Score:       100 - reputation,
+				Details:     fmt.Sprintf("Blocked due to low reputation: %.2f (fingerprint: %s)", reputation, fpID),
+				Time:        time.Now(),
+				RouteID:     h.routeID,
+				RequestURI:  r.URL.Path,
+				Category:    "bot",
+				Severity:    "HIGH",
+				ActionTaken: "blocked",
+			}))
 
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte("Forbidden by Security Policy (Reputation Block)"))

@@ -104,6 +104,18 @@ func (s *Store) GetEnabledRules() []Rule {
 	return enabled
 }
 
+// GetRule returns a specific rule by ID from the cache.
+func (s *Store) GetRule(id string) (Rule, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, r := range s.cache {
+		if r.ID == id {
+			return r, true
+		}
+	}
+	return Rule{}, false
+}
+
 // GetAllRules returns all WAF rules from the cache.
 func (s *Store) GetAllRules() []Rule {
 	s.mu.RLock()

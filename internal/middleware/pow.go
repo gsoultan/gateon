@@ -28,7 +28,7 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 				return
 			}
 
-			fingerprint := telemetry.GetDetailedFingerprint(r).Hash
+			fingerprint := telemetry.GetIPFingerprint(r)
 			score := telemetry.GetReputationScore(fingerprint)
 
 			// If reputation is below threshold, require PoW.
@@ -44,11 +44,11 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 						return
 					}
 					// Invalid solution - record as a threat
-					recordAdvancedThreat(r, "pow_invalid_solution", 10.0, "Invalid PoW solution provided", routeID, "bot", "MEDIUM")
+					recordAdvancedThreat(r, "pow_invalid_solution", 10.0, "Invalid PoW solution provided", routeID, "bot", "MEDIUM", "challenged")
 				}
 
 				// Otherwise, serve challenge.
-				recordAdvancedThreat(r, "pow_challenge_issued", 1.0, "PoW challenge issued due to low reputation", routeID, "bot", "LOW")
+				recordAdvancedThreat(r, "pow_challenge_issued", 1.0, "PoW challenge issued due to low reputation", routeID, "bot", "LOW", "challenged")
 				serveChallenge(w, r, difficulty)
 				return
 			}
@@ -61,7 +61,7 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	nonce := GenerateNonce()
 	salt := strconv.FormatInt(time.Now().UnixNano(), 36)
-	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), telemetry.GetDetailedFingerprint(r).Hash, salt)
+	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), telemetry.GetIPFingerprint(r), salt)
 
 	w.Header().Set("X-Gateon-Pow-ID", challengeID)
 	w.Header().Set(PowHeaderChallenge, salt)

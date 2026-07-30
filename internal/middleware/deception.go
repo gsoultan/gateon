@@ -30,7 +30,7 @@ func Deception(cfg DeceptionConfig) Middleware {
 			// 1. Check for Canary Token reuse
 			if cfg.CanaryHeader != "" && cfg.CanaryToken != "" {
 				if r.Header.Get(cfg.CanaryHeader) == cfg.CanaryToken {
-					recordAdvancedThreat(r, "canary_token_reused", 100, "Attacker reused injected canary header: "+cfg.CanaryHeader, cfg.RouteID, "deception", "CRITICAL")
+					recordAdvancedThreat(r, "canary_token_reused", 100, "Attacker reused injected canary header: "+cfg.CanaryHeader, cfg.RouteID, "deception", "CRITICAL", "blocked")
 					if cfg.EnableTrollResponse {
 						// Only troll if reputation is significantly degraded.
 						// High-reputation clients (e.g. mistaken browser reuse) should get a standard error.
@@ -49,7 +49,7 @@ func Deception(cfg DeceptionConfig) Middleware {
 			// 2. Check for honeypot path access
 			for _, trap := range cfg.HoneypotPaths {
 				if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
-					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID, "deception", "CRITICAL")
+					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID, "deception", "CRITICAL", "blocked")
 					if cfg.EnableTrollResponse {
 						fingerprint := telemetry.GetIPFingerprint(r)
 						reputation := telemetry.GetReputationScore(fingerprint)
@@ -66,7 +66,7 @@ func Deception(cfg DeceptionConfig) Middleware {
 			// 3. Check for invisible link access
 			for _, link := range cfg.InvisibleLinkPaths {
 				if link != "" && path == link {
-					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID, "deception", "CRITICAL")
+					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID, "deception", "CRITICAL", "blocked")
 					if cfg.EnableTrollResponse {
 						fingerprint := telemetry.GetIPFingerprint(r)
 						reputation := telemetry.GetReputationScore(fingerprint)

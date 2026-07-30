@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"hash/maphash"
 	"strings"
 	"sync"
@@ -10,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -54,6 +57,35 @@ func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *reputat
 			&RecommendationDetector{},
 		},
 	}
+}
+
+var commonCRSRules = map[string]string{
+	"920300": "Request Missing an Accept Header",
+	"920320": "Missing User-Agent Header",
+	"920350": "Host Header is a IP Address",
+	"930100": "Local File Inclusion",
+	"930110": "Local File Inclusion (Traversals)",
+	"932100": "Remote Command Execution (RCE)",
+	"932110": "RCE: Shell Command Injection",
+	"933100": "PHP Injection Attack",
+	"941100": "XSS: Script Tag Injection",
+	"942100": "SQL Injection Attack",
+	"210001": "Online Gambling Site Detection",
+	"210002": "Malicious JavaScript Detection",
+	"210003": "PHP Vulnerability Exploit Attempt",
+	"210004": "Arbitrary File Upload Execution Attempt",
+}
+
+func getRuleDescription(id string) string {
+	if name, ok := commonCRSRules[id]; ok {
+		return name
+	}
+	if store := waf.GetStore(); store != nil {
+		if r, ok := store.GetRule(id); ok {
+			return r.Name
+		}
+	}
+	return fmt.Sprintf("Rule %s", id)
 }
 
 func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
@@ -261,6 +293,19 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 			data.IPStats[th.SourceIP] = stats
 		}
 		stats.WAFHits++
+		if th.TriggeredRules != "" {
+			if stats.WAFRules == nil {
+				stats.WAFRules = make(map[string]int)
+			}
+			var ruleIDs []int
+			if err := json.Unmarshal([]byte(th.TriggeredRules), &ruleIDs); err == nil {
+				for _, id := range ruleIDs {
+					stats.WAFRules[getRuleDescription(fmt.Sprintf("%d", id))]++
+				}
+			} else {
+				stats.WAFRules[getRuleDescription(th.TriggeredRules)]++
+			}
+		}
 		if th.Time.After(stats.LastSeen) {
 			stats.LastSeen = th.Time
 		}

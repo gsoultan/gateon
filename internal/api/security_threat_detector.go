@@ -455,10 +455,17 @@ func (d *SecurityThreatDetector) analyzeTraffic(stats *IPStats, reasons *[]strin
 func (d *SecurityThreatDetector) analyzeWAF(stats *IPStats, reasons *[]string, primaryType *string) int {
 	score := 0
 	if stats.WAFHits > 0 {
-		// WAF hits are high-confidence signals.
-		// Each hit adds significant weight, especially if they accumulate.
 		score += stats.WAFHits * 40
-		*reasons = append(*reasons, fmt.Sprintf("WAF security rules triggered (%d times)", stats.WAFHits))
+		if len(stats.WAFRules) > 0 {
+			var ruleDetails []string
+			for rule, count := range stats.WAFRules {
+				ruleDetails = append(ruleDetails, fmt.Sprintf("%s (%d)", rule, count))
+			}
+			slices.Sort(ruleDetails)
+			*reasons = append(*reasons, fmt.Sprintf("WAF security rules triggered: %s", strings.Join(ruleDetails, ", ")))
+		} else {
+			*reasons = append(*reasons, fmt.Sprintf("WAF security rules triggered (%d times)", stats.WAFHits))
+		}
 		if *primaryType == "security_threat" {
 			*primaryType = "waf_violation"
 		}
