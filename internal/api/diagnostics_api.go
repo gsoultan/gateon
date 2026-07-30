@@ -52,13 +52,13 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	}
 
 	var (
-		diagEPs       []*gateonv1.EntryPointDiagnostic
-		anomalies     []*gateonv1.Anomaly
-		systemInfo    *gateonv1.SystemInfo
-		deps          []*gateonv1.DependencyHealth
-		diagErrors    []*gateonv1.HandshakeError
-		threats       []*telemetry.SecurityThreat
-		fpMitigations []telemetry.FingerprintMitigation
+		diagEPs         []*gateonv1.EntryPointDiagnostic
+		anomalies       []*gateonv1.Anomaly
+		systemInfo      *gateonv1.SystemInfo
+		deps            []*gateonv1.DependencyHealth
+		diagErrors      []*gateonv1.HandshakeError
+		threats         []*telemetry.SecurityThreat
+		userMitigations []telemetry.UserMitigation
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -85,8 +85,8 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	})
 
 	g.Go(func() error {
-		// Fetch fingerprint mitigations from the new dedicated table
-		fpMitigations, _ = telemetry.GetFingerprintMitigations(gctx, 50, 0)
+		// Fetch user mitigations from the new dedicated table
+		userMitigations, _ = telemetry.GetUserMitigations(gctx, 50, 0)
 		return nil
 	})
 
@@ -125,8 +125,8 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		}
 	}
 
-	// Add fingerprint mitigations
-	for _, m := range fpMitigations {
+	// Add user mitigations
+	for _, m := range userMitigations {
 		if !seen[m.Fingerprint+m.Type] {
 			anomalies = append(anomalies, &gateonv1.Anomaly{
 				Source:         m.Fingerprint,
@@ -137,7 +137,7 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 				Category:       m.Category,
 				Severity:       "high",
 				ActionTaken:    "blocked",
-				Recommendation: "Fingerprint is mitigated based on threat intelligence.",
+				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
 			})
 			seen[m.Fingerprint+m.Type] = true
 		}
@@ -795,8 +795,8 @@ func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
 	fps := telemetry.GetAssociatedFingerprints(ctx, ip)
 	for _, fp := range fps {
 		telemetry.ResetReputation(fp)
-		// Also remove fingerprint mitigation if it exists
-		telemetry.MarkFingerprintUnmitigated(fp)
+		// Also remove user mitigation if it exists
+		telemetry.MarkUserUnmitigated(fp, "")
 	}
 }
 
@@ -806,10 +806,10 @@ func (s *ApiService) mitigateFingerprintFromThreat(ctx context.Context, threatID
 	}
 	if th, err := telemetry.GetSecurityThreatByID(ctx, threatID); err == nil {
 		if th.JA3 != "" {
-			telemetry.MarkFingerprintMitigated(th.JA3, "JA3", "Mitigated via recommendation for "+th.Type, th.Category)
+			telemetry.MarkUserMitigated(th.JA3, "", "JA3", "Mitigated via recommendation for "+th.Type, th.Category)
 		}
 		if th.JA4 != "" {
-			telemetry.MarkFingerprintMitigated(th.JA4, "JA4", "Mitigated via recommendation for "+th.Type, th.Category)
+			telemetry.MarkUserMitigated(th.JA4, th.JA4H, "JA4", "Mitigated via recommendation for "+th.Type, th.Category)
 		}
 	}
 }
@@ -821,10 +821,11 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 	}
 	offset := int(req.GetOffset())
 
-	if req.GetStatus() == "mitigated" {
-		fpMitigations, total := telemetry.GetFingerprintMitigations(ctx, limit, offset)
-		res := make([]*gateonv1.Anomaly, 0, len(fpMitigations))
-		for _, m := range fpMitigations {
+	status := req.GetStatus()
+	if status == "mitigated" || status == "user_mitigated" {
+		userMitigations, total := telemetry.GetUserMitigations(ctx, limit, offset)
+		res := make([]*gateonv1.Anomaly, 0, len(userMitigations))
+		for _, m := range userMitigations {
 			res = append(res, &gateonv1.Anomaly{
 				Source:         m.Fingerprint,
 				Type:           m.Type,
@@ -834,9 +835,35 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Category:       m.Category,
 				Severity:       "high",
 				ActionTaken:    "blocked",
-				Recommendation: "Fingerprint is mitigated based on threat intelligence.",
+				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
 				Ja3:            m.Fingerprint, // Could be JA3 or JA4, we put it in both if it's the source
 				Ja4:            m.Fingerprint,
+			})
+		}
+		if status == "user_mitigated" {
+			return &gateonv1.ListSecurityThreatsResponse{
+				Threats:    res,
+				TotalCount: int32(total),
+			}, nil
+		}
+		// If status == "mitigated", we fall through and maybe add IP mitigations too?
+		// Actually, let's keep it separate for now as requested.
+	}
+
+	if status == "ip_mitigated" {
+		ipMitigations, total := telemetry.GetIPMitigations(ctx, limit, offset)
+		res := make([]*gateonv1.Anomaly, 0, len(ipMitigations))
+		for _, m := range ipMitigations {
+			res = append(res, &gateonv1.Anomaly{
+				Source:         m.IP,
+				Type:           "ip_shunning",
+				Mitigated:      true,
+				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
+				Description:    m.Reason,
+				Category:       "threat_intel",
+				Severity:       "high",
+				ActionTaken:    "blocked",
+				Recommendation: "IP is shunned at the network layer via eBPF/XDP.",
 			})
 		}
 		return &gateonv1.ListSecurityThreatsResponse{

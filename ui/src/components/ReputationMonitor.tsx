@@ -68,7 +68,7 @@ export function ReputationMonitor() {
           </ThemeIcon>
           <Stack gap={0}>
             <Text fw={700}>Actor Reputation Monitor</Text>
-            <Text size="xs" c="dimmed">Adaptive trust scores for client fingerprints. High trust (≥80%) receive false-positive discounts.</Text>
+            <Text size="xs" c="dimmed">Adaptive trust scores for unique actors (Users/IPs). High trust (≥80%) receive false-positive discounts.</Text>
           </Stack>
         </Group>
         <Badge variant="light" leftSection={<IconActivity size={12} />}>
@@ -80,7 +80,7 @@ export function ReputationMonitor() {
         <Table {...density}>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Fingerprint</Table.Th>
+              <Table.Th>Actor (User/IP)</Table.Th>
               <Table.Th>Trust Score</Table.Th>
               <Table.Th>Violations</Table.Th>
               <Table.Th>Last Activity</Table.Th>
@@ -90,7 +90,7 @@ export function ReputationMonitor() {
             {reputations.length === 0 ? (
               <Table.Tr>
                 <Table.Td colSpan={4}>
-                  <Text ta="center" c="dimmed" py="xl">No active high-risk fingerprints tracked.</Text>
+                  <Text ta="center" c="dimmed" py="xl">No active high-risk actors tracked.</Text>
                 </Table.Td>
               </Table.Tr>
             ) : (

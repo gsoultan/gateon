@@ -14,34 +14,34 @@ import (
 // Cache name labels used for the telemetry cache metrics. Centralized here to
 // avoid magic strings spread across the package.
 const (
-	cacheNameZeroTrust   = "zerotrust_user_location"
-	cacheNameReputation  = "reputation"
-	cacheNameBehavior    = "behavior"
-	cacheNameScore       = "ip_score"
-	cacheNameUnmitigated = "unmitigated_threats"
-	cacheNameFpMitigated = "fp_mitigated"
+	cacheNameZeroTrust     = "zerotrust_user_location"
+	cacheNameReputation    = "reputation"
+	cacheNameBehavior      = "behavior"
+	cacheNameScore         = "ip_score"
+	cacheNameUnmitigated   = "unmitigated_threats"
+	cacheNameUserMitigated = "user_mitigated"
 )
 
 // Environment variables that override the default in-memory cache capacities.
 // All values are entry counts and must be positive; invalid or non-positive
 // values fall back to the documented default.
 const (
-	envZeroTrustCacheSize   = "GATEON_TELEMETRY_ZEROTRUST_CACHE_SIZE"
-	envReputationCacheSize  = "GATEON_TELEMETRY_REPUTATION_CACHE_SIZE"
-	envBehaviorCacheSize    = "GATEON_TELEMETRY_BEHAVIOR_CACHE_SIZE"
-	envScoreCacheSize       = "GATEON_TELEMETRY_SCORE_CACHE_SIZE"
-	envUnmitigatedCacheSize = "GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE"
-	envFpMitigatedCacheSize = "GATEON_TELEMETRY_FP_MITIGATED_CACHE_SIZE"
+	envZeroTrustCacheSize     = "GATEON_TELEMETRY_ZEROTRUST_CACHE_SIZE"
+	envReputationCacheSize    = "GATEON_TELEMETRY_REPUTATION_CACHE_SIZE"
+	envBehaviorCacheSize      = "GATEON_TELEMETRY_BEHAVIOR_CACHE_SIZE"
+	envScoreCacheSize         = "GATEON_TELEMETRY_SCORE_CACHE_SIZE"
+	envUnmitigatedCacheSize   = "GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE"
+	envUserMitigatedCacheSize = "GATEON_TELEMETRY_USER_MITIGATED_CACHE_SIZE"
 )
 
 // Default cache capacities (total entries across all shards where sharded).
 const (
-	defaultZeroTrustCacheSize   = 100_000
-	defaultReputationCacheSize  = 100_000
-	defaultBehaviorCacheSize    = 10_000
-	defaultScoreCacheSize       = 10_000
-	defaultUnmitigatedCacheSize = 1_000
-	defaultFpMitigatedCacheSize = 10_000
+	defaultZeroTrustCacheSize     = 100_000
+	defaultReputationCacheSize    = 100_000
+	defaultBehaviorCacheSize      = 10_000
+	defaultScoreCacheSize         = 10_000
+	defaultUnmitigatedCacheSize   = 1_000
+	defaultUserMitigatedCacheSize = 10_000
 
 	// minCacheSize guards against pathological configuration that would make
 	// the cache useless (or, when sharded, round down to a zero-sized shard).
@@ -138,8 +138,8 @@ func sampleCacheOccupancy() {
 		if st.unmitigatedCache != nil {
 			TelemetryCacheEntries.WithLabelValues(cacheNameUnmitigated).Set(float64(st.unmitigatedCache.Len()))
 		}
-		if st.fpMitigationCache != nil {
-			TelemetryCacheEntries.WithLabelValues(cacheNameFpMitigated).Set(float64(st.fpMitigationCache.Len()))
+		if st.userMitigationCache != nil {
+			TelemetryCacheEntries.WithLabelValues(cacheNameUserMitigated).Set(float64(st.userMitigationCache.Len()))
 		}
 	}
 }

@@ -50,6 +50,7 @@ export function ThreatExplorerTab() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
   const [mitigatedFilter, setMitigatedFilter] = useState<string | null>("detected");
+  const [mitigationSubTab, setMitigationSubTab] = useState<string | null>("user");
   const [page, setPage] = useState(1);
 
   const { data, isLoading, error, refetch } = useSecurityThreats({
@@ -57,7 +58,9 @@ export function ThreatExplorerTab() {
     offset: (page - 1) * PAGE_SIZE,
     search,
     category: categoryFilter || "all",
-    status: mitigatedFilter || "all",
+    status: (mitigatedFilter === "mitigated") 
+      ? (mitigationSubTab === "user" ? "user_mitigated" : "ip_mitigated")
+      : (mitigatedFilter || "all"),
   });
 
   const density = useTableDensity();
@@ -149,13 +152,24 @@ export function ThreatExplorerTab() {
 
   return (
     <Stack gap="md">
-      <Tabs value={mitigatedFilter} onChange={setMitigatedFilter} variant="pills" radius="md">
-        <Tabs.List>
-          <Tabs.Tab value="detected" leftSection={<IconAlertTriangle size={16} />}>Active Threats</Tabs.Tab>
-          <Tabs.Tab value="mitigated" leftSection={<IconShieldCheck size={16} />}>Mitigated List</Tabs.Tab>
-          <Tabs.Tab value="all">Historical Logs</Tabs.Tab>
-        </Tabs.List>
-      </Tabs>
+      <Group justify="space-between" align="flex-end">
+        <Tabs value={mitigatedFilter} onChange={setMitigatedFilter} variant="pills" radius="md">
+          <Tabs.List>
+            <Tabs.Tab value="detected" leftSection={<IconAlertTriangle size={16} />}>Active Threats</Tabs.Tab>
+            <Tabs.Tab value="mitigated" leftSection={<IconShieldCheck size={16} />}>Mitigated List</Tabs.Tab>
+            <Tabs.Tab value="all">Historical Logs</Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
+
+        {mitigatedFilter === "mitigated" && (
+          <Tabs value={mitigationSubTab} onChange={setMitigationSubTab} variant="outline" radius="md">
+            <Tabs.List>
+              <Tabs.Tab value="user" leftSection={<IconUserCheck size={16} />}>User Mitigations</Tabs.Tab>
+              <Tabs.Tab value="ip" leftSection={<IconShieldLock size={16} />}>IP Mitigations</Tabs.Tab>
+            </Tabs.List>
+          </Tabs>
+        )}
+      </Group>
 
       <Card withBorder radius="md" p="md">
         <Group justify="space-between" mb="md">

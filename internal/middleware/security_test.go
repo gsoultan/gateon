@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 func TestWAF_AuditLogAndBodyLimits(t *testing.T) {
@@ -62,8 +64,23 @@ func (m *mockEbpfManager) BlocklistCuckoo(key string) error                     
 func (m *mockEbpfManager) GetTopIPs(limit int) ([]ebpf.IPStat, error)                   { return nil, nil }
 func (m *mockEbpfManager) GetMapStats() (ebpf.MapStats, error)                          { return ebpf.MapStats{}, nil }
 
+type telemetryMockWrapper struct {
+	*mockEbpfManager
+}
+
+func (w *telemetryMockWrapper) GetTopIPs(limit int) ([]telemetry.IPStat, error) { return nil, nil }
+
 func TestWAF_Shunning(t *testing.T) {
+	// Initialize telemetry store for escalation logic
+	_ = telemetry.InitPathStatsStore("sqlite::memory:", 1)
+	defer telemetry.ClosePathStatsStore(context.Background())
+
 	mockEbpf := &mockEbpfManager{}
+	// Note: In the new architecture, WAF doesn't call EbpfManager directly.
+	// It calls telemetry.RecordSecurityThreat, which triggers escalation.
+	// We need to set the global eBPF manager for telemetry to use.
+	telemetry.SetEbpfManager(&telemetryMockWrapper{mockEbpf})
+
 	mw, err := WAF(WAFConfig{
 		UseCRS:      false,
 		EbpfManager: mockEbpf,
@@ -77,17 +94,25 @@ func TestWAF_Shunning(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/?test=shunme", nil)
-	req.RemoteAddr = "1.2.3.4:1234"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ip := "1.2.3.4"
+	// Simulate 3 attacks from different fingerprints
+	for i := 1; i <= 3; i++ {
+		req := httptest.NewRequest("GET", "/?test=shunme", nil)
+		req.RemoteAddr = ip + ":1234"
+		// Set unique JA4 for each request to simulate different users
+		rs := &request.RequestState{JA4: "user-" + string(rune('0'+i))}
+		req = req.WithContext(context.WithValue(req.Context(), request.RequestStateContextKey{}, rs))
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("expected 403, got %d", rr.Code)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("request %d: expected 403, got %d", i, rr.Code)
+		}
 	}
 
-	if mockEbpf.shunnedIP != "1.2.3.4" {
-		t.Errorf("expected IP 1.2.3.4 to be shunned, got %q", mockEbpf.shunnedIP)
+	if mockEbpf.shunnedIP != ip {
+		t.Errorf("expected IP %s to be shunned after 3 attacks, got %q", ip, mockEbpf.shunnedIP)
 	}
 }
 
