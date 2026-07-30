@@ -29,6 +29,8 @@ func isLoginPath(path string) bool {
 func isPublicAuthPath(path string) bool {
 	return path == "/v1/setup" || path == "/v1/setup/required" ||
 		path == "/gateon.v1.ApiService/Setup" || path == "/gateon.v1.ApiService/IsSetupRequired" ||
+		path == "/v1/auth/2fa/enroll" || path == "/v1/auth/2fa/verify" ||
+		path == "/gateon.v1.ApiService/Enroll2FA" || path == "/gateon.v1.ApiService/Verify2FA" ||
 		isHealthPath(path)
 }
 
