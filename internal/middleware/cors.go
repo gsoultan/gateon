@@ -133,6 +133,7 @@ func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
 		Recommendation: "Verify if this origin should be allowed in the CORS configuration for this route.",
 	}
 
+	threat = telemetry.RecordSecurityThreatWithJA4(r, threat)
 	telemetry.RecordSecurityThreat(threat)
 	alerting.HandleThreat(&threat)
 }

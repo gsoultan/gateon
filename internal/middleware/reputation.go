@@ -18,6 +18,11 @@ type reputationHandler struct {
 
 func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fpID := telemetry.GetIPFingerprint(r)
+	// Never block localhost or management traffic
+	if fpID == "127.0.0.1" || fpID == "::1" || fpID == "localhost" {
+		h.next.ServeHTTP(w, r)
+		return
+	}
 	reputation := telemetry.GetReputationScore(fpID)
 
 	// Cache reputation in request state for downstream middlewares (like WAF)

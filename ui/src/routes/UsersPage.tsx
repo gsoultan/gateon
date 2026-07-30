@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   Title,
@@ -16,6 +16,7 @@ import {
   Paper,
   Tooltip,
   Pagination,
+  Center,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useForm } from "@mantine/form";
@@ -84,6 +85,18 @@ export default function UsersPage() {
   };
 
   const isAdmin = currentUser?.role === "admin";
+
+  if (!isAdmin) {
+    return (
+      <Center style={{ height: '50vh' }}>
+        <Stack align="center" gap="xs">
+          <IconShieldLock size={48} color="var(--mantine-color-red-6)" />
+          <Title order={2}>Access Denied</Title>
+          <Text c="dimmed">You do not have permission to manage system users.</Text>
+        </Stack>
+      </Center>
+    );
+  }
 
   // putUser persists a partial change while preserving the rest of the user's
   // state, so toggling one flag never silently resets the others (the backend

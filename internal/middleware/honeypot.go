@@ -130,7 +130,7 @@ func recordHoneypotThreat(r *http.Request, trapPath string) {
 
 	logger.SecurityEvent("honeypot_triggered", r, "access to trap path: "+trapPath+"; IP blocked for 24h")
 
-	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:        "honeypot_triggered",
 		SourceIP:    clientIP,
 		Score:       100,
@@ -141,7 +141,7 @@ func recordHoneypotThreat(r *http.Request, trapPath string) {
 		Category:    "deception",
 		Severity:    "high",
 		ActionTaken: "blocked",
-	})
+	}))
 }
 
 // parseHoneypotConfig parses the middleware configuration into HoneypotConfig.

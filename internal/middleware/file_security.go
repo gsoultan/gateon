@@ -323,7 +323,7 @@ func recordFileSecurityThreat(r *http.Request, routeID, ttype, details string) {
 	clientIP := request.GetClientIP(r, true)
 	logger.SecurityEvent(ttype, r, details)
 
-	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		ID:          fmt.Sprintf("file-sec-%d", time.Now().UnixNano()),
 		Type:        ttype,
 		SourceIP:    clientIP,
@@ -335,7 +335,7 @@ func recordFileSecurityThreat(r *http.Request, routeID, ttype, details string) {
 		Category:    "malware",
 		Severity:    "high",
 		ActionTaken: "blocked",
-	})
+	}))
 }
 
 // buildSignatureEngine constructs the YARA-lite engine for the middleware,

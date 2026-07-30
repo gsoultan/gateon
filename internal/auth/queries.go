@@ -16,14 +16,14 @@ const (
 	QueryUpdateTwoFactorPending = "UPDATE users SET two_factor_pending = ? WHERE id = ?"
 
 	QueryInsertUserSQLitePostgresWithPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET username=excluded.username, password=excluded.password, role=excluded.role`
+		ON CONFLICT(username) DO UPDATE SET password=excluded.password, role=excluded.role`
 	QueryInsertUserSQLitePostgresNoPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET username=excluded.username, role=excluded.role`
+		ON CONFLICT(username) DO UPDATE SET role=excluded.role`
 
 	QueryInsertUserMySQLWithPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE username=VALUES(username), password=VALUES(password), role=VALUES(role)`
+		ON DUPLICATE KEY UPDATE password=VALUES(password), role=VALUES(role)`
 	QueryInsertUserMySQLNoPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE username=VALUES(username), role=VALUES(role)`
+		ON DUPLICATE KEY UPDATE role=VALUES(role)`
 
 	QueryDeleteUser     = "DELETE FROM users WHERE id = ?"
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"

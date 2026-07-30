@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -99,19 +100,34 @@ func (m *AlertingManager) process(threat *telemetry.SecurityThreat) {
 
 	// Smart autonomous mitigation: check aggregate IP risk score
 	if threat.SourceIP != "" && m.ebpfManager != nil {
+		// Never shun localhost or internal management traffic
+		if httputil.IsLoopback(threat.SourceIP) {
+			return
+		}
+
 		score := telemetry.GetIPThreatScore(threat.SourceIP)
 		// If score is high (e.g. > 150) or very high severity threat
 		if score > 150 || threat.Severity == "critical" {
 			// Ensure we don't re-mitigate if already mitigated or manually unmitigated
 			if threat.ActionTaken == "" && !telemetry.IsIPUnmitigated(threat.SourceIP) {
-				if err := m.ebpfManager.ShunIP(threat.SourceIP); err == nil {
-					threat.ActionTaken = "Autonomous Mitigation"
-					telemetry.MarkIPMitigated(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)")
-					logger.L.LogInfo("autonomous smart mitigation: shunned high-risk IP",
+				// To follow the "only block the attacker" policy, we prefer fingerprint-based
+				// mitigation (already recorded in telemetry.RecordSecurityThreat).
+				// We only perform kernel-level IP shunning for extremely severe threats
+				// where the risk to infrastructure outweighs the potential for NAT false positives.
+				if threat.Severity == "critical" && threat.JA4 == "" && threat.JA3 == "" {
+					if err := m.ebpfManager.ShunIP(threat.SourceIP); err == nil {
+						threat.ActionTaken = "Autonomous Mitigation"
+						telemetry.MarkIPMitigated(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)")
+						logger.L.LogInfo("autonomous smart mitigation: shunned high-risk IP",
+							"ip", threat.SourceIP,
+							"total_score", score,
+							"threat_type", threat.Type,
+							"severity", threat.Severity)
+					}
+				} else {
+					logger.L.LogInfo("autonomous smart mitigation: skipping IP shun in favor of fingerprint mitigation",
 						"ip", threat.SourceIP,
-						"total_score", score,
-						"threat_type", threat.Type,
-						"severity", threat.Severity)
+						"ja4", threat.JA4)
 				}
 			}
 		}

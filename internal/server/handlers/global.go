@@ -243,7 +243,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		})
 	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		res, err := svc.GetStatus(r.Context(), &gateonv1.GetStatusRequest{})
@@ -256,7 +256,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /v1/status/watch", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		SetSSEHeaders(w)

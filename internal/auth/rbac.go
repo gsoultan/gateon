@@ -85,11 +85,13 @@ func allowedHardcoded(role string, action Action, resource Resource) bool {
 		return true
 	case RoleOperator:
 		if action == ActionRead {
-			return true
+			// Operators can read everything except users.
+			return resource != ResourceUsers
 		}
 		switch resource {
 		case ResourceRoutes, ResourceServices, ResourceEntryPoints,
-			ResourceMiddlewares, ResourceTLSOptions, ResourceConfig, ResourceWafRules:
+			ResourceMiddlewares, ResourceTLSOptions, ResourceCerts,
+			ResourceGlobal, ResourceConfig, ResourceWafRules:
 			return true
 		}
 		return false

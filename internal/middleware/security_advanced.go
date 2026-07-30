@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
@@ -62,6 +63,11 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) Middlewar
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			fingerprint := telemetry.GetIPFingerprint(r)
+			// Whitelist localhost and management traffic from tarpitting
+			if httputil.IsLoopback(fingerprint) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			reputation := telemetry.GetReputationScore(fingerprint)
 			threatScore := 100.0 - reputation
 
@@ -84,6 +90,11 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) Middlewar
 func Entropy(threshold float64, routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := request.GetClientIP(r, true)
+			if httputil.IsLoopback(ip) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			rs := request.GetRequestState(r)
 			if rs != nil && rs.ExecutedEntropy {
 				next.ServeHTTP(w, r)
@@ -145,6 +156,10 @@ func serveTrollResponse(w http.ResponseWriter) {
 }
 
 func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string, category string, severity string, actionTaken string) {
+	ip := request.GetClientIP(r, true)
+	if httputil.IsLoopback(ip) {
+		return
+	}
 	logger.SecurityEvent(ttype, r, details)
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		ID:          fmt.Sprintf("adv-%s-%d", ttype, time.Now().UnixNano()),
@@ -168,6 +183,11 @@ func recordAdvancedThreat(r *http.Request, ttype string, score float64, details 
 func XSSRecognition(routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := request.GetClientIP(r, true)
+			if httputil.IsLoopback(ip) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			rs := request.GetRequestState(r)
 			if rs != nil && rs.ExecutedXSS {
 				next.ServeHTTP(w, r)
@@ -243,6 +263,11 @@ func XSSRecognition(routeID string) Middleware {
 func SQLiRecognition(routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := request.GetClientIP(r, true)
+			if httputil.IsLoopback(ip) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			rs := request.GetRequestState(r)
 			if rs != nil && rs.ExecutedSQLI {
 				next.ServeHTTP(w, r)
@@ -295,6 +320,11 @@ func SQLiRecognition(routeID string) Middleware {
 func ThreatRecognition(routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := request.GetClientIP(r, true)
+			if httputil.IsLoopback(ip) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			var details string
 			found := false
 			attackType := "generic_attack"

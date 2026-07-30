@@ -11,6 +11,7 @@ import (
 // RequirePermission checks that the request has a valid user with permission for the action on resource.
 // When auth is disabled (no PasetoAuth), claims are nil and we allow. Returns false if forbidden.
 func RequirePermission(w http.ResponseWriter, r *http.Request, action auth.Action, resource auth.Resource) bool {
+	logger.L.LogDebug("checking permission", "path", r.URL.Path, "action", action, "resource", resource)
 	claimsVal := r.Context().Value(middleware.UserContextKey)
 	if claimsVal == nil {
 		// Auth disabled: PasetoAuth never ran, allow

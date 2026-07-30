@@ -36,6 +36,7 @@ import {
 import { useGateonStatus, apiFetch, useMetricsSnapshot, installClamav, uninstallClamav } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
 import { Link } from '@tanstack/react-router';
+import { usePermissions } from '../hooks/usePermissions';
 import type { GlobalConfig, DeepScanStatus } from '../types/gateon';
 import { format } from 'date-fns';
 
@@ -60,6 +61,7 @@ const TREND_RANGE_OPTIONS = [
 ];
 
 export default function SecurityCommandCenter() {
+  const { canWrite, isViewer } = usePermissions();
   const [page] = React.useState(1);
   const { data: metrics } = useMetricsSnapshot(10, page);
   const { data: status } = useGateonStatus();
@@ -292,16 +294,18 @@ export default function SecurityCommandCenter() {
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 4 }}>
               <Group justify="flex-end">
-                <Button variant="white" color="blue" leftSection={<IconAdjustments size={16} />} component={Link} to="/settings">
-                  Orchestration Rules
-                </Button>
+                {!isViewer && (
+                  <Button variant="white" color="blue" leftSection={<IconAdjustments size={16} />} component={Link} to="/settings">
+                    Orchestration Rules
+                  </Button>
+                )}
                 <Stack gap={2}>
                   <Button 
                     variant="filled" 
                     color="blue" 
                     leftSection={scanning ? <Loader size={16} color="white" /> : <IconShieldCheck size={16} />}
                     onClick={handleDeepScan}
-                    disabled={scanning || !status?.clamav_installed}
+                    disabled={scanning || !status?.clamav_installed || !canWrite}
                   >
                     {scanning ? 'Scanning...' : 'Deep Scan'}
                   </Button>
@@ -317,7 +321,7 @@ export default function SecurityCommandCenter() {
                     color="red"
                     leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
                     onClick={() => handleUninstall()}
-                    disabled={uninstalling}
+                    disabled={uninstalling || !canWrite}
                   >
                     Uninstall ClamAV
                   </Button>
@@ -334,7 +338,7 @@ export default function SecurityCommandCenter() {
               <Group gap="sm">
                 <Menu shadow="md" width={200} position="bottom-start">
                   <Menu.Target>
-                    <Button variant="white" size="xs" leftSection={installing ? <Loader size={14} color="blue" /> : <IconDownload size={14} />} rightSection={<IconChevronDown size={14} />} disabled={installing}>
+                    <Button variant="white" size="xs" leftSection={installing ? <Loader size={14} color="blue" /> : <IconDownload size={14} />} rightSection={<IconChevronDown size={14} />} disabled={installing || !canWrite}>
                       Install Now
                     </Button>
                   </Menu.Target>

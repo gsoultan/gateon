@@ -212,7 +212,15 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	if r.Score < 20.0 {
 		if m := globalEbpfManager.Load(); m != nil {
 			if prov, ok := m.(EbpfProvider); ok {
-				_ = prov.ShunIP(fingerprint)
+				// Only shun if it's an IP. If it's a fingerprint, it's already
+				// handled by ReputationBlocker at L7.
+				if net.ParseIP(fingerprint) != nil {
+					_ = prov.ShunIP(fingerprint)
+				} else {
+					// It's a JA4/JA3 fingerprint.
+					// We could call ShunJA4 here, but it's not yet implemented in XDP.
+					// For now, L7 blocking is sufficient and more precise for shared IPs.
+				}
 			}
 		}
 	}

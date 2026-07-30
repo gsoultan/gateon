@@ -85,7 +85,6 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 	if g == nil || g.Waf == nil || !g.Waf.GetEnabled() {
 		return nil, nil
 	}
-	logger.L.LogInfo("Creating Global WAF middleware")
 	w := g.Waf
 
 	// gRPC relaxations are keyed on the trusted route type, so the gateway-wide
@@ -101,6 +100,8 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 	if cached, ok := globalWAFCache.Load(key); ok {
 		return cached.(Middleware), nil
 	}
+
+	logger.L.LogInfo("Creating Global WAF middleware")
 
 	pl := int(w.GetParanoiaLevel())
 	if pl < 1 {

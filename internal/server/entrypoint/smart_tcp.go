@@ -92,6 +92,7 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 	chain := []middleware.Middleware{
 		middleware.WithRequestState(ep.Id, epLabel, isMgmt),
 		middleware.RequestID(),
+		middleware.FingerprintMitigation(),
 		middleware.Recovery(),
 		middleware.Metrics("gateon-" + epLabel),
 	}

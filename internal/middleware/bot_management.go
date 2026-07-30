@@ -46,7 +46,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				if !checkBrowserIntegrity(r) {
 					logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
 
-					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 						ID:          fmt.Sprintf("bot-integrity-%s-%s", cfg.RouteID, clientIP),
 						Type:        "bot_detected",
 						SourceIP:    clientIP,
@@ -58,7 +58,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 						Category:    "bot",
 						Severity:    "medium",
 						ActionTaken: "blocked",
-					})
+					}))
 
 					http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
 					return
@@ -92,7 +92,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				}
 
 				telemetry.ActiveUnverifiedClientsTotal.Dec()
-				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 					ID:          fmt.Sprintf("bot-challenge-fail-%s-%s", cfg.RouteID, clientIP),
 					Type:        "bot_detected",
 					SourceIP:    clientIP,
@@ -104,7 +104,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 					Category:    "bot",
 					Severity:    "high",
 					ActionTaken: "blocked",
-				})
+				}))
 			}
 
 			// 3. Handle seed request

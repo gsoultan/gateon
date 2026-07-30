@@ -101,6 +101,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		middleware.WithRequestState(ep.Id, epLabel, isMgmt),
 		middleware.RealIPGlobal(),
 		middleware.RequestID(), // Added for global correlation
+		middleware.FingerprintMitigation(),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HoneypotGlobal(deps.GlobalStore),

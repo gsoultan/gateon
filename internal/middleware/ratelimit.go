@@ -356,7 +356,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					telemetry.IncRateLimitRejected("redis")
 
 					// Record as security threat
-					telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 						SourceIP:    key,
 						Type:        "rate_limit",
 						Category:    "abuse",
@@ -368,7 +368,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 						RouteID:     routeID,
 						RequestURI:  r.RequestURI,
 						Mitigated:   true,
-					})
+					}))
 				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many requests (distributed)", "")

@@ -24,8 +24,10 @@ import { IconEdit, IconTrash, IconPlus, IconShieldCheck, IconInfoCircle, IconSea
 import { useWafRules } from '../../hooks/useWafRules';
 import type {WafRule} from '../../types/gateon';
 import { notifications } from '@mantine/notifications';
+import { usePermissions } from '../../hooks/usePermissions';
 
 export function WAFRulesTab() {
+  const { canWrite } = usePermissions();
   const [activePage, setActivePage] = useState(1);
   const pageSize = 10;
   const [search, setSearch] = useState('');
@@ -127,10 +129,11 @@ export function WAFRulesTab() {
               setEditingRule(rule);
               setOpened(true);
             }}
+            disabled={!canWrite}
           >
             <IconEdit size={16} />
           </ActionIcon>
-          <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(rule.id)}>
+          <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(rule.id)} disabled={!canWrite}>
             <IconTrash size={16} />
           </ActionIcon>
         </Group>
@@ -188,6 +191,7 @@ export function WAFRulesTab() {
               });
               setOpened(true);
             }}
+            disabled={!canWrite}
           >
             Add Rule
           </Button>
