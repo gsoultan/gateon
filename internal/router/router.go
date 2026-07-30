@@ -308,6 +308,8 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	chain = append(chain,
 		middleware.AccessLog(routeLabel),
 		middleware.Metrics(routeLabel),
+		middleware.IPMitigation(),
+		middleware.UserMitigation(),
 		middleware.ReputationBlocker(routeLabel),
 		func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

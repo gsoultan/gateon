@@ -1212,4 +1212,80 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(45, "rename_fingerprint_mitigations_to_user_mitigations", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		if dialect.Driver == DriverMySQL {
+			queries = []string{
+				`RENAME TABLE fingerprint_mitigations TO user_mitigations;`,
+			}
+		} else {
+			queries = []string{
+				`ALTER TABLE fingerprint_mitigations RENAME TO user_mitigations;`,
+			}
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	Register(46, "add_ja4h_to_user_mitigations", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite {
+			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
+		} else if dialect.Driver == DriverPostgres {
+			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
+		} else { // MySQL
+			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
+		}
+		if _, err := db.Exec(query); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	Register(47, "update_user_mitigations_primary_key", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		if dialect.Driver == DriverSQLite {
+			// SQLite doesn't support ALTER TABLE DROP PRIMARY KEY
+			// We need to recreate the table
+			queries = []string{
+				`CREATE TABLE user_mitigations_new (
+					fingerprint VARCHAR(255) NOT NULL,
+					ja4h VARCHAR(255) NOT NULL DEFAULT '',
+					fp_type VARCHAR(10) NOT NULL,
+					status VARCHAR(20) NOT NULL,
+					reason TEXT,
+					category VARCHAR(50),
+					mitigated_at TIMESTAMP,
+					unmitigated_at TIMESTAMP,
+					updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+					PRIMARY KEY (fingerprint, ja4h)
+				);`,
+				`INSERT INTO user_mitigations_new SELECT fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at FROM user_mitigations;`,
+				`DROP TABLE user_mitigations;`,
+				`ALTER TABLE user_mitigations_new RENAME TO user_mitigations;`,
+				`CREATE INDEX IF NOT EXISTS idx_user_mitigations_status ON user_mitigations(status);`,
+				`CREATE INDEX IF NOT EXISTS idx_user_mitigations_type ON user_mitigations(fp_type);`,
+			}
+		} else if dialect.Driver == DriverPostgres {
+			queries = []string{
+				`ALTER TABLE user_mitigations DROP CONSTRAINT user_mitigations_pkey;`,
+				`ALTER TABLE user_mitigations ADD PRIMARY KEY (fingerprint, ja4h);`,
+			}
+		} else { // MySQL
+			queries = []string{
+				`ALTER TABLE user_mitigations DROP PRIMARY KEY, ADD PRIMARY KEY (fingerprint, ja4h);`,
+			}
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

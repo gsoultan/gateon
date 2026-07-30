@@ -33,32 +33,63 @@ func Fingerprinting() Middleware {
 	}
 }
 
-// FingerprintMitigation returns a middleware that blocks requests from mitigated JA3/JA4 fingerprints.
-func FingerprintMitigation() Middleware {
+// IPMitigation returns a middleware that blocks requests from mitigated IPs.
+func IPMitigation() Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := request.GetClientIP(r, false)
+			if ip != "" && telemetry.IsIPMitigated(ip) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte("Forbidden: IP Shunned by Security Policy"))
+
+				// Record threat for visibility in dashboard
+				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+					Type:        "ip_mitigation",
+					SourceIP:    ip,
+					Category:    "threat_intel",
+					Severity:    "high",
+					ActionTaken: "blocked",
+					Details:     "Request blocked due to mitigated IP (IP Shunning)",
+					RequestURI:  r.URL.RequestURI(),
+					Method:      r.Method,
+					UserAgent:   r.UserAgent(),
+				}))
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// UserMitigation returns a middleware that blocks requests from mitigated JA3/JA4/JA4H fingerprints.
+func UserMitigation() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rs := GetRequestState(r)
-			var ja3, ja4 string
+			var ja3, ja4, ja4h string
 			if rs != nil {
 				ja3 = rs.JA3
 				ja4 = rs.JA4
+				ja4h = rs.JA4H
 			}
 
-			if ja3 != "" || ja4 != "" {
-				if telemetry.IsFingerprintMitigated(ja3, ja4) {
+			if ja3 != "" || ja4 != "" || ja4h != "" {
+				if telemetry.IsUserMitigated(ja3, ja4, ja4h) {
 					w.WriteHeader(http.StatusForbidden)
 					_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
 
 					// Record threat for visibility in dashboard
 					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-						Type:        "fingerprint_mitigation",
+						Type:        "user_mitigation",
 						SourceIP:    request.GetClientIP(r, false),
 						Category:    "threat_intel",
 						Severity:    "high",
 						ActionTaken: "blocked",
-						Details:     "Request blocked due to mitigated JA3/JA4 fingerprint",
+						Details:     "Request blocked due to mitigated user fingerprint (JA3/JA4/JA4H)",
 						JA3:         ja3,
 						JA4:         ja4,
+						JA4H:        ja4h,
 						RequestURI:  r.URL.RequestURI(),
 						Method:      r.Method,
 						UserAgent:   r.UserAgent(),

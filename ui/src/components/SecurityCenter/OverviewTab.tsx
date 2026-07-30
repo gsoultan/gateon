@@ -245,7 +245,7 @@ export function OverviewTab({
             </ThemeIcon>
           </Group>
           <Text size="xs" c="dimmed" mt="sm">
-            Analysis of client behavioral patterns and browser fingerprints.
+            Analysis of client behavioral patterns and user identification.
           </Text>
         </Card>
       </SimpleGrid>

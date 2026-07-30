@@ -169,6 +169,11 @@ var (
 		subscribers: make(map[chan SecurityThreat]struct{}),
 	}
 
+	// ipMaliciousFingerprints tracks unique malicious fingerprints per IP for escalation to IP shunning.
+	// map[IP]map[Fingerprint]struct{}
+	ipMaliciousFingerprints, _ = lru.NewARC(10000)
+	ipMaliciousMu              sync.Mutex
+
 	tracePool = sync.Pool{
 		New: func() any { return &TraceRecord{} },
 	}
@@ -297,6 +302,7 @@ type TraceRecord struct {
 	ResponseHeaders string    `json:"response_headers"`
 	ResponseBody    string    `json:"response_body"`
 	JA4             string    `json:"ja4"`
+	JA4H            string    `json:"ja4h"`
 	RouteID         string    `json:"route_id"`
 	Recommendation  string    `json:"recommendation"`
 	Reputation      float64   `json:"reputation"`
@@ -317,6 +323,7 @@ type SecurityThreat struct {
 	Time            time.Time `json:"timestamp,omitzero"`
 	JA3             string    `json:"ja3"`
 	JA4             string    `json:"ja4"`
+	JA4H            string    `json:"ja4h"`
 	RouteID         string    `json:"route_id"`
 	RequestURI      string    `json:"request_uri"`
 	Category        string    `json:"category"`
@@ -341,12 +348,22 @@ type SecurityThreat struct {
 	Reputation      float64   `json:"reputation"`
 }
 
-type FingerprintMitigation struct {
+type UserMitigation struct {
 	Fingerprint   string     `json:"fingerprint"`
+	JA4H          string     `json:"ja4h"`
 	Type          string     `json:"type"`
 	Status        string     `json:"status"`
 	Reason        string     `json:"reason"`
 	Category      string     `json:"category"`
+	MitigatedAt   time.Time  `json:"mitigated_at"`
+	UnmitigatedAt *time.Time `json:"unmitigated_at,omitempty"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+type IPMitigation struct {
+	IP            string     `json:"ip"`
+	Status        string     `json:"status"`
+	Reason        string     `json:"reason"`
 	MitigatedAt   time.Time  `json:"mitigated_at"`
 	UnmitigatedAt *time.Time `json:"unmitigated_at,omitempty"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -376,7 +393,7 @@ type pathStatsStore struct {
 	pruning                     atomic.Bool
 	scoreCache                  *lru.ARCCache
 	unmitigatedCache            *lru.ARCCache
-	fpMitigationCache           *lru.ARCCache
+	userMitigationCache         *lru.ARCCache
 	traceStoreEnabled           bool
 
 	// Real-time daily counters (seeded from DB at startup/rollover)
@@ -468,8 +485,8 @@ func initStore(databaseURL string, retentionDays int) error {
 	if cache, err := lru.NewARC(cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, defaultUnmitigatedCacheSize)); err == nil {
 		st.unmitigatedCache = cache
 	}
-	if cache, err := lru.NewARC(cacheSizeFromEnv(envFpMitigatedCacheSize, cacheNameFpMitigated, defaultFpMitigatedCacheSize)); err == nil {
-		st.fpMitigationCache = cache
+	if cache, err := lru.NewARC(cacheSizeFromEnv(envUserMitigatedCacheSize, cacheNameUserMitigated, defaultUserMitigatedCacheSize)); err == nil {
+		st.userMitigationCache = cache
 	}
 
 	if err := db.Migrate(database, dialect); err != nil {
@@ -509,7 +526,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 
 	logger.Default().LogInfo("telemetry: migrating existing traces to Pebble", "count", count)
 
-	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(route_id, ''), COALESCE(recommendation, ''), reputation, entrypoint_delay_ms, route_delay_ms, middleware_delay_ms, service_delay_ms FROM traces")
+	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(ja4h, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(route_id, ''), COALESCE(recommendation, ''), reputation, entrypoint_delay_ms, route_delay_ms, middleware_delay_ms, service_delay_ms FROM traces")
 	if err != nil {
 		return
 	}
@@ -519,7 +536,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 	n := 0
 	for rows.Next() {
 		var tr TraceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID, &tr.Recommendation, &tr.Reputation, &tr.EntrypointDelay, &tr.RouteDelay, &tr.MiddlewareDelay, &tr.ServiceDelay); err != nil {
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.JA4H, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID, &tr.Recommendation, &tr.Reputation, &tr.EntrypointDelay, &tr.RouteDelay, &tr.MiddlewareDelay, &tr.ServiceDelay); err != nil {
 			continue
 		}
 
@@ -994,7 +1011,7 @@ func recordTraceToStore(tr *TraceRecord) {
 	}
 }
 
-// RecordSecurityThreatWithJA4 is a helper that populates JA4 from the request before recording.
+// RecordSecurityThreatWithJA4 is a helper that populates JA4 and JA4H from the request before recording.
 func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThreat {
 	if rs := request.GetRequestState(r); rs != nil {
 		if t.JA4 == "" {
@@ -1003,12 +1020,18 @@ func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThre
 		if t.JA3 == "" {
 			t.JA3 = rs.JA3
 		}
+		if t.JA4H == "" {
+			t.JA4H = rs.JA4H
+		}
 		if t.Fingerprint == "" {
 			t.Fingerprint = cmp.Or(rs.JA4, rs.JA3)
 		}
 	}
 	if t.JA4 == "" {
 		t.JA4 = GetCachedJA4H(r)
+	}
+	if t.JA4H == "" {
+		t.JA4H = GetCachedJA4H(r)
 	}
 	if t.Fingerprint == "" {
 		t.Fingerprint = GetFingerprintHash(r)
@@ -1048,14 +1071,36 @@ func RecordSecurityThreat(t SecurityThreat) {
 		// For reputation hits, we mitigate even if the first request was not blocked
 		// to ensure we track and block this specific fingerprint across IPs.
 		if st.JA3 != "" {
-			MarkFingerprintMitigated(st.JA3, "JA3", st.Details, st.Category)
+			MarkUserMitigated(st.JA3, "", "JA3", st.Details, st.Category)
 		}
 		if st.JA4 != "" {
-			MarkFingerprintMitigated(st.JA4, "JA4", st.Details, st.Category)
+			// Use composite key (JA4 + JA4H) for more precise blocking, especially on mobile/IoT.
+			MarkUserMitigated(st.JA4, st.JA4H, "JA4", st.Details, st.Category)
 		}
 		// If both are empty but we have a generic fingerprint, use it
 		if st.JA3 == "" && st.JA4 == "" && st.Fingerprint != "" {
-			MarkFingerprintMitigated(st.Fingerprint, "FINGERPRINT", st.Details, st.Category)
+			MarkUserMitigated(st.Fingerprint, "", "FINGERPRINT", st.Details, st.Category)
+		}
+
+		// Escalation to IP Mitigation: 3-User Threshold
+		// If an IP is found to be hosting multiple malicious users (fingerprints), block the IP itself.
+		if st.SourceIP != "" && st.Fingerprint != "" {
+			ipMaliciousMu.Lock()
+			val, _ := ipMaliciousFingerprints.Get(st.SourceIP)
+			var fps map[string]struct{}
+			if val != nil {
+				fps = val.(map[string]struct{})
+			} else {
+				fps = make(map[string]struct{})
+			}
+			fps[st.Fingerprint] = struct{}{}
+			ipMaliciousFingerprints.Add(st.SourceIP, fps)
+			uniqueUsers := len(fps)
+			ipMaliciousMu.Unlock()
+
+			if uniqueUsers >= 3 && !IsIPUnmitigated(st.SourceIP) {
+				MarkIPMitigated(st.SourceIP, fmt.Sprintf("IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers))
+			}
 		}
 	}
 
@@ -1258,6 +1303,13 @@ func MarkIPMitigated(ip string, reason string) {
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, false)
 	}
+
+	// Real-time eBPF synchronization for immediate effect at XDP layer
+	if m := globalEbpfManager.Load(); m != nil {
+		if prov, ok := m.(EbpfProvider); ok {
+			_ = prov.ShunIP(ip)
+		}
+	}
 }
 
 // MarkIPUnmitigated records that an IP has been manually unmitigated.
@@ -1274,9 +1326,16 @@ func MarkIPUnmitigated(ip string) {
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, true)
 	}
+
+	// Real-time eBPF synchronization to restore access immediately
+	if m := globalEbpfManager.Load(); m != nil {
+		if prov, ok := m.(EbpfProvider); ok {
+			_ = prov.UnshunIP(ip)
+		}
+	}
 }
 
-// GetMitigatedIPs returns a list of currently mitigated IPs.
+// GetMitigatedIPs returns a list of currently mitigated IPs (plain strings).
 func GetMitigatedIPs(ctx context.Context) []string {
 	s := getStore()
 	if s == nil {
@@ -1298,77 +1357,8 @@ func GetMitigatedIPs(ctx context.Context) []string {
 	return ips
 }
 
-// IsFingerprintMitigated returns true if either the JA3 or JA4 fingerprint is currently marked as mitigated.
-func IsFingerprintMitigated(ja3, ja4 string) bool {
-	s := getStore()
-	if s == nil {
-		return false
-	}
-
-	ja3InCache := false
-	if ja3 != "" && s.fpMitigationCache != nil {
-		if val, ok := s.fpMitigationCache.Get(ja3); ok {
-			if val.(bool) {
-				return true
-			}
-			ja3InCache = true
-		}
-	}
-
-	ja4InCache := false
-	if ja4 != "" && s.fpMitigationCache != nil {
-		if val, ok := s.fpMitigationCache.Get(ja4); ok {
-			if val.(bool) {
-				return true
-			}
-			ja4InCache = true
-		}
-	}
-
-	// If both are in cache and not mitigated, return false immediately.
-	// If one is empty and the other is in cache, return false immediately.
-	if (ja3 == "" || ja3InCache) && (ja4 == "" || ja4InCache) {
-		return false
-	}
-
-	// Check DB for non-cached or non-mitigated entries
-	query := s.dialect.Rebind("SELECT fingerprint, status FROM fingerprint_mitigations WHERE fingerprint IN (?, ?) AND status = 'mitigated'")
-	rows, err := s.db.Query(query, ja3, ja4)
-	if err != nil {
-		return false
-	}
-	defer rows.Close()
-
-	foundMitigated := make(map[string]bool)
-	mitigated := false
-	for rows.Next() {
-		var fp, status string
-		if err := rows.Scan(&fp, &status); err == nil {
-			if status == "mitigated" {
-				mitigated = true
-				foundMitigated[fp] = true
-				if s.fpMitigationCache != nil {
-					s.fpMitigationCache.Add(fp, true)
-				}
-			}
-		}
-	}
-
-	// Cache clean results to avoid repeated DB queries on every request for the same fingerprints
-	if s.fpMitigationCache != nil {
-		if ja3 != "" && !foundMitigated[ja3] {
-			s.fpMitigationCache.Add(ja3, false)
-		}
-		if ja4 != "" && !foundMitigated[ja4] {
-			s.fpMitigationCache.Add(ja4, false)
-		}
-	}
-
-	return mitigated
-}
-
-// GetFingerprintMitigations returns a list of currently mitigated fingerprints.
-func GetFingerprintMitigations(ctx context.Context, limit, offset int) ([]FingerprintMitigation, int) {
+// GetIPMitigations returns a list of currently mitigated IPs with details.
+func GetIPMitigations(ctx context.Context, limit, offset int) ([]IPMitigation, int) {
 	s := getStore()
 	if s == nil {
 		return nil, 0
@@ -1377,26 +1367,129 @@ func GetFingerprintMitigations(ctx context.Context, limit, offset int) ([]Finger
 		limit = 50
 	}
 
-	countQuery := s.dialect.Rebind("SELECT COUNT(*) FROM fingerprint_mitigations WHERE status = 'mitigated'")
+	countQuery := s.dialect.Rebind("SELECT COUNT(*) FROM ip_mitigations WHERE status = 'mitigated'")
 	var total int
 	if err := s.db.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
 		return nil, 0
 	}
 
-	query := s.dialect.Rebind("SELECT fingerprint, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at FROM fingerprint_mitigations WHERE status = 'mitigated' ORDER BY mitigated_at DESC LIMIT ? OFFSET ?")
+	query := s.dialect.Rebind("SELECT ip, status, reason, mitigated_at, unmitigated_at, updated_at FROM ip_mitigations WHERE status = 'mitigated' ORDER BY mitigated_at DESC LIMIT ? OFFSET ?")
 	rows, err := s.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, 0
 	}
 	defer rows.Close()
 
-	var res []FingerprintMitigation
+	var res []IPMitigation
 	for rows.Next() {
-		var m FingerprintMitigation
+		var m IPMitigation
+		var mitigatedAt, updatedAt time.Time
+		var unmitigatedAt sql.NullTime
+		if err := rows.Scan(&m.IP, &m.Status, &m.Reason, &mitigatedAt, &unmitigatedAt, &updatedAt); err == nil {
+			m.MitigatedAt = mitigatedAt
+			m.UpdatedAt = updatedAt
+			if unmitigatedAt.Valid {
+				m.UnmitigatedAt = &unmitigatedAt.Time
+			}
+			res = append(res, m)
+		}
+	}
+	return res, total
+}
+
+// IsUserMitigated returns true if either the JA3, JA4 or composite JA4+JA4H fingerprint is currently marked as mitigated.
+func IsUserMitigated(ja3, ja4, ja4h string) bool {
+	s := getStore()
+	if s == nil {
+		return false
+	}
+
+	// 1. Check JA3 (if available)
+	if ja3 != "" && s.userMitigationCache != nil {
+		if val, ok := s.userMitigationCache.Get(ja3); ok && val.(bool) {
+			return true
+		}
+	}
+
+	// 2. Check JA4+JA4H Composite (if available) - Most specific
+	if ja4 != "" && ja4h != "" && s.userMitigationCache != nil {
+		combo := ja4 + ":" + ja4h
+		if val, ok := s.userMitigationCache.Get(combo); ok && val.(bool) {
+			return true
+		}
+	}
+
+	// 3. Check JA4 Global (if available)
+	if ja4 != "" && s.userMitigationCache != nil {
+		if val, ok := s.userMitigationCache.Get(ja4); ok && val.(bool) {
+			return true
+		}
+	}
+
+	// If not in cache, check DB
+	// We check for:
+	// - JA3 global
+	// - JA4 global (ja4h is empty string in DB)
+	// - JA4+JA4H specific
+	query := s.dialect.Rebind("SELECT fingerprint, ja4h, status FROM user_mitigations WHERE status = 'mitigated' AND (" +
+		"(fingerprint = ? AND ja4h = '') OR " + // JA3 or JA4 global
+		"(fingerprint = ? AND ja4h = '') OR " + // Another fallback for JA3/JA4
+		"(fingerprint = ? AND ja4h = ?))") // JA4 + JA4H specific
+	rows, err := s.db.Query(query, ja3, ja4, ja4, ja4h)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+
+	mitigated := false
+	for rows.Next() {
+		var fp, dbJA4H, status string
+		if err := rows.Scan(&fp, &dbJA4H, &status); err == nil && status == "mitigated" {
+			mitigated = true
+			// Populate cache for faster subsequent checks
+			if s.userMitigationCache != nil {
+				key := fp
+				if dbJA4H != "" {
+					key = fp + ":" + dbJA4H
+				}
+				s.userMitigationCache.Add(key, true)
+			}
+		}
+	}
+
+	return mitigated
+}
+
+// GetUserMitigations returns a list of currently mitigated users/fingerprints.
+func GetUserMitigations(ctx context.Context, limit, offset int) ([]UserMitigation, int) {
+	s := getStore()
+	if s == nil {
+		return nil, 0
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+
+	countQuery := s.dialect.Rebind("SELECT COUNT(*) FROM user_mitigations WHERE status = 'mitigated'")
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0
+	}
+
+	query := s.dialect.Rebind("SELECT fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at FROM user_mitigations WHERE status = 'mitigated' ORDER BY mitigated_at DESC LIMIT ? OFFSET ?")
+	rows, err := s.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0
+	}
+	defer rows.Close()
+
+	var res []UserMitigation
+	for rows.Next() {
+		var m UserMitigation
 		var mitigatedAt, updatedAt time.Time
 		var unmitigatedAt sql.NullTime
 		var category sql.NullString
-		if err := rows.Scan(&m.Fingerprint, &m.Type, &m.Status, &m.Reason, &category, &mitigatedAt, &unmitigatedAt, &updatedAt); err == nil {
+		if err := rows.Scan(&m.Fingerprint, &m.JA4H, &m.Type, &m.Status, &m.Reason, &category, &mitigatedAt, &unmitigatedAt, &updatedAt); err == nil {
 			m.MitigatedAt = mitigatedAt
 			m.UpdatedAt = updatedAt
 			m.Category = category.String
@@ -1409,39 +1502,53 @@ func GetFingerprintMitigations(ctx context.Context, limit, offset int) ([]Finger
 	return res, total
 }
 
-// MarkFingerprintMitigated records that a fingerprint has been mitigated.
-func MarkFingerprintMitigated(fp string, fpType string, reason string, category string) {
+// MarkUserMitigated records that a user fingerprint has been mitigated.
+func MarkUserMitigated(fp string, ja4h string, fpType string, reason string, category string) {
 	s := getStore()
 	if s == nil || fp == "" {
 		return
 	}
-	query := s.dialect.Rebind("INSERT INTO fingerprint_mitigations (fingerprint, fp_type, status, reason, category, mitigated_at, updated_at) VALUES (?, ?, 'mitigated', ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(fingerprint) DO UPDATE SET status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
+	// ja4h is optional and used for composite keys
+	query := s.dialect.Rebind("INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, updated_at) VALUES (?, ?, ?, 'mitigated', ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(fingerprint, ja4h) DO UPDATE SET status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
 	if s.dialect.Driver == db.DriverMySQL {
-		query = "INSERT INTO fingerprint_mitigations (fingerprint, fp_type, status, reason, category, mitigated_at) VALUES (?, ?, 'mitigated', ?, ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
+		query = "INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at) VALUES (?, ?, ?, 'mitigated', ?, ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
 	}
+	// For SQLite, if we didn't update the PK to (fingerprint, ja4h), ON CONFLICT(fingerprint) might fail if we have same JA4 with different JA4H.
+	// But the migration 46 only added the column, not changed PK.
+	// I should probably have updated the PK in migration 47.
+	// However, many users will have the same JA4, so we can't have JA4 as PK if we want JA4+JA4H.
+
 	now := time.Now()
-	_, err := s.db.Exec(query, fp, fpType, reason, category, now, reason, category, now)
+	_, err := s.db.Exec(query, fp, ja4h, fpType, reason, category, now, reason, category, now)
 	if err != nil {
-		logger.Default().LogError("failed to mark fingerprint as mitigated", "fp", fp, "error", err)
+		logger.Default().LogError("failed to mark user as mitigated", "fp", fp, "ja4h", ja4h, "error", err)
 	}
-	if s.fpMitigationCache != nil {
-		s.fpMitigationCache.Add(fp, true)
+	if s.userMitigationCache != nil {
+		key := fp
+		if ja4h != "" {
+			key = fp + ":" + ja4h
+		}
+		s.userMitigationCache.Add(key, true)
 	}
 }
 
-// MarkFingerprintUnmitigated records that a fingerprint has been manually unmitigated.
-func MarkFingerprintUnmitigated(fp string) {
+// MarkUserUnmitigated records that a fingerprint has been manually unmitigated.
+func MarkUserUnmitigated(fp string, ja4h string) {
 	s := getStore()
 	if s == nil || fp == "" {
 		return
 	}
-	query := s.dialect.Rebind("UPDATE fingerprint_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?")
-	_, err := s.db.Exec(query, fp)
+	query := s.dialect.Rebind("UPDATE user_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ? AND ja4h = ?")
+	_, err := s.db.Exec(query, fp, ja4h)
 	if err != nil {
-		logger.Default().LogError("failed to mark fingerprint as unmitigated", "fp", fp, "error", err)
+		logger.Default().LogError("failed to mark user as unmitigated", "fp", fp, "ja4h", ja4h, "error", err)
 	}
-	if s.fpMitigationCache != nil {
-		s.fpMitigationCache.Add(fp, false)
+	if s.userMitigationCache != nil {
+		key := fp
+		if ja4h != "" {
+			key = fp + ":" + ja4h
+		}
+		s.userMitigationCache.Add(key, false)
 	}
 }
 
@@ -1544,6 +1651,7 @@ func unmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 		Referer         string    `json:"referer"`
 		JA3             string    `json:"ja3"`
 		JA4             string    `json:"ja4"`
+		JA4H            string    `json:"ja4h"`
 		Fingerprint     string    `json:"fingerprint"`
 		CountryCode     string    `json:"country_code"`
 		RouteID         string    `json:"route_id"`
@@ -1570,6 +1678,7 @@ func unmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 	tr.Referer = s.Referer
 	tr.JA3 = s.JA3
 	tr.JA4 = s.JA4
+	tr.JA4H = s.JA4H
 	tr.Fingerprint = s.Fingerprint
 	tr.CountryCode = s.CountryCode
 	tr.RouteID = s.RouteID

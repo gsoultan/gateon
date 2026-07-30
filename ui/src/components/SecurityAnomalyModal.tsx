@@ -316,7 +316,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                 <Group gap="xs">
                   <IconFingerprint size={16} color="var(--mantine-color-dimmed)" />
                   <Text size="sm" fw={600}>
-                    TLS Fingerprints
+                    User Identification
                   </Text>
                 </Group>
                 <Stack gap={4} ml={26}>
