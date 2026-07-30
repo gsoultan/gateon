@@ -44,11 +44,11 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 						return
 					}
 					// Invalid solution - record as a threat
-					recordAdvancedThreat(r, "pow_invalid_solution", 10.0, "Invalid PoW solution provided", routeID, "bot")
+					recordAdvancedThreat(r, "pow_invalid_solution", 10.0, "Invalid PoW solution provided", routeID, "bot", "MEDIUM")
 				}
 
 				// Otherwise, serve challenge.
-				recordAdvancedThreat(r, "pow_challenge_issued", 1.0, "PoW challenge issued due to low reputation", routeID, "bot")
+				recordAdvancedThreat(r, "pow_challenge_issued", 1.0, "PoW challenge issued due to low reputation", routeID, "bot", "LOW")
 				serveChallenge(w, r, difficulty)
 				return
 			}

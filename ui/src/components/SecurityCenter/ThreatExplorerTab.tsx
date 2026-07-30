@@ -183,6 +183,7 @@ export function ThreatExplorerTab() {
               <Table.Tr>
                 <Table.Th>Timestamp</Table.Th>
                 <Table.Th>Source</Table.Th>
+                <Table.Th>URL</Table.Th>
                 <Table.Th>Type / Category</Table.Th>
                 <Table.Th>Severity</Table.Th>
                 <Table.Th>Status</Table.Th>
@@ -207,6 +208,13 @@ export function ThreatExplorerTab() {
                           </ActionIcon>
                         </Tooltip>
                       </Group>
+                    </Table.Td>
+                    <Table.Td>
+                      <Tooltip label={threat.request_uri || '/'}>
+                        <Text size="xs" c="dimmed" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {threat.request_uri || '/'}
+                        </Text>
+                      </Tooltip>
                     </Table.Td>
                     <Table.Td>
                       <Group gap="sm" wrap="nowrap">
@@ -273,7 +281,7 @@ export function ThreatExplorerTab() {
                 ))
               ) : (
                 <Table.Tr>
-                  <Table.Td colSpan={6}>
+                  <Table.Td colSpan={7}>
                     <Text ta="center" py="xl" c="dimmed">No threats match your filters.</Text>
                   </Table.Td>
                 </Table.Tr>
