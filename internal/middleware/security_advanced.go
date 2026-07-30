@@ -36,6 +36,19 @@ var genericAttackScanner = scanner.NewScanner([]string{
 	"class.module.classLoader",                                    // Spring4Shell
 	"; cat /etc/passwd", "; id", "; whoami", "; curl ", "; wget ", // Shell Injection
 	"coinhive.min.js", "authedmine.min.js", "cryptonight.wasm", // Malicious scripts
+	"String.fromCharCode", "unescape(", "%u00", "eval(atob(", "navigator.sendBeacon", "new WebSocket(", "document.write(", "document.createElement('script')", // Malicious JS
+})
+
+var gamblingScanner = scanner.NewScanner([]string{
+	"betting", "gambling", "casino", "slot machine", "poker", "sportsbook", "jackpot", "lottery", "bookmaker", "odds payout", "wagering", "baccarat", "blackjack", "roulette",
+})
+
+var phpScanner = scanner.NewScanner([]string{
+	"<?php", "file_get_contents(", "include(", "require(", "eval(", "exec(", "system(", "passthru(", "shell_exec(", "base64_decode(", "$_GET", "$_POST", "$_REQUEST", "$_SERVER", "$_COOKIE", "$_FILES",
+})
+
+var fileUploadScanner = scanner.NewScanner([]string{
+	".php", ".phtml", ".php3", ".php4", ".php5", ".phps", ".asp", ".aspx", ".jsp", ".jspx", ".sh", ".py", ".pl", ".exe", ".cgi", ".htaccess",
 })
 
 var securityBufferPool = sync.Pool{
@@ -95,7 +108,7 @@ func Entropy(threshold float64, routeID string) Middleware {
 
 					e := entropy.Calculate(peeked)
 					if e > threshold {
-						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced")
+						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced", "HIGH")
 					}
 				}
 				if rs != nil {
@@ -130,7 +143,7 @@ func serveTrollResponse(w http.ResponseWriter) {
 	}
 }
 
-func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string, category string) {
+func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string, category string, severity string) {
 	logger.SecurityEvent(ttype, r, details)
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		ID:         fmt.Sprintf("adv-%s-%d", ttype, time.Now().UnixNano()),
@@ -140,8 +153,11 @@ func recordAdvancedThreat(r *http.Request, ttype string, score float64, details 
 		Details:    details,
 		Time:       time.Now(),
 		RouteID:    routeID,
-		RequestURI: r.URL.Path,
+		RequestURI: r.RequestURI,
 		Category:   category,
+		Severity:   severity,
+		Method:     r.Method,
+		UserAgent:  r.UserAgent(),
 	}))
 }
 
@@ -209,7 +225,7 @@ func XSSRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss")
+				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss", "CRITICAL")
 			}
 
 			if rs != nil {
@@ -261,7 +277,7 @@ func SQLiRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli")
+				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli", "CRITICAL")
 			}
 
 			if rs != nil {
@@ -273,20 +289,47 @@ func SQLiRecognition(routeID string) Middleware {
 	}
 }
 
-// ThreatRecognition middleware scans request for various common attack patterns (RCE, Prototype Pollution, etc.)
+// ThreatRecognition middleware scans request for various common attack patterns (RCE, Prototype Pollution, Gambling, PHP vuln, etc.)
 func ThreatRecognition(routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var details string
 			found := false
 			attackType := "generic_attack"
+			severity := "HIGH"
 
 			// Check common patterns in Query, Headers, and Body
 			check := func(data string, source string) bool {
 				if matches := genericAttackScanner.FindAll(data); len(matches) > 0 {
 					found = true
+					attackType = "generic_attack"
+					severity = "HIGH"
 					details = fmt.Sprintf("Attack pattern(s) '%s' found in %s", strings.Join(matches, ", "), source)
 					return true
+				}
+				if matches := gamblingScanner.FindAll(data); len(matches) > 0 {
+					found = true
+					attackType = "gambling_detected"
+					severity = "MEDIUM"
+					details = fmt.Sprintf("Gambling related pattern(s) '%s' found in %s", strings.Join(matches, ", "), source)
+					return true
+				}
+				if matches := phpScanner.FindAll(data); len(matches) > 0 {
+					found = true
+					attackType = "php_vulnerability"
+					severity = "CRITICAL"
+					details = fmt.Sprintf("PHP vulnerability pattern(s) '%s' found in %s", strings.Join(matches, ", "), source)
+					return true
+				}
+				if matches := fileUploadScanner.FindAll(data); len(matches) > 0 {
+					// Only flag if it looks like a filename in a relevant place
+					if strings.Contains(source, "query string") || strings.Contains(source, "body") {
+						found = true
+						attackType = "file_upload_attempt"
+						severity = "CRITICAL"
+						details = fmt.Sprintf("Malicious file extension(s) '%s' found in %s", strings.Join(matches, ", "), source)
+						return true
+					}
 				}
 				return false
 			}
@@ -321,7 +364,7 @@ func ThreatRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced")
+				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced", severity)
 			}
 
 			next.ServeHTTP(w, r)

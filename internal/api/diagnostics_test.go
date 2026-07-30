@@ -129,7 +129,7 @@ func TestGetDiagnostics_ServiceDown(t *testing.T) {
 func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
-			SecurityThreatThreshold: 30.0,
+			SecurityThreatThreshold: 15.0,
 		},
 	}, nil)
 	ctx := t.Context()
@@ -222,7 +222,7 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 	ctx := t.Context()
 	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
-			SecurityThreatThreshold: 30.0,
+			SecurityThreatThreshold: 15.0,
 		},
 	}, nil)
 	now := time.Now()
@@ -292,7 +292,7 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 	ctx := t.Context()
 	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
-			SecurityThreatThreshold: 30.0,
+			SecurityThreatThreshold: 15.0,
 		},
 	}, nil)
 	now := time.Now()
@@ -494,7 +494,7 @@ func TestRemoveMitigatedThreat(t *testing.T) {
 func TestShadowedRouteDetection(t *testing.T) {
 	engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
 		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{
-			SecurityThreatThreshold: 30.0,
+			SecurityThreatThreshold: 15.0,
 		},
 	}, nil)
 	ctx := t.Context()

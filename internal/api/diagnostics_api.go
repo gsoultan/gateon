@@ -287,8 +287,8 @@ func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Rou
 		globalCfg = s.Globals.Get(ctx)
 	}
 
-	traces := telemetry.GetTraces(ctx, 1000)
-	threats := telemetry.GetSecurityThreats(ctx, 1000, 0, nil)
+	traces := telemetry.GetTracesFiltered(ctx, 1000, true)
+	threats := telemetry.GetSecurityThreatsLite(ctx, 1000, 0, nil)
 	engine := NewAnomalyAnalysisEngine(globalCfg, s.IPReputation)
 	return engine.Analyze(ctx, &DiagnosticData{
 		Traces:          traces,
@@ -710,13 +710,16 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 }
 
 func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityThreat) *gateonv1.Anomaly {
-	severity := "low"
-	if t.Score >= 100 {
-		severity = "critical"
-	} else if t.Score >= 60 {
-		severity = "high"
-	} else if t.Score >= 30 {
-		severity = "medium"
+	severity := strings.ToLower(t.Severity)
+	if severity == "" {
+		severity = "low"
+		if t.Score >= 100 {
+			severity = "critical"
+		} else if t.Score >= 60 {
+			severity = "high"
+		} else if t.Score >= 30 {
+			severity = "medium"
+		}
 	}
 
 	a := &gateonv1.Anomaly{
@@ -736,7 +739,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		RequestUri:      t.RequestURI,
 		Category:        t.Category,
 		ActionTaken:     t.ActionTaken,
-		Mitigated:       telemetry.IsIPMitigated(t.SourceIP) || ((t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned") && !telemetry.IsIPUnmitigated(t.SourceIP)),
+		Mitigated:       t.Mitigated,
 		RequestHeaders:  t.RequestHeaders,
 		RequestBody:     t.RequestBody,
 		ResponseHeaders: t.ResponseHeaders,
