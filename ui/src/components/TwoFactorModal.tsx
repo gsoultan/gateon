@@ -112,7 +112,7 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
           <>
             <Text size="sm" fw={500}>1. Scan this QR Code</Text>
             <Group justify="center">
-              <Image src={setupData.qr_code_url} w={200} h={200} alt="2FA QR Code" />
+              <Image src={setupData.qr_code_url} maw={200} mx="auto" fit="contain" alt="2FA QR Code" />
             </Group>
             <Text size="xs" c="dimmed" ta="center">
               Or enter secret manually: <Code>{setupData.secret}</Code>

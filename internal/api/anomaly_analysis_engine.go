@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -89,6 +90,24 @@ func getRuleDescription(id string) string {
 }
 
 func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
+	// Pre-filter loopback traffic to prevent management/test traffic from skewing anomalies.
+	// This improves performance and eliminates false positives during management operations.
+	filteredTraces := make([]*telemetry.RequestTrace, 0, len(data.Traces))
+	for _, tr := range data.Traces {
+		if tr != nil && !httputil.IsLoopback(tr.SourceIP) {
+			filteredTraces = append(filteredTraces, tr)
+		}
+	}
+	data.Traces = filteredTraces
+
+	filteredThreats := make([]*telemetry.SecurityThreat, 0, len(data.SecurityThreats))
+	for _, th := range data.SecurityThreats {
+		if th != nil && !httputil.IsLoopback(th.SourceIP) {
+			filteredThreats = append(filteredThreats, th)
+		}
+	}
+	data.SecurityThreats = filteredThreats
+
 	// Pre-process traces for performance - single pass
 	data.IPStats = make(map[string]*IPStats)
 	data.FingerprintStats = make(map[string]*FingerprintStats)
@@ -278,6 +297,7 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		if th == nil || th.SourceIP == "" {
 			continue
 		}
+
 		stats, ok := data.IPStats[th.SourceIP]
 		if !ok {
 			stats = &IPStats{

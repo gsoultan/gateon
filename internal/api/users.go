@@ -12,6 +12,7 @@ import (
 )
 
 func (s *ApiService) ListUsers(ctx context.Context, req *gateonv1.ListUsersRequest) (*gateonv1.ListUsersResponse, error) {
+	fmt.Printf("DEBUG: ListUsers req=%+v\n", req)
 	if req == nil {
 		return &gateonv1.ListUsersResponse{}, nil
 	}

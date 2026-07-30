@@ -94,14 +94,14 @@ func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
 			threatType, _ := m.Memory().Read(typePtr, typeLen)
 			details, _ := m.Memory().Read(detailsPtr, detailsLen)
 
-			telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+			telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 				Type:       string(threatType),
 				SourceIP:   r.RemoteAddr,
 				Score:      score,
 				Details:    string(details),
 				RouteID:    r.Header.Get("X-Gateon-Route-ID"),
 				RequestURI: r.RequestURI,
-			})
+			}))
 		}).Export("record_threat").
 		Instantiate(ctx)
 	if err != nil {

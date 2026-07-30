@@ -185,8 +185,8 @@ export default function LoginPage() {
   };
 
   return (
-    <Box style={{ height: "100vh", overflow: "hidden" }}>
-      <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0} style={{ height: "100%" }}>
+    <Box style={{ minHeight: "100vh", overflowY: "auto" }}>
+      <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0} style={{ minHeight: "100vh" }}>
         {/* Left Side: Branding & Features */}
         <Box
           className="bg-slate-950 relative overflow-hidden"
@@ -410,8 +410,9 @@ export default function LoginPage() {
                     <Group justify="center">
                       <Image
                         src={enrollData.qr_code_url}
-                        w={180}
-                        h={180}
+                        maw={180}
+                        mx="auto"
+                        fit="contain"
                         alt="2FA QR code"
                       />
                     </Group>

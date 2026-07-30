@@ -807,7 +807,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			r.Header.Set("X-Gateon-Fingerprint", traceID)
 
 			// Global IP Reputation check
-			if cfg.EnableIPReputation && cfg.Reputation != nil && os.Getenv("GATEON_TEST") == "" {
+			if cfg.EnableIPReputation && cfg.Reputation != nil {
 				clientIP := request.GetClientIP(r, cfg.TrustCloudflare)
 				if bad, score := cfg.Reputation.IsBad(clientIP); bad {
 					r.Header.Set("X-Gateon-IP-Reputation-Score", strconv.FormatFloat(score, 'f', 2, 64))
@@ -936,7 +936,7 @@ Include @crs-setup.conf.example
 		}
 
 		if cfg.EnableIPReputation {
-			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-IP-Reputation-Block \"@eq 1\" \"id:200001,phase:1,deny,status:403,msg:'IP Reputation block',tag:'reputation',severity:CRITICAL\"\n")
+			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-Ip-Reputation-Block \"@eq 1\" \"id:200001,phase:1,pass,log,msg:'IP Reputation hit',tag:'reputation',severity:CRITICAL,setvar:tx.anomaly_score=+5,setvar:tx.inbound_anomaly_score=+5\"\n")
 		}
 
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
@@ -1280,9 +1280,10 @@ type txWrapper struct {
 }
 
 func (t *txWrapper) ProcessLogging() {
-	ja4 := ""
+	ja3, ja4 := "", ""
 	if t.r != nil {
 		if rs := request.GetRequestState(t.r); rs != nil {
+			ja3 = rs.JA3
 			ja4 = rs.JA4
 		}
 	}
@@ -1292,7 +1293,6 @@ func (t *txWrapper) ProcessLogging() {
 		it = t.Interruption()
 		logger.L.LogInfo("WAF Transaction Interrupted", "rule_id", it.RuleID, "action", it.Action, "route", t.routeID)
 	}
-
 	matchedRules := t.MatchedRules()
 	if len(matchedRules) > 0 {
 		anomalyScore := 0
@@ -1310,19 +1310,6 @@ func (t *txWrapper) ProcessLogging() {
 			GetCollection(variables.RuleVariable) collection.Collection
 		}); ok {
 			if c, ok := ca.GetCollection(variables.TX).(collection.Keyed); ok {
-				// Debug log all TX variables
-				txVars := make(map[string]string)
-				for _, k := range c.FindAll() {
-					key := k.Key()
-					if key == "" {
-						key = k.Variable().Name()
-					}
-					if vals := c.Get(key); len(vals) > 0 {
-						txVars[key] = vals[0]
-					}
-				}
-				logger.L.LogInfo("WAF TX Variables", "vars", txVars)
-
 				// Thoroughly check for anomaly scores
 				findScore := func(name string) int {
 					if vals := c.Get(name); len(vals) > 0 {
@@ -1374,7 +1361,23 @@ func (t *txWrapper) ProcessLogging() {
 			"threshold", t.cfg.AnomalyThreshold)
 
 		if anomalyScore == 0 && !interrupted {
-			return
+			// Ensure reputation hits are always recorded even if anomaly score is 0
+			isReputation := false
+			for _, rule := range matchedRules {
+				tags := rule.Rule().Tags()
+				for _, tag := range tags {
+					if strings.Contains(strings.ToLower(tag), "reputation") {
+						isReputation = true
+						break
+					}
+				}
+				if isReputation {
+					break
+				}
+			}
+			if !isReputation {
+				return
+			}
 		}
 
 		for _, rule := range matchedRules {
@@ -1433,9 +1436,13 @@ func (t *txWrapper) ProcessLogging() {
 					}
 				}
 
-				if shouldShun {
-					_ = t.cfg.EbpfManager.ShunIP(clientIP)
-				} else if anomalyScore >= 10 {
+				if shouldShun && clientIP != "127.0.0.1" && clientIP != "::1" && clientIP != "localhost" {
+					// We no longer shun IPs at the kernel level by default to avoid blocking
+					// innocent users on shared IPs (NAT/CGNAT).
+					// Instead, we rely on WAF's L7 block and the fingerprint-based mitigation
+					// recorded below, which is more precise and follows the JA4/JA3 blocking policy.
+					// _ = t.cfg.EbpfManager.ShunIP(clientIP)
+				} else if anomalyScore >= 10 && clientIP != "127.0.0.1" && clientIP != "::1" && clientIP != "localhost" {
 					_ = t.cfg.EbpfManager.SetAdaptiveRateLimit(clientIP, time.Second)
 				}
 			}
@@ -1467,7 +1474,7 @@ func (t *txWrapper) ProcessLogging() {
 			actionTaken = "blocked"
 		}
 
-		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(t.r, telemetry.SecurityThreat{
 			ID:             fmt.Sprintf("waf-%s-%s", actionTaken, t.ID()),
 			Type:           "waf_" + actionTaken,
 			SourceIP:       clientIP,
@@ -1482,13 +1489,14 @@ func (t *txWrapper) ProcessLogging() {
 			Severity:       severity,
 			ActionTaken:    actionTaken,
 			Mitigated:      interrupted,
+			JA3:            ja3,
 			JA4:            ja4,
 			UserAgent:      ua,
 			Method:         method,
 			Confidence:     confidence,
 			Entropy:        ent,
 			TriggeredRules: triggeredRules,
-		})
+		}))
 	}
 	t.Transaction.ProcessLogging()
 }
@@ -1780,6 +1788,9 @@ func getCategoryFromTags(tags []string) string {
 		}
 		if strings.Contains(t, "ransomware") {
 			return "ransomware"
+		}
+		if strings.Contains(t, "reputation") {
+			return "reputation"
 		}
 	}
 	return "general"

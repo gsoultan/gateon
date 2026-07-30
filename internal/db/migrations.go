@@ -1156,4 +1156,60 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(43, "create_fingerprint_mitigations_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite || dialect.Driver == DriverPostgres {
+			query = `CREATE TABLE IF NOT EXISTS fingerprint_mitigations (
+				fingerprint VARCHAR(255) PRIMARY KEY,
+				fp_type VARCHAR(10) NOT NULL,
+				status VARCHAR(20) NOT NULL,
+				reason TEXT,
+				mitigated_at TIMESTAMP,
+				unmitigated_at TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`
+		} else { // MySQL
+			query = `CREATE TABLE IF NOT EXISTS fingerprint_mitigations (
+				fingerprint VARCHAR(255) PRIMARY KEY,
+				fp_type VARCHAR(10) NOT NULL,
+				status VARCHAR(20) NOT NULL,
+				reason TEXT,
+				mitigated_at TIMESTAMP NULL,
+				unmitigated_at TIMESTAMP NULL,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+			);`
+		}
+		if _, err := db.Exec(query); err != nil {
+			return err
+		}
+
+		// Add indices
+		indices := []string{
+			`CREATE INDEX IF NOT EXISTS idx_fingerprint_mitigations_status ON fingerprint_mitigations(status);`,
+			`CREATE INDEX IF NOT EXISTS idx_fingerprint_mitigations_type ON fingerprint_mitigations(fp_type);`,
+		}
+		for _, idxQuery := range indices {
+			if _, err := db.Exec(idxQuery); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	Register(44, "add_category_to_fingerprint_mitigations", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite {
+			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
+		} else if dialect.Driver == DriverPostgres {
+			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
+		} else { // MySQL
+			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
+		}
+		if _, err := db.Exec(query); err != nil {
+			// Ignore error if column already exists (can happen during development)
+			return nil
+		}
+		return nil
+	})
 }

@@ -57,6 +57,7 @@ import { notifications } from "@mantine/notifications";
 import { useDiagnostics, useRemoveMitigation } from "../hooks/useGateon";
 import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import { useDisclosure } from "@mantine/hooks";
+import { usePermissions } from "../hooks/usePermissions";
 
 const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
   <Tooltip label={mw.error || `Type: ${mw.type}`}>
@@ -195,7 +196,8 @@ const AnomalyCard: React.FC<{
   applying: boolean; 
   onTrace: (ip: string) => void;
   onClick?: () => void;
-}> = ({ anomaly, onApply, applying, onTrace, onClick }) => {
+  canWrite?: boolean;
+}> = ({ anomaly, onApply, applying, onTrace, onClick, canWrite }) => {
   const getSeverityColor = (sev: string) => {
     switch (sev.toLowerCase()) {
       case "critical": return "red";
@@ -238,9 +240,16 @@ const AnomalyCard: React.FC<{
               {getIcon(anomaly.type)}
             </ThemeIcon>
             <Stack gap={0}>
-              <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
-                {(anomaly.type || "unknown").replace(/_/g, " ")}
-              </Text>
+              <Group gap={4}>
+                <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  {(anomaly.type || "unknown").replace(/_/g, " ")}
+                </Text>
+                {anomaly.category && (
+                  <Badge variant="light" color="gray" size="xs">
+                    {anomaly.category}
+                  </Badge>
+                )}
+              </Group>
               <Text size="xs" c="dimmed">
                 {(() => {
                   const date = new Date(anomaly.timestamp);
@@ -276,7 +285,7 @@ const AnomalyCard: React.FC<{
           <Stack gap="xs">
             <Text size="xs" fw={700}>System Recommendation:</Text>
             <Text size="xs">{anomaly.recommendation}</Text>
-            {!anomaly.mitigated && (
+            {!anomaly.mitigated && canWrite && (
               <Group justify="flex-end">
                 <Anchor
                   component="button"
@@ -298,6 +307,7 @@ const AnomalyCard: React.FC<{
 };
 
 const DiagnosticsPage: React.FC = () => {
+  const { canWrite } = usePermissions();
   const { data, isLoading: loading, error: queryError, refetch: fetchData } = useDiagnostics();
   const [applying, setApplying] = useState<string | null>(null);
   const removeMitigation = useRemoveMitigation();
@@ -571,6 +581,7 @@ const DiagnosticsPage: React.FC = () => {
                             applying={applying === `${a.type}-${a.source}`}
                             onTrace={openVisualizer}
                             onClick={() => onAnomalyClick(a)}
+                            canWrite={canWrite}
                           />
                         ))}
                       </SimpleGrid>
@@ -619,6 +630,7 @@ const DiagnosticsPage: React.FC = () => {
                             applying={applying === `${a.type}-${a.source}`}
                             onTrace={openVisualizer}
                             onClick={() => onAnomalyClick(a)}
+                            canWrite={canWrite}
                           />
                         ))}
                       </SimpleGrid>

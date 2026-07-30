@@ -16,6 +16,7 @@ import {
   Center,
   Pagination,
   ThemeIcon,
+  Tabs,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -40,13 +41,15 @@ import type { Anomaly } from "../../types/gateon";
 import { format } from "date-fns";
 import { getSeverityColor } from "../../utils/security";
 import { notifications } from "@mantine/notifications";
+import { usePermissions } from "../../hooks/usePermissions";
 
 const PAGE_SIZE = 15;
 
 export function ThreatExplorerTab() {
+  const { canWrite } = usePermissions();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
-  const [mitigatedFilter, setMitigatedFilter] = useState<string | null>("all");
+  const [mitigatedFilter, setMitigatedFilter] = useState<string | null>("detected");
   const [page, setPage] = useState(1);
 
   const { data, isLoading, error, refetch } = useSecurityThreats({
@@ -146,6 +149,14 @@ export function ThreatExplorerTab() {
 
   return (
     <Stack gap="md">
+      <Tabs value={mitigatedFilter} onChange={setMitigatedFilter} variant="pills" radius="md">
+        <Tabs.List>
+          <Tabs.Tab value="detected" leftSection={<IconAlertTriangle size={16} />}>Active Threats</Tabs.Tab>
+          <Tabs.Tab value="mitigated" leftSection={<IconShieldCheck size={16} />}>Mitigated List</Tabs.Tab>
+          <Tabs.Tab value="all">Historical Logs</Tabs.Tab>
+        </Tabs.List>
+      </Tabs>
+
       <Card withBorder radius="md" p="md">
         <Group justify="space-between" mb="md">
           <Group gap="sm" grow style={{ flex: 1 }}>
@@ -160,16 +171,6 @@ export function ThreatExplorerTab() {
               data={categories.map(c => ({ value: c, label: c === 'all' ? 'All Categories' : c.toUpperCase() }))}
               value={categoryFilter}
               onChange={setCategoryFilter}
-            />
-            <Select
-              placeholder="Status"
-              data={[
-                { value: "all", label: "All Status" },
-                { value: "mitigated", label: "Mitigated Only" },
-                { value: "detected", label: "Detected Only" },
-              ]}
-              value={mitigatedFilter}
-              onChange={setMitigatedFilter}
             />
           </Group>
           <Button variant="light" leftSection={<IconRefresh size={16} />} onClick={() => refetch()}>
@@ -237,7 +238,10 @@ export function ThreatExplorerTab() {
                               </Tooltip>
                             )}
                           </Group>
-                          <Text size="xs" c="dimmed">{threat.category || 'N/A'}</Text>
+                          <Group gap={4}>
+                            <Badge size="xs" variant="light" color="gray">{threat.category || 'N/A'}</Badge>
+                            <Text size="xs" c="dimmed" truncate maw={200}>{threat.description}</Text>
+                          </Group>
                         </Stack>
                       </Group>
                     </Table.Td>
@@ -270,6 +274,7 @@ export function ThreatExplorerTab() {
                               size="sm" 
                               onClick={(e) => handleUnmitigate(e, threat.source)}
                               loading={unmitigating === threat.source}
+                              disabled={!canWrite}
                             >
                               <IconUserCheck size={14} />
                             </ActionIcon>

@@ -33,6 +33,45 @@ func Fingerprinting() Middleware {
 	}
 }
 
+// FingerprintMitigation returns a middleware that blocks requests from mitigated JA3/JA4 fingerprints.
+func FingerprintMitigation() Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rs := GetRequestState(r)
+			var ja3, ja4 string
+			if rs != nil {
+				ja3 = rs.JA3
+				ja4 = rs.JA4
+			}
+
+			if ja3 != "" || ja4 != "" {
+				if telemetry.IsFingerprintMitigated(ja3, ja4) {
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
+
+					// Record threat for visibility in dashboard
+					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+						Type:        "fingerprint_mitigation",
+						SourceIP:    request.GetClientIP(r, false),
+						Category:    "threat_intel",
+						Severity:    "high",
+						ActionTaken: "blocked",
+						Details:     "Request blocked due to mitigated JA3/JA4 fingerprint",
+						JA3:         ja3,
+						JA4:         ja4,
+						RequestURI:  r.URL.RequestURI(),
+						Method:      r.Method,
+						UserAgent:   r.UserAgent(),
+					}))
+					return
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // WithRequestState returns a middleware that initializes the RequestState and puts it in the context.
 // It should be the outermost middleware to ensure downstream middlewares can access the state.
 func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
@@ -46,6 +85,9 @@ func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
 			rs.IsManagement = isMgmt
 			rs.TEntrypoint = time.Now().UnixNano()
 			defer RequestStatePool.Put(rs)
+
+			// Populate fingerprints as early as possible
+			populateFingerprints(r, rs)
 
 			ctx := context.WithValue(r.Context(), RequestStateContextKey, rs)
 			r = r.WithContext(ctx)
@@ -63,6 +105,39 @@ func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func populateFingerprints(r *http.Request, rs *request.RequestState) {
+	if rs == nil || r == nil {
+		return
+	}
+	if rs.JA3 != "" && rs.JA4 != "" {
+		return
+	}
+
+	ja3, ja4 := rs.JA3, rs.JA4
+	if r.TLS != nil {
+		// Try to get fingerprints from our internal map first
+		if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
+			f := GetFingerprints(conn)
+			ja3, ja4 = f.JA3, f.JA4
+		}
+		if ja3 == "" {
+			f := GetFingerprintsByAddr(r.RemoteAddr)
+			ja3, ja4 = f.JA3, f.JA4
+		}
+	}
+
+	// Fallback to headers if still empty (e.g. from upstream proxy)
+	if ja3 == "" {
+		ja3 = r.Header.Get("X-JA3-Fingerprint")
+	}
+	if ja4 == "" {
+		ja4 = r.Header.Get("X-JA4-Fingerprint")
+	}
+
+	rs.JA3 = ja3
+	rs.JA4 = ja4
 }
 
 // AccessLog returns a middleware that logs request details.
@@ -166,37 +241,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 			start := time.Now()
-
-			// Early Fingerprinting: Capture TLS fingerprints before downstream middlewares run.
-			if rs != nil && rs.JA3 == "" {
-				if r.TLS == nil {
-					// logger.L.LogDebug("TLS is nil in metrics middleware", "path", r.URL.Path)
-				} else {
-					ja3, ja4 := "", ""
-					// Try to get fingerprints from our internal map first
-					if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
-						f := GetFingerprints(conn)
-						ja3, ja4 = f.JA3, f.JA4
-					}
-					if ja3 == "" {
-						f := GetFingerprintsByAddr(r.RemoteAddr)
-						ja3, ja4 = f.JA3, f.JA4
-					}
-
-					// Fallback to headers if still empty
-					if ja3 == "" {
-						ja3 = r.Header.Get("X-JA3-Fingerprint")
-					}
-					if ja4 == "" {
-						ja4 = r.Header.Get("X-JA4-Fingerprint")
-					}
-
-					if rs != nil {
-						rs.JA3 = ja3
-						rs.JA4 = ja4
-					}
-				}
-			}
 
 			// Track in-flight requests
 			telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Inc()

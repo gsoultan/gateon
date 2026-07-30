@@ -2,8 +2,22 @@ package httputil
 
 import (
 	"net"
+	"net/netip"
 	"strings"
 )
+
+// IsLoopback returns true if the given IP address is a local loopback address.
+func IsLoopback(ipStr string) bool {
+	host := StripPort(ipStr)
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	return addr.IsLoopback()
+}
 
 // StripPort removes the port part from a host string (e.g. "localhost:8080" -> "localhost").
 // It handles IPv6 addresses correctly, returning the bare address without brackets

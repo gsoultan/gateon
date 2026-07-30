@@ -90,7 +90,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 
 			if denied {
 
-				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 					Type:        "geoip_block",
 					SourceIP:    clientIP,
 					Score:       50,
@@ -101,7 +101,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 					Category:    "geofencing",
 					Severity:    "medium",
 					ActionTaken: "blocked",
-				})
+				}))
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.LogDebug("geoip: request denied by country",
 					"ip", clientIP,
@@ -111,7 +111,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 
 			if len(allowSet) > 0 && !allowed {
 
-				telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 					Type:        "geoip_block",
 					SourceIP:    clientIP,
 					Score:       50,
@@ -122,7 +122,7 @@ func GeoIP(cfg GeoIPConfig) (Middleware, error) {
 					Category:    "geofencing",
 					Severity:    "medium",
 					ActionTaken: "blocked",
-				})
+				}))
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.LogDebug("geoip: request not in allow list",
 					"ip", clientIP,
@@ -226,7 +226,7 @@ func GeoIPGlobalWithResolver(globalStore config.GlobalConfigStore, resolver func
 
 func recordGlobalBlock(r *http.Request, clientIP, country, reason string) {
 
-	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:        "geoip_block",
 		SourceIP:    clientIP,
 		Score:       50,
@@ -237,7 +237,7 @@ func recordGlobalBlock(r *http.Request, clientIP, country, reason string) {
 		Category:    "geofencing",
 		Severity:    "medium",
 		ActionTaken: "blocked",
-	})
+	}))
 	logger.L.LogDebug("global geoip: request blocked",
 		"ip", clientIP,
 		"country", country,

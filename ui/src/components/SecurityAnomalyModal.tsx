@@ -50,7 +50,6 @@ interface SecurityAnomalyModalProps {
 }
 
 export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose }: SecurityAnomalyModalProps) {
-  console.log("SecurityAnomalyModal render state:", { opened, hasInitial: !!initialAnomaly, initialId: initialAnomaly?.id });
   const { data: fullAnomaly } = useSecurityThreat(opened ? initialAnomaly?.id || null : null);
   const anomaly = fullAnomaly || initialAnomaly;
 
@@ -165,7 +164,14 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
               <Text size="xs" c="dimmed" fw={700} tt="uppercase">
                 Incident Type
               </Text>
-              <Title order={4}>{(anomaly.type || '').replace(/_/g, " ")}</Title>
+              <Group gap="xs">
+                <Title order={4}>{(anomaly.type || '').replace(/_/g, " ")}</Title>
+                {anomaly.category && (
+                  <Badge variant="light" color="gray" size="sm">
+                    {anomaly.category}
+                  </Badge>
+                )}
+              </Group>
             </Stack>
             <Badge size="lg" color={getSeverityColor(anomaly.severity)} variant="filled">
               {(anomaly.severity || 'unknown').toUpperCase()}

@@ -10,10 +10,10 @@ export function usePermissions() {
     const canWrite =
       role === "admin" || role === "operator";
     const canManageUsers = role === "admin";
-    const canEditGlobal = role === "admin";
+    const canEditGlobal = role === "admin" || role === "operator";
     const canImportConfig = canWrite;
     const canExportConfig = true; // all authenticated can export (read)
-    const canUploadCerts = role === "admin";
+    const canUploadCerts = role === "admin" || role === "operator";
     const isViewer = role === "viewer";
 
     return {

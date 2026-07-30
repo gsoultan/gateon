@@ -19,6 +19,7 @@ const (
 	cacheNameBehavior    = "behavior"
 	cacheNameScore       = "ip_score"
 	cacheNameUnmitigated = "unmitigated_threats"
+	cacheNameFpMitigated = "fp_mitigated"
 )
 
 // Environment variables that override the default in-memory cache capacities.
@@ -30,6 +31,7 @@ const (
 	envBehaviorCacheSize    = "GATEON_TELEMETRY_BEHAVIOR_CACHE_SIZE"
 	envScoreCacheSize       = "GATEON_TELEMETRY_SCORE_CACHE_SIZE"
 	envUnmitigatedCacheSize = "GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE"
+	envFpMitigatedCacheSize = "GATEON_TELEMETRY_FP_MITIGATED_CACHE_SIZE"
 )
 
 // Default cache capacities (total entries across all shards where sharded).
@@ -39,6 +41,7 @@ const (
 	defaultBehaviorCacheSize    = 10_000
 	defaultScoreCacheSize       = 10_000
 	defaultUnmitigatedCacheSize = 1_000
+	defaultFpMitigatedCacheSize = 10_000
 
 	// minCacheSize guards against pathological configuration that would make
 	// the cache useless (or, when sharded, round down to a zero-sized shard).
@@ -134,6 +137,9 @@ func sampleCacheOccupancy() {
 		}
 		if st.unmitigatedCache != nil {
 			TelemetryCacheEntries.WithLabelValues(cacheNameUnmitigated).Set(float64(st.unmitigatedCache.Len()))
+		}
+		if st.fpMitigationCache != nil {
+			TelemetryCacheEntries.WithLabelValues(cacheNameFpMitigated).Set(float64(st.fpMitigationCache.Len()))
 		}
 	}
 }
