@@ -16,7 +16,6 @@ before:
   hooks:
     - go mod download
     - buf generate
-    - go generate ./internal/ebpf/...
     - go generate ./internal/ui/...
     - go mod tidy
 
