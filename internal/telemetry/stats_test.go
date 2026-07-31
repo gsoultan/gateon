@@ -6,7 +6,7 @@ import (
 
 func TestPathStats(t *testing.T) {
 	// Reset stats for test
-	pathStatsMap = make(map[string]*pathStatsInternal)
+	ResetPathStats()
 
 	RecordPathRequest("example.com", "/api", 0.1, 100)
 	RecordPathRequest("example.com", "/api", 0.2, 150)
@@ -43,7 +43,7 @@ func TestPathStats(t *testing.T) {
 }
 
 func TestRecordPathRequest_ExcludesInternalAPIPaths(t *testing.T) {
-	pathStatsMap = make(map[string]*pathStatsInternal)
+	ResetPathStats()
 
 	internalPaths := []string{
 		"/v1/login",

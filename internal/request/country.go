@@ -25,6 +25,11 @@ func RegisterCountryResolver(r CountryResolver) {
 // GetCountry returns the client country from the request context,
 // or from CF-IPCountry header if present (and trusted), or "XX" (Unknown).
 func GetCountry(r *http.Request, trustCloudflare bool) string {
+	if rs := GetRequestState(r); rs != nil {
+		if rs.ClientCountry != "" {
+			return rs.ClientCountry
+		}
+	}
 	if country, ok := r.Context().Value(countryKey).(string); ok {
 		return country
 	}

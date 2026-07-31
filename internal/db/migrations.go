@@ -1350,4 +1350,18 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(51, "upgrade_waf_rule_ids", func(db *sql.DB, dialect Dialect) error {
+		// Update all 6-digit default rules to 7-digit range by adding '1' prefix
+		// This matches the new Seed logic and avoids CRS collisions.
+		var query string
+		if dialect.Driver == DriverMySQL {
+			query = "UPDATE waf_rules SET directive = REPLACE(directive, CONCAT('id:', id), CONCAT('id:1', id)), id = CONCAT('1', id) WHERE LENGTH(id) = 6 AND (id LIKE '9%' OR id LIKE '1%' OR id LIKE '2%')"
+		} else {
+			// SQLite and Postgres use ||
+			query = "UPDATE waf_rules SET directive = REPLACE(directive, 'id:' || id, 'id:1' || id), id = '1' || id WHERE LENGTH(id) = 6 AND (id LIKE '9%' OR id LIKE '1%' OR id LIKE '2%')"
+		}
+		_, err := db.Exec(query)
+		return err
+	})
 }

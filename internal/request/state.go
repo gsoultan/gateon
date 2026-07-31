@@ -24,7 +24,9 @@ type RequestState struct {
 	DebugInfo        *DebugInfo
 	RequestID        string
 	ForwardedProto   string
+	StrippedHost     string
 	ClientRemoteAddr string
+	ClientCountry    string
 	Fingerprint      any
 	JA4              string
 	JA4H             string
@@ -76,7 +78,9 @@ func (rs *RequestState) Reset() {
 	rs.DebugInfo = nil
 	rs.RequestID = ""
 	rs.ForwardedProto = ""
+	rs.StrippedHost = ""
 	rs.ClientRemoteAddr = ""
+	rs.ClientCountry = ""
 	rs.Fingerprint = nil
 	rs.JA4 = ""
 	rs.JA4H = ""

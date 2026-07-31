@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+
+	"github.com/gsoultan/gateon/internal/security/art"
 )
 
 func TestScheme(t *testing.T) {
@@ -55,7 +57,10 @@ func TestScheme(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			orig := trustedProxies
-			trustedProxies = tc.trusted
+			trustedProxies = art.NewTree()
+			for _, p := range tc.trusted {
+				_ = trustedProxies.InsertCIDR(p.String())
+			}
 			t.Cleanup(func() { trustedProxies = orig })
 
 			r := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)

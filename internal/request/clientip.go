@@ -104,6 +104,12 @@ func isTrustedProxy(remoteAddr string) bool {
 // leftmost XFF token is never trusted directly because it is the position a
 // client fully controls. Falls back to RemoteAddr.
 func GetClientIP(r *http.Request, trustCloudflare bool) string {
+	if rs := GetRequestState(r); rs != nil {
+		if rs.ClientRemoteAddr != "" {
+			return rs.ClientRemoteAddr
+		}
+	}
+
 	remoteAddr := r.RemoteAddr
 	host := httputil.StripPort(remoteAddr)
 	ip, err := netip.ParseAddr(host)
