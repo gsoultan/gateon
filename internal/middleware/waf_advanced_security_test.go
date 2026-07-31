@@ -115,11 +115,11 @@ func TestWAF_AdvancedSecurityRules(t *testing.T) {
 	}
 
 	t.Run("DLP Detection", func(t *testing.T) {
-		// DLP rule 130000 is disabled by default in Seed. Enable it for this test.
+		// DLP rule 1130000 is disabled by default in Seed. Enable it for this test.
 		err := store.UpdateRule(t.Context(), &waf.Rule{
-			ID:            "130000",
+			ID:            "1130000",
 			Name:          "DLP: Credit Card Number Detection",
-			Directive:     `SecRule RESPONSE_BODY "@rx \b4[0-9]{12}(?:[0-9]{3})?\b" "id:130000,phase:4,deny,status:403,msg:'Credit card number detected in response',tag:'dlp',tag:'compliance',severity:CRITICAL"`,
+			Directive:     `SecRule RESPONSE_BODY "@rx \b4[0-9]{12}(?:[0-9]{3})?\b" "id:1130000,phase:4,deny,status:403,msg:'Credit card number detected in response',tag:'dlp',tag:'compliance',severity:CRITICAL"`,
 			Enabled:       true,
 			ParanoiaLevel: 1,
 			Category:      "DLP",

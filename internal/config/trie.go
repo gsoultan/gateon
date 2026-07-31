@@ -1,8 +1,11 @@
 package config
 
 import (
-	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"cmp"
+	"slices"
 	"strings"
+
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // trieNode represents a single segment in the path trie.
@@ -10,6 +13,12 @@ type trieNode struct {
 	children map[string]*trieNode
 	exact    []*gateonv1.Route
 	prefix   []*gateonv1.Route
+
+	// Pre-calculated flattened lists for O(1) candidate retrieval.
+	// allPrefix stores all prefix routes from this node and its ancestors.
+	// allExact stores all routes in allPrefix plus the exact routes at this node.
+	allPrefix []*gateonv1.Route
+	allExact  []*gateonv1.Route
 }
 
 // PathTrie is a Radix-like tree optimized for HTTP path matching.
@@ -52,39 +61,75 @@ func (t *PathTrie) Insert(path string, isPrefix bool, rt *gateonv1.Route) {
 	}
 }
 
+// Flatten pre-calculates the allPrefix and allExact slices for all nodes.
+// It should be called once after all routes have been inserted.
+// It inherits prefixes from ancestors to avoid O(depth) lookup complexity.
+func (t *PathTrie) Flatten() {
+	flattenNode(t.root, nil)
+}
+
+func flattenNode(curr *trieNode, inheritedPrefixes []*gateonv1.Route) {
+	// allPrefix = inherited from parent + prefixes at this node
+	curr.allPrefix = make([]*gateonv1.Route, 0, len(inheritedPrefixes)+len(curr.prefix))
+	curr.allPrefix = append(curr.allPrefix, inheritedPrefixes...)
+	curr.allPrefix = append(curr.allPrefix, curr.prefix...)
+
+	// Sort by priority and specificity (longer rule = more specific)
+	sortRoutes(curr.allPrefix)
+
+	// allExact = allPrefix + exact routes at this node
+	curr.allExact = make([]*gateonv1.Route, 0, len(curr.allPrefix)+len(curr.exact))
+	curr.allExact = append(curr.allExact, curr.allPrefix...)
+	curr.allExact = append(curr.allExact, curr.exact...)
+	sortRoutes(curr.allExact)
+
+	for _, child := range curr.children {
+		flattenNode(child, curr.allPrefix)
+	}
+}
+
+func sortRoutes(routes []*gateonv1.Route) {
+	if len(routes) <= 1 {
+		return
+	}
+	// Note: In trie context, specificity (len(Rule)) is mostly handled by the trie depth,
+	// but we still include it for consistency with SelectRouteFromSlice.
+	slices.SortFunc(routes, func(a, b *gateonv1.Route) int {
+		if a.Priority != b.Priority {
+			return cmp.Compare(b.Priority, a.Priority)
+		}
+		if len(a.Rule) != len(b.Rule) {
+			return cmp.Compare(len(b.Rule), len(a.Rule))
+		}
+		return strings.Compare(a.Id, b.Id)
+	})
+}
+
 // Lookup returns all routes that could match the given path.
-// The results are not sorted; the caller should sort them by priority.
-// It returns routes that match as a prefix of the given path, or an exact match.
+// It returns a pre-sorted slice of candidates.
 func (t *PathTrie) Lookup(path string) []*gateonv1.Route {
 	path = strings.Trim(path, "/")
-	var candidates []*gateonv1.Route
 	curr := t.root
 
-	// Root matches (e.g. PathPrefix("/"))
-	candidates = append(candidates, curr.prefix...)
 	if path == "" {
-		candidates = append(candidates, curr.exact...)
-		return candidates
+		return curr.allExact
 	}
 
 	parts := strings.Split(path, "/")
-	for i, part := range parts {
+	lastNode := curr
+	for _, part := range parts {
 		if part == "" {
 			continue
 		}
 		next := curr.children[part]
 		if next == nil {
-			break
+			// We stop here; only prefix matches from this node and ancestors apply.
+			return curr.allPrefix
 		}
 		curr = next
-
-		// If this is the last part of the search path, it can be an exact match
-		if i == len(parts)-1 {
-			candidates = append(candidates, curr.exact...)
-		}
-		// Any node along the path can be a prefix match for the search path
-		candidates = append(candidates, curr.prefix...)
+		lastNode = curr
 	}
 
-	return candidates
+	// We matched the path exactly to a node.
+	return lastNode.allExact
 }

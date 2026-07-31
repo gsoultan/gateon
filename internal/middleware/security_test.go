@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,11 @@ func (w *telemetryMockWrapper) GetTopIPs(limit int) ([]telemetry.IPStat, error) 
 
 func TestWAF_Shunning(t *testing.T) {
 	// Initialize telemetry store for escalation logic
-	_ = telemetry.InitPathStatsStore("sqlite::memory:", 1)
+	dbPath := "gateon_shun_test.db"
+	_ = os.Remove(dbPath)
+	defer os.Remove(dbPath)
+
+	_ = telemetry.InitPathStatsStore(dbPath, 1)
 	defer telemetry.ClosePathStatsStore(context.Background())
 
 	mockEbpf := &mockEbpfManager{}
@@ -97,8 +102,9 @@ func TestWAF_Shunning(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		req := httptest.NewRequest("GET", "/?test=shunme", nil)
 		req.RemoteAddr = ip + ":1234"
-		// Set unique JA4 for each request to simulate different users
-		rs := &request.RequestState{JA4: "user-" + string(rune('0'+i))}
+		// Set unique JA4+ for each request to simulate different users
+		ja4plus := "user-" + string(rune('0'+i)) + "_ge11nn0200_90c635b248af"
+		rs := &request.RequestState{JA4Plus: ja4plus}
 		req = req.WithContext(context.WithValue(req.Context(), request.RequestStateContextKey{}, rs))
 
 		rr := httptest.NewRecorder()
@@ -108,6 +114,9 @@ func TestWAF_Shunning(t *testing.T) {
 			t.Errorf("request %d: expected 403, got %d", i, rr.Code)
 		}
 	}
+
+	// Wait for background worker to process threats and escalate to IP mitigation
+	time.Sleep(200 * time.Millisecond)
 
 	if mockEbpf.shunnedIP != ip {
 		t.Errorf("expected IP %s to be shunned after 3 attacks, got %q", ip, mockEbpf.shunnedIP)

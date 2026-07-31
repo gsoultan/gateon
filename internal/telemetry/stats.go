@@ -142,7 +142,7 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h, reqHeaders, respHeaders, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
+func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader, respHeader map[string][]string, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -161,8 +161,8 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	tr.RequestURI = requestURI
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
-	tr.RequestHeaders = reqHeaders
-	tr.ResponseHeaders = respHeaders
+	tr.rawReqHeader = CloneHeader(reqHeader)
+	tr.rawRespHeader = CloneHeader(respHeader)
 	if recommendation == "" {
 		recommendation = GetRecommendation(id)
 	}
@@ -175,7 +175,7 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	recordTraceToStore(tr)
 }
 
-func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h, reqHeaders, reqBody, respHeaders, respBody, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
+func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader map[string][]string, reqBody string, respHeader map[string][]string, respBody, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -194,9 +194,9 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 	tr.RequestURI = requestURI
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
-	tr.RequestHeaders = reqHeaders
+	tr.rawReqHeader = CloneHeader(reqHeader)
 	tr.RequestBody = reqBody
-	tr.ResponseHeaders = respHeaders
+	tr.rawRespHeader = CloneHeader(respHeader)
 	tr.ResponseBody = respBody
 	if recommendation == "" {
 		recommendation = GetRecommendation(id)
@@ -208,6 +208,16 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 	tr.MiddlewareDelay = middlewareDelay
 	tr.ServiceDelay = serviceDelay
 	recordTraceToStore(tr)
+}
+
+// ResetPathStats clears all in-memory path statistics. Primarily for testing.
+func ResetPathStats() {
+	for i := range pathStatsShards {
+		shard := pathShards[i]
+		shard.mu.Lock()
+		shard.m = make(map[string]*pathStatsInternal)
+		shard.mu.Unlock()
+	}
 }
 
 // getInMemoryPathStats returns aggregated path statistics from the in-memory map.

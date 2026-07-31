@@ -121,6 +121,12 @@ func (r *RouteRegistry) rebuildSortedLocked() {
 		}
 	}
 
+	// Flatten all tries for O(1) candidate lookup
+	for _, trie := range r.hostTries {
+		trie.Flatten()
+	}
+	r.wildcardTrie.Flatten()
+
 	// Also sort per-host slices
 	for _, items := range r.hostIndex {
 		slices.SortFunc(items, func(a, b *gateonv1.Route) int {

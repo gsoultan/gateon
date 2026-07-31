@@ -206,8 +206,12 @@ func GenerateJA4H(r *http.Request) string {
 	h := hashPool.Get().(hash.Hash)
 	h.Reset()
 
-	var localKeys [32]string
+	var localKeys [64]string
 	keys := localKeys[:0]
+	if headerCount > 64 {
+		keys = make([]string, 0, headerCount)
+	}
+
 	for k := range r.Header {
 		if k != "Cookie" && k != "Referer" {
 			keys = append(keys, k)
@@ -215,8 +219,8 @@ func GenerateJA4H(r *http.Request) string {
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		h.Write([]byte(k))
-		h.Write([]byte{','})
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte{','})
 	}
 	headerHashBytes := h.Sum(nil)
 	headerHash := hex.EncodeToString(headerHashBytes)[:12]

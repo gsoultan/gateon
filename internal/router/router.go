@@ -200,7 +200,13 @@ func (m Matcher) Match(r *http.Request) bool {
 }
 
 func (m Matcher) matchInner(r *http.Request) bool {
-	host := httputil.StripPort(r.Host)
+	host := ""
+	if rs := request.GetRequestState(r); rs != nil && rs.StrippedHost != "" {
+		host = rs.StrippedHost
+	} else {
+		host = httputil.StripPort(r.Host)
+	}
+
 	if m.host != "" {
 		match := HostMatches(m.host, host)
 		if m.hostNegated {
@@ -303,7 +309,12 @@ func HostMatches(rh string, qh string) bool {
 
 // SelectRoute finds the best matching route for the given request using a high-performance Radix Tree (PathTrie).
 func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
-	host := httputil.StripPort(r.Host)
+	host := ""
+	if rs := request.GetRequestState(r); rs != nil && rs.StrippedHost != "" {
+		host = rs.StrippedHost
+	} else {
+		host = httputil.StripPort(r.Host)
+	}
 
 	// 1. Try host-specific routes first (O(log N) lookup in Trie + small O(M) regex scan)
 	trie, regexes := store.GetTrieByHost(host)
@@ -329,17 +340,22 @@ func SelectRouteFromTrie(r *http.Request, trie *config.PathTrie, regexes []*gate
 	if trie != nil {
 		candidates = trie.Lookup(r.URL.Path)
 	}
-	if len(regexes) > 0 {
-		candidates = append(candidates, regexes...)
+
+	if len(regexes) == 0 {
+		return SelectRouteFromSlice(r, candidates)
 	}
 
 	if len(candidates) == 0 {
-		return nil
+		return SelectRouteFromSlice(r, regexes)
 	}
 
-	// If we have very few candidates (common case), sorting is negligible.
-	// For larger sets, it ensures we respect Priority and Rule Specificity.
-	slices.SortFunc(candidates, func(a, b *gateonv1.Route) int {
+	// If we have both, we must merge and sort them because regexes might have higher priority.
+	// We optimize for the common case where one of them is empty.
+	all := make([]*gateonv1.Route, 0, len(candidates)+len(regexes))
+	all = append(all, candidates...)
+	all = append(all, regexes...)
+
+	slices.SortFunc(all, func(a, b *gateonv1.Route) int {
 		if a.Priority != b.Priority {
 			return cmp.Compare(b.Priority, a.Priority)
 		}
@@ -349,7 +365,7 @@ func SelectRouteFromTrie(r *http.Request, trie *config.PathTrie, regexes []*gate
 		return strings.Compare(a.Id, b.Id)
 	})
 
-	return SelectRouteFromSlice(r, candidates)
+	return SelectRouteFromSlice(r, all)
 }
 
 // SelectRouteFromSlice finds the best matching route from a provided slice of routes.

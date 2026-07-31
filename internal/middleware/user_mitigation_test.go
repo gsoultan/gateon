@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/request"
@@ -12,16 +13,20 @@ import (
 
 func TestUserMitigationMiddleware(t *testing.T) {
 	// Initialize telemetry store
-	_ = telemetry.InitPathStatsStore("sqlite::memory:", 1)
+	dbPath := "gateon_mw_user_mit_test.db"
+	_ = os.Remove(dbPath)
+	defer os.Remove(dbPath)
+
+	_ = telemetry.InitPathStatsStore(dbPath, 1)
 	defer telemetry.ClosePathStatsStore(context.Background())
 
 	ja4_1 := "mitigated-ja4-1"
 	ja4_2 := "mitigated-ja4-2"
 	ja4h := "mitigated-ja4h"
 
-	telemetry.MarkUserMitigated(ja4_1, "", "JA4", "Test mitigation", "TestCategory")
-	telemetry.MarkUserMitigated(ja4_2, "", "JA4", "Test mitigation JA4", "TestCategory")
-	telemetry.MarkUserMitigated(ja4_2, ja4h, "JA4", "Test mitigation JA4+JA4H", "TestCategory")
+	telemetry.MarkUserMitigated(ja4_1, "JA4", "Test mitigation", "TestCategory")
+	telemetry.MarkUserMitigated(ja4_2, "JA4", "Test mitigation JA4", "TestCategory")
+	telemetry.MarkUserMitigated(ja4_2+"_"+ja4h, "JA4", "Test mitigation JA4+JA4H", "TestCategory")
 
 	mw := UserMitigation()
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +35,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Blocked JA4 1", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA4: ja4_1}
+		rs := &request.RequestState{JA4Plus: ja4_1}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -44,7 +49,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Blocked JA4 Global", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA4: ja4_2}
+		rs := &request.RequestState{JA4Plus: ja4_2}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -58,7 +63,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Blocked JA4+JA4H Composite", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA4: ja4_2, JA4H: ja4h}
+		rs := &request.RequestState{JA4Plus: ja4_2 + "_" + ja4h}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -86,10 +91,10 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Immediate Effect of Unmitigation", func(t *testing.T) {
 		// Unmitigate
-		telemetry.MarkUserUnmitigated(ja4_1, "")
+		telemetry.MarkUserUnmitigated(ja4_1)
 
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA4: ja4_1}
+		rs := &request.RequestState{JA4Plus: ja4_1}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -104,7 +109,11 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 func TestIPMitigationMiddleware(t *testing.T) {
 	// Initialize telemetry store
-	_ = telemetry.InitPathStatsStore("sqlite::memory:", 1)
+	dbPath := "gateon_mw_ip_mit_test.db"
+	_ = os.Remove(dbPath)
+	defer os.Remove(dbPath)
+
+	_ = telemetry.InitPathStatsStore(dbPath, 1)
 	defer telemetry.ClosePathStatsStore(context.Background())
 
 	ip := "1.2.3.4"

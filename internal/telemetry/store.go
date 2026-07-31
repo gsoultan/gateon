@@ -121,6 +121,20 @@ func ParseHeaders(s string) map[string]string {
 	return m
 }
 
+// CloneHeader performs a deep clone of http.Header.
+func CloneHeader(h map[string][]string) map[string][]string {
+	if h == nil {
+		return nil
+	}
+	h2 := make(map[string][]string, len(h))
+	for k, v := range h {
+		v2 := make([]string, len(v))
+		copy(v2, v)
+		h2[k] = v2
+	}
+	return h2
+}
+
 // FormatHeaders formats multiple http.Headers into a single string.
 // Optimized to minimize allocations using a pooled builder.
 func FormatHeaders(h map[string][]string, trailers ...map[string][]string) string {
@@ -324,6 +338,9 @@ type TraceRecord struct {
 	RouteDelay      float64 `json:"route_delay_ms"`
 	MiddlewareDelay float64 `json:"middleware_delay_ms"`
 	ServiceDelay    float64 `json:"service_delay_ms"`
+	// Internal fields for lazy formatting in background worker
+	rawReqHeader  map[string][]string
+	rawRespHeader map[string][]string
 }
 
 type SecurityThreat struct {
@@ -358,6 +375,9 @@ type SecurityThreat struct {
 	Recommendation  string    `json:"recommendation"`
 	TriggeredRules  string    `json:"triggered_rules"`
 	Reputation      float64   `json:"reputation"`
+	// Internal fields for lazy formatting in background worker
+	rawReqHeader  map[string][]string
+	rawRespHeader map[string][]string
 }
 
 type UserMitigation struct {
@@ -509,20 +529,23 @@ func initStore(databaseURL string, retentionDays int) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	// Set global store AFTER migrations are complete to ensure any
+	// background activity (triggered by loops) uses a fully migrated DB.
+	store = st
+
 	// Migration: Move existing traces from SQL to Pebble if table exists.
 	// Skipped when the trace store is disabled by the resource profile.
 	if st.traceStoreEnabled {
-		go st.migrateTracesToPebble()
+		st.wg.Go(st.migrateTracesToPebble)
 	}
 
 	// Restore volatile security counters from persisted history so the
 	// dashboard reflects past activity instead of resetting to 0 on restart.
-	go st.restoreWAFBlockCounter()
+	st.wg.Go(st.restoreWAFBlockCounter)
 
 	st.wg.Go(st.loop)
 	st.wg.Go(st.dailyResetLoop)
 
-	store = st
 	return nil
 }
 
@@ -930,12 +953,13 @@ func (s *pathStatsStore) reclaimSQLDisk(ctx context.Context) {
 // ClosePathStatsStore stops background processing and closes the database.
 func ClosePathStatsStore(ctx context.Context) error {
 	storeMu.Lock()
-	defer storeMu.Unlock()
 	s := store
 	if s == nil {
+		storeMu.Unlock()
 		return nil
 	}
 	store = nil
+	storeMu.Unlock()
 
 	if !s.stopped.Swap(true) {
 		close(s.stopCh)
@@ -1026,6 +1050,16 @@ func recordTraceToStore(tr *TraceRecord) {
 }
 
 func (s *pathStatsStore) processTrace(tr *TraceRecord) {
+	// Format headers lazily in the background
+	if tr.rawReqHeader != nil {
+		tr.RequestHeaders = FormatHeaders(tr.rawReqHeader)
+		tr.rawReqHeader = nil // Release map for GC
+	}
+	if tr.rawRespHeader != nil {
+		tr.ResponseHeaders = FormatHeaders(tr.rawRespHeader)
+		tr.rawRespHeader = nil // Release map for GC
+	}
+
 	// Redact sensitive headers in the background
 	tr.RequestHeaders = RedactHeaders(tr.RequestHeaders)
 	tr.ResponseHeaders = RedactHeaders(tr.ResponseHeaders)
@@ -1045,7 +1079,14 @@ func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThre
 		}
 	}
 	if t.JA4 == "" {
-		t.JA4 = r.Header.Get("X-JA4-Fingerprint")
+		ja4 := r.Header.Get("X-JA4-Fingerprint")
+		if ja4 == "" {
+			// Try to get from context if request state is missing (unlikely in entrypoint but possible in tests)
+			if ja4Val, ok := r.Context().Value(fingerprintCtxKey).(*ClientFingerprint); ok {
+				ja4 = ja4Val.Hash
+			}
+		}
+		t.JA4 = ja4
 	}
 	if t.JA4H == "" {
 		t.JA4H = GetCachedJA4H(r)
@@ -1053,6 +1094,11 @@ func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThre
 	if t.Fingerprint == "" {
 		t.Fingerprint = t.JA4 + "_" + t.JA4H
 	}
+
+	// Capture raw headers for lazy formatting
+	t.rawReqHeader = CloneHeader(r.Header)
+	// Response headers are usually empty during threat recording (blocked early)
+	// but we capture if present.
 	return t
 }
 
@@ -1090,6 +1136,16 @@ func RecordSecurityThreat(t SecurityThreat) {
 }
 
 func (s *pathStatsStore) processThreat(st *SecurityThreat) {
+	// Format headers lazily in the background
+	if st.rawReqHeader != nil {
+		st.RequestHeaders = FormatHeaders(st.rawReqHeader)
+		st.rawReqHeader = nil // Release for GC
+	}
+	if st.rawRespHeader != nil {
+		st.ResponseHeaders = FormatHeaders(st.rawRespHeader)
+		st.rawRespHeader = nil // Release for GC
+	}
+
 	// Redact sensitive data before persistence and broadcasting
 	st.RequestHeaders = RedactHeaders(st.RequestHeaders)
 	st.ResponseHeaders = RedactHeaders(st.ResponseHeaders)
@@ -1273,11 +1329,11 @@ func IsIPMitigated(ip string) bool {
 	var status string
 	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
 	err := s.db.QueryRow(query, ip).Scan(&status)
-	if err != nil {
-		return false
+	mitigated := false
+	if err == nil && status == "mitigated" {
+		mitigated = true
 	}
 
-	mitigated := status == "mitigated"
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, !mitigated)
 	}
@@ -1407,8 +1463,8 @@ func IsUserMitigated(ja4plus string) bool {
 	}
 
 	if s.userMitigationCache != nil {
-		if val, ok := s.userMitigationCache.Get(ja4plus); ok && val.(bool) {
-			return true
+		if val, ok := s.userMitigationCache.Get(ja4plus); ok {
+			return val.(bool)
 		}
 	}
 
@@ -1416,14 +1472,15 @@ func IsUserMitigated(ja4plus string) bool {
 	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'mitigated' AND fingerprint = ?")
 	var status string
 	err := s.db.QueryRow(query, ja4plus).Scan(&status)
+	mitigated := false
 	if err == nil && status == "mitigated" {
-		if s.userMitigationCache != nil {
-			s.userMitigationCache.Add(ja4plus, true)
-		}
-		return true
+		mitigated = true
 	}
 
-	return false
+	if s.userMitigationCache != nil {
+		s.userMitigationCache.Add(ja4plus, mitigated)
+	}
+	return mitigated
 }
 
 // GetUserMitigations returns a list of currently mitigated users/fingerprints.

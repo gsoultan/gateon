@@ -2,9 +2,10 @@ package request
 
 import (
 	"net/http"
-	"net/netip"
 	"os"
 	"testing"
+
+	"github.com/gsoultan/gateon/internal/security/art"
 )
 
 // withTrustedProxies temporarily sets the package-level trustedProxies set for
@@ -13,13 +14,9 @@ func withTrustedProxies(t *testing.T, cidrs ...string) {
 	t.Helper()
 	prev := trustedProxies
 	t.Cleanup(func() { trustedProxies = prev })
-	trustedProxies = nil
+	trustedProxies = art.NewTree()
 	for _, c := range cidrs {
-		p, err := netip.ParsePrefix(c)
-		if err != nil {
-			t.Fatalf("bad test CIDR %q: %v", c, err)
-		}
-		trustedProxies = append(trustedProxies, p)
+		_ = trustedProxies.InsertCIDR(c)
 	}
 }
 

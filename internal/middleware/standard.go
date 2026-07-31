@@ -128,10 +128,21 @@ func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
 			w.Header().Set("X-Request-ID", id)
 			rs.RequestID = id
 
-			// 3. Resolve Real IP and Proto (Consolidated logic)
+			// 3. Resolve Real IP, Country and Proto (Consolidated logic)
 			trustCloudflare := config.EffectiveTrustCloudflare()
 
-			// Fingerprints and Real IP resolution
+			// Resolve Real IP once and cache it in RequestState
+			clientIP := request.GetClientIP(r, trustCloudflare)
+			rs.ClientRemoteAddr = clientIP
+
+			// Resolve Host once and cache it in RequestState
+			rs.StrippedHost = httputil.StripPort(r.Host)
+
+			// Resolve Country once and cache it in RequestState
+			country := request.GetCountry(r, trustCloudflare)
+			rs.ClientCountry = country
+
+			// Fingerprints
 			populateFingerprints(r, rs)
 
 			// Add RequestState to context so downstream can use it
@@ -162,6 +173,13 @@ func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
 			defer RequestStatePool.Put(rs)
 
 			populateFingerprints(r, rs)
+
+			// Resolve Real IP and Country once and cache it in RequestState
+			trustCloudflare := config.EffectiveTrustCloudflare()
+			rs.ClientRemoteAddr = request.GetClientIP(r, trustCloudflare)
+			rs.StrippedHost = httputil.StripPort(r.Host)
+			rs.ClientCountry = request.GetCountry(r, trustCloudflare)
+
 			ctx := context.WithValue(r.Context(), RequestStateContextKey, rs)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -444,9 +462,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						origHost+r.URL.RequestURI(),
 						rs.JA4,
 						rs.JA4H,
-						debug.RequestHeaders,
+						r.Header,
 						debug.RequestBody,
-						debug.ResponseHeaders,
+						sw.Header(),
 						debug.ResponseBody,
 						recommendation,
 						reputation,
@@ -456,9 +474,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						serviceDelay,
 					)
 				} else {
-					reqHeaders := telemetry.FormatHeaders(r.Header, r.Trailer)
-					respHeaders := telemetry.FormatHeaders(sw.Header())
-
 					telemetry.RecordTrace(
 						id,
 						method+" "+origPath,
@@ -477,8 +492,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						origHost+r.URL.RequestURI(),
 						rs.JA4,
 						rs.JA4H,
-						reqHeaders,
-						respHeaders,
+						r.Header,
+						sw.Header(),
 						recommendation,
 						reputation,
 						entrypointDelay,

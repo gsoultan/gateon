@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/security/waf"
@@ -128,6 +130,14 @@ func TestWAF_SecurityV2(t *testing.T) {
 }
 
 func TestRecognitionMiddlewares(t *testing.T) {
+	// Initialize telemetry store
+	dbPath := "gateon_recognition_test.db"
+	_ = os.Remove(dbPath)
+	defer os.Remove(dbPath)
+
+	_ = telemetry.InitPathStatsStore(dbPath, 1)
+	defer telemetry.ClosePathStatsStore(t.Context())
+
 	var capturedThreats []telemetry.SecurityThreat
 	telemetry.SetAlertingHandler(func(th *telemetry.SecurityThreat) {
 		capturedThreats = append(capturedThreats, *th)
@@ -193,6 +203,10 @@ func TestRecognitionMiddlewares(t *testing.T) {
 			}
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
+
+			// Wait for background worker to process threat and call alerting handler.
+			// Since threat recording is asynchronous, we need to allow some time.
+			time.Sleep(500 * time.Millisecond)
 
 			if len(capturedThreats) == 0 {
 				t.Errorf("%s: expected threat to be captured, but none found", tc.name)

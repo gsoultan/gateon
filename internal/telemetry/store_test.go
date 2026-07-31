@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,8 +29,8 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 	traceID := "test-trace-1"
 
 	// Record the same trace twice
-	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "", `{"User-Agent":"Go-http-client/1.1"}`, `{"Content-Type":"text/plain"}`, "", 100, 0, 0, 0, 0)
-	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "", `{"User-Agent":"Go-http-client/1.1"}`, `{"Content-Type":"text/plain"}`, "", 100, 0, 0, 0, 0)
+	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "", nil, nil, "", 100, 0, 0, 0, 0)
+	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "", nil, nil, "", 100, 0, 0, 0, 0)
 
 	// Flush is triggered every 1s or when batch is full (1024)
 	time.Sleep(1500 * time.Millisecond)
@@ -55,8 +56,12 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 }
 
 func TestSecurityTelemetryUpdates(t *testing.T) {
-	// Initialize store if not already done (minimal)
-	_ = InitPathStatsStore("sqlite::memory:", 1)
+	// Initialize store with a file for stability in tests
+	dbPath := "gateon_telemetry_test.db"
+	_ = os.Remove(dbPath)
+	defer os.Remove(dbPath)
+
+	_ = InitPathStatsStore(dbPath, 1)
 	defer func() {
 		_ = ClosePathStatsStore(context.Background())
 	}()
@@ -75,6 +80,9 @@ func TestSecurityTelemetryUpdates(t *testing.T) {
 		ActionTaken: "blocked",
 	}
 	RecordSecurityThreat(threat)
+
+	// Wait for background worker to process threat and update global structures
+	time.Sleep(200 * time.Millisecond)
 
 	// Verify GlobalCMS was updated with "global"
 	score := GlobalCMS.Estimate("global")

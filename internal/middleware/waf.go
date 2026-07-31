@@ -133,7 +133,7 @@ func (c WAFConfig) Fingerprint() string {
 // REQUEST-920-PROTOCOL-ENFORCEMENT (whose rules read those values / are removed
 // here). All directives are phase:1 and run in load order, so they take effect
 // before 920 evaluates and before phase:2 body processing. Ids sit in the
-// reserved user range (900200+) and do not collide with the 9000xx setup actions.
+// reserved range (99xxx) and do not collide with the CRS setup actions.
 //
 // Two gRPC incompatibilities are addressed:
 //  1. 920420 ("content type not allowed"): gRPC content types are absent from the
@@ -379,7 +379,7 @@ func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanat
 		for _, mr := range matchedRules {
 			id := mr.Rule().ID()
 			// Skip internal/setup/reporting rules to avoid noise
-			if id == 949110 || (id >= 900000 && id <= 901999) || (id >= 949000 && id <= 949999) || (id >= 980000 && id <= 980999) {
+			if id == 949110 || (id >= 900000 && id <= 901999) || (id >= 1900000 && id <= 1901999) || (id >= 99000 && id <= 99999) || (id >= 949000 && id <= 949999) || (id >= 980000 && id <= 980999) {
 				continue
 			}
 
@@ -902,26 +902,26 @@ func createWAFInstance(cfg WAFConfig) (coraza.WAF, error) {
 		if threshold <= 0 {
 			threshold = 5
 		}
-		_, _ = fmt.Fprintf(&sb, `SecAction "id:900000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
+		_, _ = fmt.Fprintf(&sb, `SecAction "id:99000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
 SecWebAppId gateon
-SecAction "id:900002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
+SecAction "id:99002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
 Include @crs-setup.conf.example
 `, pl)
 
 		// Basic enforcement and common rules
 		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
 		// Override defaults from CRS initialization with our configured thresholds
-		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900099,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d\"\n", threshold, threshold)
+		_, _ = fmt.Fprintf(&sb, "SecAction \"id:99099,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d\"\n", threshold, threshold)
 
 		// Inject dynamic variables for rules (must be before loading database rules that use them)
 		allowedIps := "127.0.0.1"
 		if len(cfg.AllowedAdminIps) > 0 {
 			allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
 		}
-		_, _ = fmt.Fprintf(&sb, "SecAction \"id:900005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
+		_, _ = fmt.Fprintf(&sb, "SecAction \"id:99005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
 
 		if cfg.GRPCMode {
-			sb.WriteString("SecAction \"id:900006,phase:1,nolog,pass,setvar:tx.grpc_mode=1\"\n")
+			sb.WriteString("SecAction \"id:99006,phase:1,nolog,pass,setvar:tx.grpc_mode=1\"\n")
 		}
 
 		// Load dynamic rules from database
@@ -936,7 +936,7 @@ Include @crs-setup.conf.example
 		}
 
 		if cfg.EnableIPReputation {
-			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-Ip-Reputation-Block \"@eq 1\" \"id:200001,phase:1,pass,log,msg:'IP Reputation hit',tag:'reputation',severity:CRITICAL,setvar:tx.anomaly_score=+5,setvar:tx.inbound_anomaly_score=+5\"\n")
+			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-Ip-Reputation-Block \"@eq 1\" \"id:99201,phase:1,pass,log,msg:'IP Reputation hit',tag:'reputation',severity:CRITICAL,setvar:tx.anomaly_score=+5,setvar:tx.inbound_anomaly_score=+5\"\n")
 		}
 
 		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
@@ -977,11 +977,11 @@ Include @crs-setup.conf.example
 		sb.WriteString("SecRuleUpdateActionById 949110 \"deny,status:403\"\n")
 		// Manually add evaluation rules to ensure blocking if anomaly score is exceeded.
 		// We check both ANOMALY_SCORE and inbound_anomaly_score just in case.
-		sb.WriteString("SecRule TX:ANOMALY_SCORE \"@ge %{tx.inbound_anomaly_score_threshold}\" \"id:1949110,phase:2,deny,status:403,msg:'Inbound Anomaly Score Exceeded (Score: %{TX.ANOMALY_SCORE})',tag:'anomaly-evaluation'\"\n")
-		sb.WriteString("SecRule TX:inbound_anomaly_score \"@ge %{tx.inbound_anomaly_score_threshold}\" \"id:1949111,phase:2,deny,status:403,msg:'Inbound Anomaly Score Exceeded (Score: %{TX.inbound_anomaly_score})',tag:'anomaly-evaluation'\"\n")
+		sb.WriteString("SecRule TX:ANOMALY_SCORE \"@ge %{tx.inbound_anomaly_score_threshold}\" \"id:99491,phase:2,deny,status:403,msg:'Inbound Anomaly Score Exceeded (Score: %{TX.ANOMALY_SCORE})',tag:'anomaly-evaluation'\"\n")
+		sb.WriteString("SecRule TX:inbound_anomaly_score \"@ge %{tx.inbound_anomaly_score_threshold}\" \"id:99492,phase:2,deny,status:403,msg:'Inbound Anomaly Score Exceeded (Score: %{TX.inbound_anomaly_score})',tag:'anomaly-evaluation'\"\n")
 		// Ensure immediate interruption for any high-severity attack regardless of score
-		sb.WriteString("SecRule TX:sql_injection_score \"@ge 5\" \"id:1949112,phase:2,deny,status:403,msg:'SQL Injection Detected',tag:'attack-sqli'\"\n")
-		sb.WriteString("SecRule TX:xss_score \"@ge 5\" \"id:1949113,phase:2,deny,status:403,msg:'XSS Detected',tag:'attack-xss'\"\n")
+		sb.WriteString("SecRule TX:sql_injection_score \"@ge 5\" \"id:99493,phase:2,deny,status:403,msg:'SQL Injection Detected',tag:'attack-sqli'\"\n")
+		sb.WriteString("SecRule TX:xss_score \"@ge 5\" \"id:99494,phase:2,deny,status:403,msg:'XSS Detected',tag:'attack-xss'\"\n")
 
 		if cfg.EnableResponseInspection {
 			if cfg.EnableDLP {
@@ -1145,9 +1145,9 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 
 	rules := ""
 	if typeStr == "fast_path_signature" {
-		rules = "[900001]"
+		rules = "[1900001]"
 	} else if typeStr == "fast_path_malformed_token" {
-		rules = "[900002]"
+		rules = "[1990002]"
 	}
 
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
