@@ -280,6 +280,19 @@ type increment struct {
 	isDomain   bool
 }
 
+type behaviorInc struct {
+	fingerprint string
+	path        string
+	status      int
+	time        time.Time
+	sourceIP    string
+	userAgent   string
+	ja4         string
+	ja4h        string
+	ja4plus     string
+	host        string
+}
+
 type RequestTrace = TraceRecord
 
 type TraceRecord struct {
@@ -297,7 +310,6 @@ type TraceRecord struct {
 	Method          string    `json:"method"`
 	Referer         string    `json:"referer"`
 	RequestURI      string    `json:"request_uri"`
-	JA3             string    `json:"ja3"`
 	RequestHeaders  string    `json:"request_headers"`
 	RequestBody     string    `json:"request_body"`
 	ResponseHeaders string    `json:"response_headers"`
@@ -322,7 +334,6 @@ type SecurityThreat struct {
 	Score           float64   `json:"score"`
 	Details         string    `json:"details"`
 	Time            time.Time `json:"timestamp,omitzero"`
-	JA3             string    `json:"ja3"`
 	JA4             string    `json:"ja4"`
 	JA4H            string    `json:"ja4h"`
 	RouteID         string    `json:"route_id"`
@@ -383,6 +394,7 @@ type pathStatsStore struct {
 	inCh                        chan increment
 	traceInCh                   chan *TraceRecord
 	threatInCh                  chan *SecurityThreat
+	behaviorInCh                chan *behaviorInc
 	stopCh                      chan struct{}
 	stopped                     atomic.Bool
 	wg                          syncutil.WaitGroup
@@ -475,6 +487,7 @@ func initStore(databaseURL string, retentionDays int) error {
 		inCh:              make(chan increment, 4096),
 		traceInCh:         make(chan *TraceRecord, 4096),
 		threatInCh:        make(chan *SecurityThreat, 1024),
+		behaviorInCh:      make(chan *behaviorInc, 2048),
 		stopCh:            make(chan struct{}),
 		traceStoreEnabled: td.TraceStoreEnabled,
 	}
@@ -527,7 +540,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 
 	logger.Default().LogInfo("telemetry: migrating existing traces to Pebble", "count", count)
 
-	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja3, ''), COALESCE(ja4, ''), COALESCE(ja4h, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(route_id, ''), COALESCE(recommendation, ''), reputation, entrypoint_delay_ms, route_delay_ms, middleware_delay_ms, service_delay_ms FROM traces")
+	rows, err := s.db.Query("SELECT id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, COALESCE(user_agent, ''), COALESCE(method, ''), COALESCE(referer, ''), COALESCE(request_uri, ''), COALESCE(ja4, ''), COALESCE(ja4h, ''), COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(route_id, ''), COALESCE(recommendation, ''), reputation, entrypoint_delay_ms, route_delay_ms, middleware_delay_ms, service_delay_ms FROM traces")
 	if err != nil {
 		return
 	}
@@ -537,7 +550,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 	n := 0
 	for rows.Next() {
 		var tr TraceRecord
-		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA3, &tr.JA4, &tr.JA4H, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID, &tr.Recommendation, &tr.Reputation, &tr.EntrypointDelay, &tr.RouteDelay, &tr.MiddlewareDelay, &tr.ServiceDelay); err != nil {
+		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA4, &tr.JA4H, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID, &tr.Recommendation, &tr.Reputation, &tr.EntrypointDelay, &tr.RouteDelay, &tr.MiddlewareDelay, &tr.ServiceDelay); err != nil {
 			continue
 		}
 
@@ -674,7 +687,7 @@ func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -755,7 +768,7 @@ func (s *pathStatsStore) loop() {
 			} else {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA3, th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation); err != nil {
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation); err != nil {
 							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
@@ -781,15 +794,19 @@ func (s *pathStatsStore) loop() {
 				flush()
 			}
 		case tr := <-s.traceInCh:
+			s.processTrace(tr)
 			traceBatch = append(traceBatch, tr)
 			if len(traceBatch) >= cap(traceBatch) {
 				flush()
 			}
 		case th := <-s.threatInCh:
+			s.processThreat(th)
 			threatBatch = append(threatBatch, th)
 			if len(threatBatch) >= cap(threatBatch) {
 				flush()
 			}
+		case b := <-s.behaviorInCh:
+			TrackBehaviorInternal(b)
 		case <-flushTicker.C:
 			flush()
 		case <-pruneTicker.C:
@@ -999,10 +1016,6 @@ func recordTraceToStore(tr *TraceRecord) {
 		return
 	}
 
-	// Redact sensitive headers before enqueuing
-	tr.RequestHeaders = RedactHeaders(tr.RequestHeaders)
-	tr.ResponseHeaders = RedactHeaders(tr.ResponseHeaders)
-
 	select {
 	case s.traceInCh <- tr:
 	default:
@@ -1012,30 +1025,33 @@ func recordTraceToStore(tr *TraceRecord) {
 	}
 }
 
+func (s *pathStatsStore) processTrace(tr *TraceRecord) {
+	// Redact sensitive headers in the background
+	tr.RequestHeaders = RedactHeaders(tr.RequestHeaders)
+	tr.ResponseHeaders = RedactHeaders(tr.ResponseHeaders)
+}
+
 // RecordSecurityThreatWithJA4 is a helper that populates JA4 and JA4H from the request before recording.
 func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThreat {
 	if rs := request.GetRequestState(r); rs != nil {
 		if t.JA4 == "" {
 			t.JA4 = rs.JA4
 		}
-		if t.JA3 == "" {
-			t.JA3 = rs.JA3
-		}
 		if t.JA4H == "" {
 			t.JA4H = rs.JA4H
 		}
 		if t.Fingerprint == "" {
-			t.Fingerprint = cmp.Or(rs.JA4, rs.JA3)
+			t.Fingerprint = rs.JA4Plus
 		}
 	}
 	if t.JA4 == "" {
-		t.JA4 = GetCachedJA4H(r)
+		t.JA4 = r.Header.Get("X-JA4-Fingerprint")
 	}
 	if t.JA4H == "" {
 		t.JA4H = GetCachedJA4H(r)
 	}
 	if t.Fingerprint == "" {
-		t.Fingerprint = GetFingerprintHash(r)
+		t.Fingerprint = t.JA4 + "_" + t.JA4H
 	}
 	return t
 }
@@ -1057,6 +1073,23 @@ func RecordSecurityThreat(t SecurityThreat) {
 		st.Time = time.Now()
 	}
 
+	s := getStore()
+	if s == nil {
+		st.Reset()
+		threatPool.Put(st)
+		return
+	}
+
+	select {
+	case s.threatInCh <- st:
+	default:
+		// drop on backpressure
+		st.Reset()
+		threatPool.Put(st)
+	}
+}
+
+func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// Redact sensitive data before persistence and broadcasting
 	st.RequestHeaders = RedactHeaders(st.RequestHeaders)
 	st.ResponseHeaders = RedactHeaders(st.ResponseHeaders)
@@ -1069,22 +1102,11 @@ func RecordSecurityThreat(t SecurityThreat) {
 	st.Mitigated = st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
 	if st.Mitigated || st.Category == "reputation" || st.Score >= 80 {
 		// Automatically mitigate fingerprints to ensure immediate blocking of the same actor.
-		// For reputation hits, we mitigate even if the first request was not blocked
-		// to ensure we track and block this specific fingerprint across IPs.
-		if st.JA3 != "" {
-			MarkUserMitigated(st.JA3, "", "JA3", st.Details, st.Category)
-		}
-		if st.JA4 != "" {
-			// Use composite key (JA4 + JA4H) for more precise blocking, especially on mobile/IoT.
-			MarkUserMitigated(st.JA4, st.JA4H, "JA4", st.Details, st.Category)
-		}
-		// If both are empty but we have a generic fingerprint, use it
-		if st.JA3 == "" && st.JA4 == "" && st.Fingerprint != "" {
-			MarkUserMitigated(st.Fingerprint, "", "FINGERPRINT", st.Details, st.Category)
+		if st.Fingerprint != "" {
+			MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
 		}
 
 		// Escalation to IP Mitigation: 3-User Threshold
-		// If an IP is found to be hosting multiple malicious users (fingerprints), block the IP itself.
 		if st.SourceIP != "" && st.Fingerprint != "" {
 			ipMaliciousMu.Lock()
 			val, _ := ipMaliciousFingerprints.Get(st.SourceIP)
@@ -1113,17 +1135,16 @@ func RecordSecurityThreat(t SecurityThreat) {
 		st.ASN = ResolveASN(st.SourceIP)
 	}
 
-	// Log to audit trail before potentially returning to pool or enqueuing
+	// Log to audit trail
 	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
 
-	// Alerting and Broadcasting should work even without a persistent store (e.g. in tests)
+	// Alerting and Broadcasting
 	alertMu.RLock()
 	h := onThreatAlert
 	alertMu.RUnlock()
 	if h != nil {
 		h(st)
 	}
-
 	ThreatBroadcaster.Broadcast(*st)
 
 	// funnel increments: map category/type to specific funnel counters
@@ -1134,7 +1155,7 @@ func RecordSecurityThreat(t SecurityThreat) {
 		typ := strings.ToLower(st.Type)
 
 		switch {
-		case cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation" || strings.HasPrefix(typ, "fast_path_"):
+		case cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation":
 			ruleID := "unknown"
 			if st.TriggeredRules != "" {
 				ruleID = st.TriggeredRules
@@ -1142,39 +1163,28 @@ func RecordSecurityThreat(t SecurityThreat) {
 				ruleID = typ
 			}
 			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, ruleID).Inc()
-
+		case strings.HasPrefix(typ, "fast_path_"):
+			checkType := strings.TrimPrefix(typ, "fast_path_")
+			MiddlewareFastPathBlockedTotal.WithLabelValues(routeID, checkType).Inc()
 		case typ == "rate_limit" || cat == "abuse":
 			MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "behavioral").Inc()
-
 		case cat == "deception" || typ == "honeypot_triggered" || typ == "honeypot_hit":
 			trap := "unknown"
 			if st.RequestURI != "" {
 				trap = st.RequestURI
 			}
 			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, trap).Inc()
-
-		case typ == "reputation_hit" || typ == "advanced_security" || cat == "advanced":
+		case typ == "reputation_hit" || typ == "advanced_security" || cat == "advanced" || cat == "threat_intel" || typ == "ip_mitigation" || typ == "user_mitigation":
 			MiddlewareAdvancedSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
-
 		case cat == "geoip" || cat == "geofencing":
 			MiddlewareGeoIPBlockedTotal.WithLabelValues(routeID, st.CountryCode).Inc()
-
 		case cat == "auth" || typ == "brute_force_attempt":
 			MiddlewareAuthFailuresTotal.WithLabelValues(routeID, typ).Inc()
-
 		case cat == "bot":
 			MiddlewareBotManagementTotal.WithLabelValues(routeID, "blocked").Inc()
-
 		case cat == "filesecurity" || cat == "malware":
 			MiddlewareFileSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
 		}
-	}
-
-	s := getStore()
-	if s == nil {
-		st.Reset()
-		threatPool.Put(st)
-		return
 	}
 
 	if s.scoreCache != nil {
@@ -1203,22 +1213,10 @@ func RecordSecurityThreat(t SecurityThreat) {
 	// Legacy global counters (per category/severity)
 	if isMitigated {
 		MitigatedThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium"), cmp.Or(st.ActionTaken, "blocked")).Inc()
-		if s != nil {
-			s.currentMitigatedToday.Add(1)
-		}
+		s.currentMitigatedToday.Add(1)
 	} else {
 		ActiveThreatsTotal.WithLabelValues(cmp.Or(st.Category, "general"), cmp.Or(st.Severity, "medium")).Inc()
-		if s != nil {
-			s.currentActiveToday.Add(1)
-		}
-	}
-
-	select {
-	case s.threatInCh <- st:
-	default:
-		// drop on backpressure
-		st.Reset()
-		threatPool.Put(st)
+		s.currentActiveToday.Add(1)
 	}
 }
 
@@ -1401,67 +1399,31 @@ func GetIPMitigations(ctx context.Context, limit, offset int) ([]IPMitigation, i
 	return res, total
 }
 
-// IsUserMitigated returns true if either the JA3, JA4 or composite JA4+JA4H fingerprint is currently marked as mitigated.
-func IsUserMitigated(ja3, ja4, ja4h string) bool {
+// IsUserMitigated returns true if the JA4+ fingerprint is currently marked as mitigated.
+func IsUserMitigated(ja4plus string) bool {
 	s := getStore()
-	if s == nil {
+	if s == nil || ja4plus == "" {
 		return false
 	}
 
-	// 1. Check JA3 (if available)
-	if ja3 != "" && s.userMitigationCache != nil {
-		if val, ok := s.userMitigationCache.Get(ja3); ok && val.(bool) {
-			return true
-		}
-	}
-
-	// 2. Check JA4+JA4H Composite (if available) - Most specific
-	if ja4 != "" && ja4h != "" && s.userMitigationCache != nil {
-		combo := ja4 + ":" + ja4h
-		if val, ok := s.userMitigationCache.Get(combo); ok && val.(bool) {
-			return true
-		}
-	}
-
-	// 3. Check JA4 Global (if available)
-	if ja4 != "" && s.userMitigationCache != nil {
-		if val, ok := s.userMitigationCache.Get(ja4); ok && val.(bool) {
+	if s.userMitigationCache != nil {
+		if val, ok := s.userMitigationCache.Get(ja4plus); ok && val.(bool) {
 			return true
 		}
 	}
 
 	// If not in cache, check DB
-	// We check for:
-	// - JA3 global
-	// - JA4 global (ja4h is empty string in DB)
-	// - JA4+JA4H specific
-	query := s.dialect.Rebind("SELECT fingerprint, ja4h, status FROM user_mitigations WHERE status = 'mitigated' AND (" +
-		"(fingerprint = ? AND ja4h = '') OR " + // JA3 or JA4 global
-		"(fingerprint = ? AND ja4h = '') OR " + // Another fallback for JA3/JA4
-		"(fingerprint = ? AND ja4h = ?))") // JA4 + JA4H specific
-	rows, err := s.db.Query(query, ja3, ja4, ja4, ja4h)
-	if err != nil {
-		return false
-	}
-	defer rows.Close()
-
-	mitigated := false
-	for rows.Next() {
-		var fp, dbJA4H, status string
-		if err := rows.Scan(&fp, &dbJA4H, &status); err == nil && status == "mitigated" {
-			mitigated = true
-			// Populate cache for faster subsequent checks
-			if s.userMitigationCache != nil {
-				key := fp
-				if dbJA4H != "" {
-					key = fp + ":" + dbJA4H
-				}
-				s.userMitigationCache.Add(key, true)
-			}
+	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'mitigated' AND fingerprint = ?")
+	var status string
+	err := s.db.QueryRow(query, ja4plus).Scan(&status)
+	if err == nil && status == "mitigated" {
+		if s.userMitigationCache != nil {
+			s.userMitigationCache.Add(ja4plus, true)
 		}
+		return true
 	}
 
-	return mitigated
+	return false
 }
 
 // GetUserMitigations returns a list of currently mitigated users/fingerprints.
@@ -1507,52 +1469,40 @@ func GetUserMitigations(ctx context.Context, limit, offset int) ([]UserMitigatio
 }
 
 // MarkUserMitigated records that a user fingerprint has been mitigated.
-func MarkUserMitigated(fp string, ja4h string, fpType string, reason string, category string) {
+func MarkUserMitigated(ja4plus string, fpType string, reason string, category string) {
 	s := getStore()
-	if s == nil || fp == "" {
+	if s == nil || ja4plus == "" {
 		return
 	}
-	// ja4h is optional and used for composite keys
-	query := s.dialect.Rebind("INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, updated_at) VALUES (?, ?, ?, 'mitigated', ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(fingerprint, ja4h) DO UPDATE SET status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
+	// We only use the fingerprint column for JA4+ suite. ja4h column is kept for schema compatibility but left empty.
+	query := s.dialect.Rebind("INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, updated_at) VALUES (?, '', ?, 'mitigated', ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(fingerprint, ja4h) DO UPDATE SET status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
 	if s.dialect.Driver == db.DriverMySQL {
-		query = "INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at) VALUES (?, ?, ?, 'mitigated', ?, ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
+		query = "INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at) VALUES (?, '', ?, 'mitigated', ?, ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
 	}
-	// For SQLite, if we didn't update the PK to (fingerprint, ja4h), ON CONFLICT(fingerprint) might fail if we have same JA4 with different JA4H.
-	// But the migration 46 only added the column, not changed PK.
-	// I should probably have updated the PK in migration 47.
-	// However, many users will have the same JA4, so we can't have JA4 as PK if we want JA4+JA4H.
 
 	now := time.Now()
-	_, err := s.db.Exec(query, fp, ja4h, fpType, reason, category, now, reason, category, now)
+	_, err := s.db.Exec(query, ja4plus, fpType, reason, category, now, reason, category, now)
 	if err != nil {
-		logger.Default().LogError("failed to mark user as mitigated", "fp", fp, "ja4h", ja4h, "error", err)
+		logger.Default().LogError("failed to mark user as mitigated", "ja4plus", ja4plus, "error", err)
 	}
 	if s.userMitigationCache != nil {
-		key := fp
-		if ja4h != "" {
-			key = fp + ":" + ja4h
-		}
-		s.userMitigationCache.Add(key, true)
+		s.userMitigationCache.Add(ja4plus, true)
 	}
 }
 
 // MarkUserUnmitigated records that a fingerprint has been manually unmitigated.
-func MarkUserUnmitigated(fp string, ja4h string) {
+func MarkUserUnmitigated(ja4plus string) {
 	s := getStore()
-	if s == nil || fp == "" {
+	if s == nil || ja4plus == "" {
 		return
 	}
-	query := s.dialect.Rebind("UPDATE user_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ? AND ja4h = ?")
-	_, err := s.db.Exec(query, fp, ja4h)
+	query := s.dialect.Rebind("UPDATE user_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?")
+	_, err := s.db.Exec(query, ja4plus)
 	if err != nil {
-		logger.Default().LogError("failed to mark user as unmitigated", "fp", fp, "ja4h", ja4h, "error", err)
+		logger.Default().LogError("failed to mark user as unmitigated", "ja4plus", ja4plus, "error", err)
 	}
 	if s.userMitigationCache != nil {
-		key := fp
-		if ja4h != "" {
-			key = fp + ":" + ja4h
-		}
-		s.userMitigationCache.Add(key, false)
+		s.userMitigationCache.Add(ja4plus, false)
 	}
 }
 
@@ -1653,7 +1603,6 @@ func unmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 		Method          string    `json:"method"`
 		UserAgent       string    `json:"user_agent"`
 		Referer         string    `json:"referer"`
-		JA3             string    `json:"ja3"`
 		JA4             string    `json:"ja4"`
 		JA4H            string    `json:"ja4h"`
 		Fingerprint     string    `json:"fingerprint"`
@@ -1680,7 +1629,6 @@ func unmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 	tr.Method = s.Method
 	tr.UserAgent = s.UserAgent
 	tr.Referer = s.Referer
-	tr.JA3 = s.JA3
 	tr.JA4 = s.JA4
 	tr.JA4H = s.JA4H
 	tr.Fingerprint = s.Fingerprint
@@ -1984,9 +1932,9 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 		return nil, errors.New("threat ID is required")
 	}
 
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja3, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(user_agent, ''), COALESCE(method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation FROM security_threats WHERE id = ?")
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation FROM security_threats t WHERE id = ?")
 	th := &SecurityThreat{}
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation)
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("threat with ID %s not found", id)
@@ -2010,8 +1958,8 @@ func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix 
 
 	if filter.Search != "" {
 		s := "%" + filter.Search + "%"
-		conditions = append(conditions, fmt.Sprintf("(%ssource_ip LIKE ? OR %sdetails LIKE ? OR %stype LIKE ? OR %scategory LIKE ?)", prefix, prefix, prefix, prefix))
-		args = append(args, s, s, s, s)
+		conditions = append(conditions, fmt.Sprintf("(%ssource_ip LIKE ? OR %sfingerprint LIKE ? OR %sja4 LIKE ? OR %sdetails LIKE ? OR %stype LIKE ? OR %scategory LIKE ?)", prefix, prefix, prefix, prefix, prefix, prefix))
+		args = append(args, s, s, s, s, s, s)
 	}
 	if filter.Category != "" && filter.Category != "all" {
 		conditions = append(conditions, prefix+"category = ?")
@@ -2019,14 +1967,14 @@ func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix 
 	}
 	if filter.Status == "mitigated" {
 		// Mitigated if:
-		// 1. Current status is 'mitigated' in IP or either fingerprint table
+		// 1. Current status is 'mitigated' in IP or fingerprint table
 		// 2. OR it was blocked at the time AND not subsequently unmitigated in any table
-		conditions = append(conditions, fmt.Sprintf("(m.status = 'mitigated' OR fm3.status = 'mitigated' OR fm4.status = 'mitigated' OR (%saction_taken IN ('blocked', 'challenged', 'shunned') AND (m.status IS NULL OR m.status != 'unmitigated') AND (fm3.status IS NULL OR fm3.status != 'unmitigated') AND (fm4.status IS NULL OR fm4.status != 'unmitigated')))", prefix))
+		conditions = append(conditions, fmt.Sprintf("(m.status = 'mitigated' OR fm4.status = 'mitigated' OR (%saction_taken IN ('blocked', 'challenged', 'shunned') AND (m.status IS NULL OR m.status != 'unmitigated') AND (fm4.status IS NULL OR fm4.status != 'unmitigated')))", prefix))
 	} else if filter.Status == "detected" {
 		// Detected (active threat) if:
 		// 1. Current status is 'unmitigated' in any table
 		// 2. OR it was NOT blocked at the time AND not currently mitigated in any table
-		conditions = append(conditions, fmt.Sprintf("((m.status IS NULL OR m.status != 'mitigated') AND (fm3.status IS NULL OR fm3.status != 'mitigated') AND (fm4.status IS NULL OR fm4.status != 'mitigated') AND (%saction_taken NOT IN ('blocked', 'challenged', 'shunned') OR m.status = 'unmitigated' OR fm3.status = 'unmitigated' OR fm4.status = 'unmitigated'))", prefix))
+		conditions = append(conditions, fmt.Sprintf("((m.status IS NULL OR m.status != 'mitigated') AND (fm4.status IS NULL OR fm4.status != 'mitigated') AND (%saction_taken NOT IN ('blocked', 'challenged', 'shunned') OR m.status = 'unmitigated' OR fm4.status = 'unmitigated'))", prefix))
 	}
 
 	if len(conditions) == 0 {
@@ -2074,9 +2022,8 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 	}
 
 	where, args := buildThreatFilterQuery(s.dialect, filter, true)
-	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.request_headers, ''), COALESCE(t.request_body, ''), COALESCE(t.response_headers, ''), COALESCE(t.response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), t.confidence, t.entropy, t.cluster_size, COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm3.status, ''), COALESCE(fm4.status, '') " +
+	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.request_headers, ''), COALESCE(t.request_body, ''), COALESCE(t.response_headers, ''), COALESCE(t.response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), t.confidence, t.entropy, t.cluster_size, COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, '') " +
 		"FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip " +
-		"LEFT JOIN user_mitigations fm3 ON t.ja3 = fm3.fingerprint AND fm3.ja4h = '' " +
 		"LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " +
 		where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	args = append(args, limit, offset)
@@ -2093,14 +2040,14 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 			break
 		}
 		th := &SecurityThreat{}
-		var mitigationStatus, fm3Status, fm4Status string
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm3Status, &fm4Status); err != nil {
+		var mitigationStatus, fm4Status string
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm4Status); err != nil {
 			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
-		th.Mitigated = mitigationStatus == "mitigated" || fm3Status == "mitigated" || fm4Status == "mitigated" ||
+		th.Mitigated = mitigationStatus == "mitigated" || fm4Status == "mitigated" ||
 			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
-				mitigationStatus != "unmitigated" && fm3Status != "unmitigated" && fm4Status != "unmitigated")
+				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}
 	return res
@@ -2129,7 +2076,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 	}
 
 	where, args := buildThreatFilterQuery(s.dialect, filter, true)
-	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja3, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm3.status, ''), COALESCE(fm4.status, '') FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm3 ON t.ja3 = fm3.fingerprint AND fm3.ja4h = '' LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
+	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, '') FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	args = append(args, limit, offset)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -2144,14 +2091,14 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 			break
 		}
 		th := &SecurityThreat{}
-		var mitigationStatus, fm3Status, fm4Status string
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA3, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm3Status, &fm4Status); err != nil {
+		var mitigationStatus, fm4Status string
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm4Status); err != nil {
 			logQueryErr(ctx, "threats lite: scan failed", err)
 			continue
 		}
-		th.Mitigated = mitigationStatus == "mitigated" || fm3Status == "mitigated" || fm4Status == "mitigated" ||
+		th.Mitigated = mitigationStatus == "mitigated" || fm4Status == "mitigated" ||
 			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
-				mitigationStatus != "unmitigated" && fm3Status != "unmitigated" && fm4Status != "unmitigated")
+				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}
 	return res
@@ -2167,7 +2114,7 @@ func CountSecurityThreats(ctx context.Context, filter *ThreatFilter) int64 {
 	where, args := buildThreatFilterQuery(s.dialect, filter, useJoin)
 	var query string
 	if useJoin {
-		query = s.dialect.Rebind("SELECT COUNT(*) FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm3 ON t.ja3 = fm3.fingerprint AND fm3.ja4h = '' LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where)
+		query = s.dialect.Rebind("SELECT COUNT(*) FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where)
 	} else {
 		query = s.dialect.Rebind("SELECT COUNT(*) FROM security_threats " + where)
 	}

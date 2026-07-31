@@ -28,12 +28,10 @@ func (s *stubManager) SetAdaptiveRateLimit(string, time.Duration) error {
 	s.callCount++
 	return s.err
 }
-func (s *stubManager) ShunJA3([16]byte) error          { s.callCount++; return s.err }
-func (s *stubManager) UnshunJA3([16]byte) error        { s.callCount++; return s.err }
-func (s *stubManager) ShunJA4(string) error            { s.callCount++; return s.err }
-func (s *stubManager) BlocklistCuckoo(string) error    { s.callCount++; return s.err }
-func (s *stubManager) GetTopIPs(int) ([]IPStat, error) { s.callCount++; return nil, s.err }
-func (s *stubManager) GetMapStats() (MapStats, error)  { s.callCount++; return s.mapStats, s.err }
+func (s *stubManager) ShunJA4(ja4Fingerprint string) error { s.callCount++; return s.err }
+func (s *stubManager) BlocklistCuckoo(ip string) error     { s.callCount++; return s.err }
+func (s *stubManager) GetTopIPs(int) ([]IPStat, error)     { s.callCount++; return nil, s.err }
+func (s *stubManager) GetMapStats() (MapStats, error)      { s.callCount++; return s.mapStats, s.err }
 
 // TestHolderNoOpWhenEmpty verifies that every mutating call is a safe no-op and
 // GetMapStats returns empty stats when no underlying manager is installed.
@@ -55,8 +53,6 @@ func TestHolderNoOpWhenEmpty(t *testing.T) {
 		{"SetPortKnockingSequence", func() error { return h.SetPortKnockingSequence(nil) }},
 		{"UpdateLoadBalancerBackends", func() error { return h.UpdateLoadBalancerBackends(nil) }},
 		{"SetAdaptiveRateLimit", func() error { return h.SetAdaptiveRateLimit("1.2.3.4", time.Second) }},
-		{"ShunJA3", func() error { return h.ShunJA3([16]byte{}) }},
-		{"UnshunJA3", func() error { return h.UnshunJA3([16]byte{}) }},
 		{"ShunJA4", func() error { return h.ShunJA4("ja4") }},
 		{"BlocklistCuckoo", func() error { return h.BlocklistCuckoo("1.2.3.4") }},
 	}

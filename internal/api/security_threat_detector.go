@@ -204,7 +204,7 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 
 		// ENTROPY ANALYSIS: More robust than simple ratios
 		uaEntropy := d.calculateShannonEntropy(stats.UserAgents, stats.UACount)
-		ja3Entropy := d.calculateShannonEntropy(stats.JA3s, stats.JA3Count)
+		ja4Entropy := d.calculateShannonEntropy(stats.JA4s, stats.JA4Count)
 
 		// POPULARITY ANALYSIS: Determine if this sequence is a "Happy Path"
 		minPopularity := totalIPs
@@ -227,10 +227,10 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 		// SIGNAL: Low entropy means high concentration (botnet indicator)
 		// Max entropy for UA would be around 4-5 bits in a diverse set.
 		// Low diversity (e.g. all same UA) gives 0 entropy.
-		if (stats.UACount >= 3 && uaEntropy < 0.5) || (stats.JA3Count >= 2 && ja3Entropy < 0.5) {
+		if (stats.UACount >= 3 && uaEntropy < 0.5) || (stats.JA4Count >= 2 && ja4Entropy < 0.5) {
 			score *= 2.5
 			reasons = append(reasons, "extremely low identifier entropy (botnet cluster)")
-		} else if uaEntropy > 2.0 && ja3Entropy > 1.5 {
+		} else if uaEntropy > 2.0 && ja4Entropy > 1.5 {
 			// High entropy -> likely legitimate diverse humans
 			score *= 0.2
 		}
@@ -602,11 +602,6 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 			*reasons = append(*reasons, "Suspicious Referer header detected")
 			break
 		}
-	}
-
-	if len(stats.JA3s) > 1 {
-		score += 30
-		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA3: %d) from single IP", len(stats.JA3s)))
 	}
 
 	if len(stats.JA4s) > 1 {

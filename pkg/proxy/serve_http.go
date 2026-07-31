@@ -3,14 +3,11 @@ package proxy
 import (
 	"log/slog"
 	"net/http"
-	"net/url"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
@@ -37,14 +34,10 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r = h.prepareRequest(r, state, targetURL)
-
 	if isUpgradeRequest(r) {
 		h.proxyUpgrade(w, r, targetURL, state, start)
 		return
 	}
-
-	h.handleGRPCAndHTTP2(r, state.url)
 
 	sw, ok := w.(*httputil.StatusResponseWriter)
 	var pooled bool
@@ -76,70 +69,6 @@ func (h *ProxyHandler) decrementActiveConn(state *targetState) {
 	atomic.AddInt32(&state.activeConn, -1)
 	if state.activeConnGuage != nil {
 		state.activeConnGuage.Dec()
-	}
-}
-
-func (h *ProxyHandler) prepareRequest(r *http.Request, state *targetState, targetURL *url.URL) *http.Request {
-	// The client remote address is only consumed when writing a PROXY-protocol
-	// header on the backend dial, so only carry it in the context when proxy
-	// protocol is enabled for this target. This eliminates a context allocation
-	// per request for the common case where PROXY protocol is disabled.
-	if state.proxyProtocolEnabled {
-		r = r.WithContext(withClientRemoteAddr(r.Context(), r.RemoteAddr))
-	}
-
-	clientIP := request.GetClientIP(r, false)
-	r.Header.Set("X-Real-IP", clientIP)
-
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		r.Header.Set("X-Forwarded-For", xff+", "+clientIP)
-	} else {
-		r.Header.Set("X-Forwarded-For", clientIP)
-	}
-
-	r.URL.Host = targetURL.Host
-	r.URL.Scheme = targetURL.Scheme
-	r.Header.Set("X-Forwarded-Host", r.Host)
-	scheme := request.Scheme(r)
-	r.Header.Set("X-Forwarded-Proto", scheme)
-	if scheme == "https" {
-		r.Header.Set("X-Forwarded-Ssl", "on")
-	}
-	if ja4 := telemetry.GetCachedJA4H(r); ja4 != "" {
-		r.Header.Set("X-Gateon-JA4", ja4)
-	}
-
-	r.Host = targetURL.Host
-	return r
-}
-
-func (h *ProxyHandler) handleGRPCAndHTTP2(r *http.Request, origURL string) {
-	isH2C := strings.HasPrefix(origURL, "h2c://")
-	isH3 := strings.HasPrefix(origURL, "h3://")
-	isHTTPS := strings.HasPrefix(origURL, "https://") || strings.HasPrefix(origURL, "h2://")
-	contentType := r.Header.Get("Content-Type")
-	isGRPC := len(contentType) >= 16 && strings.EqualFold(contentType[:16], "application/grpc")
-
-	if isH3 {
-		r.ProtoMajor = 3
-		r.ProtoMinor = 0
-		r.Proto = "HTTP/3.0"
-	} else if isGRPC || isH2C {
-		// Only force HTTP/2 if the transport is likely to support it.
-		// For cleartext http://, forcing HTTP/2 (without H2C) causes Transport errors.
-		if isH2C || isHTTPS {
-			r.ProtoMajor = 2
-			r.ProtoMinor = 0
-			r.Proto = "HTTP/2.0"
-		}
-
-		if isGRPC {
-			r.Header.Del("Content-Length")
-			r.ContentLength = -1
-			if r.Header.Get("TE") == "" {
-				r.Header.Set("TE", "trailers")
-			}
-		}
 	}
 }
 

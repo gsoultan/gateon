@@ -26,9 +26,9 @@ type RequestState struct {
 	ForwardedProto   string
 	ClientRemoteAddr string
 	Fingerprint      any
-	JA3              string
 	JA4              string
 	JA4H             string
+	JA4Plus          string
 	Recommendation   string
 	Reputation       float64
 	// Breakdown timings (nanoseconds for precision)
@@ -78,9 +78,9 @@ func (rs *RequestState) Reset() {
 	rs.ForwardedProto = ""
 	rs.ClientRemoteAddr = ""
 	rs.Fingerprint = nil
-	rs.JA3 = ""
 	rs.JA4 = ""
 	rs.JA4H = ""
+	rs.JA4Plus = ""
 	rs.Recommendation = ""
 	rs.Reputation = 0
 	rs.TEntrypoint = 0

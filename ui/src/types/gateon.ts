@@ -739,7 +739,6 @@ export type Anomaly = {
   longitude?: number;
   country_code?: string;
   country_name?: string;
-  ja3?: string;
   ja4?: string;
   ja4h?: string;
   score?: number;
@@ -782,6 +781,7 @@ export type GetDiagnosticsResponse = {
   system: SystemInfo;
   anomalies: Anomaly[];
   dependencies: DependencyHealth[];
+  total_mitigations: number;
 };
 
 export type GetCloudflareIPsResponse = {
@@ -823,7 +823,25 @@ export type ValidateCORSResponse = {
   route_id: string;
 };
 
+export type RemoveMitigatedThreatRequest = {
+  source: string;
+  ja4plus?: string;
+  ja4h?: string;
+};
+
 export type RemoveMitigatedThreatResponse = {
+  success: boolean;
+  message: string;
+};
+
+export type MitigateThreatRequest = {
+  source: string;
+  type?: string;
+  reason?: string;
+  category?: string;
+};
+
+export type MitigateThreatResponse = {
   success: boolean;
   message: string;
 };

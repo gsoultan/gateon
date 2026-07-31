@@ -57,3 +57,16 @@ func StripPort(host string) string {
 	}
 	return host
 }
+
+// SingleJoiningSlash joins two URL paths with exactly one slash between them.
+func SingleJoiningSlash(a, b string) string {
+	aslash := strings.HasSuffix(a, "/")
+	bslash := strings.HasPrefix(b, "/")
+	switch {
+	case aslash && bslash:
+		return a + b[1:]
+	case !aslash && !bslash:
+		return a + "/" + b
+	}
+	return a + b
+}

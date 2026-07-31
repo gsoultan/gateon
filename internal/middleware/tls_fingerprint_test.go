@@ -32,7 +32,7 @@ func TestFingerprintRegistry(t *testing.T) {
 	rawConn := &mockConn{addr: "1.2.3.4:55555"}
 	tlsConn := &mockConn{addr: "1.2.3.4:55555"}
 
-	fp := Fingerprints{JA3: "ja3", JA4: "ja4"}
+	fp := Fingerprints{JA4: "ja4"}
 
 	SetFingerprints(rawConn, fp)
 	defer RemoveFingerprints(rawConn)
@@ -44,7 +44,7 @@ func TestFingerprintRegistry(t *testing.T) {
 
 	RemoveFingerprints(tlsConn)
 	gotAfter := GetFingerprints(rawConn)
-	if gotAfter.JA3 != "" {
+	if gotAfter.JA4 != "" {
 		t.Errorf("Fingerprints not removed")
 	}
 }
@@ -57,7 +57,7 @@ func TestCalcFingerprints(t *testing.T) {
 	}
 
 	fp := CalcFingerprints(hello)
-	if fp.JA3 == "" || fp.JA4 == "" {
+	if fp.JA4 == "" {
 		t.Fatal("Fingerprints should not be empty")
 	}
 }

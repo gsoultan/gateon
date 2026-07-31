@@ -10,15 +10,17 @@ import (
 
 // LeastConnLB implements least connections load balancing.
 type LeastConnLB struct {
-	targets []*targetState
-	mu      sync.RWMutex
+	targetsPtr atomic.Pointer[[]*targetState]
+	mu         sync.Mutex
 }
 
 func NewLeastConnLB(urls []string) *LeastConnLB {
-	lb := &LeastConnLB{targets: make([]*targetState, len(urls))}
+	targets := make([]*targetState, len(urls))
 	for i, u := range urls {
-		lb.targets[i] = newTargetState(u, 1)
+		targets[i] = newTargetState(u, 1)
 	}
+	lb := &LeastConnLB{}
+	lb.targetsPtr.Store(&targets)
 	return lb
 }
 
@@ -31,13 +33,16 @@ func (lb *LeastConnLB) Next() string {
 }
 
 func (lb *LeastConnLB) NextState() *targetState {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
-	if len(lb.targets) == 0 {
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return nil
+	}
+	targets := *ptr
+	if len(targets) == 0 {
 		return nil
 	}
 	var best *targetState
-	for _, t := range lb.targets {
+	for _, t := range targets {
 		if !t.alive.Load() {
 			continue
 		}
@@ -45,25 +50,25 @@ func (lb *LeastConnLB) NextState() *targetState {
 			best = t
 		}
 	}
-	if best == nil {
-		return nil // no alive targets (circuit breaker: all OPEN)
-	}
 	return best
 }
 
 func (lb *LeastConnLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
-	lb.targets = make([]*targetState, len(targets))
+	newTargets := make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = newTargetStateFromTarget(t)
+		newTargets[i] = newTargetStateFromTarget(t)
 	}
+	lb.targetsPtr.Store(&newTargets)
 }
 
 func (lb *LeastConnLB) SetAlive(url string, alive bool) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	for _, t := range lb.targets {
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return
+	}
+	for _, t := range *ptr {
 		if t.url == url {
 			if t.alive.Load() != alive {
 				state := telemetry.CircuitClosed
@@ -79,10 +84,13 @@ func (lb *LeastConnLB) SetAlive(url string, alive bool) {
 }
 
 func (lb *LeastConnLB) GetStats() []TargetStats {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
-	stats := make([]TargetStats, len(lb.targets))
-	for i, t := range lb.targets {
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return nil
+	}
+	targets := *ptr
+	stats := make([]TargetStats, len(targets))
+	for i, t := range targets {
 		stats[i] = targetStatsFromState(t)
 	}
 	return stats

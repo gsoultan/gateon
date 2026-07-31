@@ -32,6 +32,7 @@ type GlobalAndAuthAPI interface {
 	ValidateCORS(ctx context.Context, req *gateonv1.ValidateCORSRequest) (*gateonv1.ValidateCORSResponse, error)
 	ListSecurityThreats(ctx context.Context, req *gateonv1.ListSecurityThreatsRequest) (*gateonv1.ListSecurityThreatsResponse, error)
 	ListReputations(ctx context.Context, req *gateonv1.ListReputationsRequest) (*gateonv1.ListReputationsResponse, error)
+	MitigateThreat(ctx context.Context, req *gateonv1.MitigateThreatRequest) (*gateonv1.MitigateThreatResponse, error)
 	RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error)
 	GetCloudflareIPs(ctx context.Context, req *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error)
 	TriggerWafUpdate(ctx context.Context, req *gateonv1.TriggerWafUpdateRequest) (*gateonv1.TriggerWafUpdateResponse, error)

@@ -14,8 +14,8 @@ export interface Trace {
   user_agent?: string;
   method?: string;
   referer?: string;
-  ja3?: string;
   ja4?: string;
+  ja4h?: string;
   request_headers?: Record<string, string>;
   request_body?: string;
   response_headers?: Record<string, string>;

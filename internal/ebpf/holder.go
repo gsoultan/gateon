@@ -113,22 +113,6 @@ func (h *Holder) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
 	return nil
 }
 
-// ShunJA3 delegates to the active manager, if any.
-func (h *Holder) ShunJA3(ja3Md5 [16]byte) error {
-	if m := h.Current(); m != nil {
-		return m.ShunJA3(ja3Md5)
-	}
-	return nil
-}
-
-// UnshunJA3 delegates to the active manager, if any.
-func (h *Holder) UnshunJA3(ja3Md5 [16]byte) error {
-	if m := h.Current(); m != nil {
-		return m.UnshunJA3(ja3Md5)
-	}
-	return nil
-}
-
 // ShunJA4 delegates to the active manager, if any.
 func (h *Holder) ShunJA4(ja4Fingerprint string) error {
 	if m := h.Current(); m != nil {

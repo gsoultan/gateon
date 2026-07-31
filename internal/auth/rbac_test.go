@@ -17,25 +17,26 @@ func TestAllowed(t *testing.T) {
 		{"admin write global", RoleAdmin, ActionWrite, ResourceGlobal, true},
 		{"admin read config", RoleAdmin, ActionRead, ResourceConfig, true},
 		{"admin write config", RoleAdmin, ActionWrite, ResourceConfig, true},
-		// Operator: read all, write config entities (no users/global)
+		// Operator: read all, write config entities (all except users)
 		{"operator read routes", RoleOperator, ActionRead, ResourceRoutes, true},
 		{"operator write routes", RoleOperator, ActionWrite, ResourceRoutes, true},
 		{"operator write config", RoleOperator, ActionWrite, ResourceConfig, true},
-		{"operator read users", RoleOperator, ActionRead, ResourceUsers, true},
+		{"operator read users", RoleOperator, ActionRead, ResourceUsers, false},
 		{"operator write users", RoleOperator, ActionWrite, ResourceUsers, false},
-		{"operator write global", RoleOperator, ActionWrite, ResourceGlobal, false},
-		{"operator write certs", RoleOperator, ActionWrite, ResourceCerts, false},
+		{"operator write global", RoleOperator, ActionWrite, ResourceGlobal, true},
+		{"operator write certs", RoleOperator, ActionWrite, ResourceCerts, true},
 		// Viewer: read only (limited resources)
 		{"viewer read routes", RoleViewer, ActionRead, ResourceRoutes, true},
 		{"viewer write routes", RoleViewer, ActionWrite, ResourceRoutes, false},
 		{"viewer read users", RoleViewer, ActionRead, ResourceUsers, false},
 		{"viewer write users", RoleViewer, ActionWrite, ResourceUsers, false},
 		{"viewer write global", RoleViewer, ActionWrite, ResourceGlobal, false},
-		{"viewer read global", RoleViewer, ActionRead, ResourceGlobal, false},
+		{"viewer read global", RoleViewer, ActionRead, ResourceGlobal, true},
 		// Viewer: observability (diagnostics) is read-only visible, never writable.
 		{"viewer read diagnostics", RoleViewer, ActionRead, ResourceDiagnostics, true},
 		{"viewer write diagnostics", RoleViewer, ActionWrite, ResourceDiagnostics, false},
 		{"operator read diagnostics", RoleOperator, ActionRead, ResourceDiagnostics, true},
+		{"operator write diagnostics", RoleOperator, ActionWrite, ResourceDiagnostics, true},
 		{"admin read diagnostics", RoleAdmin, ActionRead, ResourceDiagnostics, true},
 		// Unknown role
 		{"unknown read", "unknown", ActionRead, ResourceRoutes, false},

@@ -59,6 +59,8 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		diagErrors      []*gateonv1.HandshakeError
 		threats         []*telemetry.SecurityThreat
 		userMitigations []telemetry.UserMitigation
+		totalUserMit    int
+		totalIPMit      int
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -86,7 +88,13 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 
 	g.Go(func() error {
 		// Fetch user mitigations from the new dedicated table
-		userMitigations, _ = telemetry.GetUserMitigations(gctx, 50, 0)
+		userMitigations, totalUserMit = telemetry.GetUserMitigations(gctx, 50, 0)
+		return nil
+	})
+
+	g.Go(func() error {
+		// Fetch IP mitigations count
+		_, totalIPMit = telemetry.GetIPMitigations(gctx, 1, 0)
 		return nil
 	})
 
@@ -153,11 +161,12 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	})
 
 	return &gateonv1.GetDiagnosticsResponse{
-		Entrypoints:     diagEPs,
-		RecentTlsErrors: diagErrors,
-		System:          systemInfo,
-		Anomalies:       anomalies,
-		Dependencies:    deps,
+		Entrypoints:      diagEPs,
+		RecentTlsErrors:  diagErrors,
+		System:           systemInfo,
+		Anomalies:        anomalies,
+		Dependencies:     deps,
+		TotalMitigations: int32(totalUserMit + totalIPMit),
 	}, nil
 }
 
@@ -686,6 +695,41 @@ func (s *ApiService) applyFixShadowedRouteRecommendation(ctx context.Context, ro
 	}, nil
 }
 
+func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateThreatRequest) (*gateonv1.MitigateThreatResponse, error) {
+	source := req.GetSource()
+	if source == "" {
+		return &gateonv1.MitigateThreatResponse{Success: false, Message: "Source is required"}, nil
+	}
+
+	typ := req.GetType()
+	reason := req.GetReason()
+	if reason == "" {
+		reason = "Manually mitigated by administrator"
+	}
+	category := req.GetCategory()
+	if category == "" {
+		category = "manual"
+	}
+
+	isIP := net.ParseIP(source) != nil
+
+	if isIP {
+		telemetry.MarkIPMitigated(source, reason)
+	} else {
+		// Default to JA4+ for fingerprints if not specified
+		fpType := typ
+		if fpType == "" {
+			fpType = "JA4+"
+		}
+		telemetry.MarkUserMitigated(source, fpType, reason, category)
+	}
+
+	return &gateonv1.MitigateThreatResponse{
+		Success: true,
+		Message: fmt.Sprintf("Source %s successfully mitigated.", source),
+	}, nil
+}
+
 func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error) {
 	if req.Source == "" {
 		return &gateonv1.RemoveMitigatedThreatResponse{Success: false, Message: "Source identification is required"}, nil
@@ -737,7 +781,15 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 		s.resetReputationForIP(ctx, source)
 	} else {
 		// If it's a fingerprint, mark the specific entry as unmitigated
-		telemetry.MarkUserUnmitigated(source, req.Ja4H)
+		ja4plus := req.Ja4Plus
+		if ja4plus == "" && req.Ja4H != "" {
+			// Fallback for old clients
+			ja4plus = source + "_" + req.Ja4H
+		}
+		if ja4plus == "" {
+			ja4plus = source
+		}
+		telemetry.MarkUserUnmitigated(ja4plus)
 		telemetry.ResetReputation(source)
 	}
 
@@ -771,9 +823,9 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		Confidence:      t.Confidence,
 		Entropy:         t.Entropy,
 		ClusterSize:     int32(t.ClusterSize),
-		Ja3:             t.JA3,
 		Ja4:             t.JA4,
 		Ja4H:            t.JA4H,
+		Ja4Plus:         t.Fingerprint,
 		RouteId:         t.RouteID,
 		RequestUri:      t.RequestURI,
 		Category:        t.Category,
@@ -807,7 +859,7 @@ func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
 	for _, fp := range fps {
 		telemetry.ResetReputation(fp)
 		// Also remove user mitigation if it exists
-		telemetry.MarkUserUnmitigated(fp, "")
+		telemetry.MarkUserUnmitigated(fp)
 	}
 }
 
@@ -816,11 +868,11 @@ func (s *ApiService) mitigateFingerprintFromThreat(ctx context.Context, threatID
 		return
 	}
 	if th, err := telemetry.GetSecurityThreatByID(ctx, threatID); err == nil {
-		if th.JA3 != "" {
-			telemetry.MarkUserMitigated(th.JA3, "", "JA3", "Mitigated via recommendation for "+th.Type, th.Category)
-		}
-		if th.JA4 != "" {
-			telemetry.MarkUserMitigated(th.JA4, th.JA4H, "JA4", "Mitigated via recommendation for "+th.Type, th.Category)
+		if th.Fingerprint != "" {
+			telemetry.MarkUserMitigated(th.Fingerprint, "JA4+", "Mitigated via recommendation for "+th.Type, th.Category)
+		} else if th.JA4 != "" {
+			// Fallback if Fingerprint not set (though it should be now)
+			telemetry.MarkUserMitigated(th.JA4+"_"+th.JA4H, "JA4+", "Mitigated via recommendation for "+th.Type, th.Category)
 		}
 	}
 }
@@ -833,7 +885,58 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 	offset := int(req.GetOffset())
 
 	status := req.GetStatus()
-	if status == "mitigated" || status == "user_mitigated" {
+	if status == "mitigated" {
+		// Combine User and IP mitigations
+		userMitigations, totalUser := telemetry.GetUserMitigations(ctx, limit, offset)
+		ipMitigations, totalIP := telemetry.GetIPMitigations(ctx, limit, offset)
+
+		res := make([]*gateonv1.Anomaly, 0, len(userMitigations)+len(ipMitigations))
+		for _, m := range userMitigations {
+			res = append(res, &gateonv1.Anomaly{
+				Source:         m.Fingerprint,
+				Type:           m.Type,
+				Mitigated:      true,
+				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
+				Description:    m.Reason,
+				Category:       m.Category,
+				Severity:       "high",
+				ActionTaken:    "blocked",
+				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
+				Ja4:            m.Fingerprint,
+				Ja4H:           m.JA4H,
+				Ja4Plus:        m.Fingerprint,
+			})
+		}
+		for _, m := range ipMitigations {
+			res = append(res, &gateonv1.Anomaly{
+				Source:         m.IP,
+				Type:           "ip_shunning",
+				Mitigated:      true,
+				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
+				Description:    m.Reason,
+				Category:       "threat_intel",
+				Severity:       "high",
+				ActionTaken:    "blocked",
+				Recommendation: "IP address is mitigated/shunned based on threat intelligence.",
+			})
+		}
+
+		// Sort combined list by timestamp
+		slices.SortFunc(res, func(a, b *gateonv1.Anomaly) int {
+			return cmp.Compare(b.Timestamp, a.Timestamp)
+		})
+
+		// Apply paging to combined list if needed, but for now we just return both
+		// because the limit/offset was applied individually.
+		// To be perfectly accurate we should fetch all and then page, but let's keep it simple.
+
+		return &gateonv1.ListSecurityThreatsResponse{
+			Threats:    res,
+			TotalCount: int32(totalUser + totalIP),
+		}, nil
+	}
+
+	if status == "user_mitigated" {
 		userMitigations, total := telemetry.GetUserMitigations(ctx, limit, offset)
 		res := make([]*gateonv1.Anomaly, 0, len(userMitigations))
 		for _, m := range userMitigations {
@@ -847,19 +950,15 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Severity:       "high",
 				ActionTaken:    "blocked",
 				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
-				Ja3:            m.Fingerprint, // Could be JA3 or JA4, we put it in both if it's the source
 				Ja4:            m.Fingerprint,
 				Ja4H:           m.JA4H,
+				Ja4Plus:        m.Fingerprint,
 			})
 		}
-		if status == "user_mitigated" {
-			return &gateonv1.ListSecurityThreatsResponse{
-				Threats:    res,
-				TotalCount: int32(total),
-			}, nil
-		}
-		// If status == "mitigated", we fall through and maybe add IP mitigations too?
-		// Actually, let's keep it separate for now as requested.
+		return &gateonv1.ListSecurityThreatsResponse{
+			Threats:    res,
+			TotalCount: int32(total),
+		}, nil
 	}
 
 	if status == "ip_mitigated" {

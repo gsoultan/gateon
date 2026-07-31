@@ -37,6 +37,7 @@ export type LabeledCount = {
 export type MiddlewareMetrics = {
   rate_limit_rejected: LabeledCount[] | null;
   waf_blocked: LabeledCount[] | null;
+  fast_path_blocked: LabeledCount[] | null;
   cache_hits: number;
   cache_misses: number;
   cache_hit_rate: number;
@@ -142,6 +143,7 @@ export type MetricsSnapshot = {
 export type MitigationFunnel = {
   http_ingress: number;
   waf_blocked: number;
+  fast_path_blocked: number;
   rate_limited: number;
   geoip_blocked: number;
   auth_failures: number;

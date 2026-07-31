@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiUrl, buildQueryString } from "./api";
 import type { AuditLog } from "../types/gateon";
+import { useSSEWorker } from "./useSSEWorker";
 
 export interface AuditLogsResponse {
   logs: AuditLog[];
@@ -19,6 +20,7 @@ export interface AuditLogsParams {
 export function useAuditLogs(params: AuditLogsParams = {}) {
   const { page = 0, page_size = 50, search = "" } = params;
   const queryClient = useQueryClient();
+  const { parseSSE } = useSSEWorker();
   const queryKey = ["audit-logs", page, page_size, search];
 
   const query = useQuery<AuditLogsResponse>({
@@ -41,9 +43,9 @@ export function useAuditLogs(params: AuditLogsParams = {}) {
     const url = getApiUrl(`/v1/audit/logs/watch`);
     const eventSource = new EventSource(url, { withCredentials: true });
 
-    eventSource.onmessage = (event) => {
+    eventSource.onmessage = async (event) => {
       try {
-        const newEntry = JSON.parse(event.data) as AuditLog;
+        const newEntry = await parseSSE(event.data) as AuditLog;
         queryClient.setQueryData<AuditLogsResponse>(queryKey, (old) => {
           if (!old) return { logs: [newEntry], total_count: 1, page, page_size };
           const exists = old.logs.some((l) => l.id === newEntry.id);

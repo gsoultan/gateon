@@ -2,13 +2,16 @@ package entrypoint
 
 import (
 	"cmp"
+	"context"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -44,36 +47,26 @@ func (b *bufFix) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// oneShotListener returns a single connection on Accept, then blocks.
-type oneShotListener struct {
-	conn net.Conn
-	done chan struct{}
+// sharedHTTPDispatcher implements net.Listener to feed connections into a shared http.Server.
+type sharedHTTPDispatcher struct {
+	conns chan net.Conn
+	addr  net.Addr
 }
 
-func newOneShotListener(conn net.Conn) *oneShotListener {
-	return &oneShotListener{conn: conn, done: make(chan struct{})}
-}
-
-func (l *oneShotListener) Accept() (net.Conn, error) {
-	select {
-	case <-l.done:
-		// Block forever after first Accept
-		select {}
-	default:
-		close(l.done)
-		return l.conn, nil
+func (d *sharedHTTPDispatcher) Accept() (net.Conn, error) {
+	c, ok := <-d.conns
+	if !ok {
+		return nil, io.EOF
 	}
+	return c, nil
 }
 
-func (l *oneShotListener) Close() error {
-	return nil
+func (d *sharedHTTPDispatcher) Close() error {
+	return nil // Server shutdown closes the dispatcher conceptually
 }
 
-func (l *oneShotListener) Addr() net.Addr {
-	if l.conn != nil {
-		return l.conn.LocalAddr()
-	}
-	return nil
+func (d *sharedHTTPDispatcher) Addr() net.Addr {
+	return d.addr
 }
 
 // buildPlainHTTPHandler builds the HTTP handler chain for an entrypoint (plaintext).
@@ -90,12 +83,11 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 	isMgmt := IsManagementAddress(ep.Address, deps)
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	chain := []middleware.Middleware{
-		middleware.WithRequestState(ep.Id, epLabel, isMgmt),
-		middleware.RequestID(),
+		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
+		middleware.Metrics("gateon-" + epLabel),
 		middleware.IPMitigation(),
 		middleware.UserMitigation(),
 		middleware.Recovery(),
-		middleware.Metrics("gateon-" + epLabel),
 	}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
@@ -104,19 +96,49 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 	return middleware.Chain(chain...)(deps.Limiter.Handler(middleware.PerIP)(epHandler))
 }
 
-// serveConnAsHTTP serves a single connection as HTTP (plaintext).
+// serveConnAsHTTP serves a single connection as HTTP (plaintext) using a shared server.
 // peeked contains the bytes already read during inspection; they are replayed first.
 func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps *Deps) {
-	handler := deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps))
-	// Read the latest timeouts from the store so config changes apply
-	// immediately to new connections without requiring a restart.
-	readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
-	server := &http.Server{
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		Handler:           handler,
+	val, ok := deps.SharedServers.Load(ep.Id)
+	if !ok {
+		d := &sharedHTTPDispatcher{
+			conns: make(chan net.Conn, 4096),
+			addr:  conn.LocalAddr(),
+		}
+		var loaded bool
+		val, loaded = deps.SharedServers.LoadOrStore(ep.Id, d)
+		if !loaded {
+			// Start the shared server for this entrypoint
+			go func() {
+				handler := deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps))
+				readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
+				server := &http.Server{
+					ReadHeaderTimeout: 10 * time.Second,
+					ReadTimeout:       readTimeout,
+					WriteTimeout:      writeTimeout,
+					Handler:           handler,
+					ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
+						telemetry.GlobalDiagnostics.RecordTLSError(ep.Id, addr, err)
+					}),
+				}
+				if deps.ShutdownRegistry != nil {
+					deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+						return server.Shutdown(ctx)
+					})
+				}
+				if err := server.Serve(d); err != nil && err != http.ErrServerClosed {
+					logger.L.LogError("shared http server failed", "ep", ep.Id, "error", err)
+				}
+			}()
+		}
 	}
-	listener := newOneShotListener(newPeekedConn(conn, peeked))
-	_ = server.Serve(listener)
+
+	d := val.(*sharedHTTPDispatcher)
+	select {
+	case d.conns <- newPeekedConn(conn, peeked):
+	default:
+		// Connection queue full, drop to protect system
+		logger.L.LogWarn("shared http connection queue full, dropping", "ep", ep.Id)
+		conn.Close()
+	}
 }

@@ -26,11 +26,9 @@ type DiagnosticData struct {
 type SequenceStats struct {
 	IPs        map[string]struct{}
 	UserAgents map[string]int
-	JA3s       map[string]int
 	JA4s       map[string]int
 	Countries  map[string]struct{}
 	UACount    int
-	JA3Count   int
 	JA4Count   int
 }
 

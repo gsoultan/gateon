@@ -130,8 +130,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	}
 
 	handler := middleware.Chain(
-		middleware.WithRequestState("management", "management", true),
-		middleware.RequestID(), // Added
+		middleware.EntryPoint("management", "management", true),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HostFilter(mgmtHost),
@@ -270,57 +269,78 @@ var (
 
 func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
 	defer conn.Close()
-	logger.L.LogInfo("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
-	conn.SetReadDeadline(time.Now().Add(peekTimeout))
+	logger.L.LogDebug("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
+
+	// Use a shorter deadline for the first byte, then a longer one for the rest
+	// to avoid blocking goroutines for slow/idle connections.
+	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+
 	peek := peekPool.Get().([]byte)
 	defer peekPool.Put(peek)
 
-	n, err := io.ReadFull(conn, peek)
-	conn.SetReadDeadline(time.Time{})
-
+	// Read at least 1 byte to detect protocol early
+	n, err := conn.Read(peek)
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			logger.L.LogDebug("TCP inspection peek timeout", "ep", ep.Id, "bytes", n)
-			err = nil
+			// No data received within 1s, handle as generic TCP
+			conn.SetReadDeadline(time.Time{})
+			goto fallback
+		}
+		logger.L.LogError("TCP inspection initial read error", "ep", ep.Id, "error", err)
+		return
+	}
+
+	// If we got some data, try to read more if needed for HTTP/2 detection (24 bytes)
+	if n > 0 && n < PeekSize {
+		// If it looks like HTTP/2 preface start, try to read more
+		if peek[0] == 'P' || IsTCPAppHTTP(peek[:n]) {
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			n2, _ := io.ReadAtLeast(conn, peek[n:], 0) // non-blocking best-effort
+			n += n2
+		}
+	}
+	conn.SetReadDeadline(time.Time{})
+
+	if n > 0 {
+		peeked := make([]byte, n)
+		copy(peeked, peek[:n])
+
+		if IsTCPAppHTTP(peeked) {
+			logger.L.LogDebug("TCP inspection: HTTP detected", "ep", ep.Id)
+			serveConnAsHTTP(conn, peeked, ep, deps)
+			return
+		}
+
+		protocol := ""
+		if IsSSH(peeked) {
+			protocol = "ssh"
+			logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("SSH protocol detected on TCP entrypoint")
+		} else if IsRDP(peeked) {
+			protocol = "rdp"
+			logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("RDP protocol detected on TCP entrypoint")
+		}
+
+		var p l4.TCPProxy
+		if deps.L4Resolver != nil {
+			p = deps.L4Resolver.ResolveTCP(ep, protocol)
+		}
+		if p != nil {
+			logger.L.LogInfo("TCP inspection: Route found, proxying", "ep", ep.Id, "protocol", protocol)
+			handleTCPProxyL4(newPeekedConn(conn, peeked), p)
+			return
 		}
 	}
 
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		logger.L.LogError("TCP inspection read error", "ep", ep.Id, "error", err)
-		return
+fallback:
+	// No protocol detected or no route found
+	var peeked []byte
+	if n > 0 {
+		peeked = make([]byte, n)
+		copy(peeked, peek[:n])
 	}
-	// Copy peeked bytes because the buffer will be put back into the pool.
-	peeked := make([]byte, n)
-	copy(peeked, peek[:n])
-	logger.L.LogDebug("TCP inspection read completed", "ep", ep.Id, "peeked_len", n)
-
-	protocol := ""
-	if n > 0 && IsTCPAppHTTP(peeked) {
-		logger.L.LogInfo("TCP inspection: HTTP detected", "ep", ep.Id)
-		serveConnAsHTTP(conn, peeked, ep, deps)
-		return
-	}
-	if n > 0 && IsSSH(peeked) {
-		protocol = "ssh"
-		logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("SSH protocol detected on TCP entrypoint")
-	} else if n > 0 && IsRDP(peeked) {
-		protocol = "rdp"
-		logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("RDP protocol detected on TCP entrypoint")
-	}
-	var p l4.TCPProxy
-	if deps.L4Resolver != nil {
-		p = deps.L4Resolver.ResolveTCP(ep, protocol)
-	}
-	if p != nil {
-		logger.L.LogInfo("TCP inspection: Route found, proxying", "ep", ep.Id, "protocol", protocol)
-		connWithPeek := newPeekedConn(conn, peeked)
-		handleTCPProxyL4(connWithPeek, p)
-	} else {
-		logger.L.LogWarn("TCP inspection: No route found for TCP connection", "ep", ep.Id, "protocol", protocol)
-		connWithPeek := newPeekedConn(conn, peeked)
-		handleTCPConn(connWithPeek)
-	}
+	logger.L.LogDebug("TCP inspection fallback to generic TCP", "ep", ep.Id, "bytes", n)
+	handleTCPConn(newPeekedConn(conn, peeked))
 }
 
 func handleTCPConn(conn net.Conn) {

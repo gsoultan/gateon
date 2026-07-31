@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,40 +40,80 @@ func GetMatcher(rule string) Matcher {
 }
 
 type Matcher struct {
-	host       string
-	path       string
-	pathPrefix string
-	pathRegex  *regexp.Regexp
-	methods    map[string]bool
-	headers    map[string]string // header name -> expected value
+	host              string
+	hostNegated       bool
+	hostRegex         *regexp.Regexp
+	hostRegexNegated  bool
+	path              string
+	pathNegated       bool
+	pathPrefix        string
+	pathPrefixNegated bool
+	pathRegex         *regexp.Regexp
+	pathRegexNegated  bool
+	methods           map[string]bool
+	methodsNegated    bool
+	headers           map[string]string // header name -> expected value
+	orParts           []Matcher         // For logical OR at top level
+	negated           bool              // For logical NOT at top level
 }
 
 func parseRule(rule string) Matcher {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return Matcher{}
+	}
+
+	// Basic negation support
+	if strings.HasPrefix(rule, "!") {
+		m := parseRule(strings.TrimSpace(rule[1:]))
+		m.negated = !m.negated
+		return m
+	}
+
+	// Basic OR support (top-level only)
+	if strings.Contains(rule, "||") {
+		// Check if it's really a top-level OR by ensuring we aren't inside parentheses
+		// (very simple heuristic)
+		parts := strings.Split(rule, "||")
+		if len(parts) > 1 {
+			m := Matcher{}
+			for _, p := range parts {
+				m.orParts = append(m.orParts, parseRule(p))
+			}
+			return m
+		}
+	}
+
 	m := Matcher{}
-	if strings.Contains(rule, "Host(`") {
-		m.host = extractValue(rule, "Host(`", "`)")
-	} else if strings.Contains(rule, "Host(\"") {
-		m.host = extractValue(rule, "Host(\"", "\")")
-	}
-	if strings.Contains(rule, "PathPrefix(`") {
-		m.pathPrefix = extractValue(rule, "PathPrefix(`", "`)")
-	} else if strings.Contains(rule, "PathPrefix(\"") {
-		m.pathPrefix = extractValue(rule, "PathPrefix(\"", "\")")
-	}
-	if strings.Contains(rule, "Path(`") {
-		m.path = extractValue(rule, "Path(`", "`)")
-	} else if strings.Contains(rule, "Path(\"") {
-		m.path = extractValue(rule, "Path(\"", "\")")
-	}
-	if s := extractValue(rule, "PathRegex(`", "`)"); s != "" {
-		if re, err := regexp.Compile(s); err == nil {
-			m.pathRegex = re
+	for _, q := range []string{"`", "\""} {
+		if idx := strings.Index(rule, "Host("+q); idx >= 0 {
+			m.host = extractValue(rule, "Host("+q, q+")")
+			m.hostNegated = idx > 0 && rule[idx-1] == '!'
 		}
-	} else if s := extractValue(rule, "PathRegex(\"", "\")"); s != "" {
-		if re, err := regexp.Compile(s); err == nil {
-			m.pathRegex = re
+		if idx := strings.Index(rule, "HostRegexp("+q); idx >= 0 {
+			s := extractValue(rule, "HostRegexp("+q, q+")")
+			if re, err := regexp.Compile(s); err == nil {
+				m.hostRegex = re
+				m.hostRegexNegated = idx > 0 && rule[idx-1] == '!'
+			}
+		}
+		if idx := strings.Index(rule, "PathPrefix("+q); idx >= 0 {
+			m.pathPrefix = extractValue(rule, "PathPrefix("+q, q+")")
+			m.pathPrefixNegated = idx > 0 && rule[idx-1] == '!'
+		}
+		if idx := strings.Index(rule, "Path("+q); idx >= 0 {
+			m.path = extractValue(rule, "Path("+q, q+")")
+			m.pathNegated = idx > 0 && rule[idx-1] == '!'
+		}
+		if idx := strings.Index(rule, "PathRegex("+q); idx >= 0 {
+			s := extractValue(rule, "PathRegex("+q, q+")")
+			if re, err := regexp.Compile(s); err == nil {
+				m.pathRegex = re
+				m.pathRegexNegated = idx > 0 && rule[idx-1] == '!'
+			}
 		}
 	}
+
 	// Methods(`GET`, `POST`) or Methods("GET", "POST")
 	methodsPrefix := ""
 	if strings.Contains(rule, "Methods(`") {
@@ -144,30 +185,85 @@ func parseRule(rule string) Matcher {
 }
 
 func (m Matcher) Match(r *http.Request) bool {
-	if m.host != "" && !HostMatches(m.host, r.Host) {
-		return false
+	if m.negated {
+		return !m.matchInner(r)
 	}
-	if m.pathPrefix != "" && !strings.HasPrefix(r.URL.Path, m.pathPrefix) {
-		return false
-	}
-	if m.path != "" && r.URL.Path != m.path {
-		return false
-	}
-	if m.pathRegex != nil && !m.pathRegex.MatchString(r.URL.Path) {
-		return false
-	}
-	if len(m.methods) > 0 && !m.methods[r.Method] {
-		// For CORS preflight (OPTIONS), we allow a match if the route supports
-		// the method requested in Access-Control-Request-Method.
-		if r.Method == http.MethodOptions {
-			reqMethod := r.Header.Get("Access-Control-Request-Method")
-			if reqMethod != "" && m.methods[strings.ToUpper(reqMethod)] {
-				goto matchMethod
+	if len(m.orParts) > 0 {
+		for _, part := range m.orParts {
+			if part.Match(r) {
+				return true
 			}
 		}
 		return false
 	}
-matchMethod:
+	return m.matchInner(r)
+}
+
+func (m Matcher) matchInner(r *http.Request) bool {
+	host := httputil.StripPort(r.Host)
+	if m.host != "" {
+		match := HostMatches(m.host, host)
+		if m.hostNegated {
+			match = !match
+		}
+		if !match {
+			return false
+		}
+	}
+	if m.hostRegex != nil {
+		match := m.hostRegex.MatchString(host)
+		if m.hostRegexNegated {
+			match = !match
+		}
+		if !match {
+			return false
+		}
+	}
+	if m.pathPrefix != "" {
+		match := strings.HasPrefix(r.URL.Path, m.pathPrefix)
+		if m.pathPrefixNegated {
+			match = !match
+		}
+		if !match {
+			return false
+		}
+	}
+	if m.path != "" {
+		match := r.URL.Path == m.path
+		if m.pathNegated {
+			match = !match
+		}
+		if !match {
+			return false
+		}
+	}
+	if m.pathRegex != nil {
+		match := m.pathRegex.MatchString(r.URL.Path)
+		if m.pathRegexNegated {
+			match = !match
+		}
+		if !match {
+			return false
+		}
+	}
+	if len(m.methods) > 0 {
+		match := m.methods[r.Method]
+		// For CORS preflight (OPTIONS), we allow a match if the route supports
+		// the method requested in Access-Control-Request-Method.
+		if !match && r.Method == http.MethodOptions {
+			reqMethod := r.Header.Get("Access-Control-Request-Method")
+			if reqMethod != "" && m.methods[strings.ToUpper(reqMethod)] {
+				match = true
+			}
+		}
+
+		if m.methodsNegated {
+			match = !match
+		}
+		if !match {
+			return false
+		}
+	}
 	for name, want := range m.headers {
 		// Use direct map access to avoid redundant CanonicalMIMEHeaderKey calls in Header.Get
 		values := r.Header[name]
@@ -205,19 +301,55 @@ func HostMatches(rh string, qh string) bool {
 	return config.HostMatches(rh, qh)
 }
 
-// SelectRoute finds the best matching route for the given request using the RouteStore's indexed lookup.
+// SelectRoute finds the best matching route for the given request using a high-performance Radix Tree (PathTrie).
 func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
 	host := httputil.StripPort(r.Host)
 
-	// 1. Try host-specific routes first (O(1) lookup in index)
-	if items := store.GetByHost(host); len(items) > 0 {
-		if rt := SelectRouteFromSlice(r, items); rt != nil {
+	// 1. Try host-specific routes first (O(log N) lookup in Trie + small O(M) regex scan)
+	trie, regexes := store.GetTrieByHost(host)
+	if trie != nil || len(regexes) > 0 {
+		if rt := SelectRouteFromTrie(r, trie, regexes); rt != nil {
 			return rt
 		}
 	}
 
 	// 2. Fallback to wildcard routes (wildcards, Path-only rules, etc.)
-	return SelectRouteFromSlice(r, store.ListWildcards(r.Context()))
+	trie, regexes = store.GetWildcardTrie()
+	if trie != nil || len(regexes) > 0 {
+		return SelectRouteFromTrie(r, trie, regexes)
+	}
+
+	return nil
+}
+
+// SelectRouteFromTrie narrows down candidates using the PathTrie, adds regex-based routes,
+// and then performs a final prioritized match check.
+func SelectRouteFromTrie(r *http.Request, trie *config.PathTrie, regexes []*gateonv1.Route) *gateonv1.Route {
+	var candidates []*gateonv1.Route
+	if trie != nil {
+		candidates = trie.Lookup(r.URL.Path)
+	}
+	if len(regexes) > 0 {
+		candidates = append(candidates, regexes...)
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// If we have very few candidates (common case), sorting is negligible.
+	// For larger sets, it ensures we respect Priority and Rule Specificity.
+	slices.SortFunc(candidates, func(a, b *gateonv1.Route) int {
+		if a.Priority != b.Priority {
+			return cmp.Compare(b.Priority, a.Priority)
+		}
+		if len(a.Rule) != len(b.Rule) {
+			return cmp.Compare(len(b.Rule), len(a.Rule))
+		}
+		return strings.Compare(a.Id, b.Id)
+	})
+
+	return SelectRouteFromSlice(r, candidates)
 }
 
 // SelectRouteFromSlice finds the best matching route from a provided slice of routes.

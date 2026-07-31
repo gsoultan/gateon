@@ -9,12 +9,19 @@ import (
 // RealIPGlobal returns a middleware that resolves the real client IP and updates r.RemoteAddr
 // using the trust settings from the global configuration.
 func RealIPGlobal() Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			trustCloudflare := config.EffectiveTrustCloudflare()
+	hTrust := RealIP(true)
+	hNoTrust := RealIP(false)
 
-			// Apply the core RealIP logic with the resolved trust setting
-			RealIP(trustCloudflare)(next).ServeHTTP(w, r)
+	return func(next http.Handler) http.Handler {
+		nextTrust := hTrust(next)
+		nextNoTrust := hNoTrust(next)
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if config.EffectiveTrustCloudflare() {
+				nextTrust.ServeHTTP(w, r)
+			} else {
+				nextNoTrust.ServeHTTP(w, r)
+			}
 		})
 	}
 }

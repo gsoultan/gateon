@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -17,15 +18,16 @@ import (
 
 type EntryPointRegistry struct {
 	mu          sync.RWMutex
-	entryPoints map[string]*gateonv1.EntryPoint
+	entryPoints atomic.Pointer[map[string]*gateonv1.EntryPoint]
 	path        string
 }
 
 func NewEntryPointRegistry(path string) *EntryPointRegistry {
 	reg := &EntryPointRegistry{
-		entryPoints: make(map[string]*gateonv1.EntryPoint),
-		path:        path,
+		path: path,
 	}
+	initial := make(map[string]*gateonv1.EntryPoint)
+	reg.entryPoints.Store(&initial)
 	reg.load()
 	return reg
 }
@@ -55,14 +57,20 @@ func (r *EntryPointRegistry) load() {
 		}
 	}
 
+	newMap := make(map[string]*gateonv1.EntryPoint)
 	for _, ep := range entryPoints {
-		r.entryPoints[ep.Id] = ep
+		newMap[ep.Id] = ep
 	}
-	logger.L.LogInfo("loaded entrypoints", "count", len(r.entryPoints), "path", r.path)
+	r.entryPoints.Store(&newMap)
+	logger.L.LogInfo("loaded entrypoints", "count", len(newMap), "path", r.path)
 }
 
 func (r *EntryPointRegistry) saveLocked() error {
-	entryPoints := slices.SortedFunc(maps.Values(r.entryPoints), func(a, b *gateonv1.EntryPoint) int {
+	mPtr := r.entryPoints.Load()
+	if mPtr == nil {
+		return nil
+	}
+	entryPoints := slices.SortedFunc(maps.Values(*mPtr), func(a, b *gateonv1.EntryPoint) int {
 		return strings.Compare(a.Id, b.Id)
 	})
 
@@ -91,12 +99,14 @@ func (r *EntryPointRegistry) List(ctx context.Context) []*gateonv1.EntryPoint {
 }
 
 func (r *EntryPointRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.EntryPoint, int32) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
+	mPtr := r.entryPoints.Load()
+	if mPtr == nil {
+		return nil, 0
+	}
+	m := *mPtr
 	var filtered []*gateonv1.EntryPoint
 	search = strings.ToLower(search)
-	for _, ep := range r.entryPoints {
+	for _, ep := range m {
 		if search == "" || strings.Contains(strings.ToLower(ep.Id), search) || strings.Contains(strings.ToLower(ep.Name), search) || strings.Contains(strings.ToLower(ep.Address), search) {
 			filtered = append(filtered, ep)
 		}
@@ -128,9 +138,11 @@ func (r *EntryPointRegistry) ListPaginated(ctx context.Context, page, pageSize i
 }
 
 func (r *EntryPointRegistry) Get(ctx context.Context, id string) (*gateonv1.EntryPoint, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	ep, ok := r.entryPoints[id]
+	mPtr := r.entryPoints.Load()
+	if mPtr == nil {
+		return nil, false
+	}
+	ep, ok := (*mPtr)[id]
 	return ep, ok
 }
 
@@ -138,7 +150,15 @@ func (r *EntryPointRegistry) Update(ctx context.Context, ep *gateonv1.EntryPoint
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.entryPoints[ep.Id] = ep
+	mPtr := r.entryPoints.Load()
+	newMap := make(map[string]*gateonv1.EntryPoint)
+	if mPtr != nil {
+		for k, v := range *mPtr {
+			newMap[k] = v
+		}
+	}
+	newMap[ep.Id] = ep
+	r.entryPoints.Store(&newMap)
 	return r.saveLocked()
 }
 
@@ -146,6 +166,15 @@ func (r *EntryPointRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	delete(r.entryPoints, id)
+	mPtr := r.entryPoints.Load()
+	if mPtr == nil {
+		return nil
+	}
+	newMap := make(map[string]*gateonv1.EntryPoint)
+	for k, v := range *mPtr {
+		newMap[k] = v
+	}
+	delete(newMap, id)
+	r.entryPoints.Store(&newMap)
 	return r.saveLocked()
 }

@@ -2,6 +2,7 @@ package art
 
 import (
 	"net"
+	"net/netip"
 	"sync"
 )
 
@@ -97,20 +98,23 @@ func (t *Tree) insert(root *node, ip []byte, bits int) {
 	curr.isEnd = true
 }
 
-// Contains checks if an IP is contained in any of the inserted CIDRs.
-func (t *Tree) Contains(ipStr string) bool {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-
+// ContainsAddr checks if a netip.Addr is contained in any of the inserted CIDRs.
+func (t *Tree) ContainsAddr(ip netip.Addr) bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	if ip4 := ip.To4(); ip4 != nil {
-		return t.search(t.root4, ip4)
+	if ip.Is4() {
+		return t.search(t.root4, ip.AsSlice())
 	}
-	return t.search(t.root6, ip)
+	return t.search(t.root6, ip.AsSlice())
+}
+
+// Contains checks if an IP string is contained in any of the inserted CIDRs.
+func (t *Tree) Contains(ipStr string) bool {
+	if addr, err := netip.ParseAddr(ipStr); err == nil {
+		return t.ContainsAddr(addr)
+	}
+	return false
 }
 
 func (t *Tree) search(root *node, ip []byte) bool {

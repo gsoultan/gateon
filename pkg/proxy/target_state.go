@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"net/http/httputil"
 	"net/url"
 	"sync/atomic"
 
@@ -27,6 +28,8 @@ type targetState struct {
 	latencySumUs    uint64
 	activeConn      int32
 	activeConnGuage prometheus.Gauge
+	proxy           atomic.Pointer[httputil.ReverseProxy]
+	transport       atomic.Value // stores http.RoundTripper
 }
 
 func newTargetState(rawURL string, weight int32) *targetState {

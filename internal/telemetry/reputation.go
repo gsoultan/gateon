@@ -17,20 +17,20 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
-// GetIPFingerprint returns a unique identifier for the client (preferring JA4 fingerprint over IP).
+// GetIPFingerprint returns a unique identifier for the client (preferring JA4+ fingerprint over IP).
 func GetIPFingerprint(r *http.Request) string {
 	if rs := request.GetRequestState(r); rs != nil {
-		if rs.JA4 != "" {
-			return rs.JA4
+		if rs.JA4Plus != "" {
+			return rs.JA4Plus
 		}
-		if rs.JA4H != "" {
-			return rs.JA4H
+		if rs.JA4 != "" || rs.JA4H != "" {
+			return rs.JA4 + "_" + rs.JA4H
 		}
 	}
 
 	// Try to get from context if not in request state
-	if ja4h := GetCachedJA4H(r); ja4h != "" {
-		return ja4h
+	if ja4plus := GetJA4Plus(r); ja4plus != "_" {
+		return ja4plus
 	}
 
 	// Fallback to IP extraction
@@ -217,7 +217,7 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 				if net.ParseIP(fingerprint) != nil {
 					_ = prov.ShunIP(fingerprint)
 				} else {
-					// It's a JA4/JA3 fingerprint.
+					// It's a JA4+ fingerprint.
 					// We could call ShunJA4 here, but it's not yet implemented in XDP.
 					// For now, L7 blocking is sufficient and more precise for shared IPs.
 				}

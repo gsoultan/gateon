@@ -62,20 +62,18 @@ func IPMitigation() Middleware {
 	}
 }
 
-// UserMitigation returns a middleware that blocks requests from mitigated JA3/JA4/JA4H fingerprints.
+// UserMitigation returns a middleware that blocks requests from mitigated JA4+ fingerprints.
 func UserMitigation() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rs := GetRequestState(r)
-			var ja3, ja4, ja4h string
+			var ja4plus string
 			if rs != nil {
-				ja3 = rs.JA3
-				ja4 = rs.JA4
-				ja4h = rs.JA4H
+				ja4plus = rs.JA4Plus
 			}
 
-			if ja3 != "" || ja4 != "" || ja4h != "" {
-				if telemetry.IsUserMitigated(ja3, ja4, ja4h) {
+			if ja4plus != "" {
+				if telemetry.IsUserMitigated(ja4plus) {
 					w.WriteHeader(http.StatusForbidden)
 					_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
 
@@ -86,10 +84,8 @@ func UserMitigation() Middleware {
 						Category:    "threat_intel",
 						Severity:    "high",
 						ActionTaken: "blocked",
-						Details:     "Request blocked due to mitigated user fingerprint (JA3/JA4/JA4H)",
-						JA3:         ja3,
-						JA4:         ja4,
-						JA4H:        ja4h,
+						Details:     "Request blocked due to mitigated user fingerprint (JA4+)",
+						Fingerprint: ja4plus,
 						RequestURI:  r.URL.RequestURI(),
 						Method:      r.Method,
 						UserAgent:   r.UserAgent(),
@@ -103,12 +99,19 @@ func UserMitigation() Middleware {
 	}
 }
 
-// WithRequestState returns a middleware that initializes the RequestState and puts it in the context.
-// It should be the outermost middleware to ensure downstream middlewares can access the state.
-func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
+// EntryPoint returns a high-performance consolidated middleware that initializes the request lifecycle.
+// It handles RequestState initialization, Real IP resolution, and Request ID generation in a single step
+// to minimize allocations and context operations.
+func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
+	hTrust := RealIP(true)
+	hNoTrust := RealIP(false)
+
 	return func(next http.Handler) http.Handler {
+		nextTrust := hTrust(next)
+		nextNoTrust := hNoTrust(next)
+
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Get or create state from pool
+			// 1. Initialize RequestState from pool
 			rs := RequestStatePool.Get().(*request.RequestState)
 			rs.Reset()
 			rs.EntryPointID = epID
@@ -117,23 +120,50 @@ func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
 			rs.TEntrypoint = time.Now().UnixNano()
 			defer RequestStatePool.Put(rs)
 
-			// Populate fingerprints as early as possible
+			// 2. Handle Request ID
+			id := r.Header.Get("X-Request-ID")
+			if id == "" {
+				id = request.GenerateID()
+			}
+			w.Header().Set("X-Request-ID", id)
+			rs.RequestID = id
+
+			// 3. Resolve Real IP and Proto (Consolidated logic)
+			trustCloudflare := config.EffectiveTrustCloudflare()
+
+			// Fingerprints and Real IP resolution
 			populateFingerprints(r, rs)
 
+			// Add RequestState to context so downstream can use it
 			ctx := context.WithValue(r.Context(), RequestStateContextKey, rs)
 			r = r.WithContext(ctx)
 
-			// Log arrival for proxy traffic only
-			if !isMgmt && !IsInternalPath(r.URL.Path) {
-				logger.L.LogInfo("Proxy request received",
-					"flow_step", "entrypoint_arrival",
-					"request_id", GetRequestID(r),
-					"entrypoint", epID,
-					"method", r.Method,
-					"path", r.URL.Path)
+			// Continue with RealIP logic and next handlers
+			if trustCloudflare {
+				nextTrust.ServeHTTP(w, r)
+			} else {
+				nextNoTrust.ServeHTTP(w, r)
 			}
+		})
+	}
+}
 
-			next.ServeHTTP(w, r)
+// WithRequestState returns a middleware that initializes the RequestState and puts it in the context.
+// It is kept for backward compatibility and specialized use cases.
+func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rs := RequestStatePool.Get().(*request.RequestState)
+			rs.Reset()
+			rs.EntryPointID = epID
+			rs.RouteName = "gateon-" + epLabel
+			rs.IsManagement = isMgmt
+			rs.TEntrypoint = time.Now().UnixNano()
+			defer RequestStatePool.Put(rs)
+
+			populateFingerprints(r, rs)
+			ctx := context.WithValue(r.Context(), RequestStateContextKey, rs)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
@@ -142,33 +172,36 @@ func populateFingerprints(r *http.Request, rs *request.RequestState) {
 	if rs == nil || r == nil {
 		return
 	}
-	if rs.JA3 != "" && rs.JA4 != "" {
+	if rs.JA4Plus != "" {
 		return
 	}
 
-	ja3, ja4 := rs.JA3, rs.JA4
-	if r.TLS != nil {
-		// Try to get fingerprints from our internal map first
-		if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
-			f := GetFingerprints(conn)
-			ja3, ja4 = f.JA3, f.JA4
-		}
-		if ja3 == "" {
-			f := GetFingerprintsByAddr(r.RemoteAddr)
-			ja3, ja4 = f.JA3, f.JA4
-		}
-	}
-
-	// Fallback to headers if still empty (e.g. from upstream proxy)
-	if ja3 == "" {
-		ja3 = r.Header.Get("X-JA3-Fingerprint")
-	}
+	ja4 := rs.JA4
 	if ja4 == "" {
-		ja4 = r.Header.Get("X-JA4-Fingerprint")
+		if r.TLS != nil {
+			// Try to get fingerprints from our internal map first
+			if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
+				f := GetFingerprints(conn)
+				ja4 = f.JA4
+			}
+			if ja4 == "" {
+				f := GetFingerprintsByAddr(r.RemoteAddr)
+				ja4 = f.JA4
+			}
+		}
+		// Fallback to header if still empty
+		if ja4 == "" {
+			ja4 = r.Header.Get("X-JA4-Fingerprint")
+		}
 	}
 
-	rs.JA3 = ja3
 	rs.JA4 = ja4
+	if rs.JA4H == "" {
+		rs.JA4H = telemetry.GetCachedJA4H(r)
+	}
+	if rs.JA4Plus == "" {
+		rs.JA4Plus = ja4 + "_" + rs.JA4H
+	}
 }
 
 // AccessLog returns a middleware that logs request details.
@@ -301,9 +334,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				defer PutStatusResponseWriter(sw)
 			}
 
-			logger.L.LogInfo("Metrics middleware CALLING NEXT", "request_id", GetRequestID(r))
 			next.ServeHTTP(sw, r)
-			logger.L.LogInfo("Metrics middleware NEXT RETURNED", "request_id", GetRequestID(r))
 
 			respOutSize := sw.BytesWritten
 			if respOutSize < 0 {
@@ -358,11 +389,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 				id := GetRequestID(r)
 
-				// JA3/JA4 fingerprints are only consumed by trace records, so resolve
+				// JA4+ fingerprints are only consumed by trace records, so resolve
 				// them lazily inside the recording branch.
-				ja3, ja4 := "", ""
 				if rs != nil {
-					ja3, ja4 = rs.JA3, rs.JA4
+					populateFingerprints(r, rs)
 				}
 
 				recommendation := ""
@@ -412,8 +442,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						method,
 						r.Referer(),
 						origHost+r.URL.RequestURI(),
-						ja3,
-						ja4,
+						rs.JA4,
+						rs.JA4H,
 						debug.RequestHeaders,
 						debug.RequestBody,
 						debug.ResponseHeaders,
@@ -445,8 +475,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						method,
 						r.Referer(),
 						origHost+r.URL.RequestURI(),
-						ja3,
-						ja4,
+						rs.JA4,
+						rs.JA4H,
 						reqHeaders,
 						respHeaders,
 						recommendation,

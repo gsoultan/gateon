@@ -75,7 +75,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /v1/audit/logs", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		page, pageSize, search := ParsePagination(r)
@@ -105,7 +105,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		})
 	})
 	mux.HandleFunc("GET /v1/audit/logs/watch", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		SetSSEHeaders(w)
@@ -138,7 +138,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 	})
 	mux.HandleFunc("GET /v1/audit/archives", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		archives, err := audit.ListArchives()
@@ -150,7 +150,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"archives": archives})
 	})
 	mux.HandleFunc("GET /v1/audit/archives/{filename}", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		filename := r.PathValue("filename")

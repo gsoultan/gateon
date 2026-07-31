@@ -99,6 +99,7 @@ type Deps struct {
 	L4Resolver       L4Resolver
 	ManagementConfig *gateonv1.ManagementConfig
 	GlobalStore      config.GlobalConfigStore
+	SharedServers    sync.Map // map[string]*sharedHTTPDispatcher
 }
 
 // RateLimiter provides per-key rate limiting middleware.

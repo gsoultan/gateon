@@ -22,14 +22,22 @@ type RouteRegistry struct {
 	sorted         []*gateonv1.Route            // Cached sorted list
 	hostIndex      map[string][]*gateonv1.Route // host -> routes for O(1) lookup
 	wildcardRoutes []*gateonv1.Route            // host wildcards or path-only routes
-	path           string
+
+	hostTries       map[string]*PathTrie
+	hostRegexes     map[string][]*gateonv1.Route
+	wildcardTrie    *PathTrie
+	wildcardRegexes []*gateonv1.Route
+
+	path string
 }
 
 func NewRouteRegistry(path string) *RouteRegistry {
 	reg := &RouteRegistry{
-		routes:    make(map[string]*gateonv1.Route),
-		hostIndex: make(map[string][]*gateonv1.Route),
-		path:      path,
+		routes:      make(map[string]*gateonv1.Route),
+		hostIndex:   make(map[string][]*gateonv1.Route),
+		hostTries:   make(map[string]*PathTrie),
+		hostRegexes: make(map[string][]*gateonv1.Route),
+		path:        path,
 	}
 	reg.load()
 	return reg
@@ -80,16 +88,36 @@ func (r *RouteRegistry) rebuildSortedLocked() {
 	})
 
 	r.wildcardRoutes = nil
+	r.wildcardTrie = NewPathTrie()
+	r.wildcardRegexes = nil
 	clear(r.hostIndex)
+	clear(r.hostTries)
+	clear(r.hostRegexes)
+
 	for _, rt := range r.sorted {
 		if rt.Rule == "" {
 			continue
 		}
 		host := hostFromRule(rt.Rule)
+		path, isPrefix, isRegex := rulePathInfo(rt.Rule)
+
 		if host != "" && RouteHostIsExact(host) {
 			r.hostIndex[host] = append(r.hostIndex[host], rt)
+			if isRegex {
+				r.hostRegexes[host] = append(r.hostRegexes[host], rt)
+			} else {
+				if r.hostTries[host] == nil {
+					r.hostTries[host] = NewPathTrie()
+				}
+				r.hostTries[host].Insert(path, isPrefix, rt)
+			}
 		} else {
 			r.wildcardRoutes = append(r.wildcardRoutes, rt)
+			if isRegex {
+				r.wildcardRegexes = append(r.wildcardRegexes, rt)
+			} else {
+				r.wildcardTrie.Insert(path, isPrefix, rt)
+			}
 		}
 	}
 
@@ -149,6 +177,19 @@ func (r *RouteRegistry) ListWildcards(ctx context.Context) []*gateonv1.Route {
 	return r.wildcardRoutes
 }
 
+func (r *RouteRegistry) GetTrieByHost(host string) (*PathTrie, []*gateonv1.Route) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	host = strings.ToLower(host)
+	return r.hostTries[host], r.hostRegexes[host]
+}
+
+func (r *RouteRegistry) GetWildcardTrie() (*PathTrie, []*gateonv1.Route) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.wildcardTrie, r.wildcardRegexes
+}
+
 func hostFromRule(rule string) string {
 	for _, q := range []string{"`", "\""} {
 		prefix := "Host(" + q
@@ -164,21 +205,52 @@ func hostFromRule(rule string) string {
 	return ""
 }
 
-func pathFromRule(rule string) string {
+func rulePathInfo(rule string) (path string, isPrefix bool, isRegex bool) {
+	// If the rule is complex (contains OR, negation, or multiple path conditions),
+	// treat it as a regex-like rule so it's checked for all potential matches.
+	if strings.Contains(rule, "||") || strings.Contains(rule, "!") {
+		return "/", true, true
+	}
+
+	// Count path-related functions
+	pathFns := []string{"Path(", "PathPrefix(", "PathRegex("}
+	totalPathFns := 0
+	for _, fn := range pathFns {
+		totalPathFns += strings.Count(rule, fn)
+	}
+	if totalPathFns > 1 {
+		return "/", true, true
+	}
+
 	for _, q := range []string{"`", "\""} {
-		for _, prefix := range []string{"PathPrefix(", "Path(", "PathRegex("} {
-			p := prefix + q
-			if idx := strings.Index(rule, p); idx >= 0 {
-				rest := rule[idx+len(p):]
-				suffix := q + ")"
-				end := strings.Index(rest, suffix)
-				if end > 0 {
-					return strings.ToLower(rest[:end])
-				}
+		if idx := strings.Index(rule, "PathPrefix("+q); idx >= 0 {
+			rest := rule[idx+len("PathPrefix(")+1:]
+			end := strings.Index(rest, q+")")
+			if end > 0 {
+				return rest[:end], true, false
+			}
+		}
+		if idx := strings.Index(rule, "PathRegex("+q); idx >= 0 {
+			rest := rule[idx+len("PathRegex(")+1:]
+			end := strings.Index(rest, q+")")
+			if end > 0 {
+				return rest[:end], false, true
+			}
+		}
+		if idx := strings.Index(rule, "Path("+q); idx >= 0 {
+			rest := rule[idx+len("Path(")+1:]
+			end := strings.Index(rest, q+")")
+			if end > 0 {
+				return rest[:end], false, false
 			}
 		}
 	}
-	return strings.ToLower(rule)
+	return "/", true, false // Matches everything by default
+}
+
+func pathFromRule(rule string) string {
+	path, _, _ := rulePathInfo(rule)
+	return strings.ToLower(path)
 }
 
 func (r *RouteRegistry) ListPaginated(ctx context.Context, page, pageSize int32, search string, filter *RouteFilter) ([]*gateonv1.Route, int32) {

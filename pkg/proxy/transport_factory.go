@@ -60,21 +60,41 @@ func (f *backendTransportFactory) TransportFor(state *targetState, req *http.Req
 	}
 
 	selectedIdentity := (*tlsClientIdentity)(nil)
-	cacheKey := state.transportKey
 	if f.identitySelector != nil {
 		selectedIdentity = f.identitySelector.Select(req)
-		if selectedIdentity != nil {
-			cacheKey += "|cert:" + selectedIdentity.id
+	}
+
+	// Fast path: use cached transport in targetState if no client cert identity is selected
+	if selectedIdentity == nil {
+		if v := state.transport.Load(); v != nil {
+			return v.(http.RoundTripper)
 		}
 	}
 
+	cacheKey := state.transportKey
+	if selectedIdentity != nil {
+		cacheKey += "|cert:" + selectedIdentity.id
+	}
+
 	if v, ok := f.cache.Load(cacheKey); ok {
-		return v.(http.RoundTripper)
+		rt := v.(http.RoundTripper)
+		if selectedIdentity == nil {
+			state.transport.Store(rt)
+		}
+		return rt
 	}
 
 	rt := f.buildTransport(state, selectedIdentity)
 	if v, loaded := f.cache.LoadOrStore(cacheKey, rt); loaded {
-		return v.(http.RoundTripper)
+		rt = v.(http.RoundTripper)
+		if selectedIdentity == nil {
+			state.transport.Store(rt)
+		}
+		return rt
+	}
+
+	if selectedIdentity == nil {
+		state.transport.Store(rt)
 	}
 	return rt
 }

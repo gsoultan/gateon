@@ -56,6 +56,7 @@ service ApiService {
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
   rpc ListSecurityThreats(ListSecurityThreatsRequest) returns (ListSecurityThreatsResponse);
   rpc GetSecurityThreat(GetSecurityThreatRequest) returns (GetSecurityThreatResponse);
+  rpc MitigateThreat(MitigateThreatRequest) returns (MitigateThreatResponse);
   rpc RemoveMitigatedThreat(RemoveMitigatedThreatRequest) returns (RemoveMitigatedThreatResponse);
   rpc ListReputations(ListReputationsRequest) returns (ListReputationsResponse);
   rpc ListAuditLogs(ListAuditLogsRequest) returns (ListAuditLogsResponse);
