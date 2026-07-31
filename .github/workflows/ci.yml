@@ -37,27 +37,16 @@ jobs:
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
           go install github.com/bufbuild/buf/cmd/buf@latest
 
-      - name: Generate proto
-        run: buf generate
-
-      - name: Install UI deps
-        run: bun install --cwd ui
-
       - name: Lint UI (accessibility gate)
-        run: (cd ui && bun run lint)
-
-      - name: Build UI
         run: |
-          (cd ui && bun run build)
-          go run ./scripts/sync_assets.go
+          bun install --cwd ui
+          (cd ui && bun run lint)
 
-      - name: Tidy
-        run: go mod tidy
-
-      # Compile the XDP/eBPF C program and regenerate the bpf2go bindings so the
-      # Linux build (manager_linux.go) and tests can link loadGateon_ebpf().
-      - name: Generate eBPF bindings
-        run: go generate ./internal/ebpf/...
+      - name: Generate all artifacts
+        run: |
+          buf generate
+          go generate ./...
+          go mod tidy
 
       - name: Build
         run: go build ./...

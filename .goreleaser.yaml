@@ -14,7 +14,10 @@ gomod:
 # provide the BPF toolchain (clang/llvm/libbpf-dev); see .github/workflows.
 before:
   hooks:
+    - buf generate
     - go generate ./internal/ebpf/...
+    - go generate ./internal/ui/...
+    - go mod tidy
 
 builds:
   - id: gateon

@@ -1870,7 +1870,30 @@ func processRequest(tx types.Transaction, r *http.Request) (*types.Interruption,
 	// 6. Process Request Body (triggers Phase 2)
 	// Skip request body inspection for gRPC and known safe large traffic if reputation is high.
 	if r.Body != nil && r.Body != http.NoBody && !isGRPCRequest(r) {
+		// Buffer only what WAF consumes to restore it for downstream handlers (proxy).
+		// We use a TeeReader to capture the read data and MultiReader to stitch it back.
+		buf := &bytes.Buffer{}
+		originalBody := r.Body
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.TeeReader(originalBody, buf),
+			Closer: originalBody,
+		}
+
 		it, _, err := tx.ReadRequestBodyFrom(r.Body)
+
+		// Restore the body for downstream. MultiReader serves the buffered part first,
+		// then continues with the remaining original body.
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.MultiReader(buf, originalBody),
+			Closer: originalBody,
+		}
+
 		if err != nil {
 			return nil, err
 		}

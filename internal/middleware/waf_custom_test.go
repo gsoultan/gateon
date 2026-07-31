@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -41,16 +43,16 @@ func TestWAFCustomRulesDynamicReload(t *testing.T) {
 	// 3. Request should pass
 	req := httptest.NewRequest("GET", "/?test=1", nil)
 	rr := httptest.NewRecorder()
-	
+
 	mw, err := WAF(cfg)
 	if err != nil {
 		t.Fatalf("WAF: %v", err)
 	}
-	
+
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	
+
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rr.Code)
@@ -74,12 +76,12 @@ func TestWAFCustomRulesDynamicReload(t *testing.T) {
 	// 5. Re-evaluate the same middleware logic.
 	// In the real app, the server would rebuild the middleware chain when it receives the invalidation signal.
 	// Here we simulate that by calling WAF(cfg) again.
-	
+
 	mw2, err := WAF(cfg)
 	if err != nil {
 		t.Fatalf("WAF2: %v", err)
 	}
-	
+
 	handler2 := mw2(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -88,5 +90,42 @@ func TestWAFCustomRulesDynamicReload(t *testing.T) {
 	handler2.ServeHTTP(rr2, req)
 	if rr2.Code != http.StatusForbidden {
 		t.Errorf("expected 403 after adding rule, got %d", rr2.Code)
+	}
+}
+
+func TestWAF_BodyRestoration(t *testing.T) {
+	cfg := WAFConfig{
+		UseCRS:     false,
+		Directives: `SecRule REQUEST_BODY "@contains Hello" "id:1001,phase:2,pass,log"`,
+	}
+
+	mw, err := WAF(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create WAF: %v", err)
+	}
+
+	bodyContent := "Hello, WAF!"
+	req := httptest.NewRequest("POST", "/test", bytes.NewReader([]byte(bodyContent)))
+	req.Header.Set("Content-Type", "text/plain")
+
+	var capturedBody []byte
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		capturedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("Failed to read body in next handler: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rr := httptest.NewRecorder()
+	mw(next).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", rr.Code)
+	}
+
+	if string(capturedBody) != bodyContent {
+		t.Errorf("Body was consumed and not restored. Expected %q, got %q", bodyContent, string(capturedBody))
 	}
 }
