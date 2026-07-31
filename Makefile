@@ -1,4 +1,4 @@
-.PHONY: proto ui ebpf build build-fips test test-race bench clean vuln staticcheck gosec sec ebpf-docker pgo-profile docker
+.PHONY: proto build build-fips test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -19,15 +19,10 @@ ebpf-docker:
 	docker run --rm -v "$(CURDIR)":/src -w /src gateon-ebpf-gen \
 		sh -c 'go generate ./internal/ebpf/...'
 
-## ui: build the React/Vite dashboard and sync assets to internal/ui/dist
-ui:
-	go generate ./internal/ui/...
-
 ## build: build the gateon binary. The Go toolchain automatically applies
 ##        Profile-Guided Optimization when cmd/gateon/default.pgo exists
-##        (see `make pgo-profile`). This target depends on proto, ebpf, and ui
-##        to ensure a complete, production-ready build.
-build: proto ebpf ui
+##        (see `make pgo-profile`).
+build:
 	go build -v -o dist/gateon ./cmd/gateon
 
 ## pgo-profile: capture a CPU profile from representative benchmarks and install
