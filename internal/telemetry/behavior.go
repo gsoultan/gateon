@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
 	lru "github.com/hashicorp/golang-lru"
 )
@@ -55,8 +56,41 @@ func getShard(fingerprint string) *behaviorShard {
 	return shards[hash%behaviorShards]
 }
 
-// TrackBehavior analyzes sequences and timing of requests from a fingerprint.
+// TrackBehavior enqueues a behavior tracking request to the background worker.
 func TrackBehavior(fingerprint string, r *http.Request, status int) {
+	if fingerprint == "" {
+		return
+	}
+	s := getStore()
+	if s == nil {
+		return
+	}
+
+	inc := &behaviorInc{
+		fingerprint: fingerprint,
+		path:        r.URL.Path,
+		status:      status,
+		time:        time.Now(),
+		sourceIP:    request.GetClientIP(r, false),
+		userAgent:   r.UserAgent(),
+		host:        r.Host,
+	}
+	if rs := request.GetRequestState(r); rs != nil {
+		inc.ja4 = rs.JA4
+		inc.ja4h = rs.JA4H
+		inc.ja4plus = rs.JA4Plus
+	}
+
+	select {
+	case s.behaviorInCh <- inc:
+	default:
+		// drop on backpressure
+	}
+}
+
+// TrackBehaviorInternal analyzes sequences and timing of requests from a fingerprint in the background.
+func TrackBehaviorInternal(b *behaviorInc) {
+	fingerprint := b.fingerprint
 	if fingerprint == "" {
 		return
 	}
@@ -65,8 +99,8 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	path := r.URL.Path
-	now := time.Now()
+	path := b.path
+	now := b.time
 
 	var state *BehaviorState
 	if val, ok := shard.cache.Get(fingerprint); ok {
@@ -99,26 +133,34 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 		// Analyze IAT for robotic regularity (low variance)
 		if len(state.IATs) >= 5 {
 			if isRoboticTiming(state.IATs, highTrafficFactor) {
-				RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
+				RecordSecurityThreat(SecurityThreat{
 					Type:        "behavioral_anomaly",
 					Fingerprint: fingerprint,
+					SourceIP:    b.sourceIP,
+					UserAgent:   b.userAgent,
+					JA4:         b.ja4,
+					JA4H:        b.ja4h,
 					Score:       30 / highTrafficFactor,
 					Details:     "Robotic timing pattern detected (highly regular intervals)",
 					RequestURI:  path,
 					ActionTaken: "flagged",
 					Severity:    "low",
-				}))
+				})
 			}
 			if isHeartbeatPattern(state.IATs, highTrafficFactor) {
-				RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
+				RecordSecurityThreat(SecurityThreat{
 					Type:        "behavioral_anomaly",
 					Fingerprint: fingerprint,
+					SourceIP:    b.sourceIP,
+					UserAgent:   b.userAgent,
+					JA4:         b.ja4,
+					JA4H:        b.ja4h,
 					Score:       40 / highTrafficFactor,
 					Details:     "Heartbeat pattern detected (regular long-interval polling)",
 					RequestURI:  path,
 					ActionTaken: "flagged",
 					Severity:    "medium",
-				}))
+				})
 			}
 		}
 	}
@@ -128,48 +170,60 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 	if len(state.Sequence) > maxSequenceLen {
 		state.Sequence = state.Sequence[1:]
 	}
-	state.StatusCodes = append(state.StatusCodes, status)
+	state.StatusCodes = append(state.StatusCodes, b.status)
 	if len(state.StatusCodes) > maxSequenceLen {
 		state.StatusCodes = state.StatusCodes[1:]
 	}
 
 	// Analyze for API Fuzzing / Scanning
 	if isFuzzing(state.StatusCodes, highTrafficFactor) {
-		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
+		RecordSecurityThreat(SecurityThreat{
 			Type:        "api_fuzzing",
 			Fingerprint: fingerprint,
+			SourceIP:    b.sourceIP,
+			UserAgent:   b.userAgent,
+			JA4:         b.ja4,
+			JA4H:        b.ja4h,
 			Score:       60 / highTrafficFactor,
 			Details:     "High rate of 404/403 responses detected (potential fuzzing/scanning)",
 			RequestURI:  path,
 			ActionTaken: "flagged",
 			Severity:    "high",
-		}))
+		})
 	}
 
 	// Analyze Sequence for jump-to-critical-path
 	if isSuspiciousSequence(state.Sequence) {
-		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
+		RecordSecurityThreat(SecurityThreat{
 			Type:        "behavioral_anomaly",
 			Fingerprint: fingerprint,
+			SourceIP:    b.sourceIP,
+			UserAgent:   b.userAgent,
+			JA4:         b.ja4,
+			JA4H:        b.ja4h,
 			Score:       50,
 			Details:     "Suspicious path sequence detected (jump to sensitive area)",
 			RequestURI:  path,
 			ActionTaken: "flagged",
 			Severity:    "medium",
-		}))
+		})
 	}
 
 	// Analyze for Directory Traversal / Probe
 	if isProbePattern(path) {
-		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
+		RecordSecurityThreat(SecurityThreat{
 			Type:        "probe_detected",
 			Fingerprint: fingerprint,
+			SourceIP:    b.sourceIP,
+			UserAgent:   b.userAgent,
+			JA4:         b.ja4,
+			JA4H:        b.ja4h,
 			Score:       70,
 			Details:     "Known exploit probe or directory traversal attempt: " + path,
 			RequestURI:  path,
 			ActionTaken: "flagged",
 			Severity:    "high",
-		}))
+		})
 	}
 
 	state.LastPath = path
@@ -177,19 +231,23 @@ func TrackBehavior(fingerprint string, r *http.Request, status int) {
 	shard.cache.Add(fingerprint, state)
 
 	// Entropy-based DGA detection on Hostname
-	hostname := r.Host
+	hostname := b.host
 	if idx := strings.Index(hostname, ":"); idx != -1 {
 		hostname = hostname[:idx]
 	}
 	if isDGAPattern(hostname) {
-		RecordSecurityThreat(RecordSecurityThreatWithJA4(r, SecurityThreat{
+		RecordSecurityThreat(SecurityThreat{
 			Type:        "dga_detected",
 			Fingerprint: fingerprint,
+			SourceIP:    b.sourceIP,
+			UserAgent:   b.userAgent,
+			JA4:         b.ja4,
+			JA4H:        b.ja4h,
 			Score:       40,
 			Details:     "Potential DGA hostname detected: " + hostname,
 			RequestURI:  path,
 			ActionTaken: "flagged",
-		}))
+		})
 	}
 }
 

@@ -10,16 +10,18 @@ import (
 
 // WeightedRoundRobinLB implements weighted round-robin load balancing.
 type WeightedRoundRobinLB struct {
-	targets []*targetState
-	current uint64
-	mu      sync.RWMutex
+	targetsPtr atomic.Pointer[[]*targetState]
+	current    uint64
+	mu         sync.Mutex
 }
 
 func NewWeightedRoundRobinLB(targets []*gateonv1.Target) *WeightedRoundRobinLB {
-	lb := &WeightedRoundRobinLB{targets: make([]*targetState, len(targets))}
+	lbTargets := make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = newTargetState(t.Url, t.Weight)
+		lbTargets[i] = newTargetState(t.Url, t.Weight)
 	}
+	lb := &WeightedRoundRobinLB{}
+	lb.targetsPtr.Store(&lbTargets)
 	return lb
 }
 
@@ -32,14 +34,17 @@ func (lb *WeightedRoundRobinLB) Next() string {
 }
 
 func (lb *WeightedRoundRobinLB) NextState() *targetState {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
-	if len(lb.targets) == 0 {
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return nil
+	}
+	targets := *ptr
+	if len(targets) == 0 {
 		return nil
 	}
 
 	totalWeight := int32(0)
-	for _, t := range lb.targets {
+	for _, t := range targets {
 		if t.alive.Load() {
 			totalWeight += t.weight
 		}
@@ -53,7 +58,7 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 	val := int32((n - 1) % uint64(totalWeight))
 
 	currentSum := int32(0)
-	for _, t := range lb.targets {
+	for _, t := range targets {
 		if !t.alive.Load() {
 			continue
 		}
@@ -68,16 +73,19 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 func (lb *WeightedRoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
-	lb.targets = make([]*targetState, len(targets))
+	newTargets := make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = newTargetStateFromTarget(t)
+		newTargets[i] = newTargetStateFromTarget(t)
 	}
+	lb.targetsPtr.Store(&newTargets)
 }
 
 func (lb *WeightedRoundRobinLB) SetAlive(url string, alive bool) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	for _, t := range lb.targets {
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return
+	}
+	for _, t := range *ptr {
 		if t.url == url {
 			if t.alive.Load() != alive {
 				state := telemetry.CircuitClosed
@@ -93,10 +101,13 @@ func (lb *WeightedRoundRobinLB) SetAlive(url string, alive bool) {
 }
 
 func (lb *WeightedRoundRobinLB) GetStats() []TargetStats {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
-	stats := make([]TargetStats, len(lb.targets))
-	for i, t := range lb.targets {
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return nil
+	}
+	targets := *ptr
+	stats := make([]TargetStats, len(targets))
+	for i, t := range targets {
 		stats[i] = targetStatsFromState(t)
 	}
 	return stats

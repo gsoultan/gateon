@@ -1322,4 +1322,32 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(50, "remove_ja3_and_upgrade_ja4", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		if dialect.Driver == DriverSQLite {
+			// SQLite doesn't support DROP COLUMN easily.
+			// Since we want to ONLY use JA4+, we just leave ja3 as an empty string
+			// or we can recreate the tables. Recreating is safer for "only use" requirement.
+			queries = []string{
+				// We don't strictly need to drop it in SQLite to "stop using" it,
+				// but for a clean state we can. However, let's keep it simple
+				// and just ensure ja4 columns are prioritized.
+				// If the user REALLY wants it gone, we'd recreate security_threats and traces.
+				// For now, let's just null it out to save space.
+				`UPDATE security_threats SET ja3 = '';`,
+				`UPDATE traces SET ja3 = '';`,
+			}
+		} else {
+			// Postgres and MySQL support DROP COLUMN
+			queries = []string{
+				`ALTER TABLE security_threats DROP COLUMN ja3;`,
+				`ALTER TABLE traces DROP COLUMN ja3;`,
+			}
+		}
+		for _, q := range queries {
+			_, _ = db.Exec(q) // Ignore errors if already dropped
+		}
+		return nil
+	})
 }

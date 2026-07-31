@@ -585,14 +585,14 @@ export default function TracesPage() {
             <Grid columns={2}>
               <Grid.Col span={1}>
                 <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">TLS JA3 FINGERPRINT</Text>
-                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja3 || "N/A"}</Text>
+                  <Text size="xs" fw={700} c="dimmed">TLS JA4 FINGERPRINT</Text>
+                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja4 || "N/A"}</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">TLS JA4 FINGERPRINT</Text>
-                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja4 || "N/A"}</Text>
+                  <Text size="xs" fw={700} c="dimmed">HTTP JA4H FINGERPRINT</Text>
+                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja4h || "N/A"}</Text>
                 </Stack>
               </Grid.Col>
             </Grid>

@@ -15,6 +15,8 @@ type RouteStore interface {
 	All(ctx context.Context) map[string]*gateonv1.Route
 	Get(ctx context.Context, id string) (*gateonv1.Route, bool)
 	GetByHost(host string) []*gateonv1.Route
+	GetTrieByHost(host string) (*PathTrie, []*gateonv1.Route)
+	GetWildcardTrie() (*PathTrie, []*gateonv1.Route)
 	Update(ctx context.Context, rt *gateonv1.Route) error
 	Delete(ctx context.Context, id string) error
 }

@@ -114,7 +114,7 @@ func (m *AlertingManager) process(threat *telemetry.SecurityThreat) {
 				// mitigation (already recorded in telemetry.RecordSecurityThreat).
 				// We only perform kernel-level IP shunning for extremely severe threats
 				// where the risk to infrastructure outweighs the potential for NAT false positives.
-				if threat.Severity == "critical" && threat.JA4 == "" && threat.JA3 == "" {
+				if threat.Severity == "critical" && threat.JA4 == "" {
 					if err := m.ebpfManager.ShunIP(threat.SourceIP); err == nil {
 						threat.ActionTaken = "Autonomous Mitigation"
 						telemetry.MarkIPMitigated(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)")

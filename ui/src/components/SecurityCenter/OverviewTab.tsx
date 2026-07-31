@@ -130,6 +130,7 @@ export function OverviewTab({
     const stages: { label: string; value: number; color: string }[] = [
       { label: "HTTP Ingress", value: ingress, color: "blue" },
       { label: "WAF Block", value: f?.waf_blocked || 0, color: "orange" },
+      { label: "Fast-Path Block", value: f?.fast_path_blocked || 0, color: "red" },
       { label: "Rate Limit", value: f?.rate_limited || 0, color: "yellow" },
     ];
     if ((f?.bot_blocked || 0) > 0) stages.push({ label: "Bot Mitigation", value: f!.bot_blocked, color: "pink" });

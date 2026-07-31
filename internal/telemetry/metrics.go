@@ -123,6 +123,12 @@ var MiddlewareWAFBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total requests blocked by WAF.",
 }, []string{"route", "rule_id"})
 
+// MiddlewareFastPathBlockedTotal counts requests blocked by fast-path security checks.
+var MiddlewareFastPathBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_fast_path_blocked_total",
+	Help: "Total requests blocked by fast-path security checks.",
+}, []string{"route", "check_type"})
+
 // MiddlewareCacheHitsTotal counts cache hits.
 var MiddlewareCacheHitsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_cache_hits_total",

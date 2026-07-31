@@ -3,8 +3,8 @@ package reputation
 import (
 	"bufio"
 	"context"
-	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -15,8 +15,8 @@ import (
 
 type IPReputationStore struct {
 	mu           sync.RWMutex
+	trie         *ipTrie
 	badIPs       map[string]float64
-	badNets      []*net.IPNet
 	config       *gateonv1.IPReputationConfig
 	integrations []reputationProvider
 }
@@ -31,9 +31,99 @@ type reputationProvider struct {
 	client ReputationClient
 }
 
+type trieNode struct {
+	children [2]*trieNode
+	score    float64
+	hasValue bool
+}
+
+type ipTrie struct {
+	v4 *trieNode
+	v6 *trieNode
+}
+
+func newIPTrie() *ipTrie {
+	return &ipTrie{
+		v4: &trieNode{},
+		v6: &trieNode{},
+	}
+}
+
+func (t *ipTrie) insert(prefix netip.Prefix, score float64) {
+	addr := prefix.Addr()
+	ones := prefix.Bits()
+	var curr *trieNode
+	var bits []byte
+
+	if addr.Is4() {
+		curr = t.v4
+		b := addr.As4()
+		bits = b[:]
+	} else {
+		curr = t.v6
+		b := addr.As16()
+		bits = b[:]
+	}
+
+	for i := 0; i < ones; i++ {
+		bit := (bits[i/8] >> (7 - (uint(i) % 8))) & 1
+		if curr.children[bit] == nil {
+			curr.children[bit] = &trieNode{}
+		}
+		curr = curr.children[bit]
+	}
+	// Longest prefix match wins for score if we just overwrite,
+	// but we could also take the max.
+	if score > curr.score || !curr.hasValue {
+		curr.score = score
+	}
+	curr.hasValue = true
+}
+
+func (t *ipTrie) search(addr netip.Addr) (bool, float64) {
+	var curr *trieNode
+	var bits []byte
+	var maxBits int
+
+	if addr.Is4() {
+		curr = t.v4
+		b := addr.As4()
+		bits = b[:]
+		maxBits = 32
+	} else {
+		curr = t.v6
+		b := addr.As16()
+		bits = b[:]
+		maxBits = 128
+	}
+
+	var lastScore float64
+	var found bool
+
+	if curr.hasValue {
+		lastScore = curr.score
+		found = true
+	}
+
+	for i := 0; i < maxBits; i++ {
+		bit := (bits[i/8] >> (7 - (uint(i) % 8))) & 1
+		if curr.children[bit] == nil {
+			break
+		}
+		curr = curr.children[bit]
+		if curr.hasValue {
+			lastScore = curr.score
+			found = true
+		}
+	}
+
+	return found, lastScore
+}
+
 func NewIPReputationStore(cfg *gateonv1.IPReputationConfig) *IPReputationStore {
 	store := &IPReputationStore{
 		badIPs: make(map[string]float64),
+		trie:   newIPTrie(),
 	}
 	store.Reconfigure(cfg)
 	return store
@@ -80,22 +170,18 @@ func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	// Check manual map first (O(1))
 	if score, ok := s.badIPs[ipStr]; ok {
 		return true, score
 	}
 
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
+	// Fast lookup in Radix Tree (O(bits))
+	addr, err := netip.ParseAddr(ipStr)
+	if err != nil {
 		return false, 0
 	}
 
-	for _, n := range s.badNets {
-		if n.Contains(ip) {
-			return true, 1.0
-		}
-	}
-
-	return false, 0
+	return s.trie.search(addr)
 }
 
 // SetIPScore manually sets the reputation score for an IP (primarily for testing or internal overrides).
@@ -174,23 +260,23 @@ func (s *IPReputationStore) update(ctx context.Context) {
 	}
 
 	newIPs := make(map[string]float64)
-	var newNets []*net.IPNet
+	newTrie := newIPTrie()
 
 	for _, url := range s.config.FeedUrls {
-		if err := s.fetchFeed(ctx, url, newIPs, &newNets); err != nil {
+		if err := s.fetchFeed(ctx, url, newIPs, newTrie); err != nil {
 			logger.L.LogError("failed to fetch IP reputation feed", "error", err, "url", url)
 		}
 	}
 
 	s.mu.Lock()
 	s.badIPs = newIPs
-	s.badNets = newNets
+	s.trie = newTrie
 	s.mu.Unlock()
 
-	logger.L.Info().Int("ips", len(newIPs)).Int("nets", len(newNets)).Msg("IP reputation store updated")
+	logger.L.Info().Int("ips", len(newIPs)).Msg("IP reputation store updated with Radix Tree")
 }
 
-func (s *IPReputationStore) fetchFeed(ctx context.Context, url string, ips map[string]float64, nets *[]*net.IPNet) error {
+func (s *IPReputationStore) fetchFeed(ctx context.Context, url string, ips map[string]float64, trie *ipTrie) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
@@ -215,12 +301,19 @@ func (s *IPReputationStore) fetchFeed(ctx context.Context, url string, ips map[s
 		}
 
 		if strings.Contains(line, "/") {
-			_, ipnet, err := net.ParseCIDR(line)
+			prefix, err := netip.ParsePrefix(line)
 			if err == nil {
-				*nets = append(*nets, ipnet)
+				trie.insert(prefix, 1.0)
 			}
 		} else {
-			ips[line] = 1.0
+			addr, err := netip.ParseAddr(line)
+			if err == nil {
+				// We can also insert single IPs into the trie for unified fast lookup,
+				// but map is even faster for exact match. Let's do both or just trie.
+				// Trie handles both fine and is O(bits).
+				trie.insert(netip.PrefixFrom(addr, addr.BitLen()), 1.0)
+				ips[line] = 1.0
+			}
 		}
 	}
 

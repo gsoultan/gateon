@@ -13,6 +13,7 @@ message GetDiagnosticsResponse {
   SystemInfo system = 3;
   repeated Anomaly anomalies = 4;
   repeated DependencyHealth dependencies = 5;
+  int32 total_mitigations = 6;
 }
 
 message Anomaly {
@@ -26,7 +27,8 @@ message Anomaly {
   double longitude = 8;
   string country_code = 9;
   double score = 10;
-  string ja3 = 11;
+  reserved 11;
+  // string ja3 = 11;
   string ja4 = 33;
   string ja4h = 35;
   string route_id = 12;
@@ -46,6 +48,7 @@ message Anomaly {
   int32 cluster_size = 26;
   string triggered_rules = 27;
   string id = 28;
+  string ja4plus = 36;
   double reputation = 34;
 }
 
@@ -121,10 +124,23 @@ message ApplyRecommendationResponse {
 
 message RemoveMitigatedThreatRequest {
   string source = 1;
-  string ja4h = 2;
+  string ja4h = 2; // Deprecated: Use ja4plus instead
+  string ja4plus = 3;
 }
 
 message RemoveMitigatedThreatResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message MitigateThreatRequest {
+  string source = 1; // IP or Fingerprint
+  string type = 2;   // e.g., JA4+, IP
+  string reason = 3;
+  string category = 4;
+}
+
+message MitigateThreatResponse {
   bool success = 1;
   string message = 2;
 }

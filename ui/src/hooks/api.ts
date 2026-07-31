@@ -9,7 +9,10 @@ import type {
   TraceRouteResponse,
   ValidateCORSRequest,
   ValidateCORSResponse,
+  RemoveMitigatedThreatRequest,
   RemoveMitigatedThreatResponse,
+  MitigateThreatRequest,
+  MitigateThreatResponse,
   InstallClamavRequest,
   InstallClamavResponse,
   UninstallClamavResponse,
@@ -147,11 +150,21 @@ export async function applyRecommendation(anomalyType: string, source: string, t
   return res.json();
 }
 
-export async function removeMitigatedThreat(source: string, ja4h?: string): Promise<RemoveMitigatedThreatResponse> {
+export async function mitigateThreat(req: MitigateThreatRequest): Promise<MitigateThreatResponse> {
+  const res = await apiFetch("/v1/diagnostics/mitigate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function removeMitigatedThreat(req: RemoveMitigatedThreatRequest): Promise<RemoveMitigatedThreatResponse> {
   const res = await apiFetch("/v1/diagnostics/remove-mitigation", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source: source, ja4h: ja4h || "" }),
+    body: JSON.stringify(req),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

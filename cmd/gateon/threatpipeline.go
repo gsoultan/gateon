@@ -187,7 +187,8 @@ func threatToEvent(t *telemetry.SecurityThreat) siem.Event {
 	addField(fields, "request_uri", t.RequestURI)
 	addField(fields, "country", t.CountryCode)
 	addField(fields, "fingerprint", t.Fingerprint)
-	addField(fields, "ja3", t.JA3)
+	addField(fields, "ja4", t.JA4)
+	addField(fields, "ja4h", t.JA4H)
 	addField(fields, "mitre", techniqueIDs(correlation.Techniques(t.Type)))
 	if t.Score != 0 {
 		fields["score"] = strconv.FormatFloat(t.Score, 'f', 2, 64)

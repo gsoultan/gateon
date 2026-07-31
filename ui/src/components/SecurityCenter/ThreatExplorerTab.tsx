@@ -32,10 +32,12 @@ import {
   IconBug,
   IconShieldLock,
   IconBolt,
+  IconPlus,
 } from "@tabler/icons-react";
-import { useSecurityThreats, useRemoveMitigation } from "../../hooks/useGateon";
+import { useSecurityThreats, useRemoveMitigation, useDiagnostics } from "../../hooks/useGateon";
 import { useTableDensity } from "../../hooks/useTableDensity";
 import { SecurityAnomalyModal } from "../SecurityAnomalyModal";
+import { ManualMitigationModal } from "./ManualMitigationModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
 import type { Anomaly } from "../../types/gateon";
 import { format } from "date-fns";
@@ -63,11 +65,15 @@ export function ThreatExplorerTab() {
       : (mitigatedFilter || "all"),
   });
 
+  const { data: diagData } = useDiagnostics();
+  const totalMitigations = diagData?.total_mitigations || 0;
+
   const density = useTableDensity();
   const removeMitigation = useRemoveMitigation();
   const [unmitigating, setUnmitigating] = useState<string | null>(null);
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
+  const [manualMitigationOpened, { open: openManualMitigation, close: closeManualMitigation }] = useDisclosure(false);
   const [traceIp, setTraceIp] = useState<string>("");
   const [traceOpened, { open: openTrace, close: closeTrace }] = useDisclosure(false);
 
@@ -157,7 +163,7 @@ export function ThreatExplorerTab() {
         <Tabs value={mitigatedFilter} onChange={setMitigatedFilter} variant="pills" radius="md">
           <Tabs.List>
             <Tabs.Tab value="detected" leftSection={<IconAlertTriangle size={16} />}>Active Threats</Tabs.Tab>
-            <Tabs.Tab value="mitigated" leftSection={<IconShieldCheck size={16} />}>Mitigated List</Tabs.Tab>
+            <Tabs.Tab value="mitigated" leftSection={<IconShieldCheck size={16} />}>Mitigated ({totalMitigations})</Tabs.Tab>
             <Tabs.Tab value="all">Historical Logs</Tabs.Tab>
           </Tabs.List>
         </Tabs>
@@ -191,6 +197,11 @@ export function ThreatExplorerTab() {
           <Button variant="light" leftSection={<IconRefresh size={16} />} onClick={() => refetch()}>
             Refresh
           </Button>
+          {canWrite && (
+            <Button color="red" leftSection={<IconPlus size={16} />} onClick={openManualMitigation}>
+              Add Mitigation
+            </Button>
+          )}
         </Group>
 
         <Table.ScrollContainer minWidth={800}>
@@ -266,7 +277,11 @@ export function ThreatExplorerTab() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      {threat.mitigated ? (
+                      {threat.action_taken === "blocked" || threat.action_taken === "shunned" || threat.action_taken === "challenged" ? (
+                        <Badge color="red" leftSection={<IconShieldLock size={12} />} variant="light">
+                          Blocked
+                        </Badge>
+                      ) : threat.mitigated ? (
                         <Badge color="teal" leftSection={<IconShieldCheck size={12} />} variant="light">
                           Mitigated
                         </Badge>
@@ -327,6 +342,11 @@ export function ThreatExplorerTab() {
           </Group>
         )}
       </Card>
+
+      <ManualMitigationModal 
+        opened={manualMitigationOpened} 
+        onClose={closeManualMitigation} 
+      />
 
       <SecurityAnomalyModal
         anomaly={selectedAnomaly}

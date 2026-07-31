@@ -6,10 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	gateonhttputil "github.com/gsoultan/gateon/internal/httputil"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -42,7 +44,6 @@ type ProxyHandler struct {
 	healthCheckClient   *http.Client
 	tlsConfig           *tls.Config
 	StripCORS           bool
-	proxyPool           sync.Map // map[targetURL string]*httputil.ReverseProxy
 }
 
 // NewProxyHandler creates a ProxyHandler from route and ServiceStore (DIP).
@@ -114,22 +115,24 @@ func (h *ProxyHandler) activeConnCount() int32 {
 
 // getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.
 func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReverseProxy {
-	if v, ok := h.proxyPool.Load(state.cacheKey); ok {
-		return v.(*httputil.ReverseProxy)
+	if rp := state.proxy.Load(); rp != nil {
+		return rp
 	}
-	// Clone target to avoid mutation affecting the cache key
-	target := &url.URL{
-		Scheme: state.parsedURL.Scheme,
-		Host:   state.parsedURL.Host,
-		Path:   state.parsedURL.Path,
+
+	// We use a custom ReverseProxy instead of NewSingleHostReverseProxy to avoid
+	// the default director which can be redundant given our prepareRequest.
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			h.rewriteRequest(pr, state)
+		},
+		Transport: &targetBoundRoundTripper{
+			state:   state,
+			factory: h.transportFactory,
+		},
+		BufferPool:    bufferPool,
+		FlushInterval: flushIntervalImmediate,
 	}
-	rp := httputil.NewSingleHostReverseProxy(target)
-	rp.Transport = &targetBoundRoundTripper{
-		state:   state,
-		factory: h.transportFactory,
-	}
-	rp.BufferPool = bufferPool
-	rp.FlushInterval = flushIntervalImmediate // flush immediately for SSE/streaming
+
 	if h.StripCORS {
 		rp.ModifyResponse = func(resp *http.Response) error {
 			resp.Header.Del("Access-Control-Allow-Origin")
@@ -141,10 +144,9 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 			return nil
 		}
 	}
+
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		if errors.Is(err, context.Canceled) {
-			// Client disconnected, not a proxy error.
-			// Use 499 (Client Closed Request) to avoid counting as 5xx error.
 			w.WriteHeader(499)
 			return
 		}
@@ -168,12 +170,82 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 			"request_id", request.GetID(r))
 		w.WriteHeader(status)
 	}
-	if v, loaded := h.proxyPool.LoadOrStore(state.cacheKey, rp); loaded {
-		return v.(*httputil.ReverseProxy)
+
+	if state.proxy.CompareAndSwap(nil, rp) {
+		return rp
 	}
-	return rp
+	return state.proxy.Load()
 }
 
 func (h *ProxyHandler) GetStats() []TargetStats {
 	return h.lb.GetStats()
+}
+
+func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetState) {
+	targetURL := state.parsedURL
+	if targetURL == nil {
+		return
+	}
+
+	// 1. Copy essential headers and set forward headers
+	pr.Out.URL.Scheme = targetURL.Scheme
+	pr.Out.URL.Host = targetURL.Host
+	pr.Out.URL.Path = gateonhttputil.SingleJoiningSlash(targetURL.Path, pr.In.URL.Path)
+	pr.Out.URL.RawQuery = pr.In.URL.RawQuery
+
+	pr.Out.Host = targetURL.Host
+
+	clientIP := request.GetClientIP(pr.In, false)
+	pr.Out.Header.Set("X-Real-IP", clientIP)
+	if xff := pr.In.Header.Get("X-Forwarded-For"); xff != "" {
+		pr.Out.Header.Set("X-Forwarded-For", xff+", "+clientIP)
+	} else {
+		pr.Out.Header.Set("X-Forwarded-For", clientIP)
+	}
+	pr.Out.Header.Set("X-Forwarded-Host", pr.In.Host)
+	scheme := request.Scheme(pr.In)
+	pr.Out.Header.Set("X-Forwarded-Proto", scheme)
+	if scheme == "https" {
+		pr.Out.Header.Set("X-Forwarded-Ssl", "on")
+	}
+	if ja4 := telemetry.GetCachedJA4H(pr.In); ja4 != "" {
+		pr.Out.Header.Set("X-Gateon-JA4", ja4)
+	}
+
+	// 2. Handle gRPC and HTTP/2 protocol specifics
+	origURL := state.url
+	isH2C := strings.HasPrefix(origURL, "h2c://")
+	isH3 := strings.HasPrefix(origURL, "h3://")
+	isHTTPS := strings.HasPrefix(origURL, "https://") || strings.HasPrefix(origURL, "h2://")
+	contentType := pr.In.Header.Get("Content-Type")
+	isGRPC := len(contentType) >= 16 && strings.EqualFold(contentType[:16], "application/grpc")
+
+	if isH3 {
+		pr.Out.ProtoMajor = 3
+		pr.Out.ProtoMinor = 0
+		pr.Out.Proto = "HTTP/3.0"
+	} else if isGRPC || isH2C {
+		if isH2C || isHTTPS {
+			pr.Out.ProtoMajor = 2
+			pr.Out.ProtoMinor = 0
+			pr.Out.Proto = "HTTP/2.0"
+		}
+		if isGRPC {
+			pr.Out.Header.Del("Content-Length")
+			pr.Out.ContentLength = -1
+			if pr.Out.Header.Get("TE") == "" {
+				pr.Out.Header.Set("TE", "trailers")
+			}
+		}
+	}
+
+	// 3. PROXY Protocol support
+	if state.proxyProtocolEnabled {
+		pr.Out = pr.Out.WithContext(withClientRemoteAddr(pr.Out.Context(), pr.In.RemoteAddr))
+	}
+
+	// 4. Ensure User-Agent isn't automatically set by Go's default if missing
+	if _, ok := pr.In.Header["User-Agent"]; !ok {
+		pr.Out.Header.Set("User-Agent", "")
+	}
 }

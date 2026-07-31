@@ -79,7 +79,7 @@ type WAFConfig struct {
 	EntropyThreshold            float64 // Threshold for Shannon entropy check (default 5.8)
 	DisableEntropy              bool    // If true, skip fast-path entropy check
 	EnableBodyEntropy           bool    // Enable entropy check on request body
-	EnableFingerprintValidation bool    // Enable JA3/JA4 fingerprint consistency check
+	EnableFingerprintValidation bool    // Enable JA4+ fingerprint consistency check
 	EnableConfidenceScoring     bool    // Enable confidence score calculation
 	RequestBodyLimit            int     // Maximum request body size in bytes
 	ResponseBodyLimit           int     // Maximum response body size in bytes
@@ -1153,7 +1153,7 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:           typeStr,
 		SourceIP:       clientIP,
-		Fingerprint:    telemetry.GetCachedJA4H(r),
+		Fingerprint:    telemetry.GetJA4Plus(r),
 		Score:          100,
 		Details:        details,
 		TriggeredRules: rules,
@@ -1280,11 +1280,14 @@ type txWrapper struct {
 }
 
 func (t *txWrapper) ProcessLogging() {
-	ja3, ja4 := "", ""
+	fingerprint := ""
+	ja4 := ""
+	ja4h := ""
 	if t.r != nil {
 		if rs := request.GetRequestState(t.r); rs != nil {
-			ja3 = rs.JA3
+			fingerprint = rs.JA4Plus
 			ja4 = rs.JA4
+			ja4h = rs.JA4H
 		}
 	}
 	interrupted := t.IsInterrupted()
@@ -1340,8 +1343,11 @@ func (t *txWrapper) ProcessLogging() {
 				if vals := c.Get("X-Gateon-JA4"); len(vals) > 0 && ja4 == "" {
 					ja4 = vals[0]
 				}
-				if ja4 == "" && t.r != nil {
-					ja4 = telemetry.GetCachedJA4H(t.r)
+				if fingerprint == "" && ja4 != "" {
+					if ja4h == "" && t.r != nil {
+						ja4h = telemetry.GetCachedJA4H(t.r)
+					}
+					fingerprint = ja4 + "_" + ja4h
 				}
 				if vals := c.Get("User-Agent"); len(vals) > 0 {
 					ua = vals[0]
@@ -1440,7 +1446,7 @@ func (t *txWrapper) ProcessLogging() {
 					// We no longer shun IPs at the kernel level by default to avoid blocking
 					// innocent users on shared IPs (NAT/CGNAT).
 					// Instead, we rely on WAF's L7 block and the fingerprint-based mitigation
-					// recorded below, which is more precise and follows the JA4/JA3 blocking policy.
+					// recorded below, which is more precise and follows the JA4+ blocking policy.
 					// _ = t.cfg.EbpfManager.ShunIP(clientIP)
 				} else if anomalyScore >= 10 && clientIP != "127.0.0.1" && clientIP != "::1" && clientIP != "localhost" {
 					_ = t.cfg.EbpfManager.SetAdaptiveRateLimit(clientIP, time.Second)
@@ -1478,7 +1484,7 @@ func (t *txWrapper) ProcessLogging() {
 			ID:             fmt.Sprintf("waf-%s-%s", actionTaken, t.ID()),
 			Type:           "waf_" + actionTaken,
 			SourceIP:       clientIP,
-			Fingerprint:    ja4,
+			Fingerprint:    fingerprint,
 			Score:          100, // Explicit block is a high priority threat
 			Details:        explanation,
 			Recommendation: recommendation,
@@ -1489,8 +1495,8 @@ func (t *txWrapper) ProcessLogging() {
 			Severity:       severity,
 			ActionTaken:    actionTaken,
 			Mitigated:      interrupted,
-			JA3:            ja3,
 			JA4:            ja4,
+			JA4H:           ja4h,
 			UserAgent:      ua,
 			Method:         method,
 			Confidence:     confidence,

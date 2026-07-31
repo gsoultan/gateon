@@ -10,46 +10,46 @@ func TestUserMitigation(t *testing.T) {
 	_ = InitPathStatsStore("sqlite::memory:", 1)
 	defer ClosePathStatsStore(context.Background())
 
-	ja3 := "test-ja3"
-	ja4 := "test-ja4"
+	ja4_1 := "test-ja4-1"
+	ja4_2 := "test-ja4-2"
 	ja4h := "test-ja4h"
 
 	// 1. Initially should not be mitigated
-	if IsUserMitigated(ja3, ja4, ja4h) {
+	if IsUserMitigated(ja4_1, ja4h) {
 		t.Error("Expected user to not be mitigated initially")
 	}
 
-	// 2. Mitigate JA3
-	MarkUserMitigated(ja3, "", "JA3", "Test reasoning", "TestCategory")
+	// 2. Mitigate JA4 1
+	MarkUserMitigated(ja4_1, "", "JA4", "Test reasoning", "TestCategory")
 
 	// 3. Should now be mitigated
-	if !IsUserMitigated(ja3, "", "") {
-		t.Error("Expected JA3 to be mitigated")
+	if !IsUserMitigated(ja4_1, "") {
+		t.Error("Expected JA4 1 to be mitigated")
 	}
 
-	// 4. Unmitigate JA3
-	MarkUserUnmitigated(ja3, "")
+	// 4. Unmitigate JA4 1
+	MarkUserUnmitigated(ja4_1, "")
 
 	// 5. Should immediately be unmitigated (cache test)
-	if IsUserMitigated(ja3, "", "") {
-		t.Error("Expected JA3 to be unmitigated immediately")
+	if IsUserMitigated(ja4_1, "") {
+		t.Error("Expected JA4 1 to be unmitigated immediately")
 	}
 
-	// 6. Mitigate JA4
-	MarkUserMitigated(ja4, "", "JA4", "Test reasoning JA4", "TestCategory")
+	// 6. Mitigate JA4 2
+	MarkUserMitigated(ja4_2, "", "JA4", "Test reasoning JA4", "TestCategory")
 
 	// 7. Should now be mitigated
-	if !IsUserMitigated("", ja4, "") {
-		t.Error("Expected JA4 to be mitigated")
+	if !IsUserMitigated(ja4_2, "") {
+		t.Error("Expected JA4 2 to be mitigated")
 	}
 
 	// 8. Test JA4+JA4H composite
-	if IsUserMitigated("", "other-ja4", "other-ja4h") {
+	if IsUserMitigated("other-ja4", "other-ja4h") {
 		t.Error("Expected other JA4 combo to not be mitigated")
 	}
 
-	MarkUserMitigated(ja4, ja4h, "JA4", "Test reasoning JA4+JA4H", "TestCategory")
-	if !IsUserMitigated("", ja4, ja4h) {
+	MarkUserMitigated(ja4_2, ja4h, "JA4", "Test reasoning JA4+JA4H", "TestCategory")
+	if !IsUserMitigated(ja4_2, ja4h) {
 		t.Error("Expected JA4+JA4H to be mitigated")
 	}
 }

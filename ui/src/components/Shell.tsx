@@ -92,11 +92,8 @@ export function Shell() {
 
   const securityLinks = useMemo(() => [
     { label: "Security Hub", to: "/security-center", icon: IconShieldCheck },
-    // Audit Logs are an admin/operator surface (global resource); a read-only
-    // Viewer would only hit a 403 here, so hide the link for them.
-    ...(isViewer
-      ? []
-      : [{ label: "Audit Logs", to: "/audit-logs", icon: IconTimeline }]),
+    // Audit Logs are now accessible to Viewers (ResourceDiagnostics).
+    { label: "Audit Logs", to: "/audit-logs", icon: IconTimeline },
     { label: "Certificates", to: "/certificates", icon: IconCertificate },
     {
       label: "Client Authorities",
@@ -114,10 +111,8 @@ export function Shell() {
     ...(user?.role === "admin"
       ? [{ label: "Users", to: "/users", icon: IconUsers }]
       : []),
-    // The global Settings editor is the global-config resource (admin/operator).
-    ...(isViewer
-      ? []
-      : [{ label: "Settings", to: "/settings", icon: IconSettings }]),
+    // Viewers now have read access to Global Settings.
+    { label: "Settings", to: "/settings", icon: IconSettings },
   ], [isViewer, user?.role]);
 
   return (

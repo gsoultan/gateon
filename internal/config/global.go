@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -21,85 +22,84 @@ type ConfigChangeFunc func(oldCfg, newCfg *gateonv1.GlobalConfig)
 
 type GlobalRegistry struct {
 	mu        sync.RWMutex
-	config    *gateonv1.GlobalConfig
-	certIndex map[string]*gateonv1.Certificate // cert ID -> certificate for O(1) lookup
+	config    atomic.Pointer[gateonv1.GlobalConfig]
+	certIndex atomic.Pointer[map[string]*gateonv1.Certificate] // cert ID -> certificate for O(1) lookup
 	path      string
 	listeners []ConfigChangeFunc
 }
 
 var (
-	globalInstance *GlobalRegistry
-	globalMu       sync.RWMutex
+	globalInstance atomic.Pointer[GlobalRegistry]
 )
 
 func NewGlobalRegistry(path string) *GlobalRegistry {
 	reg := &GlobalRegistry{
-		config: &gateonv1.GlobalConfig{
-			Tls:       &gateonv1.TlsConfig{},
-			Redis:     &gateonv1.RedisConfig{},
-			Otel:      &gateonv1.OtelConfig{},
-			Log:       &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
-			Auth:      &gateonv1.AuthConfig{},
-			Transport: &gateonv1.TransportConfig{},
-			Waf: &gateonv1.WafConfig{
-				Enabled:       false,
-				UseCrs:        true,
-				ParanoiaLevel: 1,
-				Clamav: &gateonv1.ClamavConfig{
-					InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER,
-					AutoInstall:      false,
-					DockerImage:      "clamav/clamav:latest",
-					FullScanSchedule: "0 2 * * *", // Daily at 2 AM
-					LowResourceMode:  true,
-					ClamavAddr:       "tcp://localhost:3310",
-				},
-			},
-			Ha:               &gateonv1.HaConfig{},
-			AnomalyDetection: &gateonv1.AnomalyDetectionConfig{Sensitivity: 0.5, CheckIntervalSeconds: 60},
-			Ebpf:             &gateonv1.EbpfConfig{},
-			Management: &gateonv1.ManagementConfig{
-				Bind:       "0.0.0.0",
-				Port:       "8080",
-				AllowedIps: []string{"0.0.0.0/0", "::/0"},
-			},
-			Geoip: &gateonv1.GeoIPConfig{
-				Enabled:            true,
-				AutoUpdate:         true,
-				UpdateIntervalDays: 30,
-			},
-			Debugger: &gateonv1.DebuggerConfig{
-				Enabled:     false,
-				MaxCaptures: 1000,
-				MaxBodySize: 1024 * 64, // 64KB
-			},
-			SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
-				Deception:    &gateonv1.DeceptionConfig{},
-				Tarpit:       &gateonv1.TarpitConfig{},
-				Entropy:      &gateonv1.EntropyConfig{},
-				Behavioral:   &gateonv1.BehavioralConfig{},
-				Pow:          &gateonv1.PowConfig{Secret: "changeme"},
-				IpReputation: &gateonv1.IPReputationConfig{},
-			},
-			Alerting: &gateonv1.AlertingConfig{},
-			Audit:    &gateonv1.AuditConfig{},
-		},
-		certIndex: make(map[string]*gateonv1.Certificate),
-		path:      path,
+		path: path,
 	}
+	initialConfig := &gateonv1.GlobalConfig{
+		Tls:       &gateonv1.TlsConfig{},
+		Redis:     &gateonv1.RedisConfig{},
+		Otel:      &gateonv1.OtelConfig{},
+		Log:       &gateonv1.LogConfig{Level: "info", Development: true, Format: "text", PathStatsRetentionDays: 7},
+		Auth:      &gateonv1.AuthConfig{},
+		Transport: &gateonv1.TransportConfig{},
+		Waf: &gateonv1.WafConfig{
+			Enabled:       false,
+			UseCrs:        true,
+			ParanoiaLevel: 1,
+			Clamav: &gateonv1.ClamavConfig{
+				InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER,
+				AutoInstall:      false,
+				DockerImage:      "clamav/clamav:latest",
+				FullScanSchedule: "0 2 * * *", // Daily at 2 AM
+				LowResourceMode:  true,
+				ClamavAddr:       "tcp://localhost:3310",
+			},
+		},
+		Ha:               &gateonv1.HaConfig{},
+		AnomalyDetection: &gateonv1.AnomalyDetectionConfig{Sensitivity: 0.5, CheckIntervalSeconds: 60},
+		Ebpf:             &gateonv1.EbpfConfig{},
+		Management: &gateonv1.ManagementConfig{
+			Bind:       "0.0.0.0",
+			Port:       "8080",
+			AllowedIps: []string{"0.0.0.0/0", "::/0"},
+		},
+		Geoip: &gateonv1.GeoIPConfig{
+			Enabled:            true,
+			AutoUpdate:         true,
+			UpdateIntervalDays: 30,
+		},
+		Debugger: &gateonv1.DebuggerConfig{
+			Enabled:     false,
+			MaxCaptures: 1000,
+			MaxBodySize: 1024 * 64, // 64KB
+		},
+		SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
+			Deception:    &gateonv1.DeceptionConfig{},
+			Tarpit:       &gateonv1.TarpitConfig{},
+			Entropy:      &gateonv1.EntropyConfig{},
+			Behavioral:   &gateonv1.BehavioralConfig{},
+			Pow:          &gateonv1.PowConfig{Secret: "changeme"},
+			IpReputation: &gateonv1.IPReputationConfig{},
+		},
+		Alerting: &gateonv1.AlertingConfig{},
+		Audit:    &gateonv1.AuditConfig{},
+	}
+	reg.config.Store(initialConfig)
+	idx := make(map[string]*gateonv1.Certificate)
+	reg.certIndex.Store(&idx)
+
 	reg.load()
-	globalMu.Lock()
-	globalInstance = reg
-	globalMu.Unlock()
+	globalInstance.Store(reg)
 	return reg
 }
 
 func GetGlobalConfig() *gateonv1.GlobalConfig {
-	globalMu.RLock()
-	defer globalMu.RUnlock()
-	if globalInstance == nil {
+	reg := globalInstance.Load()
+	if reg == nil {
 		return nil
 	}
-	return globalInstance.config
+	return reg.config.Load()
 }
 
 func (r *GlobalRegistry) load() {
@@ -114,33 +114,47 @@ func (r *GlobalRegistry) load() {
 		return
 	}
 
+	cfg := r.config.Load()
+	if cfg == nil {
+		cfg = &gateonv1.GlobalConfig{}
+	} else {
+		cfg = proto.Clone(cfg).(*gateonv1.GlobalConfig)
+	}
+
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
-		if err := yaml.Unmarshal(data, r.config); err != nil {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
 			logger.L.LogError("failed to unmarshal global config yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
-		if err := json.Unmarshal(data, r.config); err != nil {
+		if err := json.Unmarshal(data, cfg); err != nil {
 			logger.L.LogError("failed to unmarshal global config json", "error", err, "path", r.path)
 			return
 		}
 	}
-	decryptSensitiveFields(r.config)
+	decryptSensitiveFields(cfg)
+	r.config.Store(cfg)
 	r.rebuildCertIndexLocked()
 	logger.L.LogInfo("loaded global config", "path", r.path)
 }
 
 func (r *GlobalRegistry) rebuildCertIndexLocked() {
-	r.certIndex = make(map[string]*gateonv1.Certificate)
-	if r.config.Tls != nil {
-		for _, c := range r.config.Tls.Certificates {
-			r.certIndex[c.Id] = c
+	cfg := r.config.Load()
+	idx := make(map[string]*gateonv1.Certificate)
+	if cfg != nil && cfg.Tls != nil {
+		for _, c := range cfg.Tls.Certificates {
+			idx[c.Id] = c
 		}
 	}
+	r.certIndex.Store(&idx)
 }
 
 func (r *GlobalRegistry) saveLocked() error {
-	conf := proto.Clone(r.config).(*gateonv1.GlobalConfig)
+	cfg := r.config.Load()
+	if cfg == nil {
+		return nil
+	}
+	conf := proto.Clone(cfg).(*gateonv1.GlobalConfig)
 	encryptSensitiveFields(conf)
 
 	var data []byte
@@ -198,15 +212,15 @@ func encryptSensitiveFields(c *gateonv1.GlobalConfig) {
 }
 
 func (r *GlobalRegistry) Get(ctx context.Context) *gateonv1.GlobalConfig {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.config
+	return r.config.Load()
 }
 
 func (r *GlobalRegistry) GetCertificate(id string) (*gateonv1.Certificate, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	c, ok := r.certIndex[id]
+	idxPtr := r.certIndex.Load()
+	if idxPtr == nil {
+		return nil, false
+	}
+	c, ok := (*idxPtr)[id]
 	return c, ok
 }
 
@@ -225,11 +239,12 @@ func (r *GlobalRegistry) Subscribe(fn ConfigChangeFunc) {
 
 func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error {
 	r.mu.Lock()
-	oldCfg := r.config
-	r.config = conf
+	oldCfg := r.config.Load()
+	r.config.Store(conf)
 	r.rebuildCertIndexLocked()
 	if err := r.saveLocked(); err != nil {
-		r.config = oldCfg
+		r.config.Store(oldCfg)
+		r.rebuildCertIndexLocked()
 		r.mu.Unlock()
 		return err
 	}

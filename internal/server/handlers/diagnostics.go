@@ -289,7 +289,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 	})
 	mux.HandleFunc("POST /v1/diagnostics/recommendation", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceDiagnostics) {
 			return
 		}
 		var req gateonv1.ApplyRecommendationRequest
@@ -308,7 +308,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("POST /v1/diagnostics/remove-mitigation", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceDiagnostics) {
 			return
 		}
 		var req gateonv1.RemoveMitigatedThreatRequest
@@ -326,8 +326,27 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("POST /v1/diagnostics/mitigate", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceDiagnostics) {
+			return
+		}
+		var req gateonv1.MitigateThreatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		res, err := svc.MitigateThreat(r.Context(), &req)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := ProtojsonOptions().Marshal(res)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("POST /v1/diagnostics/traceroute", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		var req gateonv1.TraceRouteRequest
@@ -346,7 +365,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("POST /v1/diagnostics/cors-validator", func(w http.ResponseWriter, r *http.Request) {
-		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
 		var req gateonv1.ValidateCORSRequest
@@ -597,8 +616,8 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		WriteJSON(w, http.StatusOK, buildSystemInterfaces(r.Context(), svc))
 	})
 	mux.HandleFunc("POST /v1/diag/test-target", func(w http.ResponseWriter, r *http.Request) {
-		// Restrict to Admin only as this can be used for SSRF
-		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+		// Allow Operator to test target as well, but still protect against SSRF via isBlockedIP
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceDiagnostics) {
 			return
 		}
 		var req struct {

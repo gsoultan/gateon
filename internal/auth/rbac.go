@@ -91,7 +91,8 @@ func allowedHardcoded(role string, action Action, resource Resource) bool {
 		switch resource {
 		case ResourceRoutes, ResourceServices, ResourceEntryPoints,
 			ResourceMiddlewares, ResourceTLSOptions, ResourceCerts,
-			ResourceGlobal, ResourceConfig, ResourceWafRules:
+			ResourceGlobal, ResourceConfig, ResourceWafRules,
+			ResourceDiagnostics:
 			return true
 		}
 		return false
@@ -101,12 +102,13 @@ func allowedHardcoded(role string, action Action, resource Resource) bool {
 		}
 		// Viewers get read-only visibility into the routing/config surface plus all
 		// observability (dashboards, metrics, traces, path metrics, circuit breaker,
-		// system logs, topology, Security Hub) via ResourceDiagnostics. They still
-		// cannot read the global settings editor (ResourceGlobal) or users.
+		// system logs, topology, Security Hub) via ResourceDiagnostics. They also
+		// get read access to global settings for dashboard visibility, but cannot
+		// edit them.
 		switch resource {
 		case ResourceRoutes, ResourceServices, ResourceEntryPoints,
 			ResourceMiddlewares, ResourceTLSOptions, ResourceCerts,
-			ResourceDiagnostics, ResourceWafRules:
+			ResourceDiagnostics, ResourceWafRules, ResourceGlobal:
 			return true
 		}
 		return false

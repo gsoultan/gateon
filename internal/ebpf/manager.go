@@ -79,8 +79,6 @@ type Manager interface {
 	SetPortKnockingSequence(seq []int32) error
 	UpdateLoadBalancerBackends(ips []string) error
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
-	ShunJA3(ja3Md5 [16]byte) error
-	UnshunJA3(ja3Md5 [16]byte) error
 	ShunJA4(ja4Fingerprint string) error // New: JA4 support
 	BlocklistCuckoo(ip string) error     // New: Cuckoo Filter support
 	GetTopIPs(limit int) ([]IPStat, error)
@@ -322,20 +320,6 @@ func (m *EbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) er
 
 	ns := uint64(interval.Nanoseconds())
 	return limitMap.Update(ipUint, ns, ebpf.UpdateAny)
-}
-
-// ShunJA3 adds a JA3 fingerprint to the XDP blocklist.
-func (m *EbpfManager) ShunJA3(ja3Md5 [16]byte) error {
-	logger.L.LogInfo("Shunning JA3 fingerprint at XDP level", "ja3", fmt.Sprintf("%x", ja3Md5))
-	// Implementation would use bpf_map_update_elem on ja3_blocklist map
-	return nil
-}
-
-// UnshunJA3 removes a JA3 fingerprint from the XDP blocklist.
-func (m *EbpfManager) UnshunJA3(ja3Md5 [16]byte) error {
-	logger.L.LogInfo("Unshunning JA3 fingerprint at XDP level", "ja3", fmt.Sprintf("%x", ja3Md5))
-	// Implementation would use bpf_map_delete_elem on ja3_blocklist map
-	return nil
 }
 
 // ShunJA4 adds a JA4 fingerprint to the XDP blocklist.

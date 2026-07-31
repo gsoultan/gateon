@@ -10,16 +10,18 @@ import (
 
 // RoundRobinLB implements simple round-robin load balancing.
 type RoundRobinLB struct {
-	targets []*targetState
-	current uint64
-	mu      sync.RWMutex
+	targetsPtr atomic.Pointer[[]*targetState]
+	current    uint64
+	mu         sync.Mutex
 }
 
 func NewRoundRobinLB(urls []string) *RoundRobinLB {
-	lb := &RoundRobinLB{targets: make([]*targetState, len(urls))}
+	targets := make([]*targetState, len(urls))
 	for i, u := range urls {
-		lb.targets[i] = newTargetState(u, 1)
+		targets[i] = newTargetState(u, 1)
 	}
+	lb := &RoundRobinLB{}
+	lb.targetsPtr.Store(&targets)
 	return lb
 }
 
@@ -32,9 +34,11 @@ func (lb *RoundRobinLB) Next() string {
 }
 
 func (lb *RoundRobinLB) NextState() *targetState {
-	lb.mu.RLock()
-	targets := lb.targets
-	lb.mu.RUnlock()
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return nil
+	}
+	targets := *ptr
 
 	if len(targets) == 0 {
 		return nil
@@ -55,16 +59,22 @@ func (lb *RoundRobinLB) NextState() *targetState {
 func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
-	lb.targets = make([]*targetState, len(targets))
+	newTargets := make([]*targetState, len(targets))
 	for i, t := range targets {
-		lb.targets[i] = newTargetStateFromTarget(t)
+		newTargets[i] = newTargetStateFromTarget(t)
 	}
+	lb.targetsPtr.Store(&newTargets)
 }
 
 func (lb *RoundRobinLB) SetAlive(url string, alive bool) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	for _, t := range lb.targets {
+	// alive is atomic in targetState, but we might need to find the target.
+	// We don't need a lock to find and update because the slice itself is atomic,
+	// and targetState.alive is atomic.
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return
+	}
+	for _, t := range *ptr {
 		if t.url == url {
 			if t.alive.Load() != alive {
 				state := telemetry.CircuitClosed
@@ -80,10 +90,13 @@ func (lb *RoundRobinLB) SetAlive(url string, alive bool) {
 }
 
 func (lb *RoundRobinLB) GetStats() []TargetStats {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
-	stats := make([]TargetStats, len(lb.targets))
-	for i, t := range lb.targets {
+	ptr := lb.targetsPtr.Load()
+	if ptr == nil {
+		return nil
+	}
+	targets := *ptr
+	stats := make([]TargetStats, len(targets))
+	for i, t := range targets {
 		stats[i] = targetStatsFromState(t)
 	}
 	return stats

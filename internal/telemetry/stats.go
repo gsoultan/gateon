@@ -13,7 +13,10 @@ import (
 
 // maxPathStatsMapSize limits in-memory path stats to avoid unbounded growth.
 // When exceeded, the oldest ~25% of keys are evicted (by iterating and deleting).
-const maxPathStatsMapSize = 50000
+const (
+	maxPathStatsMapSize = 50000
+	pathStatsShards     = 64
+)
 
 // PathStats holds aggregated statistics for a host/path combination.
 type PathStats struct {
@@ -42,9 +45,13 @@ type DomainStats struct {
 	AvgLatency   float64 `json:"avg_latency_seconds"`
 }
 
+type pathStatsShard struct {
+	mu sync.RWMutex
+	m  map[string]*pathStatsInternal
+}
+
 var (
-	pathStatsMap = make(map[string]*pathStatsInternal)
-	pathStatsMu  sync.RWMutex
+	pathShards [pathStatsShards]*pathStatsShard
 
 	internalPaths = map[string]bool{
 		"/metrics": true,
@@ -52,6 +59,23 @@ var (
 		"/readyz":  true,
 	}
 )
+
+func init() {
+	for i := range pathStatsShards {
+		pathShards[i] = &pathStatsShard{
+			m: make(map[string]*pathStatsInternal),
+		}
+	}
+}
+
+func getPathShard(key string) *pathStatsShard {
+	var h uint32 = 2166136261
+	for i := range len(key) {
+		h ^= uint32(key[i])
+		h *= 16777619
+	}
+	return pathShards[h%pathStatsShards]
+}
 
 type pathStatsInternal struct {
 	host         string
@@ -79,24 +103,26 @@ func RecordPathRequest(host, path string, latencySeconds float64, bytesTotal uin
 	host = httputil.StripPort(host)
 
 	key := host + ":" + path
-	pathStatsMu.RLock()
-	s, ok := pathStatsMap[key]
-	pathStatsMu.RUnlock()
+	shard := getPathShard(key)
+
+	shard.mu.RLock()
+	s, ok := shard.m[key]
+	shard.mu.RUnlock()
 
 	if !ok {
-		pathStatsMu.Lock()
-		s, ok = pathStatsMap[key]
+		shard.mu.Lock()
+		s, ok = shard.m[key]
 		if !ok {
-			if len(pathStatsMap) >= maxPathStatsMapSize {
-				evictPathStatsLocked()
+			if len(shard.m) >= maxPathStatsMapSize/pathStatsShards {
+				evictPathStatsLocked(shard)
 			}
 			s = &pathStatsInternal{
 				host: host,
 				path: path,
 			}
-			pathStatsMap[key] = s
+			shard.m[key] = s
 		}
-		pathStatsMu.Unlock()
+		shard.mu.Unlock()
 	}
 
 	atomic.AddUint64(&s.requestCount, 1)
@@ -116,7 +142,7 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 }
 
 // RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, respHeaders, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
+func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h, reqHeaders, respHeaders, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -133,8 +159,8 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	tr.Method = method
 	tr.Referer = referer
 	tr.RequestURI = requestURI
-	tr.JA3 = ja3
 	tr.JA4 = ja4
+	tr.JA4H = ja4h
 	tr.RequestHeaders = reqHeaders
 	tr.ResponseHeaders = respHeaders
 	if recommendation == "" {
@@ -149,7 +175,7 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	recordTraceToStore(tr)
 }
 
-func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja3, ja4, reqHeaders, reqBody, respHeaders, respBody, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
+func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h, reqHeaders, reqBody, respHeaders, respBody, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -166,8 +192,8 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 	tr.Method = method
 	tr.Referer = referer
 	tr.RequestURI = requestURI
-	tr.JA3 = ja3
 	tr.JA4 = ja4
+	tr.JA4H = ja4h
 	tr.RequestHeaders = reqHeaders
 	tr.RequestBody = reqBody
 	tr.ResponseHeaders = respHeaders
@@ -186,29 +212,31 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 
 // getInMemoryPathStats returns aggregated path statistics from the in-memory map.
 func getInMemoryPathStats() []PathStats {
-	pathStatsMu.RLock()
-	defer pathStatsMu.RUnlock()
+	var result []PathStats
+	for i := range pathStatsShards {
+		shard := pathShards[i]
+		shard.mu.RLock()
+		for _, s := range shard.m {
+			count := atomic.LoadUint64(&s.requestCount)
+			bytes := atomic.LoadUint64(&s.bytesTotal)
+			sumNS := atomic.LoadUint64(&s.latencySum)
+			sumS := float64(sumNS) / 1e9
 
-	result := make([]PathStats, 0, len(pathStatsMap))
-	for _, s := range pathStatsMap {
-		count := atomic.LoadUint64(&s.requestCount)
-		bytes := atomic.LoadUint64(&s.bytesTotal)
-		sumNS := atomic.LoadUint64(&s.latencySum)
-		sumS := float64(sumNS) / 1e9
+			avg := 0.0
+			if count > 0 {
+				avg = sumS / float64(count)
+			}
 
-		avg := 0.0
-		if count > 0 {
-			avg = sumS / float64(count)
+			result = append(result, PathStats{
+				Host:         s.host,
+				Path:         s.path,
+				RequestCount: count,
+				BytesTotal:   bytes,
+				LatencySum:   sumS,
+				AvgLatency:   math.Round(avg*1000) / 1000, // Round to 3 decimal places
+			})
 		}
-
-		result = append(result, PathStats{
-			Host:         s.host,
-			Path:         s.path,
-			RequestCount: count,
-			BytesTotal:   bytes,
-			LatencySum:   sumS,
-			AvgLatency:   math.Round(avg*1000) / 1000, // Round to 3 decimal places
-		})
+		shard.mu.RUnlock()
 	}
 	return result
 }
@@ -230,10 +258,10 @@ func GetPathStats(ctx context.Context) []PathStats {
 	return getInMemoryPathStats()
 }
 
-// evictPathStatsLocked removes about 25% of keys from pathStatsMap.
-// Must be called with pathStatsMu held for writing.
-func evictPathStatsLocked() {
-	n := len(pathStatsMap)
+// evictPathStatsLocked removes about 25% of keys from the shard map.
+// Must be called with shard.mu held for writing.
+func evictPathStatsLocked(shard *pathStatsShard) {
+	n := len(shard.m)
 	if n == 0 {
 		return
 	}
@@ -241,8 +269,8 @@ func evictPathStatsLocked() {
 	if toEvict > n {
 		toEvict = n
 	}
-	for k := range pathStatsMap {
-		delete(pathStatsMap, k)
+	for k := range shard.m {
+		delete(shard.m, k)
 		toEvict--
 		if toEvict <= 0 {
 			break

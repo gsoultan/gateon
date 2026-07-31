@@ -21,8 +21,10 @@ message Trace {
   string request_body = 14;
   map<string, string> response_headers = 15;
   string response_body = 16;
-  string ja3 = 17;
+  reserved 17;
+  // string ja3 = 17;
   string ja4 = 18;
+  string ja4h = 25;
   string recommendation = 19;
   double reputation = 20;
   double entrypoint_delay_ms = 21;

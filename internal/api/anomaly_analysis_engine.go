@@ -150,7 +150,6 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 				UserAgents:  make(map[string]struct{}),
 				Methods:     make(map[string]int),
 				Referers:    make(map[string]int),
-				JA3s:        make(map[string]int),
 				JA4s:        make(map[string]int),
 				PathErrors:  make(map[string]int),
 				CountryCode: tr.CountryCode,
@@ -180,9 +179,6 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 		if tr.Referer != "" {
 			stats.Referers[tr.Referer]++
 		}
-		if tr.JA3 != "" {
-			stats.JA3s[tr.JA3]++
-		}
 		if tr.JA4 != "" {
 			stats.JA4s[tr.JA4]++
 		}
@@ -208,7 +204,6 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 					sStats = &SequenceStats{
 						IPs:        make(map[string]struct{}),
 						UserAgents: make(map[string]int),
-						JA3s:       make(map[string]int),
 						JA4s:       make(map[string]int),
 						Countries:  make(map[string]struct{}),
 					}
@@ -219,10 +214,6 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 					if tr.UserAgent != "" {
 						sStats.UserAgents[tr.UserAgent]++
 						sStats.UACount++
-					}
-					if tr.JA3 != "" {
-						sStats.JA3s[tr.JA3]++
-						sStats.JA3Count++
 					}
 					if tr.JA4 != "" {
 						sStats.JA4s[tr.JA4]++
@@ -305,7 +296,6 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 				UserAgents:  make(map[string]struct{}),
 				Methods:     make(map[string]int),
 				Referers:    make(map[string]int),
-				JA3s:        make(map[string]int),
 				JA4s:        make(map[string]int),
 				PathErrors:  make(map[string]int),
 				CountryCode: th.CountryCode,

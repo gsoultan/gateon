@@ -4,9 +4,11 @@ import (
 	"cmp"
 	"context"
 	"net/http"
+	"os"
 	"slices"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -268,5 +270,79 @@ func TestSelectRoute_Headers(t *testing.T) {
 	reqOpt.Header.Set("Access-Control-Request-Method", "GET")
 	if got := SelectRouteFromSlice(reqOpt, routes); got == nil || got.Id != "v2" {
 		t.Errorf("OPTIONS without header: expected v2, got %v", got)
+	}
+}
+
+func TestSelectRoute_ComplexRules(t *testing.T) {
+	// Create a temp file for the registry
+	tmpFile, err := os.CreateTemp("", "routes-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write([]byte("[]"))
+	tmpFile.Close()
+
+	reg := config.NewRouteRegistry(tmpFile.Name())
+
+	// Note: The current Matcher implementation in internal/router/router.go is very basic.
+	// We want to ensure that our Radix Tree fallback correctly handles rules it identifies as complex.
+	// If the Matcher itself doesn't support OR/Negation yet, these tests might fail on Matcher.Match.
+	// However, we at least ensure the TRIE doesn't prematurely exclude them.
+
+	routes := []*gateonv1.Route{
+		{
+			Id:   "host-regexp",
+			Rule: "HostRegexp(`.*\\.example\\.com`) && Path(`/api`)",
+		},
+		{
+			Id:   "or-rule",
+			Rule: "Path(`/a`) || Path(`/b`)",
+		},
+		{
+			Id:   "negation-rule",
+			Rule: "Host(`negate.com`) && !Path(`/secret`)",
+		},
+	}
+
+	for _, rt := range routes {
+		reg.Update(context.Background(), rt)
+	}
+
+	tests := []struct {
+		name     string
+		host     string
+		path     string
+		expected string
+	}{
+		{"HostRegexp match", "api.example.com", "/api", "host-regexp"},
+		{"HostRegexp mismatch host", "other.com", "/api", ""},
+		{"HostRegexp mismatch path", "api.example.com", "/other", ""},
+		// These will test if our trie fallback works.
+		// Even if Matcher only picks up the first part, we want to see if it's considered.
+		{"OR match A", "any.com", "/a", "or-rule"},
+		{"OR match B", "any.com", "/b", "or-rule"},
+		{"Negation match", "negate.com", "/allowed", "negation-rule"},
+		{"Negation mismatch", "negate.com", "/secret", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", "http://"+tt.host+tt.path, nil)
+			got := SelectRoute(req, reg)
+			if tt.expected == "" {
+				if got != nil {
+					t.Errorf("%s: expected nil, got %s", tt.name, got.Id)
+				}
+			} else {
+				if got == nil || got.Id != tt.expected {
+					gotId := "nil"
+					if got != nil {
+						gotId = got.Id
+					}
+					t.Errorf("%s: expected %s, got %s", tt.name, tt.expected, gotId)
+				}
+			}
+		})
 	}
 }

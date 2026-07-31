@@ -43,7 +43,7 @@ func BenchmarkInfraChain_TraceAll(b *testing.B) {
 }
 
 // BenchmarkInfraChain_TraceOff measures the chain with trace recording disabled,
-// which skips the per-request header marshal and JA3/JA4 resolution. The
+// which skips the per-request header marshal and JA4+ resolution. The
 // allocs/op delta versus TraceAll is the cost P1.2 makes optional.
 // (GATEON_PER_IP_METRICS is read once at package init, so it is configured via
 // the environment when running this benchmark, not toggled per sub-benchmark.)

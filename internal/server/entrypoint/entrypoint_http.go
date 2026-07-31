@@ -98,16 +98,14 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	isMgmt := IsManagementAddress(ep.Address, deps)
 	chain := []middleware.Middleware{
-		middleware.WithRequestState(ep.Id, epLabel, isMgmt),
-		middleware.RealIPGlobal(),
-		middleware.RequestID(), // Added for global correlation
+		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
+		middleware.Metrics("gateon-" + epLabel),
 		middleware.IPMitigation(),
 		middleware.UserMitigation(),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HoneypotGlobal(deps.GlobalStore),
 		middleware.GeoIPGlobal(deps.GlobalStore),
-		middleware.Metrics("gateon-" + epLabel),
 	}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))

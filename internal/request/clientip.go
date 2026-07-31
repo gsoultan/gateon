@@ -1,12 +1,14 @@
 package request
 
 import (
+	"fmt"
 	"net/http"
 	"net/netip"
 	"os"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/security/art"
 )
 
 const (
@@ -21,8 +23,8 @@ const (
 )
 
 var (
-	trustedProxies []netip.Prefix
-	cloudflareIPs  []netip.Prefix
+	trustedProxies = art.NewTree()
+	cloudflareIPs  = art.NewTree()
 )
 
 func init() {
@@ -38,9 +40,7 @@ func init() {
 		"2803:f800::/32", "2c0f:f248::/32", "2a06:98c0::/29",
 	}
 	for _, cidr := range append(cfv4, cfv6...) {
-		if prefix, err := netip.ParsePrefix(cidr); err == nil {
-			cloudflareIPs = append(cloudflareIPs, prefix)
-		}
+		_ = cloudflareIPs.InsertCIDR(cidr)
 	}
 
 	if s := os.Getenv(EnvTrustedProxies); s != "" {
@@ -49,15 +49,17 @@ func init() {
 			if cidr == "" {
 				continue
 			}
-			if prefix, err := netip.ParsePrefix(cidr); err == nil {
-				trustedProxies = append(trustedProxies, prefix)
-			} else if addr, err := netip.ParseAddr(cidr); err == nil {
-				// Single IP as /32 or /128
-				bits := 32
-				if addr.Is6() {
-					bits = 128
+			if strings.Contains(cidr, "/") {
+				_ = trustedProxies.InsertCIDR(cidr)
+			} else {
+				// Single IP
+				if addr, err := netip.ParseAddr(cidr); err == nil {
+					bits := 32
+					if addr.Is6() {
+						bits = 128
+					}
+					_ = trustedProxies.InsertCIDR(fmt.Sprintf("%s/%d", addr.String(), bits))
 				}
-				trustedProxies = append(trustedProxies, netip.PrefixFrom(addr, bits))
 			}
 		}
 	}
@@ -65,21 +67,11 @@ func init() {
 
 // isTrustedIP reports whether the given IP is within the configured trusted-proxy set.
 func isTrustedIP(ip netip.Addr) bool {
-	for i := range trustedProxies {
-		if trustedProxies[i].Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return trustedProxies.ContainsAddr(ip)
 }
 
 func isCloudflareIP(ip netip.Addr) bool {
-	for i := range cloudflareIPs {
-		if cloudflareIPs[i].Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return cloudflareIPs.ContainsAddr(ip)
 }
 
 // IsTrusted reports whether the given remote address is a trusted proxy.

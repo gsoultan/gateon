@@ -316,12 +316,12 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 		SourceIP: "8.8.8.8", Status: "200 OK", Timestamp: now, Path: "/search?q=;whoami", Method: "GET",
 	})
 
-	// 4. JA3 Fingerprint Rotation (IP 9.9.9.9)
+	// 4. JA4 Fingerprint Rotation (IP 9.9.9.9)
 	traces = append(traces, &telemetry.TraceRecord{
-		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET", JA3: "fingerprint1",
+		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET", JA4: "fingerprint1",
 	})
 	traces = append(traces, &telemetry.TraceRecord{
-		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/api", Method: "GET", JA3: "fingerprint2",
+		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/api", Method: "GET", JA4: "fingerprint2",
 	})
 
 	data := &DiagnosticData{
@@ -333,7 +333,7 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 	foundTargetedBruteForce := false
 	foundSSRF := false
 	foundCmdInjection := false
-	foundJA3Rotation := false
+	foundJA4Rotation := false
 
 	for _, a := range anomalies {
 		if a.Source == "6.6.6.6" && strings.Contains(strings.ToLower(a.Description), "targeted brute force") {
@@ -347,14 +347,14 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 			foundCmdInjection = true
 		}
 		if a.Source == "9.9.9.9" && strings.Contains(strings.ToLower(a.Description), "multiple tls fingerprints") {
-			foundJA3Rotation = true
+			foundJA4Rotation = true
 		}
 	}
 
 	assert.True(t, foundTargetedBruteForce, "Should detect targeted brute force from 6.6.6.6")
 	assert.True(t, foundSSRF, "Should detect SSRF from 7.7.7.7")
 	assert.True(t, foundCmdInjection, "Should detect command injection from 8.8.8.8")
-	assert.True(t, foundJA3Rotation, "Should detect JA3 rotation from 9.9.9.9")
+	assert.True(t, foundJA4Rotation, "Should detect JA4 rotation from 9.9.9.9")
 }
 
 func TestApplyRecommendation(t *testing.T) {

@@ -40,6 +40,7 @@ import {
   useRequestsPerSecond,
   useRoutes,
   useServices,
+  useDashboardWorker,
 } from "../hooks/useGateon";
 import type { RequestDeltaSample } from "../hooks/useGateon";
 import { Sparkline } from "../components/Sparkline";
@@ -297,58 +298,62 @@ export default function Dashboard() {
     return Math.max(requested, minStep);
   }, [chartResolution, trafficRangeBounds]);
 
-  const hourlyTrafficData = useMemo(
-    () => aggregateTrafficSamples(filteredTrafficSamples, effectiveResolution, trafficRangeBounds),
-    [filteredTrafficSamples, effectiveResolution, trafficRangeBounds],
-  );
+  const isLoading = aggLoading || pathStatsLoading || routesLoading || servicesLoading;
 
-  const hourlyBandwidthData = useMemo(
-    () => aggregateBandwidthSamples(filteredBandwidthSamples, effectiveResolution, trafficRangeBounds),
-    [filteredBandwidthSamples, effectiveResolution, trafficRangeBounds],
-  );
+  const { buildDashboardData } = useDashboardWorker();
+  const [workerData, setWorkerData] = useState<any>(null);
+  const [isWorkerCalculating, setIsWorkerCalculating] = useState(false);
 
-  const bandwidthSummaries = useMemo(
-    () => buildBandwidthSummaries(hourlyBandwidthData),
-    [hourlyBandwidthData],
-  );
+  useEffect(() => {
+    if (isLoading) return;
 
-  const trafficWindowLabel = useMemo(() => {
-    if (trafficRangeBounds === null) {
-      return `All captured samples (${requestDeltaHistory.length})`;
-    }
-    const startLabel = new Date(trafficRangeBounds.startTs).toLocaleDateString();
-    const endLabel = new Date(Math.max(trafficRangeBounds.startTs, trafficRangeBounds.endTs - 1))
-      .toLocaleDateString();
-    return `${startLabel} → ${endLabel}`;
-  }, [requestDeltaHistory.length, trafficRangeBounds]);
+    const controller = new AbortController();
+    setIsWorkerCalculating(true);
 
-  const groupedTrafficLoading = pathStatsLoading || routesLoading || servicesLoading;
+    buildDashboardData({
+      samples: combinedTrafficHistory,
+      bandwidthSamples: combinedBandwidthHistory,
+      pathStats: pathStats ?? [],
+      resolutionMinutes: effectiveResolution,
+      range: trafficRangeBounds,
+      routes: routesResponse?.routes ?? [],
+      services: servicesResponse?.services ?? [],
+    }).then(result => {
+      if (!controller.signal.aborted) {
+        setWorkerData(result);
+        setIsWorkerCalculating(false);
+      }
+    }).catch(err => {
+      console.error("Dashboard worker error:", err);
+      if (!controller.signal.aborted) {
+        setIsWorkerCalculating(false);
+      }
+    });
+
+    return () => controller.abort();
+  }, [
+    buildDashboardData,
+    combinedTrafficHistory,
+    combinedBandwidthHistory,
+    pathStats,
+    effectiveResolution,
+    trafficRangeBounds,
+    routesResponse?.routes,
+    servicesResponse?.services,
+    isLoading
+  ]);
+
+  const hourlyTrafficData = workerData?.hourlyTraffic ?? [];
+  const hourlyBandwidthData = workerData?.hourlyBandwidth ?? [];
+  const bandwidthSummaries = workerData?.bandwidthSummaries ?? [];
+  const trafficByServiceData = workerData?.trafficByService ?? [];
+  const bandwidthByServiceData = workerData?.bandwidthByService ?? [];
+  const bandwidthByRouterData = workerData?.bandwidthByRouter ?? [];
+  const trafficByPortData = workerData?.trafficByPort ?? [];
+  const trafficByPathData = workerData?.trafficByPath ?? [];
+
+  const groupedTrafficLoading = isLoading || isWorkerCalculating;
   const groupedBandwidthLoading = groupedTrafficLoading;
-
-  const trafficByServiceData = useMemo(
-    () =>
-      buildTrafficByServiceData(
-        pathStats ?? [],
-        routesResponse?.routes ?? [],
-        servicesResponse?.services ?? [],
-      ),
-    [pathStats, routesResponse?.routes, servicesResponse?.services],
-  );
-  const bandwidthByServiceData = useMemo(
-    () =>
-      buildBandwidthByServiceData(
-        pathStats ?? [],
-        routesResponse?.routes ?? [],
-        servicesResponse?.services ?? [],
-      ),
-    [pathStats, routesResponse?.routes, servicesResponse?.services],
-  );
-  const bandwidthByRouterData = useMemo(
-    () => buildBandwidthByRouterData(pathStats ?? [], routesResponse?.routes ?? []),
-    [pathStats, routesResponse?.routes],
-  );
-  const trafficByPortData = useMemo(() => buildTrafficByPortData(pathStats ?? []), [pathStats]);
-  const trafficByPathData = useMemo(() => buildTrafficByPathData(pathStats ?? []), [pathStats]);
 
   const ipDistributionData = useMemo(() => {
     if (!metricsSnap?.ip_metrics) return [];

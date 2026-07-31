@@ -57,8 +57,6 @@ func (m *mockEbpfManager) SetPortKnockingSequence(seq []int32) error            
 func (m *mockEbpfManager) Start(ctx context.Context)                                    {}
 func (m *mockEbpfManager) UpdateLoadBalancerBackends(ips []string) error                { return nil }
 func (m *mockEbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) error { return nil }
-func (m *mockEbpfManager) ShunJA3(ja3Md5 [16]byte) error                                { return nil }
-func (m *mockEbpfManager) UnshunJA3(ja3Md5 [16]byte) error                              { return nil }
 func (m *mockEbpfManager) ShunJA4(ja4Fingerprint string) error                          { return nil }
 func (m *mockEbpfManager) BlocklistCuckoo(key string) error                             { return nil }
 func (m *mockEbpfManager) GetTopIPs(limit int) ([]ebpf.IPStat, error)                   { return nil, nil }

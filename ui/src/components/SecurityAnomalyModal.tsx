@@ -36,8 +36,10 @@ import {
   IconBrain,
   IconInfoCircle,
   IconShieldCheck,
+  IconShieldLock,
+  IconHistory,
 } from "@tabler/icons-react";
-import { useRemoveMitigation, useApplyRecommendation, useSecurityThreat } from "../hooks/useGateon";
+import { useRemoveMitigation, useApplyRecommendation, useSecurityThreat, useSecurityThreats } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
@@ -57,6 +59,14 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
   const [confirmOpened, { open: openConfirm, close: closeConfirm }] = useDisclosure(false);
   const removeMitigation = useRemoveMitigation();
   const applyRecommendation = useApplyRecommendation();
+
+  const { data: historyData } = useSecurityThreats({
+    limit: 10,
+    offset: 0,
+    search: anomaly?.source || "",
+    status: "all",
+  });
+  const history = (historyData?.threats || []).filter(h => h.id !== anomaly?.id);
 
   const triggeredRules = useMemo(() => {
     if (!anomaly?.triggered_rules) return [];
@@ -310,33 +320,33 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
             </Grid.Col>
           )}
 
-          {(anomaly.ja3 || anomaly.ja4) && (
+          {(anomaly.ja4 || anomaly.ja4h) && (
             <Grid.Col span={12}>
               <Stack gap="xs">
                 <Group gap="xs">
                   <IconFingerprint size={16} color="var(--mantine-color-dimmed)" />
                   <Text size="sm" fw={600}>
-                    User Identification
+                    User Identification (JA4+)
                   </Text>
                 </Group>
                 <Stack gap={4} ml={26}>
-                  {anomaly.ja3 && (
-                    <Group gap="xs" wrap="nowrap">
-                      <Text size="xs" fw={700} w={40}>
-                        JA3:
-                      </Text>
-                      <Code color="blue" variant="light" style={{ flex: 1, overflow: 'auto' }}>
-                        {anomaly.ja3}
-                      </Code>
-                    </Group>
-                  )}
                   {anomaly.ja4 && (
                     <Group gap="xs" wrap="nowrap">
                       <Text size="xs" fw={700} w={40}>
-                        JA4+:
+                        TLS:
                       </Text>
                       <Code color="violet" variant="light" style={{ flex: 1, overflow: 'auto' }}>
                         {anomaly.ja4}
+                      </Code>
+                    </Group>
+                  )}
+                  {anomaly.ja4h && (
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="xs" fw={700} w={40}>
+                        HTTP:
+                      </Text>
+                      <Code color="blue" variant="light" style={{ flex: 1, overflow: 'auto' }}>
+                        {anomaly.ja4h}
                       </Code>
                     </Group>
                   )}
@@ -553,18 +563,54 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
           </Paper>
         </Stack>
 
+        {history.length > 0 && (
+          <Stack gap="xs">
+            <Group gap="xs">
+              <IconHistory size={16} color="var(--mantine-color-dimmed)" />
+              <Text size="sm" fw={600}>
+                Historical Activity for {anomaly.source}
+              </Text>
+            </Group>
+            <Paper withBorder radius="md">
+              <Stack gap={0}>
+                {history.map((h, i) => (
+                  <React.Fragment key={h.id || i}>
+                    <Box p="xs" style={{ cursor: 'default' }}>
+                      <Group justify="space-between">
+                        <Stack gap={2}>
+                          <Group gap={8}>
+                            <Text size="xs" fw={700}>{(h.type || '').toUpperCase()}</Text>
+                            <Badge size="xs" variant="light" color={getSeverityColor(h.severity)}>{h.severity}</Badge>
+                          </Group>
+                          <Text size="xs" c="dimmed">{h.description}</Text>
+                        </Stack>
+                        <Text size="xs" c="dimmed">{new Date(h.timestamp).toLocaleString()}</Text>
+                      </Group>
+                    </Box>
+                    {i < history.length - 1 && <Divider />}
+                  </React.Fragment>
+                ))}
+              </Stack>
+            </Paper>
+          </Stack>
+        )}
+
         <Group justify="space-between">
           <Group gap="xs">
             <Text size="xs" c="dimmed">
-              Mitigation Status:
+              Current Status:
             </Text>
-            {anomaly.mitigated ? (
-              <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>
+            {anomaly.action_taken === "blocked" || anomaly.action_taken === "shunned" || anomaly.action_taken === "challenged" ? (
+              <Badge color="red" variant="light" leftSection={<IconShieldLock size={12} />}>
+                Blocked
+              </Badge>
+            ) : anomaly.mitigated ? (
+              <Badge color="teal" variant="light" leftSection={<IconShieldCheck size={12} />}>
                 Mitigated
               </Badge>
             ) : (
-              <Badge color="red" variant="light" leftSection={<IconShieldExclamation size={12} />}>
-                Active / Not Mitigated
+              <Badge color="orange" variant="light" leftSection={<IconShieldExclamation size={12} />}>
+                Detected
               </Badge>
             )}
           </Group>
@@ -621,7 +667,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
             <Button 
               color="red" 
               onClick={() => {
-                removeMitigation.mutate(anomaly.source, {
+                removeMitigation.mutate({ source: anomaly.source, ja4plus: anomaly.ja4plus, ja4h: anomaly.ja4h }, {
                   onSuccess: () => {
                     closeConfirm();
                     onClose();

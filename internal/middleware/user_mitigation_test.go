@@ -15,23 +15,22 @@ func TestUserMitigationMiddleware(t *testing.T) {
 	_ = telemetry.InitPathStatsStore("sqlite::memory:", 1)
 	defer telemetry.ClosePathStatsStore(context.Background())
 
-	ja3 := "mitigated-ja3"
-	ja4 := "mitigated-ja4"
+	ja4_1 := "mitigated-ja4-1"
+	ja4_2 := "mitigated-ja4-2"
 	ja4h := "mitigated-ja4h"
 
-	// Mitigate JA3
-	telemetry.MarkUserMitigated(ja3, "", "JA3", "Test mitigation", "TestCategory")
-	telemetry.MarkUserMitigated(ja4, "", "JA4", "Test mitigation JA4", "TestCategory")
-	telemetry.MarkUserMitigated(ja4, ja4h, "JA4", "Test mitigation JA4+JA4H", "TestCategory")
+	telemetry.MarkUserMitigated(ja4_1, "", "JA4", "Test mitigation", "TestCategory")
+	telemetry.MarkUserMitigated(ja4_2, "", "JA4", "Test mitigation JA4", "TestCategory")
+	telemetry.MarkUserMitigated(ja4_2, ja4h, "JA4", "Test mitigation JA4+JA4H", "TestCategory")
 
 	mw := UserMitigation()
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	t.Run("Blocked JA3", func(t *testing.T) {
+	t.Run("Blocked JA4 1", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA3: ja3}
+		rs := &request.RequestState{JA4: ja4_1}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -45,7 +44,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Blocked JA4 Global", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA4: ja4}
+		rs := &request.RequestState{JA4: ja4_2}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -59,7 +58,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Blocked JA4+JA4H Composite", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA4: ja4, JA4H: ja4h}
+		rs := &request.RequestState{JA4: ja4_2, JA4H: ja4h}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -73,7 +72,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Allowed Clean Fingerprint", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA3: "clean-ja3"}
+		rs := &request.RequestState{JA4: "clean-ja4"}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 
@@ -87,10 +86,10 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Immediate Effect of Unmitigation", func(t *testing.T) {
 		// Unmitigate
-		telemetry.MarkUserUnmitigated(ja3, "")
+		telemetry.MarkUserUnmitigated(ja4_1, "")
 
 		req := httptest.NewRequest("GET", "/", nil)
-		rs := &request.RequestState{JA3: ja3}
+		rs := &request.RequestState{JA4: ja4_1}
 		ctx := context.WithValue(req.Context(), request.RequestStateContextKey{}, rs)
 		req = req.WithContext(ctx)
 

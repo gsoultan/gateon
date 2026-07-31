@@ -156,6 +156,7 @@ type MetricsSnapshot struct {
 type MitigationFunnel struct {
 	HTTPIngress           float64 `json:"http_ingress"`
 	WAFBlocked            float64 `json:"waf_blocked"`
+	FastPathBlocked       float64 `json:"fast_path_blocked"`
 	RateLimited           float64 `json:"rate_limited"`
 	GeoIPBlocked          float64 `json:"geoip_blocked"`
 	AuthFailures          float64 `json:"auth_failures"`
@@ -226,6 +227,7 @@ type RouteMetric struct {
 type MiddlewareMetrics struct {
 	RateLimitRejected  []LabeledCount `json:"rate_limit_rejected,omitzero"`
 	WAFBlocked         []LabeledCount `json:"waf_blocked,omitzero"`
+	FastPathBlocked    []LabeledCount `json:"fast_path_blocked,omitzero"`
 	CacheHits          float64        `json:"cache_hits"`
 	CacheMisses        float64        `json:"cache_misses"`
 	CacheHitRate       float64        `json:"cache_hit_rate"`
@@ -488,6 +490,7 @@ func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
 	f := MitigationFunnel{
 		HTTPIngress:           gs.RequestsTotal,
 		WAFBlocked:            sumCounter(idx, "gateon_middleware_waf_blocked_total", nil),
+		FastPathBlocked:       sumCounter(idx, "gateon_middleware_fast_path_blocked_total", nil),
 		RateLimited:           sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", nil),
 		GeoIPBlocked:          sumCounter(idx, "gateon_middleware_geoip_blocked_total", nil),
 		AuthFailures:          sumCounter(idx, "gateon_middleware_auth_failures_total", nil),
@@ -520,7 +523,7 @@ func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
 		}
 	}
 
-	f.TotalMitigated = f.WAFBlocked + f.RateLimited + f.GeoIPBlocked +
+	f.TotalMitigated = f.WAFBlocked + f.FastPathBlocked + f.RateLimited + f.GeoIPBlocked +
 		f.AuthFailures + f.TurnstileFailures + f.HMACFailures +
 		f.BotBlocked + f.FileSecurityBlocked + f.DeceptionBlocked +
 		f.AdvancedSecurityBlock
@@ -631,6 +634,7 @@ func buildMiddlewareMetrics(idx map[string]*dto.MetricFamily) MiddlewareMetrics 
 
 	mm.RateLimitRejected = collectLabeledCounts(idx, "gateon_middleware_ratelimit_rejected_total", "limiter_type")
 	mm.WAFBlocked = collectLabeledCounts(idx, "gateon_middleware_waf_blocked_total", "rule_id")
+	mm.FastPathBlocked = collectLabeledCounts(idx, "gateon_middleware_fast_path_blocked_total", "check_type")
 	mm.CacheHits = sumCounter(idx, "gateon_middleware_cache_hits_total", nil)
 	mm.CacheMisses = sumCounter(idx, "gateon_middleware_cache_misses_total", nil)
 	total := mm.CacheHits + mm.CacheMisses
