@@ -91,6 +91,10 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 		return "", nil, err
 	}
 
+	if user.Role == "" {
+		user.Role = RoleViewer
+	}
+
 	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
 		return "", nil, ErrAccountLocked
 	}
@@ -230,6 +234,12 @@ func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.Us
 func (m *Manager) UpsertUser(u *gateonv1.User) error {
 	if u.Id == "" {
 		u.Id = uuid.New().String()
+	}
+
+	if u.Role == "" {
+		u.Role = RoleViewer
+	} else if !ValidRole(u.Role) {
+		return fmt.Errorf("invalid role: %s", u.Role)
 	}
 
 	if u.Password != "" {

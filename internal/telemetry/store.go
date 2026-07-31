@@ -730,6 +730,7 @@ func (s *pathStatsStore) loop() {
 			if err != nil {
 				logger.Default().LogError("telemetry: begin transaction failed", "error", err)
 			} else {
+				defer tx.Rollback()
 				pathStmt, _ := s.upsertStmt(tx)
 				domainStmt, _ := s.domainUpsertStmt(tx)
 
@@ -789,6 +790,7 @@ func (s *pathStatsStore) loop() {
 			if err != nil {
 				logger.Default().LogError("threats: begin transaction failed", "error", err)
 			} else {
+				defer tx.Rollback()
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
 						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation); err != nil {
@@ -797,8 +799,6 @@ func (s *pathStatsStore) loop() {
 					}
 					stmt.Close()
 					_ = tx.Commit()
-				} else {
-					_ = tx.Rollback()
 				}
 				for _, th := range threatBatch {
 					th.Reset()
@@ -1952,14 +1952,14 @@ func GetActiveThreatsRolling24h(ctx context.Context) int {
 	if s == nil {
 		return 0
 	}
-	cutoff := time.Now().Add(-24 * time.Hour)
+	cutoff := time.Now().Add(-24 * time.Hour).Format(threatTimestampLayout)
 	q := s.dialect.Rebind(QueryGetActiveThreatsRolling24h)
-	var count int
+	var count int64
 	if err := s.db.QueryRowContext(ctx, q, cutoff).Scan(&count); err != nil {
 		logQueryErr(ctx, "active threats rolling 24h: query failed", err)
 		return 0
 	}
-	return count
+	return int(count)
 }
 
 // GetMitigatedRolling24h returns the count of threats actively mitigated
@@ -1969,14 +1969,14 @@ func GetMitigatedRolling24h(ctx context.Context) int {
 	if s == nil {
 		return 0
 	}
-	cutoff := time.Now().Add(-24 * time.Hour)
+	cutoff := time.Now().Add(-24 * time.Hour).Format(threatTimestampLayout)
 	q := s.dialect.Rebind(QueryGetMitigatedThreatsRolling24h)
-	var count int
+	var count int64
 	if err := s.db.QueryRowContext(ctx, q, cutoff).Scan(&count); err != nil {
 		logQueryErr(ctx, "mitigated threats rolling 24h: query failed", err)
 		return 0
 	}
-	return count
+	return int(count)
 }
 
 // GetSecurityThreatByID returns a single security threat by its unique ID.
@@ -2085,7 +2085,15 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 		where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	args = append(args, limit, offset)
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	// Use a prepared statement to avoid unnamed statement collision in PgBouncer (08P01)
+	stmt, err := s.db.PrepareContext(ctx, query)
+	if err != nil {
+		logQueryErr(ctx, "threats: prepare failed", err)
+		return nil
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx, args...)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
 		return nil
@@ -2136,7 +2144,15 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, '') FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	args = append(args, limit, offset)
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	// Use a prepared statement to avoid unnamed statement collision in PgBouncer (08P01)
+	stmt, err := s.db.PrepareContext(ctx, query)
+	if err != nil {
+		logQueryErr(ctx, "threats: prepare failed", err)
+		return nil
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx, args...)
 	if err != nil {
 		logQueryErr(ctx, "threats: query failed", err)
 		return nil
@@ -2176,7 +2192,14 @@ func CountSecurityThreats(ctx context.Context, filter *ThreatFilter) int64 {
 		query = s.dialect.Rebind("SELECT COUNT(*) FROM security_threats " + where)
 	}
 	var count int64
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	// Use a prepared statement to avoid unnamed statement collision in PgBouncer (08P01)
+	stmt, err := s.db.PrepareContext(ctx, query)
+	if err != nil {
+		return 0
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRowContext(ctx, args...).Scan(&count)
 	if err != nil {
 		return 0
 	}
@@ -2230,7 +2253,13 @@ func GetTopThreatSources(ctx context.Context, limit int) []LabeledCount {
 		return nil
 	}
 	query := s.dialect.Rebind("SELECT source_ip, COUNT(*) as cnt, MAX(asn) FROM security_threats WHERE source_ip != '' GROUP BY source_ip ORDER BY cnt DESC LIMIT ?")
-	rows, err := s.db.QueryContext(ctx, query, limit)
+	stmt, err := s.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx, limit)
 	if err != nil {
 		return nil
 	}
@@ -2256,7 +2285,13 @@ func GetTopThreatTypes(ctx context.Context, limit int) []LabeledCount {
 		return nil
 	}
 	query := s.dialect.Rebind("SELECT type, COUNT(*) as cnt FROM security_threats GROUP BY type ORDER BY cnt DESC LIMIT ?")
-	rows, err := s.db.QueryContext(ctx, query, limit)
+	stmt, err := s.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx, limit)
 	if err != nil {
 		return nil
 	}
@@ -2281,7 +2316,13 @@ func GetThreatsByCountry(ctx context.Context, limit int) []LabeledCount {
 		return nil
 	}
 	query := s.dialect.Rebind("SELECT country_code, COUNT(*) as cnt FROM security_threats WHERE country_code != '' GROUP BY country_code ORDER BY cnt DESC LIMIT ?")
-	rows, err := s.db.QueryContext(ctx, query, limit)
+	stmt, err := s.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx, limit)
 	if err != nil {
 		return nil
 	}
@@ -2329,7 +2370,13 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 	cutoff := time.Now().Add(time.Duration(-days*24) * time.Hour).Format(threatTimestampLayout)
 	query := attackTrendBucketQuery(s.dialect.Driver, days > attackTrendDailyThresholdDays)
 
-	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(query), cutoff)
+	stmt, err := s.db.PrepareContext(ctx, s.dialect.Rebind(query))
+	if err != nil {
+		return nil
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx, cutoff)
 	if err != nil {
 		return nil
 	}

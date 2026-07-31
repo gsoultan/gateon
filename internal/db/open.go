@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -32,6 +33,11 @@ func Open(url string) (*sql.DB, Dialect, error) {
 		_ = db.Close()
 		return nil, Dialect{}, fmt.Errorf("ping %s: %w", driver, err)
 	}
+
+	// Configure connection pool for production resilience
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	return db, Dialect{Driver: driver}, nil
 }

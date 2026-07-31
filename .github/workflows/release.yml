@@ -47,18 +47,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate proto
-        run: buf generate
-
-      - name: Build UI
-        run: |
-          bun install --cwd ui
-          (cd ui && bun run build)
-          go run ./scripts/sync_assets.go
-
-      - name: Tidy modules
-        run: go mod tidy
-
       - name: Install Syft (SBOM generator)
         uses: anchore/sbom-action/download-syft@v0
 

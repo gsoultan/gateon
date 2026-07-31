@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -62,8 +63,29 @@ func Turnstile(cfg TurnstileConfig) Middleware {
 			}
 
 			token := r.Header.Get(headerName)
-			if token == "" {
+			if token == "" && r.Body != nil && r.Body != http.NoBody {
+				// If not in header, we try to get it from form data.
+				// Since r.FormValue consumes the body reader for POST/PUT/PATCH,
+				// we must capture and restore it for the downstream proxy.
+				buf := &bytes.Buffer{}
+				originalBody := r.Body
+				r.Body = struct {
+					io.Reader
+					io.Closer
+				}{
+					Reader: io.TeeReader(originalBody, buf),
+					Closer: originalBody,
+				}
+
 				token = r.FormValue("cf-turnstile-response")
+
+				r.Body = struct {
+					io.Reader
+					io.Closer
+				}{
+					Reader: io.MultiReader(buf, originalBody),
+					Closer: originalBody,
+				}
 			}
 			if token == "" {
 				telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()

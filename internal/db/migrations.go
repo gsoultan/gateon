@@ -1364,4 +1364,10 @@ func init() {
 		_, err := db.Exec(query)
 		return err
 	})
+	Register(52, "ensure_users_have_roles", func(db *sql.DB, dialect Dialect) error {
+		// Fix any users with empty or invalid roles. Default to 'viewer' if not set.
+		query := "UPDATE users SET role = 'viewer' WHERE role IS NULL OR role = ''"
+		_, err := db.Exec(query)
+		return err
+	})
 }

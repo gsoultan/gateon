@@ -45,6 +45,8 @@ type AuditManager struct {
 	Broadcaster *Broadcaster
 	lastHash    string
 	stop        chan struct{}
+	stmtInsert  *sql.Stmt
+	stmtMu      sync.RWMutex
 }
 
 // GenerateSignatureKey returns a cryptographically-random 256-bit key as a hex
@@ -125,6 +127,7 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 			stop: make(chan struct{}),
 		}
 		manager.loadLastHash()
+		manager.prepareStatements()
 		go manager.runRetentionTask()
 	})
 	return err
@@ -133,7 +136,25 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 func Stop() {
 	if manager != nil {
 		close(manager.stop)
+		manager.stmtMu.Lock()
+		if manager.stmtInsert != nil {
+			manager.stmtInsert.Close()
+			manager.stmtInsert = nil
+		}
+		manager.stmtMu.Unlock()
 	}
+}
+
+func (m *AuditManager) prepareStatements() {
+	m.stmtMu.Lock()
+	defer m.stmtMu.Unlock()
+	query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := m.db.Prepare(query)
+	if err != nil {
+		logger.L.LogError("audit: failed to prepare insert statement", "error", err)
+		return
+	}
+	m.stmtInsert = stmt
 }
 
 func (m *AuditManager) loadLastHash() {
@@ -213,8 +234,19 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 	}
 	m.mu.Unlock()
 
-	query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-	_, err := m.db.ExecContext(ctx, query, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
+	var err error
+	m.stmtMu.RLock()
+	stmt := m.stmtInsert
+	m.stmtMu.RUnlock()
+
+	if stmt != nil {
+		_, err = stmt.ExecContext(ctx, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
+	} else {
+		// Fallback to unnamed statement if preparation failed
+		query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		_, err = m.db.ExecContext(ctx, query, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
+	}
+
 	if err != nil {
 		logger.L.LogError("audit: failed to write log", "error", err)
 		return
