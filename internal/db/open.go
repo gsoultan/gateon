@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/gsoultan/gateon/internal/config"
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
@@ -34,9 +35,11 @@ func Open(url string) (*sql.DB, Dialect, error) {
 		return nil, Dialect{}, fmt.Errorf("ping %s: %w", driver, err)
 	}
 
-	// Configure connection pool for production resilience
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
+	// Configure connection pool for production resilience.
+	// Defaults are tuned by resource tier (minimal: 5, standard: 25, enterprise: 100).
+	td := config.CurrentTierDefaults()
+	db.SetMaxOpenConns(td.DBMaxOpenConns)
+	db.SetMaxIdleConns(td.DBMaxIdleConns)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	return db, Dialect{Driver: driver}, nil

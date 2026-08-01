@@ -731,7 +731,13 @@ func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) loop() {
-	flushTicker := time.NewTicker(1 * time.Second)
+	td := config.CurrentTierDefaults()
+	interval := time.Duration(td.FlushIntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = 1 * time.Second
+	}
+
+	flushTicker := time.NewTicker(interval)
 	pruneTicker := time.NewTicker(1 * time.Hour)
 	defer flushTicker.Stop()
 	defer pruneTicker.Stop()
@@ -1834,40 +1840,13 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 	return stats
 }
 
-// GetSystemTrafficRolling24h returns total requests and bandwidth for the last 24 hours.
+// GetSystemTrafficRolling24h returns total requests and bandwidth for today (since UTC midnight).
 func GetSystemTrafficRolling24h(ctx context.Context) (uint64, uint64) {
 	s := getStore()
 	if s == nil {
 		return 0, 0
 	}
-
-	now := time.Now().UTC()
-	today := now.Format("2006-01-02")
-	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
-	bucket := now.Hour()*2 + now.Minute()/30
-
-	q := s.dialect.Rebind(QueryGetTotalTrafficRolling24h)
-	var rc, bsum int64
-
-	ex, cleanup := s.getExecutor(ctx)
-	defer cleanup()
-
-	err := ex.QueryRowContext(ctx, q, today, bucket, yesterday, bucket).Scan(&rc, &bsum)
-	if err != nil {
-		logQueryErr(ctx, "traffic rolling 24h: query failed", err)
-		// Fallback to in-memory today counters if DB fails or is empty
-		return s.currentReqToday.Load(), s.currentBytesToday.Load()
-	}
-
-	reqs := uint64(rc)
-	bytes := uint64(max(bsum, 0))
-
-	// If DB has no rolling data (e.g. newly installed), use in-memory today's counters
-	if reqs == 0 {
-		return s.currentReqToday.Load(), s.currentBytesToday.Load()
-	}
-
-	return reqs, bytes
+	return s.currentReqToday.Load(), s.currentBytesToday.Load()
 }
 
 // logQueryErr logs a query failure unless it was caused by the caller's
@@ -1990,21 +1969,8 @@ func GetActiveThreatsRolling24h(ctx context.Context) int {
 	if s == nil {
 		return 0
 	}
-	cutoff := time.Now().Add(-24 * time.Hour).Format(threatTimestampLayout)
-	q := s.dialect.Rebind(QueryGetActiveThreatsRolling24h)
-	var count int64
-	ex, cleanup := s.getExecutor(ctx)
-	defer cleanup()
-
-	err := ex.QueryRowContext(ctx, q, cutoff).Scan(&count)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0
-		}
-		logQueryErr(ctx, "active threats rolling 24h: query failed", err)
-		return 0
-	}
-	return int(count)
+	// Prefer the in-memory atomic counter if available (current day)
+	return int(s.currentActiveToday.Load())
 }
 
 // GetMitigatedRolling24h returns the count of threats actively mitigated
@@ -2014,21 +1980,8 @@ func GetMitigatedRolling24h(ctx context.Context) int {
 	if s == nil {
 		return 0
 	}
-	cutoff := time.Now().Add(-24 * time.Hour).Format(threatTimestampLayout)
-	q := s.dialect.Rebind(QueryGetMitigatedThreatsRolling24h)
-	var count int64
-	ex, cleanup := s.getExecutor(ctx)
-	defer cleanup()
-
-	err := ex.QueryRowContext(ctx, q, cutoff).Scan(&count)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0
-		}
-		logQueryErr(ctx, "mitigated threats rolling 24h: query failed", err)
-		return 0
-	}
-	return int(count)
+	// Prefer the in-memory atomic counter if available (current day)
+	return int(s.currentMitigatedToday.Load())
 }
 
 // GetSecurityThreatByID returns a single security threat by its unique ID.

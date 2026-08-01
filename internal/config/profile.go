@@ -31,11 +31,17 @@ type TierDefaults struct {
 	CorrelationMaxSources   int
 	CorrelationMaxPerSource int
 
+	// Database connection pool.
+	DBMaxOpenConns int
+	DBMaxIdleConns int
+
 	// Telemetry.
-	TraceStoreEnabled bool // open the Pebble trace store at all
-	CMSWidth          int  // Count-Min Sketch width
-	CMSDepth          int  // Count-Min Sketch depth
-	EbpfPollSeconds   int  // eBPF stats poll interval
+	TelemetryIntervalSeconds int
+	FlushIntervalSeconds     int
+	TraceStoreEnabled        bool // open the Pebble trace store at all
+	CMSWidth                 int  // Count-Min Sketch width
+	CMSDepth                 int  // Count-Min Sketch depth
+	EbpfPollSeconds          int  // eBPF stats poll interval
 
 	// Storage (Pebble + SQL retention).
 	RetentionDays       int
@@ -80,51 +86,63 @@ func DefaultsFor(tier Tier) TierDefaults {
 	switch tier {
 	case TierMinimal:
 		return TierDefaults{
-			Tier:                    TierMinimal,
-			CorrelationEnabled:      false,
-			CorrelationMaxSources:   500,
-			CorrelationMaxPerSource: 32,
-			TraceStoreEnabled:       false,
-			CMSWidth:                512,
-			CMSDepth:                3,
-			EbpfPollSeconds:         10,
-			RetentionDays:           1,
-			PebbleCacheBytes:        4 << 20, // 4 MiB
-			PebbleMemTableBytes:     1 << 20, // 1 MiB
-			PebbleMaxOpenFiles:      50,
-			WAFTier:                 TierMinimal,
+			Tier:                     TierMinimal,
+			CorrelationEnabled:       false,
+			CorrelationMaxSources:    500,
+			CorrelationMaxPerSource:  32,
+			TraceStoreEnabled:        false,
+			CMSWidth:                 512,
+			CMSDepth:                 3,
+			EbpfPollSeconds:          10,
+			RetentionDays:            1,
+			PebbleCacheBytes:         4 << 20, // 4 MiB
+			PebbleMemTableBytes:      1 << 20, // 1 MiB
+			PebbleMaxOpenFiles:       50,
+			DBMaxOpenConns:           5,
+			DBMaxIdleConns:           5,
+			TelemetryIntervalSeconds: 30,
+			FlushIntervalSeconds:     10,
+			WAFTier:                  TierMinimal,
 		}
 	case TierEnterprise:
 		return TierDefaults{
-			Tier:                    TierEnterprise,
-			CorrelationEnabled:      true,
-			CorrelationMaxSources:   10000,
-			CorrelationMaxPerSource: 256,
-			TraceStoreEnabled:       true,
-			CMSWidth:                4096,
-			CMSDepth:                4,
-			EbpfPollSeconds:         2,
-			RetentionDays:           30,
-			PebbleCacheBytes:        32 << 20, // 32 MiB
-			PebbleMemTableBytes:     8 << 20,  // 8 MiB
-			PebbleMaxOpenFiles:      500,
-			WAFTier:                 TierEnterprise,
+			Tier:                     TierEnterprise,
+			CorrelationEnabled:       true,
+			CorrelationMaxSources:    10000,
+			CorrelationMaxPerSource:  256,
+			TraceStoreEnabled:        true,
+			CMSWidth:                 4096,
+			CMSDepth:                 4,
+			EbpfPollSeconds:          2,
+			RetentionDays:            30,
+			PebbleCacheBytes:         32 << 20, // 32 MiB
+			PebbleMemTableBytes:      8 << 20,  // 8 MiB
+			PebbleMaxOpenFiles:       500,
+			DBMaxOpenConns:           100,
+			DBMaxIdleConns:           50,
+			TelemetryIntervalSeconds: 2,
+			FlushIntervalSeconds:     1,
+			WAFTier:                  TierEnterprise,
 		}
 	default: // TierStandard
 		return TierDefaults{
-			Tier:                    TierStandard,
-			CorrelationEnabled:      true,
-			CorrelationMaxSources:   2000,
-			CorrelationMaxPerSource: 64,
-			TraceStoreEnabled:       true,
-			CMSWidth:                2048,
-			CMSDepth:                4,
-			EbpfPollSeconds:         2,
-			RetentionDays:           7,
-			PebbleCacheBytes:        8 << 20, // 8 MiB
-			PebbleMemTableBytes:     4 << 20, // 4 MiB
-			PebbleMaxOpenFiles:      200,
-			WAFTier:                 TierStandard,
+			Tier:                     TierStandard,
+			CorrelationEnabled:       true,
+			CorrelationMaxSources:    2000,
+			CorrelationMaxPerSource:  64,
+			TraceStoreEnabled:        true,
+			CMSWidth:                 2048,
+			CMSDepth:                 4,
+			EbpfPollSeconds:          2,
+			RetentionDays:            7,
+			PebbleCacheBytes:         8 << 20, // 8 MiB
+			PebbleMemTableBytes:      4 << 20, // 4 MiB
+			PebbleMaxOpenFiles:       200,
+			DBMaxOpenConns:           25,
+			DBMaxIdleConns:           25,
+			TelemetryIntervalSeconds: 5,
+			FlushIntervalSeconds:     2,
+			WAFTier:                  TierStandard,
 		}
 	}
 }
