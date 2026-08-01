@@ -350,7 +350,29 @@ export default function Dashboard() {
   const bandwidthByServiceData = workerData?.bandwidthByService ?? [];
   const bandwidthByRouterData = workerData?.bandwidthByRouter ?? [];
   const trafficByPortData = workerData?.trafficByPort ?? [];
+  const trafficByPortLoading = isLoading || isWorkerCalculating;
   const trafficByPathData = workerData?.trafficByPath ?? [];
+
+  const trafficWindowLabel = useMemo(() => {
+    if (trafficFilterMode === "all") {
+      return `Total History (${combinedTrafficHistory.length} samples)`;
+    }
+    if (trafficFilterMode === "date") {
+      return `Traffic for ${trafficDate || "selected date"}`;
+    }
+    if (trafficRangePreset === "custom") {
+      return `Range: ${trafficRangeStart || "?"} to ${trafficRangeEnd || "?"}`;
+    }
+    const preset = TRAFFIC_RANGE_PRESET_OPTIONS.find((o) => o.value === trafficRangePreset);
+    return preset?.label ?? trafficRangePreset;
+  }, [
+    trafficFilterMode,
+    trafficDate,
+    trafficRangePreset,
+    trafficRangeStart,
+    trafficRangeEnd,
+    combinedTrafficHistory.length,
+  ]);
 
   const groupedTrafficLoading = isLoading || isWorkerCalculating;
   const groupedBandwidthLoading = groupedTrafficLoading;

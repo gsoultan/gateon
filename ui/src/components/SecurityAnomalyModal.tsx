@@ -18,7 +18,7 @@ import {
   List,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { useMemo } from "react";
+import React, { useMemo } from "react";
 import {
   IconShieldExclamation,
   IconClock,
