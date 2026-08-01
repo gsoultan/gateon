@@ -62,33 +62,23 @@ func SetEbpfManager(m EbpfProvider) {
 // StartSnapshotLoop starts a background goroutine to periodically refresh the
 // global metrics snapshot, ensuring the UI remains fast even under load.
 func StartSnapshotLoop(ctx context.Context) {
-	td := config.CurrentTierDefaults()
-	interval := time.Duration(td.TelemetryIntervalSeconds) * time.Second
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	// Initial snapshot
-	if snap, err := collectMetricsSnapshot(ctx, 50, 0, true); err == nil {
-		old := lastSnapshot.Swap(snap)
-		if old != nil {
-			snapshotPool.Put(old)
-		}
-	}
+	timer := time.NewTimer(100 * time.Millisecond) // Start soon
+	defer timer.Stop()
 
 	heavyCounter := 0
-	heavyThreshold := 1 // By default, every refresh is heavy for standard/enterprise
-	if td.Tier == config.TierMinimal {
-		heavyThreshold = 4 // For minimal, 1 heavy every 4 cycles (e.g. 30s * 4 = 2 min)
-	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
+			td := config.CurrentTierDefaults()
+
+			heavyThreshold := 1 // By default, every refresh is heavy for standard/enterprise
+			if td.Tier == config.TierMinimal {
+				heavyThreshold = 4 // For minimal, 1 heavy every 4 cycles (e.g. 30s * 4 = 2 min)
+			}
+
 			heavyCounter++
 			isHeavy := heavyCounter >= heavyThreshold
 			if isHeavy {
@@ -102,6 +92,12 @@ func StartSnapshotLoop(ctx context.Context) {
 					snapshotPool.Put(old)
 				}
 			}
+
+			interval := time.Duration(td.TelemetryIntervalSeconds) * time.Second
+			if interval <= 0 {
+				interval = 5 * time.Second
+			}
+			timer.Reset(interval)
 		}
 	}
 }

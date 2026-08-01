@@ -3,13 +3,14 @@ package api
 import (
 	"context"
 	"errors"
-	"runtime"
-	"time"
-
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"os"
+	"runtime"
+	"time"
 )
 
 func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest) (*gateonv1.GetStatusResponse, error) {
@@ -34,6 +35,8 @@ func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest
 	}
 
 	stats := telemetry.GetSystemStats()
+	activeTier := config.ResolveProfile()
+	profilePinned := os.Getenv("GATEON_PROFILE") != ""
 
 	return &gateonv1.GetStatusResponse{
 		Status:              "running",
@@ -52,6 +55,8 @@ func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest
 		StorageTotalGb:      float64(stats.StorageTotalBytes) / (1024 * 1024 * 1024),
 		StorageUsagePercent: stats.StorageUsagePercent,
 		ClamavInstalled:     s.ClamAVManager != nil && s.ClamAVManager.IsInstalled(ctx),
+		Profile:             string(activeTier),
+		ProfilePinned:       profilePinned,
 	}, nil
 }
 

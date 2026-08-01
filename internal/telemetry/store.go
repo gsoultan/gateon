@@ -436,6 +436,7 @@ type pathStatsStore struct {
 	currentMitigatedToday atomic.Uint64
 	lastResetDay          string
 	resetMu               sync.Mutex
+	lastTier              config.Tier
 }
 
 // InitPathStatsStore initializes the database-backed store.
@@ -547,6 +548,48 @@ func initStore(databaseURL string, retentionDays int) error {
 	st.wg.Go(st.dailyResetLoop)
 
 	return nil
+}
+
+func (s *pathStatsStore) syncTierSettings() {
+	td := config.CurrentTierDefaults()
+
+	if s.lastTier != td.Tier {
+		logger.Default().LogInfo("telemetry: applying resource profile tier settings", "tier", td.Tier, "flush_interval", td.FlushIntervalSeconds, "db_max_open", td.DBMaxOpenConns, "trace_store", td.TraceStoreEnabled)
+		s.lastTier = td.Tier
+	}
+
+	// Update DB pool limits
+	s.db.SetMaxOpenConns(td.DBMaxOpenConns)
+	s.db.SetMaxIdleConns(td.DBMaxIdleConns)
+
+	// Update trace store toggle
+	s.traceStoreEnabled = td.TraceStoreEnabled
+
+	// Update retention days if not explicitly overridden in global config.
+	// We read the global config directly to see if there's an override.
+	gc := config.GetGlobalConfig()
+	retention := td.RetentionDays
+	pathRetention := int32(0)
+	accessRetention := int32(0)
+	threatRetention := int32(0)
+	auditRetention := int32(0)
+
+	if gc != nil && gc.Log != nil {
+		if gc.Log.AccessLogRetentionDays > 0 {
+			retention = int(gc.Log.AccessLogRetentionDays)
+		} else if gc.Log.PathStatsRetentionDays > 0 {
+			retention = int(gc.Log.PathStatsRetentionDays)
+		}
+		pathRetention = gc.Log.PathStatsRetentionDays
+		accessRetention = gc.Log.AccessLogRetentionDays
+		threatRetention = gc.Log.SecurityThreatRetentionDays
+		auditRetention = gc.Log.AuditLogRetentionDays
+	}
+	s.retentionDays.Store(int32(max(retention, 1)))
+	s.pathStatsRetentionDays.Store(pathRetention)
+	s.accessLogRetentionDays.Store(accessRetention)
+	s.securityThreatRetentionDays.Store(threatRetention)
+	s.auditLogRetentionDays.Store(auditRetention)
 }
 
 func (s *pathStatsStore) migrateTracesToPebble() {
@@ -731,15 +774,11 @@ func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) loop() {
-	td := config.CurrentTierDefaults()
-	interval := time.Duration(td.FlushIntervalSeconds) * time.Second
-	if interval <= 0 {
-		interval = 1 * time.Second
-	}
-
-	flushTicker := time.NewTicker(interval)
+	// Sync initially to ensure everything matches the tier
+	s.syncTierSettings()
+	timer := time.NewTimer(100 * time.Millisecond) // Start soon
 	pruneTicker := time.NewTicker(1 * time.Hour)
-	defer flushTicker.Stop()
+	defer timer.Stop()
 	defer pruneTicker.Stop()
 
 	batch := make([]increment, 0, 1024)
@@ -852,8 +891,15 @@ func (s *pathStatsStore) loop() {
 			}
 		case b := <-s.behaviorInCh:
 			TrackBehaviorInternal(b)
-		case <-flushTicker.C:
+		case <-timer.C:
+			s.syncTierSettings()
 			flush()
+			td := config.CurrentTierDefaults()
+			interval := time.Duration(td.FlushIntervalSeconds) * time.Second
+			if interval <= 0 {
+				interval = 1 * time.Second
+			}
+			timer.Reset(interval)
 		case <-pruneTicker.C:
 			go s.prune()
 		case <-s.stopCh:

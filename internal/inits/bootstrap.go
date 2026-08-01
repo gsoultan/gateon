@@ -14,6 +14,13 @@ import (
 )
 
 func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth.Manager {
+	activeTier := config.ResolveProfile()
+	if os.Getenv("GATEON_PROFILE") != "" {
+		logger.L.LogInfo("using active resource profile tier", "tier", activeTier, "source", "GATEON_PROFILE env")
+	} else {
+		logger.L.LogInfo("using active resource profile tier", "tier", activeTier, "source", "global config")
+	}
+
 	var authManager *auth.Manager
 	// Only init auth and apply defaults when global.json exists (not first run)
 	if !globalReg.ConfigFileExists() {

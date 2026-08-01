@@ -57,7 +57,8 @@ import {
   AlertingSettingsCard,
   AuditSettingsCard,
   PresetsCard,
-  AppearanceCard
+  AppearanceCard,
+  ResourceProfileCard
 } from "../components/settings";
 import { usePermissions } from "../hooks/usePermissions";
 import { useGateonStatus } from "../hooks/useGateonStatus";
@@ -298,6 +299,13 @@ export default function SettingsPage() {
         setRefreshIntervalDraft={setRefreshIntervalDraft}
         generalSavedOk={generalSavedOk}
         onSave={handleSave}
+      />
+
+      <ResourceProfileCard
+        profile={config.profile || ""}
+        pinned={status?.profile_pinned}
+        disabled={formDisabled}
+        onChange={(val) => setConfig({ ...config, profile: val })}
       />
 
       <Card withBorder padding="xl" radius="lg" shadow="xs">

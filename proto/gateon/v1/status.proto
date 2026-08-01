@@ -23,4 +23,8 @@ message GetStatusResponse {
   double storage_total_gb = 14;
   double storage_usage_percent = 15;
   bool clamav_installed = 16;
+  // Current active resource profile tier: "minimal" | "standard" | "enterprise"
+  string profile = 17;
+  // If true, the profile is pinned by GATEON_PROFILE environment variable.
+  bool profile_pinned = 18;
 }
