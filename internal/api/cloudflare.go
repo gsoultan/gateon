@@ -117,6 +117,8 @@ func getPublicIP(ctx context.Context) string {
 	}
 
 	logger.Default().LogError("All Public IP providers failed", "count", len(providers))
+	publicIPCache = "unknown"
+	lastIPFetch = time.Now()
 	return "unknown"
 }
 

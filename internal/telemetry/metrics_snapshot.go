@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -61,15 +62,26 @@ func SetEbpfManager(m EbpfProvider) {
 // StartSnapshotLoop starts a background goroutine to periodically refresh the
 // global metrics snapshot, ensuring the UI remains fast even under load.
 func StartSnapshotLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	td := config.CurrentTierDefaults()
+	interval := time.Duration(td.TelemetryIntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	// Initial snapshot
-	if snap, err := collectMetricsSnapshot(ctx, 50, 0); err == nil {
+	if snap, err := collectMetricsSnapshot(ctx, 50, 0, true); err == nil {
 		old := lastSnapshot.Swap(snap)
 		if old != nil {
 			snapshotPool.Put(old)
 		}
+	}
+
+	heavyCounter := 0
+	heavyThreshold := 1 // By default, every refresh is heavy for standard/enterprise
+	if td.Tier == config.TierMinimal {
+		heavyThreshold = 4 // For minimal, 1 heavy every 4 cycles (e.g. 30s * 4 = 2 min)
 	}
 
 	for {
@@ -77,7 +89,13 @@ func StartSnapshotLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			snap, err := collectMetricsSnapshot(ctx, 50, 0)
+			heavyCounter++
+			isHeavy := heavyCounter >= heavyThreshold
+			if isHeavy {
+				heavyCounter = 0
+			}
+
+			snap, err := collectMetricsSnapshot(ctx, 50, 0, isHeavy)
 			if err == nil {
 				old := lastSnapshot.Swap(snap)
 				if old != nil {
@@ -322,10 +340,10 @@ func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	}
 
 	// Fallback to synchronous collection if no cache or non-default parameters
-	return collectMetricsSnapshot(ctx, limit, offset)
+	return collectMetricsSnapshot(ctx, limit, offset, true)
 }
 
-func collectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
+func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) (*MetricsSnapshot, error) {
 	families, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		return nil, err
@@ -339,6 +357,9 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap := snapshotPool.Get().(*MetricsSnapshot)
 	snap.Reset()
 
+	// Capture previous snapshot to preserve heavy data during light refreshes
+	prev := lastSnapshot.Load()
+
 	snap.GoldenSignals = buildGoldenSignals(ctx, idx)
 	snap.RouteMetrics = buildRouteMetrics(idx)
 	snap.Middleware = buildMiddlewareMetrics(idx)
@@ -348,18 +369,40 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSna
 	snap.CountryMetrics = buildCountryMetrics(idx)
 	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
 	snap.DomainMetrics = buildDomainMetrics(idx)
-	snap.HourlyDomainMetrics = GetDomainStatsWindow(ctx, 1)
-	snap.DomainStatsRolling24h = GetDomainStatsRolling24h(ctx)
-	snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
+
+	if heavy {
+		snap.HourlyDomainMetrics = GetDomainStatsWindow(ctx, 1)
+		snap.DomainStatsRolling24h = GetDomainStatsRolling24h(ctx)
+		snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
+		snap.Security = buildSecurityInsights(ctx, idx, limit, offset, true)
+	} else if prev != nil {
+		snap.HourlyDomainMetrics = prev.HourlyDomainMetrics
+		snap.DomainStatsRolling24h = prev.DomainStatsRolling24h
+		snap.TrafficHistory = prev.TrafficHistory
+		snap.Security = buildSecurityInsights(ctx, idx, limit, offset, false)
+		// Merge recent anomalies and total from prev if available
+		snap.Security.RecentAnomalies = prev.Security.RecentAnomalies
+		snap.Security.TotalAnomalies = prev.Security.TotalAnomalies
+		snap.Security.TopThreatSources = prev.Security.TopThreatSources
+		snap.Security.TopThreatTypes = prev.Security.TopThreatTypes
+		snap.Security.ThreatsByCountry = prev.Security.ThreatsByCountry
+		snap.Security.AttackTrend = prev.Security.AttackTrend
+	}
+
 	snap.System = buildSystemMetrics(idx)
-	snap.Security = buildSecurityInsights(ctx, idx, limit, offset)
-	if m := globalEbpfManager.Load(); m != nil {
-		if prov, ok := m.(EbpfProvider); ok {
-			if ips, err := prov.GetTopIPs(5); err == nil {
-				snap.Security.EbpfTopIPs = ips
+
+	if heavy {
+		if m := globalEbpfManager.Load(); m != nil {
+			if prov, ok := m.(EbpfProvider); ok {
+				if ips, err := prov.GetTopIPs(5); err == nil {
+					snap.Security.EbpfTopIPs = ips
+				}
 			}
 		}
+	} else if prev != nil {
+		snap.Security.EbpfTopIPs = prev.Security.EbpfTopIPs
 	}
+
 	snap.MitigationFunnel = buildMitigationFunnel(idx)
 
 	// Build active threat metrics
@@ -955,7 +998,7 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	return sm
 }
 
-func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily, limit, offset int) SecurityInsights {
+func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily, limit, offset int, heavy bool) SecurityInsights {
 	// Parallelize database queries to minimize latency on the metrics path.
 	var (
 		threats     []*SecurityThreat
@@ -970,36 +1013,40 @@ func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	g.Go(func() error {
-		threats = GetSecurityThreatsLite(ctx, limit, offset, nil)
-		return nil
-	})
-	g.Go(func() error {
-		total = CountSecurityThreats(ctx, nil)
-		return nil
-	})
+	if heavy {
+		g.Go(func() error {
+			threats = GetSecurityThreatsLite(ctx, limit, offset, nil)
+			return nil
+		})
+		g.Go(func() error {
+			total = CountSecurityThreats(ctx, nil)
+			return nil
+		})
+		g.Go(func() error {
+			sources = GetTopThreatSources(ctx, 5)
+			return nil
+		})
+		g.Go(func() error {
+			types = GetTopThreatTypes(ctx, 5)
+			return nil
+		})
+		g.Go(func() error {
+			byCountry = GetThreatsByCountry(ctx, 10)
+			return nil
+		})
+		g.Go(func() error {
+			trend = GetAttackTrend(ctx, dashboardTrendWindowDays())
+			return nil
+		})
+	}
+
+	// Always refresh atomic counters (low cost)
 	g.Go(func() error {
 		activeCount = GetActiveThreatsRolling24h(ctx)
 		return nil
 	})
 	g.Go(func() error {
 		mitigated = GetMitigatedRolling24h(ctx)
-		return nil
-	})
-	g.Go(func() error {
-		sources = GetTopThreatSources(ctx, 5)
-		return nil
-	})
-	g.Go(func() error {
-		types = GetTopThreatTypes(ctx, 5)
-		return nil
-	})
-	g.Go(func() error {
-		byCountry = GetThreatsByCountry(ctx, 10)
-		return nil
-	})
-	g.Go(func() error {
-		trend = GetAttackTrend(ctx, dashboardTrendWindowDays())
 		return nil
 	})
 
