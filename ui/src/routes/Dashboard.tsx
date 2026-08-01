@@ -13,21 +13,13 @@ import {
   Skeleton,
   Box,
   Select,
-  SegmentedControl,
   TextInput,
-  Badge,
-  Table,
-  Divider,
 } from "@mantine/core";
 import { BarChart, LineChart } from "@mantine/charts";
 import {
   IconActivity,
   IconAlertCircle,
-  IconChartBar,
   IconTransferIn,
-  IconWorld,
-  IconAddressBook,
-  IconDeviceDesktop,
   IconShieldExclamation,
   IconShieldOff,
 } from "@tabler/icons-react";
@@ -37,14 +29,12 @@ import {
   useGateonStatus,
   useMetricsSnapshot,
   usePathStats,
-  useRequestsPerSecond,
   useRoutes,
   useServices,
   useDashboardWorker,
 } from "../hooks/useGateon";
-import type { RequestDeltaSample } from "../hooks/useGateon";
+import type { RequestDeltaSample } from "../types/gateon";
 import { Sparkline } from "../components/Sparkline";
-import type { PathStats, Route, Service } from "../types/gateon";
 import { formatBytes, formatCompact } from "../utils/format";
 import { TrafficMetricsGrid } from "../components/Dashboard/TrafficMetricsGrid";
 import { DomainStatsTable } from "../components/Dashboard/DomainStatsTable";
@@ -55,37 +45,14 @@ import { OnboardingChecklist } from "../components/Dashboard/OnboardingChecklist
 import {
   TOP_GROUP_LIMIT,
   MINUTE_MS,
-  HOUR_MS,
-  DAY_MS,
-  DEFAULT_PORT_LABEL,
-  OTHER_GROUP_LABEL,
-  UNMATCHED_SERVICE_LABEL,
-  UNMATCHED_ROUTER_LABEL,
   resolveTrafficRangeBounds,
-  filterTrafficSamplesByRange,
-  buildHourlyTrafficData,
-  toTopGroupedData,
-  buildTrafficByPathData,
-  formatHourLabel,
   buildRouteMatchers,
   resolveRouterLabel,
   resolveServiceLabel,
-  buildTrafficByServiceData,
-  buildHourlyBandwidthData,
-  buildBandwidthSummaries,
-  buildBandwidthByRouterData,
-  buildBandwidthByServiceData,
-  buildTrafficByPortData,
-  aggregateTrafficSamples,
-  aggregateBandwidthSamples,
 } from "../utils/dashboard";
 import type {
   TrafficFilterMode,
   TrafficRangePreset,
-  TrafficRangeBounds,
-  HourlyBandwidthDatum,
-  BandwidthSummaryDatum,
-  RouteMatcher,
 } from "../utils/dashboard";
 
 const StatusCard = lazy(() => import("../components/StatusCard"));
@@ -151,7 +118,6 @@ export default function Dashboard() {
   const { data: pathStats, isLoading: pathStatsLoading } = usePathStats();
   const { data: routesResponse, isLoading: routesLoading } = useRoutes();
   const { data: servicesResponse, isLoading: servicesLoading } = useServices();
-  const reqPerSec = useRequestsPerSecond();
   const { data: metricsSnap } = useMetricsSnapshot();
   const [trafficFilterMode, setTrafficFilterMode] = useState<TrafficFilterMode>("range");
   const [trafficDate, setTrafficDate] = useState("");
@@ -276,16 +242,6 @@ export default function Dashboard() {
     return [...samples, ...sessionDeltas];
   }, [metricsSnap?.traffic_history, bandwidthDeltaHistory]);
 
-  const filteredTrafficSamples = useMemo(
-    () => filterTrafficSamplesByRange(combinedTrafficHistory, trafficRangeBounds),
-    [combinedTrafficHistory, trafficRangeBounds],
-  );
-
-  const filteredBandwidthSamples = useMemo(
-    () => filterTrafficSamplesByRange(combinedBandwidthHistory, trafficRangeBounds),
-    [combinedBandwidthHistory, trafficRangeBounds],
-  );
-
   // Coarsen the resolution automatically so that wide spans never produce more
   // than MAX_CHART_BUCKETS data points (bounded client memory/CPU).
   const effectiveResolution = useMemo(() => {
@@ -350,7 +306,6 @@ export default function Dashboard() {
   const bandwidthByServiceData = workerData?.bandwidthByService ?? [];
   const bandwidthByRouterData = workerData?.bandwidthByRouter ?? [];
   const trafficByPortData = workerData?.trafficByPort ?? [];
-  const trafficByPortLoading = isLoading || isWorkerCalculating;
   const trafficByPathData = workerData?.trafficByPath ?? [];
 
   const trafficWindowLabel = useMemo(() => {
@@ -496,9 +451,6 @@ export default function Dashboard() {
   const totalBandwidthBytes = agg?.total_bandwidth_bytes ?? 0;
   const requestsToday = metricsSnap?.golden_signals?.requests_today ?? 0;
   const bytesToday = metricsSnap?.golden_signals?.bytes_today ?? 0;
-  const totalErrors = agg?.total_errors ?? 0;
-  const errorRate =
-    totalRequests > 0 ? ((totalErrors / totalRequests) * 100).toFixed(2) : "0.00";
 
   const trafficMetrics = [
     {
@@ -643,7 +595,7 @@ export default function Dashboard() {
               ) : chart.data.length > 0 ? (
                 <BarChart
                   h={180}
-                  minWidth={0}
+                  miw={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -696,7 +648,7 @@ export default function Dashboard() {
               ) : chart.data.length > 0 ? (
                 <BarChart
                   h={180}
-                  minWidth={0}
+                  miw={0}
                   data={chart.data}
                   dataKey="group"
                   withLegend={false}
@@ -895,7 +847,7 @@ export default function Dashboard() {
         ) : hourlyTrafficData.length > 0 ? (
           <BarChart
             h={240}
-            minWidth={0}
+            miw={0}
             data={hourlyTrafficData}
             dataKey="hour"
             withLegend={false}
@@ -923,7 +875,7 @@ export default function Dashboard() {
           </Group>
 
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-            {bandwidthSummaries.map((summary) => (
+            {bandwidthSummaries.map((summary: any) => (
               <Paper key={summary.label} p="sm" radius="md" withBorder>
                 <Text size="xs" fw={700} c="dimmed" style={{ letterSpacing: 0.5 }}>
                   {summary.label}
@@ -944,7 +896,7 @@ export default function Dashboard() {
           {hourlyBandwidthData.length > 0 ? (
             <LineChart
               h={260}
-              minWidth={0}
+              miw={0}
               data={hourlyBandwidthData}
               dataKey="hour"
               withLegend
@@ -971,7 +923,7 @@ export default function Dashboard() {
         <ServiceOverviewCards />
       </Suspense>
 
-      <Grid gutter="lg">
+      <Grid gap="lg">
         <Grid.Col span={{ base: 12, md: 8 }}>
           <Suspense fallback={ROUTE_LIST_FALLBACK}>
             <RouteList readOnly />

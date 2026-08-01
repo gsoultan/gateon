@@ -22,7 +22,7 @@ export function useUrlFilters<T extends Record<string, FilterValue>>(): readonly
   (updates: Partial<T>) => void,
 ] {
   // strict:false lets this hook work on any route without coupling to a route id.
-  const search = useSearch({ strict: false }) as Partial<T>;
+  const search = (useSearch as any)({ strict: false }) as Partial<T>;
   const navigate = useNavigate();
 
   const setFilters = useCallback(

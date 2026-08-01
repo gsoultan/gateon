@@ -73,7 +73,7 @@ describe("hourly traffic helpers", () => {
       { ts: baseTs + hourMs + 5 * 60 * 1000, requests: 5 },
     ];
 
-    const hourly = buildHourlyTrafficData(samples, range);
+    const hourly = buildHourlyTrafficData(samples, 60, range);
 
     expect(hourly).toHaveLength(3);
     expect(hourly[0].requests).toBe(0);
@@ -317,14 +317,14 @@ describe("bandwidth helpers", () => {
       {
         ts: baseTs + 20 * 60 * 1000,
         totalBytes: 500,
-        routerBytes: { users: 500 },
-        serviceBytes: { users: 500 },
+        routerBytes: { users: 500, health: 0 },
+        serviceBytes: { users: 500, health: 0 },
       },
       {
         ts: baseTs + hourMs,
         totalBytes: 200,
-        routerBytes: { health: 200 },
-        serviceBytes: { health: 200 },
+        routerBytes: { users: 0, health: 200 },
+        serviceBytes: { users: 0, health: 200 },
       },
     ];
 

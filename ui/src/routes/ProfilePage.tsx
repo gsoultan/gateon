@@ -192,7 +192,7 @@ export default function ProfilePage() {
         </Group>
       </Card>
 
-      <Grid gutter="lg">
+      <Grid gap="lg">
         <Grid.Col span={{ base: 12, md: 6 }}>
           <Card withBorder radius="lg" shadow="sm" p="lg" h="100%">
             <Group gap="sm" mb="md">

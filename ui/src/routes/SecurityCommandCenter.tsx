@@ -365,7 +365,7 @@ export default function SecurityCommandCenter() {
 
           <Tabs.Panel value="overview">
             <OverviewTab 
-              metrics={metrics}
+              metrics={metrics ?? null}
               securityScore={securityScore}
               scoreColor={scoreColor}
               threatTypeData={threatTypeData}
@@ -394,7 +394,7 @@ export default function SecurityCommandCenter() {
               />
             </Group>
             <AnalyticsTab 
-              metrics={metrics}
+              metrics={metrics ?? null}
               trendData={trendData}
               countryData={countryData}
               threatTypeData={threatTypeData}

@@ -12,7 +12,7 @@ import type { Route } from "../../types/gateon";
 import type { FormApi } from "@tanstack/react-form";
 import { RuleBuilder } from "./RuleBuilder";
 
-export type RouteFormApi = FormApi<Route, any>;
+export type RouteFormApi = any;
 
 interface RoutingConfigProps {
   form: RouteFormApi;
@@ -25,7 +25,7 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
     <Stack gap="md" mt="xl">
       <form.Field
         name="type"
-        children={(field) => (
+        children={(field: any) => (
           <Select
             label="Route Type"
             description={
@@ -62,7 +62,7 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
 
       <form.Field
         name="name"
-        children={(field) => (
+        children={(field: any) => (
           <TextInput
             label="Friendly Name"
             placeholder="My Application Route"
@@ -78,7 +78,7 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
 
       <form.Field
         name="entrypoints"
-        children={(field) => (
+        children={(field: any) => (
           <MultiSelect
             label="EntryPoints"
             description="Restrict this route to specific addresses (optional)"
@@ -95,7 +95,7 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
 
       <form.Field
         name="rule"
-        children={(ruleField) => {
+        children={(ruleField: any) => {
           const routeType = form.state.values.type;
           const isL4 = routeType === "tcp" || routeType === "udp";
           if (isL4) {
@@ -124,7 +124,7 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
 
       <form.Field
         name="priority"
-        children={(field) => (
+        children={(field: any) => (
           <NumberInput
             label="Priority"
             description="Higher matches first (default 0)"

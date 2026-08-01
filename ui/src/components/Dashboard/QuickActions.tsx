@@ -5,7 +5,6 @@ import {
   IconServer, 
   IconShieldLock, 
   IconSettings,
-  IconPlus,
   IconActivity
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";

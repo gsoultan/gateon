@@ -79,22 +79,22 @@ export default function RouteForm({
     },
   });
 
-  const form = useForm<Route, any>({
+  const form = useForm({
     defaultValues: {
       id: "",
       name: "",
-      type: "http",
+      type: "http" as const,
       rule: "",
       priority: 0,
-      entrypoints: [],
-      middlewares: [],
+      entrypoints: [] as string[],
+      middlewares: [] as string[],
       service_id: "",
       tls: {
-        certificate_ids: [],
+        certificate_ids: [] as string[],
         option_id: "",
       },
       disabled: false,
-    },
+    } as Route,
     onSubmit: async ({ value }) => {
       const v = { ...value };
       if (v.type === "tcp" || v.type === "udp") {

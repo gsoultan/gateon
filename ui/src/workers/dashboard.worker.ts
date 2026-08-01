@@ -48,7 +48,7 @@ self.onmessage = (e: MessageEvent) => {
         result = {
           hourlyTraffic: buildHourlyTrafficData(samples, resolutionMinutes, range),
           trafficByPort: buildTrafficByPortData(pathStats),
-          trafficByPath: buildTrafficByPathData(pathStats, routes),
+          trafficByPath: buildTrafficByPathData(pathStats),
           trafficByService: buildTrafficByServiceData(pathStats, routes, services),
           hourlyBandwidth: buildHourlyBandwidthData(bandwidthSamples, resolutionMinutes, range),
           bandwidthSummaries: buildBandwidthSummaries(bandwidthSamples),

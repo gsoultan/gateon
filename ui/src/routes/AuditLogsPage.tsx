@@ -340,7 +340,7 @@ export default function AuditLogsPage() {
 
             <Divider />
 
-            <Grid gutter="md">
+            <Grid gap="md">
               <Grid.Col span={6}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={700}>User ID</Text>
                 <Text size="sm">{selectedLog.user_id}</Text>
@@ -359,7 +359,7 @@ export default function AuditLogsPage() {
 
             <Stack gap={4}>
               <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Details</Text>
-              <ScrollArea.Autosize maxHeight={200} type="always">
+              <ScrollArea.Autosize mah={200} type="always">
                 <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{selectedLog.details}</Text>
               </ScrollArea.Autosize>
             </Stack>

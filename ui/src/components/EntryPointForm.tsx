@@ -69,8 +69,7 @@ export function EntryPointForm({
     },
   });
 
-  // @ts-expect-error TanStack Form expects 12 type params; EntryPoint works at runtime
-  const form = useForm<EntryPoint>({
+  const form = useForm({
     defaultValues: {
       id: "",
       name: "",
@@ -83,7 +82,7 @@ export function EntryPointForm({
       write_timeout_ms: DEFAULT_TIMEOUT_MS,
       max_connections: 0,
       access_log_enabled: true,
-    },
+    } as EntryPoint,
     onSubmit: async ({ value }) => {
       try {
         await mutation.mutateAsync(value);
@@ -150,7 +149,7 @@ export function EntryPointForm({
       <Stack gap="md">
         <form.Field
           name="name"
-          children={(field) => (
+          children={(field: any) => (
             <TextInput
               label="EntryPoint Name"
               description="Friendly name for this entrypoint"
@@ -167,7 +166,7 @@ export function EntryPointForm({
 
         <form.Field
           name="address"
-          children={(field) => (
+          children={(field: any) => (
             <TextInput
               label="Listening Address"
               description="Interface and port to bind to"
@@ -201,12 +200,12 @@ export function EntryPointForm({
 
         <form.Field
           name="protocols"
-          children={(field) => (
+          children={(field: any) => (
             <Checkbox.Group
               label="Network Protocols"
               description="Select one or both (TCP and UDP)"
               required
-              value={(field.state.value ?? [Protocol.TCP]).map((v) => v.toString())}
+              value={(field.state.value ?? [Protocol.TCP]).map((v: any) => v.toString())}
               onChange={(vals) => field.handleChange(vals.map(Number))}
             >
               <Group mt="xs">
@@ -235,7 +234,7 @@ export function EntryPointForm({
 
         <form.Field
           name="tls.enabled"
-          children={(field) => (
+          children={(field: any) => (
             <Switch
               label="Enable TLS"
               description={
@@ -257,7 +256,7 @@ export function EntryPointForm({
         <Group grow>
           <form.Field
             name="read_timeout_ms"
-            children={(field) => (
+            children={(field: any) => (
               <TextInput
                 label="Read Timeout"
                 description="Max time to read request"
@@ -274,7 +273,7 @@ export function EntryPointForm({
           />
           <form.Field
             name="write_timeout_ms"
-            children={(field) => (
+            children={(field: any) => (
               <TextInput
                 label="Write Timeout"
                 description="Max time to write response"
@@ -293,7 +292,7 @@ export function EntryPointForm({
 
         <form.Field
           name="access_log_enabled"
-          children={(field) => (
+          children={(field: any) => (
             <Switch
               label="Enable Access Logs"
               description="Record all incoming requests for this entrypoint"
