@@ -1,12 +1,12 @@
 import React, { memo } from "react";
-import { SimpleGrid, Paper, Group, Text, ThemeIcon, Stack, Box, Badge } from "@mantine/core";
+import { SimpleGrid, Paper, Group, Text, ThemeIcon, Stack, Badge } from "@mantine/core";
 import { IconArrowUpRight, IconArrowDownRight } from "@tabler/icons-react";
-import type { TablerIconsProps } from "@tabler/icons-react";
+import type { TablerIcon } from "@tabler/icons-react";
 
 interface MetricItem {
   label: string;
   value: string;
-  icon: React.FC<TablerIconsProps>;
+  icon: TablerIcon;
   color: string;
   description: string;
   diff?: number;

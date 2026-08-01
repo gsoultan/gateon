@@ -456,7 +456,7 @@ export default function MiddlewaresPage() {
                     {affectedRoutes.map((r) => (
                       <Code
                         key={r.id}
-                        size="xs"
+                        fz="xs"
                         variant="light"
                         display="block"
                         mb={4}

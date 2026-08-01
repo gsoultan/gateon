@@ -91,15 +91,15 @@ export function ServiceForm({
     { value: "h2", label: "h2 (HTTP/2 + TLS)" },
   ] as const;
 
-  const form = useForm<Service, any>({
+  const form = useForm({
     defaultValues: {
       id: "",
       name: "",
-      backend_type: "http",
+      backend_type: "http" as any,
       weighted_targets: [{
         url: "",
         weight: 1,
-        protocol: "http",
+        protocol: "http" as any,
         proxy_protocol_enabled: false,
         proxy_protocol_version: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
       }],
@@ -121,7 +121,7 @@ export function ServiceForm({
         skip_verify: true,
         server_name: "",
       },
-    },
+    } as Service,
     onSubmit: async ({ value }) => {
       const bt = value.backend_type || "http";
       const isGRPC = bt === "grpc";
@@ -291,7 +291,7 @@ export function ServiceForm({
 
         <form.Field
           name="name"
-          children={(field) => (
+          children={(field: any) => (
             <TextInput
               label="Service Name"
               description="A human-readable name for this backend service"
@@ -308,7 +308,7 @@ export function ServiceForm({
 
         <form.Field
           name="backend_type"
-          children={(field) => (
+          children={(field: any) => (
             <Select
               label="Backend Type"
               description="Determines target format and load balancing options"
@@ -342,7 +342,7 @@ export function ServiceForm({
 
         <form.Field
           name="discovery_url"
-          children={(field) => (
+          children={(field: any) => (
             <TextInput
               label="Service Discovery URL"
               description="e.g. dns:my-service.local, consul:auth-svc, etcd:/services/api"
@@ -373,7 +373,7 @@ export function ServiceForm({
               </div>
               <form.Field
                 name="tls_client_config.enabled"
-                children={(field) => (
+                children={(field: any) => (
                   <Switch
                     checked={field.state.value}
                     onChange={(e) => field.handleChange(e.currentTarget.checked)}
@@ -390,7 +390,7 @@ export function ServiceForm({
                   <Stack gap="sm">
                     <form.Field
                       name="tls_client_config.cert_file"
-                      children={(field) => (
+                      children={(field: any) => (
                         <TextInput
                           label="Client Certificate Path"
                           placeholder="/path/to/client.crt"
@@ -402,7 +402,7 @@ export function ServiceForm({
                     />
                     <form.Field
                       name="tls_client_config.key_file"
-                      children={(field) => (
+                      children={(field: any) => (
                         <TextInput
                           label="Client Private Key Path"
                           placeholder="/path/to/client.key"
@@ -414,7 +414,7 @@ export function ServiceForm({
                     />
                     <form.Field
                       name="tls_client_config.ca_file"
-                      children={(field) => (
+                      children={(field: any) => (
                         <TextInput
                           label="CA Certificate Path"
                           placeholder="/path/to/ca.crt"
@@ -427,7 +427,7 @@ export function ServiceForm({
                     <Group grow>
                       <form.Field
                         name="tls_client_config.server_name"
-                        children={(field) => (
+                        children={(field: any) => (
                           <TextInput
                             label="Server Name (SNI Override)"
                             placeholder="backend.example.com"
@@ -439,7 +439,7 @@ export function ServiceForm({
                       />
                       <form.Field
                         name="tls_client_config.skip_verify"
-                        children={(field) => (
+                        children={(field: any) => (
                           <Switch
                             label="Insecure Skip Verify"
                             checked={field.state.value}
@@ -489,9 +489,9 @@ export function ServiceForm({
             <form.Field
               name="weighted_targets"
               mode="array"
-              children={(field) => (
+              children={(field: any) => (
                 <Stack gap="sm">
-                  {field.state.value.map((_, i) => {
+                  {field.state.value.map((_: any, i: number) => {
                     const backendType = form.state.values.backend_type || "http";
                     const isL4 = backendType === "tcp" || backendType === "udp";
                     const protocolOpts = backendType === "grpc" ? PROTOCOL_GRPC : PROTOCOL_HTTP;
@@ -507,7 +507,7 @@ export function ServiceForm({
                         {!isL4 && (
                           <form.Field
                             name={`weighted_targets[${i}].protocol`}
-                            children={(protoField) => (
+                            children={(protoField: any) => (
                               <Select
                                 label={i === 0 ? "Protocol" : undefined}
                                 data={protocolOpts}
@@ -536,7 +536,7 @@ export function ServiceForm({
                         )}
                         <form.Field
                           name={`weighted_targets[${i}].url`}
-                          children={(urlField) => (
+                          children={(urlField: any) => (
                             <TextInput
                               label={i === 0 ? (isL4 ? "Address (host:port)" : "URL (host:port)") : undefined}
                               placeholder={isL4 ? "db1:5432 or dns:53" : "localhost:8080 or backend.example.com:443"}
@@ -571,7 +571,7 @@ export function ServiceForm({
                         {!isL4 && (
                           <form.Field
                             name={`weighted_targets[${i}].weight`}
-                            children={(weightField) => (
+                            children={(weightField: any) => (
                               <Tooltip label="Higher weight = more traffic.">
                                 <NumberInput
                                   label={i === 0 ? "Weight" : undefined}
@@ -607,7 +607,7 @@ export function ServiceForm({
 
         <form.Field
           name="load_balancer_policy"
-          children={(field) => {
+          children={(field: any) => {
             const bt = form.state.values.backend_type || "http";
             const isL4 = bt === "tcp" || bt === "udp";
             const options = isL4
@@ -651,7 +651,7 @@ export function ServiceForm({
                 {backendType === "tcp" && (
                   <form.Field
                     name="l4_proxy_protocol"
-                    children={(field) => (
+                    children={(field: any) => (
                       <Tooltip label="Send HAProxy PROXY protocol v1 header so the backend (e.g. mail server) sees the original client IP. Required for correct SPF checks when proxying SMTP/IMAP/POP3.">
                         <div>
                           <Switch
@@ -669,7 +669,7 @@ export function ServiceForm({
                 <Group grow>
                 <form.Field
                   name="l4_health_check_interval_ms"
-                  children={(field) => (
+                  children={(field: any) => (
                     <TextInput
                       label="TCP Health Check Interval (ms)"
                       description="0 = disabled"
@@ -683,7 +683,7 @@ export function ServiceForm({
                 />
                 <form.Field
                   name="l4_health_check_timeout_ms"
-                  children={(field) => (
+                  children={(field: any) => (
                     <TextInput
                       label="Health Check Timeout (ms)"
                       type="number"
@@ -696,7 +696,7 @@ export function ServiceForm({
                 />
                 <form.Field
                   name="l4_udp_session_timeout_s"
-                  children={(field) => (
+                  children={(field: any) => (
                     <TextInput
                       label="UDP Session Timeout (s)"
                       description="UDP only"
@@ -721,7 +721,7 @@ export function ServiceForm({
               <>
                 <form.Field
                   name="health_check_type"
-                  children={(field) => (
+                  children={(field: any) => (
                     <Select
                       label="Health Check Type"
                       description="Choose standard HTTP or gRPC health checking"
@@ -741,7 +741,7 @@ export function ServiceForm({
                 />
                 <form.Field
                   name="health_check_path"
-                  children={(field) => {
+                  children={(field: any) => {
                     // Determine actual type if unspecified
                     let effectiveType = healthCheckType;
                     if (effectiveType === HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED) {
@@ -818,7 +818,7 @@ export function ServiceForm({
                 <Group grow>
                   <form.Field
                     name="health_check_port"
-                    children={(field) => (
+                    children={(field: any) => (
                       <TextInput
                         label="Health Check Port"
                         description="Override port (0 = use target port)"
@@ -833,7 +833,7 @@ export function ServiceForm({
                   />
                   <form.Field
                     name="health_check_protocol"
-                    children={(field) => (
+                    children={(field: any) => (
                       <Select
                         label="Health Check Protocol"
                         description="Override scheme (empty = use target scheme)"

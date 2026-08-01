@@ -207,7 +207,7 @@ export default function TracesPage() {
               onChange={(value) => {
                 setRouteFilter(value);
                 setPage(1);
-                setFilters({ route: value });
+                setFilters({ route: value ?? undefined });
               }}
               searchable
               clearable
@@ -640,7 +640,7 @@ export default function TracesPage() {
             {fullTrace.request_body && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">REQUEST BODY</Text>
-                <ScrollArea.Autosize maxHeight={200}>
+                <ScrollArea.Autosize mah={200}>
                   <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                     {fullTrace.request_body}
                   </Code>
@@ -667,7 +667,7 @@ export default function TracesPage() {
             {fullTrace.response_body && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">RESPONSE BODY</Text>
-                <ScrollArea.Autosize maxHeight={200}>
+                <ScrollArea.Autosize mah={200}>
                   <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                     {fullTrace.response_body}
                   </Code>

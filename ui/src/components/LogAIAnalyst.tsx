@@ -4,7 +4,6 @@ import {
   Button,
   Text,
   Stack,
-  Textarea,
   Group,
   Paper,
   ScrollArea,

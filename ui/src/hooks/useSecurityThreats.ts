@@ -55,7 +55,7 @@ export function useSecurityThreats(params: SecurityThreatsParams | number = 50) 
       try {
         const newThreat = JSON.parse(event.data) as Anomaly;
         queryClient.setQueryData<SecurityThreatsResponse>(queryKey, (old) => {
-          if (!old) return { threats: [newThreat] };
+          if (!old) return { threats: [newThreat], totalCount: 1 };
           const exists = old.threats.some((t) => t.id === newThreat.id);
           if (exists) return old;
           return {

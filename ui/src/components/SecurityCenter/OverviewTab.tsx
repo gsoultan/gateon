@@ -13,16 +13,14 @@ import {
   Center, 
   Box, 
   Table, 
-  Button 
+  Button,
 } from '@mantine/core';
 import { DonutChart } from '@mantine/charts';
 import { 
   IconShieldCheck, 
   IconShieldOff, 
   IconActivity, 
-  IconHistory, 
   IconFingerprint, 
-  IconArrowUpRight, 
   IconRefresh, 
   IconClock,
   IconCpu,
@@ -34,7 +32,7 @@ import {
   IconBolt,
   IconAlertTriangle,
 } from '@tabler/icons-react';
-import { Alert, Anchor } from '@mantine/core';
+import { Alert, Anchor, Tooltip } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { format } from 'date-fns';
 import { useAnimateValue } from '../../hooks/useAnimateValue';
@@ -53,7 +51,7 @@ const AnimatedTitle = ({ value, suffix = "" }: { value: number; suffix?: string 
 };
 
 interface OverviewTabProps {
-  metrics: MetricsSnapshot | null;
+  metrics: MetricsSnapshot | null | undefined;
   securityScore: number;
   scoreColor: string;
   threatTypeData: DonutChartDataItem[];

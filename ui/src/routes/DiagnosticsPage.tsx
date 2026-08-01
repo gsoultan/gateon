@@ -26,7 +26,7 @@ import {
   Loader,
 } from "@mantine/core";
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
-import type { GetDiagnosticsResponse, RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
+import type { RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
 // Lazy-loaded: AnomalyMap pulls in Leaflet (the heavy `viz-vendor` chunk), so it
 // is only fetched when the Diagnostics anomaly map is actually rendered.
 const AnomalyMap = lazy(() => import("../components/Diagnostics/AnomalyMap"));
@@ -54,7 +54,7 @@ import {
   IconShieldExclamation,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
-import { useDiagnostics, useRemoveMitigation } from "../hooks/useGateon";
+import { useDiagnostics } from "../hooks/useGateon";
 import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import { useDisclosure } from "@mantine/hooks";
 import { usePermissions } from "../hooks/usePermissions";
@@ -292,9 +292,9 @@ const AnomalyCard: React.FC<{
                   size="xs"
                   fw={800}
                   onClick={onApply}
-                  loading={applying}
                   style={{ display: "flex", alignItems: "center", gap: 4 }}
                 >
+                  {applying && <Loader size={10} mr={4} />}
                   Apply Automatic Fix <IconArrowRight size={12} />
                 </Anchor>
               </Group>
@@ -310,7 +310,6 @@ const DiagnosticsPage: React.FC = () => {
   const { canWrite } = usePermissions();
   const { data, isLoading: loading, error: queryError, refetch: fetchData } = useDiagnostics();
   const [applying, setApplying] = useState<string | null>(null);
-  const removeMitigation = useRemoveMitigation();
 
   const error = queryError instanceof Error ? queryError.message : (queryError ? String(queryError) : null);
 
@@ -331,26 +330,6 @@ const DiagnosticsPage: React.FC = () => {
     setModalOpened(true);
   };
 
-  const handleUnmitigate = async (ip: string) => {
-    try {
-      await removeMitigation.mutateAsync(ip);
-      notifications.show({
-        title: 'Mitigation Removed',
-        message: `IP ${ip} has been unmitigated.`,
-        color: 'teal',
-        icon: <IconCheck size={18} />,
-      });
-      fetchData();
-      setModalOpened(false);
-    } catch (err: any) {
-      notifications.show({
-        title: 'Error',
-        message: err.message || 'Failed to remove mitigation',
-        color: 'red',
-        icon: <IconX size={18} />,
-      });
-    }
-  };
   const theme = useMantineTheme();
   
   const sortedAnomalies = useMemo(() => {
@@ -464,7 +443,7 @@ const DiagnosticsPage: React.FC = () => {
         >
           {error}
         </Alert>
-        <ActionIcon variant="light" size="xl" onClick={fetchData} loading={loading}>
+        <ActionIcon variant="light" size="xl" onClick={() => fetchData()} loading={loading}>
           <IconRefresh size={24} />
         </ActionIcon>
         <Text c="dimmed" size="sm">Retry fetching diagnostics</Text>
@@ -490,7 +469,7 @@ const DiagnosticsPage: React.FC = () => {
             variant="default"
             size="lg"
             radius="md"
-            onClick={fetchData}
+            onClick={() => fetchData()}
             loading={loading}
           >
             <IconRefresh size={18} />
@@ -504,12 +483,12 @@ const DiagnosticsPage: React.FC = () => {
             <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 1 }}>System Health Dashboard</Text>
           </Group>
           <SimpleGrid cols={{ base: 1, sm: 2, md: 4, lg: 6 }} spacing="md">
-            <SystemStatCard title="Public IP" value={data?.system?.public_ip} icon={<IconGlobe size={20} color="blue" />} />
-            <SystemStatCard title="CPU Usage" value={data?.system?.cpu_usage} icon={<IconActivity size={20} color="red" />} />
-            <SystemStatCard title="Memory" value={data?.system?.memory_usage} icon={<IconServer size={20} color="orange" />} />
-            <SystemStatCard title="Goroutines" value={data?.system?.goroutines} icon={<IconRoute size={20} color="teal" />} />
-            <SystemStatCard title="Uptime" value={data?.system?.uptime} icon={<IconClock size={20} color="violet" />} />
-            <SystemStatCard title="Version" value={data?.system?.version} icon={<IconInfoCircle size={20} color="gray" />} />
+            <SystemStatCard title="Public IP" value={data?.system?.public_ip ?? "-"} icon={<IconGlobe size={20} color="blue" />} />
+            <SystemStatCard title="CPU Usage" value={data?.system?.cpu_usage ?? "-"} icon={<IconActivity size={20} color="red" />} />
+            <SystemStatCard title="Memory" value={data?.system?.memory_usage ?? "-"} icon={<IconServer size={20} color="orange" />} />
+            <SystemStatCard title="Goroutines" value={data?.system?.goroutines ?? "-"} icon={<IconRoute size={20} color="teal" />} />
+            <SystemStatCard title="Uptime" value={data?.system?.uptime ?? "-"} icon={<IconClock size={20} color="violet" />} />
+            <SystemStatCard title="Version" value={data?.system?.version ?? "-"} icon={<IconInfoCircle size={20} color="gray" />} />
           </SimpleGrid>
         </Stack>
 
@@ -524,7 +503,7 @@ const DiagnosticsPage: React.FC = () => {
                 <Badge variant="light" color="teal">All checks active</Badge>
              </Group>
              <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-                {sortedDependencies.map((dep) => (
+                {sortedDependencies.map((dep: any) => (
                    <DependencyBadge key={dep.name} dep={dep} />
                 ))}
              </SimpleGrid>

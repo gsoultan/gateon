@@ -86,7 +86,7 @@ export function PipelineConfig({
       )}
       <form.Field
         name="middlewares"
-        children={(field) => (
+        children={(field: any) => (
           <MultiSelect
             label="Middlewares"
             description="Add protection presets above or select existing middlewares"
@@ -104,7 +104,7 @@ export function PipelineConfig({
 
       <form.Field
         name="tls.option_id"
-        children={(field) => (
+        children={(field: any) => (
           <Select
             label="TLS Option"
             data={tlsOptOptions}
@@ -119,7 +119,7 @@ export function PipelineConfig({
 
       <form.Field
         name="tls.certificate_ids"
-        children={(field) => (
+        children={(field: any) => (
           <MultiSelect
             label="Certificates"
             data={certOptions}

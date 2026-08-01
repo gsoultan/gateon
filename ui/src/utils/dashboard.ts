@@ -363,10 +363,10 @@ export function resolveTrafficRangeBounds(
   return { startTs, endTs };
 }
 
-export function filterTrafficSamplesByRange(
-  samples: RequestDeltaSample[],
+export function filterTrafficSamplesByRange<T extends { ts: number }>(
+  samples: T[],
   range: TrafficRangeBounds | null,
-): RequestDeltaSample[] {
+): T[] {
   if (range === null) return samples;
   return samples.filter((sample) => sample.ts >= range.startTs && sample.ts < range.endTs);
 }

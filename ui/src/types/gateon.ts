@@ -743,6 +743,8 @@ export type Anomaly = {
   country_code?: string;
   country_name?: string;
   ja4?: string;
+  ja4plus?: string;
+  ja3?: string;
   ja4h?: string;
   score?: number;
   route_id?: string;
@@ -851,6 +853,7 @@ export type MitigateThreatResponse = {
 
 export type InstallClamavRequest = {
   mode: ClamavInstallationMode;
+  sudo_password?: string;
 };
 
 export type InstallClamavResponse = {
@@ -903,4 +906,34 @@ export type ListAuditArchivesResponse = {
 
 export type GetAuditArchiveResponse = {
   logs: AuditLog[];
+};
+
+export type LimitStats = {
+  rate_limit_rejected: Record<string, number>;
+  inflight_rejected: Record<string, number>;
+  buffering_rejected: Record<string, number>;
+};
+
+export type AggStats = {
+  total_requests: number;
+  total_bandwidth_bytes: number;
+  total_errors: number;
+  active_connections: number;
+  open_circuits: number;
+  half_open_circuits: number;
+  healthy_targets: number;
+  total_targets: number;
+  cpu_usage: number;
+  memory_usage: number;
+};
+
+export type RequestDeltaSample = {
+  ts: number;
+  requests: number;
+};
+
+export type CountryTraffic = {
+  country: string;
+  name?: string;
+  request_count: number;
 };
