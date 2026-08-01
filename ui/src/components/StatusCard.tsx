@@ -1,5 +1,5 @@
 import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper, Progress, Box, ThemeIcon } from '@mantine/core'
-import { IconActivity, IconRoute, IconClock, IconVersions, IconCpu, IconDeviceDesktop } from '@tabler/icons-react'
+import { IconActivity, IconRoute, IconClock, IconVersions, IconCpu, IconDeviceDesktop, IconAdjustments } from '@tabler/icons-react'
 import { useGateonStatus } from '../hooks/useGateon'
 import { formatBytes } from '../utils/format'
 
@@ -11,6 +11,21 @@ export default function StatusCard() {
     { label: 'System Uptime', value: statusData?.uptime ? formatUptime(Number(statusData.uptime)) : '0s', icon: IconClock, color: 'teal' },
     { label: 'CPU Cores', value: statusData?.cpu_cores || 'N/A', icon: IconCpu, color: 'indigo' },
     { label: 'Total Memory', value: statusData?.memory_total_gb ? `${statusData.memory_total_gb.toFixed(1)} GB` : 'N/A', icon: IconDeviceDesktop, color: 'grape' },
+    { 
+      label: 'Resource Profile', 
+      value: (
+        <Group gap={4}>
+          <Text fw={700} size="sm" style={{ textTransform: 'capitalize' }}>
+            {statusData?.profile || 'Standard'}
+          </Text>
+          {statusData?.profile_pinned && (
+            <Badge size="xs" color="orange" variant="light" title="Pinned by GATEON_PROFILE env">PINNED</Badge>
+          )}
+        </Group>
+      ), 
+      icon: IconAdjustments, 
+      color: 'orange' 
+    },
   ]
 
   const counts = [

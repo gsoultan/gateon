@@ -184,6 +184,8 @@ export type StatusResponse = {
   storage_total_gb?: number;
   storage_usage_percent?: number;
   clamav_installed?: boolean;
+  profile?: string;
+  profile_pinned?: boolean;
 };
 
 export type CertificateValidation = {
@@ -479,6 +481,7 @@ export type GlobalConfig = {
   security_advanced?: SecurityAdvancedConfig;
   alerting?: AlertingConfig;
   audit?: AuditConfig;
+  profile?: string;
 };
 
 export type AlertingConfig = {

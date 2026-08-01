@@ -84,6 +84,7 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 		},
 		Alerting: &gateonv1.AlertingConfig{},
 		Audit:    &gateonv1.AuditConfig{},
+		Profile:  "standard",
 	}
 	reg.config.Store(initialConfig)
 	idx := make(map[string]*gateonv1.Certificate)
