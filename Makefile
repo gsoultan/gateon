@@ -1,4 +1,14 @@
-.PHONY: proto build build-fips test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker pgo-profile docker
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+HAS_EBPF := $(wildcard internal/ebpf/gateon_ebpf_bpfel.go)
+ifeq ($(HAS_EBPF),)
+	BUILD_TAGS ?= noebpf
+else
+	BUILD_TAGS ?=
+endif
+LDFLAGS = -s -w -X main.Version=$(VERSION)
+GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
+
+.PHONY: proto build build-fips release deb test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -19,11 +29,25 @@ ebpf-docker:
 	docker run --rm -v "$(CURDIR)":/src -w /src gateon-ebpf-gen \
 		sh -c 'go generate ./internal/ebpf/...'
 
-## build: build the gateon binary. The Go toolchain automatically applies
-##        Profile-Guided Optimization when cmd/gateon/default.pgo exists
-##        (see `make pgo-profile`).
+## build: build the gateon binary for the current host. The Go toolchain automatically
+##        applies Profile-Guided Optimization when cmd/gateon/default.pgo exists.
 build:
-	go build -v -o dist/gateon ./cmd/gateon
+	mkdir -p dist
+	$(GOBUILD) -o dist/gateon ./cmd/gateon
+
+## release: build optimized linux binaries for production (amd64 and arm64).
+release:
+	mkdir -p dist
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o dist/gateon-amd64 ./cmd/gateon
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o dist/gateon-arm64 ./cmd/gateon
+
+## deb: build the .deb packages for amd64 and arm64 using nfpm.
+deb: release
+	@# nFPM standalone doesn't always expand env vars in 'src' fields, so we use sed to pre-process the config.
+	sed 's/$${ARCH}/amd64/g' nfpm.yaml > dist/nfpm-amd64.yaml
+	sed 's/$${ARCH}/arm64/g' nfpm.yaml > dist/nfpm-arm64.yaml
+	VERSION=$(VERSION) ARCH=amd64 go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --config dist/nfpm-amd64.yaml --target dist/gateon_amd64.deb
+	VERSION=$(VERSION) ARCH=arm64 go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest pkg --config dist/nfpm-arm64.yaml --target dist/gateon_arm64.deb
 
 ## pgo-profile: capture a CPU profile from representative benchmarks and install
 ##              it as cmd/gateon/default.pgo, which `make build`/`go build` then
