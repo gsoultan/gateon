@@ -42,6 +42,7 @@ internal/ui/dist/*
 ui/bun.lock
 ui/.bun-cache
 ui/package-lock.json
+ui/src/services/gen/*
 gateon.exe
 gateon_test.exe
 go.sum
@@ -95,3 +96,5 @@ internal/telemetry/telemetry_pebble/
 /mock_backend.log
 /output.txt
 /.kiro/
+/audit/
+/internal/middleware/audit/

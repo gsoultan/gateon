@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
+# nFPM configuration for Gateon
+name: "gateon"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+section: "default"
+priority: "extra"
+maintainer: "Gembit Soultan Shirazi <gembit.soultan@gmail.com>"
+description: "Gateon - Ultra-Intelligent Defense Security Gateway"
+vendor: "Gateon"
+homepage: "https://github.com/gsoultan/gateon"
+license: "MIT"
+contents:
+  - src: "dist/gateon-${ARCH}"
+    dst: "/usr/bin/gateon"
+  - src: "packaging/gateon.service"
+    dst: "/lib/systemd/system/gateon.service"
+  - src: "packaging/gateon-service.xml"
+    dst: "/etc/gateon/gateon-service.xml"
+    type: "config"
+scripts:
+  postinstall: "scripts/postinstall.sh"
+  postremove: "scripts/postremove.sh"

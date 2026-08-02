@@ -52,13 +52,16 @@ nfpms:
     formats:
       - deb
       - rpm
-    description: Gateon - API Gateway and Reverse Proxy
+    description: Gateon - Ultra-Intelligent Defense Security Gateway
     vendor: Gateon
-    maintainer: Gembit Soultan Shirazi <https://github.com/gsoultan/gateon>
+    maintainer: Gembit Soultan Shirazi <gembit.soultan@gmail.com>
     homepage: https://github.com/gsoultan/gateon
     contents:
       - src: packaging/gateon.service
         dst: /lib/systemd/system/gateon.service
+      - src: packaging/gateon-service.xml
+        dst: /etc/gateon/gateon-service.xml
+        type: config
       - dst: /etc/gateon
         type: dir
         file_info:
