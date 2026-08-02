@@ -97,3 +97,7 @@ func (lb *LeastConnLB) GetStats() []TargetStats {
 	}
 	return stats
 }
+
+func (lb *LeastConnLB) RecordLatency(url string, latency float64) {
+	// LeastConnLB doesn't use latency for balancing.
+}

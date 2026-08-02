@@ -103,3 +103,7 @@ func (lb *RoundRobinLB) GetStats() []TargetStats {
 	}
 	return stats
 }
+
+func (lb *RoundRobinLB) RecordLatency(url string, latency float64) {
+	// RoundRobinLB doesn't use latency for balancing.
+}

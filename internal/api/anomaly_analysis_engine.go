@@ -64,6 +64,15 @@ func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *reputat
 	}
 }
 
+// SetLowPower toggles low-power mode for underlying detectors.
+func (e *AnomalyAnalysisEngine) SetLowPower(enabled bool) {
+	for _, d := range e.detectors {
+		if nd, ok := d.(*NeuralAnomalyDetector); ok {
+			nd.SetLowPower(enabled)
+		}
+	}
+}
+
 var commonCRSRules = map[string]string{
 	"920300": "Request Missing an Accept Header",
 	"920320": "Missing User-Agent Header",

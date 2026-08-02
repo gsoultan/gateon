@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/e-XpertSolutions/go-iforest/v2/iforest"
@@ -15,7 +16,17 @@ import (
 // NeuralAnomalyDetector uses an Isolation Forest (Unsupervised ML) to detect zero-day threats
 // by finding "mathematical loneliness" in high-dimensional behavioral data.
 type NeuralAnomalyDetector struct {
-	Config *gateonv1.AnomalyDetectionConfig
+	Config   *gateonv1.AnomalyDetectionConfig
+	LowPower int32 // atomic: 0 = normal, 1 = low power
+}
+
+// SetLowPower toggles the low-power mode for the ML engine.
+func (d *NeuralAnomalyDetector) SetLowPower(enabled bool) {
+	if enabled {
+		atomic.StoreInt32(&d.LowPower, 1)
+	} else {
+		atomic.StoreInt32(&d.LowPower, 0)
+	}
 }
 
 func (d *NeuralAnomalyDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
@@ -44,7 +55,13 @@ func (d *NeuralAnomalyDetector) Detect(ctx context.Context, data *DiagnosticData
 
 	// 2. Train Isolation Forest
 	// We use 100 trees, a sample size of 256, and an initial anomaly ratio of 0.05.
-	forest := iforest.NewForest(100, 256, 0.05)
+	numTrees := 100
+	sampleSize := 256
+	if atomic.LoadInt32(&d.LowPower) == 1 {
+		numTrees = 25
+		sampleSize = 64
+	}
+	forest := iforest.NewForest(numTrees, sampleSize, 0.05)
 	forest.Train(features)
 
 	// 3. Score each point

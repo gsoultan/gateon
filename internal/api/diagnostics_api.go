@@ -360,13 +360,25 @@ func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Rou
 	traces := telemetry.GetTracesFiltered(ctx, 1000, true)
 	threats := telemetry.GetSecurityThreatsLite(ctx, 1000, 0, nil)
 	engine := NewAnomalyAnalysisEngine(globalCfg, s.IPReputation)
-	return engine.Analyze(ctx, &DiagnosticData{
+	engine.SetLowPower(s.mlLowPower.Load())
+	anomalies := engine.Analyze(ctx, &DiagnosticData{
 		Traces:          traces,
 		SecurityThreats: threats,
 		Routes:          routes,
 		Middlewares:     middlewares,
 		ManagementHosts: mgmtHosts,
 	})
+
+	// Process neural sentinel anomalies through the RL feedback loop in eBPF.
+	if s.EbpfManager != nil {
+		for _, a := range anomalies {
+			if a.Type == "neural_sentinel" {
+				_ = s.EbpfManager.ApplyRLFeedback(a.Source, a.Score/100.0)
+			}
+		}
+	}
+
+	return anomalies
 }
 
 func (s *ApiService) getManagementHosts(ctx context.Context) []string {

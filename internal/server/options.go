@@ -134,6 +134,22 @@ func WithIPReputation(r any) ServerOption {
 	}
 }
 
+// WithPhantomCore sets the TITAN phantom core.
+func WithPhantomCore(p any) ServerOption {
+	return func(s *Server) error {
+		s.Phantom = p
+		return nil
+	}
+}
+
+// WithGovernor sets the resource governor.
+func WithGovernor(g any) ServerOption {
+	return func(s *Server) error {
+		s.Governor = g
+		return nil
+	}
+}
+
 // WithLogger sets the logger.
 func WithLogger(l logger.Logger) ServerOption {
 	return func(s *Server) error {

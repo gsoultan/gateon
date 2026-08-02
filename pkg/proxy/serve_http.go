@@ -81,4 +81,7 @@ func (h *ProxyHandler) recordMetrics(state *targetState, start time.Time, status
 	if status >= 500 {
 		atomic.AddUint64(&state.errorCount, 1)
 	}
+
+	// Provide feedback to the load balancer (e.g. for AI-driven predictive LB)
+	h.lb.RecordLatency(state.url, duration.Seconds())
 }

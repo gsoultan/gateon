@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/canary"
@@ -19,6 +20,7 @@ import (
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
@@ -58,7 +60,20 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	if s.ClamAVManager != nil {
 		clamavManager = s.ClamAVManager.(*security.ClamAVManager)
 	}
+	var gov *resource.Governor
+	if s.Governor != nil {
+		gov = s.Governor.(*resource.Governor)
+	}
+	if gov != nil {
+		gov.RegisterMemoryHook("proxy_cache", s.PurgeCache)
+		gov.RegisterMemoryHook("telemetry_stats", telemetry.TrimShards)
+	}
 	fimScanner := startFIM(ctx, &wg)
+
+	if s.EbpfManager != nil {
+		rlLimiter := ai.NewReinforcementLearningLimiter(s.EbpfManager)
+		s.EbpfManager.SetRLFeedbackHandler(rlLimiter.ProcessFeedback)
+	}
 
 	var ipReputation *reputation.IPReputationStore
 	if s.IPReputation != nil {
@@ -89,6 +104,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		ClamAVManager:      clamavManager,
 		WafRules:           wafRules,
 	})
+	if gov != nil {
+		gov.RegisterCPUHook("ml_engine", func() {
+			apiService.SetMLLowPower(true)
+		})
+	}
 	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)
 	epService := dentrypoint.NewService(s.EpStore, s.Logger)
@@ -167,7 +187,12 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore)
+	var phantomCore entrypoint.PhantomCore
+	if s.Phantom != nil {
+		phantomCore = s.Phantom.(entrypoint.PhantomCore)
+	}
+
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, phantomCore)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	metricsStop := make(chan struct{})

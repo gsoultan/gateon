@@ -222,6 +222,16 @@ func ResetPathStats() {
 	}
 }
 
+// TrimShards evicts entries from all shards to reduce memory usage.
+func TrimShards() {
+	for i := range pathStatsShards {
+		shard := pathShards[i]
+		shard.mu.Lock()
+		evictPathStatsLocked(shard)
+		shard.mu.Unlock()
+	}
+}
+
 // getInMemoryPathStats returns aggregated path statistics from the in-memory map.
 func getInMemoryPathStats() []PathStats {
 	var result []PathStats

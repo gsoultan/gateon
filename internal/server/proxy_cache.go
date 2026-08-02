@@ -15,6 +15,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -216,6 +217,23 @@ func (c *ProxyCache) GetRouteStats(routeID string) []proxy.TargetStats {
 		return nil
 	}
 	return ph.GetStats()
+}
+
+// Purge clears all cached proxies.
+func (c *ProxyCache) Purge() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	handlers := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
+	for _, ph := range handlers {
+		if ph != nil {
+			go ph.DrainAndClose(drainTimeout)
+		}
+	}
+
+	c.proxies.Store(make(map[string]http.Handler))
+	c.proxyHandlers.Store(make(map[string]*proxy.ProxyHandler))
+	logger.L.LogInfo("proxy cache purged due to resource pressure")
 }
 
 // Sync runs periodic proxy cache maintenance: pre-warms new routes and cleans up orphans.
