@@ -46,6 +46,16 @@ message GlobalConfig {
   // trace store, retention, WAF tier) for the deployment's footprint without
   // removing capabilities. Overridable per-subsystem and by the GATEON_PROFILE env.
   string profile = 19;
+  TitanConfig titan = 20;
+}
+
+message TitanConfig {
+  bool enabled = 1;
+  bool enable_phantom = 2;
+  bool enable_ai_predictor = 3;
+  bool enable_pqc = 4;
+  bool enable_governor = 5;
+  string ai_model_path = 6;
 }
 
 message AlertingConfig {
@@ -355,6 +365,10 @@ message EbpfConfig {
   bool enable_knocking = 7;
   int32 mgmt_port = 8;
   repeated int32 knocking_sequence = 9;
+  // TITAN extensions
+  bool xdp_cuckoo_filter = 10;
+  bool af_xdp_phantom = 11;
+  bool xdp_ja4_blocklist = 12;
 }
 
 message AuthConfig {

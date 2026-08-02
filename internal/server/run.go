@@ -20,6 +20,7 @@ import (
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -86,6 +87,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		wafRules.SetInvalidator(&WafToProxyInvalidator{proxyInvalidator})
 	}
 
+	var phantomCore phantom.PhantomCore
+	if s.Phantom != nil {
+		phantomCore = s.Phantom.(phantom.PhantomCore)
+	}
+
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Version:            s.Version,
 		Routes:             s.RouteStore,
@@ -103,6 +109,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		IPReputation:       ipReputation,
 		ClamAVManager:      clamavManager,
 		WafRules:           wafRules,
+		PhantomCore:        phantomCore,
+		Governor:           gov,
 	})
 	if gov != nil {
 		gov.RegisterCPUHook("ml_engine", func() {
@@ -187,12 +195,12 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 
 	shutdownReg := &entrypoint.ShutdownRegistry{}
-	var phantomCore entrypoint.PhantomCore
+	var pCore entrypoint.PhantomCore
 	if s.Phantom != nil {
-		phantomCore = s.Phantom.(entrypoint.PhantomCore)
+		pCore = s.Phantom.(entrypoint.PhantomCore)
 	}
 
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, phantomCore)
+	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	metricsStop := make(chan struct{})

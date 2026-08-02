@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -424,6 +425,38 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 		publicIP = *p
 	}
 
+	titanStats := &gateonv1.TitanStats{}
+	if s.PhantomCore != nil {
+		enabled, engine, ports := s.PhantomCore.GetStatus()
+		titanStats.PhantomEnabled = enabled
+		titanStats.PhantomEngine = engine
+		titanStats.ActivePhantomPorts = int32(ports)
+	}
+	if ai.GlobalPredictor != nil {
+		titanStats.AiPredictorEnabled = true
+		titanStats.AiModelStatus = "Running (WASM)"
+	} else {
+		titanStats.AiModelStatus = "Not Loaded"
+	}
+	if s.EbpfManager != nil {
+		if stats, err := s.EbpfManager.GetMapStats(); err == nil {
+			titanStats.CuckooFilterEntries = int32(stats.ShunnedIPsCount) // Cuckoo used for shunning
+		}
+	}
+	// circl library is always available for PQC in this build
+	titanStats.PqcEnabled = true
+
+	if s.Governor != nil {
+		active, memHooks, cpuHooks, memPressure, cpuPressure := s.Governor.GetStatus(ctx)
+		titanStats.Governor = &gateonv1.ResourceGovernorStats{
+			Active:                active,
+			MemoryHooksCount:      int32(memHooks),
+			CpuHooksCount:         int32(cpuHooks),
+			MemoryPressurePercent: memPressure,
+			CpuPressurePercent:    cpuPressure,
+		}
+	}
+
 	return &gateonv1.SystemInfo{
 		PublicIp:            publicIP,
 		CloudflareReachable: cfReachable,
@@ -434,6 +467,7 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 		Version:             s.Version,
 		Gossip:              telemetry.GetGossipStatus(),
 		Ebpf:                ebpfStats,
+		Titan:               titanStats,
 	}
 }
 

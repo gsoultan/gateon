@@ -17,6 +17,9 @@ type PhantomCore interface {
 	// ServeHTTP leverages io_uring for high-performance L7 request handling.
 	// It wraps a standard http.Handler to provide kernel-bypass optimized ingress.
 	ServeHTTP(ctx context.Context, listener net.Listener, handler http.Handler) error
+
+	// GetStatus returns the current operational status of the Phantom core.
+	GetStatus() (enabled bool, engine string, activePorts int)
 }
 
 // EbpfManager defines the subset of eBPF operations required by the Phantom core.

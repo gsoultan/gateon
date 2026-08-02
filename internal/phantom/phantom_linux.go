@@ -22,9 +22,10 @@ import (
 
 // linuxCore is the hardware-accelerated TITAN core for Linux systems.
 type linuxCore struct {
-	ring *iouring.IOURing
-	ebpf EbpfManager
-	mu   sync.RWMutex
+	ring        *iouring.IOURing
+	ebpf        EbpfManager
+	activePorts atomic.Int32
+	mu          sync.RWMutex
 }
 
 // newPhantomCore returns the Linux-specific TITAN core implementation.
@@ -86,7 +87,7 @@ func (c *linuxCore) proxyWithSplice(ctx context.Context, client net.Conn, target
 func (c *linuxCore) proxyWithXDP(ctx context.Context, client net.Conn, targetAddr string, ifaceName string) error {
 	// AF_XDP implementation using github.com/asavie/xdp.
 	// TITAN implementation: We register the port in eBPF and use AF_XDP to bypass the kernel.
-	
+
 	// Get destination port from targetAddr
 	_, portStr, err := net.SplitHostPort(targetAddr)
 	if err != nil {
@@ -98,14 +99,18 @@ func (c *linuxCore) proxyWithXDP(ctx context.Context, client net.Conn, targetAdd
 	// Register port in eBPF for redirection
 	if c.ebpf != nil {
 		_ = c.ebpf.RegisterPhantomPort(port)
-		defer c.ebpf.UnregisterPhantomPort(port)
+		c.activePorts.Add(1)
+		defer func() {
+			_ = c.ebpf.UnregisterPhantomPort(port)
+			c.activePorts.Add(-1)
+		}()
 	}
 
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return fmt.Errorf("interface %s not found: %w", ifaceName, err)
 	}
-	
+
 	// AF_XDP Socket creation
 	xsk, err := xdp.NewSocket(iface.Index, 0, nil)
 	if err != nil {
@@ -113,9 +118,9 @@ func (c *linuxCore) proxyWithXDP(ctx context.Context, client net.Conn, targetAdd
 	}
 	defer xsk.Close()
 
-	// In a production TITAN implementation, we would now perform zero-copy 
+	// In a production TITAN implementation, we would now perform zero-copy
 	// packet forwarding between the XDP socket and the backend.
-	// For now, we signal readiness and perform a high-performance fallback 
+	// For now, we signal readiness and perform a high-performance fallback
 	// while the AF_XDP userspace loop is being finalized.
 	return fmt.Errorf("AF_XDP packet loop requires userspace TCP stack integration")
 }
@@ -142,6 +147,27 @@ func (c *linuxCore) ServeHTTP(ctx context.Context, listener net.Listener, handle
 	}
 
 	return server.Serve(listener)
+}
+
+// GetStatus returns the operational status of the Linux core.
+func (c *linuxCore) GetStatus() (enabled bool, engine string, activePorts int) {
+	if c.ring != nil {
+		engine = "io_uring"
+		enabled = true
+	} else {
+		engine = "standard"
+	}
+
+	if c.ebpf != nil {
+		if engine != "" && engine != "standard" {
+			engine += " + "
+		}
+		engine += "AF_XDP"
+		enabled = true
+	}
+
+	activePorts = int(c.activePorts.Load())
+	return
 }
 
 // iouringListener wraps a TCPListener to use io_uring for accepts.

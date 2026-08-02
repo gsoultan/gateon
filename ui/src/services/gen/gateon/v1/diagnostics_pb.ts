@@ -1931,6 +1931,11 @@ export class SystemInfo extends Message<SystemInfo> {
    */
   ebpf?: EbpfStats;
 
+  /**
+   * @generated from field: gateon.v1.TitanStats titan = 10;
+   */
+  titan?: TitanStats;
+
   constructor(data?: PartialMessage<SystemInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1948,6 +1953,7 @@ export class SystemInfo extends Message<SystemInfo> {
     { no: 7, name: "version", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "gossip", kind: "message", T: GossipStatus },
     { no: 9, name: "ebpf", kind: "message", T: EbpfStats },
+    { no: 10, name: "titan", kind: "message", T: TitanStats },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemInfo {
@@ -1964,6 +1970,148 @@ export class SystemInfo extends Message<SystemInfo> {
 
   static equals(a: SystemInfo | PlainMessage<SystemInfo> | undefined, b: SystemInfo | PlainMessage<SystemInfo> | undefined): boolean {
     return proto3.util.equals(SystemInfo, a, b);
+  }
+}
+
+/**
+ * @generated from message gateon.v1.TitanStats
+ */
+export class TitanStats extends Message<TitanStats> {
+  /**
+   * @generated from field: bool phantom_enabled = 1;
+   */
+  phantomEnabled = false;
+
+  /**
+   * e.g. "io_uring + AF_XDP"
+   *
+   * @generated from field: string phantom_engine = 2;
+   */
+  phantomEngine = "";
+
+  /**
+   * @generated from field: int32 active_phantom_ports = 3;
+   */
+  activePhantomPorts = 0;
+
+  /**
+   * @generated from field: bool ai_predictor_enabled = 4;
+   */
+  aiPredictorEnabled = false;
+
+  /**
+   * @generated from field: string ai_model_status = 5;
+   */
+  aiModelStatus = "";
+
+  /**
+   * @generated from field: int32 cuckoo_filter_entries = 6;
+   */
+  cuckooFilterEntries = 0;
+
+  /**
+   * @generated from field: bool pqc_enabled = 7;
+   */
+  pqcEnabled = false;
+
+  /**
+   * @generated from field: gateon.v1.ResourceGovernorStats governor = 8;
+   */
+  governor?: ResourceGovernorStats;
+
+  constructor(data?: PartialMessage<TitanStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gateon.v1.TitanStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "phantom_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "phantom_engine", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "active_phantom_ports", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "ai_predictor_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "ai_model_status", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "cuckoo_filter_entries", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 7, name: "pqc_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 8, name: "governor", kind: "message", T: ResourceGovernorStats },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TitanStats {
+    return new TitanStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TitanStats {
+    return new TitanStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TitanStats {
+    return new TitanStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TitanStats | PlainMessage<TitanStats> | undefined, b: TitanStats | PlainMessage<TitanStats> | undefined): boolean {
+    return proto3.util.equals(TitanStats, a, b);
+  }
+}
+
+/**
+ * @generated from message gateon.v1.ResourceGovernorStats
+ */
+export class ResourceGovernorStats extends Message<ResourceGovernorStats> {
+  /**
+   * @generated from field: bool active = 1;
+   */
+  active = false;
+
+  /**
+   * @generated from field: int32 memory_hooks_count = 2;
+   */
+  memoryHooksCount = 0;
+
+  /**
+   * @generated from field: int32 cpu_hooks_count = 3;
+   */
+  cpuHooksCount = 0;
+
+  /**
+   * @generated from field: double memory_pressure_percent = 4;
+   */
+  memoryPressurePercent = 0;
+
+  /**
+   * @generated from field: double cpu_pressure_percent = 5;
+   */
+  cpuPressurePercent = 0;
+
+  constructor(data?: PartialMessage<ResourceGovernorStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gateon.v1.ResourceGovernorStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "memory_hooks_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 3, name: "cpu_hooks_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "memory_pressure_percent", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 5, name: "cpu_pressure_percent", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResourceGovernorStats {
+    return new ResourceGovernorStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ResourceGovernorStats {
+    return new ResourceGovernorStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ResourceGovernorStats {
+    return new ResourceGovernorStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ResourceGovernorStats | PlainMessage<ResourceGovernorStats> | undefined, b: ResourceGovernorStats | PlainMessage<ResourceGovernorStats> | undefined): boolean {
+    return proto3.util.equals(ResourceGovernorStats, a, b);
   }
 }
 

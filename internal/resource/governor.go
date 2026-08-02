@@ -107,3 +107,22 @@ func (g *Governor) checkCPU(ctx context.Context) {
 		}
 	}
 }
+
+// GetStatus returns the current stats of the resource governor.
+func (g *Governor) GetStatus(ctx context.Context) (active bool, memHooks, cpuHooks int, memPressure, cpuPressure float64) {
+	g.mu.RLock()
+	memHooks = len(g.memoryHooks)
+	cpuHooks = len(g.cpuHooks)
+	g.mu.RUnlock()
+
+	active = true
+	v, _ := mem.VirtualMemoryWithContext(ctx)
+	if v != nil {
+		memPressure = v.UsedPercent
+	}
+	percentages, _ := cpu.PercentWithContext(ctx, 0, false)
+	if len(percentages) > 0 {
+		cpuPressure = percentages[0]
+	}
+	return
+}

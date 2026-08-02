@@ -450,6 +450,9 @@ export type EbpfConfig = {
   enable_knocking?: boolean;
   mgmt_port?: number;
   knocking_sequence?: number[];
+  xdp_cuckoo_filter?: boolean;
+  af_xdp_phantom?: boolean;
+  xdp_ja4_blocklist?: boolean;
 };
 
 export interface GeoIPConfig {
@@ -482,6 +485,16 @@ export type GlobalConfig = {
   alerting?: AlertingConfig;
   audit?: AuditConfig;
   profile?: string;
+  titan?: TitanConfig;
+};
+
+export type TitanConfig = {
+  enabled: boolean;
+  enable_phantom: boolean;
+  enable_ai_predictor: boolean;
+  enable_pqc: boolean;
+  enable_governor: boolean;
+  ai_model_path: string;
 };
 
 export type AlertingConfig = {
@@ -728,6 +741,33 @@ export type SystemInfo = {
   cpu_usage: string;
   version: string;
   gossip?: GossipStatus;
+  ebpf?: EbpfStats;
+  titan?: TitanStats;
+};
+
+export type TitanStats = {
+  phantom_enabled: boolean;
+  phantom_engine: string;
+  active_phantom_ports: number;
+  ai_predictor_enabled: boolean;
+  ai_model_status: string;
+  cuckoo_filter_entries: number;
+  pqc_enabled: boolean;
+  governor?: ResourceGovernorStats;
+};
+
+export type ResourceGovernorStats = {
+  active: boolean;
+  memory_hooks_count: number;
+  cpu_hooks_count: number;
+  memory_pressure_percent: number;
+  cpu_pressure_percent: number;
+};
+
+export type EbpfStats = {
+  enabled: boolean;
+  shunned_ips_count: number;
+  dropped_packets: Record<string, number>;
 };
 
 export type Anomaly = {
