@@ -23,7 +23,6 @@ import (
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"google.golang.org/grpc"
 )
 
@@ -82,7 +81,7 @@ func TestIntegration_ProxyRequest(t *testing.T) {
 		TLSManager: s.TLSManager,
 	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
-	wrapped := grpcweb.WrapServer(grpcServer)
+	wrapped := middleware.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 
@@ -145,7 +144,7 @@ func TestIntegration_ProxyWithIPFilterMiddleware(t *testing.T) {
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
-	wrapped := grpcweb.WrapServer(grpc.NewServer())
+	wrapped := middleware.NewDefaultGRPCWebDetector(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
@@ -200,7 +199,7 @@ func TestIntegration_RestApiAndProxy(t *testing.T) {
 		TLSManager: s.TLSManager,
 	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
-	wrapped := grpcweb.WrapServer(grpcServer)
+	wrapped := middleware.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 
@@ -250,7 +249,7 @@ func TestIntegration_NotFound(t *testing.T) {
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
-	wrapped := grpcweb.WrapServer(grpc.NewServer())
+	wrapped := middleware.NewDefaultGRPCWebDetector(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
@@ -371,7 +370,7 @@ func TestIntegration_ProxyWithOAuth2IntrospectionMiddleware(t *testing.T) {
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
-	wrapped := grpcweb.WrapServer(grpc.NewServer())
+	wrapped := middleware.NewDefaultGRPCWebDetector(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})
@@ -462,7 +461,7 @@ func TestIntegration_ProxyWithOIDCMiddleware(t *testing.T) {
 	})
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
-	wrapped := grpcweb.WrapServer(grpc.NewServer())
+	wrapped := middleware.NewDefaultGRPCWebDetector(grpc.NewServer())
 	gatewayHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.HandleProxyOrLocal(w, r, wrapped, wrapped, mux)
 	})

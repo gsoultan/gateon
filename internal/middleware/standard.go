@@ -445,6 +445,13 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					}
 				}
 
+				ja4 := ""
+				ja4h := ""
+				if rs != nil {
+					ja4 = rs.JA4
+					ja4h = rs.JA4H
+				}
+
 				if recordDetailed {
 					telemetry.RecordTraceDetailed(
 						id,
@@ -462,8 +469,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						method,
 						r.Referer(),
 						origHost+r.URL.RequestURI(),
-						rs.JA4,
-						rs.JA4H,
+						ja4,
+						ja4h,
 						r.Header,
 						debug.RequestBody,
 						sw.Header(),
@@ -492,8 +499,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						method,
 						r.Referer(),
 						origHost+r.URL.RequestURI(),
-						rs.JA4,
-						rs.JA4H,
+						ja4,
+						ja4h,
 						r.Header,
 						sw.Header(),
 						recommendation,

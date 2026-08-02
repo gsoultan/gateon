@@ -30,7 +30,6 @@ import (
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 )
@@ -100,12 +99,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
-	// Internal API only: gRPC-Web for the dashboard. Allow all origins; auth protects the API.
-	// User routes use the grpcweb middleware with per-route allowed_origins config.
-	internalAPI := grpcweb.WrapServer(grpcServer,
-		grpcweb.WithOriginFunc(func(string) bool { return true }),
-		grpcweb.WithCorsForRegisteredEndpointsOnly(false),
-	)
+	// Internal API only: gRPC-Web for the dashboard.
+	// We use our modern DefaultGRPCWebDetector which supports Connect and gRPC-Web.
+	internalAPI := middleware.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
 
 	// Register ConnectRPC handler for the internal API.

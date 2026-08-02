@@ -11,12 +11,13 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"google.golang.org/grpc"
 )
 
-func setupProxyTest(t *testing.T, routeType string, withGrpcWebMiddleware bool) (*Server, *atomic.Int64, *grpcweb.WrappedGrpcServer, *http.ServeMux) {
+func setupProxyTest(t *testing.T, routeType string, withGrpcWebMiddleware bool) (*Server, *atomic.Int64, entrypoint.GRPCWebHandler, *http.ServeMux) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	mwReg := config.NewMiddlewareRegistry(filepath.Join(tmpDir, "middlewares.json"))
@@ -67,7 +68,7 @@ func setupProxyTest(t *testing.T, routeType string, withGrpcWebMiddleware bool) 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	return s, hits, grpcweb.WrapServer(grpcServer), mux
+	return s, hits, middleware.NewDefaultGRPCWebDetector(grpcServer), mux
 }
 
 func TestHandleProxyOrLocal_DoesNotProxyLegacyGrpcWebRouteType(t *testing.T) {
@@ -90,7 +91,7 @@ func TestHandleProxyOrLocal_ProxiesGrpcWebRequestsForGrpcRouteWithMiddleware(t *
 	w := httptest.NewRecorder()
 	s.HandleProxyOrLocal(w, req, wrapped, wrapped, mux)
 	if got := hits.Load(); got != 1 {
-		t.Fatalf("expected grpc route with grpcweb middleware to proxy grpc-web request exactly once, got %d", got)
+		t.Fatalf("expected grpc route with grpcweb middleware to proxy grpc-web request exactly once, got %d. Status: %d, Body: %q", got, w.Code, w.Body.String())
 	}
 }
 

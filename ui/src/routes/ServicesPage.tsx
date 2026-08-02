@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { Card, Title, Text, Stack, Group, Button, Drawer, Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination } from '@mantine/core'
+import { Card, Title, Text, Stack, Group, Button, Drawer, Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination, Skeleton } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconPlus, IconServer, IconSearch, IconDotsVertical, IconEdit, IconTrash, IconExternalLink, IconActivity, IconChevronDown, IconChevronRight, IconRocket } from '@tabler/icons-react'
 import { useServices, apiFetch, getApiErrorMessage } from '../hooks/useGateon'
@@ -136,7 +136,24 @@ export default function ServicesPage() {
           />
 
           <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
-            {isMobile ? (
+            {isLoading ? (
+              <Stack gap="md">
+                {[...Array(5)].map((_, i) => (
+                  <Card key={i} withBorder radius="md" p="md">
+                    <Group justify="space-between">
+                      <Stack gap={4} style={{ flex: 1 }}>
+                        <Skeleton height={20} width="40%" />
+                        <Skeleton height={14} width="25%" />
+                      </Stack>
+                      <Group gap="xs">
+                        <Skeleton height={24} width={80} radius="xl" />
+                        <Skeleton height={28} width={28} radius="sm" />
+                      </Group>
+                    </Group>
+                  </Card>
+                ))}
+              </Stack>
+            ) : isMobile ? (
               <Stack gap="md">
                 {services.length === 0 && !isLoading && (
                   <Center py={48}>
