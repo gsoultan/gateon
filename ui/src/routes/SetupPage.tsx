@@ -39,6 +39,7 @@ import {
 import { setupGateon, testDbConnection } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
 import { useClipboard } from "@mantine/hooks";
+import { useIsMobile } from "../hooks/useMobile";
 import { generateRandomString } from "../utils/random";
 
 const WIZARD_STEPS = 6; // Admin, Security, Database, Logging, Management, Review
@@ -85,6 +86,7 @@ function buildDbPayload(f: DbFields): { payload?: any; error?: string } {
 
 export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const clipboard = useClipboard({ timeout: 2000 });
@@ -333,21 +335,22 @@ export default function SetupPage() {
               onStepClick={(s) => s < wizardStep && setWizardStep(s)}
               allowNextStepsSelect={false}
               size="xs"
+              orientation={isMobile ? "vertical" : "horizontal"}
               iconSize={28}
               wrap={false}
               completedIcon={<IconCheck size={16} />}
               mb="xl"
               styles={{
-                steps: { flexWrap: "nowrap", overflowX: "auto", paddingBottom: 4 },
+                steps: { flexWrap: "nowrap", overflowX: isMobile ? undefined : "auto", paddingBottom: 4 },
                 step: {
-                  flexDirection: "column",
+                  flexDirection: isMobile ? "row" : "column",
                   alignItems: "center",
                   gap: 6,
                   minWidth: 0,
                   flex: "1 1 auto",
                 },
-                stepBody: { marginInlineStart: 0, textAlign: "center" },
-                separator: { minWidth: 8, marginInline: 4 },
+                stepBody: { marginInlineStart: isMobile ? 12 : 0, textAlign: isMobile ? "left" : "center" },
+                separator: { minWidth: isMobile ? undefined : 8, marginInline: isMobile ? undefined : 4 },
                 stepLabel: { fontSize: rem(11), lineHeight: 1.1 },
               }}
             >

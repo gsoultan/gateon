@@ -25,6 +25,7 @@ import {
   apiFetch,
   getApiErrorMessage,
 } from "../../hooks/useGateon";
+import { useIsMobile } from "../../hooks/useMobile";
 import {
   IconCheck,
   IconServer,
@@ -131,6 +132,7 @@ export default function RouteForm({
   const prevStep = () =>
     setActive((current) => (current > 0 ? current - 1 : current));
 
+  const isMobile = useIsMobile();
   const routeType = form.state.values.type;
   const epOptionsAll = (epData?.entry_points || []).map((ep) => ({
     value: ep.id,
@@ -188,26 +190,27 @@ export default function RouteForm({
                   onStepClick={setActive}
                   allowNextStepsSelect={false}
                   size="sm"
+                  orientation={isMobile ? "vertical" : "horizontal"}
                 >
                   <Stepper.Step
-                    label="Basics"
-                    description="ID, Type, Rule"
+                    label={isMobile ? null : "Basics"}
+                    description={isMobile ? null : "ID, Type, Rule"}
                     icon={<IconRoute size={18} />}
                   >
                     <RoutingConfig form={form} entryPointOptions={epOptions} />
                   </Stepper.Step>
 
                   <Stepper.Step
-                    label="Upstream"
-                    description="Targets & Load Balancing"
+                    label={isMobile ? null : "Upstream"}
+                    description={isMobile ? null : "Targets & Load Balancing"}
                     icon={<IconServer size={18} />}
                   >
                     <UpstreamConfig form={form} serviceOptions={serviceOptions} />
                   </Stepper.Step>
 
                   <Stepper.Step
-                    label="Security"
-                    description="Middlewares & TLS"
+                    label={isMobile ? null : "Security"}
+                    description={isMobile ? null : "Middlewares & TLS"}
                     icon={<IconShieldLock size={18} />}
                   >
                     <PipelineConfig
@@ -219,8 +222,8 @@ export default function RouteForm({
                   </Stepper.Step>
 
                   <Stepper.Step
-                    label="Review"
-                    description="Confirm & Save"
+                    label={isMobile ? null : "Review"}
+                    description={isMobile ? null : "Confirm & Save"}
                     icon={<IconCheck size={18} />}
                   >
                     <Stack gap="md" mt="xl" align="center" py="xl">

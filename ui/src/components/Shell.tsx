@@ -25,6 +25,7 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { apiFetch, useGateonStatus } from "../hooks/useGateon";
 import { queryClient } from "../queryClient";
 import { usePermissions } from "../hooks/usePermissions";
+import { useIsMobile } from "../hooks/useMobile";
 import { GlobalHealthBar } from "./GlobalHealthBar";
 import { useAuthStore } from "../store/useAuthStore";
 import { usePreferencesStore } from "../store/usePreferencesStore";
@@ -84,7 +85,8 @@ export function Shell() {
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-  const { isViewer } = usePermissions();
+  const isViewer = usePermissions().isViewer;
+  const isMobile = useIsMobile();
 
   const cycleScheme = useCallback((next: "light" | "dark" | "auto") => {
     setColorScheme(next);
@@ -190,11 +192,11 @@ export function Shell() {
                 component="img"
                 src="/gateon-logo.svg"
                 alt="Gateon logo"
-                w={28}
-                h={28}
+                w={isMobile ? 24 : 28}
+                h={isMobile ? 24 : 28}
                 style={{ display: "block", flexShrink: 0 }}
               />
-              <Title order={4} fw={800} style={{ letterSpacing: -0.5 }}>
+              <Title order={isMobile ? 5 : 4} fw={800} style={{ letterSpacing: -0.5 }}>
                 GATEON
               </Title>
             </Group>
@@ -203,18 +205,19 @@ export function Shell() {
           <Flex
             align="center"
             gap={{ base: "xs", md: "sm", lg: "lg" }}
-            visibleFrom="sm"
             style={{ flex: 1, minWidth: 0, justifyContent: "flex-end" }}
           >
-            <CommandSearchButton />
+            <Box visibleFrom="sm">
+              <CommandSearchButton />
+            </Box>
             <Group visibleFrom="lg" style={{ flexShrink: 0 }}>
               <GlobalHealthBar />
             </Group>
-            <Group gap="xs" style={{ flexShrink: 0 }}>
+            <Group gap="xs" style={{ flexShrink: 0 }} visibleFrom="md">
               <ConnectionStatus />
 
               {user?.role && (
-                <Stack gap={0} align="flex-end" visibleFrom="md">
+                <Stack gap={0} align="flex-end">
                   <Text size="xs" fw={700} c="dimmed" lh={1}>
                     ROLE
                   </Text>
@@ -238,7 +241,7 @@ export function Shell() {
             </Group>
 
             <Group gap="xs" style={{ flexShrink: 0 }}>
-      <Menu shadow="md" width={220} position="bottom-end">
+              <Menu shadow="md" width={220} position="bottom-end">
         <Menu.Target>
           <Tooltip label="Theme (Light / Dark / System)">
             <ActionIcon variant="default" size="md" radius="md" aria-label="Change color scheme">
@@ -342,6 +345,16 @@ export function Shell() {
       <AppShell.Navbar p="md">
         <AppShell.Section grow component={ScrollArea}>
           <Stack gap={2}>
+            {isMobile && (
+              <Stack px="md" py="sm" gap="xs">
+                <Group justify="space-between">
+                  <Text size="xs" fw={700} c="dimmed" style={{ textTransform: "uppercase" }}>System Status</Text>
+                  <ConnectionStatus />
+                </Group>
+                <GlobalHealthBar />
+                <Divider my="xs" />
+              </Stack>
+            )}
             {desktopOpened && (
               <Text
                 size="xs"

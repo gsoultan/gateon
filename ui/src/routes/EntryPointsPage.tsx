@@ -19,8 +19,10 @@ import {
   SimpleGrid,
   Code,
   Pagination,
+  Divider,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import { useIsMobile } from "../hooks/useMobile";
 import {
   IconPlus,
   IconAccessPoint,
@@ -44,6 +46,7 @@ import type { EntryPoint } from "../types/gateon";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
+  const isMobile = useIsMobile();
   const density = useTableDensity();
   const [opened, { open, close }] = useDisclosure(false);
   const [search, setSearch] = useState("");
@@ -108,7 +111,7 @@ export default function EntryPointsPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center">
+      <Group justify="space-between" align="center" wrap="wrap" gap="md">
         <div>
           <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
             EntryPoints
@@ -125,6 +128,7 @@ export default function EntryPointsPage() {
             radius="md"
             variant="gradient"
             gradient={{ from: "blue", to: "cyan" }}
+            fullWidth={isMobile}
           >
             Create EntryPoint
           </Button>
@@ -205,107 +209,42 @@ export default function EntryPointsPage() {
               setPage(1);
             }}
             size="xs"
-            w={300}
+            w={isMobile ? "100%" : 300}
           />
 
-          <Box style={{ overflowX: "auto" }}>
-            <Table {...density} highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>ID / Name</Table.Th>
-                  <Table.Th>Address</Table.Th>
-                  <Table.Th>Protocol</Table.Th>
-                  <Table.Th>TLS</Table.Th>
-                  <Table.Th>Access Log</Table.Th>
-                  <Table.Th w={80}>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
+          <Box style={{ overflowX: isMobile ? undefined : "auto" }}>
+            {isMobile ? (
+              <Stack gap="md">
                 {entryPoints.length === 0 && !isLoading && (
-                  <Table.Tr>
-                    <Table.Td colSpan={6}>
-                      <Center py={40}>
-                        <Text c="dimmed">No entrypoints found.</Text>
-                      </Center>
-                    </Table.Td>
-                  </Table.Tr>
+                  <Center py={40}>
+                    <Text c="dimmed">No entrypoints found.</Text>
+                  </Center>
                 )}
                 {entryPoints.map((ep) => (
-                  <Table.Tr key={ep.id}>
-                    <Table.Td>
-                      <Group gap="sm">
-                        <ActionIcon variant="light" color="indigo" radius="md">
-                          <IconAccessPoint size={16} />
-                        </ActionIcon>
-                        <Stack gap={0}>
-                          <Text fw={700} size="sm">
-                            {ep.name || ep.id}
-                          </Text>
-                          <Text size="xs" c="dimmed" ff="monospace">
-                            {ep.id}
-                          </Text>
-                        </Stack>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Code color="blue" variant="light" fw={700}>
-                        {ep.address}
-                      </Code>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge
-                        variant="dot"
-                        color={ep.protocol === 1 ? "orange" : "blue"}
-                        radius="sm"
-                      >
-                        {ep.protocol === 1 ? "UDP" : "TCP"}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {ep.tls?.enabled ? (
-                        <Badge
-                          variant="filled"
-                          color="teal"
-                          size="sm"
-                          leftSection={<IconLock size={10} />}
-                        >
-                          TLS
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          color="gray"
-                          size="sm"
-                          leftSection={<IconLockOff size={10} />}
-                        >
-                          Plain
-                        </Badge>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge
-                        variant={ep.access_log_enabled ? "light" : "outline"}
-                        color={ep.access_log_enabled ? "blue" : "gray"}
-                        size="sm"
-                      >
-                        {ep.access_log_enabled ? "Active" : "Disabled"}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {canWrite && (
-                        <Group gap="xs">
-                          <Menu
-                            shadow="md"
-                            position="bottom-end"
-                            transitionProps={{ transition: "pop-top-right" }}
-                          >
+                  <Card key={ep.id} withBorder radius="md" p="md">
+                    <Stack gap="xs">
+                      <Group justify="space-between" align="flex-start">
+                        <Group gap="sm" wrap="nowrap">
+                          <ActionIcon variant="light" color="indigo" radius="md">
+                            <IconAccessPoint size={16} />
+                          </ActionIcon>
+                          <Stack gap={0}>
+                            <Text fw={700} size="sm" truncate>
+                              {ep.name || ep.id}
+                            </Text>
+                            <Text size="xs" c="dimmed" ff="monospace" truncate>
+                              {ep.id}
+                            </Text>
+                          </Stack>
+                        </Group>
+                        {canWrite && (
+                          <Menu shadow="md" position="bottom-end">
                             <Menu.Target>
                               <ActionIcon variant="subtle" color="gray">
                                 <IconDotsVertical size={16} />
                               </ActionIcon>
                             </Menu.Target>
                             <Menu.Dropdown>
-                              <Menu.Label>EntryPoint Actions</Menu.Label>
                               <Menu.Item
                                 leftSection={<IconEdit size={14} />}
                                 onClick={() => handleEdit(ep)}
@@ -322,13 +261,157 @@ export default function EntryPointsPage() {
                               </Menu.Item>
                             </Menu.Dropdown>
                           </Menu>
-                        </Group>
-                      )}
-                    </Table.Td>
-                  </Table.Tr>
+                        )}
+                      </Group>
+                      <Divider variant="dashed" />
+                      <SimpleGrid cols={2} spacing="xs">
+                        <Box>
+                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Address</Text>
+                          <Text size="xs" ff="monospace" fw={700}>{ep.address}</Text>
+                        </Box>
+                        <Box>
+                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Protocol</Text>
+                          <Badge size="xs" color={ep.protocol === 1 ? "orange" : "blue"}>{ep.protocol === 1 ? "UDP" : "TCP"}</Badge>
+                        </Box>
+                        <Box>
+                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Security</Text>
+                          {ep.tls?.enabled ? (
+                            <Badge variant="filled" color="teal" size="xs" leftSection={<IconLock size={10} />}>TLS</Badge>
+                          ) : (
+                            <Badge variant="outline" color="gray" size="xs" leftSection={<IconLockOff size={10} />}>Plain</Badge>
+                          )}
+                        </Box>
+                        <Box>
+                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Logs</Text>
+                          <Badge size="xs" color={ep.access_log_enabled ? "blue" : "gray"}>{ep.access_log_enabled ? "Active" : "Disabled"}</Badge>
+                        </Box>
+                      </SimpleGrid>
+                    </Stack>
+                  </Card>
                 ))}
-              </Table.Tbody>
-            </Table>
+              </Stack>
+            ) : (
+              <Table {...density} highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>ID / Name</Table.Th>
+                    <Table.Th>Address</Table.Th>
+                    <Table.Th>Protocol</Table.Th>
+                    <Table.Th>TLS</Table.Th>
+                    <Table.Th>Access Log</Table.Th>
+                    <Table.Th w={80}>Actions</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {entryPoints.length === 0 && !isLoading && (
+                    <Table.Tr>
+                      <Table.Td colSpan={6}>
+                        <Center py={40}>
+                          <Text c="dimmed">No entrypoints found.</Text>
+                        </Center>
+                      </Table.Td>
+                    </Table.Tr>
+                  )}
+                  {entryPoints.map((ep) => (
+                    <Table.Tr key={ep.id}>
+                      <Table.Td>
+                        <Group gap="sm">
+                          <ActionIcon variant="light" color="indigo" radius="md">
+                            <IconAccessPoint size={16} />
+                          </ActionIcon>
+                          <Stack gap={0}>
+                            <Text fw={700} size="sm">
+                              {ep.name || ep.id}
+                            </Text>
+                            <Text size="xs" c="dimmed" ff="monospace">
+                              {ep.id}
+                            </Text>
+                          </Stack>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Code color="blue" variant="light" fw={700}>
+                          {ep.address}
+                        </Code>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge
+                          variant="dot"
+                          color={ep.protocol === 1 ? "orange" : "blue"}
+                          radius="sm"
+                        >
+                          {ep.protocol === 1 ? "UDP" : "TCP"}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        {ep.tls?.enabled ? (
+                          <Badge
+                            variant="filled"
+                            color="teal"
+                            size="sm"
+                            leftSection={<IconLock size={10} />}
+                          >
+                            TLS
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            color="gray"
+                            size="sm"
+                            leftSection={<IconLockOff size={10} />}
+                          >
+                            Plain
+                          </Badge>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge
+                          variant={ep.access_log_enabled ? "light" : "outline"}
+                          color={ep.access_log_enabled ? "blue" : "gray"}
+                          size="sm"
+                        >
+                          {ep.access_log_enabled ? "Active" : "Disabled"}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        {canWrite && (
+                          <Group gap="xs">
+                            <Menu
+                              shadow="md"
+                              position="bottom-end"
+                              transitionProps={{ transition: "pop-top-right" }}
+                            >
+                              <Menu.Target>
+                                <ActionIcon variant="subtle" color="gray">
+                                  <IconDotsVertical size={16} />
+                                </ActionIcon>
+                              </Menu.Target>
+                              <Menu.Dropdown>
+                                <Menu.Label>EntryPoint Actions</Menu.Label>
+                                <Menu.Item
+                                  leftSection={<IconEdit size={14} />}
+                                  onClick={() => handleEdit(ep)}
+                                >
+                                  Edit
+                                </Menu.Item>
+                                <Menu.Divider />
+                                <Menu.Item
+                                  leftSection={<IconTrash size={14} />}
+                                  color="red"
+                                  onClick={() => deleteMutation.mutate(ep.id)}
+                                >
+                                  Delete
+                                </Menu.Item>
+                              </Menu.Dropdown>
+                            </Menu>
+                          </Group>
+                        )}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
           </Box>
 
           {totalCount > pageSize && (

@@ -18,6 +18,10 @@ import {
   JsonInput,
   Tabs,
   Pagination,
+  Box,
+  Divider,
+  Center,
+  Menu,
 } from "@mantine/core";
 import {
   IconPlus,
@@ -28,8 +32,11 @@ import {
   IconCheck,
   IconSettings,
   IconCode,
+  IconDotsVertical,
+  IconSearch,
 } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
+import { useIsMobile } from "../hooks/useMobile";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { Middleware } from "../types/gateon";
@@ -40,6 +47,7 @@ import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
+  const isMobile = useIsMobile();
   const density = useTableDensity();
   const queryClient = useQueryClient();
   const [opened, { open, close }] = useDisclosure(false);
@@ -137,7 +145,7 @@ export default function MiddlewaresPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" mb="md">
+      <Group justify="space-between" wrap="wrap" gap="md">
         <div>
           <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
             Middlewares ({totalCount})
@@ -146,11 +154,13 @@ export default function MiddlewaresPage() {
             Define reusable middleware policies for your routes.
           </Text>
         </div>
-        <Group>
+        <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
           <TextInput
             placeholder="Search middlewares..."
+            leftSection={<IconSearch size={16} />}
             size="xs"
-            w={250}
+            w={isMobile ? "100%" : 250}
+            style={{ flex: isMobile ? "1 1 100%" : "none" }}
             value={search}
             onChange={(e) => {
               setSearch(e.currentTarget.value);
@@ -162,6 +172,7 @@ export default function MiddlewaresPage() {
               leftSection={<IconPlus size={16} />}
               onClick={startAdd}
               radius="md"
+              fullWidth={isMobile}
             >
               Add Middleware
             </Button>
@@ -169,37 +180,23 @@ export default function MiddlewaresPage() {
         </Group>
       </Group>
 
-      <Card withBorder padding={0} radius="lg" shadow="xs">
-        <ScrollArea>
-          <Table {...density}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>ID / Name</Table.Th>
-                <Table.Th>Type</Table.Th>
-                <Table.Th>Config Preview</Table.Th>
-                <Table.Th style={{ width: 100 }}>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {isLoading ? (
-                <Table.Tr>
-                  <Table.Td colSpan={4} align="center">
-                    <Text py="xl">Loading...</Text>
-                  </Table.Td>
-                </Table.Tr>
-              ) : middlewares.length === 0 ? (
-                <Table.Tr>
-                  <Table.Td colSpan={4} align="center">
-                    <Stack align="center" py="xl" gap="xs">
-                      <IconSettingsAutomation size={40} color="dimmed" />
-                      <Text c="dimmed">No middlewares configured</Text>
-                    </Stack>
-                  </Table.Td>
-                </Table.Tr>
-              ) : (
-                middlewares.map((mw) => (
-                  <Table.Tr key={mw.id}>
-                    <Table.Td>
+      <Card withBorder padding={isMobile ? "sm" : 0} radius="lg" shadow="xs">
+        {isMobile ? (
+          <Stack gap="md">
+            {isLoading ? (
+               <Text ta="center" py="xl" c="dimmed">Loading...</Text>
+            ) : middlewares.length === 0 ? (
+               <Center py="xl">
+                 <Stack align="center" gap="xs">
+                   <IconSettingsAutomation size={40} color="dimmed" />
+                   <Text c="dimmed">No middlewares configured</Text>
+                 </Stack>
+               </Center>
+            ) : (
+              middlewares.map((mw) => (
+                <Card key={mw.id} withBorder radius="md" p="md">
+                  <Stack gap="xs">
+                    <Group justify="space-between" align="flex-start">
                       <Stack gap={2}>
                         <Text fw={700} size="sm">
                           {mw.name || "Unnamed"}
@@ -212,56 +209,147 @@ export default function MiddlewaresPage() {
                           {mw.id}
                         </Code>
                       </Stack>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="light" radius="sm">
-                        {mw.type}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text
-                        size="xs"
-                        c="dimmed"
-                        truncate="end"
-                        style={{ maxWidth: 300 }}
-                      >
+                      <Group gap={4}>
+                        <Badge size="xs" variant="light" radius="sm">
+                          {mw.type}
+                        </Badge>
+                        {canWrite && (
+                          <Menu shadow="md" position="bottom-end">
+                            <Menu.Target>
+                              <ActionIcon variant="subtle" color="gray">
+                                <IconDotsVertical size={16} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Item
+                                leftSection={<IconPencil size={14} />}
+                                onClick={() => startEdit(mw)}
+                              >
+                                Edit
+                              </Menu.Item>
+                              <Menu.Divider />
+                              <Menu.Item
+                                leftSection={<IconTrash size={14} />}
+                                color="red"
+                                onClick={() => setDeleteTarget(mw)}
+                              >
+                                Delete
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        )}
+                      </Group>
+                    </Group>
+                    <Divider variant="dashed" />
+                    <Box>
+                      <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Config Preview</Text>
+                      <Text size="xs" c="dimmed" lineClamp={2} style={{ wordBreak: 'break-all' }}>
                         {mw.type === "wasm"
                           ? mw.wasm_blob
                             ? `WASM Module (${Math.round((mw.wasm_blob.length * 0.75) / 1024)} KB)`
                             : "No module uploaded"
                           : JSON.stringify(mw.config)}
                       </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      {canWrite && (
-                        <Group gap="xs" justify="flex-end">
-                          <Tooltip label="Edit">
-                            <ActionIcon
-                              variant="subtle"
-                              color="blue"
-                              onClick={() => startEdit(mw)}
-                            >
-                              <IconPencil size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                          <Tooltip label="Remove">
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
-                              onClick={() => setDeleteTarget(mw)}
-                            >
-                              <IconTrash size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                        </Group>
-                      )}
+                    </Box>
+                  </Stack>
+                </Card>
+              ))
+            )}
+          </Stack>
+        ) : (
+          <ScrollArea>
+            <Table {...density}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>ID / Name</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Config Preview</Table.Th>
+                  <Table.Th style={{ width: 100 }}>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {isLoading ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={4} align="center">
+                      <Text py="xl">Loading...</Text>
                     </Table.Td>
                   </Table.Tr>
-                ))
-              )}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea>
+                ) : middlewares.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={4} align="center">
+                      <Stack align="center" py="xl" gap="xs">
+                        <IconSettingsAutomation size={40} color="dimmed" />
+                        <Text c="dimmed">No middlewares configured</Text>
+                      </Stack>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : (
+                  middlewares.map((mw) => (
+                    <Table.Tr key={mw.id}>
+                      <Table.Td>
+                        <Stack gap={2}>
+                          <Text fw={700} size="sm">
+                            {mw.name || "Unnamed"}
+                          </Text>
+                          <Code
+                            color="blue"
+                            variant="light"
+                            style={{ fontSize: 10 }}
+                          >
+                            {mw.id}
+                          </Code>
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge variant="light" radius="sm">
+                          {mw.type}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text
+                          size="xs"
+                          c="dimmed"
+                          truncate="end"
+                          style={{ maxWidth: 300 }}
+                        >
+                          {mw.type === "wasm"
+                            ? mw.wasm_blob
+                              ? `WASM Module (${Math.round((mw.wasm_blob.length * 0.75) / 1024)} KB)`
+                              : "No module uploaded"
+                            : JSON.stringify(mw.config)}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {canWrite && (
+                          <Group gap="xs" justify="flex-end">
+                            <Tooltip label="Edit">
+                              <ActionIcon
+                                variant="subtle"
+                                color="blue"
+                                onClick={() => startEdit(mw)}
+                              >
+                                <IconPencil size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Remove">
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                onClick={() => setDeleteTarget(mw)}
+                              >
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Group>
+                        )}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
         {totalCount > pageSize && (
           <Group justify="center" py="md" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
             <Pagination
@@ -335,7 +423,7 @@ export default function MiddlewaresPage() {
           />
 
           <Tabs defaultValue="config" variant="pills" radius="md">
-            <Tabs.List mb="md">
+            <Tabs.List mb="md" className="scrollable-tabs-list">
               <Tabs.Tab value="config" leftSection={<IconSettings size={14} />}>
                 Config
               </Tabs.Tab>

@@ -32,6 +32,7 @@ import type { RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth }
 const AnomalyMap = lazy(() => import("../components/Diagnostics/AnomalyMap"));
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 import CORSValidator from "../components/Diagnostics/CORSValidator";
+import { useIsMobile } from "../hooks/useMobile";
 import {
   IconActivity,
   IconAlertTriangle,
@@ -308,6 +309,7 @@ const AnomalyCard: React.FC<{
 
 const DiagnosticsPage: React.FC = () => {
   const { canWrite } = usePermissions();
+  const isMobile = useIsMobile();
   const { data, isLoading: loading, error: queryError, refetch: fetchData } = useDiagnostics();
   const [applying, setApplying] = useState<string | null>(null);
 
@@ -482,13 +484,13 @@ const DiagnosticsPage: React.FC = () => {
             <IconActivity size={20} color={theme.colors.blue[6]} />
             <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 1 }}>System Health Dashboard</Text>
           </Group>
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 4, lg: 6 }} spacing="md">
-            <SystemStatCard title="Public IP" value={data?.system?.public_ip ?? "-"} icon={<IconGlobe size={20} color="blue" />} />
-            <SystemStatCard title="CPU Usage" value={data?.system?.cpu_usage ?? "-"} icon={<IconActivity size={20} color="red" />} />
-            <SystemStatCard title="Memory" value={data?.system?.memory_usage ?? "-"} icon={<IconServer size={20} color="orange" />} />
-            <SystemStatCard title="Goroutines" value={data?.system?.goroutines ?? "-"} icon={<IconRoute size={20} color="teal" />} />
-            <SystemStatCard title="Uptime" value={data?.system?.uptime ?? "-"} icon={<IconClock size={20} color="violet" />} />
-            <SystemStatCard title="Version" value={data?.system?.version ?? "-"} icon={<IconInfoCircle size={20} color="gray" />} />
+          <SimpleGrid cols={{ base: 2, sm: 2, md: 4, lg: 6 }} spacing="md">
+            <SystemStatCard title="Public IP" value={data?.system?.public_ip ?? "-"} icon={<IconGlobe size={isMobile ? 16 : 20} color="blue" />} />
+            <SystemStatCard title="CPU Usage" value={data?.system?.cpu_usage ?? "-"} icon={<IconActivity size={isMobile ? 16 : 20} color="red" />} />
+            <SystemStatCard title="Memory" value={data?.system?.memory_usage ?? "-"} icon={<IconServer size={isMobile ? 16 : 20} color="orange" />} />
+            <SystemStatCard title="Goroutines" value={data?.system?.goroutines ?? "-"} icon={<IconRoute size={isMobile ? 16 : 20} color="teal" />} />
+            <SystemStatCard title="Uptime" value={data?.system?.uptime ?? "-"} icon={<IconClock size={isMobile ? 16 : 20} color="violet" />} />
+            <SystemStatCard title="Version" value={data?.system?.version ?? "-"} icon={<IconInfoCircle size={isMobile ? 16 : 20} color="gray" />} />
           </SimpleGrid>
         </Stack>
 
@@ -531,7 +533,7 @@ const DiagnosticsPage: React.FC = () => {
             </Text>
 
             <Tabs defaultValue="active" variant="pills" radius="md">
-              <Tabs.List mb="md">
+              <Tabs.List mb="md" className="scrollable-tabs-list">
                 <Tabs.Tab value="active" leftSection={<IconAlertTriangle size={14} />} color="red">
                   Active Threats ({activeThreats.length})
                 </Tabs.Tab>
@@ -785,7 +787,7 @@ const DiagnosticsPage: React.FC = () => {
             </Group>
 
             <Tabs defaultValue="cors" variant="outline" radius="md">
-              <Tabs.List mb="md">
+              <Tabs.List mb="md" className="scrollable-tabs-list">
                 <Tabs.Tab value="cors" leftSection={<IconShield size={14} />}>
                   CORS Validator
                 </Tabs.Tab>

@@ -16,6 +16,7 @@ import {
   Tabs,
   Button,
   Modal,
+  Center,
   Code,
   ScrollArea,
   ThemeIcon,
@@ -40,6 +41,7 @@ import {
 import { useAuditLogs } from '../hooks/useAuditLogs';
 import { useAuditArchives, getAuditArchive } from '../hooks/useAuditArchives';
 import { useUrlFilters } from '../hooks/useUrlFilters';
+import { useIsMobile } from '../hooks/useMobile';
 import { format } from 'date-fns';
 import type { AuditLog, AuditArchive } from '../types/gateon';
 
@@ -48,6 +50,7 @@ const PAGE_SIZE = 50;
 export default function AuditLogsPage() {
   const [activeTab, setActiveTab] = useState<string | null>('active');
   const [filters, setFilters] = useUrlFilters<{ q: string }>();
+  const isMobile = useIsMobile();
   const search = filters.q ?? '';
   const [debouncedSearch] = useDebouncedValue(search, 300);
   const [page, setPage] = useState(1);
@@ -146,7 +149,7 @@ export default function AuditLogsPage() {
         </Group>
 
         <Tabs value={activeTab} onChange={setActiveTab} variant="pills" radius="md">
-          <Tabs.List mb="md">
+          <Tabs.List mb="md" className="scrollable-tabs-list">
             <Tabs.Tab value="active" leftSection={<IconList size={16} />}>
               Active Logs
             </Tabs.Tab>
@@ -166,71 +169,99 @@ export default function AuditLogsPage() {
                 />
               </Box>
 
-              <Table.ScrollContainer minWidth={800}>
-                <Table verticalSpacing="sm" highlightOnHover>
-                  <Table.Thead bg="var(--mantine-color-gray-0)">
-                    <Table.Tr>
-                      <Table.Th>Timestamp</Table.Th>
-                      <Table.Th>User</Table.Th>
-                      <Table.Th>Action</Table.Th>
-                      <Table.Th>Resource</Table.Th>
-                      <Table.Th>IP Address</Table.Th>
-                      <Table.Th>Integrity</Table.Th>
-                      <Table.Th w={80}></Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody style={{ opacity: isFetching ? 0.6 : 1, transition: 'opacity 0.2s' }}>
+              <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
+                {isMobile ? (
+                  <Stack gap="sm" p="md">
                     {logs.map((log) => (
-                      <Table.Tr key={log.id}>
-                        <Table.Td>
-                          <Text size="sm" fw={500}>
-                            {formatTimestamp(log.timestamp)}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge variant="light" color="blue" radius="sm">{log.user_id}</Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge variant="dot" color={getActionColor(log.action)} radius="sm">{log.action}</Badge>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs" c="dimmed" style={{ fontFamily: 'var(--mantine-font-family-monospace)' }}>
-                            {log.resource}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs">{log.ip_address}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Tooltip label={log.signature ? "Cryptographically Signed" : "Not Signed"}>
-                            <ThemeIcon variant="subtle" color={log.signature ? "green" : "gray"} size="sm">
-                              {log.signature ? <IconShieldCheck size={18} /> : <IconShieldX size={18} />}
+                      <Card key={log.id} withBorder radius="md" p="sm" onClick={() => { setSelectedLog(log); open(); }} style={{ cursor: 'pointer' }}>
+                        <Stack gap={4}>
+                          <Group justify="space-between">
+                            <Text size="xs" fw={700} c="dimmed">{formatTimestamp(log.timestamp)}</Text>
+                            <ThemeIcon variant="subtle" color={log.signature ? "green" : "gray"} size="xs">
+                              {log.signature ? <IconShieldCheck size={14} /> : <IconShieldX size={14} />}
                             </ThemeIcon>
-                          </Tooltip>
-                        </Table.Td>
-                        <Table.Td>
-                          <ActionIcon
-                            variant="subtle"
-                            onClick={() => {
-                              setSelectedLog(log);
-                              open();
-                            }}
-                          >
-                            <IconEye size={18} />
-                          </ActionIcon>
-                        </Table.Td>
-                      </Table.Tr>
+                          </Group>
+                          <Group justify="space-between">
+                            <Badge variant="light" color="blue" size="xs">{log.user_id}</Badge>
+                            <Badge variant="dot" color={getActionColor(log.action)} size="xs">{log.action}</Badge>
+                          </Group>
+                          <Text size="xs" truncate style={{ fontFamily: 'var(--mantine-font-family-monospace)' }}>{log.resource}</Text>
+                          <Text size="xs" c="dimmed">{log.ip_address}</Text>
+                        </Stack>
+                      </Card>
                     ))}
                     {!isLoading && logs.length === 0 && (
-                      <Table.Tr>
-                        <Table.Td colSpan={7}>
-                          <Text ta="center" py="xl" c="dimmed">No audit logs found.</Text>
-                        </Table.Td>
-                      </Table.Tr>
+                      <Center py="xl">
+                        <Text c="dimmed">No audit logs found.</Text>
+                      </Center>
                     )}
-                  </Table.Tbody>
-                </Table>
-              </Table.ScrollContainer>
+                  </Stack>
+                ) : (
+                  <Table verticalSpacing="sm" highlightOnHover>
+                    <Table.Thead bg="var(--mantine-color-gray-0)">
+                      <Table.Tr>
+                        <Table.Th>Timestamp</Table.Th>
+                        <Table.Th>User</Table.Th>
+                        <Table.Th>Action</Table.Th>
+                        <Table.Th>Resource</Table.Th>
+                        <Table.Th>IP Address</Table.Th>
+                        <Table.Th>Integrity</Table.Th>
+                        <Table.Th w={80}></Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody style={{ opacity: isFetching ? 0.6 : 1, transition: 'opacity 0.2s' }}>
+                      {logs.map((log) => (
+                        <Table.Tr key={log.id}>
+                          <Table.Td>
+                            <Text size="sm" fw={500}>
+                              {formatTimestamp(log.timestamp)}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge variant="light" color="blue" radius="sm">{log.user_id}</Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge variant="dot" color={getActionColor(log.action)} radius="sm">{log.action}</Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs" c="dimmed" style={{ fontFamily: 'var(--mantine-font-family-monospace)' }}>
+                              {log.resource}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs">{log.ip_address}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Tooltip label={log.signature ? "Cryptographically Signed" : "Not Signed"}>
+                              <ThemeIcon variant="subtle" color={log.signature ? "green" : "gray"} size="sm">
+                                {log.signature ? <IconShieldCheck size={18} /> : <IconShieldX size={18} />}
+                              </ThemeIcon>
+                            </Tooltip>
+                          </Table.Td>
+                          <Table.Td>
+                            <ActionIcon
+                              variant="subtle"
+                              onClick={() => {
+                                setSelectedLog(log);
+                                open();
+                              }}
+                            >
+                              <IconEye size={18} />
+                            </ActionIcon>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                      {!isLoading && logs.length === 0 && (
+                        <Table.Tr>
+                          <Table.Td colSpan={7}>
+                            <Text ta="center" py="xl" c="dimmed">No audit logs found.</Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      )}
+                    </Table.Tbody>
+                  </Table>
+                )}
+              </Box>
 
               {totalCount > PAGE_SIZE && (
                 <Group justify="space-between" align="center" p="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
@@ -245,63 +276,93 @@ export default function AuditLogsPage() {
 
           <Tabs.Panel value="archived">
             <Card withBorder radius="md" p={0} shadow="sm">
-              <Table.ScrollContainer minWidth={600}>
-                <Table verticalSpacing="sm">
-                  <Table.Thead bg="var(--mantine-color-gray-0)">
-                    <Table.Tr>
-                      <Table.Th>Archive File</Table.Th>
-                      <Table.Th>Size</Table.Th>
-                      <Table.Th>Created At</Table.Th>
-                      <Table.Th w={150}>Actions</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
+              <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
+                {isMobile ? (
+                  <Stack gap="sm" p="md">
                     {archivesData?.archives?.map((archive) => (
-                      <Table.Tr key={archive.filename}>
-                        <Table.Td>
-                          <Group gap="sm">
-                            <IconFileZip size={20} color="var(--mantine-color-grape-6)" />
-                            <Text size="sm" fw={500}>{archive.filename}</Text>
+                      <Card key={archive.filename} withBorder radius="md" p="sm">
+                        <Stack gap={4}>
+                          <Group justify="space-between">
+                            <Group gap="xs">
+                              <IconFileZip size={16} color="var(--mantine-color-grape-6)" />
+                              <Text size="sm" fw={500}>{archive.filename}</Text>
+                            </Group>
+                            <Text size="xs">{(archive.size / 1024).toFixed(1)} KB</Text>
                           </Group>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs">{(archive.size / 1024).toFixed(1)} KB</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs">{formatTimestamp(archive.created_at)}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap="xs">
-                            <Button
-                              size="compact-xs"
-                              variant="light"
-                              leftSection={<IconEye size={14} />}
-                              onClick={() => handleOpenArchive(archive)}
-                              loading={isOpeningArchive && currentArchiveName === archive.filename}
-                            >
-                              Open
-                            </Button>
-                            <ActionIcon
-                              variant="subtle"
-                              color="blue"
-                              onClick={() => handleDownloadArchive(archive)}
-                            >
-                              <IconDownload size={16} />
-                            </ActionIcon>
+                          <Group justify="space-between" align="flex-end">
+                            <Text size="xs" c="dimmed">{formatTimestamp(archive.created_at)}</Text>
+                            <Group gap="xs">
+                              <ActionIcon
+                                variant="light"
+                                onClick={() => handleOpenArchive(archive)}
+                                loading={isOpeningArchive && currentArchiveName === archive.filename}
+                              >
+                                <IconEye size={14} />
+                              </ActionIcon>
+                              <ActionIcon
+                                variant="subtle"
+                                color="blue"
+                                onClick={() => handleDownloadArchive(archive)}
+                              >
+                                <IconDownload size={14} />
+                              </ActionIcon>
+                            </Group>
                           </Group>
-                        </Table.Td>
-                      </Table.Tr>
+                        </Stack>
+                      </Card>
                     ))}
-                    {!isLoadingArchives && (!archivesData?.archives || archivesData.archives.length === 0) && (
+                  </Stack>
+                ) : (
+                  <Table verticalSpacing="sm">
+                    <Table.Thead bg="var(--mantine-color-gray-0)">
                       <Table.Tr>
-                        <Table.Td colSpan={4}>
-                          <Text ta="center" py="xl" c="dimmed">No archives found.</Text>
-                        </Table.Td>
+                        <Table.Th>Archive File</Table.Th>
+                        <Table.Th>Size</Table.Th>
+                        <Table.Th>Created At</Table.Th>
+                        <Table.Th w={150}>Actions</Table.Th>
                       </Table.Tr>
-                    )}
-                  </Table.Tbody>
-                </Table>
-              </Table.ScrollContainer>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {archivesData?.archives?.map((archive) => (
+                        <Table.Tr key={archive.filename}>
+                          <Table.Td>
+                            <Group gap="sm">
+                              <IconFileZip size={20} color="var(--mantine-color-grape-6)" />
+                              <Text size="sm" fw={500}>{archive.filename}</Text>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs">{(archive.size / 1024).toFixed(1)} KB</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="xs">{formatTimestamp(archive.created_at)}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap="xs">
+                              <Button
+                                size="compact-xs"
+                                variant="light"
+                                leftSection={<IconEye size={14} />}
+                                onClick={() => handleOpenArchive(archive)}
+                                loading={isOpeningArchive && currentArchiveName === archive.filename}
+                              >
+                                Open
+                              </Button>
+                              <ActionIcon
+                                variant="subtle"
+                                color="blue"
+                                onClick={() => handleDownloadArchive(archive)}
+                              >
+                                <IconDownload size={16} />
+                              </ActionIcon>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                )}
+              </Box>
             </Card>
           </Tabs.Panel>
         </Tabs>

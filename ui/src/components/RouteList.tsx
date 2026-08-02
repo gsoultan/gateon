@@ -26,6 +26,7 @@ import { useDebouncedValue } from "@mantine/hooks";
 import { useRoutes } from "../hooks/useGateon";
 import { RouteStats } from "./RouteStats";
 import { RouteSparklineCell } from "./RouteSparklineCell";
+import { useIsMobile } from "../hooks/useMobile";
 import {
   IconSearch,
   IconDotsVertical,
@@ -33,6 +34,7 @@ import {
   IconCopy,
   IconTrash,
   IconPlayerPause,
+  IconRefresh,
   IconRouteOff,
   IconLock,
   IconSettingsAutomation,
@@ -64,6 +66,7 @@ export default function RouteList({
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
   const pageSize = 10;
   const density = useTableDensity();
+  const isMobile = useIsMobile();
 
   // Debounce the free-text inputs so we don't fire a request on every
   // keystroke. The input fields stay controlled by local state (so focus
@@ -228,14 +231,86 @@ export default function RouteList({
           )}
         </Group>
 
-        <Box pos="relative" style={{ overflowX: "auto", borderRadius: "var(--mantine-radius-md)" }}>
+        <Box pos="relative" style={{ overflowX: isMobile ? undefined : "auto", borderRadius: "var(--mantine-radius-md)" }}>
           <LoadingOverlay
             visible={isFetching && !isLoading}
             zIndex={5}
             overlayProps={{ blur: 1, backgroundOpacity: 0.15 }}
             loaderProps={{ size: "sm" }}
           />
-          <Table
+          
+          {isMobile ? (
+            <Stack gap="md">
+              {routes.length > 0 ? (
+                routes.map((route) => (
+                  <Card key={route.id} withBorder radius="md" p="md">
+                    <Stack gap="xs">
+                      <Group justify="space-between">
+                        <Stack gap={2}>
+                          <Text fw={700} size="sm">{route.id}</Text>
+                          <Badge size="xs" variant="light" color={route.type === "http" ? "blue" : route.type === "grpc" ? "teal" : "orange"}>
+                            {route.type.toUpperCase()}
+                          </Badge>
+                        </Stack>
+                        <Group gap={4}>
+                          {route.disabled && <Badge color="gray" size="xs">PAUSED</Badge>}
+                          {!readOnly && (
+                            <Menu position="bottom-end">
+                              <Menu.Target>
+                                <ActionIcon variant="subtle">
+                                  <IconDotsVertical size={16} />
+                                </ActionIcon>
+                              </Menu.Target>
+                              <Menu.Dropdown>
+                                <Menu.Item leftSection={<IconEdit size={16} />} onClick={() => onEdit?.(route)}>Edit</Menu.Item>
+                                <Menu.Item leftSection={<IconCopy size={16} />} onClick={() => onClone?.(route)}>Clone</Menu.Item>
+                                <Menu.Item
+                                  leftSection={route.disabled ? <IconRefresh size={16} /> : <IconPlayerPause size={16} />}
+                                  onClick={() => onPause?.(route)}
+                                >
+                                  {route.disabled ? "Resume" : "Pause"}
+                                </Menu.Item>
+                                <Menu.Divider />
+                                <Menu.Item color="red" leftSection={<IconTrash size={16} />} onClick={() => {
+                                  if (confirm(`Delete route ${route.id}?`)) {
+                                    startTransition(() => {
+                                      deleteOptimisticRoute(route.id);
+                                      onDelete?.(route.id);
+                                    });
+                                  }
+                                }}>Delete</Menu.Item>
+                              </Menu.Dropdown>
+                            </Menu>
+                          )}
+                        </Group>
+                      </Group>
+                      
+                      <Box>
+                        <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Rule</Text>
+                        <Code block color="brand.1" c="brand.7" style={{ fontSize: 10 }}>{route.rule}</Code>
+                      </Box>
+                      
+                      <Group justify="space-between" align="flex-end">
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Upstream</Text>
+                          <Text size="xs" truncate>{route.service_id}</Text>
+                        </Stack>
+                        <Stack gap={2} align="flex-end">
+                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Traffic</Text>
+                          <RouteSparklineCell routeId={route.id} />
+                        </Stack>
+                      </Group>
+                    </Stack>
+                  </Card>
+                ))
+              ) : (
+                <Center py="xl">
+                  <Text c="dimmed">No routes found.</Text>
+                </Center>
+              )}
+            </Stack>
+          ) : (
+            <Table
             {...density}
             withRowBorders
             highlightOnHover
@@ -507,6 +582,7 @@ export default function RouteList({
               ))}
             </Table.Tbody>
           </Table>
+          )}
         </Box>
 
         {!limit && totalCount > pageSize && (

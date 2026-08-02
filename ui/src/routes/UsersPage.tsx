@@ -17,6 +17,8 @@ import {
   Tooltip,
   Pagination,
   Center,
+  Divider,
+  Menu,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useForm } from "@mantine/form";
@@ -33,12 +35,14 @@ import {
 } from "@tabler/icons-react";
 import { useUsers, apiFetch } from "../hooks/useGateon";
 import { useTableDensity } from "../hooks/useTableDensity";
+import { useIsMobile } from "../hooks/useMobile";
 import type { User } from "../types/gateon";
 import { useAuthStore } from "../store/useAuthStore";
 import { TwoFactorModal } from "../components/TwoFactorModal";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
+  const isMobile = useIsMobile();
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const density = useTableDensity();
@@ -351,7 +355,7 @@ export default function UsersPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap" gap="md">
         <div>
           <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
             User Management ({totalCount})
@@ -361,12 +365,13 @@ export default function UsersPage() {
             Control.
           </Text>
         </div>
-        <Group>
+        <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
           <TextInput
             placeholder="Search users..."
             leftSection={<IconSearch size={16} />}
             size="xs"
-            w={250}
+            w={isMobile ? "100%" : 250}
+            style={{ flex: isMobile ? "1 1 100%" : "none" }}
             value={search}
             onChange={(e) => {
               setSearch(e.currentTarget.value);
@@ -378,43 +383,129 @@ export default function UsersPage() {
             onClick={handleCreate}
             disabled={currentUser?.role !== "admin"}
             radius="md"
+            fullWidth={isMobile}
           >
             Add User
           </Button>
         </Group>
       </Group>
 
-      <Card withBorder padding="xl" radius="lg" shadow="xs">
-        <Table {...density}>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Username</Table.Th>
-              <Table.Th>Role</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
+      <Card withBorder padding={isMobile ? "sm" : "xl"} radius="lg" shadow="xs">
+        {isMobile ? (
+          <Stack gap="md">
             {isLoading ? (
-              <Table.Tr>
-                <Table.Td colSpan={3}>
-                  <Text ta="center" py="xl" c="dimmed">
-                    Loading users...
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
-            ) : rows?.length === 0 ? (
-              <Table.Tr>
-                <Table.Td colSpan={3}>
-                  <Text ta="center" py="xl" c="dimmed">
-                    No users found
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
+               <Text ta="center" py="xl" c="dimmed">Loading users...</Text>
+            ) : users.length === 0 ? (
+               <Text ta="center" py="xl" c="dimmed">No users found</Text>
             ) : (
-              rows
+              users.map((user) => (
+                <Card key={user.id} withBorder radius="md" p="md">
+                  <Stack gap="xs">
+                    <Group justify="space-between" align="flex-start">
+                      <Stack gap={2}>
+                        <Group gap="xs">
+                          <Text fw={700} size="sm">{user.username}</Text>
+                          {currentUser?.id === user.id && <Badge size="xs" variant="light">You</Badge>}
+                        </Group>
+                        <Badge
+                          size="xs"
+                          color={user.role === "admin" ? "red" : user.role === "operator" ? "blue" : "gray"}
+                          variant="light"
+                        >
+                          {user.role}
+                        </Badge>
+                      </Stack>
+                      <Group gap={4}>
+                         {user.disabled && <Badge size="xs" color="red" variant="light">Disabled</Badge>}
+                         {user.two_factor_enabled ? (
+                            <Badge size="xs" color="green" variant="light">2FA</Badge>
+                          ) : user.two_factor_pending ? (
+                            <Badge size="xs" color="orange" variant="light">2FA pending</Badge>
+                          ) : null}
+                      </Group>
+                    </Group>
+                    <Divider variant="dashed" />
+                    <Group justify="flex-end" gap="xs">
+                      <Tooltip label="Change password">
+                        <ActionIcon
+                          variant="light"
+                          color="blue"
+                          onClick={() => handleChangePassword(user)}
+                          disabled={currentUser?.role !== "admin" && currentUser?.id !== user.id}
+                        >
+                          <IconKey size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <ActionIcon
+                        variant="light"
+                        color={user.two_factor_enabled ? "green" : user.two_factor_pending ? "orange" : "gray"}
+                        onClick={() => handle2FA(user)}
+                        disabled={!(currentUser?.id === user.id || (isAdmin && !user.two_factor_enabled))}
+                      >
+                        <IconShieldLock size={16} />
+                      </ActionIcon>
+                      <ActionIcon
+                        variant="light"
+                        color={user.disabled ? "green" : "orange"}
+                        onClick={() => handleToggleDisabled(user)}
+                        disabled={!isAdmin || currentUser?.id === user.id}
+                      >
+                        {user.disabled ? <IconUserCheck size={16} /> : <IconBan size={16} />}
+                      </ActionIcon>
+                      <ActionIcon
+                        variant="light"
+                        color="gray"
+                        onClick={() => handleEdit(user)}
+                        disabled={currentUser?.role !== "admin"}
+                      >
+                        <IconEdit size={16} />
+                      </ActionIcon>
+                      <ActionIcon
+                        variant="light"
+                        color="red"
+                        onClick={() => handleDelete(user.id)}
+                        disabled={currentUser?.role !== "admin" || currentUser?.id === user.id}
+                      >
+                        <IconTrash size={16} />
+                      </ActionIcon>
+                    </Group>
+                  </Stack>
+                </Card>
+              ))
             )}
-          </Table.Tbody>
-        </Table>
+          </Stack>
+        ) : (
+          <Table {...density}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Username</Table.Th>
+                <Table.Th>Role</Table.Th>
+                <Table.Th />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {isLoading ? (
+                <Table.Tr>
+                  <Table.Td colSpan={3}>
+                    <Text ta="center" py="xl" c="dimmed">
+                      Loading users...
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ) : rows?.length === 0 ? (
+                <Table.Tr>
+                  <Table.Td colSpan={3}>
+                    <Text ta="center" py="xl" c="dimmed">
+                      No users found
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ) : (
+                rows
+              )}
+            </Table.Tbody>
+          </Table>
+        )}
         {totalCount > pageSize && (
           <Group justify="center" py="md" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
             <Pagination

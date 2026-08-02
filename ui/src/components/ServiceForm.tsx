@@ -503,100 +503,102 @@ export function ServiceForm({
                         : "http";
                     return (
                     <Paper key={i} withBorder p="sm" radius="md" style={{ backgroundColor: "var(--mantine-color-default-hover)" }}>
-                      <Group gap="sm" align="flex-end" wrap="nowrap">
-                        {!isL4 && (
+                      <Stack gap="sm">
+                        <Group gap="sm" align="flex-end" wrap="wrap">
+                          {!isL4 && (
+                            <form.Field
+                              name={`weighted_targets[${i}].protocol`}
+                              children={(protoField: any) => (
+                                <Select
+                                  label={i === 0 ? "Protocol" : "Protocol"}
+                                  data={protocolOpts}
+                                  value={protoField.state.value || protocol}
+                                  onChange={(v) => {
+                                    protoField.handleChange(v || protocol);
+                                    const url = field.state.value[i]?.url ?? "";
+                                    if (url) {
+                                      const host = url.replace(/^(https?|h2c?):\/\//, "") || url;
+                                      const scheme =
+                                        backendType === "grpc"
+                                          ? v === "h2"
+                                            ? "h2"
+                                            : "h2c"
+                                          : v === "https"
+                                            ? "https"
+                                            : "http";
+                                      form.setFieldValue(`weighted_targets[${i}].url`, `${scheme}://${host}`);
+                                    }
+                                  }}
+                                  style={{ flex: 1, minWidth: 140 }}
+                                  size="sm"
+                                />
+                              )}
+                            />
+                          )}
                           <form.Field
-                            name={`weighted_targets[${i}].protocol`}
-                            children={(protoField: any) => (
-                              <Select
-                                label={i === 0 ? "Protocol" : undefined}
-                                data={protocolOpts}
-                                value={protoField.state.value || protocol}
-                                onChange={(v) => {
-                                  protoField.handleChange(v || protocol);
-                                  const url = field.state.value[i]?.url ?? "";
-                                  if (url) {
-                                    const host = url.replace(/^(https?|h2c?):\/\//, "") || url;
+                            name={`weighted_targets[${i}].url`}
+                            children={(urlField: any) => (
+                              <TextInput
+                                label={i === 0 ? (isL4 ? "Address (host:port)" : "URL (host:port)") : (isL4 ? "Address" : "URL")}
+                                placeholder={isL4 ? "db1:5432 or dns:53" : "localhost:8080 or backend.example.com:443"}
+                                value={(urlField.state.value || "").replace(/^(https?|h2c?|tcp|udp):\/\//, "")}
+                                onBlur={urlField.handleBlur}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  if (isL4) {
+                                    urlField.handleChange(v.trim());
+                                  } else {
+                                    const p = field.state.value[i]?.protocol;
                                     const scheme =
                                       backendType === "grpc"
-                                        ? v === "h2"
+                                        ? p === "h2"
                                           ? "h2"
                                           : "h2c"
-                                        : v === "https"
+                                        : p === "https" || p === "h2"
                                           ? "https"
                                           : "http";
-                                    form.setFieldValue(`weighted_targets[${i}].url`, `${scheme}://${host}`);
+                                    const withScheme =
+                                      v.startsWith("http") || v.startsWith("h2")
+                                        ? v
+                                        : `${scheme}://${v}`;
+                                    urlField.handleChange(v ? withScheme : "");
                                   }
                                 }}
-                                style={{ minWidth: 140 }}
+                                style={{ flex: 2, minWidth: 180 }}
                                 size="sm"
                               />
                             )}
                           />
-                        )}
-                        <form.Field
-                          name={`weighted_targets[${i}].url`}
-                          children={(urlField: any) => (
-                            <TextInput
-                              label={i === 0 ? (isL4 ? "Address (host:port)" : "URL (host:port)") : undefined}
-                              placeholder={isL4 ? "db1:5432 or dns:53" : "localhost:8080 or backend.example.com:443"}
-                              value={(urlField.state.value || "").replace(/^(https?|h2c?|tcp|udp):\/\//, "")}
-                              onBlur={urlField.handleBlur}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (isL4) {
-                                  urlField.handleChange(v.trim());
-                                } else {
-                                  const p = field.state.value[i]?.protocol;
-                                  const scheme =
-                                    backendType === "grpc"
-                                      ? p === "h2"
-                                        ? "h2"
-                                        : "h2c"
-                                      : p === "https" || p === "h2"
-                                        ? "https"
-                                        : "http";
-                                  const withScheme =
-                                    v.startsWith("http") || v.startsWith("h2")
-                                      ? v
-                                      : `${scheme}://${v}`;
-                                  urlField.handleChange(v ? withScheme : "");
-                                }
-                              }}
-                              style={{ flex: 1, minWidth: 180 }}
-                              size="sm"
+                          {!isL4 && (
+                            <form.Field
+                              name={`weighted_targets[${i}].weight`}
+                              children={(weightField: any) => (
+                                <Tooltip label="Higher weight = more traffic.">
+                                  <NumberInput
+                                    label={i === 0 ? "Weight" : "Weight"}
+                                    value={weightField.state.value}
+                                    onBlur={weightField.handleBlur}
+                                    onChange={(v) => weightField.handleChange(Number(v))}
+                                    style={{ flex: 1, minWidth: 80, maxWidth: isL4 ? '100%' : 90 }}
+                                    min={1}
+                                    size="sm"
+                                  />
+                                </Tooltip>
+                              )}
                             />
                           )}
-                        />
-                        {!isL4 && (
-                          <form.Field
-                            name={`weighted_targets[${i}].weight`}
-                            children={(weightField: any) => (
-                              <Tooltip label="Higher weight = more traffic.">
-                                <NumberInput
-                                  label={i === 0 ? "Weight" : undefined}
-                                  value={weightField.state.value}
-                                  onBlur={weightField.handleBlur}
-                                  onChange={(v) => weightField.handleChange(Number(v))}
-                                  style={{ maxWidth: 90 }}
-                                  min={1}
-                                  size="sm"
-                                />
-                              </Tooltip>
-                            )}
-                          />
-                        )}
-                        <ActionIcon
-                          color="red"
-                          variant="subtle"
-                          size="lg"
-                          onClick={() => form.removeFieldValue("weighted_targets", i)}
-                          disabled={field.state.value.length === 1}
-                          style={{ marginBottom: 2 }}
-                        >
-                          <IconTrash size={16} />
-                        </ActionIcon>
-                      </Group>
+                          <ActionIcon
+                            color="red"
+                            variant="subtle"
+                            size="lg"
+                            onClick={() => form.removeFieldValue("weighted_targets", i)}
+                            disabled={field.state.value.length === 1}
+                            style={{ marginBottom: 2 }}
+                          >
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Group>
+                      </Stack>
                     </Paper>
                   )})}
                 </Stack>
