@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { visualizer } from 'rollup-plugin-visualizer'
+import { compression } from 'vite-plugin-compression2'
+import { VitePWA } from 'vite-plugin-pwa'
 
 // Set ANALYZE=1 to emit dist/stats.html (treemap of chunk/module sizes) after a
 // build, e.g. `ANALYZE=1 bun run build`. Off by default so normal/CI builds are
@@ -10,6 +12,50 @@ const analyze = process.env.ANALYZE === '1' || process.env.ANALYZE === 'true'
 export default defineConfig({
   plugins: [
     react(),
+    // Pre-compress assets to save CPU at runtime
+    compression({ algorithm: 'brotli', exclude: [/\.(br)$/, /\.(gz)$/] }),
+    compression({ algorithm: 'gzip', exclude: [/\.(br)$/, /\.(gz)$/] }),
+    // PWA: Offline-first assets and near-instant loading
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      manifest: {
+        name: 'Gateon Dashboard',
+        short_name: 'Gateon',
+        description: 'Ultra-Intelligent Defense Gateway',
+        theme_color: '#1a1b1e',
+        icons: [
+          {
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png'
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png'
+          }
+        ]
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Stale-While-Revalidate for configuration files ensures immediate transition
+        // without loading spinners, while keeping the data fresh in the background.
+        runtimeCaching: [
+          {
+            urlPattern: /\/v1\/config.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'gateon-config-cache',
+              expiration: {
+                maxEntries: 50,
+                maxAgeSeconds: 60 * 60 * 24 // 24 hours
+              }
+            }
+          }
+        ]
+      }
+    }),
     ...(analyze
       ? [
           visualizer({

@@ -27,6 +27,7 @@ import (
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect"
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
@@ -104,6 +105,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		grpcweb.WithCorsForRegisteredEndpointsOnly(false),
 	)
 	mux := http.NewServeMux()
+
+	// Register ConnectRPC handler for the internal API.
+	// This provides high-performance binary communication for the dashboard.
+	mux.Handle(gateonv1connect.NewApiServiceHandler(api.NewConnectHandler(apiService)))
+
 	handlers.RegisterRESTHandlers(mux, apiService, &handlers.Deps{
 		RouteService:       routeService,
 		ServiceService:     serviceService,
