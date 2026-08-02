@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 // Package yara implements a dependency-free, pure-Go signature engine
 // ("YARA-lite") for inspecting uploaded file content for known malware,
 // webshells, exploit payloads, and other malicious indicators.

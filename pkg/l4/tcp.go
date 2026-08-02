@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 // Package l4 provides production-ready L4 (TCP/UDP) proxy with load balancing and health checks.
 package l4
 

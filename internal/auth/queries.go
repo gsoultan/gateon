@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 package auth
 
 // SQL queries for user management. Dialect.Rebind replaces ? with $N (Postgres) as needed.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 package ebpf
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpf -type ebpf_config gateon_ebpf bpf/xdp_rate_limit.c
