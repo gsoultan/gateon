@@ -27,10 +27,12 @@ import {
   IconServer,
 } from "@tabler/icons-react";
 import { useAuthStore } from "../store/useAuthStore";
+import { useIsMobile } from "../hooks/useMobile";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [activeFeature, setActiveFeature] = useState(0);
   const [step, setStep] = useState<"login" | "2fa" | "2fa-setup">("login");
@@ -298,12 +300,12 @@ export default function LoginPage() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "40px",
+            padding: isMobile ? "24px 16px" : "40px",
           }}
         >
           <Box maw={420} w="100%">
-            <Box mb={50}>
-              <Box hiddenFrom="md" mb={30}>
+            <Box mb={isMobile ? 30 : 50}>
+              <Box hiddenFrom="md" mb={24}>
                  <Group gap="xs">
                     <IconActivity size={32} className="text-indigo-600" />
                     <Title order={3} fw={900} className="tracking-tight">GATEON</Title>

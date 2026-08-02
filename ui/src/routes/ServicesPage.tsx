@@ -4,6 +4,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { IconPlus, IconServer, IconSearch, IconDotsVertical, IconEdit, IconTrash, IconExternalLink, IconActivity, IconChevronDown, IconChevronRight, IconRocket } from '@tabler/icons-react'
 import { useServices, apiFetch, getApiErrorMessage } from '../hooks/useGateon'
 import { usePermissions } from '../hooks/usePermissions'
+import { useIsMobile } from '../hooks/useMobile'
 import { ServiceForm } from '../components/ServiceForm'
 import { CanaryWizard } from '../components/CanaryWizard'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11,6 +12,7 @@ import { notifications } from '@mantine/notifications'
 
 export default function ServicesPage() {
   const { canWrite } = usePermissions()
+  const isMobile = useIsMobile()
   const [opened, { open, close }] = useDisclosure(false)
   const [canaryOpened, { open: openCanary, close: closeCanary }] = useDisclosure(false)
   const [search, setSearch] = useState('')
@@ -130,11 +132,66 @@ export default function ServicesPage() {
               setPage(1)
             }}
             size="xs"
-            w={300}
+            w={isMobile ? '100%' : 300}
           />
 
-          <Box style={{ overflowX: 'auto' }}>
-            <Table verticalSpacing="md" highlightOnHover layout="fixed">
+          <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
+            {isMobile ? (
+              <Stack gap="md">
+                {services.length === 0 && !isLoading && (
+                  <Center py={48}>
+                    <Stack align="center" gap="sm">
+                      <IconServer size={48} stroke={1.2} style={{ opacity: 0.4 }} />
+                      <Text c="dimmed" ta="center">No services found.</Text>
+                    </Stack>
+                  </Center>
+                )}
+                {services.map(s => (
+                  <Card key={s.id} withBorder radius="md" p="md">
+                    <Stack gap="xs">
+                      <Group justify="space-between" align="flex-start">
+                        <Stack gap={2}>
+                          <Text fw={700} size="sm" c="indigo.3">{s.id}</Text>
+                          <Text size="xs" c="dimmed">{s.name}</Text>
+                        </Stack>
+                        <Group gap={4}>
+                          <Badge size="xs" variant="outline">{(s.load_balancer_policy || "").replace(/_/g, ' ')}</Badge>
+                          {canWrite && (
+                            <Menu shadow="md" position="bottom-end">
+                              <Menu.Target>
+                                <ActionIcon variant="subtle" color="gray"><IconDotsVertical size={16} /></ActionIcon>
+                              </Menu.Target>
+                              <Menu.Dropdown>
+                                <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => handleEdit(s)}>Edit</Menu.Item>
+                                <Menu.Item leftSection={<IconRocket size={14} />} color="blue" onClick={() => handleCanary(s)}>Canary Deployment</Menu.Item>
+                                <Menu.Divider />
+                                <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => deleteMutation.mutate(s.id)}>Delete</Menu.Item>
+                              </Menu.Dropdown>
+                            </Menu>
+                          )}
+                        </Group>
+                      </Group>
+                      
+                      <Box>
+                        <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>Targets ({s.weighted_targets.length})</Text>
+                        <Stack gap={4} mt={4}>
+                          {s.weighted_targets.slice(0, 3).map((t, i) => (
+                            <Group key={i} gap="xs" wrap="nowrap">
+                              <Text size="xs" ff="monospace" truncate style={{ flex: 1 }}>{t.url}</Text>
+                              <Badge size="xs" variant="light">{t.weight}</Badge>
+                            </Group>
+                          ))}
+                          {s.weighted_targets.length > 3 && (
+                            <Text size="xs" c="dimmed">+{s.weighted_targets.length - 3} more...</Text>
+                          )}
+                        </Stack>
+                      </Box>
+                    </Stack>
+                  </Card>
+                ))}
+              </Stack>
+            ) : (
+              <Table verticalSpacing="md" highlightOnHover layout="fixed">
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th w={40} />
@@ -251,6 +308,7 @@ export default function ServicesPage() {
                 })}
               </Table.Tbody>
             </Table>
+            )}
           </Box>
 
           {totalCount > pageSize && (
@@ -271,7 +329,7 @@ export default function ServicesPage() {
         onClose={close}
         title={<Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>{editingService ? 'Edit Service' : 'Create New Service'}</Text>}
         position="right"
-        size="50%"
+        size={isMobile ? "100%" : "50%"}
         padding="xl"
         styles={{
           header: { borderBottom: '1px solid var(--mantine-color-default-border)', marginBottom: 'xl' },
@@ -289,7 +347,7 @@ export default function ServicesPage() {
         onClose={closeCanary}
         title={<Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>Canary Deployment Wizard</Text>}
         position="right"
-        size="md"
+        size={isMobile ? "100%" : "md"}
         padding="xl"
       >
         {canaryService && (

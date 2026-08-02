@@ -102,3 +102,29 @@ body {
   width: 256px;
   height: 256px;
 }
+
+/* Mobile Friendly Tabs */
+.scrollable-tabs-list {
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scrollable-tabs-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* Ensure forms and cards take full width on mobile */
+@media (max-width: 768px) {
+  .mantine-Container-root {
+    padding-left: var(--mantine-spacing-xs);
+    padding-right: var(--mantine-spacing-xs);
+  }
+
+  .mantine-Card-root {
+    padding: var(--mantine-spacing-sm) !important;
+  }
+}

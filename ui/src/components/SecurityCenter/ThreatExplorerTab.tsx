@@ -159,9 +159,9 @@ export function ThreatExplorerTab() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
+      <Group justify="space-between" align="flex-end" wrap="wrap" gap="md">
         <Tabs value={mitigatedFilter} onChange={setMitigatedFilter} variant="pills" radius="md">
-          <Tabs.List>
+          <Tabs.List className="scrollable-tabs-list">
             <Tabs.Tab value="detected" leftSection={<IconAlertTriangle size={16} />}>Active Threats</Tabs.Tab>
             <Tabs.Tab value="mitigated" leftSection={<IconShieldCheck size={16} />}>Mitigated ({totalMitigations})</Tabs.Tab>
             <Tabs.Tab value="all">Historical Logs</Tabs.Tab>
@@ -170,7 +170,7 @@ export function ThreatExplorerTab() {
 
         {mitigatedFilter === "mitigated" && (
           <Tabs value={mitigationSubTab} onChange={setMitigationSubTab} variant="outline" radius="md">
-            <Tabs.List>
+            <Tabs.List className="scrollable-tabs-list">
               <Tabs.Tab value="user" leftSection={<IconUserCheck size={16} />}>User Mitigations</Tabs.Tab>
               <Tabs.Tab value="ip" leftSection={<IconShieldLock size={16} />}>IP Mitigations</Tabs.Tab>
             </Tabs.List>

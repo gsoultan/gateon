@@ -132,7 +132,7 @@ export default function ProfilePage() {
 
   return (
     <Stack gap="lg">
-      <Group gap="sm">
+      <Group gap="sm" wrap="wrap">
         <ThemeIcon size={36} radius="md" variant="light" color="blue">
           <IconUserCircle size={22} />
         </ThemeIcon>
@@ -148,11 +148,11 @@ export default function ProfilePage() {
 
       <Card withBorder radius="lg" shadow="sm" p="xl">
         <Group justify="space-between" wrap="wrap" gap="lg">
-          <Group gap="lg" wrap="nowrap">
+          <Group gap="lg" wrap="wrap">
             <Avatar color="blue" radius="xl" size={72}>
               {initial || <IconUser size={36} />}
             </Avatar>
-            <Stack gap={4}>
+            <Stack gap={4} style={{ flex: 1, minWidth: 200 }}>
               <Title order={3} fw={800}>
                 {username}
               </Title>

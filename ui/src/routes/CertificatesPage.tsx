@@ -1,13 +1,15 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Badge, List, ThemeIcon, Textarea, Code } from '@mantine/core'
-import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, IconKey, IconTrash, IconPencil, IconAlertTriangle, IconCheck, IconBulb, IconClipboard } from '@tabler/icons-react'
+import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Badge, List, ThemeIcon, Textarea, Code, SimpleGrid } from '@mantine/core'
+import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, IconKey, IconTrash, IconPencil, IconAlertTriangle, IconCheck, IconBulb, IconClipboard, IconDotsVertical } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
+import { useIsMobile } from "../hooks/useMobile"
 import type { GlobalConfig, Certificate } from '../types/gateon'
 import { apiFetch } from '../hooks/useGateon'
 import { usePermissions } from '../hooks/usePermissions'
 
 export default function CertificatesPage() {
   const { canUploadCerts } = usePermissions()
+  const isMobile = useIsMobile()
   const [config, setConfig] = useState<GlobalConfig>({
     tls: { enabled: false },
   })
@@ -176,13 +178,13 @@ export default function CertificatesPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap" gap="md">
         <div>
           <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Certificates</Title>
           <Text c="dimmed" size="sm">Manage SSL/TLS certificates for your domains.</Text>
         </div>
         {canUploadCerts && (
-          <Button leftSection={<IconPlus size={16} />} onClick={startAdd}>Add Certificate</Button>
+          <Button leftSection={<IconPlus size={16} />} onClick={startAdd} fullWidth={isMobile}>Add Certificate</Button>
         )}
       </Group>
 
@@ -190,75 +192,133 @@ export default function CertificatesPage() {
         Certificates managed here can be used across multiple routes or assigned to entrypoints.
       </Alert>
 
-      <Card withBorder padding={0} radius="lg" shadow="xs">
-        <ScrollArea>
-          <Table verticalSpacing="md" horizontalSpacing="xl" highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Certificate File</Table.Th>
-                <Table.Th>Key File</Table.Th>
-                <Table.Th>CA File</Table.Th>
-                <Table.Th style={{ width: 100 }}>Actions</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {certificates.length === 0 ? (
-                <Table.Tr>
-                  <Table.Td colSpan={5}>
-                    <Center py="xl">
-                      <Text c="dimmed">No certificates configured</Text>
-                    </Center>
-                  </Table.Td>
-                </Table.Tr>
-              ) : (
-                paginatedCerts.map((cert) => (
-                  <Table.Tr key={cert.id}>
-                    <Table.Td>
-                      <Group gap="sm">
-                        <IconCertificate size={16} color="var(--mantine-color-blue-6)" />
+      <Card withBorder padding={isMobile ? 'sm' : 0} radius="lg" shadow="xs">
+        {isMobile ? (
+          <Stack gap="md">
+            {certificates.length === 0 ? (
+               <Center py="xl">
+                 <Text c="dimmed">No certificates configured</Text>
+               </Center>
+            ) : (
+              paginatedCerts.map((cert) => (
+                <Card key={cert.id} withBorder radius="md" p="md">
+                  <Stack gap="xs">
+                    <Group justify="space-between" align="flex-start">
+                      <Group gap="sm" wrap="nowrap">
+                        <IconCertificate size={20} color="var(--mantine-color-blue-6)" />
                         <Stack gap={0}>
-                          <Text fw={600}>{cert.name}</Text>
+                          <Text fw={700} size="sm">{cert.name}</Text>
                           {cert.validation?.warnings && cert.validation.warnings.length > 0 && (
                             <Group gap={4}>
                               <IconAlertTriangle size={12} color="var(--mantine-color-orange-6)" />
-                              <Text size="xs" c="orange.6" fw={500}>{cert.validation.warnings.length} issues</Text>
+                              <Text size="xs" c="orange.6" fw={600}>{cert.validation.warnings.length} issues</Text>
                             </Group>
                           )}
                         </Stack>
                       </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" ff="monospace" c="dimmed">{cert.cert_file}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" ff="monospace" c="dimmed">{cert.key_file}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" ff="monospace" c="dimmed">{cert.ca_file || '—'}</Text>
-                    </Table.Td>
-                    <Table.Td>
                       {canUploadCerts && (
-                        <Group gap="xs" justify="flex-end">
-                          <Tooltip label="Edit">
-                            <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)}>
-                              <IconPencil size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                          <Tooltip label="Remove">
-                            <ActionIcon variant="subtle" color="red" onClick={() => removeCertificate(cert.id)}>
-                              <IconTrash size={16} />
-                            </ActionIcon>
-                          </Tooltip>
+                        <Group gap={4}>
+                          <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)}>
+                            <IconPencil size={16} />
+                          </ActionIcon>
+                          <ActionIcon variant="subtle" color="red" onClick={() => removeCertificate(cert.id)}>
+                            <IconTrash size={16} />
+                          </ActionIcon>
                         </Group>
                       )}
+                    </Group>
+                    <Divider variant="dashed" />
+                    <SimpleGrid cols={1} spacing={4}>
+                       <Box>
+                         <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>Cert File</Text>
+                         <Text size="xs" ff="monospace" truncate>{cert.cert_file}</Text>
+                       </Box>
+                       <Box>
+                         <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>Key File</Text>
+                         <Text size="xs" ff="monospace" truncate>{cert.key_file}</Text>
+                       </Box>
+                       {cert.ca_file && (
+                         <Box>
+                           <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>CA File</Text>
+                           <Text size="xs" ff="monospace" truncate>{cert.ca_file}</Text>
+                         </Box>
+                       )}
+                    </SimpleGrid>
+                  </Stack>
+                </Card>
+              ))
+            )}
+          </Stack>
+        ) : (
+          <ScrollArea>
+            <Table verticalSpacing="md" horizontalSpacing="xl" highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Name</Table.Th>
+                  <Table.Th>Certificate File</Table.Th>
+                  <Table.Th>Key File</Table.Th>
+                  <Table.Th>CA File</Table.Th>
+                  <Table.Th style={{ width: 100 }}>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {certificates.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={5}>
+                      <Center py="xl">
+                        <Text c="dimmed">No certificates configured</Text>
+                      </Center>
                     </Table.Td>
                   </Table.Tr>
-                ))
-              )}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea>
+                ) : (
+                  paginatedCerts.map((cert) => (
+                    <Table.Tr key={cert.id}>
+                      <Table.Td>
+                        <Group gap="sm">
+                          <IconCertificate size={16} color="var(--mantine-color-blue-6)" />
+                          <Stack gap={0}>
+                            <Text fw={600}>{cert.name}</Text>
+                            {cert.validation?.warnings && cert.validation.warnings.length > 0 && (
+                              <Group gap={4}>
+                                <IconAlertTriangle size={12} color="var(--mantine-color-orange-6)" />
+                                <Text size="xs" c="orange.6" fw={500}>{cert.validation.warnings.length} issues</Text>
+                              </Group>
+                            )}
+                          </Stack>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" ff="monospace" c="dimmed">{cert.cert_file}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" ff="monospace" c="dimmed">{cert.key_file}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" ff="monospace" c="dimmed">{cert.ca_file || '—'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {canUploadCerts && (
+                          <Group gap="xs" justify="flex-end">
+                            <Tooltip label="Edit">
+                              <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)}>
+                                <IconPencil size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Remove">
+                              <ActionIcon variant="subtle" color="red" onClick={() => removeCertificate(cert.id)}>
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Group>
+                        )}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
         {certificates.length > PAGE_SIZE && (
           <Box p="md" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
             <Group justify="space-between" align="center">
