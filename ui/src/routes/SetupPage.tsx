@@ -132,8 +132,8 @@ export default function SetupPage() {
   });
 
   const nextStep = async () => {
-    const adminValid = form.validateField("admin_username").hasError === false &&
-      form.validateField("admin_password").hasError === false &&
+    const adminValid = form.validateField("adminUsername").hasError === false &&
+      form.validateField("adminPassword").hasError === false &&
       form.validateField("confirm_password").hasError === false;
     const securityValid = form.validateField("paseto_secret").hasError === false;
     const managementValid = form.validateField("management_bind").hasError === false &&
@@ -180,8 +180,8 @@ export default function SetupPage() {
 
   const form = useForm({
     initialValues: {
-      admin_username: "admin",
-      admin_password: "",
+      adminUsername: "admin",
+      adminPassword: "",
       confirm_password: "",
       paseto_secret: "",
       management_bind: "0.0.0.0",
@@ -211,9 +211,9 @@ export default function SetupPage() {
       log_db_ssl_mode: "disable",
     },
     validate: {
-      admin_username: (value) => (value.length < 3 ? "Username too short" : null),
-      admin_password: (val) => (val.length < 8 ? "Password must be at least 8 characters" : null),
-      confirm_password: (val, values) => (val !== values.admin_password ? "Passwords do not match" : null),
+      adminUsername: (value) => (value.length < 3 ? "Username too short" : null),
+      adminPassword: (val) => (val.length < 8 ? "Password must be at least 8 characters" : null),
+      confirm_password: (val, values) => (val !== values.adminPassword ? "Passwords do not match" : null),
       paseto_secret: (val) => (val.length !== 32 ? "Secret must be exactly 32 characters" : null),
       management_bind: (val) => (!val ? "Bind address is required" : null),
       management_port: (val) => (!val ? "Port is required" : null),
@@ -229,8 +229,8 @@ export default function SetupPage() {
     setError(null);
     try {
       const payload: any = {
-        admin_username: values.admin_username,
-        admin_password: values.admin_password,
+        adminUsername: values.adminUsername,
+        adminPassword: values.adminPassword,
         paseto_secret: values.paseto_secret,
         management_bind: values.management_bind,
         management_port: values.management_port,
@@ -367,7 +367,7 @@ export default function SetupPage() {
                         required
                         size="md"
                         leftSection={<IconUser size={rem(18)} stroke={1.5} />}
-                        {...form.getInputProps("admin_username")}
+                        {...form.getInputProps("adminUsername")}
                       />
                       <SimpleGrid cols={{ base: 1, sm: 2 }}>
                         <PasswordInput
@@ -377,12 +377,12 @@ export default function SetupPage() {
                           size="md"
                           leftSection={<IconLock size={rem(18)} stroke={1.5} />}
                           rightSectionWidth={68}
-                          {...form.getInputProps("admin_password")}
+                          {...form.getInputProps("adminPassword")}
                           rightSection={
                             <Group gap={0}>
                               <Tooltip label={clipboard.copied ? "Copied" : "Copy Password"}>
                                 <ActionIcon
-                                  onClick={() => clipboard.copy(form.values.admin_password)}
+                                  onClick={() => clipboard.copy(form.values.adminPassword)}
                                   variant="subtle"
                                   color={clipboard.copied ? "teal" : "gray"}
                                 >
@@ -393,7 +393,7 @@ export default function SetupPage() {
                                 <ActionIcon
                                   onClick={() => {
                                     const pwd = generateRandomString(16);
-                                    form.setFieldValue("admin_password", pwd);
+                                    form.setFieldValue("adminPassword", pwd);
                                     form.setFieldValue("confirm_password", pwd);
                                   }}
                                   variant="subtle"
@@ -711,7 +711,7 @@ export default function SetupPage() {
                     <Stack gap="xs">
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">Username:</Text>
-                        <Code>{form.values.admin_username}</Code>
+                        <Code>{form.values.adminUsername}</Code>
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">PASETO Secret:</Text>

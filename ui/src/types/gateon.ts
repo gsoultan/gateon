@@ -3,10 +3,10 @@ export type WafRule = {
   name: string;
   directive: string;
   enabled: boolean;
-  paranoia_level: number;
+  paranoiaLevel: number;
   category: string;
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ListWafRulesResponse = {
@@ -49,21 +49,21 @@ export type MiddlewarePreset = {
 export type PathStats = {
   host: string;
   path: string;
-  request_count: number;
-  bytes_total: number;
-  latency_sum_seconds: number;
-  avg_latency_seconds: number;
+  requestCount: number;
+  bytesTotal: number;
+  latencySumSeconds: number;
+  avgLatencySeconds: number;
 };
 
 export type TargetStats = {
   url: string;
   alive: boolean;
-  request_count: number;
-  error_count: number;
-  avg_latency_ms: number;
-  active_conn: number;
-  circuit_state?: string;
-  status_codes?: Record<string, number>;
+  requestCount: number;
+  errorCount: number;
+  avgLatencyMs: number;
+  activeConn: number;
+  circuitState?: string;
+  statusCodes?: Record<string, number>;
 };
 
 export type Target = {
@@ -71,8 +71,8 @@ export type Target = {
   weight: number;
   /** For HTTP: "http" | "https"; for gRPC: "h2" | "h2c" */
   protocol?: string;
-  proxy_protocol_enabled?: boolean;
-  proxy_protocol_version?: ProxyProtocolVersion;
+  proxyProtocolEnabled?: boolean;
+  proxyProtocolVersion?: ProxyProtocolVersion;
 };
 
 export enum ProxyProtocolVersion {
@@ -89,43 +89,43 @@ export enum TlsClientCertSelectionStrategy {
 
 export type TlsClientIdentity = {
   id?: string;
-  cert_file?: string;
-  key_file?: string;
-  match_hosts?: string[];
-  match_header?: string;
-  match_header_value?: string;
+  certFile?: string;
+  keyFile?: string;
+  matchHosts?: string[];
+  matchHeader?: string;
+  matchHeaderValue?: string;
 };
 
 export type TlsClientConfig = {
   enabled: boolean;
-  cert_file?: string;
-  key_file?: string;
-  ca_file?: string;
-  skip_verify?: boolean;
-  server_name?: string;
-  cert_selection_strategy?: TlsClientCertSelectionStrategy;
-  cert_identities?: TlsClientIdentity[];
+  certFile?: string;
+  keyFile?: string;
+  caFile?: string;
+  skipVerify?: boolean;
+  serverName?: string;
+  certSelectionStrategy?: TlsClientCertSelectionStrategy;
+  certIdentities?: TlsClientIdentity[];
 };
 
 export type Service = {
   id: string;
   name: string;
-  weighted_targets: Target[];
-  load_balancer_policy: string;
-  health_check_path: string;
-  backend_type?: "http" | "grpc" | "graphql" | "tcp" | "udp";
-  l4_health_check_interval_ms?: number;
-  l4_health_check_timeout_ms?: number;
-  l4_udp_session_timeout_s?: number;
-  l4_proxy_protocol?: boolean;
-  discovery_url?: string;
-  tls_client_config?: TlsClientConfig;
+  weightedTargets: Target[];
+  loadBalancerPolicy: string;
+  healthCheckPath: string;
+  backendType?: "http" | "grpc" | "graphql" | "tcp" | "udp";
+  l4HealthCheckIntervalMs?: number;
+  l4HealthCheckTimeoutMs?: number;
+  l4UdpSessionTimeoutS?: number;
+  l4ProxyProtocol?: boolean;
+  discoveryUrl?: string;
+  tlsClientConfig?: TlsClientConfig;
   /** Overrides the target port for health checks (e.g. HTTP health on port 3001 while gRPC runs on 3000). */
-  health_check_port?: number;
+  healthCheckPort?: number;
   /** Overrides the scheme for health checks (e.g. "http", "https"). */
-  health_check_protocol?: string;
+  healthCheckProtocol?: string;
   /** Determines whether to use HTTP or gRPC standard health check. */
-  health_check_type?: HealthCheckType;
+  healthCheckType?: HealthCheckType;
 };
 
 export enum HealthCheckType {
@@ -137,32 +137,32 @@ export enum HealthCheckType {
 }
 
 export type RouteTLSConfig = {
-  certificate_ids: string[];
-  option_id?: string;
+  certificateIds: string[];
+  optionId?: string;
 };
 
 export type TLSOption = {
   id: string;
   name: string;
-  min_tls_version?: string;
-  max_tls_version?: string;
-  cipher_suites?: string[];
+  minTlsVersion?: string;
+  maxTlsVersion?: string;
+  cipherSuites?: string[];
   prefer_server_cipher_suites?: boolean;
-  client_auth_type?: string;
-  sni_strict?: boolean;
-  alpn_protocols?: string[];
-  client_authority_ids?: string[];
+  clientAuthType?: string;
+  sniStrict?: boolean;
+  alpnProtocols?: string[];
+  clientAuthorityIds?: string[];
 };
 
 export type Route = {
   id: string;
   name?: string;
   type: "http" | "grpc" | "graphql" | "tcp" | "udp";
-  entrypoints: string[];
+  entryPoints: string[];
   rule: string;
   priority: number;
   middlewares: string[];
-  service_id: string;
+  serviceId: string;
   tls?: RouteTLSConfig;
   disabled?: boolean;
 };
@@ -171,36 +171,36 @@ export type StatusResponse = {
   status: string;
   version: string;
   uptime: number;
-  memory_usage: number;
-  cpu_usage: number;
-  memory_usage_percent: number;
-  routes_count: number;
-  services_count: number;
-  entry_points_count: number;
-  middlewares_count: number;
-  cpu_cores?: number;
-  memory_total_gb?: number;
-  storage_usage_gb?: number;
-  storage_total_gb?: number;
-  storage_usage_percent?: number;
-  clamav_installed?: boolean;
+  memoryUsage: number;
+  cpuUsage: number;
+  memoryUsagePercent: number;
+  routesCount: number;
+  servicesCount: number;
+  entryPointsCount: number;
+  middlewaresCount: number;
+  cpuCores?: number;
+  memoryTotalGb?: number;
+  storageUsageGb?: number;
+  storageTotalGb?: number;
+  storageUsagePercent?: number;
+  clamavInstalled?: boolean;
   profile?: string;
-  profile_pinned?: boolean;
+  profilePinned?: boolean;
 };
 
 export type CertificateValidation = {
   valid: boolean;
   warnings?: string[];
-  recommended_ciphers?: string[];
+  recommendedCiphers?: string[];
 };
 
 export type Certificate = {
   id: string;
   name: string;
-  cert_file: string;
-  key_file: string;
+  certFile: string;
+  keyFile: string;
   /** Optional CA/intermediate certificate file appended to the served chain during SNI selection. */
-  ca_file?: string;
+  caFile?: string;
   host?: string;
   validation?: CertificateValidation;
 };
@@ -208,9 +208,9 @@ export type Certificate = {
 export type ClientAuthority = {
   id: string;
   name: string;
-  ca_file: string;
+  caFile: string;
   /** Optional per-CA preferred client auth mode; UI hint, may be enforced by server config */
-  client_auth_type?: string;
+  clientAuthType?: string;
 };
 
 export type AcmeConfig = {
@@ -218,19 +218,19 @@ export type AcmeConfig = {
   email?: string;
   ca_server?: string;
   challenge_type?: string;
-  dns_provider?: string;
-  dns_config?: Record<string, string>;
+  dnsProvider?: string;
+  dnsConfig?: Record<string, string>;
 };
 
 export type TlsConfig = {
   enabled: boolean;
   email?: string;
   domains?: string[];
-  auto_redirect?: boolean;
-  min_tls_version?: string;
-  max_tls_version?: string;
-  client_auth_type?: string;
-  cipher_suites?: string[];
+  autoRedirect?: boolean;
+  minTlsVersion?: string;
+  maxTlsVersion?: string;
+  clientAuthType?: string;
+  cipherSuites?: string[];
   certificates?: Certificate[];
   client_authorities?: ClientAuthority[];
   acme?: AcmeConfig;
@@ -246,16 +246,16 @@ export type RedisConfig = {
 export type OtelConfig = {
   enabled?: boolean;
   endpoint?: string;
-  service_name?: string;
+  serviceName?: string;
 };
 
 export type LogConfig = {
   level?: "debug" | "info" | "warn" | "error";
   development?: boolean;
   format?: "json" | "text";
-  path_stats_retention_days?: number;
-  access_log_retention_days?: number;
-  security_threat_retention_days?: number;
+  pathStatsRetentionDays?: number;
+  accessLogRetentionDays?: number;
+  securityThreatRetentionDays?: number;
   audit_log_retention_days?: number;
 };
 
@@ -331,8 +331,8 @@ export type IsSetupRequiredResponse = {
 };
 
 export type SetupRequest = {
-  admin_username: string;
-  admin_password: string;
+  adminUsername: string;
+  adminPassword: string;
   paseto_secret: string;
   management_bind: string;
   management_port: string;
@@ -357,7 +357,7 @@ export type Middleware = {
 export type WafConfig = {
   enabled: boolean;
   use_crs: boolean;
-  paranoia_level: number;
+  paranoiaLevel: number;
   custom_directives?: string;
   sqli?: boolean;
   xss?: boolean;
@@ -369,26 +369,26 @@ export type WafConfig = {
   java?: boolean;
   nodejs?: boolean;
   wordpress?: boolean;
-  ip_reputation?: boolean;
-  dos_protection?: boolean;
-  malware_detection?: boolean;
-  ransomware_detection?: boolean;
+  ipReputation?: boolean;
+  dosProtection?: boolean;
+  malwareDetection?: boolean;
+  ransomwareDetection?: boolean;
   dlp?: boolean;
-  anomaly_threshold?: number;
+  anomalyThreshold?: number;
   bot_management?: BotManagementConfig;
-  request_body_limit?: number;
-  response_body_limit?: number;
-  audit_log_path?: string;
-  audit_log_relevant_only?: boolean;
+  requestBody_limit?: number;
+  responseBody_limit?: number;
+  auditLogPath?: string;
+  auditLogRelevantOnly?: boolean;
   allowed_admin_ips?: string[];
   auto_update_rules?: boolean;
   update_interval_hours?: number;
   rules_url?: string;
-  clamav_addr?: string;
+  clamavAddr?: string;
   clamav?: ClamavConfig;
   entropy_threshold?: number;
   disable_entropy?: boolean;
-  trust_cloudflare_headers?: boolean;
+  trustCloudflareHeaders?: boolean;
 };
 
 export type ClamavConfig = {
@@ -397,7 +397,7 @@ export type ClamavConfig = {
   docker_image?: string;
   full_scan_schedule?: string;
   low_resource_mode?: boolean;
-  clamav_addr?: string;
+  clamavAddr?: string;
 };
 
 export enum ClamavInstallationMode {
@@ -494,7 +494,7 @@ export type TitanConfig = {
   enable_ai_predictor: boolean;
   enable_pqc: boolean;
   enable_governor: boolean;
-  ai_model_path: string;
+  aiModelPath: string;
 };
 
 export type AlertingConfig = {
@@ -536,7 +536,7 @@ export type SecurityAdvancedConfig = {
   entropy?: EntropyConfig;
   behavioral?: BehavioralConfig;
   pow?: PowConfig;
-  ip_reputation?: IPReputationConfig;
+  ipReputation?: IPReputationConfig;
   tls_binding?: TlsBindingConfig;
 };
 
@@ -627,50 +627,50 @@ export type EntryPoint = {
   protocol?: Protocol;
   protocols?: Protocol[];
   tls?: TlsConfig;
-  read_timeout_ms?: number;
-  write_timeout_ms?: number;
+  readTimeoutMs?: number;
+  writeTimeoutMs?: number;
   max_connections?: number;
-  access_log_enabled?: boolean;
+  accessLogEnabled?: boolean;
 };
 
 export type ListRoutesResponse = {
   routes: Route[];
-  total_count: number;
+  totalCount: number;
   page: number;
   page_size: number;
 };
 
 export type ListServicesResponse = {
   services: Service[];
-  total_count: number;
+  totalCount: number;
   page: number;
   page_size: number;
 };
 
 export type ListMiddlewaresResponse = {
   middlewares: Middleware[];
-  total_count: number;
+  totalCount: number;
   page: number;
   page_size: number;
 };
 
 export type ListEntryPointsResponse = {
   entry_points: EntryPoint[];
-  total_count: number;
+  totalCount: number;
   page: number;
   page_size: number;
 };
 
 export type ListTLSOptionsResponse = {
   tls_options: TLSOption[];
-  total_count: number;
+  totalCount: number;
   page: number;
   page_size: number;
 };
 
 export type ListUsersResponse = {
   users: User[];
-  total_count: number;
+  totalCount: number;
   page: number;
   page_size: number;
 };
@@ -695,9 +695,9 @@ export type RouteDiagnostic = {
   id: string;
   name: string;
   rule: string;
-  service_id: string;
-  service_name: string;
-  service_healthy: boolean;
+  serviceId: string;
+  serviceName: string;
+  serviceHealthy: boolean;
   middlewares: MiddlewareDiagnostic[];
   healthy: boolean;
   error: string;
@@ -708,9 +708,9 @@ export type EntryPointDiagnostic = {
   address: string;
   type: string;
   listening: boolean;
-  total_connections: number;
-  active_connections: number;
-  last_error: string;
+  totalConnections: number;
+  activeConnections: number;
+  lastError: string;
   name: string;
   certificates?: CertificateStatus[];
   routes?: RouteDiagnostic[];
@@ -718,27 +718,27 @@ export type EntryPointDiagnostic = {
 
 export type HandshakeError = {
   timestamp: string;
-  remote_addr: string;
+  remoteAddr: string;
   error: string;
-  entrypoint_id: string;
-  entrypoint_name: string;
+  entrypointId: string;
+  entrypointName: string;
 };
 
 export type GossipStatus = {
   enabled: boolean;
   members_count: number;
   member_names: string[];
-  messages_sent: number;
-  messages_received: number;
+  messagesSent: number;
+  messagesReceived: number;
 };
 
 export type SystemInfo = {
-  public_ip: string;
-  cloudflare_reachable: boolean;
+  publicIp: string;
+  cloudflareReachable: boolean;
   uptime: string;
   goroutines: number;
-  memory_usage: string;
-  cpu_usage: string;
+  memoryUsage: string;
+  cpuUsage: string;
   version: string;
   gossip?: GossipStatus;
   ebpf?: EbpfStats;
@@ -746,28 +746,28 @@ export type SystemInfo = {
 };
 
 export type TitanStats = {
-  phantom_enabled: boolean;
-  phantom_engine: string;
-  active_phantom_ports: number;
-  ai_predictor_enabled: boolean;
-  ai_model_status: string;
-  cuckoo_filter_entries: number;
-  pqc_enabled: boolean;
+  phantomEnabled: boolean;
+  phantomEngine: string;
+  activePhantomPorts: number;
+  aiPredictorEnabled: boolean;
+  aiModelStatus: string;
+  cuckooFilterEntries: number;
+  pqcEnabled: boolean;
   governor?: ResourceGovernorStats;
 };
 
 export type ResourceGovernorStats = {
   active: boolean;
-  memory_hooks_count: number;
-  cpu_hooks_count: number;
-  memory_pressure_percent: number;
-  cpu_pressure_percent: number;
+  memoryHooksCount: number;
+  cpuHooksCount: number;
+  memoryPressurePercent: number;
+  cpuPressurePercent: number;
 };
 
 export type EbpfStats = {
   enabled: boolean;
-  shunned_ips_count: number;
-  dropped_packets: Record<string, number>;
+  shunnedIpsCount: number;
+  droppedPackets: Record<string, number>;
 };
 
 export type Anomaly = {
@@ -780,36 +780,37 @@ export type Anomaly = {
   recommendation: string;
   latitude?: number;
   longitude?: number;
-  country_code?: string;
-  country_name?: string;
+  countryCode?: string;
+  countryName?: string;
   ja4?: string;
   ja4plus?: string;
   ja3?: string;
   ja4h?: string;
   score?: number;
-  route_id?: string;
-  request_uri?: string;
+  routeId?: string;
+  requestUri?: string;
   mitigated?: boolean;
   category?: string;
-  action_taken?: string;
-  request_headers?: string;
-  request_body?: string;
-  response_headers?: string;
-  response_body?: string;
-  user_agent?: string;
-  http_method?: string;
+  actionTaken?: string;
+  requestHeaders?: string;
+  requestBody?: string;
+  responseHeaders?: string;
+  responseBody?: string;
+  userAgent?: string;
+  httpMethod?: string;
   confidence?: number;
   entropy?: number;
-  cluster_size?: number;
-  triggered_rules?: string;
+  clusterSize?: number;
+  triggeredRules?: string;
   reputation?: number;
+  sourceIps?: string[];
 };
 
 export type Reputation = {
   fingerprint: string;
   score: number;
-  last_event: string;
-  violation_count: number;
+  lastEvent: string;
+  violationCount: number;
   history: string[];
 };
 
@@ -817,16 +818,16 @@ export type DependencyHealth = {
   name: string;
   healthy: boolean;
   error: string;
-  latency_ms: string;
+  latencyMs: string;
 };
 
 export type GetDiagnosticsResponse = {
-  entrypoints: EntryPointDiagnostic[];
-  recent_tls_errors: HandshakeError[];
+  entryPoints: EntryPointDiagnostic[];
+  recentTlsErrors: HandshakeError[];
   system: SystemInfo;
   anomalies: Anomaly[];
   dependencies: DependencyHealth[];
-  total_mitigations: number;
+  totalMitigations: number;
 };
 
 export type GetCloudflareIPsResponse = {
@@ -839,7 +840,7 @@ export type TraceHop = {
   ip: string;
   latitude: number;
   longitude: number;
-  country_code: string;
+  countryCode: string;
   city: string;
   rtt_ms: number;
 };
@@ -853,19 +854,19 @@ export type ValidateCORSRequest = {
   origin: string;
   method: string;
   headers: Record<string, string>;
-  auth_bearer_token: string;
+  authBearerToken: string;
 };
 
 export type ValidateCORSResponse = {
-  is_allowed: boolean;
+  isAllowed: boolean;
   message: string;
-  response_headers: Record<string, string>;
+  responseHeaders: Record<string, string>;
   checks: string[];
-  is_preflight: boolean;
-  middleware_config: Record<string, string>;
-  route_name: string;
+  isPreflight: boolean;
+  middlewareConfig: Record<string, string>;
+  routeName: string;
   suggestions: string[];
-  route_id: string;
+  routeId: string;
 };
 
 export type RemoveMitigatedThreatRequest = {
@@ -917,20 +918,20 @@ export type RunDeepScanResponse = {
 };
 
 export type DeepScanStatus = {
-  is_running: boolean;
-  last_scan: string;
-  last_error: string;
-  last_result: string;
+  isRunning: boolean;
+  lastScan: string;
+  lastError: string;
+  lastResult: string;
 };
 
 export type AuditLog = {
   id: string;
-  user_id: string;
+  userId: string;
   action: string;
   resource: string;
   details: string;
   timestamp: string;
-  ip_address: string;
+  ipAddress: string;
   signature: string;
 };
 
@@ -955,16 +956,16 @@ export type LimitStats = {
 };
 
 export type AggStats = {
-  total_requests: number;
-  total_bandwidth_bytes: number;
-  total_errors: number;
-  active_connections: number;
-  open_circuits: number;
-  half_open_circuits: number;
-  healthy_targets: number;
-  total_targets: number;
-  cpu_usage: number;
-  memory_usage: number;
+  totalRequests: number;
+  totalBandwidthBytes: number;
+  totalErrors: number;
+  activeConnections: number;
+  openCircuits: number;
+  halfOpenCircuits: number;
+  healthyTargets: number;
+  totalTargets: number;
+  cpuUsage: number;
+  memoryUsage: number;
 };
 
 export type RequestDeltaSample = {
@@ -975,5 +976,5 @@ export type RequestDeltaSample = {
 export type CountryTraffic = {
   country: string;
   name?: string;
-  request_count: number;
+  requestCount: number;
 };

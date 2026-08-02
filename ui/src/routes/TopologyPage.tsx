@@ -47,16 +47,16 @@ export default function TopologyPage() {
     },
   });
 
-  const { data: entrypoints, isLoading: loadingEps } = useQuery<EntryPoint[]>({
-    queryKey: ["entrypoints", "all"],
+  const { data: entryPoints, isLoading: loadingEps } = useQuery<EntryPoint[]>({
+    queryKey: ["entryPoints", "all"],
     queryFn: async () => {
       try {
-        const res = await apiFetch("/v1/entrypoints?page_size=1000");
+        const res = await apiFetch("/v1/entryPoints?page_size=1000");
         if (!res.ok) return [];
         const data = await res.json();
         return data?.entry_points || [];
       } catch (e) {
-        console.error("Failed to fetch entrypoints:", e);
+        console.error("Failed to fetch entryPoints:", e);
         return [];
       }
     },
@@ -86,15 +86,15 @@ export default function TopologyPage() {
         <div>
           <Title order={2}>Traffic Topology</Title>
           <Text size="sm" c="dimmed">
-            Animated visual flow of traffic from entrypoints to backend services through middlewares.
+            Animated visual flow of traffic from entryPoints to backend services through middlewares.
           </Text>
         </div>
       </Group>
 
-      {entrypoints && routes && services && middlewares && (
+      {entryPoints && routes && services && middlewares && (
         <Suspense fallback={<LoadingOverlay visible />}>
           <TopologyGraph
-            entrypoints={entrypoints}
+            entryPoints={entryPoints}
             routes={routes}
             services={services}
             middlewares={middlewares}

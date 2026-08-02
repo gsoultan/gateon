@@ -12,7 +12,7 @@ import (
 var (
 	protojsonOptions = protojson.MarshalOptions{
 		EmitUnpopulated: true,
-		UseProtoNames:   true,
+		UseProtoNames:   false,
 		UseEnumNumbers:  true,
 	}
 	protojsonUnmarshalOptions = protojson.UnmarshalOptions{

@@ -244,11 +244,6 @@ func bufferBodyInto(body io.Reader, maxBytes int64, buf *bytes.Buffer) (data []b
 	return buf.Bytes(), false, nil
 }
 
-// bufferBody is deprecated, use bufferBodyInto instead.
-func bufferBody(body io.Reader, maxBytes int64) (buf []byte, tooLarge bool, err error) {
-	return bufferBodyInto(body, maxBytes, bytes.NewBuffer(make([]byte, 0, maxBytes)))
-}
-
 // scanMultipart inspects every file part of the buffered body.
 func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity, allowedMap, blockedMap map[string]bool) scanResult {
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)

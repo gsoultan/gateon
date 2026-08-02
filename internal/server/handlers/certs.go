@@ -3,7 +3,7 @@
 package handlers
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -175,14 +175,14 @@ func generateCertFilename(content string, certType string) string {
 			if name != "" {
 				name = filenameSanitizeRegexp.ReplaceAllString(name, "_")
 				name = strings.Trim(name, "_")
-				h := sha1.Sum(block.Bytes)
+				h := sha256.Sum256(block.Bytes)
 				return fmt.Sprintf("%s_%x%s", name, h[:4], suffix)
 			}
 		}
 	}
 
 	// Fallback to hash-based name
-	hash := fmt.Sprintf("%x", sha1.Sum(contentBytes))
+	hash := fmt.Sprintf("%x", sha256.Sum256(contentBytes))
 	prefix := certType
 	if prefix == "" {
 		prefix = "file"

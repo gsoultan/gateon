@@ -29,7 +29,6 @@ type EbpfProvider interface {
 var (
 	globalEbpfManager atomic.Value // stores EbpfProvider (interface)
 	lastSnapshot      atomic.Pointer[MetricsSnapshot]
-	snapshotMu        sync.Mutex
 
 	snapshotPool = sync.Pool{
 		New: func() any {

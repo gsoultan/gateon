@@ -20,7 +20,7 @@ export default function CertificatesPage() {
   const [opened, { open, close }] = useDisclosure(false)
   const [pasteOpened, { open: openPaste, close: closePaste }] = useDisclosure(false)
   const [editingCert, setEditingCert] = useState<Certificate | null>(null)
-  const [pastingField, setPastingField] = useState<'cert_file' | 'key_file' | 'ca_file' | null>(null)
+  const [pastingField, setPastingField] = useState<'certFile' | 'keyFile' | 'caFile' | null>(null)
   const [pasteContent, setPasteContent] = useState('')
 
   useEffect(() => {
@@ -59,7 +59,7 @@ export default function CertificatesPage() {
     }
   }
 
-  const handleUpload = async (field: 'cert_file' | 'key_file' | 'ca_file', file: File | null) => {
+  const handleUpload = async (field: 'certFile' | 'keyFile' | 'caFile', file: File | null) => {
     if (!file) return
     
     setUploading(prev => ({ ...prev, [field]: true }))
@@ -97,7 +97,7 @@ export default function CertificatesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           content: pasteContent, 
-          type: pastingField === 'cert_file' ? 'cert' : pastingField === 'key_file' ? 'key' : 'ca' 
+          type: pastingField === 'certFile' ? 'cert' : pastingField === 'keyFile' ? 'key' : 'ca' 
         }),
       })
       
@@ -155,7 +155,7 @@ export default function CertificatesPage() {
   }
 
   const startAdd = () => {
-    setEditingCert({ id: crypto.randomUUID(), name: '', cert_file: '', key_file: '', ca_file: '' })
+    setEditingCert({ id: crypto.randomUUID(), name: '', certFile: '', keyFile: '', caFile: '' })
     open()
   }
 
@@ -189,7 +189,7 @@ export default function CertificatesPage() {
       </Group>
 
       <Alert icon={<IconInfoCircle size={16} />} color="blue" variant="light" radius="md">
-        Certificates managed here can be used across multiple routes or assigned to entrypoints.
+        Certificates managed here can be used across multiple routes or assigned to entryPoints.
       </Alert>
 
       <Card withBorder padding={isMobile ? 'sm' : 0} radius="lg" shadow="xs">
@@ -231,16 +231,16 @@ export default function CertificatesPage() {
                     <SimpleGrid cols={1} spacing={4}>
                        <Box>
                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>Cert File</Text>
-                         <Text size="xs" ff="monospace" truncate>{cert.cert_file}</Text>
+                         <Text size="xs" ff="monospace" truncate>{cert.certFile}</Text>
                        </Box>
                        <Box>
                          <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>Key File</Text>
-                         <Text size="xs" ff="monospace" truncate>{cert.key_file}</Text>
+                         <Text size="xs" ff="monospace" truncate>{cert.keyFile}</Text>
                        </Box>
-                       {cert.ca_file && (
+                       {cert.caFile && (
                          <Box>
                            <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>CA File</Text>
-                           <Text size="xs" ff="monospace" truncate>{cert.ca_file}</Text>
+                           <Text size="xs" ff="monospace" truncate>{cert.caFile}</Text>
                          </Box>
                        )}
                     </SimpleGrid>
@@ -288,13 +288,13 @@ export default function CertificatesPage() {
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm" ff="monospace" c="dimmed">{cert.cert_file}</Text>
+                        <Text size="sm" ff="monospace" c="dimmed">{cert.certFile}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm" ff="monospace" c="dimmed">{cert.key_file}</Text>
+                        <Text size="sm" ff="monospace" c="dimmed">{cert.keyFile}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm" ff="monospace" c="dimmed">{cert.ca_file || '—'}</Text>
+                        <Text size="sm" ff="monospace" c="dimmed">{cert.caFile || '—'}</Text>
                       </Table.Td>
                       <Table.Td>
                         {canUploadCerts && (
@@ -349,21 +349,21 @@ export default function CertificatesPage() {
           <TextInput 
             label="Certificate File (.crt, .pem)" 
             placeholder="certs/example.crt"
-            value={editingCert?.cert_file || ''} 
-            onChange={(e) => editingCert && setEditingCert({ ...editingCert, cert_file: e.currentTarget.value })} 
+            value={editingCert?.certFile || ''} 
+            onChange={(e) => editingCert && setEditingCert({ ...editingCert, certFile: e.currentTarget.value })} 
             radius="md" 
             leftSection={<IconCertificate size={16} />}
             rightSection={
               <Group gap={4} mr={4}>
                 <Tooltip label="Paste Certificate">
-                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('cert_file'); openPaste(); }}>
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('certFile'); openPaste(); }}>
                     <IconClipboard size={16} />
                   </ActionIcon>
                 </Tooltip>
-                <FileButton onChange={(f) => handleUpload('cert_file', f)} accept=".pem,.crt,.cer">
+                <FileButton onChange={(f) => handleUpload('certFile', f)} accept=".pem,.crt,.cer">
                   {(props) => (
                     <Tooltip label="Upload Certificate">
-                      <ActionIcon {...props} variant="subtle" loading={uploading['cert_file']}>
+                      <ActionIcon {...props} variant="subtle" loading={uploading['certFile']}>
                         <IconUpload size={16} />
                       </ActionIcon>
                     </Tooltip>
@@ -375,21 +375,21 @@ export default function CertificatesPage() {
           <TextInput 
             label="Private Key File (.key, .pem)" 
             placeholder="certs/example.key"
-            value={editingCert?.key_file || ''} 
-            onChange={(e) => editingCert && setEditingCert({ ...editingCert, key_file: e.currentTarget.value })} 
+            value={editingCert?.keyFile || ''} 
+            onChange={(e) => editingCert && setEditingCert({ ...editingCert, keyFile: e.currentTarget.value })} 
             radius="md" 
             leftSection={<IconKey size={16} />}
             rightSection={
               <Group gap={4} mr={4}>
                 <Tooltip label="Paste Private Key">
-                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('key_file'); openPaste(); }}>
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('keyFile'); openPaste(); }}>
                     <IconClipboard size={16} />
                   </ActionIcon>
                 </Tooltip>
-                <FileButton onChange={(f) => handleUpload('key_file', f)} accept=".pem,.key">
+                <FileButton onChange={(f) => handleUpload('keyFile', f)} accept=".pem,.key">
                   {(props) => (
                     <Tooltip label="Upload Private Key">
-                      <ActionIcon {...props} variant="subtle" loading={uploading['key_file']}>
+                      <ActionIcon {...props} variant="subtle" loading={uploading['keyFile']}>
                         <IconUpload size={16} />
                       </ActionIcon>
                     </Tooltip>
@@ -402,21 +402,21 @@ export default function CertificatesPage() {
             label="CA / Intermediate File (optional)" 
             description="Intermediates are appended to the served chain during SNI, so you don't need to pre-bundle a full-chain cert."
             placeholder="certs/cloudflare-origin-ecc-ca.pem"
-            value={editingCert?.ca_file || ''} 
-            onChange={(e) => editingCert && setEditingCert({ ...editingCert, ca_file: e.currentTarget.value })} 
+            value={editingCert?.caFile || ''} 
+            onChange={(e) => editingCert && setEditingCert({ ...editingCert, caFile: e.currentTarget.value })} 
             radius="md" 
             leftSection={<IconShieldLock size={16} />}
             rightSection={
               <Group gap={4} mr={4}>
                 <Tooltip label="Paste CA Certificate">
-                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('ca_file'); openPaste(); }}>
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('caFile'); openPaste(); }}>
                     <IconClipboard size={16} />
                   </ActionIcon>
                 </Tooltip>
-                <FileButton onChange={(f) => handleUpload('ca_file', f)} accept=".pem,.crt,.cer">
+                <FileButton onChange={(f) => handleUpload('caFile', f)} accept=".pem,.crt,.cer">
                   {(props) => (
                     <Tooltip label="Upload CA Certificate">
-                      <ActionIcon {...props} variant="subtle" loading={uploading['ca_file']}>
+                      <ActionIcon {...props} variant="subtle" loading={uploading['caFile']}>
                         <IconUpload size={16} />
                       </ActionIcon>
                     </Tooltip>
@@ -443,7 +443,7 @@ export default function CertificatesPage() {
                 </Alert>
               )}
 
-              {editingCert.validation.recommended_ciphers && editingCert.validation.recommended_ciphers.length > 0 && (
+              {editingCert.validation.recommendedCiphers && editingCert.validation.recommendedCiphers.length > 0 && (
                 <Paper withBorder p="md" radius="md" bg="var(--mantine-color-blue-light)">
                   <Group gap="xs" mb="xs">
                     <IconBulb size={16} color="var(--mantine-color-blue-6)" />
@@ -451,7 +451,7 @@ export default function CertificatesPage() {
                   </Group>
                   <Text size="xs" mb="sm" c="dimmed">Use these in your TLS Options for optimal security and compatibility with this certificate:</Text>
                   <Stack gap={4}>
-                    {editingCert.validation.recommended_ciphers.map((cipher) => (
+                    {editingCert.validation.recommendedCiphers.map((cipher) => (
                       <Code key={cipher} block style={{ fontSize: '10px' }}>{cipher}</Code>
                     ))}
                   </Stack>
@@ -464,7 +464,7 @@ export default function CertificatesPage() {
         </Stack>
       </Modal>
 
-      <Modal opened={pasteOpened} onClose={closePaste} title={`Paste ${pastingField === 'key_file' ? 'Private Key' : 'Certificate'}`} radius="lg">
+      <Modal opened={pasteOpened} onClose={closePaste} title={`Paste ${pastingField === 'keyFile' ? 'Private Key' : 'Certificate'}`} radius="lg">
         <Stack gap="md">
           <Textarea
             label="PEM Content"

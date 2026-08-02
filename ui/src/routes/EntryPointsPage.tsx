@@ -63,14 +63,14 @@ export default function EntryPointsPage() {
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await apiFetch(
-        `/v1/entrypoints/${encodeURIComponent(id)}`,
+        `/v1/entryPoints/${encodeURIComponent(id)}`,
         { method: "DELETE" },
       );
       if (!res.ok) throw new Error(await res.text());
       return true;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["entrypoints"] });
+      queryClient.invalidateQueries({ queryKey: ["entryPoints"] });
       notifications.show({
         title: "EntryPoint Deleted",
         message: "The entrypoint has been successfully removed.",
@@ -99,7 +99,7 @@ export default function EntryPointsPage() {
   };
 
   const entryPoints = data?.entry_points || [];
-  const totalCount = data?.total_count || 0;
+  const totalCount = data?.totalCount || 0;
 
   const stats = useMemo(() => {
     return {
@@ -117,7 +117,7 @@ export default function EntryPointsPage() {
             EntryPoints
           </Title>
           <Text c="dimmed" size="sm" fw={500}>
-            Configure network entrypoints and listening addresses.
+            Configure network entryPoints and listening addresses.
           </Text>
         </div>
         {canWrite && (
@@ -201,7 +201,7 @@ export default function EntryPointsPage() {
       <Card shadow="xs" padding="lg" radius="lg" withBorder>
         <Stack gap="md">
           <TextInput
-            placeholder="Search entrypoints..."
+            placeholder="Search entryPoints..."
             leftSection={<IconSearch size={16} />}
             value={search}
             onChange={(e) => {
@@ -217,7 +217,7 @@ export default function EntryPointsPage() {
               <Stack gap="md">
                 {entryPoints.length === 0 && !isLoading && (
                   <Center py={40}>
-                    <Text c="dimmed">No entrypoints found.</Text>
+                    <Text c="dimmed">No entryPoints found.</Text>
                   </Center>
                 )}
                 {entryPoints.map((ep) => (
@@ -283,7 +283,7 @@ export default function EntryPointsPage() {
                         </Box>
                         <Box>
                           <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Logs</Text>
-                          <Badge size="xs" color={ep.access_log_enabled ? "blue" : "gray"}>{ep.access_log_enabled ? "Active" : "Disabled"}</Badge>
+                          <Badge size="xs" color={ep.accessLogEnabled ? "blue" : "gray"}>{ep.accessLogEnabled ? "Active" : "Disabled"}</Badge>
                         </Box>
                       </SimpleGrid>
                     </Stack>
@@ -307,7 +307,7 @@ export default function EntryPointsPage() {
                     <Table.Tr>
                       <Table.Td colSpan={6}>
                         <Center py={40}>
-                          <Text c="dimmed">No entrypoints found.</Text>
+                          <Text c="dimmed">No entryPoints found.</Text>
                         </Center>
                       </Table.Td>
                     </Table.Tr>
@@ -366,11 +366,11 @@ export default function EntryPointsPage() {
                       </Table.Td>
                       <Table.Td>
                         <Badge
-                          variant={ep.access_log_enabled ? "light" : "outline"}
-                          color={ep.access_log_enabled ? "blue" : "gray"}
+                          variant={ep.accessLogEnabled ? "light" : "outline"}
+                          color={ep.accessLogEnabled ? "blue" : "gray"}
                           size="sm"
                         >
-                          {ep.access_log_enabled ? "Active" : "Disabled"}
+                          {ep.accessLogEnabled ? "Active" : "Disabled"}
                         </Badge>
                       </Table.Td>
                       <Table.Td>

@@ -78,7 +78,7 @@ export default function ServicesPage() {
   }
 
   const services = data?.services || []
-  const totalCount = data?.total_count || 0
+  const totalCount = data?.totalCount || 0
 
   return (
     <Stack gap="lg">
@@ -114,7 +114,7 @@ export default function ServicesPage() {
             <div>
               <Text size="xs" c="dimmed" fw={800} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Active Targets</Text>
               <Text fw={700} size="xl">
-                {data?.services?.reduce((acc, s) => acc + s.weighted_targets.length, 0) || 0}
+                {data?.services?.reduce((acc, s) => acc + s.weightedTargets.length, 0) || 0}
               </Text>
             </div>
           </Group>
@@ -172,7 +172,7 @@ export default function ServicesPage() {
                           <Text size="xs" c="dimmed">{s.name}</Text>
                         </Stack>
                         <Group gap={4}>
-                          <Badge size="xs" variant="outline">{(s.load_balancer_policy || "").replace(/_/g, ' ')}</Badge>
+                          <Badge size="xs" variant="outline">{(s.loadBalancerPolicy || "").replace(/_/g, ' ')}</Badge>
                           {canWrite && (
                             <Menu shadow="md" position="bottom-end">
                               <Menu.Target>
@@ -190,16 +190,16 @@ export default function ServicesPage() {
                       </Group>
                       
                       <Box>
-                        <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>Targets ({s.weighted_targets.length})</Text>
+                        <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase' }}>Targets ({s.weightedTargets.length})</Text>
                         <Stack gap={4} mt={4}>
-                          {s.weighted_targets.slice(0, 3).map((t, i) => (
+                          {s.weightedTargets.slice(0, 3).map((t, i) => (
                             <Group key={i} gap="xs" wrap="nowrap">
                               <Text size="xs" ff="monospace" truncate style={{ flex: 1 }}>{t.url}</Text>
                               <Badge size="xs" variant="light">{t.weight}</Badge>
                             </Group>
                           ))}
-                          {s.weighted_targets.length > 3 && (
-                            <Text size="xs" c="dimmed">+{s.weighted_targets.length - 3} more...</Text>
+                          {s.weightedTargets.length > 3 && (
+                            <Text size="xs" c="dimmed">+{s.weightedTargets.length - 3} more...</Text>
                           )}
                         </Stack>
                       </Box>
@@ -241,13 +241,13 @@ export default function ServicesPage() {
                 )}
                 {services.map(s => {
                   const isExpanded = expandedIds.has(s.id)
-                  const firstTarget = s.weighted_targets[0]?.url || ''
-                  const hasMore = s.weighted_targets.length > 1
+                  const firstTarget = s.weightedTargets[0]?.url || ''
+                  const hasMore = s.weightedTargets.length > 1
                   return (
                     <Fragment key={s.id}>
                       <Table.Tr>
                         <Table.Td>
-                          {s.weighted_targets.length > 0 && (
+                          {s.weightedTargets.length > 0 && (
                             <ActionIcon
                               variant="subtle"
                               size="sm"
@@ -273,18 +273,18 @@ export default function ServicesPage() {
                             </Tooltip>
                             {hasMore && (
                               <Badge variant="light" color="blue" size="xs">
-                                +{s.weighted_targets.length - 1} more
+                                +{s.weightedTargets.length - 1} more
                               </Badge>
                             )}
                           </Stack>
                         </Table.Td>
                         <Table.Td>
                           <Text size="xs" fw={600} tt="capitalize">
-                            {(s.load_balancer_policy || "").replace(/_/g, ' ')}
+                            {(s.loadBalancerPolicy || "").replace(/_/g, ' ')}
                           </Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs" c="dimmed">{s.health_check_path || '—'}</Text>
+                          <Text size="xs" c="dimmed">{s.healthCheckPath || '—'}</Text>
                         </Table.Td>
                         <Table.Td>
                           {canWrite && (
@@ -308,7 +308,7 @@ export default function ServicesPage() {
                           <Table.Td colSpan={6} py="xs" style={{ backgroundColor: 'var(--mantine-color-dark-7)' }}>
                             <Stack gap={6} pl="md">
                               <Text size="xs" fw={600} c="dimmed">All targets</Text>
-                              {s.weighted_targets.map((t, i) => (
+                              {s.weightedTargets.map((t, i) => (
                                 <Group key={i} gap="sm">
                                   <Text size="xs" ff="monospace" c="dimmed">
                                     {t.url}

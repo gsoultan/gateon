@@ -7,9 +7,9 @@ const PAGE_SIZE = 10;
 
 interface HourlyDomainMetric {
   domain: string;
-  request_count: number;
-  bytes_total: number;
-  avg_latency_seconds: number;
+  requestCount: number;
+  bytesTotal: number;
+  avgLatencySeconds: number;
 }
 
 interface DomainStatsTableProps {
@@ -53,12 +53,12 @@ export const DomainStatsTable = memo(function DomainStatsTable({
       </Table.Td>
       <Table.Td>
         <Badge variant="light" color="brand" size="sm">
-          {m.request_count.toLocaleString()}
+          {m.requestCount.toLocaleString()}
         </Badge>
       </Table.Td>
       <Table.Td>
         <Text size="sm" fw={500}>
-          {formatBytes(m.bytes_total)}
+          {formatBytes(m.bytesTotal)}
         </Text>
       </Table.Td>
       <Table.Td>
@@ -66,14 +66,14 @@ export const DomainStatsTable = memo(function DomainStatsTable({
           size="sm"
           fw={700}
           c={
-            m.avg_latency_seconds > 1
+            m.avgLatencySeconds > 1
               ? "red"
-              : m.avg_latency_seconds > 0.5
+              : m.avgLatencySeconds > 0.5
                 ? "orange"
                 : "teal"
           }
         >
-          {m.avg_latency_seconds.toFixed(3)}s
+          {m.avgLatencySeconds.toFixed(3)}s
         </Text>
       </Table.Td>
     </Table.Tr>

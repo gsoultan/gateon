@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,10 +27,15 @@ func TestIntegration_Alerting(t *testing.T) {
 	// 1. Setup mock webhook server
 	var receivedThreat telemetry.SecurityThreat
 	var receivedCount int
+	var mu sync.Mutex
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		receivedCount++
 		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &receivedThreat)
+		var t telemetry.SecurityThreat
+		_ = json.Unmarshal(body, &t)
+		receivedThreat = t
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
@@ -69,21 +75,34 @@ func TestIntegration_Alerting(t *testing.T) {
 
 		// Wait for async alert delivery
 		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) && receivedCount == 0 {
+		for {
+			mu.Lock()
+			count := receivedCount
+			mu.Unlock()
+			if count > 0 || time.Now().After(deadline) {
+				break
+			}
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		if receivedCount != 1 {
-			t.Errorf("Expected 1 alert, got %d", receivedCount)
+		mu.Lock()
+		count := receivedCount
+		threatID := receivedThreat.ID
+		mu.Unlock()
+
+		if count != 1 {
+			t.Errorf("Expected 1 alert, got %d", count)
 		}
-		if receivedThreat.ID != threat.ID {
-			t.Errorf("Expected threat ID %s, got %s", threat.ID, receivedThreat.ID)
+		if threatID != threat.ID {
+			t.Errorf("Expected threat ID %s, got %s", threat.ID, threatID)
 		}
 	})
 
 	t.Run("Negative - Alerting Disabled", func(t *testing.T) {
 		alerting.UpdateConfig(&gateonv1.AlertingConfig{Enabled: false}, nil)
+		mu.Lock()
 		receivedCount = 0
+		mu.Unlock()
 		threat := &telemetry.SecurityThreat{
 			ID:   "test-threat-2",
 			Type: "waf_violation",
@@ -91,8 +110,11 @@ func TestIntegration_Alerting(t *testing.T) {
 		alerting.HandleThreat(threat)
 
 		time.Sleep(200 * time.Millisecond)
-		if receivedCount != 0 {
-			t.Errorf("Expected 0 alerts when disabled, got %d", receivedCount)
+		mu.Lock()
+		count := receivedCount
+		mu.Unlock()
+		if count != 0 {
+			t.Errorf("Expected 0 alerts when disabled, got %d", count)
 		}
 	})
 }

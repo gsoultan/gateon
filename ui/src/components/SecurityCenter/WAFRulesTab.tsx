@@ -111,8 +111,8 @@ export function WAFRulesTab() {
         </Tooltip>
       </Table.Td>
       <Table.Td>
-        <Badge color={rule.paranoia_level > 2 ? 'red' : rule.paranoia_level > 1 ? 'orange' : 'blue'}>
-          PL {rule.paranoia_level}
+        <Badge color={rule.paranoiaLevel > 2 ? 'red' : rule.paranoiaLevel > 1 ? 'orange' : 'blue'}>
+          PL {rule.paranoiaLevel}
         </Badge>
       </Table.Td>
       <Table.Td>
@@ -186,7 +186,7 @@ export function WAFRulesTab() {
                 name: '',
                 directive: '',
                 enabled: true,
-                paranoia_level: 1,
+                paranoiaLevel: 1,
                 category: 'custom',
               });
               setOpened(true);
@@ -265,8 +265,8 @@ export function WAFRulesTab() {
                 label="Paranoia Level"
                 min={1}
                 max={4}
-                value={editingRule?.paranoia_level || 1}
-                onChange={(val) => setEditingRule({ ...editingRule!, paranoia_level: Number(val) })}
+                value={editingRule?.paranoiaLevel || 1}
+                onChange={(val) => setEditingRule({ ...editingRule!, paranoiaLevel: Number(val) })}
               />
             </Group>
             <Textarea

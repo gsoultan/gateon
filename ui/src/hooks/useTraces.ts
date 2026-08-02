@@ -3,29 +3,29 @@ import { apiFetch } from "./api";
 
 export interface Trace {
   id: string;
-  operation_name: string;
-  service_name: string;
-  duration_ms: number;
+  operationName: string;
+  serviceName: string;
+  durationMs: number;
   timestamp: string;
   status: string;
   path: string;
-  request_uri?: string;
+  requestUri?: string;
   source_ip: string;
-  user_agent?: string;
+  userAgent?: string;
   method?: string;
   referer?: string;
   ja4?: string;
   ja4h?: string;
-  request_headers?: Record<string, string>;
-  request_body?: string;
-  response_headers?: Record<string, string>;
-  response_body?: string;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string;
   recommendation?: string;
   reputation?: number;
-  entrypoint_delay_ms?: number;
-  route_delay_ms?: number;
-  middleware_delay_ms?: number;
-  service_delay_ms?: number;
+  entrypointDelayMs?: number;
+  routeDelayMs?: number;
+  middlewareDelayMs?: number;
+  serviceDelayMs?: number;
 }
 
 export function useTraces(limit: number = 100) {

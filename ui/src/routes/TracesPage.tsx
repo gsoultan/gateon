@@ -135,8 +135,8 @@ export default function TracesPage() {
       const lower = deferredSearch.toLowerCase();
       return (
         t.id.toLowerCase().includes(lower) ||
-        t.operation_name.toLowerCase().includes(lower) ||
-        t.service_name.toLowerCase().includes(lower) ||
+        t.operationName.toLowerCase().includes(lower) ||
+        t.serviceName.toLowerCase().includes(lower) ||
         t.source_ip.toLowerCase().includes(lower) ||
         t.path.toLowerCase().includes(lower) ||
         t.status.toLowerCase().includes(lower)
@@ -294,7 +294,7 @@ export default function TracesPage() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Badge variant="dot" color="blue" size="sm">{trace.service_name}</Badge>
+                      <Badge variant="dot" color="blue" size="sm">{trace.serviceName}</Badge>
                     </Table.Td>
                     <Table.Td>
                       <Tooltip label={trace.source_ip && trace.source_ip !== "-" ? "Click to visualize IP route" : ""}>
@@ -318,7 +318,7 @@ export default function TracesPage() {
                       </Tooltip>
                     </Table.Td>
                     <Table.Td>
-                      <Tooltip label={trace.request_uri || trace.path} multiline maw={400} withArrow>
+                      <Tooltip label={trace.requestUri || trace.path} multiline maw={400} withArrow>
                         <Text size="xs" c="dimmed" truncate="end" maw={200}>
                           {trace.path}
                         </Text>
@@ -327,12 +327,12 @@ export default function TracesPage() {
                     <Table.Td>
                       <Badge 
                         variant="light" 
-                        color={getDurationColor(trace.duration_ms)}
+                        color={getDurationColor(trace.durationMs)}
                         radius="sm"
                       >
-                        {trace.duration_ms < 1
-                          ? trace.duration_ms.toFixed(3)
-                          : trace.duration_ms.toFixed(2)}
+                        {trace.durationMs < 1
+                          ? trace.durationMs.toFixed(3)
+                          : trace.durationMs.toFixed(2)}
                         ms
                       </Badge>
                     </Table.Td>
@@ -509,7 +509,7 @@ export default function TracesPage() {
               <Text size="xs" fw={700} c="dimmed">REQUEST URI</Text>
               <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                 <Text size="sm" style={{ wordBreak: 'break-all' }}>
-                  {fullTrace.request_uri || fullTrace.path}
+                  {fullTrace.requestUri || fullTrace.path}
                 </Text>
               </Paper>
             </Stack>
@@ -526,7 +526,7 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">DURATION</Text>
-                  <Text size="sm">{fullTrace.duration_ms.toFixed(3)} ms</Text>
+                  <Text size="sm">{fullTrace.durationMs.toFixed(3)} ms</Text>
                 </Stack>
               </Grid.Col>
             </Grid>
@@ -550,25 +550,25 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">ENTRYPOINT</Text>
-                  <Text size="sm">{fullTrace.entrypoint_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.entrypointDelayMs?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">ROUTING</Text>
-                  <Text size="sm">{fullTrace.route_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.routeDelayMs?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">MIDDLEWARE</Text>
-                  <Text size="sm">{fullTrace.middleware_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.middlewareDelayMs?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">SERVICE</Text>
-                  <Text size="sm">{fullTrace.service_delay_ms?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{fullTrace.serviceDelayMs?.toFixed(3) || "0.000"} ms</Text>
                 </Stack>
               </Grid.Col>
             </Grid>
@@ -578,7 +578,7 @@ export default function TracesPage() {
             <Stack gap={4}>
               <Text size="xs" fw={700} c="dimmed">USER AGENT</Text>
               <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                {fullTrace.user_agent || "N/A"}
+                {fullTrace.userAgent || "N/A"}
               </Text>
             </Stack>
 
@@ -621,12 +621,12 @@ export default function TracesPage() {
 
             <Divider label="Metadata" labelPosition="center" />
 
-            {fullTrace.request_headers && Object.keys(fullTrace.request_headers).length > 0 && (
+            {fullTrace.requestHeaders && Object.keys(fullTrace.requestHeaders).length > 0 && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">REQUEST HEADERS</Text>
                 <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                   <Stack gap={2}>
-                    {Object.entries(fullTrace.request_headers).map(([key, value]) => (
+                    {Object.entries(fullTrace.requestHeaders).map(([key, value]) => (
                       <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
                         <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
                         <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
@@ -637,23 +637,23 @@ export default function TracesPage() {
               </Stack>
             )}
 
-            {fullTrace.request_body && (
+            {fullTrace.requestBody && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">REQUEST BODY</Text>
                 <ScrollArea.Autosize mah={200}>
                   <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {fullTrace.request_body}
+                    {fullTrace.requestBody}
                   </Code>
                 </ScrollArea.Autosize>
               </Stack>
             )}
 
-            {fullTrace.response_headers && Object.keys(fullTrace.response_headers).length > 0 && (
+            {fullTrace.responseHeaders && Object.keys(fullTrace.responseHeaders).length > 0 && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">RESPONSE HEADERS</Text>
                 <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                   <Stack gap={2}>
-                    {Object.entries(fullTrace.response_headers).map(([key, value]) => (
+                    {Object.entries(fullTrace.responseHeaders).map(([key, value]) => (
                       <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
                         <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
                         <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
@@ -664,12 +664,12 @@ export default function TracesPage() {
               </Stack>
             )}
 
-            {fullTrace.response_body && (
+            {fullTrace.responseBody && (
               <Stack gap={4}>
                 <Text size="xs" fw={700} c="dimmed">RESPONSE BODY</Text>
                 <ScrollArea.Autosize mah={200}>
                   <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {fullTrace.response_body}
+                    {fullTrace.responseBody}
                   </Code>
                 </ScrollArea.Autosize>
               </Stack>

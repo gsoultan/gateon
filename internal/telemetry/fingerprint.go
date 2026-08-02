@@ -35,11 +35,6 @@ var (
 			return &strings.Builder{}
 		},
 	}
-	headerKeysPool = sync.Pool{
-		New: func() any {
-			return make([]string, 0, 32)
-		},
-	}
 	fingerprintPool = sync.Pool{
 		New: func() any {
 			return &ClientFingerprint{

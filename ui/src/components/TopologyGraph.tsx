@@ -209,7 +209,7 @@ const nodeTypes = {
 };
 
 interface TopologyGraphProps {
-  entrypoints: EntryPoint[];
+  entryPoints: EntryPoint[];
   routes: Route[];
   middlewares: Middleware[];
   services: Service[];
@@ -222,7 +222,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = (props) => (
 );
 
 const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
-  entrypoints,
+  entryPoints,
   routes,
   middlewares,
   services,
@@ -238,7 +238,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
     const emittedServices = new Set<string>();
 
     // 1. Add Entrypoints
-    (entrypoints || []).forEach((ep) => {
+    (entryPoints || []).forEach((ep) => {
       if (!ep) return;
       nodes.push({
         id: `ep-${ep.id}`,
@@ -267,11 +267,11 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
         position: { x: 0, y: 0 },
       });
 
-      // Link entrypoints to routes
-      const relevantEps = (entrypoints || []).filter((ep) => {
+      // Link entryPoints to routes
+      const relevantEps = (entryPoints || []).filter((ep) => {
         if (!ep) return false;
-        const epIdMatch = Array.isArray(r.entrypoints) && r.entrypoints.includes(ep.id);
-        const allEntries = !Array.isArray(r.entrypoints) || r.entrypoints.length === 0;
+        const epIdMatch = Array.isArray(r.entryPoints) && r.entryPoints.includes(ep.id);
+        const allEntries = !Array.isArray(r.entryPoints) || r.entryPoints.length === 0;
 
         if (ep.type === EntryPointType.TCP || ep.type === EntryPointType.UDP) {
           const typeMatch =
@@ -324,7 +324,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
       }
 
       // 4. Link to Service
-      const svc = (services || []).find((s) => s?.id === r.service_id);
+      const svc = (services || []).find((s) => s?.id === r.serviceId);
       if (svc) {
         const svcNodeId = `svc-${svc.id}`;
 
@@ -338,14 +338,14 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
             type: "service",
             data: {
               label: svc.name || svc.id,
-              sublabel: `${svc.weighted_targets?.length || 0} targets`,
+              sublabel: `${svc.weightedTargets?.length || 0} targets`,
             },
             position: { x: 0, y: 0 },
           });
 
           // 5. Add targets for service
-          if (Array.isArray(svc.weighted_targets)) {
-            svc.weighted_targets.forEach((target, tIdx) => {
+          if (Array.isArray(svc.weightedTargets)) {
+            svc.weightedTargets.forEach((target, tIdx) => {
               if (!target) return;
               const targetNodeId = `svc-${svc.id}-t-${tIdx}`;
               nodes.push({
@@ -382,7 +382,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
     });
 
     return getLayoutedElements(nodes, edges, direction);
-  }, [entrypoints, routes, middlewares, services, direction]);
+  }, [entryPoints, routes, middlewares, services, direction]);
 
   // Per-type node counts for the legend summary.
   const counts = useMemo(() => {
@@ -465,7 +465,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
           </ThemeIcon>
           <Text fw={500} c="dimmed">No traffic topology data available</Text>
           <Text size="sm" c="dimmed" ta="center" maw={400}>
-            Configure entrypoints and routes to see how traffic flows through your Gateon instance.
+            Configure entryPoints and routes to see how traffic flows through your Gateon instance.
           </Text>
         </Stack>
       </Box>

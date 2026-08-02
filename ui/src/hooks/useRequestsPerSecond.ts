@@ -9,7 +9,7 @@ export function useRequestsPerSecond(): number {
 
   useEffect(() => {
     if (!data) return;
-    const total = data.reduce((s, p) => s + (p.request_count ?? 0), 0);
+    const total = data.reduce((s, p) => s + (p.requestCount ?? 0), 0);
     const now = Date.now();
     if (prevRef.current) {
       const dt = (now - prevRef.current.ts) / 1000;

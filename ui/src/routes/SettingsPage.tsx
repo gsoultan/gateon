@@ -249,7 +249,7 @@ export default function SettingsPage() {
     if (preset === "development") {
       setConfig({
         ...base,
-        log: { level: "debug", development: true, format: "text", path_stats_retention_days: 7 },
+        log: { level: "debug", development: true, format: "text", pathStatsRetentionDays: 7 },
         tls: { ...tls, enabled: false },
         redis: { ...redis, enabled: false },
         otel: { ...otel, enabled: false },
@@ -257,7 +257,7 @@ export default function SettingsPage() {
     } else if (preset === "production") {
       setConfig({
         ...base,
-        log: { level: "info", development: false, format: "json", path_stats_retention_days: 30 },
+        log: { level: "info", development: false, format: "json", pathStatsRetentionDays: 30 },
         tls: { ...tls, enabled: true },
         redis: { ...redis, enabled: true },
         otel: { ...otel, enabled: true },
@@ -265,7 +265,7 @@ export default function SettingsPage() {
     } else if (preset === "high-throughput") {
       setConfig({
         ...base,
-        log: { level: "warn", development: false, format: "json", path_stats_retention_days: 7 },
+        log: { level: "warn", development: false, format: "json", pathStatsRetentionDays: 7 },
         tls: tls,
         redis: redis,
         otel: otel,
@@ -304,7 +304,7 @@ export default function SettingsPage() {
 
       <ResourceProfileCard
         profile={config.profile || ""}
-        pinned={status?.profile_pinned}
+        pinned={status?.profilePinned}
         disabled={formDisabled}
         onChange={(val) => setConfig({ ...config, profile: val })}
       />
@@ -481,11 +481,11 @@ export default function SettingsPage() {
                       label="Min TLS Version"
                       disabled={formDisabled}
                       data={["TLS1.2", "TLS1.3"]}
-                      value={tls.min_tls_version || "TLS1.2"}
+                      value={tls.minTlsVersion || "TLS1.2"}
                       onChange={(val) =>
                         setConfig({
                           ...config,
-                          tls: { ...tls, min_tls_version: val || "TLS1.2" },
+                          tls: { ...tls, minTlsVersion: val || "TLS1.2" },
                         })
                       }
                       radius="md"
@@ -494,12 +494,12 @@ export default function SettingsPage() {
                       label="Max TLS Version"
                       disabled={formDisabled}
                       data={["TLS1.2", "TLS1.3"]}
-                      value={tls.max_tls_version || ""}
+                      value={tls.maxTlsVersion || ""}
                       placeholder="Default"
                       onChange={(val) =>
                         setConfig({
                           ...config,
-                          tls: { ...tls, max_tls_version: val || "" },
+                          tls: { ...tls, maxTlsVersion: val || "" },
                         })
                       }
                       radius="md"
@@ -528,11 +528,11 @@ export default function SettingsPage() {
                         value: "RequireAndVerifyClientCert",
                       },
                     ]}
-                    value={tls.client_auth_type || "NoClientCert"}
+                    value={tls.clientAuthType || "NoClientCert"}
                     onChange={(val) =>
                       setConfig({
                         ...config,
-                        tls: { ...tls, client_auth_type: val || "NoClientCert" },
+                        tls: { ...tls, clientAuthType: val || "NoClientCert" },
                       })
                     }
                     radius="md"
@@ -550,11 +550,11 @@ export default function SettingsPage() {
                       "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
                       "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
                     ]}
-                    value={tls.cipher_suites || []}
+                    value={tls.cipherSuites || []}
                     onChange={(val) =>
                       setConfig({
                         ...config,
-                        tls: { ...tls, cipher_suites: val },
+                        tls: { ...tls, cipherSuites: val },
                       })
                     }
                     radius="md"
@@ -734,11 +734,11 @@ export default function SettingsPage() {
                   label="Service Name"
                   placeholder="gateon-gateway"
                   disabled={formDisabled || !otel.enabled}
-                  value={otel.service_name || ""}
+                  value={otel.serviceName || ""}
                   onChange={(e) =>
                     setConfig({
                       ...config,
-                      otel: { ...otel, service_name: e.currentTarget.value },
+                      otel: { ...otel, serviceName: e.currentTarget.value },
                     })
                   }
                   radius="md"
@@ -900,13 +900,13 @@ export default function SettingsPage() {
                 disabled={formDisabled}
                 min={1}
                 max={365}
-                value={config.log?.path_stats_retention_days ?? 7}
+                value={config.log?.pathStatsRetentionDays ?? 7}
                 onChange={(v) =>
                   setConfig({
                     ...config,
                     log: {
                       ...(config.log || {}),
-                      path_stats_retention_days: typeof v === 'number' ? v : 7,
+                      pathStatsRetentionDays: typeof v === 'number' ? v : 7,
                     },
                   })
                 }
@@ -918,13 +918,13 @@ export default function SettingsPage() {
                 disabled={formDisabled}
                 min={1}
                 max={365}
-                value={config.log?.access_log_retention_days ?? 7}
+                value={config.log?.accessLogRetentionDays ?? 7}
                 onChange={(v) =>
                   setConfig({
                     ...config,
                     log: {
                       ...(config.log || {}),
-                      access_log_retention_days: typeof v === 'number' ? v : 7,
+                      accessLogRetentionDays: typeof v === 'number' ? v : 7,
                     },
                   })
                 }
@@ -936,13 +936,13 @@ export default function SettingsPage() {
                 disabled={formDisabled}
                 min={1}
                 max={365}
-                value={config.log?.security_threat_retention_days ?? 30}
+                value={config.log?.securityThreatRetentionDays ?? 30}
                 onChange={(v) =>
                   setConfig({
                     ...config,
                     log: {
                       ...(config.log || {}),
-                      security_threat_retention_days: typeof v === 'number' ? v : 30,
+                      securityThreatRetentionDays: typeof v === 'number' ? v : 30,
                     },
                   })
                 }
@@ -1425,7 +1425,7 @@ export default function SettingsPage() {
                   waf: {
                     ...(config.waf || {
                       use_crs: true,
-                      paranoia_level: 1,
+                      paranoiaLevel: 1,
                     }),
                     enabled: e.currentTarget.checked,
                   },
@@ -1460,13 +1460,13 @@ export default function SettingsPage() {
                 />
                 <Switch
                   label="Trust Cloudflare IPs/Headers"
-                  checked={config.waf.trust_cloudflare_headers}
+                  checked={config.waf.trustCloudflareHeaders}
                   onChange={(e) =>
                     setConfig({
                       ...config,
                       waf: {
                         ...config.waf!,
-                        trust_cloudflare_headers: e.currentTarget.checked,
+                        trustCloudflareHeaders: e.currentTarget.checked,
                       },
                     })
                   }
@@ -1480,13 +1480,13 @@ export default function SettingsPage() {
                     { value: "3", label: "3 - Extreme" },
                     { value: "4", label: "4 - Insane" },
                   ]}
-                  value={config.waf.paranoia_level.toString()}
+                  value={config.waf.paranoiaLevel.toString()}
                   onChange={(v) =>
                     setConfig({
                       ...config,
                       waf: {
                         ...config.waf!,
-                        paranoia_level: parseInt(v || "1"),
+                        paranoiaLevel: parseInt(v || "1"),
                       },
                     })
                   }
@@ -1575,28 +1575,28 @@ export default function SettingsPage() {
                       )}
                       <Switch
                         label="IP Reputation"
-                        checked={config.waf.ip_reputation}
-                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, ip_reputation: e.currentTarget.checked } })}
+                        checked={config.waf.ipReputation}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, ipReputation: e.currentTarget.checked } })}
                         disabled={formDisabled}
                       />
                       <Switch
                         label="DOS Protection"
-                        checked={config.waf.dos_protection}
-                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, dos_protection: e.currentTarget.checked } })}
+                        checked={config.waf.dosProtection}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, dosProtection: e.currentTarget.checked } })}
                         disabled={formDisabled}
                       />
                     </Stack>
                     <Stack gap="xs">
                       <Switch
                         label="Malware Detection"
-                        checked={config.waf.malware_detection}
-                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, malware_detection: e.currentTarget.checked } })}
+                        checked={config.waf.malwareDetection}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, malwareDetection: e.currentTarget.checked } })}
                         disabled={formDisabled}
                       />
                       <Switch
                         label="Ransomware Detection"
-                        checked={config.waf.ransomware_detection}
-                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, ransomware_detection: e.currentTarget.checked } })}
+                        checked={config.waf.ransomwareDetection}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, ransomwareDetection: e.currentTarget.checked } })}
                         disabled={formDisabled}
                       />
                       <Switch
@@ -1611,8 +1611,8 @@ export default function SettingsPage() {
                   <NumberInput
                     label="Global Anomaly Threshold"
                     description="Default score required to block if not specified on route. Default: 5"
-                    value={config.waf.anomaly_threshold || 5}
-                    onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, anomaly_threshold: parseInt(v?.toString() || "5") } })}
+                    value={config.waf.anomalyThreshold || 5}
+                    onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, anomalyThreshold: parseInt(v?.toString() || "5") } })}
                     min={1}
                     disabled={formDisabled}
                   />
@@ -1648,7 +1648,7 @@ export default function SettingsPage() {
                   />
 
                   <Divider label="ClamAV Anti-Malware" labelPosition="center" />
-                  {config.waf?.malware_detection && status && !status.clamav_installed && (
+                  {config.waf?.malwareDetection && status && !status.clamavInstalled && (
                     <Alert icon={<IconInfoCircle size="1rem" />} title="ClamAV Not Detected" color="red">
                       <Stack gap="xs">
                         <Text size="sm">
@@ -1689,7 +1689,7 @@ export default function SettingsPage() {
                       </Stack>
                     </Alert>
                   )}
-                  {status && status.clamav_installed && (
+                  {status && status.clamavInstalled && (
                     <Alert icon={<IconShieldCheck size="1rem" />} title="ClamAV Installed" color="green">
                       <Group justify="space-between" align="center">
                         <Text size="sm">
@@ -1726,7 +1726,7 @@ export default function SettingsPage() {
                           }
                         }
                       })}
-                      disabled={formDisabled || !config.waf.malware_detection}
+                      disabled={formDisabled || !config.waf.malwareDetection}
                     />
                     <Switch
                       label="Auto-Install/Manage"
@@ -1742,7 +1742,7 @@ export default function SettingsPage() {
                           }
                         }
                       })}
-                      disabled={formDisabled || !config.waf.malware_detection}
+                      disabled={formDisabled || !config.waf.malwareDetection}
                       mt="xl"
                     />
                   </Group>
@@ -1752,18 +1752,18 @@ export default function SettingsPage() {
                       label="ClamAV Address"
                       description="Address of ClamAV daemon"
                       placeholder="tcp://localhost:3310"
-                      value={config.waf.clamav?.clamav_addr || config.waf.clamav_addr || ""}
+                      value={config.waf.clamav?.clamavAddr || config.waf.clamavAddr || ""}
                       onChange={(e) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
                           clamav: {
                             ...(config.waf!.clamav || {}),
-                            clamav_addr: e.currentTarget.value
+                            clamavAddr: e.currentTarget.value
                           }
                         }
                       })}
-                      disabled={formDisabled || !config.waf.malware_detection}
+                      disabled={formDisabled || !config.waf.malwareDetection}
                     />
                     <TextInput
                       label="Full Scan Schedule"
@@ -1780,7 +1780,7 @@ export default function SettingsPage() {
                           }
                         }
                       })}
-                      disabled={formDisabled || !config.waf.malware_detection}
+                      disabled={formDisabled || !config.waf.malwareDetection}
                     />
                   </Group>
 
@@ -1799,7 +1799,7 @@ export default function SettingsPage() {
                           }
                         }
                       })}
-                      disabled={formDisabled || !config.waf.malware_detection}
+                      disabled={formDisabled || !config.waf.malwareDetection}
                     />
                     {config.waf.clamav?.installation_mode === 2 && (
                       <TextInput
@@ -1816,7 +1816,7 @@ export default function SettingsPage() {
                             }
                           }
                         })}
-                        disabled={formDisabled || !config.waf.malware_detection}
+                        disabled={formDisabled || !config.waf.malwareDetection}
                       />
                     )}
                   </Group>

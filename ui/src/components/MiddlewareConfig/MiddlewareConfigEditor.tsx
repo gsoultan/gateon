@@ -101,9 +101,9 @@ export function MiddlewareConfigEditor({
           <Switch
             label="Trust inbound X-Forwarded-Proto"
             description="Honor the inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES. Ignored when a scheme is forced above."
-            checked={config.trust_forward_header === "true"}
+            checked={config.trustForwardHeader === "true"}
             onChange={(e) =>
-              updateConfig("trust_forward_header", e.currentTarget.checked ? "true" : "false")
+              updateConfig("trustForwardHeader", e.currentTarget.checked ? "true" : "false")
             }
           />
         </Stack>
@@ -149,8 +149,8 @@ export function MiddlewareConfigEditor({
           <TagsInput
             label="Status Codes"
             placeholder="404, 500, 503"
-            value={splitTags(config.status_codes)}
-            onChange={(val) => updateConfig("status_codes", joinTags(val))}
+            value={splitTags(config.statusCodes)}
+            onChange={(val) => updateConfig("statusCodes", joinTags(val))}
             description="HTTP status codes that should trigger custom error pages."
             clearable
           />
@@ -173,7 +173,7 @@ export function MiddlewareConfigEditor({
         <TextInput
           label="Route Name Override (Optional)"
           placeholder="custom-name"
-          value={config.route || config.route_id || ""}
+          value={config.route || config.routeId || ""}
           onChange={(e) => updateConfig("route", e.currentTarget.value)}
         />
       );
@@ -257,18 +257,18 @@ export function MiddlewareConfigEditor({
             label="Auth Response Headers"
             description="Comma-separated headers from auth 2xx to copy to the forwarded request (e.g. X-Forwarded-User)"
             placeholder="X-Forwarded-User, X-Auth-Request-Email"
-            value={config.auth_response_headers || ""}
+            value={config.authResponseHeaders || ""}
             onChange={(e) =>
-              updateConfig("auth_response_headers", e.currentTarget.value)
+              updateConfig("authResponseHeaders", e.currentTarget.value)
             }
           />
           <TextInput
             label="Auth Request Headers"
             description="Comma-separated headers to forward to auth service. Empty = all headers"
             placeholder="Cookie, Authorization"
-            value={config.auth_request_headers || ""}
+            value={config.authRequestHeaders || ""}
             onChange={(e) =>
-              updateConfig("auth_request_headers", e.currentTarget.value)
+              updateConfig("authRequestHeaders", e.currentTarget.value)
             }
           />
           <Group grow>
@@ -276,13 +276,13 @@ export function MiddlewareConfigEditor({
               label="Max Body Size (bytes)"
               description="Limit when forwarding body. Default 1MB. -1 = unlimited"
               value={
-                config.max_body_size
-                  ? parseInt(config.max_body_size)
+                config.maxBodySize
+                  ? parseInt(config.maxBodySize)
                   : 1048576
               }
               onChange={(val) =>
                 updateConfig(
-                  "max_body_size",
+                  "maxBodySize",
                   (val ?? 1048576).toString()
                 )
               }
@@ -291,10 +291,10 @@ export function MiddlewareConfigEditor({
             <Switch
               label="Trust Forward Header"
               description="Trust X-Forwarded-* from incoming request"
-              checked={config.trust_forward_header === "true"}
+              checked={config.trustForwardHeader === "true"}
               onChange={(e) =>
                 updateConfig(
-                  "trust_forward_header",
+                  "trustForwardHeader",
                   e.currentTarget.checked ? "true" : "false"
                 )
               }
@@ -305,10 +305,10 @@ export function MiddlewareConfigEditor({
             <Switch
               label="Forward Body"
               description="Forward request body to auth service"
-              checked={config.forward_body === "true"}
+              checked={config.forwardBody === "true"}
               onChange={(e) =>
                 updateConfig(
-                  "forward_body",
+                  "forwardBody",
                   e.currentTarget.checked ? "true" : "false"
                 )
               }
@@ -316,10 +316,10 @@ export function MiddlewareConfigEditor({
             <Switch
               label="Preserve Request Method"
               description="Use same HTTP method for auth request"
-              checked={config.preserve_request_method === "true"}
+              checked={config.preserveRequestMethod === "true"}
               onChange={(e) =>
                 updateConfig(
-                  "preserve_request_method",
+                  "preserveRequestMethod",
                   e.currentTarget.checked ? "true" : "false"
                 )
               }

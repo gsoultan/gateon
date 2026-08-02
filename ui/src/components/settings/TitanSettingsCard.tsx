@@ -18,7 +18,7 @@ export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, on
     enable_ai_predictor: false,
     enable_pqc: false,
     enable_governor: false,
-    ai_model_path: ''
+    aiModelPath: ''
   };
 
   const ebpf = config.ebpf || {
@@ -111,8 +111,8 @@ export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, on
                   <TextInput
                     label="AI Model Path"
                     placeholder="/path/to/model.wasm"
-                    value={titan.ai_model_path}
-                    onChange={(event) => handleChange('ai_model_path', event.currentTarget.value)}
+                    value={titan.aiModelPath}
+                    onChange={(event) => handleChange('aiModelPath', event.currentTarget.value)}
                     size="xs"
                     disabled={disabled || !titan.enable_ai_predictor}
                   />

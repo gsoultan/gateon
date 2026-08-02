@@ -32,14 +32,6 @@ var brotliWriterPool = sync.Pool{
 	},
 }
 
-var compressBodyPool = sync.Pool{
-	New: func() any {
-		// Pre-allocate 4KB; will grow as needed up to maxBytes
-		b := make([]byte, 0, 4096)
-		return &b
-	},
-}
-
 // CompressConfig configures the compress middleware (Traefik-style).
 type CompressConfig struct {
 	MinResponseBodyBytes int      // Minimum body size to compress; 0 = use default 1024
@@ -109,8 +101,9 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 				return
 			}
 
-			// gRPC must not be compressed
-			if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			// gRPC and SSE must not be compressed
+			contentType := r.Header.Get("Content-Type")
+			if strings.HasPrefix(contentType, "application/grpc") || strings.HasPrefix(contentType, "text/event-stream") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -182,8 +175,11 @@ func (w *compressWriter) decide() {
 	if h.Get("Content-Encoding") != "" || w.status >= 300 || w.status == http.StatusNoContent || w.status == http.StatusNotModified {
 		w.should = false
 	} else {
-		contentType := strings.ToLower(strings.TrimSpace(strings.Split(h.Get("Content-Type"), ";")[0]))
-		if excluded := w.excluded[contentType]; excluded {
+		ct := h.Get("Content-Type")
+		contentType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
+		if strings.HasPrefix(ct, "application/grpc") || contentType == "text/event-stream" {
+			w.should = false
+		} else if excluded := w.excluded[contentType]; excluded {
 			w.should = false
 		} else if len(w.included) > 0 && !w.included[contentType] {
 			w.should = false

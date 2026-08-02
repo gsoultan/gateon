@@ -92,7 +92,7 @@ export default function RouteList({
   );
 
   const routes = optimisticRoutes;
-  const totalCount = data?.total_count ?? 0;
+  const totalCount = data?.totalCount ?? 0;
 
   if (isLoading)
     return (
@@ -293,7 +293,7 @@ export default function RouteList({
                       <Group justify="space-between" align="flex-end">
                         <Stack gap={2}>
                           <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Upstream</Text>
-                          <Text size="xs" truncate>{route.service_id}</Text>
+                          <Text size="xs" truncate>{route.serviceId}</Text>
                         </Stack>
                         <Stack gap={2} align="flex-end">
                           <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Traffic</Text>
@@ -460,9 +460,9 @@ export default function RouteList({
                           PAUSED
                         </Badge>
                       )}
-                      {route.entrypoints && route.entrypoints.length > 0 ? (
+                      {route.entryPoints && route.entryPoints.length > 0 ? (
                         <Group gap={4}>
-                          {route.entrypoints.map((ep) => (
+                          {route.entryPoints.map((ep) => (
                             <Badge key={ep} size="xs" variant="outline">
                               {ep}
                             </Badge>
@@ -496,7 +496,7 @@ export default function RouteList({
                   <Table.Td>
                     <Group gap="xs">
                       <Badge size="sm" variant="light" color="teal">
-                        {route.service_id}
+                        {route.serviceId}
                       </Badge>
                     </Group>
                   </Table.Td>

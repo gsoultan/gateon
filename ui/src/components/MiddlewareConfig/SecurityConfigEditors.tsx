@@ -114,26 +114,26 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
               <Switch
                 label="IP Reputation"
                 description="Block requests from known malicious IPs"
-                checked={config.ip_reputation === "true"}
-                onChange={(e) => updateConfig("ip_reputation", e.currentTarget.checked ? "true" : "false")}
+                checked={config.ipReputation === "true"}
+                onChange={(e) => updateConfig("ipReputation", e.currentTarget.checked ? "true" : "false")}
               />
               <Switch
                 label="DOS Protection"
                 description="Basic HTTP-level DOS protection rules"
-                checked={config.dos_protection === "true"}
-                onChange={(e) => updateConfig("dos_protection", e.currentTarget.checked ? "true" : "false")}
+                checked={config.dosProtection === "true"}
+                onChange={(e) => updateConfig("dosProtection", e.currentTarget.checked ? "true" : "false")}
               />
               <Switch
                 label="Malware Detection"
                 description="Detect common malware and web shell patterns"
-                checked={config.malware_detection === "true"}
-                onChange={(e) => updateConfig("malware_detection", e.currentTarget.checked ? "true" : "false")}
+                checked={config.malwareDetection === "true"}
+                onChange={(e) => updateConfig("malwareDetection", e.currentTarget.checked ? "true" : "false")}
               />
               <Switch
                 label="Ransomware Detection"
                 description="Detect ransomware file extension uploads"
-                checked={config.ransomware_detection === "true"}
-                onChange={(e) => updateConfig("ransomware_detection", e.currentTarget.checked ? "true" : "false")}
+                checked={config.ransomwareDetection === "true"}
+                onChange={(e) => updateConfig("ransomwareDetection", e.currentTarget.checked ? "true" : "false")}
               />
             </Stack>
             <Stack gap="xs">
@@ -201,16 +201,16 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
             <NumberInput
               label="Paranoia Level"
               description="CRS paranoia 1-4. Higher = stricter."
-              value={parseInt(config.paranoia_level) || 1}
-              onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
+              value={parseInt(config.paranoiaLevel) || 1}
+              onChange={(val) => updateConfig("paranoiaLevel", (val ?? 1).toString())}
               min={1}
               max={4}
             />
             <NumberInput
               label="Anomaly Threshold"
               description="Score required to block. Default: 5"
-              value={parseInt(config.anomaly_threshold) || 5}
-              onChange={(val) => updateConfig("anomaly_threshold", (val ?? 5).toString())}
+              value={parseInt(config.anomalyThreshold) || 5}
+              onChange={(val) => updateConfig("anomalyThreshold", (val ?? 5).toString())}
               min={1}
             />
           </Group>
@@ -239,19 +239,19 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
               label="Audit Log Path (optional)"
               description="Leave blank — Gateon automatically creates the folder and file and writes WAF audit events there. Only set this to override the default location."
               placeholder="Auto: <data-dir>/audit/waf/<route>_audit.log"
-              value={config.audit_log_path || ""}
-              onChange={(e) => updateConfig("audit_log_path", e.currentTarget.value)}
+              value={config.auditLogPath || ""}
+              onChange={(e) => updateConfig("auditLogPath", e.currentTarget.value)}
             />
             <Text size="xs" c="dimmed">
-              {config.audit_log_path
+              {config.auditLogPath
                 ? `Gateon will create this file and its parent folder if they don't exist.`
                 : `Default location: the Gateon data directory under audit/waf/. The folder and log file are created for you on save.`}
             </Text>
             <Switch
               label="Relevant Only"
               description="Only log 'relevant' events (e.g. those that triggered a rule)"
-              checked={config.audit_log_relevant_only === "true"}
-              onChange={(e) => updateConfig("audit_log_relevant_only", e.currentTarget.checked ? "true" : "false")}
+              checked={config.auditLogRelevantOnly === "true"}
+              onChange={(e) => updateConfig("auditLogRelevantOnly", e.currentTarget.checked ? "true" : "false")}
             />
           </Stack>
         </>
@@ -270,10 +270,10 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       <Switch
         label="Trust Cloudflare Headers"
         description="Use CF-Connecting-IP for WAF REMOTE_ADDR"
-        checked={config.trust_cloudflare_headers === "true"}
+        checked={config.trustCloudflareHeaders === "true"}
         onChange={(e) =>
           updateConfig(
-            "trust_cloudflare_headers",
+            "trustCloudflareHeaders",
             e.currentTarget.checked ? "true" : "false"
           )
         }
@@ -496,10 +496,10 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
       <Switch
         label="Trust Cloudflare Headers"
         description="Use CF-Connecting-IP for client IP"
-        checked={config.trust_cloudflare_headers === "true"}
+        checked={config.trustCloudflareHeaders === "true"}
         onChange={(e) =>
           updateConfig(
-            "trust_cloudflare_headers",
+            "trustCloudflareHeaders",
             e.currentTarget.checked ? "true" : "false"
           )
         }
@@ -649,10 +649,10 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
       <Switch
         label="Trust Cloudflare Headers"
         description="Use CF-Connecting-IP when behind Cloudflare"
-        checked={config.trust_cloudflare_headers === "true"}
+        checked={config.trustCloudflareHeaders === "true"}
         onChange={(e) =>
           updateConfig(
-            "trust_cloudflare_headers",
+            "trustCloudflareHeaders",
             e.currentTarget.checked ? "true" : "false"
           )
         }
@@ -759,8 +759,8 @@ export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) 
           label="ClamAV Address"
           description="TCP or Unix socket address (e.g. tcp://localhost:3310)"
           placeholder="tcp://localhost:3310"
-          value={config.clamav_addr || ""}
-          onChange={(e) => updateConfig("clamav_addr", e.currentTarget.value)}
+          value={config.clamavAddr || ""}
+          onChange={(e) => updateConfig("clamavAddr", e.currentTarget.value)}
         />
       )}
       <Divider label="MIME Validation" labelPosition="center" />
@@ -783,8 +783,8 @@ export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) 
       <NumberInput
         label="Max File Size (bytes)"
         description="Maximum allowed size for individual files. 0 = unlimited."
-        value={parseInt(config.max_file_size) || 0}
-        onChange={(val) => updateConfig("max_file_size", (val ?? 0).toString())}
+        value={parseInt(config.maxFileSize) || 0}
+        onChange={(val) => updateConfig("maxFileSize", (val ?? 0).toString())}
         min={0}
       />
       <Switch

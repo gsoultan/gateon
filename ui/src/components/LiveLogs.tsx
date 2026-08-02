@@ -140,7 +140,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
           logs
             .map((entry) => {
               if (!entry.parsed) return "";
-              return String(entry.parsed.route ?? entry.parsed.route_id ?? "").trim();
+              return String(entry.parsed.route ?? entry.parsed.routeId ?? "").trim();
             })
             .filter(Boolean),
         ),
@@ -160,7 +160,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
         
         const parsed = entry.parsed;
         if (deferredRouteFilter) {
-          const route = String(parsed.route ?? parsed.route_id ?? "").trim();
+          const route = String(parsed.route ?? parsed.routeId ?? "").trim();
           if (route !== deferredRouteFilter) return false;
         }
         if (deferredStatusFilter) {
@@ -170,7 +170,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
         }
         if (deferredClientIpFilter) {
           const ip = String(
-            parsed.ip ?? parsed.remote_addr ?? parsed.client_ip ?? "",
+            parsed.ip ?? parsed.remoteAddr ?? parsed.client_ip ?? "",
           ).toLowerCase();
           if (!ip.includes(ipLower)) return false;
         }
@@ -321,7 +321,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
               value={clientIpFilter}
               onChange={(e) => setClientIpFilter(e.currentTarget.value)}
               w={110}
-              title="Filter by client IP (ip, remote_addr)"
+              title="Filter by client IP (ip, remoteAddr)"
             />
             <Button
               size="compact-xs"

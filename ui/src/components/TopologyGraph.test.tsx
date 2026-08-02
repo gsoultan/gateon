@@ -16,7 +16,7 @@ describe("TopologyGraph", () => {
     expect(() =>
       renderToString(
         <MantineProvider>
-          <TopologyGraph entrypoints={[]} routes={[]} middlewares={[]} services={[]} />
+          <TopologyGraph entryPoints={[]} routes={[]} middlewares={[]} services={[]} />
         </MantineProvider>,
       ),
     ).not.toThrow();
@@ -25,19 +25,19 @@ describe("TopologyGraph", () => {
   test("renders a populated topology with a service shared by two routes", () => {
     // Two routes pointing at the same service must not produce duplicate node
     // ids for the service or its backend targets (regression guard).
-    const entrypoints: EntryPoint[] = [
+    const entryPoints: EntryPoint[] = [
       { id: "web", name: "web", address: ":443", type: EntryPointType.HTTP },
     ];
     const services: Service[] = [
       {
         id: "svc-1",
         name: "api",
-        weighted_targets: [
+        weightedTargets: [
           { url: "http://10.0.0.1:8080", weight: 1 },
           { url: "http://10.0.0.2:8080", weight: 1 },
         ],
-        load_balancer_policy: "round_robin",
-        health_check_path: "/healthz",
+        loadBalancerPolicy: "round_robin",
+        healthCheckPath: "/healthz",
       },
     ];
     const middlewares: Middleware[] = [
@@ -48,21 +48,21 @@ describe("TopologyGraph", () => {
         id: "r1",
         name: "route-a",
         type: "http",
-        entrypoints: ["web"],
+        entryPoints: ["web"],
         rule: "Host(`a.example.com`)",
         priority: 1,
         middlewares: ["mw-auth"],
-        service_id: "svc-1",
+        serviceId: "svc-1",
       },
       {
         id: "r2",
         name: "route-b",
         type: "http",
-        entrypoints: ["web"],
+        entryPoints: ["web"],
         rule: "Host(`b.example.com`)",
         priority: 1,
         middlewares: [],
-        service_id: "svc-1",
+        serviceId: "svc-1",
       },
     ];
 
@@ -70,7 +70,7 @@ describe("TopologyGraph", () => {
       renderToString(
         <MantineProvider>
           <TopologyGraph
-            entrypoints={entrypoints}
+            entryPoints={entryPoints}
             routes={routes}
             middlewares={middlewares}
             services={services}

@@ -179,10 +179,6 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 	return anomalies
 }
 
-func (d *SecurityThreatDetector) detectCoordinatedScans(data *DiagnosticData) map[string]map[string]struct{} {
-	return data.PathIPs
-}
-
 func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	totalIPs := len(data.IPStats)

@@ -184,7 +184,7 @@ export default function Dashboard() {
 
     const currentTotals = new Map<string, number>();
     for (const stat of pathStats) {
-      currentTotals.set(`${stat.host}:${stat.path}`, stat.bytes_total);
+      currentTotals.set(`${stat.host}:${stat.path}`, stat.bytesTotal);
     }
 
     const previousTotals = previousPathStatsRef.current;
@@ -201,7 +201,7 @@ export default function Dashboard() {
     for (const stat of pathStats) {
       const key = `${stat.host}:${stat.path}`;
       const prevBytes = previousTotals.get(key) ?? 0;
-      const deltaBytes = Math.max(0, stat.bytes_total - prevBytes);
+      const deltaBytes = Math.max(0, stat.bytesTotal - prevBytes);
       if (deltaBytes <= 0) {
         continue;
       }
@@ -362,7 +362,7 @@ export default function Dashboard() {
     return metricsSnap.country_metrics
       .sort((a, b) => b.requests - a.requests)
       .slice(0, 5)
-      .map((m) => ({ group: m.country, name: m.country_name, requests: m.requests }));
+      .map((m) => ({ group: m.country, name: m.countryName, requests: m.requests }));
   }, [metricsSnap]);
 
   const protocolDistributionData = useMemo(() => {
@@ -461,10 +461,10 @@ export default function Dashboard() {
     return metricsSnap.country_metrics
       .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
       .slice(0, 5)
-      .map((m) => ({ group: m.country, name: m.country_name, requests: m.bytes_in + m.bytes_out }));
+      .map((m) => ({ group: m.country, name: m.countryName, requests: m.bytes_in + m.bytes_out }));
   }, [metricsSnap]);
 
-  const totalRequests = agg?.total_requests ?? 0;
+  const totalRequests = agg?.totalRequests ?? 0;
   const totalBandwidthBytes = agg?.total_bandwidth_bytes ?? 0;
   const requestsToday = metricsSnap?.golden_signals?.requests_today ?? 0;
   const bytesToday = metricsSnap?.golden_signals?.bytes_today ?? 0;
@@ -493,7 +493,7 @@ export default function Dashboard() {
     },
     {
       label: "Active Threats",
-      value: formatCompact(metricsSnap?.security?.active_threats || 0),
+      value: formatCompact(metricsSnap?.security?.activeThreats || 0),
       icon: IconAlertCircle,
       color: "orange" as const,
       description: "Active risks detected in last 24h",
@@ -1024,7 +1024,7 @@ export default function Dashboard() {
                     Manage Routes
                   </Text>
                   <Text size="xs" c="dimmed">
-                    View and edit all {status?.routes_count ?? 0} routes
+                    View and edit all {status?.routesCount ?? 0} routes
                   </Text>
                 </div>
                 <Text size="xs" c="indigo" fw={600}>

@@ -50,11 +50,11 @@ export default function CircuitBreakerPage() {
   }, [orderedEvents.length, eventTotalPages, eventPage]);
 
   const routes = data?.routes ?? [];
-  const totalCount = data?.total_count ?? 0;
+  const totalCount = data?.totalCount ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-  const closed = aggStats?.healthy_targets ?? 0;
-  const open = aggStats?.open_circuits ?? 0;
-  const halfOpen = aggStats?.half_open_circuits ?? 0;
+  const closed = aggStats?.healthyTargets ?? 0;
+  const open = aggStats?.openCircuits ?? 0;
+  const halfOpen = aggStats?.halfOpenCircuits ?? 0;
 
   return (
     <Stack gap="lg">

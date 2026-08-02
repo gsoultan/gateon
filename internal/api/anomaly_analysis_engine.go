@@ -154,7 +154,7 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 
 		// 1. Path Hashing & Mapping
 		hasher.Reset()
-		hasher.WriteString(tr.Path)
+		_, _ = hasher.WriteString(tr.Path)
 		h := hasher.Sum64()
 		if _, ok := data.PathMap[h]; !ok {
 			data.PathMap[h] = tr.Path

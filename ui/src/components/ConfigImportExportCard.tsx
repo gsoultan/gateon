@@ -103,7 +103,7 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
               Config Import / Export
             </Title>
             <Text c="dimmed" size="xs">
-              Backup or restore routes, services, entrypoints, and middlewares.
+              Backup or restore routes, services, entryPoints, and middlewares.
             </Text>
           </div>
         </Group>
@@ -172,7 +172,7 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
           </Paper>
         )}
         <Text size="xs" c="dimmed">
-          Export downloads gateon-config.json. Import merges the uploaded config (services first, then entrypoints, middlewares, routes).
+          Export downloads gateon-config.json. Import merges the uploaded config (services first, then entryPoints, middlewares, routes).
         </Text>
       </Stack>
     </Card>

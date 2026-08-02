@@ -137,17 +137,17 @@ export function ReputationMonitor() {
                     >
                       <Badge 
                         variant="light" 
-                        color={rep.violation_count > 0 ? "red" : "gray"}
+                        color={rep.violationCount > 0 ? "red" : "gray"}
                         size="sm"
                       >
-                        {rep.violation_count}
+                        {rep.violationCount}
                       </Badge>
                     </Tooltip>
                   </Table.Td>
                   <Table.Td>
                     <Text size="xs" c="dimmed">
                       {(() => {
-                        const date = new Date(rep.last_event);
+                        const date = new Date(rep.lastEvent);
                         return isNaN(date.getTime()) ? 'N/A' : date.toLocaleTimeString();
                       })()}
                     </Text>

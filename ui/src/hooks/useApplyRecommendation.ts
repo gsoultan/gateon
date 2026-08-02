@@ -2,9 +2,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../services/client";
 
 export interface ApplyRecommendationRequest {
-  anomaly_type: string;
+  anomalyType: string;
   source: string;
-  threat_id?: string;
+  threatId?: string;
 }
 
 export interface ApplyRecommendationResponse {
@@ -18,9 +18,9 @@ export function useApplyRecommendation() {
   return useMutation({
     mutationFn: async (req: ApplyRecommendationRequest) => {
       const res = await api.applyRecommendation({
-        anomalyType: req.anomaly_type,
+        anomalyType: req.anomalyType,
         source: req.source,
-        threatId: req.threat_id,
+        threatId: req.threatId,
       });
       return res as ApplyRecommendationResponse;
     },

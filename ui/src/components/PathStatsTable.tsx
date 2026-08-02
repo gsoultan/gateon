@@ -166,16 +166,16 @@ export function PathStatsTable() {
                   </Table.Td>
                   <Table.Td ta="right">
                     <Badge variant="flat" color="gray">
-                      {stat.request_count.toLocaleString()}
+                      {stat.requestCount.toLocaleString()}
                     </Badge>
                   </Table.Td>
                   <Table.Td ta="right">
                     <Text
                       size="sm"
                       fw={600}
-                      c={stat.avg_latency_seconds > 0.5 ? "orange" : "green"}
+                      c={stat.avgLatencySeconds > 0.5 ? "orange" : "green"}
                     >
-                      {stat.avg_latency_seconds.toFixed(3)}s
+                      {stat.avgLatencySeconds.toFixed(3)}s
                     </Text>
                   </Table.Td>
                 </Table.Tr>

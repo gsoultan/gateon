@@ -39,7 +39,7 @@ export function EntryPointForm({
 
   const mutation = useMutation({
     mutationFn: async (newEP: EntryPoint) => {
-      const res = await apiFetch("/v1/entrypoints", {
+      const res = await apiFetch("/v1/entryPoints", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newEP),
@@ -51,7 +51,7 @@ export function EntryPointForm({
       return res.json();
     },
     onSuccess: (savedEP: EntryPoint) => {
-      queryClient.invalidateQueries({ queryKey: ["entrypoints"] });
+      queryClient.invalidateQueries({ queryKey: ["entryPoints"] });
       notifications.show({
         title: "EntryPoint Saved",
         message: `EntryPoint ${savedEP.id} has been successfully created/updated.`,
@@ -78,10 +78,10 @@ export function EntryPointForm({
       protocol: 0,
       protocols: [Protocol.TCP],
       tls: { enabled: false },
-      read_timeout_ms: DEFAULT_TIMEOUT_MS,
-      write_timeout_ms: DEFAULT_TIMEOUT_MS,
+      readTimeoutMs: DEFAULT_TIMEOUT_MS,
+      writeTimeoutMs: DEFAULT_TIMEOUT_MS,
       max_connections: 0,
-      access_log_enabled: true,
+      accessLogEnabled: true,
     } as EntryPoint,
     onSubmit: async ({ value }) => {
       try {
@@ -107,17 +107,17 @@ export function EntryPointForm({
       );
       form.setFieldValue("tls", initialData.tls || { enabled: false });
       form.setFieldValue(
-        "read_timeout_ms",
-        initialData.read_timeout_ms ?? DEFAULT_TIMEOUT_MS,
+        "readTimeoutMs",
+        initialData.readTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       );
       form.setFieldValue(
-        "write_timeout_ms",
-        initialData.write_timeout_ms ?? DEFAULT_TIMEOUT_MS,
+        "writeTimeoutMs",
+        initialData.writeTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       );
       form.setFieldValue("max_connections", initialData.max_connections || 0);
       form.setFieldValue(
-        "access_log_enabled",
-        initialData.access_log_enabled ?? true,
+        "accessLogEnabled",
+        initialData.accessLogEnabled ?? true,
       );
     }
   }, [initialData, form]);
@@ -255,7 +255,7 @@ export function EntryPointForm({
 
         <Group grow>
           <form.Field
-            name="read_timeout_ms"
+            name="readTimeoutMs"
             children={(field: any) => (
               <TextInput
                 label="Read Timeout"
@@ -272,7 +272,7 @@ export function EntryPointForm({
             )}
           />
           <form.Field
-            name="write_timeout_ms"
+            name="writeTimeoutMs"
             children={(field: any) => (
               <TextInput
                 label="Write Timeout"
@@ -291,7 +291,7 @@ export function EntryPointForm({
         </Group>
 
         <form.Field
-          name="access_log_enabled"
+          name="accessLogEnabled"
           children={(field: any) => (
             <Switch
               label="Enable Access Logs"

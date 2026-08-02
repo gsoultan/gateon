@@ -144,7 +144,7 @@ export async function applyRecommendation(anomalyType: string, source: string, t
   const res = await apiFetch("/v1/diagnostics/recommendation", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ anomaly_type: anomalyType, source: source, threat_id: threatId }),
+    body: JSON.stringify({ anomalyType: anomalyType, source: source, threatId: threatId }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

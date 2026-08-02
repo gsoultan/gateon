@@ -140,12 +140,12 @@ export default function TLSOptionsPage() {
     setEditingOption({
       id: "",
       name: "",
-      min_tls_version: "TLS1.2",
-      max_tls_version: "TLS1.3",
-      cipher_suites: [],
+      minTlsVersion: "TLS1.2",
+      maxTlsVersion: "TLS1.3",
+      cipherSuites: [],
       prefer_server_cipher_suites: true,
-      sni_strict: false,
-      alpn_protocols: ["h2", "http/1.1"],
+      sniStrict: false,
+      alpnProtocols: ["h2", "http/1.1"],
     });
     open();
   };
@@ -162,7 +162,7 @@ export default function TLSOptionsPage() {
   };
 
   const tlsOptions = data?.tls_options || [];
-  const totalCount = data?.total_count || 0;
+  const totalCount = data?.totalCount || 0;
 
   const isInsecureVersion = (ver?: string) => ver === "TLS1.0" || ver === "TLS1.1";
 
@@ -248,38 +248,38 @@ export default function TLSOptionsPage() {
                     </Table.Td>
                     <Table.Td>
                       <Group gap={4}>
-                        <Badge size="xs" variant="outline" color={isInsecureVersion(opt.min_tls_version) ? "red" : "blue"}>
-                          {opt.min_tls_version || "TLS1.2"}
+                        <Badge size="xs" variant="outline" color={isInsecureVersion(opt.minTlsVersion) ? "red" : "blue"}>
+                          {opt.minTlsVersion || "TLS1.2"}
                         </Badge>
                         <Text size="xs">to</Text>
-                        <Badge size="xs" variant="outline" color={isInsecureVersion(opt.max_tls_version) ? "red" : "blue"}>
-                          {opt.max_tls_version || "TLS1.3"}
+                        <Badge size="xs" variant="outline" color={isInsecureVersion(opt.maxTlsVersion) ? "red" : "blue"}>
+                          {opt.maxTlsVersion || "TLS1.3"}
                         </Badge>
                       </Group>
                     </Table.Td>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
-                        {opt.cipher_suites && opt.cipher_suites.length > 0
-                          ? `${opt.cipher_suites.length} selected`
+                        {opt.cipherSuites && opt.cipherSuites.length > 0
+                          ? `${opt.cipherSuites.length} selected`
                           : "Default"}
                       </Text>
                     </Table.Td>
                     <Table.Td>
                       <Badge
-                        color={opt.sni_strict ? "red" : "gray"}
+                        color={opt.sniStrict ? "red" : "gray"}
                         variant="light"
                       >
-                        {opt.sni_strict ? "Yes" : "No"}
+                        {opt.sniStrict ? "Yes" : "No"}
                       </Badge>
                     </Table.Td>
                     <Table.Td>
                       <Stack gap={4}>
-                        <Badge size="xs" variant="light" color={opt.client_auth_type ? "blue" : "gray"}>
-                          {opt.client_auth_type || "No client auth"}
+                        <Badge size="xs" variant="light" color={opt.clientAuthType ? "blue" : "gray"}>
+                          {opt.clientAuthType || "No client auth"}
                         </Badge>
                         <Text size="xs" c="dimmed">
-                          {opt.client_authority_ids && opt.client_authority_ids.length > 0
-                            ? `CAs: ${opt.client_authority_ids.length}`
+                          {opt.clientAuthorityIds && opt.clientAuthorityIds.length > 0
+                            ? `CAs: ${opt.clientAuthorityIds.length}`
                             : "CAs: 0"}
                         </Text>
                       </Stack>
@@ -362,30 +362,30 @@ export default function TLSOptionsPage() {
             <Select
               label="Min TLS Version"
               data={TLS_VERSIONS}
-              value={editingOption?.min_tls_version || "TLS1.2"}
+              value={editingOption?.minTlsVersion || "TLS1.2"}
               onChange={(val) =>
                 editingOption &&
                 setEditingOption({
                   ...editingOption,
-                  min_tls_version: val || "TLS1.2",
+                  minTlsVersion: val || "TLS1.2",
                 })
               }
             />
             <Select
               label="Max TLS Version"
               data={TLS_VERSIONS}
-              value={editingOption?.max_tls_version || "TLS1.3"}
+              value={editingOption?.maxTlsVersion || "TLS1.3"}
               onChange={(val) =>
                 editingOption &&
                 setEditingOption({
                   ...editingOption,
-                  max_tls_version: val || "TLS1.3",
+                  maxTlsVersion: val || "TLS1.3",
                 })
               }
             />
           </Group>
 
-          {isInsecureVersion(editingOption?.min_tls_version) && (
+          {isInsecureVersion(editingOption?.minTlsVersion) && (
             <Alert color="red" icon={<IconAlertTriangle size={16} />} title="Security Warning" radius="md">
               <Text size="xs">
                 TLS 1.0 and 1.1 are deprecated and have known vulnerabilities. 
@@ -399,24 +399,24 @@ export default function TLSOptionsPage() {
             description="Only effective for TLS 1.2 and below. TLS 1.3 ciphers are not configurable."
             placeholder="Select cipher suites"
             data={CIPHER_SUITES}
-            value={editingOption?.cipher_suites || []}
+            value={editingOption?.cipherSuites || []}
             onChange={(val) =>
               editingOption &&
-              setEditingOption({ ...editingOption, cipher_suites: val })
+              setEditingOption({ ...editingOption, cipherSuites: val })
             }
             searchable
             clearable
-            disabled={editingOption?.min_tls_version === "TLS1.3"}
+            disabled={editingOption?.minTlsVersion === "TLS1.3"}
           />
 
           <TagsInput
             label="ALPN Protocols"
             placeholder="e.g. h2, http/1.1"
             data={["h2", "http/1.1", "grpc-exp"]}
-            value={editingOption?.alpn_protocols || []}
+            value={editingOption?.alpnProtocols || []}
             onChange={(val) =>
               editingOption &&
-              setEditingOption({ ...editingOption, alpn_protocols: val })
+              setEditingOption({ ...editingOption, alpnProtocols: val })
             }
             clearable
           />
@@ -436,12 +436,12 @@ export default function TLSOptionsPage() {
             <Switch
               label="Strict SNI"
               description="Reject requests without SNI or with mismatched SNI"
-              checked={editingOption?.sni_strict || false}
+              checked={editingOption?.sniStrict || false}
               onChange={(e) =>
                 editingOption &&
                 setEditingOption({
                   ...editingOption,
-                  sni_strict: e.currentTarget.checked,
+                  sniStrict: e.currentTarget.checked,
                 })
               }
             />
@@ -458,14 +458,14 @@ export default function TLSOptionsPage() {
                 { label: "Verify if presented", value: "VerifyClientCertIfGiven" },
                 { label: "Require and verify", value: "RequireAndVerifyClientCert" },
               ]}
-              value={editingOption?.client_auth_type || ""}
+              value={editingOption?.clientAuthType || ""}
               onChange={(val) =>
                 editingOption &&
                 setEditingOption({
                   ...editingOption,
-                  client_auth_type: val || "",
+                  clientAuthType: val || "",
                   // If client auth disabled, also clear CA selection to avoid confusion
-                  client_authority_ids: (val && val !== "") ? (editingOption.client_authority_ids || []) : [],
+                  clientAuthorityIds: (val && val !== "") ? (editingOption.clientAuthorityIds || []) : [],
                 })
               }
               clearable
@@ -475,14 +475,14 @@ export default function TLSOptionsPage() {
               description="Select one or more CA bundles to trust for client certificates (e.g., Cloudflare Origin Pull CA)."
               placeholder={caList && caList.length > 0 ? "Select client authorities" : "No client authorities found. Add them in Global TLS → Client Authorities"}
               data={(caList || []).map((c) => ({ value: c.id, label: `${c.name} (${c.id})` }))}
-              value={editingOption?.client_authority_ids || []}
+              value={editingOption?.clientAuthorityIds || []}
               onChange={(val) =>
                 editingOption &&
-                setEditingOption({ ...editingOption, client_authority_ids: val })
+                setEditingOption({ ...editingOption, clientAuthorityIds: val })
               }
               searchable
               clearable
-              disabled={!editingOption?.client_auth_type || editingOption?.client_auth_type === ""}
+              disabled={!editingOption?.clientAuthType || editingOption?.clientAuthType === ""}
             />
           </Group>
 

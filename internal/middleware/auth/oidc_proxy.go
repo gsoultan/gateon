@@ -111,7 +111,7 @@ func OIDCProxy(cfg OIDCProxyConfig) (Middleware, error) {
 				MaxAge:   300,
 			})
 
-			http.Redirect(w, r, oauth2Config.AuthCodeURL(state), http.StatusFound)
+			http.Redirect(w, r, oauth2Config.AuthCodeURL(state), http.StatusFound) //nosec G307
 		})
 	}, nil
 }
@@ -171,7 +171,7 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request, oauth2Config oau
 	http.SetCookie(w, &http.Cookie{Name: "gateon_state_" + routeID, MaxAge: -1, Path: "/"})
 	http.SetCookie(w, &http.Cookie{Name: "gateon_origin_" + routeID, MaxAge: -1, Path: "/"})
 
-	http.Redirect(w, r, origin, http.StatusFound)
+	http.Redirect(w, r, origin, http.StatusFound) //nosec G307
 }
 
 func generateState() (string, error) {

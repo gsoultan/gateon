@@ -66,7 +66,7 @@ export function ThreatExplorerTab() {
   });
 
   const { data: diagData } = useDiagnostics();
-  const totalMitigations = diagData?.total_mitigations || 0;
+  const totalMitigations = diagData?.totalMitigations || 0;
 
   const density = useTableDensity();
   const removeMitigation = useRemoveMitigation();
@@ -237,9 +237,9 @@ export function ThreatExplorerTab() {
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Tooltip label={threat.request_uri || '/'}>
+                      <Tooltip label={threat.requestUri || '/'}>
                         <Text size="xs" c="dimmed" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {threat.request_uri || '/'}
+                          {threat.requestUri || '/'}
                         </Text>
                       </Tooltip>
                     </Table.Td>
@@ -277,7 +277,7 @@ export function ThreatExplorerTab() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      {threat.action_taken === "blocked" || threat.action_taken === "shunned" || threat.action_taken === "challenged" ? (
+                      {threat.actionTaken === "blocked" || threat.actionTaken === "shunned" || threat.actionTaken === "challenged" ? (
                         <Badge color="red" leftSection={<IconShieldLock size={12} />} variant="light">
                           Blocked
                         </Badge>

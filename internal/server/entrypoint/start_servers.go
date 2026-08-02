@@ -24,8 +24,6 @@ import (
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 // GATEON_ENTRYPOINT_RATE_LIMIT_QPS: per-IP requests per second (0 = disabled).
@@ -143,12 +141,16 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	)(deps.BaseHandler)
 
 	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
-	// Standard http.Server only supports HTTP/2 via TLS.
-	h2cHandler := h2c.NewHandler(handler, &http2.Server{})
+	// In Go 1.26+, this is handled natively via the Protocols field.
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
 
 	server := &http.Server{
-		Addr:    addr,
-		Handler: h2cHandler,
+		Addr:      addr,
+		Handler:   handler,
+		HTTP2:     &http.HTTP2Config{},
+		Protocols: protocols,
 		ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
 			telemetry.GlobalDiagnostics.RecordTLSError("management", addr, err)
 		}),
@@ -280,12 +282,11 @@ func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 	})
 }
 
-const peekTimeout = 5000 * time.Millisecond
-
 var (
 	peekPool = sync.Pool{
 		New: func() any {
-			return make([]byte, PeekSize)
+			b := make([]byte, PeekSize)
+			return &b
 		},
 	}
 )
@@ -297,8 +298,9 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 	// to avoid blocking goroutines for slow/idle connections.
 	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 
-	peek := peekPool.Get().([]byte)
-	defer peekPool.Put(peek)
+	peekPtr := peekPool.Get().(*[]byte)
+	peek := *peekPtr
+	defer peekPool.Put(peekPtr)
 
 	// Read at least 1 byte to detect protocol early
 	n, err := conn.Read(peek)

@@ -4,12 +4,15 @@ package proxy
 
 import (
 	"sync"
+	"unsafe"
 )
+
+type buffer [32 * 1024]byte
 
 var bufferPool = &syncBufferPool{
 	pool: sync.Pool{
 		New: func() any {
-			return make([]byte, 32*1024)
+			return new(buffer)
 		},
 	},
 }
@@ -19,16 +22,12 @@ type syncBufferPool struct {
 }
 
 func (p *syncBufferPool) Get() []byte {
-	b, ok := p.pool.Get().([]byte)
-	if !ok {
-		return make([]byte, 32*1024)
-	}
-	return b
+	return p.pool.Get().(*buffer)[:]
 }
 
 func (p *syncBufferPool) Put(b []byte) {
 	if cap(b) < 32*1024 {
 		return
 	}
-	p.pool.Put(b[:cap(b)])
+	p.pool.Put((*buffer)(unsafe.Pointer(&b[0])))
 }
