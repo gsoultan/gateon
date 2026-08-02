@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 // Package siem exports Gateon's structured security events (raw threats and
 // correlated incidents) to external SIEM/log collectors such as the Wazuh
 // indexer, Elasticsearch/OpenSearch, Splunk, or any syslog sink. It is

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 package middleware
 
 import "github.com/gsoultan/gateon/internal/middleware/auth"

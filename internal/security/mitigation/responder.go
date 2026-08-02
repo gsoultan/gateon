@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 // Package mitigation turns correlated security incidents into graduated,
 // confidence-aware mitigation actions. It is the missing link between detection
 // (the correlation engine, which has the best cross-signal view of a source) and

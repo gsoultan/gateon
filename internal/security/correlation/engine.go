@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 // Package correlation provides a lightweight, dependency-free rules engine that
 // aggregates individual security signals (the threats Gateon already records:
 // brute-force attempts, exploit scans, WAF blocks, rate-limit hits, impossible

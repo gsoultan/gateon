@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 // Package kind holds the cycle-free core primitives of the middleware layer:
 // the Middleware type, composition (Chain), panic Recovery, request-context keys,
 // path predicates, security-header presets, the pooled StatusResponseWriter, and

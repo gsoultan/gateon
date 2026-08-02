@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
 package yara
 
 // defaultEngine is the built-in ruleset, compiled once at package init. It is
