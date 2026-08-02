@@ -81,7 +81,7 @@ message Service {
   string id = 1;
   string name = 2;
   repeated Target weighted_targets = 3;
-  string load_balancer_policy = 4; // "round_robin", "least_conn", "weighted_round_robin"
+  string load_balancer_policy = 4; // "round_robin", "least_conn", "weighted_round_robin", "intelligent", "ai_predictive"
   string health_check_path = 5;
   string backend_type = 6; // "http", "grpc", "graphql", "tcp", "udp"
   int32 l4_health_check_interval_ms = 7;

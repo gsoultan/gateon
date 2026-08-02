@@ -5,6 +5,7 @@ package entrypoint
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"sync"
 
@@ -62,6 +63,12 @@ type L4Resolver interface {
 	ResolveUDP(ep *gateonv1.EntryPoint) l4.UDPProxy
 }
 
+// PhantomCore defines the interface for the high-performance TITAN proxy core.
+type PhantomCore interface {
+	ProxyL4(ctx context.Context, client net.Conn, targetAddr string) error
+	ServeHTTP(ctx context.Context, listener net.Listener, handler http.Handler) error
+}
+
 // WrapL4Resolver adapts *l4.Resolver to L4Resolver (concrete returns -> interface returns).
 func WrapL4Resolver(r *l4.Resolver) L4Resolver {
 	if r == nil {
@@ -102,6 +109,7 @@ type Deps struct {
 	ManagementConfig *gateonv1.ManagementConfig
 	GlobalStore      config.GlobalConfigStore
 	SharedServers    sync.Map // map[string]*sharedHTTPDispatcher
+	Phantom          PhantomCore
 }
 
 // RateLimiter provides per-key rate limiting middleware.

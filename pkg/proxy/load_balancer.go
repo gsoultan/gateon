@@ -13,4 +13,5 @@ type LoadBalancer interface {
 	UpdateWeightedTargets(targets []*gateonv1.Target)
 	GetStats() []TargetStats
 	SetAlive(url string, alive bool)
+	RecordLatency(url string, latency float64)
 }

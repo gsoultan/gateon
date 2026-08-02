@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/alerting"
+	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -24,8 +25,10 @@ import (
 	"github.com/gsoultan/gateon/internal/k8s"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
@@ -41,6 +44,7 @@ import (
 
 func main() {
 	uiPath := flag.String("ui-path", "", "Path to UI assets (serves from disk instead of embed)")
+	aiModel := flag.String("ai-model", "", "Path to WASM-based AI traffic prediction model")
 	buildUI := flag.Bool("build-ui", false, "Build UI assets before starting")
 	builtUI := flag.Bool("built-ui", false, "Alias for build-ui")
 	flag.Parse()
@@ -185,6 +189,27 @@ func main() {
 		ipReputation.Start(ctx)
 	}
 
+	// Initialize TITAN Phantom core for hardware acceleration.
+	phantomCore := phantom.NewPhantomCore(ebpfHolder)
+	
+	// Load AI model if provided.
+	if *aiModel != "" {
+		wasmBytes, err := os.ReadFile(*aiModel)
+		if err != nil {
+			logger.L.LogError("failed to read AI model file", "path", *aiModel, "error", err)
+		} else {
+			if err := ai.InitGlobalPredictor(ctx, wasmBytes); err != nil {
+				logger.L.LogError("failed to initialize AI predictor", "error", err)
+			} else {
+				logger.L.LogInfo("AI traffic predictor initialized from WASM", "path", *aiModel)
+			}
+		}
+	}
+
+	// Initialize Resource Governor for real-time pressure monitoring and protection.
+	gov := resource.NewGovernor()
+	go gov.Start(ctx)
+
 	port := getPort()
 	s, err := server.NewServer(
 		server.WithLogger(logger.Default()),
@@ -194,6 +219,8 @@ func main() {
 		server.WithEbpfManager(ebpfHolder),
 		server.WithWafUpdater(wafUpdater),
 		server.WithClamAVManager(clamavManager),
+		server.WithPhantomCore(phantomCore),
+		server.WithGovernor(gov),
 		server.WithPort(port),
 		server.WithVersion(version()),
 		server.WithRouteRegistry(config.NewRouteRegistry(getEnvDefault("ROUTES_FILE", "routes.json"))),

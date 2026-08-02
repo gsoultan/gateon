@@ -654,7 +654,7 @@ export class Service extends Message<Service> {
   weightedTargets: Target[] = [];
 
   /**
-   * "round_robin", "least_conn", "weighted_round_robin"
+   * "round_robin", "least_conn", "weighted_round_robin", "intelligent", "ai_predictive"
    *
    * @generated from field: string load_balancer_policy = 4;
    */

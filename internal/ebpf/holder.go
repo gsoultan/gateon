@@ -115,6 +115,21 @@ func (h *Holder) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
 	return nil
 }
 
+// ApplyRLFeedback delegates to the active manager, if any.
+func (h *Holder) ApplyRLFeedback(ip string, score float64) error {
+	if m := h.Current(); m != nil {
+		return m.ApplyRLFeedback(ip, score)
+	}
+	return nil
+}
+
+// SetRLFeedbackHandler delegates to the active manager, if any.
+func (h *Holder) SetRLFeedbackHandler(f func(ip string, score float64)) {
+	if m := h.Current(); m != nil {
+		m.SetRLFeedbackHandler(f)
+	}
+}
+
 // ShunJA4 delegates to the active manager, if any.
 func (h *Holder) ShunJA4(ja4Fingerprint string) error {
 	if m := h.Current(); m != nil {
@@ -127,6 +142,22 @@ func (h *Holder) ShunJA4(ja4Fingerprint string) error {
 func (h *Holder) BlocklistCuckoo(ip string) error {
 	if m := h.Current(); m != nil {
 		return m.BlocklistCuckoo(ip)
+	}
+	return nil
+}
+
+// RegisterPhantomPort delegates to the active manager, if any.
+func (h *Holder) RegisterPhantomPort(port uint32) error {
+	if m := h.Current(); m != nil {
+		return m.RegisterPhantomPort(port)
+	}
+	return nil
+}
+
+// UnregisterPhantomPort delegates to the active manager, if any.
+func (h *Holder) UnregisterPhantomPort(port uint32) error {
+	if m := h.Current(); m != nil {
+		return m.UnregisterPhantomPort(port)
 	}
 	return nil
 }

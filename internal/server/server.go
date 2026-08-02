@@ -32,6 +32,8 @@ type Server struct {
 	WafUpdater    any // middleware.WAFUpdater (interface to avoid cyclic import)
 	ClamAVManager any // security.ClamAVManager
 	WafRules      any // waf.Store
+	Phantom       any // phantom.PhantomCore
+	Governor      any // resource.Governor
 	Logger        logger.Logger
 	Port          string
 	Version       string
@@ -68,6 +70,11 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 
 // StartTime returns when the server was created (for uptime).
 func (s *Server) StartTime() time.Time { return s.startTime }
+
+// PurgeCache clears the proxy cache.
+func (s *Server) PurgeCache() {
+	s.proxyCache().Purge()
+}
 
 // Close closes all server resources.
 func (s *Server) Close() error {

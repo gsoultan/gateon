@@ -193,18 +193,50 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		}
 	}
 	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(server.Shutdown)
+		deps.ShutdownRegistry.Register(func(context.Context) error {
+			return server.Shutdown(context.Background())
+		})
 	}
 	if hasTCP {
 		if epTLSConfig != nil {
 			logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", ep.Type.String())
-			if err := server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.LogError("HTTPS server failed", "error", err, "addr", addr)
+			l, err := net.Listen("tcp", addr)
+			if err != nil {
+				logger.L.LogError("HTTPS listen failed", "error", err, "addr", addr)
+				return
+			}
+			if deps.Phantom != nil {
+				wg.Go(func() {
+					if err := deps.Phantom.ServeHTTP(context.Background(), l, h2cHandler); err != nil && !errors.Is(err, http.ErrServerClosed) {
+						logger.L.LogError("HTTPS server (Phantom) failed", "error", err, "addr", addr)
+					}
+				})
+			} else {
+				wg.Go(func() {
+					if err := server.ServeTLS(l, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+						logger.L.LogError("HTTPS server failed", "error", err, "addr", addr)
+					}
+				})
 			}
 		} else {
 			logger.L.LogInfo("starting HTTP entrypoint", "addr", addr, "type", ep.Type.String())
-			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.LogError("HTTP server failed", "error", err, "addr", addr)
+			l, err := net.Listen("tcp", addr)
+			if err != nil {
+				logger.L.LogError("HTTP listen failed", "error", err, "addr", addr)
+				return
+			}
+			if deps.Phantom != nil {
+				wg.Go(func() {
+					if err := deps.Phantom.ServeHTTP(context.Background(), l, h2cHandler); err != nil && !errors.Is(err, http.ErrServerClosed) {
+						logger.L.LogError("HTTP server (Phantom) failed", "error", err, "addr", addr)
+					}
+				})
+			} else {
+				wg.Go(func() {
+					if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+						logger.L.LogError("HTTP server failed", "error", err, "addr", addr)
+					}
+				})
 			}
 		}
 	}

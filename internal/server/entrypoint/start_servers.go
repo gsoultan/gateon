@@ -60,9 +60,10 @@ func StartServers(
 	tlsManager gtls.TLSManager,
 	wg *syncutil.WaitGroup,
 	shutdownReg *ShutdownRegistry,
-	l4Resolver L4Resolver,
-	mgmtConfig *gateonv1.ManagementConfig,
-	globalStore config.GlobalConfigStore,
+	l4_resolver L4Resolver,
+	mgmt_config *gateonv1.ManagementConfig,
+	global_store config.GlobalConfigStore,
+	phantom PhantomCore,
 ) {
 	limiter := entrypointRateLimiter()
 	deps := &Deps{
@@ -74,9 +75,10 @@ func StartServers(
 		TLSManager:       tlsManager,
 		Limiter:          limiter,
 		ShutdownRegistry: shutdownReg,
-		L4Resolver:       l4Resolver,
-		ManagementConfig: mgmtConfig,
-		GlobalStore:      globalStore,
+		L4Resolver:       l4_resolver,
+		ManagementConfig: mgmt_config,
+		GlobalStore:      global_store,
+		Phantom:          phantom,
 	}
 
 	// ALWAYS start a dedicated management listener
@@ -164,13 +166,28 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	}
 
 	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(server.Shutdown)
+		deps.ShutdownRegistry.Register(func(context.Context) error {
+			return server.Shutdown(context.Background())
+		})
 	}
 
 	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
 	wg.Go(func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.L.LogError("Management server failed", "error", err)
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			logger.L.LogError("Management listen failed", "error", err)
+			return
+		}
+		defer l.Close()
+
+		if deps.Phantom != nil {
+			if err := deps.Phantom.ServeHTTP(context.Background(), l, h2cHandler); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.L.LogError("Management server (Phantom) failed", "error", err)
+			}
+		} else {
+			if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.L.LogError("Management server failed", "error", err)
+			}
 		}
 	})
 }
@@ -207,6 +224,12 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 			if plaintext {
 				wg.Go(func() {
 					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
+					if deps.Phantom != nil {
+						// For plaintext TCP, attempt TITAN L4 hardware offload (AF_XDP/io_uring)
+						if err := deps.Phantom.ProxyL4(context.Background(), c, ""); err == nil {
+							return
+						}
+					}
 					handleTCPConnWithInspection(c, ep, deps, wg)
 				})
 			} else {

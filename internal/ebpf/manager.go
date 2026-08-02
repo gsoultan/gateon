@@ -48,6 +48,8 @@ type EbpfManager struct {
 	attached bool
 	iface    string
 	loadErr  string
+	// RL feedback handler (injected from internal/ai to avoid circular deps)
+	rlFeedbackHandler func(ip string, score float64)
 	// attachMode records how XDP attached: "native" (driver-level, fastest) or
 	// "generic" (SKB/stack-level, a slower fallback used when the driver rejects
 	// native attach — common on virtualized NICs such as AWS ENA/ens5).
@@ -81,8 +83,12 @@ type Manager interface {
 	SetPortKnockingSequence(seq []int32) error
 	UpdateLoadBalancerBackends(ips []string) error
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
+	ApplyRLFeedback(ip string, score float64) error
+	SetRLFeedbackHandler(h func(ip string, score float64))
 	ShunJA4(ja4Fingerprint string) error // New: JA4 support
 	BlocklistCuckoo(ip string) error     // New: Cuckoo Filter support
+	RegisterPhantomPort(port uint32) error
+	UnregisterPhantomPort(port uint32) error
 	GetTopIPs(limit int) ([]IPStat, error)
 	GetMapStats() (MapStats, error)
 }
@@ -98,6 +104,25 @@ func NewEbpfManager(conf *gateonv1.EbpfConfig) *EbpfManager {
 		config: conf,
 		maps:   make(map[string]*ebpf.Map),
 	}
+}
+
+// SetRLFeedbackHandler injects the reinforcement learning feedback processor.
+func (m *EbpfManager) SetRLFeedbackHandler(h func(ip string, score float64)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rlFeedbackHandler = h
+}
+
+// ApplyRLFeedback forwards security feedback to the reinforcement learning agent.
+func (m *EbpfManager) ApplyRLFeedback(ip string, score float64) error {
+	m.mu.RLock()
+	handler := m.rlFeedbackHandler
+	m.mu.RUnlock()
+
+	if handler != nil {
+		handler(ip, score)
+	}
+	return nil
 }
 
 // close detaches the XDP program and frees the loaded objects, then clears the
@@ -358,6 +383,34 @@ func (m *EbpfManager) BlocklistCuckoo(ip string) error {
 	}
 
 	return cuckooMap.Update(ipUint, uint32(1), ebpf.UpdateAny)
+}
+
+// RegisterPhantomPort enables AF_XDP redirection for a specific port.
+func (m *EbpfManager) RegisterPhantomPort(port uint32) error {
+	logger.L.LogInfo("Registering Phantom port in eBPF", "port", port)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	phantomMap, ok := m.maps["phantom_ports"]
+	if !ok {
+		return fmt.Errorf("phantom_ports map not loaded")
+	}
+
+	return phantomMap.Update(port, uint32(1), ebpf.UpdateAny)
+}
+
+// UnregisterPhantomPort disables AF_XDP redirection for a specific port.
+func (m *EbpfManager) UnregisterPhantomPort(port uint32) error {
+	logger.L.LogInfo("Unregistering Phantom port in eBPF", "port", port)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	phantomMap, ok := m.maps["phantom_ports"]
+	if !ok {
+		return fmt.Errorf("phantom_ports map not loaded")
+	}
+
+	return phantomMap.Delete(port)
 }
 
 var dropReasons = map[uint32]string{

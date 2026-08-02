@@ -42,12 +42,19 @@ type ApiService struct {
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 	WafRules           *waf.Store
+	governor           any // resource.Governor (interface to avoid cyclic import)
 
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
 	cfReachableCache atomic.Bool
 	cfLatencyCache   atomic.Pointer[time.Duration]
 	anomaliesCache   atomic.Pointer[[]*gateonv1.Anomaly]
+	mlLowPower       atomic.Bool
+}
+
+// SetMLLowPower toggles the low-power mode for the ML engine.
+func (s *ApiService) SetMLLowPower(enabled bool) {
+	s.mlLowPower.Store(enabled)
 }
 
 // GetGlobals returns the global config store for REST handlers.

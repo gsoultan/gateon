@@ -23,7 +23,7 @@ func NewDefaultLoadBalancerFactory() LoadBalancerFactory {
 }
 
 // Create returns a LoadBalancer for the given policy.
-// Policy: "least_conn", "weighted_round_robin", or default round-robin.
+// Policy: "least_conn", "weighted_round_robin", "ai_predictive", or default round-robin.
 func (f *DefaultLoadBalancerFactory) Create(policy string, targets []*gateonv1.Target) LoadBalancer {
 	if targets == nil {
 		targets = []*gateonv1.Target{}
@@ -37,6 +37,8 @@ func (f *DefaultLoadBalancerFactory) Create(policy string, targets []*gateonv1.T
 		return NewLeastConnLB(urls)
 	case "weighted_round_robin":
 		return NewWeightedRoundRobinLB(targets)
+	case "ai_predictive", "intelligent":
+		return NewAIPredictiveLB(targets)
 	default:
 		return NewRoundRobinLB(urls)
 	}

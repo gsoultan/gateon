@@ -71,6 +71,20 @@ struct {
 } mgmt_whitelist SEC(".maps");
 
 struct {
+    __uint(type, BPF_MAP_TYPE_XSKMAP);
+    __uint(max_entries, 64);
+    __type(key, __u32);
+    __type(value, __u32);
+} xsk_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 128);
+    __type(key, __u32);   // Port
+    __type(value, __u32); // Flag
+} phantom_ports SEC(".maps");
+
+struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u32);   // Country Code (Simplified)
@@ -287,6 +301,25 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
     // 3. Rate Limiting (Adaptive)
     __u64 now = bpf_ktime_get_ns();
     __u64 min_interval = 1000000; // 1ms default (1000 pps)
+
+    // TITAN: Phantom Redirection (AF_XDP)
+    if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
+        __u16 dport = 0;
+        if (iph->protocol == IPPROTO_TCP) {
+            struct tcphdr *tcph = (void *)(iph + 1);
+            if ((void *)(tcph + 1) <= data_end) dport = bpf_ntohs(tcph->dest);
+        } else {
+            struct udphdr *udph = (void *)(iph + 1);
+            if ((void *)(udph + 1) <= data_end) dport = bpf_ntohs(udph->dest);
+        }
+
+        if (dport > 0) {
+            __u32 port_key = (__u32)dport;
+            if (bpf_map_lookup_elem(&phantom_ports, &port_key)) {
+                return bpf_redirect_map(&xsk_map, ctx->rx_queue_index, XDP_PASS);
+            }
+        }
+    }
 
     __u64 *custom_limit = bpf_map_lookup_elem(&adaptive_limits, &src_ip);
     if (custom_limit) {
