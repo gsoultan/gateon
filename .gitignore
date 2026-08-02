@@ -69,3 +69,6 @@ internal/telemetry/telemetry_pebble/
 /gateon_test.db
 /gateon_test.db-shm
 /gateon_test.db-wal
+/.agents/*
+/agent/*
+/.claude/
