@@ -53,3 +53,7 @@ func (c *fallbackCore) ServeHTTP(ctx context.Context, listener net.Listener, han
 	}()
 	return server.Serve(listener)
 }
+
+func (c *fallbackCore) GetStatus() (enabled bool, engine string, activePorts int) {
+	return false, "standard (no-linux fallback)", 0
+}

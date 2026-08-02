@@ -15,6 +15,8 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/phantom"
+	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
@@ -42,7 +44,8 @@ type ApiService struct {
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 	WafRules           *waf.Store
-	governor           any // resource.Governor (interface to avoid cyclic import)
+	PhantomCore        phantom.PhantomCore
+	Governor           *resource.Governor
 
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
@@ -224,6 +227,8 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		WafUpdater:         cfg.WafUpdater,
 		ClamAVManager:      cfg.ClamAVManager,
 		WafRules:           cfg.WafRules,
+		PhantomCore:        cfg.PhantomCore,
+		Governor:           cfg.Governor,
 	}
 
 	if cfg.IPReputation != nil {

@@ -250,6 +250,11 @@ export class GlobalConfig extends Message<GlobalConfig> {
    */
   profile = "";
 
+  /**
+   * @generated from field: gateon.v1.TitanConfig titan = 20;
+   */
+  titan?: TitanConfig;
+
   constructor(data?: PartialMessage<GlobalConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -276,6 +281,7 @@ export class GlobalConfig extends Message<GlobalConfig> {
     { no: 17, name: "audit", kind: "message", T: AuditConfig },
     { no: 18, name: "rbac", kind: "message", T: RBACConfig },
     { no: 19, name: "profile", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 20, name: "titan", kind: "message", T: TitanConfig },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GlobalConfig {
@@ -292,6 +298,73 @@ export class GlobalConfig extends Message<GlobalConfig> {
 
   static equals(a: GlobalConfig | PlainMessage<GlobalConfig> | undefined, b: GlobalConfig | PlainMessage<GlobalConfig> | undefined): boolean {
     return proto3.util.equals(GlobalConfig, a, b);
+  }
+}
+
+/**
+ * @generated from message gateon.v1.TitanConfig
+ */
+export class TitanConfig extends Message<TitanConfig> {
+  /**
+   * @generated from field: bool enabled = 1;
+   */
+  enabled = false;
+
+  /**
+   * @generated from field: bool enable_phantom = 2;
+   */
+  enablePhantom = false;
+
+  /**
+   * @generated from field: bool enable_ai_predictor = 3;
+   */
+  enableAiPredictor = false;
+
+  /**
+   * @generated from field: bool enable_pqc = 4;
+   */
+  enablePqc = false;
+
+  /**
+   * @generated from field: bool enable_governor = 5;
+   */
+  enableGovernor = false;
+
+  /**
+   * @generated from field: string ai_model_path = 6;
+   */
+  aiModelPath = "";
+
+  constructor(data?: PartialMessage<TitanConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gateon.v1.TitanConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "enable_phantom", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "enable_ai_predictor", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "enable_pqc", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "enable_governor", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 6, name: "ai_model_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TitanConfig {
+    return new TitanConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TitanConfig {
+    return new TitanConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TitanConfig {
+    return new TitanConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TitanConfig | PlainMessage<TitanConfig> | undefined, b: TitanConfig | PlainMessage<TitanConfig> | undefined): boolean {
+    return proto3.util.equals(TitanConfig, a, b);
   }
 }
 
@@ -2322,6 +2395,23 @@ export class EbpfConfig extends Message<EbpfConfig> {
    */
   knockingSequence: number[] = [];
 
+  /**
+   * TITAN extensions
+   *
+   * @generated from field: bool xdp_cuckoo_filter = 10;
+   */
+  xdpCuckooFilter = false;
+
+  /**
+   * @generated from field: bool af_xdp_phantom = 11;
+   */
+  afXdpPhantom = false;
+
+  /**
+   * @generated from field: bool xdp_ja4_blocklist = 12;
+   */
+  xdpJa4Blocklist = false;
+
   constructor(data?: PartialMessage<EbpfConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2339,6 +2429,9 @@ export class EbpfConfig extends Message<EbpfConfig> {
     { no: 7, name: "enable_knocking", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "mgmt_port", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 9, name: "knocking_sequence", kind: "scalar", T: 5 /* ScalarType.INT32 */, repeated: true },
+    { no: 10, name: "xdp_cuckoo_filter", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 11, name: "af_xdp_phantom", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 12, name: "xdp_ja4_blocklist", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): EbpfConfig {

@@ -258,6 +258,26 @@ message SystemInfo {
   string version = 7;
   GossipStatus gossip = 8;
   EbpfStats ebpf = 9;
+  TitanStats titan = 10;
+}
+
+message TitanStats {
+  bool phantom_enabled = 1;
+  string phantom_engine = 2; // e.g. "io_uring + AF_XDP"
+  int32 active_phantom_ports = 3;
+  bool ai_predictor_enabled = 4;
+  string ai_model_status = 5;
+  int32 cuckoo_filter_entries = 6;
+  bool pqc_enabled = 7;
+  ResourceGovernorStats governor = 8;
+}
+
+message ResourceGovernorStats {
+  bool active = 1;
+  int32 memory_hooks_count = 2;
+  int32 cpu_hooks_count = 3;
+  double memory_pressure_percent = 4;
+  double cpu_pressure_percent = 5;
 }
 
 message EbpfStats {

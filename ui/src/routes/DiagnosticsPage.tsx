@@ -53,6 +53,11 @@ import {
   IconLock,
   IconShieldLock,
   IconShieldExclamation,
+  IconCpu,
+  IconBolt,
+  IconBrain,
+  IconAtom,
+  IconScale,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useDiagnostics } from "../hooks/useGateon";
@@ -491,8 +496,88 @@ const DiagnosticsPage: React.FC = () => {
             <SystemStatCard title="Goroutines" value={data?.system?.goroutines ?? "-"} icon={<IconRoute size={isMobile ? 16 : 20} color="teal" />} />
             <SystemStatCard title="Uptime" value={data?.system?.uptime ?? "-"} icon={<IconClock size={isMobile ? 16 : 20} color="violet" />} />
             <SystemStatCard title="Version" value={data?.system?.version ?? "-"} icon={<IconInfoCircle size={isMobile ? 16 : 20} color="gray" />} />
-          </SimpleGrid>
+  </SimpleGrid>
         </Stack>
+
+        {/* TITAN Evolution Intelligence */}
+        {data?.system?.titan && (
+          <Stack gap="sm">
+            <Group gap="xs">
+              <IconBolt size={20} color={theme.colors.orange[6]} />
+              <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 1 }}>TITAN Evolution Core</Text>
+              <Badge variant="filled" color="orange" size="xs">ACTIVE</Badge>
+            </Group>
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
+              <Paper withBorder p="md" radius="lg" shadow="xs" style={{ position: 'relative', overflow: 'hidden' }}>
+                <Box pos="absolute" top={-10} right={-10} opacity={0.1}>
+                  <IconCpu size={80} />
+                </Box>
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Phantom Core</Text>
+                    <Badge size="xs" color={data.system.titan.phantom_enabled ? "teal" : "gray"}>
+                      {data.system.titan.phantom_enabled ? "OPTIMIZED" : "FALLBACK"}
+                    </Badge>
+                  </Group>
+                  <Text fw={900} size="xl">{data.system.titan.phantom_engine || "Standard"}</Text>
+                  <Text size="10px" c="dimmed">Active Redirections: {data.system.titan.active_phantom_ports}</Text>
+                </Stack>
+              </Paper>
+
+              <Paper withBorder p="md" radius="lg" shadow="xs" style={{ position: 'relative', overflow: 'hidden' }}>
+                <Box pos="absolute" top={-10} right={-10} opacity={0.1}>
+                  <IconBrain size={80} />
+                </Box>
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Predictive AI</Text>
+                    <Badge size="xs" color={data.system.titan.ai_predictor_enabled ? "indigo" : "gray"}>
+                      {data.system.titan.ai_predictor_enabled ? "LEARNING" : "OFF"}
+                    </Badge>
+                  </Group>
+                  <Text fw={900} size="xl">{data.system.titan.ai_model_status || "Inactive"}</Text>
+                  <Text size="10px" c="dimmed">Cuckoo Blocklist: {data.system.titan.cuckoo_filter_entries} IPs</Text>
+                </Stack>
+              </Paper>
+
+              <Paper withBorder p="md" radius="lg" shadow="xs" style={{ position: 'relative', overflow: 'hidden' }}>
+                <Box pos="absolute" top={-10} right={-10} opacity={0.1}>
+                  <IconAtom size={80} />
+                </Box>
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Quantum Security</Text>
+                    <Badge size="xs" color={data.system.titan.pqc_enabled ? "teal" : "gray"}>
+                      {data.system.titan.pqc_enabled ? "ENABLED" : "OFF"}
+                    </Badge>
+                  </Group>
+                  <Text fw={900} size="xl">ML-KEM / ML-DSA</Text>
+                  <Text size="10px" c="dimmed">Post-Quantum Cryptography Active</Text>
+                </Stack>
+              </Paper>
+
+              <Paper withBorder p="md" radius="lg" shadow="xs" style={{ position: 'relative', overflow: 'hidden' }}>
+                <Box pos="absolute" top={-10} right={-10} opacity={0.1}>
+                  <IconScale size={80} />
+                </Box>
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Resource Governor</Text>
+                    <Badge size="xs" color={data.system.titan.governor?.active ? "teal" : "gray"}>
+                      {data.system.titan.governor?.active ? "STABLE" : "OFF"}
+                    </Badge>
+                  </Group>
+                  <Text fw={900} size="xl">
+                    {data.system.titan.governor?.memory_pressure_percent?.toFixed(1)}% / {data.system.titan.governor?.cpu_pressure_percent?.toFixed(1)}%
+                  </Text>
+                  <Text size="10px" c="dimmed">
+                    Scavengers: {data.system.titan.governor?.memory_hooks_count} Memory / {data.system.titan.governor?.cpu_hooks_count} CPU
+                  </Text>
+                </Stack>
+              </Paper>
+            </SimpleGrid>
+          </Stack>
+        )}
 
         {/* Dependency Health */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
