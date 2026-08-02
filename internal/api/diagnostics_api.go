@@ -817,6 +817,10 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 		return &gateonv1.RemoveMitigatedThreatResponse{Success: false, Message: "Source identification is required"}, nil
 	}
 
+	// Ensure all background threats are processed before we try to unmitigate.
+	// This prevents race conditions where a queued threat re-mitigates the user.
+	telemetry.FlushThreats()
+
 	source := req.Source
 	isIP := net.ParseIP(source) != nil
 

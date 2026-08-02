@@ -85,8 +85,9 @@ type Manager interface {
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 	ApplyRLFeedback(ip string, score float64) error
 	SetRLFeedbackHandler(h func(ip string, score float64))
-	ShunJA4(ja4Fingerprint string) error // New: JA4 support
-	BlocklistCuckoo(ip string) error     // New: Cuckoo Filter support
+	ShunJA4(ja4Fingerprint string) error
+	UnshunJA4(ja4Fingerprint string) error
+	BlocklistCuckoo(ip string) error
 	RegisterPhantomPort(port uint32) error
 	UnregisterPhantomPort(port uint32) error
 	GetTopIPs(limit int) ([]IPStat, error)
@@ -363,6 +364,21 @@ func (m *EbpfManager) ShunJA4(ja4Fingerprint string) error {
 	// JA4 is a string, we hash it to 32 bytes for the map key
 	h := sha256.Sum256([]byte(ja4Fingerprint))
 	return ja4Map.Update(h, uint32(1), ebpf.UpdateAny)
+}
+
+// UnshunJA4 removes a JA4 fingerprint from the XDP blocklist.
+func (m *EbpfManager) UnshunJA4(ja4Fingerprint string) error {
+	logger.L.LogInfo("Unshunning JA4 fingerprint at XDP level", "ja4", ja4Fingerprint)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ja4Map, ok := m.maps["ja4_blocklist"]
+	if !ok {
+		return fmt.Errorf("ja4_blocklist map not loaded")
+	}
+
+	h := sha256.Sum256([]byte(ja4Fingerprint))
+	return ja4Map.Delete(h)
 }
 
 // BlocklistCuckoo adds an IP to the high-performance Cuckoo Filter in eBPF.

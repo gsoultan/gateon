@@ -30,10 +30,15 @@ func (s *stubManager) SetAdaptiveRateLimit(string, time.Duration) error {
 	s.callCount++
 	return s.err
 }
-func (s *stubManager) ShunJA4(ja4Fingerprint string) error { s.callCount++; return s.err }
-func (s *stubManager) BlocklistCuckoo(ip string) error     { s.callCount++; return s.err }
-func (s *stubManager) GetTopIPs(int) ([]IPStat, error)     { s.callCount++; return nil, s.err }
-func (s *stubManager) GetMapStats() (MapStats, error)      { s.callCount++; return s.mapStats, s.err }
+func (s *stubManager) ApplyRLFeedback(string, float64) error      { s.callCount++; return s.err }
+func (s *stubManager) SetRLFeedbackHandler(func(string, float64)) { s.callCount++ }
+func (s *stubManager) ShunJA4(ja4Fingerprint string) error        { s.callCount++; return s.err }
+func (s *stubManager) UnshunJA4(ja4Fingerprint string) error      { s.callCount++; return s.err }
+func (s *stubManager) BlocklistCuckoo(ip string) error            { s.callCount++; return s.err }
+func (s *stubManager) RegisterPhantomPort(port uint32) error      { s.callCount++; return s.err }
+func (s *stubManager) UnregisterPhantomPort(port uint32) error    { s.callCount++; return s.err }
+func (s *stubManager) GetTopIPs(int) ([]IPStat, error)            { s.callCount++; return nil, s.err }
+func (s *stubManager) GetMapStats() (MapStats, error)             { s.callCount++; return s.mapStats, s.err }
 
 // TestHolderNoOpWhenEmpty verifies that every mutating call is a safe no-op and
 // GetMapStats returns empty stats when no underlying manager is installed.

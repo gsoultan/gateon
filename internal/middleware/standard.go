@@ -39,7 +39,13 @@ func Fingerprinting() Middleware {
 func IPMitigation() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := request.GetClientIP(r, false)
+			rs := GetRequestState(r)
+			trustCloudflare := config.EffectiveTrustCloudflare()
+			ip := request.GetClientIP(r, trustCloudflare)
+			if rs != nil && rs.ClientRemoteAddr != "" {
+				ip = rs.ClientRemoteAddr
+			}
+
 			if ip != "" && telemetry.IsIPMitigated(ip) {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("Forbidden: IP Shunned by Security Policy"))
@@ -68,6 +74,14 @@ func IPMitigation() Middleware {
 func UserMitigation() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip mitigation checks for non-functional assets (favicon, robots.txt, etc.)
+			// to avoid phantom requests breaking security isolation in E2E tests and production.
+			path := r.URL.Path
+			if path == "/favicon.ico" || path == "/robots.txt" || path == "/sitemap.xml" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			rs := GetRequestState(r)
 			var ja4plus string
 			if rs != nil {
@@ -79,10 +93,16 @@ func UserMitigation() Middleware {
 					w.WriteHeader(http.StatusForbidden)
 					_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
 
+					// Use resolved client IP from RequestState if available.
+					clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+					if rs != nil && rs.ClientRemoteAddr != "" {
+						clientIP = rs.ClientRemoteAddr
+					}
+
 					// Record threat for visibility in dashboard
 					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 						Type:        "user_mitigation",
-						SourceIP:    request.GetClientIP(r, false),
+						SourceIP:    clientIP,
 						Category:    "threat_intel",
 						Severity:    "high",
 						ActionTaken: "blocked",

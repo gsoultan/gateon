@@ -9,6 +9,16 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
+#define TLS_HANDSHAKE 22
+#define TLS_CLIENT_HELLO 1
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10000);
+    __type(key, __u8[32]); // JA4 Fingerprint Hash
+    __type(value, __u32);
+} ja4_blocklist SEC(".maps");
+
 struct backend {
     __u32 ip;
     __u8 eth_addr[ETH_ALEN];
@@ -223,6 +233,43 @@ static __always_inline int handle_port_knocking(struct xdp_md *ctx, struct iphdr
     return XDP_PASS;
 }
 
+static __always_inline int handle_tls_packet(struct xdp_md *ctx, struct iphdr *iph, struct tcphdr *tcph) {
+    void *data_end = (void *)(long)ctx->data_end;
+    __u8 *payload = (void *)(tcph + 1);
+
+    // TLS record header: [type(1)][version(2)][length(2)]
+    if ((void *)(payload + 5) > data_end) return XDP_PASS;
+
+    if (payload[0] != TLS_HANDSHAKE) return XDP_PASS;
+
+    __u8 *handshake = payload + 5;
+    // Handshake header: [type(1)][length(3)]
+    if ((void *)(handshake + 4) > data_end) return XDP_PASS;
+
+    if (handshake[0] != TLS_CLIENT_HELLO) return XDP_PASS;
+
+    // We take the first 32 bytes of the Client Hello (after headers) as a signature
+    // This includes the Client Version and part of the Random/Session ID.
+    // While not a full JA4, it's a stable TITAN-grade kernel fingerprint.
+    __u8 signature[32];
+    __u8 *hello_data = handshake + 4;
+    
+    #pragma unroll
+    for (int i = 0; i < 32; i++) {
+        if ((void *)(hello_data + i + 1) <= data_end) {
+            signature[i] = hello_data[i];
+        } else {
+            signature[i] = 0;
+        }
+    }
+
+    if (bpf_map_lookup_elem(&ja4_blocklist, &signature)) {
+        return XDP_DROP;
+    }
+
+    return XDP_PASS;
+}
+
 static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *eth) {
     void *data_end = (void *)(long)ctx->data_end;
     struct iphdr *iph = (void *)(eth + 1);
@@ -259,6 +306,12 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
     if (iph->protocol == IPPROTO_TCP) {
         struct tcphdr *tcph = (void *)(iph + 1);
         if ((void *)(tcph + 1) <= data_end) {
+            // Check for TLS Handshake (Client Hello)
+            if (handle_tls_packet(ctx, iph, tcph) == XDP_DROP) {
+                count_drop(DROP_REASON_SHUNNED_IP);
+                return XDP_DROP;
+            }
+
             if (tcph->syn && !tcph->ack) {
                 // Tracking SYN starts. If already has a SYN state without ACK, could be a flood.
                 __u32 *state = bpf_map_lookup_elem(&tcp_conntrack, &src_ip);

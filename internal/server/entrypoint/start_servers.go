@@ -181,13 +181,11 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		defer l.Close()
 
 		if deps.Phantom != nil {
-			if err := deps.Phantom.ServeHTTP(context.Background(), l, h2cHandler); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.LogError("Management server (Phantom) failed", "error", err)
-			}
-		} else {
-			if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.LogError("Management server failed", "error", err)
-			}
+			l = deps.Phantom.OptimizeListener(l)
+		}
+
+		if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.L.LogError("Management server failed", "error", err)
 		}
 	})
 }

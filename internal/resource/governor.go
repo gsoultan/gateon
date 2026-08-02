@@ -64,6 +64,11 @@ func (g *Governor) Start(ctx context.Context) {
 	}
 }
 
+// Stop manually stops the governor. (Context-based Start usually handles this).
+func (g *Governor) Stop() error {
+	return nil
+}
+
 func (g *Governor) check(ctx context.Context) {
 	g.checkMemory(ctx)
 	g.checkCPU(ctx)

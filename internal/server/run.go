@@ -63,7 +63,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 	var gov *resource.Governor
 	if s.Governor != nil {
-		gov = s.Governor.(*resource.Governor)
+		gov = s.Governor
 	}
 	if gov != nil {
 		gov.RegisterMemoryHook("proxy_cache", s.PurgeCache)
@@ -89,7 +89,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 
 	var phantomCore phantom.PhantomCore
 	if s.Phantom != nil {
-		phantomCore = s.Phantom.(phantom.PhantomCore)
+		phantomCore = s.Phantom
 	}
 
 	apiService := api.NewApiService(api.ApiServiceConfig{
@@ -197,7 +197,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	shutdownReg := &entrypoint.ShutdownRegistry{}
 	var pCore entrypoint.PhantomCore
 	if s.Phantom != nil {
-		pCore = s.Phantom.(entrypoint.PhantomCore)
+		pCore = s.Phantom
 	}
 
 	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore)

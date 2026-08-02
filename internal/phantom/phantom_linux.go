@@ -125,28 +125,17 @@ func (c *linuxCore) proxyWithXDP(ctx context.Context, client net.Conn, targetAdd
 	return fmt.Errorf("AF_XDP packet loop requires userspace TCP stack integration")
 }
 
-// ServeHTTP leverages io_uring to provide high-performance L7 ingress.
-func (c *linuxCore) ServeHTTP(ctx context.Context, listener net.Listener, handler http.Handler) error {
-	server := &http.Server{
-		Handler: handler,
-	}
-
-	go func() {
-		<-ctx.Done()
-		_ = server.Shutdown(context.Background())
-	}()
-
-	// If io_uring is available, we wrap the listener to optimize Accept calls.
+// OptimizeListener wraps the given listener with io_uring optimizations.
+func (c *linuxCore) OptimizeListener(l net.Listener) net.Listener {
 	if c.ring != nil {
-		if tcpListener, ok := listener.(*net.TCPListener); ok {
-			return server.Serve(&iouringListener{
+		if tcpListener, ok := l.(*net.TCPListener); ok {
+			return &iouringListener{
 				TCPListener: tcpListener,
 				ring:        c.ring,
-			})
+			}
 		}
 	}
-
-	return server.Serve(listener)
+	return l
 }
 
 // GetStatus returns the operational status of the Linux core.
@@ -168,6 +157,18 @@ func (c *linuxCore) GetStatus() (enabled bool, engine string, activePorts int) {
 
 	activePorts = int(c.activePorts.Load())
 	return
+}
+
+// Close releases the io_uring ring and other kernel resources.
+func (c *linuxCore) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ring != nil {
+		err := c.ring.Close()
+		c.ring = nil
+		return err
+	}
+	return nil
 }
 
 // iouringListener wraps a TCPListener to use io_uring for accepts.

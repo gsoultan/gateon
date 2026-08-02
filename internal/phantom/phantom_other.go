@@ -6,11 +6,9 @@ package phantom
 
 import (
 	"context"
+	"github.com/gsoultan/gateon/pkg/l4"
 	"io"
 	"net"
-	"net/http"
-
-	"github.com/gsoultan/gateon/pkg/l4"
 )
 
 type fallbackCore struct{}
@@ -43,17 +41,14 @@ func (c *fallbackCore) ProxyL4(ctx context.Context, client net.Conn, targetAddr 
 	return nil
 }
 
-func (c *fallbackCore) ServeHTTP(ctx context.Context, listener net.Listener, handler http.Handler) error {
-	server := &http.Server{
-		Handler: handler,
-	}
-	go func() {
-		<-ctx.Done()
-		_ = server.Shutdown(context.Background())
-	}()
-	return server.Serve(listener)
+func (c *fallbackCore) OptimizeListener(l net.Listener) net.Listener {
+	return l
 }
 
 func (c *fallbackCore) GetStatus() (enabled bool, engine string, activePorts int) {
 	return false, "standard (no-linux fallback)", 0
+}
+
+func (c *fallbackCore) Close() error {
+	return nil
 }

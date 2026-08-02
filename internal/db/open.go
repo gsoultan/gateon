@@ -53,10 +53,13 @@ func parseURL(url string) (driver, dsn string) {
 		return "", ""
 	}
 
+	// Default pragmas for modernc.org/sqlite to ensure production performance and concurrency.
+	sqlitePragmas := "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
+
 	// Plain path -> SQLite (backward compat)
 	if !strings.Contains(url, "://") && !strings.HasPrefix(url, "sqlite:") {
 		if len(url) > 0 && url[0] != ':' {
-			return DriverSQLite, url
+			return DriverSQLite, url + sqlitePragmas
 		}
 		return "", ""
 	}
@@ -67,6 +70,9 @@ func parseURL(url string) (driver, dsn string) {
 		path = strings.TrimPrefix(path, "//")
 		if path == "" {
 			path = "gateon.db"
+		}
+		if !strings.Contains(path, "?") {
+			path += sqlitePragmas
 		}
 		return DriverSQLite, path
 	}

@@ -66,7 +66,7 @@ type L4Resolver interface {
 // PhantomCore defines the interface for the high-performance TITAN proxy core.
 type PhantomCore interface {
 	ProxyL4(ctx context.Context, client net.Conn, targetAddr string) error
-	ServeHTTP(ctx context.Context, listener net.Listener, handler http.Handler) error
+	OptimizeListener(l net.Listener) net.Listener
 }
 
 // WrapL4Resolver adapts *l4.Resolver to L4Resolver (concrete returns -> interface returns).

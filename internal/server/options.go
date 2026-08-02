@@ -7,6 +7,8 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/phantom"
+	"github.com/gsoultan/gateon/internal/resource"
 	redigo "github.com/redis/go-redis/v9"
 )
 
@@ -135,7 +137,7 @@ func WithIPReputation(r any) ServerOption {
 }
 
 // WithPhantomCore sets the TITAN phantom core.
-func WithPhantomCore(p any) ServerOption {
+func WithPhantomCore(p phantom.PhantomCore) ServerOption {
 	return func(s *Server) error {
 		s.Phantom = p
 		return nil
@@ -143,7 +145,7 @@ func WithPhantomCore(p any) ServerOption {
 }
 
 // WithGovernor sets the resource governor.
-func WithGovernor(g any) ServerOption {
+func WithGovernor(g *resource.Governor) ServerOption {
 	return func(s *Server) error {
 		s.Governor = g
 		return nil

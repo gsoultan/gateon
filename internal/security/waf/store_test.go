@@ -29,13 +29,13 @@ func TestStore_SeedAndReload(t *testing.T) {
 	// Verify some specific rule
 	found := false
 	for _, r := range rules {
-		if r.ID == "900300" {
+		if r.ID == "1900300" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected rule 900300 to be found")
+		t.Error("expected rule 1900300 to be found")
 	}
 }
 

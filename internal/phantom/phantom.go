@@ -5,7 +5,6 @@ package phantom
 import (
 	"context"
 	"net"
-	"net/http"
 )
 
 // PhantomCore defines the interface for the high-performance TITAN proxy core.
@@ -14,12 +13,15 @@ type PhantomCore interface {
 	// targetAddr is the address to proxy to.
 	ProxyL4(ctx context.Context, client net.Conn, targetAddr string) error
 
-	// ServeHTTP leverages io_uring for high-performance L7 request handling.
-	// It wraps a standard http.Handler to provide kernel-bypass optimized ingress.
-	ServeHTTP(ctx context.Context, listener net.Listener, handler http.Handler) error
+	// OptimizeListener wraps the given listener with high-performance TITAN optimizations
+	// (e.g. io_uring for Accept, Read, and Write).
+	OptimizeListener(l net.Listener) net.Listener
 
 	// GetStatus returns the current operational status of the Phantom core.
 	GetStatus() (enabled bool, engine string, activePorts int)
+
+	// Close releases all TITAN-specific resources (e.g. io_uring rings, AF_XDP sockets).
+	Close() error
 }
 
 // EbpfManager defines the subset of eBPF operations required by the Phantom core.

@@ -10,7 +10,9 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/resource"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/rs/cors"
 )
@@ -32,8 +34,8 @@ type Server struct {
 	WafUpdater    any // middleware.WAFUpdater (interface to avoid cyclic import)
 	ClamAVManager any // security.ClamAVManager
 	WafRules      any // waf.Store
-	Phantom       any // phantom.PhantomCore
-	Governor      any // resource.Governor
+	Phantom       phantom.PhantomCore
+	Governor      *resource.Governor
 	Logger        logger.Logger
 	Port          string
 	Version       string
@@ -79,7 +81,13 @@ func (s *Server) PurgeCache() {
 // Close closes all server resources.
 func (s *Server) Close() error {
 	if s.AuthManager != nil {
-		return s.AuthManager.Close()
+		_ = s.AuthManager.Close()
+	}
+	if s.Phantom != nil {
+		_ = s.Phantom.Close()
+	}
+	if s.Governor != nil {
+		_ = s.Governor.Stop()
 	}
 	return nil
 }
