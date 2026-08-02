@@ -21,7 +21,6 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 const (
@@ -149,17 +148,24 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	}
 
 	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
-	// Standard http.Server only supports HTTP/2 via TLS.
-	h2cHandler := h2c.NewHandler(dynamicTimeouts(ep, deps, tcpHandler), &http2.Server{
-		MaxConcurrentStreams: h2MaxConcurrentStreams,
-		MaxReadFrameSize:     h2MaxReadFrameSize,
-		IdleTimeout:          h2IdleTimeout,
-	})
+	// In Go 1.26+, this is handled natively via the Protocols field.
+	handler := dynamicTimeouts(ep, deps, tcpHandler)
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+	if epTLSConfig != nil {
+		protocols.SetHTTP2(true)
+	}
 
 	server := &http.Server{
 		Addr:      addr,
-		Handler:   h2cHandler,
+		Handler:   handler,
 		TLSConfig: epTLSConfig,
+		HTTP2: &http.HTTP2Config{
+			MaxConcurrentStreams: h2MaxConcurrentStreams,
+			MaxReadFrameSize:     h2MaxReadFrameSize,
+		},
+		Protocols: protocols,
 		ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
 			telemetry.GlobalDiagnostics.RecordTLSError(ep.Id, addr, err)
 		}),

@@ -25,7 +25,7 @@ type SecurityPostureProvider func(context.Context) *SecurityPostureReport
 // operators (and external SIEMs) can assess detection coverage at a glance.
 type SecurityPostureReport struct {
 	Version     string            `json:"version"`
-	GeneratedAt time.Time         `json:"generated_at"`
+	GeneratedAt time.Time         `json:"generatedAt"`
 	WAF         WAFPosture        `json:"waf"`
 	ClamAV      ClamAVPosture     `json:"clamav"`
 	Signatures  SignaturePosture  `json:"signatures"`
@@ -38,23 +38,23 @@ type SecurityPostureReport struct {
 // state (built-in + any loaded custom rules).
 type SignaturePosture struct {
 	Enabled   bool `json:"enabled"`
-	RuleCount int  `json:"rule_count"`
+	RuleCount int  `json:"ruleCount"`
 }
 
 // WAFPosture reports WAF rule-set freshness.
 type WAFPosture struct {
 	Enabled     bool      `json:"enabled"`
-	AutoUpdate  bool      `json:"auto_update"`
-	LastUpdated time.Time `json:"last_updated,omitzero"`
+	AutoUpdate  bool      `json:"autoUpdate"`
+	LastUpdated time.Time `json:"lastUpdated,omitzero"`
 }
 
 // ClamAVPosture reports antivirus engine availability and scan freshness.
 type ClamAVPosture struct {
 	Enabled    bool      `json:"enabled"`
 	Installed  bool      `json:"installed"`
-	LastScan   time.Time `json:"last_scan,omitzero"`
-	LastResult string    `json:"last_result,omitzero"`
-	LastError  string    `json:"last_error,omitzero"`
+	LastScan   time.Time `json:"lastScan,omitzero"`
+	LastResult string    `json:"lastResult,omitzero"`
+	LastError  string    `json:"lastError,omitzero"`
 }
 
 // EbpfPosture reports eBPF offloading and security state.
@@ -62,8 +62,8 @@ type EbpfPosture struct {
 	Enabled    bool   `json:"enabled"`
 	Attached   bool   `json:"attached"`
 	Interface  string `json:"interface,omitzero"`
-	AttachMode string `json:"attach_mode,omitzero"`
-	ShunnedIPs int    `json:"shunned_ips"`
+	AttachMode string `json:"attachMode,omitzero"`
+	ShunnedIPs int    `json:"shunnedIps"`
 }
 
 // registerSecurityHandlers wires the security posture and correlated-incidents
@@ -95,10 +95,10 @@ func registerSecurityHandlers(mux *http.ServeMux, d *Deps) {
 		incidents := correlation.DefaultIncidentStore.List(limit)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"incidents":    incidents,
-			"total_seen":   correlation.DefaultIncidentStore.TotalSeen(),
-			"retained":     correlation.DefaultIncidentStore.Len(),
-			"generated_at": time.Now(),
+			"incidents":   incidents,
+			"totalSeen":   correlation.DefaultIncidentStore.TotalSeen(),
+			"retained":    correlation.DefaultIncidentStore.Len(),
+			"generatedAt": time.Now(),
 		})
 	})
 }

@@ -9,24 +9,25 @@ export interface MitreTechnique {
 
 export interface SecurityIncident {
   id: string;
-  source_key: string;
-  source_ip: string;
+  sourceKey: string;
+  sourceIp: string;
+  sourceIps?: string[];
   fingerprint?: string;
-  first_seen: string;
-  last_seen: string;
+  firstSeen: string;
+  lastSeen: string;
   severity: string;
   score: number;
-  signal_count: number;
-  signal_types: string[];
+  signalCount: number;
+  signalTypes: string[];
   techniques: MitreTechnique[];
   countries?: string[];
 }
 
 export interface SecurityIncidentsResponse {
   incidents: SecurityIncident[];
-  total_seen: number;
+  totalSeen: number;
   retained: number;
-  generated_at: string;
+  generatedAt: string;
 }
 
 export function useSecurityIncidents(limit = 100, refetchIntervalMs = 10000) {

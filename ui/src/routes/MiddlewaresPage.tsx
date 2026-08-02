@@ -141,7 +141,7 @@ export default function MiddlewaresPage() {
   };
 
   const middlewares = data?.middlewares || [];
-  const totalCount = data?.total_count || 0;
+  const totalCount = data?.totalCount || 0;
 
   return (
     <Stack gap="xl">
@@ -481,7 +481,7 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "headers" &&
                     "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, add_response_X, set_response_X, del_request_X, del_response_X"}
                   {editingMW?.type === "forwardedheaders" &&
-                    "Keys: proto (http/https — force X-Forwarded-Proto), trust_forward_header (true/false — honor inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES)"}
+                    "Keys: proto (http/https — force X-Forwarded-Proto), trustForwardHeader (true/false — honor inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES)"}
                   {editingMW?.type === "rewrite" &&
                     "Keys: path, pattern, replacement, query_X"}
                   {editingMW?.type === "addprefix" && "Keys: prefix"}
@@ -498,11 +498,11 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "geoip" &&
                     "Keys: db_path (required), header (default X-Forwarded-For), allow_countries, deny_countries, block_status_code"}
                   {editingMW?.type === "forwardauth" &&
-                    "Keys: address (required), auth_response_headers, auth_request_headers, trust_forward_header, forward_body, preserve_request_method, max_body_size, tls_insecure_skip_verify"}
+                    "Keys: address (required), authResponseHeaders, authRequestHeaders, trustForwardHeader, forwardBody, preserveRequestMethod, maxBodySize, tls_insecure_skip_verify"}
                   {editingMW?.type === "grpcweb" &&
                     "Required for grpc routes called from browsers. No config. Add to route and attach this middleware."}
                   {editingMW?.type === "errors" &&
-                    "Keys: status_codes (comma separated), page_404, page_500, etc."}
+                    "Keys: statusCodes (comma separated), page_404, page_500, etc."}
                   {editingMW?.type === "retry" && "Keys: attempts"}
                 </Text>
               </Group>

@@ -124,9 +124,9 @@ function GoldenSignalsSection({ gs }: { gs: GoldenSignals }) {
     },
     {
       label: "Avg Latency",
-      value: formatLatency(gs.avg_latency_ms),
+      value: formatLatency(gs.avgLatencyMs),
       icon: IconClock,
-      color: latencyColor(gs.avg_latency_ms),
+      color: latencyColor(gs.avgLatencyMs),
       description: "Mean request duration",
     },
     {
@@ -231,7 +231,7 @@ function LatencyPercentilesCard({ gs }: { gs: GoldenSignals }) {
     { label: "P50", value: gs.p50_latency_ms, color: "green" },
     { label: "P95", value: gs.p95_latency_ms, color: "yellow" },
     { label: "P99", value: gs.p99_latency_ms, color: "red" },
-    { label: "Avg", value: gs.avg_latency_ms, color: "blue" },
+    { label: "Avg", value: gs.avgLatencyMs, color: "blue" },
   ];
   const maxVal = Math.max(...items.map((i) => i.value), 1);
 
@@ -397,8 +397,8 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                         </Badge>
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>
-                        <Text size="sm" c={latencyColor(r.avg_latency_ms)}>
-                          {formatLatency(r.avg_latency_ms)}
+                        <Text size="sm" c={latencyColor(r.avgLatencyMs)}>
+                          {formatLatency(r.avgLatencyMs)}
                         </Text>
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>
@@ -423,7 +423,7 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap="wrap">
-                          {Object.entries(r.status_codes)
+                          {Object.entries(r.statusCodes)
                             .sort(([a], [b]) => a.localeCompare(b))
                             .map(([code, count]) => (
                               <Tooltip
@@ -884,7 +884,7 @@ function TargetHealthSection({ targets }: { targets: TargetMetric[] | null }) {
                   </Badge>
                 </Table.Td>
                 <Table.Td style={{ textAlign: "right" }}>
-                  <Text size="sm">{t.active_conn}</Text>
+                  <Text size="sm">{t.activeConn}</Text>
                 </Table.Td>
               </Table.Tr>
             ))}

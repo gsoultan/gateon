@@ -83,7 +83,7 @@ export default function SecurityCommandCenter() {
       const data = await res.json();
       if (data.success) {
         setScanStatus(data.status);
-        setScanning(!!data.status?.is_running);
+        setScanning(!!data.status?.isRunning);
       }
     } catch (err) {
       console.error("Failed to poll scan status", err);
@@ -220,9 +220,9 @@ export default function SecurityCommandCenter() {
   const securityScore = React.useMemo(() => {
     if (!metrics) return 100;
     const base = 100;
-    const penalty = (metrics.active_suspicious_sessions * 2) + 
-                    (metrics.active_unverified_clients * 0.5) +
-                    (metrics.active_anomaly_score_average * 0.1);
+    const penalty = (metrics.activeSuspiciousSessions * 2) + 
+                    (metrics.activeUnverifiedClients * 0.5) +
+                    (metrics.activeAnomalyScoreAverage * 0.1);
     return Math.max(Math.round(base - penalty), 0);
   }, [metrics]);
 
@@ -309,17 +309,17 @@ export default function SecurityCommandCenter() {
                     color="blue" 
                     leftSection={scanning ? <Loader size={16} color="white" /> : <IconShieldCheck size={16} />}
                     onClick={handleDeepScan}
-                    disabled={scanning || !status?.clamav_installed || !canWrite}
+                    disabled={scanning || !status?.clamavInstalled || !canWrite}
                   >
                     {scanning ? 'Scanning...' : 'Deep Scan'}
                   </Button>
-                  {scanStatus?.last_scan && !scanning && (
+                  {scanStatus?.lastScan && !scanning && (
                     <Text size="10px" c="dimmed" ta="right" fw={500}>
-                      Last scan: {format(new Date(scanStatus.last_scan), 'MMM d, HH:mm')}
+                      Last scan: {format(new Date(scanStatus.lastScan), 'MMM d, HH:mm')}
                     </Text>
                   )}
                 </Stack>
-                {status?.clamav_installed && (
+                {status?.clamavInstalled && (
                   <Button
                     variant="subtle"
                     color="red"
@@ -335,7 +335,7 @@ export default function SecurityCommandCenter() {
           </Grid>
         </Paper>
 
-        {globalConfig?.waf?.malware_detection && status && !status.clamav_installed && (
+        {globalConfig?.waf?.malwareDetection && status && !status.clamavInstalled && (
           <Alert icon={<IconInfoCircle size="1rem" />} title="Malware Protection Degraded" color="red" variant="filled" radius="md">
             <Stack gap="xs">
               <Text size="sm">ClamAV service is not responding or not installed. Malware scanning is disabled.</Text>

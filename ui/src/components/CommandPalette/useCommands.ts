@@ -50,7 +50,7 @@ const navSpecs: NavSpec[] = [
   { label: "Metrics", to: "/metrics", icon: IconChartBar },
   { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
   { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
-  { label: "EntryPoints", to: "/entrypoints", icon: IconAccessPoint },
+  { label: "EntryPoints", to: "/entryPoints", icon: IconAccessPoint },
   { label: "Security Hub", to: "/security-center", icon: IconShieldCheck, keywords: ["waf", "threats"] },
   { label: "Audit Logs", to: "/audit-logs", icon: IconTimeline },
   { label: "Certificates", to: "/certificates", icon: IconCertificate, keywords: ["tls", "ssl"] },

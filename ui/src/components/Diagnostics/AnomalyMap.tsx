@@ -50,12 +50,12 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies, onTrace }) => {
   const isDark = false;
 
   // Filter anomalies that have geo coordinates
-  // We include 0,0 if country_code is present, as it might be a valid coordinate for some countries or fallback
+  // We include 0,0 if countryCode is present, as it might be a valid coordinate for some countries or fallback
   const geoAnomalies = anomalies.filter(a =>
     a.latitude !== undefined &&
     a.longitude !== undefined &&
-    a.country_code &&
-    a.country_code !== "XX"
+    a.countryCode &&
+    a.countryCode !== "XX"
   );
 
   return (
@@ -100,7 +100,7 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies, onTrace }) => {
                   <Text size="xs" maw={200}>{a.description}</Text>
                   <Group justify="space-between">
                     <Badge color={a.severity.toLowerCase() === 'critical' ? 'red' : a.severity.toLowerCase() === 'high' ? 'orange' : 'yellow'} size="xs">{a.severity}</Badge>
-                    <Text size="10px" c="dimmed">{a.country_code} - {a.source}</Text>
+                    <Text size="10px" c="dimmed">{a.countryCode} - {a.source}</Text>
                   </Group>
                   <Text size="10px" c="blue" fw={700} ta="center" mt={4} style={{ cursor: "pointer" }}>Click marker to trace IP route</Text>
                 </Stack>

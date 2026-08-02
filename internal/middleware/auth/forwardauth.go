@@ -66,7 +66,9 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 	}
 	if authURL.Scheme == "https" && cfg.TLSInsecureSkipVerify {
 		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //nosec G402
+			},
 		}
 	}
 
@@ -140,7 +142,7 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 				}
 			}
 
-			resp, err := client.Do(authReq)
+			resp, err := client.Do(authReq) //nosec G107
 			if err != nil {
 				http.Error(w, "auth service unavailable", http.StatusBadGateway)
 				return

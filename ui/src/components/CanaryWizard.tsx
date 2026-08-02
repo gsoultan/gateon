@@ -16,7 +16,7 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
   const [maxErrorRate, setMaxErrorRate] = useState<number | string>(5)
   const [maxP99Latency, setMaxP99Latency] = useState<number | string>(500)
   const [targetWeights, setTargetWeights] = useState<Target[]>(
-    service.weighted_targets.map(t => ({ ...t }))
+    service.weightedTargets.map(t => ({ ...t }))
   )
   const [loading, setLoading] = useState(false)
 
@@ -31,7 +31,7 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          service_id: service.id,
+          serviceId: service.id,
           target_weights: targetWeights,
           duration_minutes: Number(duration),
           steps: Number(steps),
@@ -84,7 +84,7 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {service.weighted_targets.map((t, i) => (
+            {service.weightedTargets.map((t, i) => (
               <Table.Tr key={i}>
                 <Table.Td>
                   <Text size="xs" ff="monospace">{t.url}</Text>

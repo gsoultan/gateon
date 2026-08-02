@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/ai"
+	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -191,18 +191,27 @@ func main() {
 
 	// Initialize TITAN Phantom core for hardware acceleration.
 	phantomCore := phantom.NewPhantomCore(ebpfHolder)
-	
-	// Load AI model if provided.
+
+	// Load AI model if provided, or use default.
+	var wasmBytes []byte
 	if *aiModel != "" {
-		wasmBytes, err := os.ReadFile(*aiModel)
+		var err error
+		wasmBytes, err = os.ReadFile(*aiModel)
 		if err != nil {
 			logger.L.LogError("failed to read AI model file", "path", *aiModel, "error", err)
 		} else {
-			if err := ai.InitGlobalPredictor(ctx, wasmBytes); err != nil {
-				logger.L.LogError("failed to initialize AI predictor", "error", err)
-			} else {
-				logger.L.LogInfo("AI traffic predictor initialized from WASM", "path", *aiModel)
-			}
+			logger.L.LogInfo("AI traffic predictor initialized from external WASM", "path", *aiModel)
+		}
+	}
+
+	if len(wasmBytes) == 0 {
+		wasmBytes = ai.DefaultModelWasm
+		logger.L.LogInfo("AI traffic predictor initialized from built-in default model")
+	}
+
+	if len(wasmBytes) > 0 {
+		if err := ai.InitGlobalPredictor(ctx, wasmBytes); err != nil {
+			logger.L.LogError("failed to initialize AI predictor", "error", err)
 		}
 	}
 

@@ -348,34 +348,35 @@ type TraceRecord struct {
 type SecurityThreat struct {
 	ID              string    `json:"id"`
 	Type            string    `json:"type"`
-	SourceIP        string    `json:"source_ip"`
+	SourceIP        string    `json:"sourceIp"`
+	SourceIPs       []string  `json:"sourceIps,omitzero"`
 	Fingerprint     string    `json:"fingerprint"`
 	Score           float64   `json:"score"`
 	Details         string    `json:"details"`
 	Time            time.Time `json:"timestamp,omitzero"`
 	JA4             string    `json:"ja4"`
 	JA4H            string    `json:"ja4h"`
-	RouteID         string    `json:"route_id"`
-	RequestURI      string    `json:"request_uri"`
+	RouteID         string    `json:"routeId"`
+	RequestURI      string    `json:"requestUri"`
 	Category        string    `json:"category"`
 	Severity        string    `json:"severity"`
 	ASN             string    `json:"asn"`
-	ActionTaken     string    `json:"action_taken"`
-	CountryCode     string    `json:"country_code"`
+	ActionTaken     string    `json:"actionTaken"`
+	CountryCode     string    `json:"countryCode"`
 	Latitude        float64   `json:"latitude"`
 	Longitude       float64   `json:"longitude"`
 	Mitigated       bool      `json:"mitigated"`
-	RequestHeaders  string    `json:"request_headers"`
-	RequestBody     string    `json:"request_body"`
-	ResponseHeaders string    `json:"response_headers"`
-	ResponseBody    string    `json:"response_body"`
-	UserAgent       string    `json:"user_agent"`
+	RequestHeaders  string    `json:"requestHeaders"`
+	RequestBody     string    `json:"requestBody"`
+	ResponseHeaders string    `json:"responseHeaders"`
+	ResponseBody    string    `json:"responseBody"`
+	UserAgent       string    `json:"userAgent"`
 	Method          string    `json:"method"`
 	Confidence      float64   `json:"confidence,omitzero"`
 	Entropy         float64   `json:"entropy,omitzero"`
-	ClusterSize     int       `json:"cluster_size,omitzero"`
+	ClusterSize     int       `json:"clusterSize,omitzero"`
 	Recommendation  string    `json:"recommendation"`
-	TriggeredRules  string    `json:"triggered_rules"`
+	TriggeredRules  string    `json:"triggeredRules"`
 	Reputation      float64   `json:"reputation"`
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
@@ -430,7 +431,7 @@ type pathStatsStore struct {
 	scoreCache                  *lru.ARCCache
 	unmitigatedCache            *lru.ARCCache
 	userMitigationCache         *lru.ARCCache
-	traceStoreEnabled           bool
+	traceStoreEnabled           atomic.Bool
 
 	// Real-time daily counters (seeded from DB at startup/rollover)
 	currentReqToday       atomic.Uint64
@@ -505,17 +506,17 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 
 	st := &pathStatsStore{
-		db:                database,
-		pebble:            pdb,
-		dialect:           dialect,
-		inCh:              make(chan increment, 4096),
-		traceInCh:         make(chan *TraceRecord, 4096),
-		threatInCh:        make(chan *SecurityThreat, 1024),
-		behaviorInCh:      make(chan *behaviorInc, 2048),
-		flushCh:           make(chan chan struct{}),
-		stopCh:            make(chan struct{}),
-		traceStoreEnabled: td.TraceStoreEnabled,
+		db:           database,
+		pebble:       pdb,
+		dialect:      dialect,
+		inCh:         make(chan increment, 4096),
+		traceInCh:    make(chan *TraceRecord, 4096),
+		threatInCh:   make(chan *SecurityThreat, 1024),
+		behaviorInCh: make(chan *behaviorInc, 2048),
+		flushCh:      make(chan chan struct{}),
+		stopCh:       make(chan struct{}),
 	}
+	st.traceStoreEnabled.Store(td.TraceStoreEnabled)
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
 
 	if cache, err := lru.NewARC(cacheSizeFromEnv(envScoreCacheSize, cacheNameScore, defaultScoreCacheSize)); err == nil {
@@ -540,7 +541,7 @@ func initStore(databaseURL string, retentionDays int) error {
 
 	// Migration: Move existing traces from SQL to Pebble if table exists.
 	// Skipped when the trace store is disabled by the resource profile.
-	if st.traceStoreEnabled {
+	if st.traceStoreEnabled.Load() {
 		st.wg.Go(st.migrateTracesToPebble)
 	}
 
@@ -567,7 +568,7 @@ func (s *pathStatsStore) syncTierSettings() {
 	s.db.SetMaxIdleConns(td.DBMaxIdleConns)
 
 	// Update trace store toggle
-	s.traceStoreEnabled = td.TraceStoreEnabled
+	s.traceStoreEnabled.Store(td.TraceStoreEnabled)
 
 	// Update retention days if not explicitly overridden in global config.
 	// We read the global config directly to see if there's an override.
@@ -773,7 +774,7 @@ func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation, source_ips) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -891,7 +892,8 @@ func (s *pathStatsStore) loop() {
 				defer tx.Rollback()
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation); err != nil {
+						sourceIPs := strings.Join(th.SourceIPs, ",")
+						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs); err != nil {
 							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
@@ -1140,7 +1142,7 @@ func recordDomainToStore(domain string, latencySeconds float64, bytesTotal uint6
 
 func recordTraceToStore(tr *TraceRecord) {
 	s := getStore()
-	if s == nil || !s.traceStoreEnabled || tr == nil {
+	if s == nil || !s.traceStoreEnabled.Load() || tr == nil {
 		if tr != nil {
 			tr.Reset()
 			tracePool.Put(tr)
@@ -2119,17 +2121,21 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 		return nil, errors.New("threat ID is required")
 	}
 
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation FROM security_threats t WHERE id = ?")
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation, source_ips FROM security_threats t WHERE id = ?")
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
 	th := &SecurityThreat{}
-	err := ex.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation)
+	var sourceIPs string
+	err := ex.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &sourceIPs)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("threat with ID %s not found", id)
 		}
 		return nil, err
+	}
+	if sourceIPs != "" {
+		th.SourceIPs = strings.Split(sourceIPs, ",")
 	}
 	th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
 	return th, nil
@@ -2284,7 +2290,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 	}
 
 	where, args := buildThreatFilterQuery(s.dialect, filter, true)
-	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, '') FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
+	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, ''), t.source_ips FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	args = append(args, limit, offset)
 
 	ex, cleanup := s.getExecutor(ctx)
@@ -2303,9 +2309,13 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		}
 		th := &SecurityThreat{}
 		var mitigationStatus, fm4Status string
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm4Status); err != nil {
+		var sourceIPs string
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm4Status, &sourceIPs); err != nil {
 			logQueryErr(ctx, "threats lite: scan failed", err)
 			continue
+		}
+		if sourceIPs != "" {
+			th.SourceIPs = strings.Split(sourceIPs, ",")
 		}
 		th.Mitigated = mitigationStatus == "mitigated" || fm4Status == "mitigated" ||
 			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&

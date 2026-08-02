@@ -4,16 +4,16 @@ import { apiFetch } from "./api";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 
 export type AggStats = {
-  total_requests: number;
+  totalRequests: number;
   total_bandwidth_bytes: number;
   total_errors: number;
-  active_connections: number;
-  open_circuits: number;
-  half_open_circuits: number;
-  healthy_targets: number;
-  total_targets: number;
-  cpu_usage: number;
-  memory_usage: number;
+  activeConnections: number;
+  openCircuits: number;
+  halfOpenCircuits: number;
+  healthyTargets: number;
+  totalTargets: number;
+  cpuUsage: number;
+  memoryUsage: number;
 };
 
 export function useAggStats() {

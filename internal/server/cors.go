@@ -75,7 +75,7 @@ func BuildManagementCORS(cfg *gateonv1.ManagementConfig) *cors.Cors {
 		AllowedOrigins:   origins,
 		AllowedMethods:   methods,
 		AllowedHeaders:   headers,
-		ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding"},
+		ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
 		AllowCredentials: allowCreds,
 	})
 }

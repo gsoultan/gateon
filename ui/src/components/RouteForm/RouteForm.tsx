@@ -87,12 +87,12 @@ export default function RouteForm({
       type: "http" as const,
       rule: "",
       priority: 0,
-      entrypoints: [] as string[],
+      entryPoints: [] as string[],
       middlewares: [] as string[],
-      service_id: "",
+      serviceId: "",
       tls: {
-        certificate_ids: [] as string[],
-        option_id: "",
+        certificateIds: [] as string[],
+        optionId: "",
       },
       disabled: false,
     } as Route,
@@ -116,12 +116,12 @@ export default function RouteForm({
         t === "tcp" || t === "udp" ? "L4()" : (initialData.rule || ""),
       );
       form.setFieldValue("priority", initialData.priority || 0);
-      form.setFieldValue("entrypoints", initialData.entrypoints || []);
+      form.setFieldValue("entryPoints", initialData.entryPoints || []);
       form.setFieldValue("middlewares", initialData.middlewares || []);
-      form.setFieldValue("service_id", initialData.service_id || "");
+      form.setFieldValue("serviceId", initialData.serviceId || "");
       form.setFieldValue(
         "tls",
-        initialData.tls || { certificate_ids: [], option_id: "" },
+        initialData.tls || { certificateIds: [], optionId: "" },
       );
       form.setFieldValue("disabled", initialData.disabled ?? false);
     }
@@ -142,7 +142,7 @@ export default function RouteForm({
   const epOptions = epOptionsAll.filter((ep) => {
     if (routeType === "tcp") return ep.type === 2; // EntryPointType.TCP
     if (routeType === "udp") return ep.type === 3; // EntryPointType.UDP
-    return ep.type !== 2 && ep.type !== 3; // HTTP/gRPC: exclude L4 entrypoints
+    return ep.type !== 2 && ep.type !== 3; // HTTP/gRPC: exclude L4 entryPoints
   }).map(({ value, label }) => ({ value, label }));
 
   const mwOptions = (mwData?.middlewares || []).map((mw) => ({
@@ -163,13 +163,13 @@ export default function RouteForm({
   const serviceOptions = (serviceData?.services || [])
     .filter((s) => {
       if (routeType === "tcp" || routeType === "udp") {
-        return (s.backend_type || "http") === routeType;
+        return (s.backendType || "http") === routeType;
       }
-      return (s.backend_type || "http") !== "tcp" && (s.backend_type || "http") !== "udp";
+      return (s.backendType || "http") !== "tcp" && (s.backendType || "http") !== "udp";
     })
     .map((s) => ({
       value: s.id,
-      label: `${s.name} (${s.backend_type || "http"})`,
+      label: `${s.name} (${s.backendType || "http"})`,
     }));
 
   return (
@@ -240,9 +240,9 @@ export default function RouteForm({
                         selector={(state) => [
                           state.values.name,
                           state.values.rule,
-                          state.values.service_id,
+                          state.values.serviceId,
                         ]}
-                        children={([name, rule, service_id]) => {
+                        children={([name, rule, serviceId]) => {
                           const type = form.state.values.type;
                           const isL4 = type === "tcp" || type === "udp";
                           const ruleOk = isL4 ? true : !!rule;
@@ -252,7 +252,7 @@ export default function RouteForm({
                             size="md"
                             radius="md"
                             loading={mutation.isPending}
-                            disabled={!name || !ruleOk || !service_id}
+                            disabled={!name || !ruleOk || !serviceId}
                             w={200}
                           >
                             Save Route
@@ -275,10 +275,10 @@ export default function RouteForm({
                       selector={(state) => [
                         state.values.name,
                         state.values.rule,
-                        state.values.service_id,
+                        state.values.serviceId,
                         state.values.type,
                       ]}
-                      children={([name, rule, service_id, type]) => {
+                      children={([name, rule, serviceId, type]) => {
                         const isL4 = type === "tcp" || type === "udp";
                         const ruleOk = isL4 ? true : !!rule;
                         return (
@@ -288,7 +288,7 @@ export default function RouteForm({
                           px="xl"
                           disabled={
                             (active === 0 && (!name || !ruleOk || !type)) ||
-                            (active === 1 && !service_id)
+                            (active === 1 && !serviceId)
                           }
                         >
                           Next Step

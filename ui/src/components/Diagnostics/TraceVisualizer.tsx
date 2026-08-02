@@ -149,7 +149,7 @@ const TraceVisualizer: React.FC<TraceVisualizerProps> = ({ opened, onClose, targ
                     }
                   >
                     <Text c="dimmed" size="xs">
-                      {h.city ? `${h.city}, ` : ""}{h.country_code}
+                      {h.city ? `${h.city}, ` : ""}{h.countryCode}
                     </Text>
                   </Timeline.Item>
                 ))}

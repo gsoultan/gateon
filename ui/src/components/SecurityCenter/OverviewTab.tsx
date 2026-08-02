@@ -90,24 +90,24 @@ export function OverviewTab({
       timestamp: anomaly.timestamp,
       source: anomaly.source_ip,
       recommendation: anomaly.recommendation || "Investigate source IP and associated traffic patterns.",
-      country_code: anomaly.country_code,
+      countryCode: anomaly.countryCode,
       ja3: anomaly.ja3,
       ja4: anomaly.ja4,
       score: anomaly.score,
-      route_id: anomaly.route_id,
-      request_uri: anomaly.request_uri,
+      routeId: anomaly.routeId,
+      requestUri: anomaly.requestUri,
       mitigated: anomaly.mitigated,
       category: anomaly.category,
-      action_taken: anomaly.action_taken,
-      request_headers: anomaly.request_headers,
-      request_body: anomaly.request_body,
-      response_headers: anomaly.response_headers,
-      response_body: anomaly.response_body,
-      user_agent: anomaly.user_agent,
-      http_method: anomaly.http_method,
+      actionTaken: anomaly.actionTaken,
+      requestHeaders: anomaly.requestHeaders,
+      requestBody: anomaly.requestBody,
+      responseHeaders: anomaly.responseHeaders,
+      responseBody: anomaly.responseBody,
+      userAgent: anomaly.userAgent,
+      httpMethod: anomaly.httpMethod,
       confidence: anomaly.confidence,
       entropy: anomaly.entropy,
-      cluster_size: anomaly.cluster_size,
+      clusterSize: anomaly.clusterSize,
     };
     setSelectedAnomaly(mappedAnomaly);
     open();
@@ -134,7 +134,7 @@ export function OverviewTab({
     if ((f?.bot_blocked || 0) > 0) stages.push({ label: "Bot Mitigation", value: f!.bot_blocked, color: "pink" });
     if ((f?.file_security_blocked || 0) > 0) stages.push({ label: "File Security", value: f!.file_security_blocked, color: "red" });
     if ((f?.deception_blocked || 0) > 0) stages.push({ label: "Deception/Trap", value: f!.deception_blocked, color: "grape" });
-    if ((f?.advanced_security_blocked || 0) > 0) stages.push({ label: "Advanced Sec", value: f!.advanced_security_blocked, color: "dark" });
+    if ((f?.advancedSecurityBlocked || 0) > 0) stages.push({ label: "Advanced Sec", value: f!.advancedSecurityBlocked, color: "dark" });
     if ((f?.geoip_blocked || 0) > 0) stages.push({ label: "GeoIP Block", value: f!.geoip_blocked, color: "indigo" });
     if ((f?.auth_failures || 0) > 0) stages.push({ label: "Auth Failures", value: f!.auth_failures, color: "cyan" });
     if ((f?.turnstile_failures || 0) > 0) stages.push({ label: "Turnstile Fail", value: f!.turnstile_failures, color: "violet" });
@@ -374,7 +374,7 @@ export function OverviewTab({
                   </Table.Td>
                   <Table.Td>
                     <Group gap={4}>
-                      <Badge size="xs" variant="outline">{a.country_code || 'XX'}</Badge>
+                      <Badge size="xs" variant="outline">{a.countryCode || 'XX'}</Badge>
                       <Text size="sm" fw={500} ff="monospace" onClick={(e) => handleTraceClick(e, a.source_ip)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{a.source_ip}</Text>
                     </Group>
                   </Table.Td>

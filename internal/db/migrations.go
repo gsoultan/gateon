@@ -1372,4 +1372,14 @@ func init() {
 		_, err := db.Exec(query)
 		return err
 	})
+	Register(53, "add_source_ips_to_security_threats", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverSQLite || dialect.Driver == DriverPostgres {
+			query = `ALTER TABLE security_threats ADD COLUMN source_ips TEXT NOT NULL DEFAULT '';`
+		} else { // MySQL
+			query = `ALTER TABLE security_threats ADD COLUMN source_ips LONGTEXT NOT NULL DEFAULT '';`
+		}
+		_, err := db.Exec(query)
+		return err
+	})
 }

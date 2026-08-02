@@ -61,7 +61,7 @@ function PostureStatusCards() {
               Signature engine
             </Text>
             <Badge color={sig.enabled ? "blue" : "gray"} variant="light">
-              {sig.enabled ? `${sig.rule_count} rules active` : "Disabled"}
+              {sig.enabled ? `${sig.ruleCount} rules active` : "Disabled"}
             </Badge>
           </Stack>
           <ThemeIcon color={sig.enabled ? "blue" : "gray"} variant="light" size="lg" radius="md">
@@ -156,7 +156,7 @@ export function IncidentsTab() {
           </Stack>
           {data && (
             <Badge variant="light" color="blue">
-              {data.total_seen} total · {data.retained} retained
+              {data.totalSeen} total · {data.retained} retained
             </Badge>
           )}
         </Group>
@@ -216,7 +216,14 @@ export function IncidentsTab() {
                     </Table.Td>
                     <Table.Td>
                       <Stack gap={2}>
-                        <Code>{inc.source_ip || inc.source_key}</Code>
+                        <Code>{inc.sourceIp || inc.sourceKey}</Code>
+                        {inc.sourceIps && inc.sourceIps.length > 1 && (
+                          <Tooltip label={inc.sourceIps.join(", ")}>
+                            <Text size="xs" c="blue" fw={700} style={{ cursor: 'help' }}>
+                              +{inc.sourceIps.length - 1} more IPs
+                            </Text>
+                          </Tooltip>
+                        )}
                         {inc.countries && inc.countries.length > 0 && (
                           <Text size="xs" c="dimmed">
                             {inc.countries.join(", ")}
@@ -227,9 +234,9 @@ export function IncidentsTab() {
                     <Table.Td>
                       <Group gap={4}>
                         <Badge size="sm" variant="light" color="orange">
-                          {inc.signal_count} signals
+                          {inc.signalCount} signals
                         </Badge>
-                        {inc.signal_types?.map((t) => (
+                        {inc.signalTypes?.map((t) => (
                           <Badge key={t} size="xs" variant="outline" color="gray">
                             {t.replace(/_/g, " ")}
                           </Badge>
@@ -257,7 +264,7 @@ export function IncidentsTab() {
                     </Table.Td>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
-                        {inc.last_seen ? format(new Date(inc.last_seen), "MMM d, HH:mm:ss") : "—"}
+                        {inc.lastSeen ? format(new Date(inc.lastSeen), "MMM d, HH:mm:ss") : "—"}
                       </Text>
                     </Table.Td>
                   </Table.Tr>

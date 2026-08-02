@@ -59,13 +59,13 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
   };
 
   const updateIntegration = (index: number, val: Partial<IPReputationIntegration>) => {
-    const integrations = [...(security.ip_reputation?.integrations || [])];
+    const integrations = [...(security.ipReputation?.integrations || [])];
     integrations[index] = { ...integrations[index], ...val };
-    updateSection("ip_reputation", { integrations });
+    updateSection("ipReputation", { integrations });
   };
 
   const addIntegration = () => {
-    const integrations = [...(security.ip_reputation?.integrations || [])];
+    const integrations = [...(security.ipReputation?.integrations || [])];
     integrations.push({
       id: Math.random().toString(36).substring(7),
       name: "AbuseIPDB",
@@ -74,13 +74,13 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
       enabled: true,
       confidence_threshold: 80,
     });
-    updateSection("ip_reputation", { integrations });
+    updateSection("ipReputation", { integrations });
   };
 
   const removeIntegration = (index: number) => {
-    const integrations = [...(security.ip_reputation?.integrations || [])];
+    const integrations = [...(security.ipReputation?.integrations || [])];
     integrations.splice(index, 1);
-    updateSection("ip_reputation", { integrations });
+    updateSection("ipReputation", { integrations });
   };
 
   return (
@@ -306,35 +306,35 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   </Text>
                 </Stack>
                 <Switch
-                  checked={security.ip_reputation?.enabled}
-                  onChange={(e) => updateSection("ip_reputation", { enabled: e.currentTarget.checked })}
+                  checked={security.ipReputation?.enabled}
+                  onChange={(e) => updateSection("ipReputation", { enabled: e.currentTarget.checked })}
                   disabled={disabled}
                 />
               </Group>
-              {security.ip_reputation?.enabled && (
+              {security.ipReputation?.enabled && (
                 <Stack gap="sm">
                   <TagsInput
                     label="Feed URLs"
                     description="URLs of IP reputation feeds (text/plain). Recommended: AbuseIPDB, Emerging Threats."
                     placeholder="https://example.com/bad-ips.txt"
-                    value={security.ip_reputation?.feed_urls || []}
-                    onChange={(val) => updateSection("ip_reputation", { feed_urls: val })}
+                    value={security.ipReputation?.feed_urls || []}
+                    onChange={(val) => updateSection("ipReputation", { feed_urls: val })}
                     disabled={disabled}
                   />
                   <SimpleGrid cols={2}>
                     <NumberInput
                       label="Update Interval (h)"
                       description="How often to sync feeds. Recommended: 24h."
-                      value={security.ip_reputation?.update_interval_hours}
-                      onChange={(val) => updateSection("ip_reputation", { update_interval_hours: val })}
+                      value={security.ipReputation?.update_interval_hours}
+                      onChange={(val) => updateSection("ipReputation", { update_interval_hours: val })}
                       disabled={disabled}
                       min={1}
                     />
                     <NumberInput
                       label="Block Threshold"
                       description="Minimum score to block. Recommended: 80.0."
-                      value={security.ip_reputation?.block_threshold}
-                      onChange={(val) => updateSection("ip_reputation", { block_threshold: val })}
+                      value={security.ipReputation?.block_threshold}
+                      onChange={(val) => updateSection("ipReputation", { block_threshold: val })}
                       disabled={disabled}
                       decimalScale={1}
                     />
@@ -342,7 +342,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
 
                   <Divider label="External Integrations" labelPosition="center" />
                   <Stack gap="xs">
-                    {(security.ip_reputation?.integrations || []).map((integration, index) => (
+                    {(security.ipReputation?.integrations || []).map((integration, index) => (
                       <Paper key={integration.id || index} withBorder p="sm" radius="sm">
                         <Stack gap="xs">
                           <Group justify="space-between">

@@ -35,17 +35,17 @@ export function RouteStats({ routeId }: RouteStatsProps) {
               <Text size="xs" truncate fw={500}>{s.url}</Text>
               <Group gap="sm">
                 <Text size="xs" c={s.alive ? 'green' : 'red'}>{s.alive ? 'HEALTHY' : 'UNHEALTHY'}</Text>
-                <Text size="xs">Reqs: {s.request_count}</Text>
-                <Text size="xs">Errs: {s.error_count}</Text>
-                <Text size="xs">Active: {s.active_conn}</Text>
-                <Text size="xs">Avg Lat: {s.avg_latency_ms.toFixed(2)}ms</Text>
+                <Text size="xs">Reqs: {s.requestCount}</Text>
+                <Text size="xs">Errs: {s.errorCount}</Text>
+                <Text size="xs">Active: {s.activeConn}</Text>
+                <Text size="xs">Avg Lat: {s.avgLatencyMs.toFixed(2)}ms</Text>
                 <Text size="xs" fw={700} c={s.alive ? 'green' : 'orange'}>
-                  Circuit: {(s as any).circuit_state ?? (s.alive ? 'CLOSED' : 'OPEN')}
+                  Circuit: {(s as any).circuitState ?? (s.alive ? 'CLOSED' : 'OPEN')}
                 </Text>
               </Group>
-              {s.status_codes && Object.keys(s.status_codes).length > 0 && (
+              {s.statusCodes && Object.keys(s.statusCodes).length > 0 && (
                 <Group gap="xs" mt={4}>
-                  {Object.entries(s.status_codes).map(([code, count]) => (
+                  {Object.entries(s.statusCodes).map(([code, count]) => (
                     <Text key={code} size="xs" c="dimmed">{code}: {count}</Text>
                   ))}
                 </Group>

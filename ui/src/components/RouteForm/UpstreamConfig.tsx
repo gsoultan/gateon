@@ -22,7 +22,7 @@ export function UpstreamConfig({ form, serviceOptions }: UpstreamConfigProps) {
   return (
     <Stack gap="md" mt="xl">
       <form.Field
-        name="service_id"
+        name="serviceId"
         children={(field: any) => (
           <Select
             label="Upstream Service"

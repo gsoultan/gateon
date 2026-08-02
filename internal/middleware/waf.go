@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"bytes"
 	"cmp"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -1190,12 +1189,7 @@ func isSafeHeader(name string) bool {
 	}
 
 	// Fallback for non-canonical forms or mixed case
-	lname := strings.ToLower(name)
-	if safeHeaders[lname] {
-		return true
-	}
-
-	return false
+	return safeHeaders[strings.ToLower(name)]
 }
 
 func calculateConfidence(reputation float64, severity string, anomalyScore int, isFastPath bool) float64 {
@@ -1275,7 +1269,6 @@ func (w *wafWrapper) NewTransactionWithID(id string) types.Transaction {
 
 type txWrapper struct {
 	types.Transaction
-	ctx     context.Context
 	r       *http.Request
 	routeID string
 	cfg     WAFConfig
@@ -1309,7 +1302,6 @@ func (t *txWrapper) ProcessLogging() {
 		ua := ""
 		method := ""
 		isCritical := false
-		details := ""
 
 		if ca, ok := t.Transaction.(interface {
 			GetCollection(variables.RuleVariable) collection.Collection
@@ -1406,15 +1398,13 @@ func (t *txWrapper) ProcessLogging() {
 
 			if interrupted && rule.Rule().ID() == it.RuleID {
 				severity = strings.ToLower(rule.Rule().Severity().String())
-				details = rule.ErrorLog()
 			}
 		}
 
-		if details == "" {
+		if clientIP == "" || uri == "" {
 			// Fallback to last matched rule if the interrupting one isn't in matched rules
 			// OR if not interrupted at all.
 			last := matchedRules[len(matchedRules)-1]
-			details = last.ErrorLog()
 			if clientIP == "" {
 				clientIP = last.ClientIPAddress()
 			}

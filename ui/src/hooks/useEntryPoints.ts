@@ -5,9 +5,9 @@ import type { ListEntryPointsResponse } from "../types/gateon";
 
 export function useEntryPoints(params?: PaginationParams) {
   return useQuery<ListEntryPointsResponse>({
-    queryKey: ["entrypoints", params],
+    queryKey: ["entryPoints", params],
     queryFn: async () => {
-      const res = await apiFetch(`/v1/entrypoints${buildQueryString(params)}`);
+      const res = await apiFetch(`/v1/entryPoints${buildQueryString(params)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },

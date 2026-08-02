@@ -103,7 +103,7 @@ export function PipelineConfig({
       <Divider label="TLS Settings" labelPosition="center" my="sm" />
 
       <form.Field
-        name="tls.option_id"
+        name="tls.optionId"
         children={(field: any) => (
           <Select
             label="TLS Option"
@@ -118,7 +118,7 @@ export function PipelineConfig({
       />
 
       <form.Field
-        name="tls.certificate_ids"
+        name="tls.certificateIds"
         children={(field: any) => (
           <MultiSelect
             label="Certificates"

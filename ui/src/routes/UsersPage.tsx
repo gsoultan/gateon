@@ -223,7 +223,7 @@ export default function UsersPage() {
     }
   };
 
-  const totalCount = data?.total_count || 0;
+  const totalCount = data?.totalCount || 0;
   const users = data?.users || [];
 
   const rows = users.map((user) => (

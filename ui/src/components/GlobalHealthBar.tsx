@@ -27,7 +27,7 @@ export function GlobalHealthBar() {
   const { colorScheme } = useMantineColorScheme();
 
   const reqsLabel = useMemo(() => {
-    const totalReqs = pathStats?.reduce((s, p) => s + (p.request_count ?? 0), 0) ?? 0;
+    const totalReqs = pathStats?.reduce((s, p) => s + (p.requestCount ?? 0), 0) ?? 0;
     if (totalReqs >= 1_000_000) return `${(totalReqs / 1_000_000).toFixed(1)}M`;
     if (totalReqs >= 1000) return `${(totalReqs / 1000).toFixed(1)}K`;
     return String(totalReqs);
@@ -37,13 +37,13 @@ export function GlobalHealthBar() {
     const s = [
       {
         icon: IconRoute,
-        value: status?.routes_count ?? 0,
+        value: status?.routesCount ?? 0,
         label: "Routes",
         color: "var(--mantine-color-brand-6)",
       },
       {
         icon: IconServer,
-        value: status?.services_count ?? 0,
+        value: status?.servicesCount ?? 0,
         label: "Services",
         color: "var(--mantine-color-teal-6)",
       },
@@ -55,16 +55,16 @@ export function GlobalHealthBar() {
       },
       {
         icon: IconPlugConnected,
-        value: aggStats?.active_connections ?? 0,
+        value: aggStats?.activeConnections ?? 0,
         label: "Active Connections",
         color: "var(--mantine-color-blue-6)",
       },
     ];
 
-    if ((aggStats?.open_circuits ?? 0) + (aggStats?.half_open_circuits ?? 0) > 0) {
+    if ((aggStats?.openCircuits ?? 0) + (aggStats?.halfOpenCircuits ?? 0) > 0) {
       s.push({
         icon: IconAlertTriangle,
-        value: (aggStats?.open_circuits ?? 0) + (aggStats?.half_open_circuits ?? 0),
+        value: (aggStats?.openCircuits ?? 0) + (aggStats?.halfOpenCircuits ?? 0),
         label: "Circuits OPEN / HALF-OPEN",
         color: "var(--mantine-color-red-6)",
       });

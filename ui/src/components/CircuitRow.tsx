@@ -24,10 +24,10 @@ export function CircuitRow({
         url: s.url,
         alive: s.alive,
         circuit:
-          (s as { circuit_state?: string }).circuit_state ??
+          (s as { circuitState?: string }).circuitState ??
           (s.alive ? "CLOSED" : "OPEN"),
-        errors: s.error_count,
-        reqs: s.request_count,
+        errors: s.errorCount,
+        reqs: s.requestCount,
       }))
       .filter(
         (r) => stateFilter === "all" || r.circuit === stateFilter

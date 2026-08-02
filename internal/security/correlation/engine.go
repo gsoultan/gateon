@@ -54,16 +54,17 @@ type Signal struct {
 // within the correlation window.
 type Incident struct {
 	ID          string      `json:"id"`
-	SourceKey   string      `json:"source_key"`
-	SourceIP    string      `json:"source_ip"`
+	SourceKey   string      `json:"sourceKey"`
+	SourceIP    string      `json:"sourceIp"`
+	SourceIPs   []string    `json:"sourceIps,omitzero"`
 	Fingerprint string      `json:"fingerprint,omitzero"`
 	JA4         string      `json:"ja4,omitzero"`
-	FirstSeen   time.Time   `json:"first_seen,omitzero"`
-	LastSeen    time.Time   `json:"last_seen,omitzero"`
+	FirstSeen   time.Time   `json:"firstSeen,omitzero"`
+	LastSeen    time.Time   `json:"lastSeen,omitzero"`
 	Severity    string      `json:"severity"`
 	Score       float64     `json:"score"`
-	SignalCount int         `json:"signal_count"`
-	SignalTypes []string    `json:"signal_types,omitzero"`
+	SignalCount int         `json:"signalCount"`
+	SignalTypes []string    `json:"signalTypes,omitzero"`
 	Techniques  []Technique `json:"techniques,omitzero"`
 	Countries   []string    `json:"countries,omitzero"`
 }
@@ -240,6 +241,7 @@ func (e *Engine) buildIncident(key string, signals []Signal) Incident {
 		typeSet    = map[string]struct{}{}
 		techSet    = map[string]Technique{}
 		countrySet = map[string]struct{}{}
+		ipSet      = map[string]struct{}{}
 		topSev     = "low"
 	)
 	first := signals[0].Time
@@ -251,6 +253,9 @@ func (e *Engine) buildIncident(key string, signals []Signal) Incident {
 	for _, sig := range signals {
 		score += sig.Score
 		typeSet[sig.Type] = struct{}{}
+		if sig.SourceIP != "" {
+			ipSet[sig.SourceIP] = struct{}{}
+		}
 		for _, t := range Techniques(sig.Type) {
 			techSet[t.ID] = t
 		}
@@ -281,6 +286,7 @@ func (e *Engine) buildIncident(key string, signals []Signal) Incident {
 		ID:          uuid.NewString(),
 		SourceKey:   key,
 		SourceIP:    sourceIP,
+		SourceIPs:   sortedKeys(ipSet),
 		Fingerprint: fingerprint,
 		JA4:         ja4,
 		FirstSeen:   first,

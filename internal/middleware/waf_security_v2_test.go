@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,7 +142,10 @@ func TestRecognitionMiddlewares(t *testing.T) {
 	defer telemetry.ClosePathStatsStore(t.Context())
 
 	var capturedThreats []telemetry.SecurityThreat
+	var mu sync.Mutex
 	telemetry.SetAlertingHandler(func(th *telemetry.SecurityThreat) {
+		mu.Lock()
+		defer mu.Unlock()
 		capturedThreats = append(capturedThreats, *th)
 	})
 	defer telemetry.SetAlertingHandler(nil)
@@ -194,7 +198,9 @@ func TestRecognitionMiddlewares(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			mu.Lock()
 			capturedThreats = nil
+			mu.Unlock()
 			method := tc.method
 			if method == "" {
 				method = "GET"
@@ -210,18 +216,23 @@ func TestRecognitionMiddlewares(t *testing.T) {
 			// Since threat recording is asynchronous, we need to allow some time.
 			time.Sleep(500 * time.Millisecond)
 
-			if len(capturedThreats) == 0 {
+			mu.Lock()
+			threats := make([]telemetry.SecurityThreat, len(capturedThreats))
+			copy(threats, capturedThreats)
+			mu.Unlock()
+
+			if len(threats) == 0 {
 				t.Errorf("%s: expected threat to be captured, but none found", tc.name)
 			} else {
 				found := false
-				for _, th := range capturedThreats {
+				for _, th := range threats {
 					if th.Type == tc.expectType {
 						found = true
 						break
 					}
 				}
 				if !found {
-					t.Errorf("%s: expected threat type %s, but got %v", tc.name, tc.expectType, capturedThreats)
+					t.Errorf("%s: expected threat type %s, but got %v", tc.name, tc.expectType, threats)
 				}
 			}
 		})

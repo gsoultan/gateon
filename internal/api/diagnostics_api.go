@@ -929,6 +929,7 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		CountryCode:     t.CountryCode,
 		Latitude:        t.Latitude,
 		Longitude:       t.Longitude,
+		SourceIps:       t.SourceIPs,
 	}
 	if a.CountryCode == "" || (a.Latitude == 0 && a.Longitude == 0) {
 		populateAnomalyGeo(ctx, a, t.SourceIP)

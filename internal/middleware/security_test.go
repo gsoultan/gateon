@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,9 +51,21 @@ func TestWAF_AuditLogAndBodyLimits(t *testing.T) {
 
 type mockEbpfManager struct {
 	shunnedIP string
+	mu        sync.RWMutex
 }
 
-func (m *mockEbpfManager) ShunIP(ip string) error                                       { m.shunnedIP = ip; return nil }
+func (m *mockEbpfManager) ShunIP(ip string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.shunnedIP = ip
+	return nil
+}
+
+func (m *mockEbpfManager) getShunnedIP() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.shunnedIP
+}
 func (m *mockEbpfManager) UnshunIP(ip string) error                                     { return nil }
 func (m *mockEbpfManager) BlockCountry(countryCode string) error                        { return nil }
 func (m *mockEbpfManager) UpdateManagementWhitelist(ips []string) error                 { return nil }
@@ -125,8 +138,8 @@ func TestWAF_Shunning(t *testing.T) {
 	// Wait for background worker to process threats and escalate to IP mitigation
 	time.Sleep(200 * time.Millisecond)
 
-	if mockEbpf.shunnedIP != ip {
-		t.Errorf("expected IP %s to be shunned after 3 attacks, got %q", ip, mockEbpf.shunnedIP)
+	if mockEbpf.getShunnedIP() != ip {
+		t.Errorf("expected IP %s to be shunned after 3 attacks, got %q", ip, mockEbpf.getShunnedIP())
 	}
 }
 

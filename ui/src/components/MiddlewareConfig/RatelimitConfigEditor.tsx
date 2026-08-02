@@ -52,10 +52,10 @@ export function RatelimitConfigEditor({ config, onChange }: RatelimitConfigEdito
           <Switch
             label="Trust Cloudflare Headers"
             description="Use CF-Connecting-IP when behind Cloudflare."
-            checked={config.trust_cloudflare_headers === "true"}
+            checked={config.trustCloudflareHeaders === "true"}
             onChange={(e) =>
               updateConfig(
-                "trust_cloudflare_headers",
+                "trustCloudflareHeaders",
                 e.currentTarget.checked ? "true" : "false"
               )
             }

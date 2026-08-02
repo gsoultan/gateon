@@ -38,6 +38,7 @@ import {
   IconShieldCheck,
   IconShieldLock,
   IconHistory,
+  IconUsers,
 } from "@tabler/icons-react";
 import { useRemoveMitigation, useApplyRecommendation, useSecurityThreat, useSecurityThreats } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
@@ -69,13 +70,13 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
   const history = (historyData?.threats || []).filter(h => h.id !== anomaly?.id);
 
   const triggeredRules = useMemo(() => {
-    if (!anomaly?.triggered_rules) return [];
+    if (!anomaly?.triggeredRules) return [];
     try {
-      return JSON.parse(anomaly.triggered_rules) as number[];
+      return JSON.parse(anomaly.triggeredRules) as number[];
     } catch {
       return [];
     }
-  }, [anomaly?.triggered_rules]);
+  }, [anomaly?.triggeredRules]);
 
   if (!anomaly) return null;
 
@@ -96,9 +97,9 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
   const handleApplyFalsePositive = async () => {
     try {
       const res = await applyRecommendation.mutateAsync({
-        anomaly_type: anomaly.type,
+        anomalyType: anomaly.type,
         source: anomaly.source,
-        threat_id: anomaly.id,
+        threatId: anomaly.id,
       });
       if (res.success) {
         notifications.show({
@@ -272,26 +273,46 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                     <IconMap2 size={12} />
                   </ActionIcon>
                 </Tooltip>
-                {anomaly.country_code && (
+                {anomaly.countryCode && (
                   <Badge
                     variant="light"
                     size="xs"
                     leftSection={
                       <img
-                        src={`https://flagcdn.com/16x12/${anomaly.country_code.toLowerCase()}.png`}
-                        alt={anomaly.country_name}
+                        src={`https://flagcdn.com/16x12/${anomaly.countryCode.toLowerCase()}.png`}
+                        alt={anomaly.countryName}
                         style={{ borderRadius: 1, display: 'block' }}
                       />
                     }
                   >
-                    {anomaly.country_name}
+                    {anomaly.countryName}
                   </Badge>
                 )}
               </Group>
             </Stack>
           </Grid.Col>
 
-          {anomaly.route_id && (
+          {anomaly.sourceIps && anomaly.sourceIps.length > 0 && (
+            <Grid.Col span={12}>
+              <Stack gap="xs">
+                <Group gap="xs">
+                  <IconUsers size={16} color="var(--mantine-color-dimmed)" />
+                  <Text size="sm" fw={600}>
+                    Attack Source Cluster ({anomaly.sourceIps.length} IPs)
+                  </Text>
+                </Group>
+                <Group gap={4} ml={26} wrap="wrap">
+                  {anomaly.sourceIps.map((ip: string) => (
+                    <Badge key={ip} color="gray" variant="outline" size="xs" ff="monospace" style={{ textTransform: 'none' }}>
+                      {ip}
+                    </Badge>
+                  ))}
+                </Group>
+              </Stack>
+            </Grid.Col>
+          )}
+
+          {anomaly.routeId && (
             <Grid.Col span={12}>
               <Stack gap="xs">
                 <Group gap="xs">
@@ -302,9 +323,9 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                 </Group>
                 <Box ml={26}>
                   <Badge color="gray" variant="light" tt="none">
-                    Route: {anomaly.route_id}
+                    Route: {anomaly.routeId}
                   </Badge>
-                  {anomaly.request_uri && (
+                  {anomaly.requestUri && (
                     <Text
                       size="xs"
                       ff="monospace"
@@ -312,7 +333,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                       mt={4}
                       style={{ wordBreak: "break-all" }}
                     >
-                      {anomaly.request_uri}
+                      {anomaly.requestUri}
                     </Text>
                   )}
                 </Box>
@@ -355,7 +376,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
             </Grid.Col>
           )}
 
-          {anomaly.user_agent && (
+          {anomaly.userAgent && (
             <Grid.Col span={12}>
               <Stack gap="xs">
                 <Group gap="xs">
@@ -365,14 +386,14 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                   </Text>
                 </Group>
                 <Text size="xs" ml={26} c="dimmed" ff="monospace">
-                  {anomaly.user_agent}
+                  {anomaly.userAgent}
                 </Text>
               </Stack>
             </Grid.Col>
           )}
         </Grid>
 
-        {(anomaly.confidence !== undefined || anomaly.entropy !== undefined || (anomaly.cluster_size ?? 0) > 0) && (
+        {(anomaly.confidence !== undefined || anomaly.entropy !== undefined || (anomaly.clusterSize ?? 0) > 0) && (
           <>
             <Divider label="Security Intelligence Metrics" labelPosition="center" />
             <Grid grow>
@@ -406,7 +427,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                   </Tooltip>
                 </Grid.Col>
               )}
-              {(anomaly.cluster_size ?? 0) > 0 && (
+              {(anomaly.clusterSize ?? 0) > 0 && (
                 <Grid.Col span={{ base: 6, sm: 4 }}>
                   <Tooltip label="Number of unique IPs involved in this specific threat pattern across the network.">
                     <Stack gap={2} align="center">
@@ -415,7 +436,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                         <Text size="xs" c="dimmed" fw={700}>CLUSTER SIZE</Text>
                       </Group>
                       <Badge variant="light" color="violet" size="lg">
-                        {anomaly.cluster_size} IPs
+                        {anomaly.clusterSize} IPs
                       </Badge>
                     </Stack>
                   </Tooltip>
@@ -425,20 +446,20 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
           </>
         )}
 
-        {(anomaly.request_headers || anomaly.request_body) && (
+        {(anomaly.requestHeaders || anomaly.requestBody) && (
           <>
             <Divider label="Request Details" labelPosition="center" />
             <Stack gap="xs">
               <Group gap="xs">
                 <Badge variant="light" color="blue" radius="sm">
-                  {anomaly.http_method || "GET"}
+                  {anomaly.httpMethod || "GET"}
                 </Badge>
                 <Text size="xs" ff="monospace" c="dimmed" style={{ wordBreak: "break-all" }}>
-                  {anomaly.request_uri}
+                  {anomaly.requestUri}
                 </Text>
               </Group>
 
-              {anomaly.request_headers && (
+              {anomaly.requestHeaders && (
                 <Stack gap={4}>
                   <Group gap={4}>
                     <IconNotes size={14} color="var(--mantine-color-dimmed)" />
@@ -447,12 +468,12 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                     </Text>
                   </Group>
                   <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
-                    {anomaly.request_headers}
+                    {anomaly.requestHeaders}
                   </Code>
                 </Stack>
               )}
 
-              {anomaly.request_body && (
+              {anomaly.requestBody && (
                 <Stack gap={4}>
                   <Group gap={4}>
                     <IconDatabase size={14} color="var(--mantine-color-dimmed)" />
@@ -461,7 +482,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                     </Text>
                   </Group>
                   <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
-                    {anomaly.request_body}
+                    {anomaly.requestBody}
                   </Code>
                 </Stack>
               )}
@@ -469,11 +490,11 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
           </>
         )}
 
-        {(anomaly.response_headers || anomaly.response_body) && (
+        {(anomaly.responseHeaders || anomaly.responseBody) && (
           <>
             <Divider label="Response Details" labelPosition="center" />
             <Stack gap="xs">
-              {anomaly.response_headers && (
+              {anomaly.responseHeaders && (
                 <Stack gap={4}>
                   <Group gap={4}>
                     <IconNotes size={14} color="var(--mantine-color-dimmed)" />
@@ -482,12 +503,12 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                     </Text>
                   </Group>
                   <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
-                    {anomaly.response_headers}
+                    {anomaly.responseHeaders}
                   </Code>
                 </Stack>
               )}
 
-              {anomaly.response_body && (
+              {anomaly.responseBody && (
                 <Stack gap={4}>
                   <Group gap={4}>
                     <IconDatabase size={14} color="var(--mantine-color-dimmed)" />
@@ -496,7 +517,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                     </Text>
                   </Group>
                   <Code block style={{ fontSize: "10px", maxHeight: "150px", overflow: "auto" }}>
-                    {anomaly.response_body}
+                    {anomaly.responseBody}
                   </Code>
                 </Stack>
               )}
@@ -600,7 +621,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
             <Text size="xs" c="dimmed">
               Current Status:
             </Text>
-            {anomaly.action_taken === "blocked" || anomaly.action_taken === "shunned" || anomaly.action_taken === "challenged" ? (
+            {anomaly.actionTaken === "blocked" || anomaly.actionTaken === "shunned" || anomaly.actionTaken === "challenged" ? (
               <Badge color="red" variant="light" leftSection={<IconShieldLock size={12} />}>
                 Blocked
               </Badge>

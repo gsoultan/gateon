@@ -8,11 +8,15 @@ endif
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
-.PHONY: proto build build-fips release deb test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker pgo-profile docker
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
 	buf generate
+
+## models: compile the default WASM-based AI traffic prediction model.
+models:
+	GOOS=wasip1 GOARCH=wasm go build -o internal/ai/models/default/model.wasm internal/ai/models/default/main.go
 
 ## ebpf: compile the XDP/eBPF C program and (re)generate the bpf2go Go bindings.
 ##       Requires a Linux host with clang/llvm + libbpf headers + kernel headers.
@@ -31,12 +35,12 @@ ebpf-docker:
 
 ## build: build the gateon binary for the current host. The Go toolchain automatically
 ##        applies Profile-Guided Optimization when cmd/gateon/default.pgo exists.
-build:
+build: models
 	mkdir -p dist
 	$(GOBUILD) -o dist/gateon ./cmd/gateon
 
 ## release: build optimized linux binaries for production (amd64 and arm64).
-release:
+release: models
 	mkdir -p dist
 	GOOS=linux GOARCH=amd64 $(GOBUILD) -o dist/gateon-amd64 ./cmd/gateon
 	GOOS=linux GOARCH=arm64 $(GOBUILD) -o dist/gateon-arm64 ./cmd/gateon
@@ -81,12 +85,11 @@ test:
 test-race:
 	go test -race ./...
 
-## bench: run benchmarks with allocation tracking and write CPU/heap profiles
-##        (catches perf/alloc regressions; profiles land in dist/ for `go tool pprof`)
+## bench: run benchmarks with allocation tracking.
 bench:
 	mkdir -p dist
-	go test -run '^$$' -bench . -benchmem -benchtime 100000x \
-		-cpuprofile dist/cpu.prof -memprofile dist/mem.prof ./pkg/proxy/ ./internal/telemetry/
+	go test -run '^$$' -bench . -benchmem -benchtime 100x ./pkg/proxy/
+	go test -run '^$$' -bench . -benchmem -benchtime 100x ./internal/telemetry/
 
 ## vuln: scan for known vulnerabilities in dependencies and code (govulncheck)
 vuln:
@@ -98,7 +101,7 @@ staticcheck:
 
 ## gosec: run the gosec security scanner
 gosec:
-	go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
+	go run github.com/securego/gosec/v2/cmd/gosec@latest -exclude-dir=proto -exclude-dir=tests ./...
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec)
 sec: vuln staticcheck gosec

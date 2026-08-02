@@ -78,7 +78,7 @@ export default function AuditLogsPage() {
   }, [debouncedSearch]);
 
   const logs = data?.logs ?? [];
-  const totalCount = data?.total_count ?? logs.length;
+  const totalCount = data?.totalCount ?? logs.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const formatTimestamp = (ts: string) => {
@@ -202,11 +202,11 @@ export default function AuditLogsPage() {
                             </ThemeIcon>
                           </Group>
                           <Group justify="space-between">
-                            <Badge variant="light" color="blue" size="xs">{log.user_id}</Badge>
+                            <Badge variant="light" color="blue" size="xs">{log.userId}</Badge>
                             <Badge variant="dot" color={getActionColor(log.action)} size="xs">{log.action}</Badge>
                           </Group>
                           <Text size="xs" truncate style={{ fontFamily: 'var(--mantine-font-family-monospace)' }}>{log.resource}</Text>
-                          <Text size="xs" c="dimmed">{log.ip_address}</Text>
+                          <Text size="xs" c="dimmed">{log.ipAddress}</Text>
                         </Stack>
                       </Card>
                     ))}
@@ -238,7 +238,7 @@ export default function AuditLogsPage() {
                             </Text>
                           </Table.Td>
                           <Table.Td>
-                            <Badge variant="light" color="blue" radius="sm">{log.user_id}</Badge>
+                            <Badge variant="light" color="blue" radius="sm">{log.userId}</Badge>
                           </Table.Td>
                           <Table.Td>
                             <Badge variant="dot" color={getActionColor(log.action)} radius="sm">{log.action}</Badge>
@@ -249,7 +249,7 @@ export default function AuditLogsPage() {
                             </Text>
                           </Table.Td>
                           <Table.Td>
-                            <Text size="xs">{log.ip_address}</Text>
+                            <Text size="xs">{log.ipAddress}</Text>
                           </Table.Td>
                           <Table.Td>
                             <Tooltip label={log.signature ? "Cryptographically Signed" : "Not Signed"}>
@@ -438,11 +438,11 @@ export default function AuditLogsPage() {
             <Grid gap="md">
               <Grid.Col span={6}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={700}>User ID</Text>
-                <Text size="sm">{selectedLog.user_id}</Text>
+                <Text size="sm">{selectedLog.userId}</Text>
               </Grid.Col>
               <Grid.Col span={6}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={700}>IP Address</Text>
-                <Text size="sm">{selectedLog.ip_address}</Text>
+                <Text size="sm">{selectedLog.ipAddress}</Text>
               </Grid.Col>
               <Grid.Col span={12}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Resource</Text>
@@ -491,7 +491,7 @@ export default function AuditLogsPage() {
               {currentArchiveLogs.map((log) => (
                 <Table.Tr key={log.id}>
                   <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatTimestamp(log.timestamp)}</Table.Td>
-                  <Table.Td><Badge size="xs" variant="light">{log.user_id}</Badge></Table.Td>
+                  <Table.Td><Badge size="xs" variant="light">{log.userId}</Badge></Table.Td>
                   <Table.Td><Badge size="xs" variant="dot" color={getActionColor(log.action)}>{log.action}</Badge></Table.Td>
                   <Table.Td><Text size="xs" truncate maw={200}>{log.resource}</Text></Table.Td>
                   <Table.Td><Text size="xs" lineClamp={1}>{log.details}</Text></Table.Td>

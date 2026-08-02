@@ -11,7 +11,6 @@ import (
 	"net"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -19,17 +18,12 @@ type tlsContextKey string
 
 const (
 	ConnContextKey tlsContextKey = "net-conn"
-	numShards                    = 16
 )
+
+const numShards = 16
 
 var (
 	shards [numShards]*fingerprintShard
-
-	builderPool = sync.Pool{
-		New: func() any {
-			return &strings.Builder{}
-		},
-	}
 
 	sha256Pool = sync.Pool{
 		New: func() any {

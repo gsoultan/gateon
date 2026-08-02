@@ -71,7 +71,7 @@ const CORE_LINKS = [
   { label: "Metrics", to: "/metrics", icon: IconChartBar },
   { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
   { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
-  { label: "EntryPoints", to: "/entrypoints", icon: IconAccessPoint },
+  { label: "EntryPoints", to: "/entryPoints", icon: IconAccessPoint },
 ];
 
 export function Shell() {

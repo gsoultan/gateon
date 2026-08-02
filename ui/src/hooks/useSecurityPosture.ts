@@ -19,42 +19,42 @@ export interface SiemStatus {
 
 export interface WafPosture {
   enabled: boolean;
-  auto_update: boolean;
-  last_updated?: string;
+  autoUpdate: boolean;
+  lastUpdated?: string;
 }
 
 export interface ClamavPosture {
   enabled: boolean;
   installed: boolean;
-  last_scan?: string;
-  last_result?: string;
-  last_error?: string;
+  lastScan?: string;
+  lastResult?: string;
+  lastError?: string;
 }
 
 export interface SignaturePosture {
   enabled: boolean;
-  rule_count: number;
+  ruleCount: number;
 }
 
 export interface FimStatus {
   enabled: boolean;
-  watched_paths?: string[];
-  baseline_files?: number;
-  last_scan?: string;
-  total_drift?: number;
+  watchedPaths?: string[];
+  baselineFiles?: number;
+  lastScan?: string;
+  totalDrift?: number;
 }
 
 export interface EbpfPosture {
   enabled: boolean;
   attached: boolean;
   interface?: string;
-  attach_mode?: string;
-  shunned_ips: number;
+  attachMode?: string;
+  shunnedIps: number;
 }
 
 export interface SecurityPosture {
   version: string;
-  generated_at: string;
+  generatedAt: string;
   waf: WafPosture;
   clamav: ClamavPosture;
   signatures: SignaturePosture;

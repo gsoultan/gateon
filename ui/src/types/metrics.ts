@@ -2,14 +2,14 @@ export type GoldenSignals = {
   requests_total: number;
   errors_total: number;
   error_rate: number;
-  avg_latency_ms: number;
+  avgLatencyMs: number;
   p50_latency_ms: number;
   p95_latency_ms: number;
   p99_latency_ms: number;
   in_flight_total: number;
   bytes_in_total: number;
   bytes_out_total: number;
-  active_conn_total: number;
+  activeConnTotal: number;
   requests_today: number;
   bytes_today: number;
 };
@@ -20,11 +20,11 @@ export type RouteMetric = {
   requests: number;
   errors: number;
   error_rate: number;
-  avg_latency_ms: number;
+  avgLatencyMs: number;
   in_flight: number;
   bytes_in: number;
   bytes_out: number;
-  status_codes: Record<string, number>;
+  statusCodes: Record<string, number>;
   failures: LabeledCount[] | null;
 };
 
@@ -69,7 +69,7 @@ export type TargetMetric = {
   route: string;
   target: string;
   healthy: boolean;
-  active_conn: number;
+  activeConn: number;
 };
 
 export type IPMetric = {
@@ -81,7 +81,7 @@ export type IPMetric = {
 
 export type CountryMetric = {
   country: string;
-  country_name?: string;
+  countryName?: string;
   requests: number;
   bytes_in: number;
   bytes_out: number;
@@ -97,10 +97,10 @@ export type DomainMetric = {
 export type DomainStats = {
   domain: string;
   hour?: number;
-  request_count: number;
-  bytes_total: number;
-  latency_sum_seconds: number;
-  avg_latency_seconds: number;
+  requestCount: number;
+  bytesTotal: number;
+  latencySumSeconds: number;
+  avgLatencySeconds: number;
 };
 
 export type SystemMetrics = {
@@ -110,12 +110,12 @@ export type SystemMetrics = {
   memory_total_alloc_bytes: number;
   memory_sys_bytes: number;
   cpu_usage_percent: number;
-  memory_usage_percent: number;
-  cpu_cores: number;
-  memory_total_gb: number;
-  storage_usage_gb: number;
-  storage_total_gb: number;
-  storage_usage_percent: number;
+  memoryUsagePercent: number;
+  cpuCores: number;
+  memoryTotalGb: number;
+  storageUsageGb: number;
+  storageTotalGb: number;
+  storageUsagePercent: number;
 };
 
 export type MetricsSnapshot = {
@@ -131,10 +131,10 @@ export type MetricsSnapshot = {
   hourly_domain_metrics: DomainStats[] | null;
   domain_stats_rolling24h: DomainStats[] | null;
   traffic_history: TrafficSample[] | null;
-  active_suspicious_sessions: number;
-  active_unverified_clients: number;
-  active_shunned_entities: LabeledCount[] | null;
-  active_anomaly_score_average: number;
+  activeSuspiciousSessions: number;
+  activeUnverifiedClients: number;
+  activeShunnedEntities: LabeledCount[] | null;
+  activeAnomalyScoreAverage: number;
   system: SystemMetrics;
   security: SecurityInsights;
   mitigation_funnel?: MitigationFunnel;
@@ -152,8 +152,8 @@ export type MitigationFunnel = {
   bot_blocked: number;
   file_security_blocked: number;
   deception_blocked: number;
-  advanced_security_blocked: number;
-  total_mitigated: number;
+  advancedSecurityBlocked: number;
+  totalMitigated: number;
   allowed: number;
   server_errors: number;
   xdp_packets_dropped: number;
@@ -166,7 +166,7 @@ export type SecurityInsights = {
   attack_trend: TrafficSample[] | null;
   recent_anomalies: SecurityThreat[] | null;
   total_anomalies: number;
-  active_threats: number;
+  activeThreats: number;
   mitigated_today: number;
   heavy_hitters: HeavyHitter[] | null;
   global_threat_score: number;
@@ -194,24 +194,24 @@ export type SecurityThreat = {
   timestamp: string;
   ja3: string;
   ja4: string;
-  route_id: string;
-  request_uri: string;
+  routeId: string;
+  requestUri: string;
   category: string;
   severity: string;
   asn: string;
-  action_taken: string;
-  country_code: string;
+  actionTaken: string;
+  countryCode: string;
   mitigated: boolean;
-  request_headers?: string;
-  request_body?: string;
-  response_headers?: string;
-  response_body?: string;
-  user_agent?: string;
-  http_method?: string;
+  requestHeaders?: string;
+  requestBody?: string;
+  responseHeaders?: string;
+  responseBody?: string;
+  userAgent?: string;
+  httpMethod?: string;
   recommendation?: string;
   confidence?: number;
   entropy?: number;
-  cluster_size?: number;
+  clusterSize?: number;
 };
 
 export type TrafficSample = {

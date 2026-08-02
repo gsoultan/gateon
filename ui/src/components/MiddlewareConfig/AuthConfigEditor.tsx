@@ -224,8 +224,8 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
           />
           <TextInput
             label="Token Type Hint (optional)"
-            description="access_token or refresh_token"
-            placeholder="access_token"
+            description="accessToken or refresh_token"
+            placeholder="accessToken"
             value={config.token_type_hint || ""}
             onChange={(e) =>
               updateConfig("token_type_hint", e.currentTarget.value)

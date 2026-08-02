@@ -10,7 +10,7 @@ export type RequestDeltaSample = {
   requests: number;
 };
 
-/** Rolling request-rate history (delta of total_requests per poll). */
+/** Rolling request-rate history (delta of totalRequests per poll). */
 export function useAggStatsHistory() {
   const { data, ...rest } = useAggStats();
   const [requestDeltaHistory, setRequestDeltaHistory] = useState<RequestDeltaSample[]>([]);
@@ -18,7 +18,7 @@ export function useAggStatsHistory() {
 
   useEffect(() => {
     if (data == null) return;
-    const total = data.total_requests ?? 0;
+    const total = data.totalRequests ?? 0;
     if (prevTotal.current !== null) {
       const delta = Math.max(0, total - prevTotal.current);
       const now = Date.now();

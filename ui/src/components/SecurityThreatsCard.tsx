@@ -117,10 +117,10 @@ export function SecurityThreatsCard() {
                           onClick={(e) => handleTraceClick(e, threat.source)}
                         />
                       </Tooltip>
-                      {threat.route_id && (
+                      {threat.routeId && (
                         <>
                           <Text size="xs" c="dimmed">•</Text>
-                          <Text size="xs" c="brand" fw={600} truncate>{threat.route_id}</Text>
+                          <Text size="xs" c="brand" fw={600} truncate>{threat.routeId}</Text>
                         </>
                       )}
                     </Group>

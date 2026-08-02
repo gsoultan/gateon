@@ -267,6 +267,11 @@ export class Anomaly extends Message<Anomaly> {
    */
   reputation = 0;
 
+  /**
+   * @generated from field: repeated string source_ips = 37;
+   */
+  sourceIps: string[] = [];
+
   constructor(data?: PartialMessage<Anomaly>) {
     super();
     proto3.util.initPartial(data, this);
@@ -306,6 +311,7 @@ export class Anomaly extends Message<Anomaly> {
     { no: 28, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 36, name: "ja4plus", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 34, name: "reputation", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 37, name: "source_ips", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Anomaly {

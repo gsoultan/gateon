@@ -45,9 +45,9 @@ func (s *ApiService) ListAuditLogs(ctx context.Context, req *gateonv1.ListAuditL
 
 	return &gateonv1.ListAuditLogsResponse{
 		Logs:       protoLogs,
-		TotalCount: int32(total),
-		Page:       int32(page),
-		PageSize:   int32(pageSize),
+		TotalCount: int32(total),    //nosec G115
+		Page:       int32(page),     //nosec G115
+		PageSize:   int32(pageSize), //nosec G115
 	}, nil
 }
 

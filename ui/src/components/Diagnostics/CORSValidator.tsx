@@ -70,7 +70,7 @@ const CORSValidator: React.FC = () => {
         origin: origin.trim(),
         method,
         headers: headerMap,
-        auth_bearer_token: bearerToken.trim(),
+        authBearerToken: bearerToken.trim(),
       });
       setResult(res);
     } catch (err: any) {
@@ -214,9 +214,9 @@ const CORSValidator: React.FC = () => {
       {result && (
         <Stack gap="md">
           <Alert
-            icon={result.is_allowed ? <IconShieldCheck size={20} /> : <IconShieldX size={20} />}
-            title={result.is_allowed ? "Allowed" : "Blocked"}
-            color={result.is_allowed ? "teal" : "red"}
+            icon={result.isAllowed ? <IconShieldCheck size={20} /> : <IconShieldX size={20} />}
+            title={result.isAllowed ? "Allowed" : "Blocked"}
+            color={result.isAllowed ? "teal" : "red"}
             radius="lg"
             variant="light"
           >
@@ -225,16 +225,16 @@ const CORSValidator: React.FC = () => {
                <Group gap="xs">
                  <Button 
                    variant="subtle" 
-                   color={result.is_allowed ? "teal" : "red"} 
+                   color={result.isAllowed ? "teal" : "red"} 
                    size="compact-xs" 
                    leftSection={clipboard.copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
                    onClick={copyAsCurl}
                  >
                    {clipboard.copied ? "Copied!" : "Copy as cURL"}
                  </Button>
-                 {result.route_id && (
+                 {result.routeId && (
                     <Badge variant="light" color="gray" size="sm" leftSection={<IconExternalLink size={10} />}>
-                      Route ID: {result.route_id}
+                      Route ID: {result.routeId}
                     </Badge>
                  )}
                </Group>
@@ -308,9 +308,9 @@ const CORSValidator: React.FC = () => {
             <Stack gap="md">
                 <Card withBorder radius="lg" p="md">
                   <Title order={4} mb="sm">Expected Response Headers</Title>
-                  {Object.keys(result.response_headers).length > 0 ? (
+                  {Object.keys(result.responseHeaders).length > 0 ? (
                     <Stack gap="xs">
-                      {Object.entries(result.response_headers).map(([k, v]) => (
+                      {Object.entries(result.responseHeaders).map(([k, v]) => (
                         <Group key={k} justify="space-between" wrap="nowrap">
                           <Text size="xs" fw={700} style={{ fontFamily: "monospace" }}>{k}</Text>
                           <Badge variant="dot" size="sm" style={{ textTransform: "none", fontFamily: "monospace" }}>{v}</Badge>
@@ -322,11 +322,11 @@ const CORSValidator: React.FC = () => {
                   )}
                 </Card>
 
-                {result.middleware_config && (
+                {result.middlewareConfig && (
                     <Card withBorder radius="lg" p="md">
                       <Title order={4} mb="sm">Middleware Configuration</Title>
                       <Stack gap="xs">
-                        {Object.entries(result.middleware_config).map(([k, v]) => (
+                        {Object.entries(result.middlewareConfig).map(([k, v]) => (
                           <Group key={k} justify="space-between" wrap="nowrap">
                             <Text size="xs" fw={700}>{k.replace(/_/g, " ").toUpperCase()}</Text>
                             <Text size="xs" ff="monospace" truncate>{v || "(empty)"}</Text>
@@ -338,7 +338,7 @@ const CORSValidator: React.FC = () => {
             </Stack>
           </SimpleGrid>
 
-          {!result.is_allowed && (
+          {!result.isAllowed && (
              <Alert 
                variant="light" 
                color="red" 
@@ -370,7 +370,7 @@ const CORSValidator: React.FC = () => {
                     )}
                     {result.message.includes("entrypoint context") && (
                         <Text size="sm">
-                            This route is restricted to specific entrypoints. Ensure you are accessing it through the correct port/protocol.
+                            This route is restricted to specific entryPoints. Ensure you are accessing it through the correct port/protocol.
                         </Text>
                     )}
                 </Stack>

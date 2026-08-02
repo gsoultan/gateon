@@ -171,7 +171,7 @@ const clientAuthoritiesRoute = createRoute({
 
 const entryPointsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
-  path: "/entrypoints",
+  path: "/entryPoints",
   component: () => <EntryPointsPage />,
 });
 

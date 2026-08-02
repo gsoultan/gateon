@@ -9,8 +9,8 @@ export default function StatusCard() {
   const stats = [
     { label: 'Version', value: statusData?.version || 'N/A', icon: IconVersions, color: 'blue' },
     { label: 'System Uptime', value: statusData?.uptime ? formatUptime(Number(statusData.uptime)) : '0s', icon: IconClock, color: 'teal' },
-    { label: 'CPU Cores', value: statusData?.cpu_cores || 'N/A', icon: IconCpu, color: 'indigo' },
-    { label: 'Total Memory', value: statusData?.memory_total_gb ? `${statusData.memory_total_gb.toFixed(1)} GB` : 'N/A', icon: IconDeviceDesktop, color: 'grape' },
+    { label: 'CPU Cores', value: statusData?.cpuCores || 'N/A', icon: IconCpu, color: 'indigo' },
+    { label: 'Total Memory', value: statusData?.memoryTotalGb ? `${statusData.memoryTotalGb.toFixed(1)} GB` : 'N/A', icon: IconDeviceDesktop, color: 'grape' },
     { 
       label: 'Resource Profile', 
       value: (
@@ -18,7 +18,7 @@ export default function StatusCard() {
           <Text fw={700} size="sm" style={{ textTransform: 'capitalize' }}>
             {statusData?.profile || 'Standard'}
           </Text>
-          {statusData?.profile_pinned && (
+          {statusData?.profilePinned && (
             <Badge size="xs" color="orange" variant="light" title="Pinned by GATEON_PROFILE env">PINNED</Badge>
           )}
         </Group>
@@ -29,10 +29,10 @@ export default function StatusCard() {
   ]
 
   const counts = [
-    { label: 'Routes', value: statusData?.routes_count ?? 0, color: 'brand' },
-    { label: 'Services', value: statusData?.services_count ?? 0, color: 'blue' },
-    { label: 'EntryPoints', value: statusData?.entry_points_count ?? 0, color: 'teal' },
-    { label: 'Middlewares', value: statusData?.middlewares_count ?? 0, color: 'orange' },
+    { label: 'Routes', value: statusData?.routesCount ?? 0, color: 'brand' },
+    { label: 'Services', value: statusData?.servicesCount ?? 0, color: 'blue' },
+    { label: 'EntryPoints', value: statusData?.entryPointsCount ?? 0, color: 'teal' },
+    { label: 'Middlewares', value: statusData?.middlewaresCount ?? 0, color: 'orange' },
   ]
 
   if (isStatusLoading) return (
@@ -90,23 +90,23 @@ export default function StatusCard() {
             <Box>
               <Group justify="space-between" mb={6}>
                 <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>CPU Load</Text>
-                <Text size="xs" fw={700}>{statusData?.cpu_usage?.toFixed(1) || 0}%</Text>
+                <Text size="xs" fw={700}>{statusData?.cpuUsage?.toFixed(1) || 0}%</Text>
               </Group>
-              <Progress value={statusData?.cpu_usage || 0} size="md" radius="xl" color="brand" animated />
+              <Progress value={statusData?.cpuUsage || 0} size="md" radius="xl" color="brand" animated />
             </Box>
             <Box>
               <Group justify="space-between" mb={6}>
                 <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Memory Utilization</Text>
-                <Text size="xs" fw={700}>{statusData?.memory_usage_percent?.toFixed(1) || 0}%</Text>
+                <Text size="xs" fw={700}>{statusData?.memoryUsagePercent?.toFixed(1) || 0}%</Text>
               </Group>
-              <Progress value={statusData?.memory_usage_percent || 0} size="md" radius="xl" color="orange" animated />
+              <Progress value={statusData?.memoryUsagePercent || 0} size="md" radius="xl" color="orange" animated />
             </Box>
             <Box>
               <Group justify="space-between" mb={6}>
-                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Storage ({statusData?.storage_usage_gb?.toFixed(1)}GB / {statusData?.storage_total_gb?.toFixed(1)}GB)</Text>
-                <Text size="xs" fw={700}>{statusData?.storage_usage_percent?.toFixed(1) || 0}%</Text>
+                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Storage ({statusData?.storageUsageGb?.toFixed(1)}GB / {statusData?.storageTotalGb?.toFixed(1)}GB)</Text>
+                <Text size="xs" fw={700}>{statusData?.storageUsagePercent?.toFixed(1) || 0}%</Text>
               </Group>
-              <Progress value={statusData?.storage_usage_percent || 0} size="md" radius="xl" color="teal" animated />
+              <Progress value={statusData?.storageUsagePercent || 0} size="md" radius="xl" color="teal" animated />
             </Box>
           </SimpleGrid>
 

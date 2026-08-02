@@ -52,6 +52,7 @@ message Anomaly {
   string id = 28;
   string ja4plus = 36;
   double reputation = 34;
+  repeated string source_ips = 37;
 }
 
 message GossipStatus {

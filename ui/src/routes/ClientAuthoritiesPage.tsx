@@ -74,7 +74,7 @@ export default function ClientAuthoritiesPage() {
       
       const data = await res.json()
       if (editingCA) {
-        setEditingCA({ ...editingCA, ca_file: data.path })
+        setEditingCA({ ...editingCA, caFile: data.path })
       }
     } catch (err: any) {
       setError(`Upload failed: ${err.message}`)
@@ -102,7 +102,7 @@ export default function ClientAuthoritiesPage() {
       
       const data = await res.json()
       if (editingCA) {
-        setEditingCA({ ...editingCA, ca_file: data.path })
+        setEditingCA({ ...editingCA, caFile: data.path })
       }
       closePaste()
       setPasteContent('')
@@ -152,7 +152,7 @@ export default function ClientAuthoritiesPage() {
   }
 
   const startAdd = () => {
-    setEditingCA({ id: crypto.randomUUID(), name: '', ca_file: '', client_auth_type: 'NoClientCert' })
+    setEditingCA({ id: crypto.randomUUID(), name: '', caFile: '', clientAuthType: 'NoClientCert' })
     open()
   }
 
@@ -219,10 +219,10 @@ export default function ClientAuthoritiesPage() {
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm" ff="monospace" c="dimmed">{ca.ca_file}</Text>
+                      <Text size="sm" ff="monospace" c="dimmed">{ca.caFile}</Text>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm">{ca.client_auth_type || 'NoClientCert'}</Text>
+                      <Text size="sm">{ca.clientAuthType || 'NoClientCert'}</Text>
                     </Table.Td>
                     <Table.Td>
                       {canUploadCerts && (
@@ -276,8 +276,8 @@ export default function ClientAuthoritiesPage() {
           <TextInput 
             label="CA Certificate File" 
             placeholder="certs/ca.crt"
-            value={editingCA?.ca_file || ''} 
-            onChange={(e) => editingCA && setEditingCA({ ...editingCA, ca_file: e.currentTarget.value })} 
+            value={editingCA?.caFile || ''} 
+            onChange={(e) => editingCA && setEditingCA({ ...editingCA, caFile: e.currentTarget.value })} 
             radius="md" 
             leftSection={<IconLockCheck size={16} />}
             rightSection={
@@ -309,10 +309,10 @@ export default function ClientAuthoritiesPage() {
               { value: 'VerifyClientCertIfGiven', label: 'VerifyClientCertIfGiven' },
               { value: 'RequireAndVerifyClientCert', label: 'RequireAndVerifyClientCert (mTLS)' },
             ]}
-            value={editingCA?.client_auth_type || 'NoClientCert'}
-            onChange={(val) => editingCA && setEditingCA({ ...editingCA, client_auth_type: val || 'NoClientCert' })}
+            value={editingCA?.clientAuthType || 'NoClientCert'}
+            onChange={(val) => editingCA && setEditingCA({ ...editingCA, clientAuthType: val || 'NoClientCert' })}
             radius="md"
-            description="Per-CA preference; actual enforcement occurs via TLS Options or global TLS client_auth_type."
+            description="Per-CA preference; actual enforcement occurs via TLS Options or global TLS clientAuthType."
           />
           <Button onClick={handleSaveCA} radius="md" mt="md">Save Authority</Button>
         </Stack>

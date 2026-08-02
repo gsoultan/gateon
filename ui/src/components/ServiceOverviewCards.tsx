@@ -10,10 +10,10 @@ import { useAggStats } from "../hooks/useGateon";
 export function ServiceOverviewCards() {
   const { data: agg, isLoading } = useAggStats();
 
-  const healthy = agg?.healthy_targets ?? 0;
+  const healthy = agg?.healthyTargets ?? 0;
   const atRisk =
-    (agg?.open_circuits ?? 0) + (agg?.half_open_circuits ?? 0);
-  const total = agg?.total_targets ?? 0;
+    (agg?.openCircuits ?? 0) + (agg?.halfOpenCircuits ?? 0);
+  const total = agg?.totalTargets ?? 0;
   const healthyRoutesRatio =
     total > 0 ? Math.round((healthy / total) * 100) : 100;
 
@@ -49,7 +49,7 @@ export function ServiceOverviewCards() {
     },
     {
       label: "Active Connections",
-      value: agg?.active_connections ?? 0,
+      value: agg?.activeConnections ?? 0,
       color: "blue" as const,
       icon: IconPlugConnected,
       description: "In-flight requests",

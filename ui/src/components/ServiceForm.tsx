@@ -95,37 +95,37 @@ export function ServiceForm({
     defaultValues: {
       id: "",
       name: "",
-      backend_type: "http" as any,
-      weighted_targets: [{
+      backendType: "http" as any,
+      weightedTargets: [{
         url: "",
         weight: 1,
         protocol: "http" as any,
-        proxy_protocol_enabled: false,
-        proxy_protocol_version: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+        proxyProtocolEnabled: false,
+        proxyProtocolVersion: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
       }],
-      load_balancer_policy: "round_robin",
-      health_check_path: "",
-      health_check_port: 0,
-      health_check_protocol: "",
-      health_check_type: HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED,
-      l4_health_check_interval_ms: 10000,
-      l4_health_check_timeout_ms: 3000,
-      l4_udp_session_timeout_s: 60,
-      l4_proxy_protocol: false,
-      discovery_url: "",
-      tls_client_config: {
+      loadBalancerPolicy: "round_robin",
+      healthCheckPath: "",
+      healthCheckPort: 0,
+      healthCheckProtocol: "",
+      healthCheckType: HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED,
+      l4HealthCheckIntervalMs: 10000,
+      l4HealthCheckTimeoutMs: 3000,
+      l4UdpSessionTimeoutS: 60,
+      l4ProxyProtocol: false,
+      discoveryUrl: "",
+      tlsClientConfig: {
         enabled: false,
-        cert_file: "",
-        key_file: "",
-        ca_file: "",
-        skip_verify: true,
-        server_name: "",
+        certFile: "",
+        keyFile: "",
+        caFile: "",
+        skipVerify: true,
+        serverName: "",
       },
     } as Service,
     onSubmit: async ({ value }) => {
-      const bt = value.backend_type || "http";
+      const bt = value.backendType || "http";
       const isGRPC = bt === "grpc";
-      const targets = value.weighted_targets
+      const targets = value.weightedTargets
         .filter((t) => t.url.trim() !== "")
         .map((t) => {
           if (bt === "tcp" || bt === "udp") {
@@ -149,9 +149,9 @@ export function ServiceForm({
             ...t,
             url: `${scheme}://${hostPart}`,
             protocol,
-            proxy_protocol_enabled: t.proxy_protocol_enabled ?? false,
-            proxy_protocol_version:
-              t.proxy_protocol_version ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+            proxyProtocolEnabled: t.proxyProtocolEnabled ?? false,
+            proxyProtocolVersion:
+              t.proxyProtocolVersion ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
           };
         });
       if (targets.length === 0) {
@@ -162,7 +162,7 @@ export function ServiceForm({
         });
         return;
       }
-      mutation.mutate({ ...value, weighted_targets: targets });
+      mutation.mutate({ ...value, weightedTargets: targets });
     },
   });
 
@@ -170,21 +170,21 @@ export function ServiceForm({
     if (initialData) {
       form.setFieldValue("id", initialData.id);
       form.setFieldValue("name", initialData.name);
-      form.setFieldValue("backend_type", initialData.backend_type || "http");
+      form.setFieldValue("backendType", initialData.backendType || "http");
       form.setFieldValue(
-        "weighted_targets",
-        initialData.weighted_targets?.length > 0
-          ? initialData.weighted_targets.map((t) => {
-              const bt = initialData.backend_type || "http";
+        "weightedTargets",
+        initialData.weightedTargets?.length > 0
+          ? initialData.weightedTargets.map((t) => {
+              const bt = initialData.backendType || "http";
               if (bt === "tcp" || bt === "udp") {
                 const u = (t.url || "").replace(/^(https?|h2c?|tcp|udp):\/\//, "");
                 return {
                   ...t,
                   url: u,
                   protocol: undefined,
-                  proxy_protocol_enabled: t.proxy_protocol_enabled ?? false,
-                  proxy_protocol_version:
-                    t.proxy_protocol_version ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+                  proxyProtocolEnabled: t.proxyProtocolEnabled ?? false,
+                  proxyProtocolVersion:
+                    t.proxyProtocolVersion ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
                 };
               }
               const inferred =
@@ -203,48 +203,48 @@ export function ServiceForm({
               return {
                 ...t,
                 protocol: p,
-                proxy_protocol_enabled: t.proxy_protocol_enabled ?? false,
-                proxy_protocol_version:
-                  t.proxy_protocol_version ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+                proxyProtocolEnabled: t.proxyProtocolEnabled ?? false,
+                proxyProtocolVersion:
+                  t.proxyProtocolVersion ?? ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
               };
             })
           : [{
               url: "",
               weight: 1,
               protocol: "http",
-              proxy_protocol_enabled: false,
-              proxy_protocol_version: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+              proxyProtocolEnabled: false,
+              proxyProtocolVersion: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
             }],
       );
       form.setFieldValue(
-        "load_balancer_policy",
-        initialData.load_balancer_policy || "round_robin",
+        "loadBalancerPolicy",
+        initialData.loadBalancerPolicy || "round_robin",
       );
-      form.setFieldValue("health_check_path", initialData.health_check_path || "");
-      form.setFieldValue("health_check_port", initialData.health_check_port ?? 0);
-      form.setFieldValue("health_check_protocol", initialData.health_check_protocol || "");
-      form.setFieldValue("health_check_type", initialData.health_check_type ?? HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED);
+      form.setFieldValue("healthCheckPath", initialData.healthCheckPath || "");
+      form.setFieldValue("healthCheckPort", initialData.healthCheckPort ?? 0);
+      form.setFieldValue("healthCheckProtocol", initialData.healthCheckProtocol || "");
+      form.setFieldValue("healthCheckType", initialData.healthCheckType ?? HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED);
       form.setFieldValue(
-        "l4_health_check_interval_ms",
-        initialData.l4_health_check_interval_ms ?? 10000,
-      );
-      form.setFieldValue(
-        "l4_health_check_timeout_ms",
-        initialData.l4_health_check_timeout_ms ?? 3000,
+        "l4HealthCheckIntervalMs",
+        initialData.l4HealthCheckIntervalMs ?? 10000,
       );
       form.setFieldValue(
-        "l4_udp_session_timeout_s",
-        initialData.l4_udp_session_timeout_s ?? 60,
+        "l4HealthCheckTimeoutMs",
+        initialData.l4HealthCheckTimeoutMs ?? 3000,
       );
-      form.setFieldValue("l4_proxy_protocol", initialData.l4_proxy_protocol ?? false);
-      form.setFieldValue("discovery_url", initialData.discovery_url || "");
-      form.setFieldValue("tls_client_config", initialData.tls_client_config || {
+      form.setFieldValue(
+        "l4UdpSessionTimeoutS",
+        initialData.l4UdpSessionTimeoutS ?? 60,
+      );
+      form.setFieldValue("l4ProxyProtocol", initialData.l4ProxyProtocol ?? false);
+      form.setFieldValue("discoveryUrl", initialData.discoveryUrl || "");
+      form.setFieldValue("tlsClientConfig", initialData.tlsClientConfig || {
         enabled: false,
-        cert_file: "",
-        key_file: "",
-        ca_file: "",
-        skip_verify: true,
-        server_name: "",
+        certFile: "",
+        keyFile: "",
+        caFile: "",
+        skipVerify: true,
+        serverName: "",
       });
     }
   }, [initialData, form]);
@@ -259,7 +259,7 @@ export function ServiceForm({
     >
       <Stack gap="md">
         <form.Subscribe
-          selector={(s) => s.values.backend_type}
+          selector={(s) => s.values.backendType}
           children={(backendType) => (
             <Alert
               icon={<IconInfoCircle size={18} />}
@@ -275,7 +275,7 @@ export function ServiceForm({
               <Text size="sm" c="dimmed">
                 {backendType === "tcp" || backendType === "udp" ? (
                   <>
-                    Targets use <code>host:port</code> (e.g. db1:5432, dns:53). Connect to L4 entrypoints via a Route
+                    Targets use <code>host:port</code> (e.g. db1:5432, dns:53). Connect to L4 entryPoints via a Route
                     with type &quot;tcp&quot; or &quot;udp&quot;.
                   </>
                 ) : (
@@ -307,7 +307,7 @@ export function ServiceForm({
         />
 
         <form.Field
-          name="backend_type"
+          name="backendType"
           children={(field: any) => (
             <Select
               label="Backend Type"
@@ -324,7 +324,7 @@ export function ServiceForm({
               onChange={(v) => {
                 const bt = (v || "http") as "http" | "grpc" | "graphql" | "tcp" | "udp";
                 field.handleChange(bt);
-                const targets = form.state.values.weighted_targets || [];
+                const targets = form.state.values.weightedTargets || [];
                 const updated = targets.map((t: { url: string; weight: number; protocol?: string }) => {
                   if (bt === "tcp" || bt === "udp") {
                     const u = (t.url || "").replace(/^(https?|h2c?|tcp|udp):\/\//, "").trim();
@@ -334,14 +334,14 @@ export function ServiceForm({
                   const p = bt === "grpc" ? (scheme === "https" ? "h2" : "h2c") : scheme;
                   return { ...t, protocol: p };
                 });
-                form.setFieldValue("weighted_targets", updated);
+                form.setFieldValue("weightedTargets", updated);
               }}
             />
           )}
         />
 
         <form.Field
-          name="discovery_url"
+          name="discoveryUrl"
           children={(field: any) => (
             <TextInput
               label="Service Discovery URL"
@@ -372,7 +372,7 @@ export function ServiceForm({
                 </Text>
               </div>
               <form.Field
-                name="tls_client_config.enabled"
+                name="tlsClientConfig.enabled"
                 children={(field: any) => (
                   <Switch
                     checked={field.state.value}
@@ -384,12 +384,12 @@ export function ServiceForm({
             </Group>
 
             <form.Subscribe
-              selector={(s) => s.values.tls_client_config?.enabled}
+              selector={(s) => s.values.tlsClientConfig?.enabled}
               children={(enabled) =>
                 enabled && (
                   <Stack gap="sm">
                     <form.Field
-                      name="tls_client_config.cert_file"
+                      name="tlsClientConfig.certFile"
                       children={(field: any) => (
                         <TextInput
                           label="Client Certificate Path"
@@ -401,7 +401,7 @@ export function ServiceForm({
                       )}
                     />
                     <form.Field
-                      name="tls_client_config.key_file"
+                      name="tlsClientConfig.keyFile"
                       children={(field: any) => (
                         <TextInput
                           label="Client Private Key Path"
@@ -413,7 +413,7 @@ export function ServiceForm({
                       )}
                     />
                     <form.Field
-                      name="tls_client_config.ca_file"
+                      name="tlsClientConfig.caFile"
                       children={(field: any) => (
                         <TextInput
                           label="CA Certificate Path"
@@ -426,7 +426,7 @@ export function ServiceForm({
                     />
                     <Group grow>
                       <form.Field
-                        name="tls_client_config.server_name"
+                        name="tlsClientConfig.serverName"
                         children={(field: any) => (
                           <TextInput
                             label="Server Name (SNI Override)"
@@ -438,7 +438,7 @@ export function ServiceForm({
                         )}
                       />
                       <form.Field
-                        name="tls_client_config.skip_verify"
+                        name="tlsClientConfig.skipVerify"
                         children={(field: any) => (
                           <Switch
                             label="Insecure Skip Verify"
@@ -472,13 +472,13 @@ export function ServiceForm({
                 size="xs"
                 leftSection={<IconPlus size={14} />}
                 onClick={() => {
-                  const bt = form.state.values.backend_type || "http";
-                  form.pushFieldValue("weighted_targets", {
+                  const bt = form.state.values.backendType || "http";
+                  form.pushFieldValue("weightedTargets", {
                     url: "",
                     weight: 1,
                     protocol: bt === "tcp" || bt === "udp" ? undefined : bt === "grpc" ? "h2c" : "http",
-                    proxy_protocol_enabled: false,
-                    proxy_protocol_version: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
+                    proxyProtocolEnabled: false,
+                    proxyProtocolVersion: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
                   });
                 }}
               >
@@ -487,12 +487,12 @@ export function ServiceForm({
             </Group>
 
             <form.Field
-              name="weighted_targets"
+              name="weightedTargets"
               mode="array"
               children={(field: any) => (
                 <Stack gap="sm">
                   {field.state.value.map((_: any, i: number) => {
-                    const backendType = form.state.values.backend_type || "http";
+                    const backendType = form.state.values.backendType || "http";
                     const isL4 = backendType === "tcp" || backendType === "udp";
                     const protocolOpts = backendType === "grpc" ? PROTOCOL_GRPC : PROTOCOL_HTTP;
                     const currentProtocol = field.state.value[i]?.protocol;
@@ -507,7 +507,7 @@ export function ServiceForm({
                         <Group gap="sm" align="flex-end" wrap="wrap">
                           {!isL4 && (
                             <form.Field
-                              name={`weighted_targets[${i}].protocol`}
+                              name={`weightedTargets[${i}].protocol`}
                               children={(protoField: any) => (
                                 <Select
                                   label={i === 0 ? "Protocol" : "Protocol"}
@@ -526,7 +526,7 @@ export function ServiceForm({
                                           : v === "https"
                                             ? "https"
                                             : "http";
-                                      form.setFieldValue(`weighted_targets[${i}].url`, `${scheme}://${host}`);
+                                      form.setFieldValue(`weightedTargets[${i}].url`, `${scheme}://${host}`);
                                     }
                                   }}
                                   style={{ flex: 1, minWidth: 140 }}
@@ -536,7 +536,7 @@ export function ServiceForm({
                             />
                           )}
                           <form.Field
-                            name={`weighted_targets[${i}].url`}
+                            name={`weightedTargets[${i}].url`}
                             children={(urlField: any) => (
                               <TextInput
                                 label={i === 0 ? (isL4 ? "Address (host:port)" : "URL (host:port)") : (isL4 ? "Address" : "URL")}
@@ -571,7 +571,7 @@ export function ServiceForm({
                           />
                           {!isL4 && (
                             <form.Field
-                              name={`weighted_targets[${i}].weight`}
+                              name={`weightedTargets[${i}].weight`}
                               children={(weightField: any) => (
                                 <Tooltip label="Higher weight = more traffic.">
                                   <NumberInput
@@ -591,7 +591,7 @@ export function ServiceForm({
                             color="red"
                             variant="subtle"
                             size="lg"
-                            onClick={() => form.removeFieldValue("weighted_targets", i)}
+                            onClick={() => form.removeFieldValue("weightedTargets", i)}
                             disabled={field.state.value.length === 1}
                             style={{ marginBottom: 2 }}
                           >
@@ -608,9 +608,9 @@ export function ServiceForm({
         </Paper>
 
         <form.Field
-          name="load_balancer_policy"
+          name="loadBalancerPolicy"
           children={(field: any) => {
-            const bt = form.state.values.backend_type || "http";
+            const bt = form.state.values.backendType || "http";
             const isL4 = bt === "tcp" || bt === "udp";
             const options = isL4
               ? [
@@ -646,13 +646,13 @@ export function ServiceForm({
         />
 
         <form.Subscribe
-          selector={(s) => s.values.backend_type}
+          selector={(s) => s.values.backendType}
           children={(backendType) =>
             (backendType === "tcp" || backendType === "udp") ? (
               <>
                 {backendType === "tcp" && (
                   <form.Field
-                    name="l4_proxy_protocol"
+                    name="l4ProxyProtocol"
                     children={(field: any) => (
                       <Tooltip label="Send HAProxy PROXY protocol v1 header so the backend (e.g. mail server) sees the original client IP. Required for correct SPF checks when proxying SMTP/IMAP/POP3.">
                         <div>
@@ -670,7 +670,7 @@ export function ServiceForm({
                 )}
                 <Group grow>
                 <form.Field
-                  name="l4_health_check_interval_ms"
+                  name="l4HealthCheckIntervalMs"
                   children={(field: any) => (
                     <TextInput
                       label="TCP Health Check Interval (ms)"
@@ -684,7 +684,7 @@ export function ServiceForm({
                   )}
                 />
                 <form.Field
-                  name="l4_health_check_timeout_ms"
+                  name="l4HealthCheckTimeoutMs"
                   children={(field: any) => (
                     <TextInput
                       label="Health Check Timeout (ms)"
@@ -697,7 +697,7 @@ export function ServiceForm({
                   )}
                 />
                 <form.Field
-                  name="l4_udp_session_timeout_s"
+                  name="l4UdpSessionTimeoutS"
                   children={(field: any) => (
                     <TextInput
                       label="UDP Session Timeout (s)"
@@ -717,12 +717,12 @@ export function ServiceForm({
         />
 
         <form.Subscribe
-          selector={(s) => [s.values.backend_type, s.values.health_check_type] as const}
+          selector={(s) => [s.values.backendType, s.values.healthCheckType] as const}
           children={([backendType, healthCheckType]) =>
             backendType !== "tcp" && backendType !== "udp" ? (
               <>
                 <form.Field
-                  name="health_check_type"
+                  name="healthCheckType"
                   children={(field: any) => (
                     <Select
                       label="Health Check Type"
@@ -742,17 +742,17 @@ export function ServiceForm({
                   )}
                 />
                 <form.Field
-                  name="health_check_path"
+                  name="healthCheckPath"
                   children={(field: any) => {
                     // Determine actual type if unspecified
                     let effectiveType = healthCheckType;
                     if (effectiveType === HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED) {
-                      const bt = form.state.values.backend_type || "http";
+                      const bt = form.state.values.backendType || "http";
                       effectiveType = bt === "grpc" ? HealthCheckType.HEALTH_CHECK_TYPE_GRPC : HealthCheckType.HEALTH_CHECK_TYPE_HTTP;
                     }
 
                     const isGRPC = effectiveType === HealthCheckType.HEALTH_CHECK_TYPE_GRPC;
-                    const targets = form.state.values.weighted_targets;
+                    const targets = form.state.values.weightedTargets;
                     const firstTarget = targets && targets.length > 0 ? targets[0] : null;
 
                     const handleDiscover = () => {
@@ -774,7 +774,7 @@ export function ServiceForm({
 
                       discoverMutation.mutate({
                         url,
-                        tls_config: form.state.values.tls_client_config,
+                        tls_config: form.state.values.tlsClientConfig,
                       });
                     };
 
@@ -819,7 +819,7 @@ export function ServiceForm({
                 />
                 <Group grow>
                   <form.Field
-                    name="health_check_port"
+                    name="healthCheckPort"
                     children={(field: any) => (
                       <TextInput
                         label="Health Check Port"
@@ -834,7 +834,7 @@ export function ServiceForm({
                     )}
                   />
                   <form.Field
-                    name="health_check_protocol"
+                    name="healthCheckProtocol"
                     children={(field: any) => (
                       <Select
                         label="Health Check Protocol"

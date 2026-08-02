@@ -102,7 +102,7 @@ const DependencyBadge: React.FC<{ dep: DependencyHealth }> = ({ dep }) => (
       </Badge>
     </Group>
     <Group justify="space-between" mt={4}>
-      <Text size="xs" c="dimmed">Latency: {dep.latency_ms}</Text>
+      <Text size="xs" c="dimmed">Latency: {dep.latencyMs}</Text>
       {dep.error && <Text size="xs" c="red" fw={500} truncate maw={200}>{dep.error}</Text>}
     </Group>
   </Paper>
@@ -145,7 +145,7 @@ const RouteTrace: React.FC<{ route: RouteDiagnostic }> = ({ route }) => {
           </Group>
         </Group>
 
-        <Paper p="xs" radius="xs" withBorder style={{ borderStyle: "dashed", backgroundColor: "var(--mantine-color-gray-0)" }}>
+        <Paper p="xs" radius="xs" withBorder style={{ borderStyle: "dashed", backgroundColor: "var(--mantine-color-blue-0)" }}>
           <Text size="xs" c="dimmed" ff="monospace">
             Rule: {route.rule}
           </Text>
@@ -177,11 +177,11 @@ const RouteTrace: React.FC<{ route: RouteDiagnostic }> = ({ route }) => {
           <IconArrowRight size={16} color="gray" />
 
           <Stack align="center" gap={4} style={{ minWidth: 100 }}>
-             <ThemeIcon color={route.service_healthy ? "teal" : "red"} variant="filled" radius="md" size="md">
+             <ThemeIcon color={route.serviceHealthy ? "teal" : "red"} variant="filled" radius="md" size="md">
                <IconServer size={18} />
              </ThemeIcon>
              <Text size="10px" fw={700} ta="center" truncate maw={120}>
-               {route.service_name || route.service_id}
+               {route.serviceName || route.serviceId}
              </Text>
           </Stack>
         </Group>
@@ -396,14 +396,14 @@ const DiagnosticsPage: React.FC = () => {
   }, [data?.dependencies]);
 
   const sortedEntrypoints = useMemo(() => {
-    if (!data?.entrypoints) return [];
-    return [...data.entrypoints].sort((a, b) => a.name.localeCompare(b.name) || a.address.localeCompare(b.address));
-  }, [data?.entrypoints]);
+    if (!data?.entryPoints) return [];
+    return [...data.entryPoints].sort((a, b) => a.name.localeCompare(b.name) || a.address.localeCompare(b.address));
+  }, [data?.entryPoints]);
 
   const sortedTlsErrors = useMemo(() => {
-    if (!data?.recent_tls_errors) return [];
-    return [...data.recent_tls_errors].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [data?.recent_tls_errors]);
+    if (!data?.recentTlsErrors) return [];
+    return [...data.recentTlsErrors].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [data?.recentTlsErrors]);
 
   const handleApplyRecommendation = async (anomaly: Anomaly) => {
     const key = `${anomaly.type}-${anomaly.source}`;
@@ -490,13 +490,13 @@ const DiagnosticsPage: React.FC = () => {
             <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 1 }}>System Health Dashboard</Text>
           </Group>
           <SimpleGrid cols={{ base: 2, sm: 2, md: 4, lg: 6 }} spacing="md">
-            <SystemStatCard title="Public IP" value={data?.system?.public_ip ?? "-"} icon={<IconGlobe size={isMobile ? 16 : 20} color="blue" />} />
-            <SystemStatCard title="CPU Usage" value={data?.system?.cpu_usage ?? "-"} icon={<IconActivity size={isMobile ? 16 : 20} color="red" />} />
-            <SystemStatCard title="Memory" value={data?.system?.memory_usage ?? "-"} icon={<IconServer size={isMobile ? 16 : 20} color="orange" />} />
+            <SystemStatCard title="Public IP" value={data?.system?.publicIp ?? "-"} icon={<IconGlobe size={isMobile ? 16 : 20} color="blue" />} />
+            <SystemStatCard title="CPU Usage" value={data?.system?.cpuUsage ?? "-"} icon={<IconActivity size={isMobile ? 16 : 20} color="red" />} />
+            <SystemStatCard title="Memory" value={data?.system?.memoryUsage ?? "-"} icon={<IconServer size={isMobile ? 16 : 20} color="orange" />} />
             <SystemStatCard title="Goroutines" value={data?.system?.goroutines ?? "-"} icon={<IconRoute size={isMobile ? 16 : 20} color="teal" />} />
             <SystemStatCard title="Uptime" value={data?.system?.uptime ?? "-"} icon={<IconClock size={isMobile ? 16 : 20} color="violet" />} />
             <SystemStatCard title="Version" value={data?.system?.version ?? "-"} icon={<IconInfoCircle size={isMobile ? 16 : 20} color="gray" />} />
-  </SimpleGrid>
+          </SimpleGrid>
         </Stack>
 
         {/* TITAN Evolution Intelligence */}
@@ -515,12 +515,12 @@ const DiagnosticsPage: React.FC = () => {
                 <Stack gap={4}>
                   <Group justify="space-between">
                     <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Phantom Core</Text>
-                    <Badge size="xs" color={data.system.titan.phantom_enabled ? "teal" : "gray"}>
-                      {data.system.titan.phantom_enabled ? "OPTIMIZED" : "FALLBACK"}
+                    <Badge size="xs" color={data.system.titan.phantomEnabled ? "teal" : "gray"}>
+                      {data.system.titan.phantomEnabled ? "OPTIMIZED" : "FALLBACK"}
                     </Badge>
                   </Group>
-                  <Text fw={900} size="xl">{data.system.titan.phantom_engine || "Standard"}</Text>
-                  <Text size="10px" c="dimmed">Active Redirections: {data.system.titan.active_phantom_ports}</Text>
+                  <Text fw={900} size="xl">{data.system.titan.phantomEngine || "Standard"}</Text>
+                  <Text size="10px" c="dimmed">Active Redirections: {data.system.titan.activePhantomPorts}</Text>
                 </Stack>
               </Paper>
 
@@ -530,13 +530,15 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Predictive AI</Text>
-                    <Badge size="xs" color={data.system.titan.ai_predictor_enabled ? "indigo" : "gray"}>
-                      {data.system.titan.ai_predictor_enabled ? "LEARNING" : "OFF"}
+                    <Tooltip label="Enable via -ai-model flag at startup">
+                      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Predictive AI</Text>
+                    </Tooltip>
+                    <Badge size="xs" color={data.system.titan.aiPredictorEnabled ? "indigo" : "gray"}>
+                      {data.system.titan.aiPredictorEnabled ? "LEARNING" : "OFF"}
                     </Badge>
                   </Group>
-                  <Text fw={900} size="xl">{data.system.titan.ai_model_status || "Inactive"}</Text>
-                  <Text size="10px" c="dimmed">Cuckoo Blocklist: {data.system.titan.cuckoo_filter_entries} IPs</Text>
+                  <Text fw={900} size="xl">{data.system.titan.aiModelStatus || "Inactive"}</Text>
+                  <Text size="10px" c="dimmed">Cuckoo Blocklist: {data.system.titan.cuckooFilterEntries} IPs</Text>
                 </Stack>
               </Paper>
 
@@ -546,9 +548,11 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Quantum Security</Text>
-                    <Badge size="xs" color={data.system.titan.pqc_enabled ? "teal" : "gray"}>
-                      {data.system.titan.pqc_enabled ? "ENABLED" : "OFF"}
+                    <Tooltip label="Quantum-Safe ML-KEM and ML-DSA active">
+                      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Quantum Security</Text>
+                    </Tooltip>
+                    <Badge size="xs" color={data.system.titan.pqcEnabled ? "teal" : "gray"}>
+                      {data.system.titan.pqcEnabled ? "ENABLED" : "OFF"}
                     </Badge>
                   </Group>
                   <Text fw={900} size="xl">ML-KEM / ML-DSA</Text>
@@ -568,10 +572,10 @@ const DiagnosticsPage: React.FC = () => {
                     </Badge>
                   </Group>
                   <Text fw={900} size="xl">
-                    {data.system.titan.governor?.memory_pressure_percent?.toFixed(1)}% / {data.system.titan.governor?.cpu_pressure_percent?.toFixed(1)}%
+                    {data.system.titan.governor?.memoryPressurePercent?.toFixed(1)}% / {data.system.titan.governor?.cpuPressurePercent?.toFixed(1)}%
                   </Text>
                   <Text size="10px" c="dimmed">
-                    Scavengers: {data.system.titan.governor?.memory_hooks_count} Memory / {data.system.titan.governor?.cpu_hooks_count} CPU
+                    Scavengers: {data.system.titan.governor?.memoryHooksCount} Memory / {data.system.titan.governor?.cpuHooksCount} CPU
                   </Text>
                 </Stack>
               </Paper>
@@ -665,7 +669,7 @@ const DiagnosticsPage: React.FC = () => {
                       )}
                     </>
                   ) : (
-                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
+                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed", backgroundColor: "var(--mantine-color-blue-0)" }}>
                       <Stack align="center" gap="xs">
                         <IconCircleCheck size={40} color={theme.colors.teal[3]} />
                         <Text fw={700} c="teal">No Active Threats</Text>
@@ -714,7 +718,7 @@ const DiagnosticsPage: React.FC = () => {
                       )}
                     </>
                   ) : (
-                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed" }} bg="var(--mantine-color-gray-0)">
+                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed", backgroundColor: "var(--mantine-color-blue-0)" }}>
                       <Stack align="center" gap="xs">
                         <IconInfoCircle size={40} color={theme.colors.gray[3]} />
                         <Text fw={700} c="dimmed">No Mitigated Threats</Text>
@@ -776,16 +780,16 @@ const DiagnosticsPage: React.FC = () => {
                           </Stack>
                         </Group>
                         <Group gap="xs" visibleFrom="xs">
-                           <Badge variant="outline" size="xs" color="blue">{ep.active_connections} active</Badge>
+                           <Badge variant="outline" size="xs" color="blue">{ep.activeConnections} active</Badge>
                            {!ep.listening && <Badge color="red" size="xs">Stopped</Badge>}
                         </Group>
                       </Group>
                     </Accordion.Control>
                     <Accordion.Panel>
                       <Stack gap="xs" mt="xs">
-                        {ep.last_error && (
+                        {ep.lastError && (
                           <Alert color="red" variant="light" p="xs" title="Entrypoint Error" icon={<IconAlertTriangle size={16} />}>
-                            <Text size="xs" ff="monospace">{ep.last_error}</Text>
+                            <Text size="xs" ff="monospace">{ep.lastError}</Text>
                           </Alert>
                         )}
                         
@@ -802,9 +806,9 @@ const DiagnosticsPage: React.FC = () => {
                   </Accordion.Item>
                 ))}
               </Accordion>
-              {(!data?.entrypoints || data.entrypoints?.length === 0) && (
+              {(!data?.entryPoints || data.entryPoints?.length === 0) && (
                 <Stack align="center" py="xl">
-                  <Text c="dimmed" size="sm">No entrypoints configured.</Text>
+                  <Text c="dimmed" size="sm">No entryPoints configured.</Text>
                 </Stack>
               )}
             </ScrollArea>
@@ -817,11 +821,11 @@ const DiagnosticsPage: React.FC = () => {
                 <IconShield size={20} color="gray" />
                 <Title order={4} fw={800}>Recent TLS Handshake Errors</Title>
               </Group>
-              <Badge variant="filled" color="red" size="sm">{data?.recent_tls_errors?.length || 0}</Badge>
+              <Badge variant="filled" color="red" size="sm">{data?.recentTlsErrors?.length || 0}</Badge>
             </Group>
             <Divider />
             <ScrollArea h={400}>
-              {data?.recent_tls_errors?.length === 0 ? (
+              {data?.recentTlsErrors?.length === 0 ? (
                 <Stack align="center" justify="center" h="100%" py="xl" gap="xs">
                   <IconCircleCheck size={48} color={theme.colors.teal[2]} />
                   <Text c="dimmed" size="sm" fw={500}>No recent TLS errors detected.</Text>
@@ -829,7 +833,7 @@ const DiagnosticsPage: React.FC = () => {
               ) : (
                 <Stack gap={0} p={0}>
                   {sortedTlsErrors.map((err) => (
-                    <Paper key={`${err.timestamp}-${err.remote_addr}-${err.entrypoint_id}`} p="md" radius={0} className="hover-bg-default" style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}>
+                    <Paper key={`${err.timestamp}-${err.remoteAddr}-${err.entrypointId}`} p="md" radius={0} className="hover-bg-default" style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}>
                       <Group justify="space-between" mb={4}>
                         <Group gap={6}>
                           <IconClock size={12} color={theme.colors.gray[5]} />
@@ -840,14 +844,14 @@ const DiagnosticsPage: React.FC = () => {
                             })()}
                           </Text>
                         </Group>
-                        <Tooltip label={`ID: ${err.entrypoint_id}`}>
+                        <Tooltip label={`ID: ${err.entrypointId}`}>
                           <Badge variant="outline" color="gray" size="xs">
-                            {err.entrypoint_name || err.entrypoint_id}
+                            {err.entrypointName || err.entrypointId}
                           </Badge>
                         </Tooltip>
                       </Group>
                       <Text size="sm" ff="monospace" fw={500} mb={8} style={{ wordBreak: "break-all" }}>
-                        {err.remote_addr}
+                        {err.remoteAddr}
                       </Text>
                       <Alert variant="light" color="red" p="xs" radius="md">
                         <Text size="xs" ff="monospace" fw={600}>{err.error}</Text>

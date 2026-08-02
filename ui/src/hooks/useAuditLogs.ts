@@ -6,7 +6,7 @@ import type { AuditLog } from "../types/gateon";
 
 export interface AuditLogsResponse {
   logs: AuditLog[];
-  total_count?: number;
+  totalCount?: number;
   page?: number;
   page_size?: number;
 }
@@ -29,7 +29,7 @@ export function useAuditLogs(params: AuditLogsParams = {}) {
       const res = await api.listAuditLogs({ page, pageSize: page_size, search });
       return {
         logs: res.logs as any,
-        total_count: res.totalCount,
+        totalCount: res.totalCount,
         page: res.page,
         page_size: res.pageSize,
       };
@@ -43,13 +43,13 @@ export function useAuditLogs(params: AuditLogsParams = {}) {
 
     return subscribe("audit", (newEntry: AuditLog) => {
       queryClient.setQueryData<AuditLogsResponse>(queryKey, (old) => {
-        if (!old) return { logs: [newEntry], total_count: 1, page, page_size };
+        if (!old) return { logs: [newEntry], totalCount: 1, page, page_size };
         const exists = old.logs.some((l) => l.id === newEntry.id);
         if (exists) return old;
         return {
           ...old,
           logs: [newEntry, ...old.logs].slice(0, page_size),
-          total_count: (old.total_count ?? old.logs.length) + 1,
+          totalCount: (old.totalCount ?? old.logs.length) + 1,
         };
       });
     });

@@ -89,7 +89,7 @@ export function buildTrafficByPortData(pathStats: PathStats[]): GroupedTrafficDa
   const grouped = new Map<string, number>();
   for (const stat of pathStats) {
     const port = extractPortLabel(stat.host);
-    grouped.set(port, (grouped.get(port) ?? 0) + stat.request_count);
+    grouped.set(port, (grouped.get(port) ?? 0) + stat.requestCount);
   }
   return toTopGroupedData(grouped);
 }
@@ -105,7 +105,7 @@ export type RouteMatcher = {
 export function buildRouteMatchers(routes: Route[]): RouteMatcher[] {
   return routes.map((route) => ({
     routeLabel: route.name?.trim() || route.id,
-    serviceId: route.service_id,
+    serviceId: route.serviceId,
     hosts: Array.from(route.rule.matchAll(/Host\(`([^`]*)`\)/g), (m) => m[1]),
     exactPaths: Array.from(route.rule.matchAll(/Path\(`([^`]*)`\)/g), (m) => m[1]),
     pathPrefixes: Array.from(route.rule.matchAll(/PathPrefix\(`([^`]*)`\)/g), (m) => m[1]),
@@ -431,7 +431,7 @@ export function toTopGroupedData(
 export function buildTrafficByPathData(pathStats: PathStats[]): GroupedTrafficDatum[] {
   const counters = new Map<string, number>();
   for (const p of pathStats) {
-    counters.set(p.path, (counters.get(p.path) ?? 0) + p.request_count);
+    counters.set(p.path, (counters.get(p.path) ?? 0) + p.requestCount);
   }
   return toTopGroupedData(counters);
 }
@@ -448,17 +448,17 @@ export function buildHealthDistribution(agg: AggStats | undefined) {
   return [
     {
       group: "Total",
-      value: agg.total_targets,
+      value: agg.totalTargets,
       color: "blue.6",
     },
     {
       group: "Healthy",
-      value: agg.healthy_targets,
+      value: agg.healthyTargets,
       color: "teal.6",
     },
     {
       group: "At Risk",
-      value: (agg.open_circuits ?? 0) + (agg.half_open_circuits ?? 0),
+      value: (agg.openCircuits ?? 0) + (agg.halfOpenCircuits ?? 0),
       color: "red.6",
     },
   ];
@@ -469,12 +469,12 @@ export function buildResourceDistribution(agg: AggStats | undefined) {
   return [
     {
       name: "CPU",
-      value: agg.cpu_usage,
+      value: agg.cpuUsage,
       color: "blue",
     },
     {
       name: "Memory",
-      value: agg.memory_usage,
+      value: agg.memoryUsage,
       color: "indigo",
     },
   ];
@@ -484,7 +484,7 @@ export function buildRegionDistribution(countryTraffic: CountryTraffic[] | undef
   if (!countryTraffic) return [];
   const counters = new Map<string, number>();
   for (const c of countryTraffic) {
-    counters.set(c.country, (counters.get(c.country) ?? 0) + c.request_count);
+    counters.set(c.country, (counters.get(c.country) ?? 0) + c.requestCount);
   }
   return toTopGroupedData(counters, 5);
 }
@@ -521,7 +521,7 @@ export function buildTrafficByServiceData(
 
   for (const stat of pathStats) {
     const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
-    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.request_count);
+    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.requestCount);
   }
 
   return toTopGroupedData(grouped);
@@ -630,7 +630,7 @@ export function buildBandwidthByRouterData(
 
   for (const stat of pathStats) {
     const routerLabel = resolveRouterLabel(stat, routeMatchers);
-    grouped.set(routerLabel, (grouped.get(routerLabel) ?? 0) + stat.bytes_total);
+    grouped.set(routerLabel, (grouped.get(routerLabel) ?? 0) + stat.bytesTotal);
   }
 
   return toTopGroupedData(grouped);
@@ -647,7 +647,7 @@ export function buildBandwidthByServiceData(
 
   for (const stat of pathStats) {
     const serviceLabel = resolveServiceLabel(stat, routeMatchers, serviceNameById);
-    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.bytes_total);
+    grouped.set(serviceLabel, (grouped.get(serviceLabel) ?? 0) + stat.bytesTotal);
   }
 
   return toTopGroupedData(grouped);

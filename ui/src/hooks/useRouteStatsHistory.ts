@@ -10,7 +10,7 @@ export function useRouteStatsHistory(routeId: string) {
 
   useEffect(() => {
     if (!stats || stats.length === 0) return;
-    const total = stats.reduce((s, t) => s + t.request_count, 0);
+    const total = stats.reduce((s, t) => s + t.requestCount, 0);
     const delta = total - prevRef.current;
     prevRef.current = total;
     setHistory((h) => {
