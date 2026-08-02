@@ -72,3 +72,6 @@ internal/telemetry/telemetry_pebble/
 /.agents/*
 /agent/*
 /.claude/
+/.claude/skills/*
+/.agents/
+/dist/
