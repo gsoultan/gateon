@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	aidanwoods.dev/go-paseto v1.6.0
+	connectrpc.com/connect v1.20.0
 	github.com/MicahParks/keyfunc/v3 v3.8.0
 	github.com/andybalholm/brotli v1.2.1
 	github.com/aws/aws-sdk-go-v2 v1.41.5
@@ -15,6 +16,7 @@ require (
 	github.com/corazawaf/coraza/v3 v3.7.0
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
+	github.com/e-XpertSolutions/go-iforest/v2 v2.0.0
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/go-zookeeper/zk v1.0.4
@@ -67,7 +69,6 @@ require (
 require (
 	aidanwoods.dev/go-result v0.3.1 // indirect
 	cel.dev/expr v0.25.1 // indirect
-	connectrpc.com/connect v1.20.0 // indirect
 	dario.cat/mergo v1.0.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
@@ -107,7 +108,6 @@ require (
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/e-XpertSolutions/go-iforest/v2 v2.0.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
