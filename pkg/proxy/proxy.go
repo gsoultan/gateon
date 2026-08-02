@@ -232,7 +232,7 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 			pr.Out.ProtoMinor = 0
 			pr.Out.Proto = "HTTP/2.0"
 		}
-		if isGRPC {
+		if isGRPC && pr.Out.Body != nil && pr.Out.Body != http.NoBody {
 			pr.Out.Header.Del("Content-Length")
 			pr.Out.ContentLength = -1
 			if pr.Out.Header.Get("TE") == "" {

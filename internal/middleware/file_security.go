@@ -21,7 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/yara"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/h2non/filetype"
-	aho_corasick "github.com/petar-dambovaliev/aho-corasick"
+	aho_corasick "github.com/wasilibs/go-aho-corasick"
 )
 
 const (
@@ -458,7 +458,7 @@ func scanEmbeddedExecutable(r *http.Request, p *multipart.Part, head, content []
 		return scanResult{}
 	}
 
-	if match := embeddedScanner.IterByte(content).Next(); match != nil {
+	if match := embeddedScanner.Iter(string(content)).Next(); match != nil {
 		name := embeddedNames[match.Pattern()]
 		logger.L.LogWarn("File upload blocked: embedded executable in benign wrapper",
 			"filename", p.FileName(), "mime", mimeType, "embedded", name, "client_ip", r.RemoteAddr)

@@ -73,10 +73,27 @@ const SecurityThreatsCard = lazy(() =>
   }))
 );
 
-const STATUS_FALLBACK = <Text>Loading status...</Text>;
+const STATUS_FALLBACK = (
+  <Paper withBorder p="md" radius="md">
+    <Skeleton height={20} width="60%" mb="sm" />
+    <Skeleton height={40} />
+  </Paper>
+);
 const ROUTE_LIST_FALLBACK = (
-  <Card withBorder h={200}>
-    <Loader />
+  <Card withBorder radius="lg" p={0} style={{ overflow: "hidden" }}>
+    <Stack gap={0}>
+      {[...Array(5)].map((_, i) => (
+        <Box key={i} p="md" style={{ borderBottom: i < 4 ? '1px solid var(--mantine-color-dark-4)' : 'none' }}>
+          <Group justify="space-between">
+            <Stack gap={4} style={{ flex: 1 }}>
+              <Skeleton height={20} width="40%" />
+              <Skeleton height={14} width="25%" />
+            </Stack>
+            <Skeleton height={24} width={80} radius="xl" />
+          </Group>
+        </Box>
+      ))}
+    </Stack>
   </Card>
 );
 

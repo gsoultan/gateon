@@ -14,10 +14,38 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/rs/cors"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// DefaultGRPCWebDetector is a lightweight implementation of gRPC-Web detection
+// that doesn't depend on the deprecated improbable-eng/grpc-web library.
+type DefaultGRPCWebDetector struct {
+	grpcServer http.Handler
+}
+
+func NewDefaultGRPCWebDetector(grpcServer http.Handler) *DefaultGRPCWebDetector {
+	return &DefaultGRPCWebDetector{grpcServer: grpcServer}
+}
+
+func (d *DefaultGRPCWebDetector) IsGrpcWebRequest(r *http.Request) bool {
+	return r.Method == http.MethodPost && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc-web")
+}
+
+func (d *DefaultGRPCWebDetector) IsAcceptableGrpcCorsRequest(r *http.Request) bool {
+	return r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") == http.MethodPost
+}
+
+func (d *DefaultGRPCWebDetector) IsGrpcWebSocketRequest(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket") &&
+		strings.Contains(strings.ToLower(r.Header.Get("Sec-WebSocket-Protocol")), "grpc-websockets")
+}
+
+func (d *DefaultGRPCWebDetector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if d.grpcServer != nil {
+		d.grpcServer.ServeHTTP(w, r)
+	}
+}
 
 // grpcWebTrailerFlag is the gRPC frame flag indicating a trailer frame.
 const grpcWebTrailerFlag byte = 0x80
@@ -36,15 +64,11 @@ const grpcWebTrailerFlag byte = 0x80
 // HTTP trailers as a gRPC trailer frame in the response body (required because
 // HTTP/1.1 browsers cannot read HTTP/2 trailers).
 func GRPCWeb(cfg ...CORSConfig) Middleware {
-	// We create a wrapper with nil server to use its detection methods.
-	// This avoids the type mismatch with http.HandlerFunc and allows us to use
-	// the library's detection logic while we handle the header mapping for the proxy.
-	// We set WithCorsForRegisteredEndpointsOnly(false) to avoid panics with nil server.
-	detector := grpcweb.WrapServer(nil, grpcweb.WithCorsForRegisteredEndpointsOnly(false))
+	detector := &DefaultGRPCWebDetector{}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			isGRPCWeb := detector.IsGrpcWebRequest(r) || (r.Method == http.MethodOptions && detector.IsAcceptableGrpcCorsRequest(r))
+			isGRPCWeb := detector.IsGrpcWebRequest(r) || detector.IsAcceptableGrpcCorsRequest(r)
 
 			if isGRPCWeb {
 				if r.Context().Value(CORSHandledContextKey) != nil {
@@ -148,7 +172,7 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 	}
 }
 
-func serveGRPCWeb(w http.ResponseWriter, r *http.Request, detector *grpcweb.WrappedGrpcServer, next http.Handler) {
+func serveGRPCWeb(w http.ResponseWriter, r *http.Request, detector *DefaultGRPCWebDetector, next http.Handler) {
 	contentType := r.Header.Get("Content-Type")
 	isTextFormat := strings.HasPrefix(contentType, "application/grpc-web-text")
 

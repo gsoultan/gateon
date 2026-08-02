@@ -1,13 +1,5 @@
 import { Suspense, lazy, useState } from "react";
-import {
-  Card,
-  Title,
-  Text,
-  Stack,
-  Group,
-  Button,
-  Drawer,
-} from "@mantine/core";
+import { Card, Title, Text, Stack, Group, Button, Drawer, Skeleton, Box } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconPlus } from "@tabler/icons-react";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
@@ -20,11 +12,40 @@ const RouteForm = lazy(() => import("../components/RouteForm"));
 const RouteList = lazy(() => import("../components/RouteList"));
 
 const ROUTE_LIST_FALLBACK = (
-  <Card withBorder h={300}>
-    <Text>Loading routes...</Text>
+  <Card withBorder radius="lg" p={0} style={{ overflow: "hidden" }}>
+    <Stack gap={0}>
+      {[...Array(8)].map((_, i) => (
+        <Box
+          key={i}
+          p="md"
+          style={{
+            borderBottom: i < 7 ? "1px solid var(--mantine-color-dark-4)" : "none",
+          }}
+        >
+          <Group justify="space-between">
+            <Stack gap={4} style={{ flex: 1 }}>
+              <Skeleton height={22} width="35%" />
+              <Skeleton height={14} width="20%" />
+            </Stack>
+            <Group gap="xs">
+              <Skeleton height={24} width={60} radius="xl" />
+              <Skeleton height={24} width={80} radius="xl" />
+              <Skeleton height={28} width={28} radius="sm" />
+            </Group>
+          </Group>
+        </Box>
+      ))}
+    </Stack>
   </Card>
 );
-const FORM_FALLBACK = <Text>Loading form...</Text>;
+const FORM_FALLBACK = (
+  <Stack p="xl">
+    <Skeleton height={40} mb="sm" />
+    <Skeleton height={40} mb="sm" />
+    <Skeleton height={150} mb="sm" />
+    <Skeleton height={40} />
+  </Stack>
+);
 
 export default function RoutesPage() {
   const { canWrite } = usePermissions();

@@ -11,9 +11,9 @@ import (
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"google.golang.org/grpc"
 )
 
@@ -63,7 +63,7 @@ func TestIntegration_ProxyRedirects(t *testing.T) {
 		TLSManager: s.TLSManager,
 	})
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
-	wrapped := grpcweb.WrapServer(grpcServer)
+	wrapped := middleware.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
 	handlers.RegisterRESTHandlers(mux, apiService, handlerDeps(s))
 

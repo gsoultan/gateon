@@ -49,6 +49,14 @@ func (m *mockRouteStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *mockRouteStore) GetTrieByHost(host string) (*config.PathTrie, []*gateonv1.Route) {
+	return nil, nil
+}
+
+func (m *mockRouteStore) GetWildcardTrie() (*config.PathTrie, []*gateonv1.Route) {
+	return nil, nil
+}
+
 type mockGlobalReg struct {
 	config *gateonv1.GlobalConfig
 }

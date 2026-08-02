@@ -23,6 +23,7 @@ import {
   Box,
   Divider,
   Grid,
+  Skeleton,
 } from '@mantine/core';
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
 import {
@@ -170,7 +171,26 @@ export default function AuditLogsPage() {
               </Box>
 
               <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
-                {isMobile ? (
+                {isLoading ? (
+                  <Stack gap="sm" p="md">
+                    {[...Array(8)].map((_, i) => (
+                      <Card key={i} withBorder radius="md" p="sm">
+                        <Stack gap={4}>
+                          <Group justify="space-between">
+                            <Skeleton height={12} width="30%" />
+                            <Skeleton height={12} width={12} radius="xl" />
+                          </Group>
+                          <Group justify="space-between">
+                            <Skeleton height={20} width={60} radius="sm" />
+                            <Skeleton height={20} width={80} radius="sm" />
+                          </Group>
+                          <Skeleton height={12} width="80%" />
+                          <Skeleton height={12} width="40%" />
+                        </Stack>
+                      </Card>
+                    ))}
+                  </Stack>
+                ) : isMobile ? (
                   <Stack gap="sm" p="md">
                     {logs.map((log) => (
                       <Card key={log.id} withBorder radius="md" p="sm" onClick={() => { setSelectedLog(log); open(); }} style={{ cursor: 'pointer' }}>
@@ -277,7 +297,21 @@ export default function AuditLogsPage() {
           <Tabs.Panel value="archived">
             <Card withBorder radius="md" p={0} shadow="sm">
               <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
-                {isMobile ? (
+                {isLoadingArchives ? (
+                  <Stack gap="sm" p="md">
+                    {[...Array(3)].map((_, i) => (
+                      <Card key={i} withBorder radius="md" p="sm">
+                        <Group justify="space-between">
+                          <Group gap="xs">
+                            <Skeleton height={16} width={16} radius="sm" />
+                            <Skeleton height={16} width={120} />
+                          </Group>
+                          <Skeleton height={16} width={60} />
+                        </Group>
+                      </Card>
+                    ))}
+                  </Stack>
+                ) : isMobile ? (
                   <Stack gap="sm" p="md">
                     {archivesData?.archives?.map((archive) => (
                       <Card key={archive.filename} withBorder radius="md" p="sm">

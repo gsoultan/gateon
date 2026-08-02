@@ -270,7 +270,6 @@ var (
 )
 
 func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
-	defer conn.Close()
 	logger.L.LogDebug("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
 
 	// Use a shorter deadline for the first byte, then a longer one for the rest
@@ -290,6 +289,7 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 			goto fallback
 		}
 		logger.L.LogError("TCP inspection initial read error", "ep", ep.Id, "error", err)
+		conn.Close()
 		return
 	}
 
@@ -342,7 +342,9 @@ fallback:
 		copy(peeked, peek[:n])
 	}
 	logger.L.LogDebug("TCP inspection fallback to generic TCP", "ep", ep.Id, "bytes", n)
-	handleTCPConn(newPeekedConn(conn, peeked))
+	pc := newPeekedConn(conn, peeked)
+	handleTCPConn(pc)
+	pc.Close()
 }
 
 func handleTCPConn(conn net.Conn) {

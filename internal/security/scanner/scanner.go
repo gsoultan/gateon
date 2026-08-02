@@ -3,20 +3,20 @@
 package scanner
 
 import (
-	"github.com/petar-dambovaliev/aho-corasick"
+	ahocorasick "github.com/wasilibs/go-aho-corasick"
 )
 
 // Scanner is a high-performance multi-pattern matcher using the Aho-Corasick algorithm.
 type Scanner struct {
-	matcher aho_corasick.AhoCorasick
+	matcher ahocorasick.AhoCorasick
 }
 
 // NewScanner creates a new scanner with the given set of patterns.
 func NewScanner(patterns []string) *Scanner {
-	builder := aho_corasick.NewAhoCorasickBuilder(aho_corasick.Opts{
+	builder := ahocorasick.NewAhoCorasickBuilder(ahocorasick.Opts{
 		AsciiCaseInsensitive: true,
 		MatchOnlyWholeWords:  false,
-		MatchKind:            aho_corasick.LeftMostLongestMatch,
+		MatchKind:            ahocorasick.LeftMostLongestMatch,
 	})
 	return &Scanner{
 		matcher: builder.Build(patterns),
