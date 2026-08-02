@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/asavie/xdp"
@@ -94,7 +94,9 @@ func (c *linuxCore) proxyWithXDP(ctx context.Context, client net.Conn, targetAdd
 		return err
 	}
 	var port uint32
-	fmt.Sscanf(portStr, "%d", &port)
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		return fmt.Errorf("invalid port in target address %s: %w", targetAddr, err)
+	}
 
 	// Register port in eBPF for redirection
 	if c.ebpf != nil {
