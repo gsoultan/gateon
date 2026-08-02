@@ -192,8 +192,6 @@ func GenerateJA4H(r *http.Request) string {
 		refererChar = 'r'
 	}
 
-	headerCount := len(r.Header)
-
 	alpn := "00"
 	if r.TLS != nil && len(r.TLS.NegotiatedProtocol) > 0 {
 		p := r.TLS.NegotiatedProtocol
@@ -210,13 +208,17 @@ func GenerateJA4H(r *http.Request) string {
 
 	var localKeys [64]string
 	keys := localKeys[:0]
-	if headerCount > 64 {
-		keys = make([]string, 0, headerCount)
-	}
+	headerCount := 0
 
 	for k := range r.Header {
-		if k != "Cookie" && k != "Referer" {
+		// Ultra-Stable Fingerprint Strategy:
+		// We only include headers that are the most stable and representative
+		// of a unique browser/client identity to avoid identity drift
+		// in complex middleware chains.
+		kl := strings.ToLower(k)
+		if kl == "user-agent" || kl == "accept-language" {
 			keys = append(keys, k)
+			headerCount++
 		}
 	}
 	slices.Sort(keys)

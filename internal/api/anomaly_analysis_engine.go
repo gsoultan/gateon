@@ -44,15 +44,19 @@ func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *reputat
 	}
 
 	var blockedCountries []string
-	if config != nil && config.Geoip != nil {
-		blockedCountries = config.Geoip.BlockedCountries
+	var anomalyConfig *gateonv1.AnomalyDetectionConfig
+	if config != nil {
+		if config.Geoip != nil {
+			blockedCountries = config.Geoip.BlockedCountries
+		}
+		anomalyConfig = config.AnomalyDetection
 	}
 
 	return &AnomalyAnalysisEngine{
 		detectors: []AnomalyDetector{
 			&SecurityThreatDetector{Threshold: securityThreshold, Reputation: reputation, Config: behavioral},
-			&NeuralAnomalyDetector{Config: config.AnomalyDetection},
-			&HybridGraphAnomalyDetector{Config: config.AnomalyDetection},
+			&NeuralAnomalyDetector{Config: anomalyConfig},
+			&HybridGraphAnomalyDetector{Config: anomalyConfig},
 			&UnlistedRouteDetector{},
 			&ManagementDomainDetector{},
 			&SlowClientDetector{},

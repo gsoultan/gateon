@@ -23,7 +23,11 @@ var (
 // is a safe no-op and GetMapStats returns empty stats, mirroring the behaviour
 // of a disabled eBPF subsystem.
 type Holder struct {
-	current atomic.Pointer[Manager]
+	current atomic.Value // holds *managerContainer
+}
+
+type managerContainer struct {
+	m Manager
 }
 
 // NewHolder returns a Holder seeded with the (optional) initial manager. Pass
@@ -37,19 +41,16 @@ func NewHolder(initial Manager) *Holder {
 // Swap atomically installs m as the active underlying manager. Passing nil
 // disables delegation so all subsequent calls become no-ops.
 func (h *Holder) Swap(m Manager) {
-	if m == nil {
-		h.current.Store(nil)
-		return
-	}
-	h.current.Store(&m)
+	h.current.Store(&managerContainer{m: m})
 }
 
 // Current returns the active underlying manager, or nil when none is installed.
 func (h *Holder) Current() Manager {
-	if p := h.current.Load(); p != nil {
-		return *p
+	val := h.current.Load()
+	if val == nil {
+		return nil
 	}
-	return nil
+	return val.(*managerContainer).m
 }
 
 // Start delegates to the active manager, if any.
@@ -134,6 +135,14 @@ func (h *Holder) SetRLFeedbackHandler(f func(ip string, score float64)) {
 func (h *Holder) ShunJA4(ja4Fingerprint string) error {
 	if m := h.Current(); m != nil {
 		return m.ShunJA4(ja4Fingerprint)
+	}
+	return nil
+}
+
+// UnshunJA4 delegates to the active manager, if any.
+func (h *Holder) UnshunJA4(ja4Fingerprint string) error {
+	if m := h.Current(); m != nil {
+		return m.UnshunJA4(ja4Fingerprint)
 	}
 	return nil
 }

@@ -34,8 +34,8 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "", nil, nil, "", 100, 0, 0, 0, 0)
 	RecordTrace(traceID, "GET /test", "service-1", "service-1", 10.5, time.Now(), "success", "/test", "127.0.0.1", "", "US", "Go-http-client/1.1", "GET", "", "example.com/test", "", "", nil, nil, "", 100, 0, 0, 0, 0)
 
-	// Flush is triggered every 1s or when batch is full (1024)
-	time.Sleep(1500 * time.Millisecond)
+	// Flush is triggered every 2s or when batch is full (1024)
+	time.Sleep(2500 * time.Millisecond)
 
 	// Verify that we can still get traces
 	traces := GetTraces(t.Context(), 10)
@@ -215,7 +215,7 @@ func TestRestoreWAFBlockCounter(t *testing.T) {
 	}
 
 	// Threats are persisted by the async batch flush (every ~1s).
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(2500 * time.Millisecond)
 
 	// restoreWAFBlockCounter must replay the persisted blocks into the volatile
 	// Prometheus counter so the dashboard does not show 0 after a restart.
@@ -281,7 +281,7 @@ func TestGetMitigatedRolling24h(t *testing.T) {
 	RecordSecurityThreat(SecurityThreat{ID: "m-4", Type: "scan", SourceIP: "9.9.9.4", Category: "recon", Severity: "low", ActionTaken: "detected", Time: time.Now()})
 
 	// Wait for async persistence
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(2500 * time.Millisecond)
 
 	if got := GetMitigatedRolling24h(ctx) - start; got != 3 {
 		t.Fatalf("GetMitigatedRolling24h delta = %d, want 3 (only blocked/challenged/shunned)", got)
@@ -328,7 +328,7 @@ func TestGetTopThreatSources(t *testing.T) {
 	}
 
 	// Flush (batch flush is ~1s)
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(2500 * time.Millisecond)
 
 	// This should NOT fail if fixed, but currently it triggers "scan failed" log and returns empty/wrong data
 	top := GetTopThreatSources(t.Context(), 10)

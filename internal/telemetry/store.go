@@ -417,6 +417,7 @@ type pathStatsStore struct {
 	traceInCh                   chan *TraceRecord
 	threatInCh                  chan *SecurityThreat
 	behaviorInCh                chan *behaviorInc
+	flushCh                     chan chan struct{}
 	stopCh                      chan struct{}
 	stopped                     atomic.Bool
 	wg                          syncutil.WaitGroup
@@ -511,6 +512,7 @@ func initStore(databaseURL string, retentionDays int) error {
 		traceInCh:         make(chan *TraceRecord, 4096),
 		threatInCh:        make(chan *SecurityThreat, 1024),
 		behaviorInCh:      make(chan *behaviorInc, 2048),
+		flushCh:           make(chan chan struct{}),
 		stopCh:            make(chan struct{}),
 		traceStoreEnabled: td.TraceStoreEnabled,
 	}
@@ -935,6 +937,9 @@ func (s *pathStatsStore) loop() {
 				interval = 1 * time.Second
 			}
 			timer.Reset(interval)
+		case ack := <-s.flushCh:
+			flush()
+			close(ack)
 		case <-pruneTicker.C:
 			go s.prune()
 		case <-s.stopCh:
@@ -1259,9 +1264,10 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 		st.ActionTaken = "detected"
 	}
 	st.Mitigated = st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
-	if st.Mitigated || st.Category == "reputation" || st.Score >= 80 {
+	if (st.Mitigated || st.Category == "reputation" || st.Score >= 80) &&
+		st.Type != "user_mitigation" && st.Type != "ip_mitigation" && st.Type != "ip_shunning" {
 		// Automatically mitigate fingerprints to ensure immediate blocking of the same actor.
-		if st.Fingerprint != "" {
+		if st.Fingerprint != "" && !IsUserUnmitigated(st.Fingerprint) {
 			MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
 		}
 
@@ -1568,16 +1574,30 @@ func IsUserMitigated(ja4plus string) bool {
 		return false
 	}
 
-	if s.userMitigationCache != nil {
-		if val, ok := s.userMitigationCache.Get(ja4plus); ok {
-			return val.(bool)
+	// 1. Check high-priority 'unmitigated' cache (Manual override / bypass)
+	if s.unmitigatedCache != nil {
+		if _, ok := s.unmitigatedCache.Get(ja4plus); ok {
+			return false
 		}
 	}
 
-	// If not in cache, check DB
-	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'mitigated' AND fingerprint = ?")
+	// 2. Check standard mitigation cache
+	if s.userMitigationCache != nil {
+		if val, ok := s.userMitigationCache.Get(ja4plus); ok {
+			res := val.(bool)
+			if res {
+				// DOUBLE CHECK DB if cache says true, to avoid stale blocks after manual unmitigation.
+				goto check_db
+			}
+			return false
+		}
+	}
+
+check_db:
+	// 3. Check DB for status 'mitigated'
+	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE (fingerprint = ? OR ja4h = ?) ORDER BY updated_at DESC LIMIT 1")
 	var status string
-	err := s.db.QueryRow(query, ja4plus).Scan(&status)
+	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
 	mitigated := false
 	if err == nil && status == "mitigated" {
 		mitigated = true
@@ -1587,6 +1607,19 @@ func IsUserMitigated(ja4plus string) bool {
 		s.userMitigationCache.Add(ja4plus, mitigated)
 	}
 	return mitigated
+}
+
+// IsUserUnmitigated returns true if the JA4+ fingerprint is currently explicitly unmitigated.
+func IsUserUnmitigated(ja4plus string) bool {
+	s := getStore()
+	if s == nil || ja4plus == "" {
+		return false
+	}
+	// Check DB for status 'unmitigated' within the last 24 hours to prevent immediate re-mitigation.
+	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'unmitigated' AND (fingerprint = ? OR ja4h = ?) AND updated_at > datetime('now', '-1 day')")
+	var status string
+	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
+	return err == nil && status == "unmitigated"
 }
 
 // GetUserMitigations returns a list of currently mitigated users/fingerprints.
@@ -1662,13 +1695,24 @@ func MarkUserUnmitigated(ja4plus string) {
 	if s == nil || ja4plus == "" {
 		return
 	}
-	query := s.dialect.Rebind("UPDATE user_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?")
-	_, err := s.db.Exec(query, ja4plus)
-	if err != nil {
-		logger.Default().LogError("failed to mark user as unmitigated", "ja4plus", ja4plus, "error", err)
+	// 1. Populate high-priority override cache (Bypass all security for 24h)
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Add(ja4plus, true)
 	}
+
+	// 2. FORCEFULLY update standard mitigation cache to 'false'
 	if s.userMitigationCache != nil {
 		s.userMitigationCache.Add(ja4plus, false)
+	}
+
+	// 3. Clear from DB and insert an explicit 'unmitigated' marker.
+	queryDelete := s.dialect.Rebind("DELETE FROM user_mitigations WHERE fingerprint = ? OR ja4h = ?")
+	_, _ = s.db.Exec(queryDelete, ja4plus, ja4plus)
+
+	queryInsert := s.dialect.Rebind("INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at) VALUES (?, 'UNMITIGATED_MARKER', 'JA4+', 'unmitigated', 'Manual reset', 'manual', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+	_, err := s.db.Exec(queryInsert, ja4plus)
+	if err != nil {
+		logger.Default().LogError("failed to mark user as unmitigated", "ja4plus", ja4plus, "error", err)
 	}
 }
 
@@ -2135,7 +2179,10 @@ func GetAssociatedFingerprints(ctx context.Context, ip string) []string {
 	if s == nil || ip == "" {
 		return nil
 	}
-	query := s.dialect.Rebind("SELECT DISTINCT fingerprint FROM security_threats WHERE source_ip = ? UNION SELECT DISTINCT ja4 FROM security_threats WHERE source_ip = ?")
+	// Query for unique JA4+ fingerprints (ja4_ja4h) seen from this IP.
+	// We use UNION to capture both explicitly set 'fingerprint' column and reconstructed ja4+ja4h.
+	query := s.dialect.Rebind("SELECT DISTINCT fingerprint FROM security_threats WHERE source_ip = ? AND fingerprint != '' " +
+		"UNION SELECT DISTINCT ja4 || '_' || ja4h FROM security_threats WHERE source_ip = ? AND ja4 != '' AND ja4h != ''")
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
@@ -2154,15 +2201,24 @@ func GetAssociatedFingerprints(ctx context.Context, ip string) []string {
 	return fps
 }
 
+// FlushThreats blocks until all enqueued security threats are processed and persisted to DB.
+func FlushThreats() {
+	s := getStore()
+	if s == nil {
+		return
+	}
+	ack := make(chan struct{})
+	select {
+	case s.flushCh <- ack:
+		<-ack
+	case <-time.After(5 * time.Second):
+		// timeout to avoid blocking forever if loop is stuck
+	}
+}
+
 // GetSecurityThreats returns a paged list of security threats from the store.
 func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
 	s := getStore()
-	if s == nil {
-		return nil
-	}
-	if limit <= 0 {
-		limit = 100
-	}
 	if limit > 1000 {
 		limit = 1000
 	}
