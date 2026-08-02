@@ -12,10 +12,10 @@ plugins:
     out: proto
     opt:
       - paths=source_relative
-  - local: ./ui/node_modules/.bin/protoc-gen-es
+  - remote: buf.build/bufbuild/es:v1.10.0
     out: ui/src/services/gen
     opt: target=ts
-  - local: ./ui/node_modules/.bin/protoc-gen-connect-es
+  - remote: buf.build/connectrpc/es:v1.4.0
     out: ui/src/services/gen
     opt: target=ts
 inputs:
