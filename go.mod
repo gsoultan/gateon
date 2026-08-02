@@ -22,6 +22,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/go-zookeeper/zk v1.0.4
+	github.com/godzie44/go-uring v0.0.0-20250501163612-d16a9e597639
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/cel-go v0.28.0
 	github.com/google/go-tpm v0.9.8
@@ -32,7 +33,6 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/hashicorp/memberlist v0.5.4
 	github.com/hashicorp/vault/api v1.23.0
-	github.com/iceber/iouring-go v0.0.0-20230403020409-002cfd2e2a90
 	github.com/kaptinlin/jsonschema v0.9.2
 	github.com/lib/pq v1.12.3
 	github.com/oschwald/geoip2-golang v1.13.0
@@ -166,6 +166,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/libp2p/go-sockaddr v0.1.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect

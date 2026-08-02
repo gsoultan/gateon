@@ -15,16 +15,20 @@ import (
 	"syscall"
 
 	"github.com/asavie/xdp"
+	"github.com/godzie44/go-uring/reactor"
+	"github.com/godzie44/go-uring/uring"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/pkg/l4"
-	"github.com/iceber/iouring-go"
 )
 
 // linuxCore is the hardware-accelerated TITAN core for Linux systems.
 type linuxCore struct {
-	ring        *iouring.IOURing
+	ring        *uring.Ring
+	rea         *reactor.Reactor
 	ebpf        EbpfManager
 	activePorts atomic.Int32
+	ctx         context.Context
+	cancel      context.CancelFunc
 	mu          sync.RWMutex
 }
 
@@ -32,12 +36,29 @@ type linuxCore struct {
 func newPhantomCore(ebpf EbpfManager) PhantomCore {
 	// Attempt to initialize io_uring with a large enough queue size.
 	// io_uring is used to optimize ingress HTTP handling.
-	ring, err := iouring.New(8192)
+	ring, err := uring.New(8192)
 	if err != nil {
 		logger.L.LogWarn("io_uring initialization failed, falling back to standard I/O", "error", err)
 		return &linuxCore{ebpf: ebpf}
 	}
-	return &linuxCore{ring: ring, ebpf: ebpf}
+
+	rea, err := reactor.New([]*uring.Ring{ring})
+	if err != nil {
+		ring.Close()
+		logger.L.LogWarn("io_uring reactor initialization failed, falling back to standard I/O", "error", err)
+		return &linuxCore{ebpf: ebpf}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go rea.Run(ctx)
+
+	return &linuxCore{
+		ring:   ring,
+		rea:    rea,
+		ebpf:   ebpf,
+		ctx:    ctx,
+		cancel: cancel,
+	}
 }
 
 // ProxyL4 implements high-performance L4 proxying.
@@ -129,11 +150,13 @@ func (c *linuxCore) proxyWithXDP(ctx context.Context, client net.Conn, targetAdd
 
 // OptimizeListener wraps the given listener with io_uring optimizations.
 func (c *linuxCore) OptimizeListener(l net.Listener) net.Listener {
-	if c.ring != nil {
+	if c.ring != nil && c.rea != nil {
 		if tcpListener, ok := l.(*net.TCPListener); ok {
 			return &iouringListener{
 				TCPListener: tcpListener,
 				ring:        c.ring,
+				rea:         c.rea,
+				ctx:         c.ctx,
 			}
 		}
 	}
@@ -165,9 +188,13 @@ func (c *linuxCore) GetStatus() (enabled bool, engine string, activePorts int) {
 func (c *linuxCore) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.cancel != nil {
+		c.cancel()
+	}
 	if c.ring != nil {
 		err := c.ring.Close()
 		c.ring = nil
+		c.rea = nil
 		return err
 	}
 	return nil
@@ -176,7 +203,9 @@ func (c *linuxCore) Close() error {
 // iouringListener wraps a TCPListener to use io_uring for accepts.
 type iouringListener struct {
 	*net.TCPListener
-	ring *iouring.IOURing
+	ring *uring.Ring
+	rea  *reactor.Reactor
+	ctx  context.Context
 }
 
 func (l *iouringListener) Accept() (net.Conn, error) {
@@ -195,21 +224,27 @@ func (l *iouringListener) Accept() (net.Conn, error) {
 	}
 
 	// Use io_uring to accept the next connection.
-	ch := make(chan iouring.Result, 1)
-	prepReq := iouring.Accept(fd)
-	if _, err := l.ring.SubmitRequest(prepReq, ch); err != nil {
+	resCh := make(chan uring.CQEvent, 1)
+	op := uring.Accept(uintptr(fd), 0)
+	_, err = l.rea.Queue(op, func(event uring.CQEvent) {
+		resCh <- event
+	})
+	if err != nil {
 		return l.TCPListener.Accept()
 	}
 
-	result := <-ch
-	if result.Err() != nil {
-		return nil, result.Err()
+	var event uring.CQEvent
+	select {
+	case event = <-resCh:
+	case <-l.ctx.Done():
+		return nil, l.ctx.Err()
 	}
 
-	newFd, err := result.ReturnFd()
-	if err != nil {
+	if err := event.Error(); err != nil {
 		return nil, err
 	}
+
+	newFd := int(event.Res)
 
 	// Convert the file descriptor back to a net.Conn.
 	file := os.NewFile(uintptr(newFd), "iouring-accept")
@@ -236,64 +271,66 @@ func (l *iouringListener) Accept() (net.Conn, error) {
 	return &iouringConn{
 		Conn: conn,
 		ring: l.ring,
+		rea:  l.rea,
 		fd:   actualFd,
+		ctx:  l.ctx,
 	}, nil
 }
 
 // iouringConn wraps a net.Conn to use io_uring for Read and Write.
 type iouringConn struct {
 	net.Conn
-	ring *iouring.IOURing
+	ring *uring.Ring
+	rea  *reactor.Reactor
 	fd   int
+	ctx  context.Context
 }
 
 func (c *iouringConn) Read(b []byte) (n int, err error) {
-	ch := make(chan iouring.Result, 1)
-	prepReq := iouring.Read(c.fd, b)
-	if _, err := c.ring.SubmitRequest(prepReq, ch); err != nil {
+	resCh := make(chan uring.CQEvent, 1)
+	op := uring.Read(uintptr(c.fd), b, 0)
+	_, err = c.rea.Queue(op, func(event uring.CQEvent) {
+		resCh <- event
+	})
+	if err != nil {
 		return c.Conn.Read(b)
 	}
-	res := <-ch
-	if res.Err() != nil {
-		return 0, res.Err()
+
+	var event uring.CQEvent
+	select {
+	case event = <-resCh:
+	case <-c.ctx.Done():
+		return 0, c.ctx.Err()
 	}
-	n, err = res.ReturnInt()
-	return n, err
+
+	if err := event.Error(); err != nil {
+		return 0, err
+	}
+	if event.Res == 0 {
+		return 0, io.EOF
+	}
+	return int(event.Res), nil
 }
 
 func (c *iouringConn) Write(b []byte) (n int, err error) {
-	// Optimization: For larger buffers, we could use Writev.
-	// We demonstrate Writev usage here for data > 4KB.
-	if len(b) > 4096 {
-		return c.writev(b)
-	}
-
-	ch := make(chan iouring.Result, 1)
-	prepReq := iouring.Write(c.fd, b)
-	if _, err := c.ring.SubmitRequest(prepReq, ch); err != nil {
+	resCh := make(chan uring.CQEvent, 1)
+	op := uring.Write(uintptr(c.fd), b, 0)
+	_, err = c.rea.Queue(op, func(event uring.CQEvent) {
+		resCh <- event
+	})
+	if err != nil {
 		return c.Conn.Write(b)
 	}
-	res := <-ch
-	if res.Err() != nil {
-		return 0, res.Err()
-	}
-	n, err = res.ReturnInt()
-	return n, err
-}
 
-func (c *iouringConn) writev(b []byte) (int, error) {
-	// Split buffer into two vectors for writev demonstration.
-	mid := len(b) / 2
-	bs := [][]byte{b[:mid], b[mid:]}
+	var event uring.CQEvent
+	select {
+	case event = <-resCh:
+	case <-c.ctx.Done():
+		return 0, c.ctx.Err()
+	}
 
-	ch := make(chan iouring.Result, 1)
-	prepReq := iouring.Writev(c.fd, bs)
-	if _, err := c.ring.SubmitRequest(prepReq, ch); err != nil {
-		return c.Conn.Write(b)
+	if err := event.Error(); err != nil {
+		return 0, err
 	}
-	res := <-ch
-	if res.Err() != nil {
-		return 0, res.Err()
-	}
-	return res.ReturnInt()
+	return int(event.Res), nil
 }
