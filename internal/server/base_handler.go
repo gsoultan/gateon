@@ -62,6 +62,7 @@ func CreateBaseHandler(
 	finalInternal := middleware.Chain(
 		middleware.Recovery(),
 		middleware.Nonce(),
+		middleware.Compress(),
 		func(next http.Handler) http.Handler {
 			if deps.MgmtCORS != nil {
 				return deps.MgmtCORS.Handler(next)

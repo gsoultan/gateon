@@ -295,6 +295,40 @@ func (s *ApiService) RunSecurityAnalysisLoop(ctx context.Context, interval time.
 			// Store results in cache so Diagnostics UI is instantaneous
 			anomalies := s.detectAnomalies(ctx, routes)
 			s.anomaliesCache.Store(&anomalies)
+
+			// Step 5: Closed-Loop Mitigation (EAGLE Phase)
+			// Automatically apply eBPF rate limits for high-confidence anomalies.
+			s.applyAutomaticMitigation(ctx, anomalies)
+		}
+	}
+}
+
+func (s *ApiService) applyAutomaticMitigation(ctx context.Context, anomalies []*gateonv1.Anomaly) {
+	if s.EbpfManager == nil {
+		return
+	}
+
+	for _, a := range anomalies {
+		// Only mitigate high-score anomalies from the Neural Sentinel or Graph Intelligence
+		if a.Score > 80 && (a.Type == "neural_sentinel" || a.Type == "graph_coordinated_fp") {
+			// Extract IP from Source (it could be a list for graph clusters)
+			ips := strings.Split(a.Source, ", ")
+			for _, ip := range ips {
+				ip = strings.TrimSpace(ip)
+				if ip == "" || net.ParseIP(ip) == nil {
+					continue
+				}
+
+				// Apply a strict rate limit in eBPF (e.g. 10ms interval = 100 pps)
+				// This is "soft" blocking - it allows some traffic but slows down the attacker
+				// drastically at the kernel level.
+				err := s.EbpfManager.SetAdaptiveRateLimit(ip, 10*time.Millisecond)
+				if err != nil {
+					logger.L.LogWarn("failed to apply automatic eBPF mitigation", "ip", ip, "error", err)
+				} else {
+					logger.L.LogInfo("Automatically applied eBPF rate limit for anomalous actor", "ip", ip, "score", a.Score, "type", a.Type)
+				}
+			}
 		}
 	}
 }

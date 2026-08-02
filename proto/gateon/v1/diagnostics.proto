@@ -67,6 +67,13 @@ message ReputationSyncPayload {
   repeated string history = 4;
 }
 
+message GraphEdgeSyncPayload {
+  string source_node = 1;
+  string target_node = 2;
+  double weight = 3;
+  string type = 4; // e.g. "fp_ip", "ip_path"
+}
+
 message ListSecurityThreatsRequest {
   int32 limit = 1;
   int32 offset = 2;

@@ -795,20 +795,53 @@ func (s *pathStatsStore) loop() {
 				pathStmt, _ := s.upsertStmt(tx)
 				domainStmt, _ := s.domainUpsertStmt(tx)
 
+				// Aggregate increments in the batch to reduce IOPS.
+				// This significantly reduces the number of Exec() calls for popular paths.
+				type aggKey struct {
+					day      string
+					host     string
+					path     string
+					isDomain bool
+					bucket   int // for domain stats
+				}
+				aggregated := make(map[aggKey]*struct {
+					count int
+					latS  float64
+					bytes uint64
+				})
+
 				for _, inc := range batch {
+					day := inc.atTime.UTC().Format("2006-01-02")
+					bucket := 0
 					if inc.isDomain {
+						// Use 30-minute buckets: hour*2 + (minute/30) -> 0-47
+						bucket = inc.atTime.UTC().Hour()*2 + inc.atTime.UTC().Minute()/30
+					}
+					key := aggKey{day, inc.host, inc.path, inc.isDomain, bucket}
+
+					if s, ok := aggregated[key]; ok {
+						s.count++
+						s.latS += inc.latS
+						s.bytes += inc.bytesTotal
+					} else {
+						aggregated[key] = &struct {
+							count int
+							latS  float64
+							bytes uint64
+						}{1, inc.latS, inc.bytesTotal}
+					}
+				}
+
+				for key, val := range aggregated {
+					if key.isDomain {
 						if domainStmt != nil {
-							day := inc.atTime.UTC().Format("2006-01-02")
-							// Use 30-minute buckets: hour*2 + (minute/30) -> 0-47
-							bucket := inc.atTime.UTC().Hour()*2 + inc.atTime.UTC().Minute()/30
-							if _, err := domainStmt.Exec(day, bucket, inc.host, 1, inc.latS, inc.bytesTotal); err != nil {
+							if _, err := domainStmt.Exec(key.day, key.bucket, key.host, val.count, val.latS, val.bytes); err != nil {
 								logger.Default().LogError("domain stats: upsert failed", "error", err)
 							}
 						}
 					} else {
 						if pathStmt != nil {
-							day := inc.atTime.UTC().Format("2006-01-02")
-							if _, err := pathStmt.Exec(day, inc.host, inc.path, 1, inc.latS, inc.bytesTotal); err != nil {
+							if _, err := pathStmt.Exec(key.day, key.host, key.path, val.count, val.latS, val.bytes); err != nil {
 								logger.Default().LogError("path stats: upsert failed", "error", err)
 							}
 						}

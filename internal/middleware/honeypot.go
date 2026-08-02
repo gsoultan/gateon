@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"bytes"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -45,8 +48,10 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 
 			gc := globalStore.Get(r.Context())
 			var paths []string
+			deceptionEnabled := false
 			if gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.Deception != nil && gc.SecurityAdvanced.Deception.Enabled {
 				paths = gc.SecurityAdvanced.Deception.HoneypotPaths
+				deceptionEnabled = true
 			}
 
 			if len(paths) == 0 {
@@ -55,6 +60,17 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 			}
 
 			path := r.URL.Path
+
+			// Check for breadcrumb triggers first
+			if strings.HasPrefix(path, "/_gateon_trap_") {
+				recordHoneypotThreat(r, "dynamic_breadcrumb")
+				blocklistMu.Lock()
+				honeypotBlocklist[clientIP] = time.Now().Add(24 * time.Hour)
+				blocklistMu.Unlock()
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+
 			for _, trapPath := range paths {
 				if trapPath == "" {
 					continue
@@ -72,9 +88,71 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 					return
 				}
 			}
+
+			// If deception is enabled, wrap ResponseWriter to inject breadcrumbs
+			if deceptionEnabled {
+				bw := &breadcrumbWriter{
+					ResponseWriter: w,
+					request:        r,
+				}
+				next.ServeHTTP(bw, r)
+				return
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+type breadcrumbWriter struct {
+	http.ResponseWriter
+	request     *http.Request
+	wroteHeader bool
+	isHTML      bool
+}
+
+func (w *breadcrumbWriter) WriteHeader(code int) {
+	if w.wroteHeader {
+		return
+	}
+	contentType := w.Header().Get("Content-Type")
+	if strings.Contains(contentType, "text/html") && code == http.StatusOK {
+		w.isHTML = true
+		// Remove Content-Length as we will modify the body
+		w.Header().Del("Content-Length")
+	}
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *breadcrumbWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if !w.isHTML {
+		return w.ResponseWriter.Write(b)
+	}
+
+	// Simple breadcrumb injection: find </body> and insert a hidden link
+	bodyTag := []byte("</body>")
+	idx := bytes.LastIndex(b, bodyTag)
+	if idx == -1 {
+		return w.ResponseWriter.Write(b)
+	}
+
+	// Generate a unique trap path
+	trapID := rand.Intn(1000000)
+	trapLink := fmt.Sprintf("\n<!-- Gateon Breadcrumb -->\n<a href=\"/_gateon_trap_%d\" style=\"display:none\" aria-hidden=\"true\" tabIndex=\"-1\"></a>\n", trapID)
+
+	newBody := make([]byte, 0, len(b)+len(trapLink))
+	newBody = append(newBody, b[:idx]...)
+	newBody = append(newBody, []byte(trapLink)...)
+	newBody = append(newBody, b[idx:]...)
+
+	_, err := w.ResponseWriter.Write(newBody)
+	// We return len(b) to pretend we wrote exactly what was given,
+	// although we wrote more. Some middlewares might care.
+	return len(b), err
 }
 
 // Honeypot returns a middleware that detects access to "trap" paths and blocks them.

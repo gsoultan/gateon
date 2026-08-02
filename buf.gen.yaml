@@ -8,5 +8,15 @@ plugins:
     out: proto
     opt:
       - paths=source_relative
+  - remote: buf.build/connectrpc/go:v1.18.1
+    out: proto
+    opt:
+      - paths=source_relative
+  - local: ./ui/node_modules/.bin/protoc-gen-es
+    out: ui/src/services/gen
+    opt: target=ts
+  - local: ./ui/node_modules/.bin/protoc-gen-connect-es
+    out: ui/src/services/gen
+    opt: target=ts
 inputs:
   - directory: proto

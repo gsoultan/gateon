@@ -1,34 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getDiagnostics, getApiUrl } from "./api";
+import { api } from "../services/client";
+import { useRealTimeStore } from "../store/useRealTimeStore";
 import type { GetDiagnosticsResponse } from "../types/gateon";
 
 export function useDiagnostics() {
   const queryClient = useQueryClient();
+  const subscribe = useRealTimeStore((s: any) => s.subscribe);
   const queryKey = ["diagnostics"];
 
   const query = useQuery<GetDiagnosticsResponse>({
     queryKey,
-    queryFn: getDiagnostics,
+    queryFn: async () => {
+      const res = await api.getDiagnostics({});
+      return res as any;
+    },
   });
 
   useEffect(() => {
-    const url = getApiUrl("/v1/diagnostics/watch");
-    const eventSource = new EventSource(url, { withCredentials: true });
-
-    eventSource.onmessage = (event) => {
-      try {
-        const newData = JSON.parse(event.data) as GetDiagnosticsResponse;
-        queryClient.setQueryData(queryKey, newData);
-      } catch (err) {
-        console.error("Failed to parse diagnostics SSE", err);
-      }
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [queryClient, queryKey]);
+    return subscribe("/v1/diagnostics/watch", (newData: GetDiagnosticsResponse) => {
+      queryClient.setQueryData(queryKey, newData);
+    });
+  }, [queryClient, queryKey, subscribe]);
 
   return query;
 }

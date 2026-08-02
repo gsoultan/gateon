@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "./api";
+import { api } from "../services/client";
 
 export interface ApplyRecommendationRequest {
   anomaly_type: string;
@@ -17,15 +17,12 @@ export function useApplyRecommendation() {
 
   return useMutation({
     mutationFn: async (req: ApplyRecommendationRequest) => {
-      const response = await apiFetch("/v1/diagnostics/recommendation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
+      const res = await api.applyRecommendation({
+        anomalyType: req.anomaly_type,
+        source: req.source,
+        threatId: req.threat_id,
       });
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-      return response.json() as Promise<ApplyRecommendationResponse>;
+      return res as ApplyRecommendationResponse;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["security-threats"] });

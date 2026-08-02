@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { mitigateThreat } from "./api";
+import { api } from "../services/client";
 import { notifications } from "@mantine/notifications";
 import type { MitigateThreatRequest } from "../types/gateon";
 
@@ -7,8 +7,13 @@ export function useMitigateThreat() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (req: MitigateThreatRequest) => mitigateThreat(req),
-    onSuccess: (data) => {
+    mutationFn: (req: MitigateThreatRequest) => api.mitigateThreat({
+      source: req.source,
+      type: req.type,
+      reason: req.reason,
+      category: req.category,
+    }),
+    onSuccess: (data: any) => {
       notifications.show({
         title: "Success",
         message: data.message,

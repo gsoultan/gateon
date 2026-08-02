@@ -23,15 +23,44 @@ func (d *ReputationDelegate) NodeMeta(limit int) []byte {
 }
 
 func (d *ReputationDelegate) NotifyMsg(msg []byte) {
-	var payload gateonv1.ReputationSyncPayload
-	if err := json.Unmarshal(msg, &payload); err != nil {
-		logger.L.LogError("failed to unmarshal gossip message", "error", err)
+	// Identify payload type by unmarshaling to a map first or trying both
+	var raw map[string]interface{}
+	if err := json.Unmarshal(msg, &raw); err != nil {
 		return
 	}
 
-	// Apply the received reputation update locally.
-	// We use a internal-only decrease that doesn't trigger another broadcast to avoid loops.
-	ApplyRemoteReputation(payload.Fingerprint, payload.Score, int(payload.ViolationCount), payload.History)
+	if _, ok := raw["fingerprint"]; ok {
+		var payload gateonv1.ReputationSyncPayload
+		if err := json.Unmarshal(msg, &payload); err == nil {
+			// Apply the received reputation update locally.
+			ApplyRemoteReputation(payload.Fingerprint, payload.Score, int(payload.ViolationCount), payload.History)
+		}
+	} else if _, ok := raw["source_node"]; ok {
+		var payload gateonv1.GraphEdgeSyncPayload
+		if err := json.Unmarshal(msg, &payload); err == nil {
+			AddGraphEdge(payload.SourceNode, payload.TargetNode, payload.Weight)
+		}
+	}
+}
+
+func BroadcastGraphEdge(u, v string, weight float64, edgeType string) {
+	if gossipManager == nil {
+		return
+	}
+
+	payload := &gateonv1.GraphEdgeSyncPayload{
+		SourceNode: u,
+		TargetNode: v,
+		Weight:     weight,
+		Type:       edgeType,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	gossipManager.delegate.Enqueue(data)
 }
 
 func (d *ReputationDelegate) GetBroadcasts(overhead, limit int) [][]byte {

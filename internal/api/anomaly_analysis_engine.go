@@ -49,6 +49,8 @@ func NewAnomalyAnalysisEngine(config *gateonv1.GlobalConfig, reputation *reputat
 	return &AnomalyAnalysisEngine{
 		detectors: []AnomalyDetector{
 			&SecurityThreatDetector{Threshold: securityThreshold, Reputation: reputation, Config: behavioral},
+			&NeuralAnomalyDetector{Config: config.AnomalyDetection},
+			&HybridGraphAnomalyDetector{Config: config.AnomalyDetection},
 			&UnlistedRouteDetector{},
 			&ManagementDomainDetector{},
 			&SlowClientDetector{},
