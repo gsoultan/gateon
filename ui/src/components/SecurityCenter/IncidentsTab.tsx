@@ -14,6 +14,7 @@ import {
   ThemeIcon,
   Code,
   Pagination,
+  Skeleton,
 } from "@mantine/core";
 import {
   IconAlertTriangle,
@@ -162,9 +163,22 @@ export function IncidentsTab() {
         </Group>
 
         {isLoading && (
-          <Center py="xl">
-            <Loader />
-          </Center>
+          <Table.ScrollContainer minWidth={760}>
+            <Table striped verticalSpacing="sm">
+              <Table.Tbody>
+                {Array(5).fill(0).map((_, i) => (
+                  <Table.Tr key={i}>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
         )}
 
         {error && (

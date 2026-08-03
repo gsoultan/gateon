@@ -11,6 +11,7 @@ import {
   Title,
   Paper,
   Tooltip,
+  Skeleton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconShieldExclamation, IconArrowRight, IconLock, IconMap2 } from "@tabler/icons-react";
@@ -68,7 +69,20 @@ export function SecurityThreatsCard() {
 
       <Stack gap="xs">
         {isLoading ? (
-          <Text size="sm" c="dimmed">Analyzing threats...</Text>
+          Array(3).fill(0).map((_, i) => (
+            <Paper key={i} withBorder p="xs" radius="sm">
+              <Group justify="space-between" wrap="nowrap">
+                <Group gap="sm" wrap="nowrap" style={{ flex: 1 }}>
+                  <Skeleton height={24} circle />
+                  <div style={{ flex: 1 }}>
+                    <Skeleton height={12} width="40%" mb={6} />
+                    <Skeleton height={10} width="70%" />
+                  </div>
+                </Group>
+                <Skeleton height={20} width={60} radius="xl" />
+              </Group>
+            </Paper>
+          ))
         ) : threats.length === 0 ? (
           <Paper withBorder p="md" radius="sm" style={{ borderStyle: 'dashed' }}>
             <Text size="xs" c="dimmed" ta="center">No security anomalies detected in the last session.</Text>

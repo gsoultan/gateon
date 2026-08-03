@@ -409,6 +409,19 @@ type IPMitigation struct {
 	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
+type CombinedMitigation struct {
+	SourceType    string     `json:"sourceType"` // "ip" or "user"
+	Source        string     `json:"source"`     // IP or Fingerprint
+	JA4H          string     `json:"ja4h"`
+	Type          string     `json:"type"`
+	Category      string     `json:"category"`
+	Status        string     `json:"status"`
+	Reason        string     `json:"reason"`
+	MitigatedAt   time.Time  `json:"mitigatedAt"`
+	UnmitigatedAt *time.Time `json:"unmitigatedAt,omitempty"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
 type ThreatFilter struct {
 	Search   string
 	Category string
@@ -1662,6 +1675,68 @@ func GetUserMitigations(ctx context.Context, limit, offset int) ([]UserMitigatio
 		var unmitigatedAt sql.NullTime
 		var category sql.NullString
 		if err := rows.Scan(&m.Fingerprint, &m.JA4H, &m.Type, &m.Status, &m.Reason, &category, &mitigatedAt, &unmitigatedAt, &updatedAt); err == nil {
+			m.MitigatedAt = mitigatedAt
+			m.UpdatedAt = updatedAt
+			m.Category = category.String
+			if unmitigatedAt.Valid {
+				m.UnmitigatedAt = &unmitigatedAt.Time
+			}
+			res = append(res, m)
+		}
+	}
+	return res, total
+}
+
+// GetCombinedMitigations returns a unified list of both IP and User mitigations.
+func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedMitigation, int) {
+	s := getStore()
+	if s == nil {
+		return nil, 0
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+
+	totalIPQuery := s.dialect.Rebind("SELECT COUNT(*) FROM ip_mitigations WHERE status = 'mitigated'")
+	totalUserQuery := s.dialect.Rebind("SELECT COUNT(*) FROM user_mitigations WHERE status = 'mitigated'")
+
+	var totalIP, totalUser int
+	_ = s.db.QueryRowContext(ctx, totalIPQuery).Scan(&totalIP)
+	_ = s.db.QueryRowContext(ctx, totalUserQuery).Scan(&totalUser)
+	total := totalIP + totalUser
+
+	// Use UNION ALL for consistent paging across both types.
+	// Cast nulls to empty strings for consistency in scans.
+	query := `
+		SELECT 'ip' as source_type, ip as source, '' as ja4h, 'ip_shunning' as type, 'threat_intel' as category, status, reason, mitigated_at, unmitigated_at, updated_at
+		FROM ip_mitigations
+		WHERE status = 'mitigated'
+		UNION ALL
+		SELECT 'user' as source_type, fingerprint as source, ja4h, fp_type as type, category, status, reason, mitigated_at, unmitigated_at, updated_at
+		FROM user_mitigations
+		WHERE status = 'mitigated'
+		ORDER BY mitigated_at DESC
+		LIMIT ? OFFSET ?
+	`
+	query = s.dialect.Rebind(query)
+
+	ex, cleanup := s.getExecutor(ctx)
+	defer cleanup()
+
+	rows, err := ex.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		logger.Default().LogError("failed to get combined mitigations", "error", err)
+		return nil, 0
+	}
+	defer rows.Close()
+
+	var res []CombinedMitigation
+	for rows.Next() {
+		var m CombinedMitigation
+		var mitigatedAt, updatedAt time.Time
+		var unmitigatedAt sql.NullTime
+		var category sql.NullString
+		if err := rows.Scan(&m.SourceType, &m.Source, &m.JA4H, &m.Type, &category, &m.Status, &m.Reason, &mitigatedAt, &unmitigatedAt, &updatedAt); err == nil {
 			m.MitigatedAt = mitigatedAt
 			m.UpdatedAt = updatedAt
 			m.Category = category.String

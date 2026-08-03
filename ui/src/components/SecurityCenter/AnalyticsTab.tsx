@@ -11,7 +11,8 @@ import {
   Avatar, 
   Badge, 
   ThemeIcon, 
-  Group 
+  Group,
+  Skeleton,
 } from '@mantine/core';
 import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
 import { IconMapPin, IconActivity, IconTarget, IconCpu } from '@tabler/icons-react';
@@ -134,22 +135,37 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
           <Table.ScrollContainer minWidth={300}>
             <Table>
               <Table.Tbody>
-                {metrics?.security?.topThreatSources?.map((s: LabeledCount) => (
-                  <Table.Tr key={s.label}>
-                    <Table.Td>
-                      <Group gap="sm">
-                        <Avatar size="sm" radius="xl" color="red"><IconMapPin size={14} /></Avatar>
-                        <Stack gap={0}>
-                          <Text size="sm" fw={700}>{s.label}</Text>
-                          <Text size="xs" c="dimmed">ASN: {s.subtext || 'Unknown'}</Text>
-                        </Stack>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td ta="right">
-                      <Badge color="red" variant="light">{s.value}</Badge>
+                {!metrics ? (
+                  Array(3).fill(0).map((_, i) => (
+                    <Table.Tr key={i}>
+                      <Table.Td><Skeleton height={24} circle mb={4} /><Skeleton height={12} width="60%" /></Table.Td>
+                      <Table.Td ta="right"><Skeleton height={20} width={40} radius="xl" /></Table.Td>
+                    </Table.Tr>
+                  ))
+                ) : metrics.security?.topThreatSources?.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={2} ta="center" py="xl">
+                      <Text size="sm" c="dimmed">No attack sources detected.</Text>
                     </Table.Td>
                   </Table.Tr>
-                ))}
+                ) : (
+                  metrics.security?.topThreatSources?.map((s: LabeledCount) => (
+                    <Table.Tr key={s.label}>
+                      <Table.Td>
+                        <Group gap="sm">
+                          <Avatar size="sm" radius="xl" color="red"><IconMapPin size={14} /></Avatar>
+                          <Stack gap={0}>
+                            <Text size="sm" fw={700}>{s.label}</Text>
+                            <Text size="xs" c="dimmed">ASN: {s.subtext || 'Unknown'}</Text>
+                          </Stack>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Badge color="red" variant="light">{s.value}</Badge>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
@@ -167,25 +183,33 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {metrics?.security?.ebpfTopIPs?.map((s: IPStat) => (
-                  <Table.Tr key={s.ip}>
-                    <Table.Td>
-                      <Group gap="sm">
-                        <ThemeIcon size="sm" radius="xl" color="teal" variant="light"><IconCpu size={14} /></ThemeIcon>
-                        <Text size="sm" fw={700} ff="monospace">{s.ip}</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td ta="right">
-                      <Text size="sm" fw={500}>{safeToLocaleString(s.count)}</Text>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-                {(!metrics?.security?.ebpfTopIPs || metrics.security.ebpfTopIPs.length === 0) && (
+                {!metrics ? (
+                  Array(3).fill(0).map((_, i) => (
+                    <Table.Tr key={i}>
+                      <Table.Td><Skeleton height={24} circle mb={4} /><Skeleton height={12} width="50%" /></Table.Td>
+                      <Table.Td ta="right"><Skeleton height={20} width={60} /></Table.Td>
+                    </Table.Tr>
+                  ))
+                ) : (!metrics.security?.ebpfTopIPs || metrics.security.ebpfTopIPs.length === 0) ? (
                   <Table.Tr>
                     <Table.Td colSpan={2} ta="center" py="xl">
                       <Text size="sm" c="dimmed">No kernel telemetry available (eBPF might be disabled).</Text>
                     </Table.Td>
                   </Table.Tr>
+                ) : (
+                  metrics.security?.ebpfTopIPs?.map((s: IPStat) => (
+                    <Table.Tr key={s.ip}>
+                      <Table.Td>
+                        <Group gap="sm">
+                          <ThemeIcon size="sm" radius="xl" color="teal" variant="light"><IconCpu size={14} /></ThemeIcon>
+                          <Text size="sm" fw={700} ff="monospace">{s.ip}</Text>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="sm" fw={500}>{safeToLocaleString(s.count)}</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
                 )}
               </Table.Tbody>
             </Table>
@@ -195,24 +219,40 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Card withBorder radius="md">
           <Title order={4} mb="md">Heaviest Hitters (Subnets)</Title>
           <Stack gap="sm">
-            {metrics?.security?.heavyHitters?.map((h: HeavyHitter) => (
-              <Box key={h.network} p="xs" style={{ border: '1px solid var(--mantine-color-red-light)', borderRadius: 'var(--mantine-radius-sm)' }} bg="var(--mantine-color-red-light)">
-                <Group justify="space-between">
-                  <Group gap="xs">
-                    <ThemeIcon color="red" variant="subtle" size="sm">
-                      <IconTarget size={14} />
-                    </ThemeIcon>
-                    <Stack gap={0}>
-                      <Text size="sm" fw={700} ff="monospace">{h.network}</Text>
-                      <Text size="xs" c="dimmed">{h.count} threats ({safeToFixed(h.percentage, 1)}%)</Text>
-                    </Stack>
+            {!metrics ? (
+              Array(2).fill(0).map((_, i) => (
+                <Box key={i} p="xs" style={{ border: '1px solid var(--mantine-color-default-border)', borderRadius: 'var(--mantine-radius-sm)' }}>
+                  <Group justify="space-between">
+                    <Group gap="xs" style={{ flex: 1 }}>
+                      <Skeleton height={24} circle />
+                      <div style={{ flex: 1 }}>
+                        <Skeleton height={12} width="40%" mb={6} />
+                        <Skeleton height={10} width="60%" />
+                      </div>
+                    </Group>
+                    <Skeleton height={20} width={60} radius="xl" />
                   </Group>
-                  <Badge color="red" variant="filled">CRITICAL</Badge>
-                </Group>
-              </Box>
-            ))}
-            {(!metrics?.security?.heavyHitters || metrics.security.heavyHitters.length === 0) && (
+                </Box>
+              ))
+            ) : metrics.security?.heavyHitters?.length === 0 ? (
               <Text size="sm" c="dimmed" ta="center" py="xl">No malicious subnets detected.</Text>
+            ) : (
+              metrics.security?.heavyHitters?.map((h: HeavyHitter) => (
+                <Box key={h.network} p="xs" style={{ border: '1px solid var(--mantine-color-red-light)', borderRadius: 'var(--mantine-radius-sm)' }} bg="var(--mantine-color-red-light)">
+                  <Group justify="space-between">
+                    <Group gap="xs">
+                      <ThemeIcon color="red" variant="subtle" size="sm">
+                        <IconTarget size={14} />
+                      </ThemeIcon>
+                      <Stack gap={0}>
+                        <Text size="sm" fw={700} ff="monospace">{h.network}</Text>
+                        <Text size="xs" c="dimmed">{h.count} threats ({safeToFixed(h.percentage, 1)}%)</Text>
+                      </Stack>
+                    </Group>
+                    <Badge color="red" variant="filled">CRITICAL</Badge>
+                  </Group>
+                </Box>
+              ))
             )}
           </Stack>
         </Card>
