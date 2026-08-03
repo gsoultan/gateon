@@ -203,6 +203,14 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
+	telemetry.SetEbpfManager(s.EbpfManager)
+	telemetry.SetVersion(s.Version)
+	if s.Phantom != nil {
+		telemetry.SetTitanProvider(s.Phantom)
+	}
+	if s.Governor != nil {
+		telemetry.SetGovernorProvider(s.Governor)
+	}
 	metricsStop := make(chan struct{})
 	telemetry.StartSystemMetricsCollector(metricsStop)
 	go telemetry.StartCacheMetricsLoop(ctx)

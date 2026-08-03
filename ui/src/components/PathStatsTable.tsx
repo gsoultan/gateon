@@ -1,4 +1,5 @@
 import { useState, useMemo, useTransition, useEffect } from "react";
+import { safeToFixed } from "../utils/format";
 import { usePathStats } from "../hooks/useGateon";
 import {
   Table,
@@ -175,7 +176,7 @@ export function PathStatsTable() {
                       fw={600}
                       c={stat.avgLatencySeconds > 0.5 ? "orange" : "green"}
                     >
-                      {stat.avgLatencySeconds.toFixed(3)}s
+                      {safeToFixed(stat.avgLatencySeconds, 3)}s
                     </Text>
                   </Table.Td>
                 </Table.Tr>

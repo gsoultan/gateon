@@ -43,6 +43,7 @@ import {
 import { useMetricsSnapshot } from "../hooks/useMetricsSnapshot";
 import { useTableDensity } from "../hooks/useTableDensity";
 import React, { useMemo, useState } from "react";
+import { formatBytes as formatBytesGlobal, formatCompact as formatNumberGlobal, safeToFixed, safeToLocaleString } from "../utils/format";
 import type {
   GoldenSignals,
   RouteMetric,
@@ -53,21 +54,17 @@ import type {
   LabeledCount,
 } from "../types/metrics";
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const idx = Math.min(i, units.length - 1);
-  return `${(bytes / Math.pow(1024, idx)).toFixed(1)} ${units[idx]}`;
+// Use the global formatters where possible, or hardened locals
+function formatBytes(bytes: number | undefined | null): string {
+  return formatBytesGlobal(bytes);
 }
 
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+function formatNumber(n: number | undefined | null): string {
+  return formatNumberGlobal(n);
 }
 
-function formatDuration(seconds: number): string {
+function formatDuration(seconds: number | undefined | null): string {
+  if (!seconds) return "0s";
   if (seconds < 60) return `${Math.floor(seconds)}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
   const h = Math.floor(seconds / 3600);
@@ -75,11 +72,11 @@ function formatDuration(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
-function formatLatency(ms: number): string {
-  if (ms === 0) return "—";
-  if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
-  if (ms < 1000) return `${ms.toFixed(1)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
+function formatLatency(ms: number | undefined | null): string {
+  if (!ms) return "—";
+  if (ms < 1) return `${safeToFixed(ms * 1000, 0)}µs`;
+  if (ms < 1000) return `${safeToFixed(ms, 1)}ms`;
+  return `${safeToFixed(ms / 1000, 2)}s`;
 }
 
 function errorRateColor(rate: number): string {
@@ -117,7 +114,7 @@ function GoldenSignalsSection({ gs }: { gs: GoldenSignals }) {
     },
     {
       label: "Error Rate",
-      value: `${gs.errorRate.toFixed(2)}%`,
+      value: `${safeToFixed(gs.errorRate, 2)}%`,
       icon: IconAlertTriangle,
       color: errorRateColor(gs.errorRate),
       description: `${formatNumber(gs.errorsTotal)} errors of ${formatNumber(gs.requestsTotal)} requests`,
@@ -393,7 +390,7 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                           variant="light"
                           color={errorRateColor(r.errorRate)}
                         >
-                          {r.errorRate.toFixed(1)}%
+                          {safeToFixed(r.errorRate, 1)}%
                         </Badge>
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>
@@ -543,7 +540,7 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
                   Hit Rate
                 </Text>
                 <Text size="sm" fw={700} c="teal">
-                  {mw.cacheHitRate.toFixed(1)}%
+                  {safeToFixed(mw.cacheHitRate, 1)}%
                 </Text>
               </Group>
               <Progress value={mw.cacheHitRate} color="teal" size="sm" radius="md" />
@@ -575,7 +572,7 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
                   Ratio
                 </Text>
                 <Text size="sm" fw={700} c="blue">
-                  {mw.compressionRatio.toFixed(1)}%
+                  {safeToFixed(mw.compressionRatio, 1)}%
                 </Text>
               </Group>
               <Progress
@@ -902,7 +899,7 @@ function SystemMetricsSection({ sys }: { sys: SystemMetrics }) {
       value: formatDuration(sys.uptimeSeconds),
       icon: IconClock,
       color: "green",
-      description: `${sys.uptimeSeconds.toFixed(0)}s total`,
+      description: `${safeToFixed(sys.uptimeSeconds, 0)}s total`,
     },
     {
       label: "Goroutines",

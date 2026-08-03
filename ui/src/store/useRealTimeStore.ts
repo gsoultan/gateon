@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { getApiUrl } from '../hooks/api';
-import type { Anomaly, AuditLog } from '../types/gateon';
+import type { Anomaly, AuditLog, MetricsSnapshot } from '../types/gateon';
 
-type EventType = 'audit' | 'threat';
+type EventType = 'audit' | 'threat' | 'metrics';
 
 interface RealTimeEvent {
   type: EventType;
@@ -11,6 +11,7 @@ interface RealTimeEvent {
 
 interface RealTimeState {
   isConnected: boolean;
+  lastMetrics: MetricsSnapshot | null;
   connect: () => void;
   disconnect: () => void;
   subscribers: Map<EventType, Set<(data: any) => void>>;
@@ -21,6 +22,7 @@ let eventSource: EventSource | null = null;
 
 export const useRealTimeStore = create<RealTimeState>((set, get) => ({
   isConnected: false,
+  lastMetrics: null,
   subscribers: new Map(),
 
   connect: () => {
@@ -36,11 +38,16 @@ export const useRealTimeStore = create<RealTimeState>((set, get) => ({
     eventSource.onmessage = (event) => {
       try {
         const ev = JSON.parse(event.data) as RealTimeEvent;
+        if (ev.type === 'metrics') {
+          set({ lastMetrics: ev.data });
+        }
         const subs = get().subscribers.get(ev.type);
         if (subs) {
           subs.forEach((cb) => cb(ev.data));
         }
       } catch (err) {
+        // Heartbeat is not JSON, so ignore parsing errors for it
+        if (event.data?.includes('heartbeat')) return;
         console.error('Failed to parse multiplexed SSE event', err);
       }
     };

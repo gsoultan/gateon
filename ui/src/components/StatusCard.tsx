@@ -1,16 +1,16 @@
 import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper, Progress, Box, ThemeIcon } from '@mantine/core'
 import { IconActivity, IconRoute, IconClock, IconVersions, IconCpu, IconDeviceDesktop, IconAdjustments } from '@tabler/icons-react'
-import { useGateonStatus } from '../hooks/useGateon'
-import { formatBytes } from '../utils/format'
+import { useGateonStatus } from '../hooks/useGateonStatus'
+import { formatBytes, safeToFixed } from '../utils/format'
 
 export default function StatusCard() {
   const { data: statusData, error: statusError, isLoading: isStatusLoading } = useGateonStatus()
 
   const stats = [
     { label: 'Version', value: statusData?.version || 'N/A', icon: IconVersions, color: 'blue' },
-    { label: 'System Uptime', value: statusData?.uptime ? formatUptime(Number(statusData.uptime)) : '0s', icon: IconClock, color: 'teal' },
+    { label: 'System Uptime', value: statusData?.uptimeSeconds ? formatUptime(Number(statusData.uptimeSeconds)) : '0s', icon: IconClock, color: 'teal' },
     { label: 'CPU Cores', value: statusData?.cpuCores || 'N/A', icon: IconCpu, color: 'indigo' },
-    { label: 'Total Memory', value: statusData?.memoryTotalGb ? `${statusData.memoryTotalGb.toFixed(1)} GB` : 'N/A', icon: IconDeviceDesktop, color: 'grape' },
+    { label: 'Total Memory', value: statusData?.memoryTotalMb ? `${safeToFixed(statusData.memoryTotalMb / 1024, 1)} GB` : 'N/A', icon: IconDeviceDesktop, color: 'grape' },
     { 
       label: 'Resource Profile', 
       value: (
@@ -90,21 +90,21 @@ export default function StatusCard() {
             <Box>
               <Group justify="space-between" mb={6}>
                 <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>CPU Load</Text>
-                <Text size="xs" fw={700}>{statusData?.cpuUsage?.toFixed(1) || 0}%</Text>
+                <Text size="xs" fw={700}>{safeToFixed(statusData?.cpuUsage, 1)}%</Text>
               </Group>
               <Progress value={statusData?.cpuUsage || 0} size="md" radius="xl" color="brand" animated />
             </Box>
             <Box>
               <Group justify="space-between" mb={6}>
                 <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Memory Utilization</Text>
-                <Text size="xs" fw={700}>{statusData?.memoryUsagePercent?.toFixed(1) || 0}%</Text>
+                <Text size="xs" fw={700}>{safeToFixed(statusData?.memoryUsagePercent, 1)}%</Text>
               </Group>
               <Progress value={statusData?.memoryUsagePercent || 0} size="md" radius="xl" color="orange" animated />
             </Box>
             <Box>
               <Group justify="space-between" mb={6}>
-                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Storage ({statusData?.storageUsageGb?.toFixed(1)}GB / {statusData?.storageTotalGb?.toFixed(1)}GB)</Text>
-                <Text size="xs" fw={700}>{statusData?.storageUsagePercent?.toFixed(1) || 0}%</Text>
+                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Storage ({safeToFixed(statusData?.storageUsageGb, 1)}GB / {safeToFixed(statusData?.storageTotalGb, 1)}GB)</Text>
+                <Text size="xs" fw={700}>{safeToFixed(statusData?.storageUsagePercent, 1)}%</Text>
               </Group>
               <Progress value={statusData?.storageUsagePercent || 0} size="md" radius="xl" color="teal" animated />
             </Box>

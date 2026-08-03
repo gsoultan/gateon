@@ -60,6 +60,7 @@ import {
   IconScale,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
+import { safeToFixed } from "../utils/format";
 import { useDiagnostics } from "../hooks/useGateon";
 import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import { useDisclosure } from "@mantine/hooks";
@@ -577,7 +578,7 @@ const DiagnosticsPage: React.FC = () => {
                     </Badge>
                   </Group>
                   <Text fw={900} size="xl">
-                    {data.system.titan.governor?.memoryPressurePercent?.toFixed(1)}% / {data.system.titan.governor?.cpuPressurePercent?.toFixed(1)}%
+                    {safeToFixed(data.system.titan.governor?.memoryPressurePercent, 1)}% / {safeToFixed(data.system.titan.governor?.cpuPressurePercent, 1)}%
                   </Text>
                   <Text size="10px" c="dimmed">
                     Scavengers: {data.system.titan.governor?.memoryHooksCount} Memory / {data.system.titan.governor?.cpuHooksCount} CPU

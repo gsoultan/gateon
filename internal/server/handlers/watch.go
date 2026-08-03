@@ -41,12 +41,20 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 		threatCh := telemetry.ThreatBroadcaster.Subscribe()
 		defer telemetry.ThreatBroadcaster.Unsubscribe(threatCh)
 
+		metricsCh := telemetry.MetricsBroadcaster.Subscribe()
+		defer telemetry.MetricsBroadcaster.Unsubscribe(metricsCh)
+
 		// Create a common channel for all events
-		eventCh := make(chan WatchEvent, 10)
+		eventCh := make(chan WatchEvent, 20)
 
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
+
+			// Send initial metrics if available
+			if snap := telemetry.GetLastSnapshot(); snap != nil {
+				eventCh <- WatchEvent{Type: "metrics", Data: snap}
+			}
 
 			for {
 				select {
@@ -56,6 +64,8 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 					eventCh <- WatchEvent{Type: "audit", Data: log}
 				case threat := <-threatCh:
 					eventCh <- WatchEvent{Type: "threat", Data: threat}
+				case snap := <-metricsCh:
+					eventCh <- WatchEvent{Type: "metrics", Data: snap}
 				case <-ticker.C:
 					eventCh <- WatchEvent{Type: "heartbeat", Data: time.Now().Unix()}
 				}

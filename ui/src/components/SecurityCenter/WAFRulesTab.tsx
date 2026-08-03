@@ -28,34 +28,32 @@ import { usePermissions } from '../../hooks/usePermissions';
 
 export function WAFRulesTab() {
   const { canWrite } = usePermissions();
-  const [activePage, setActivePage] = useState(1);
   const pageSize = 10;
-  const [search, setSearch] = useState('');
+  const [localSearch, setLocalSearch] = useState('');
 
   const { rules, total, params, setParams, isLoading, createRule, updateRule, deleteRule } = useWafRules({
-    limit: pageSize,
-    offset: (activePage - 1) * pageSize,
-    search: search
+    pageSize: pageSize,
+    page: 0,
+    search: ''
   });
+  
   const [opened, setOpened] = useState(false);
   const [editingRule, setEditingRule] = useState<Partial<WafRule> | null>(null);
 
+  const activePage = (params.page || 0) + 1;
   const totalPages = Math.ceil(total / pageSize);
 
   const handlePageChange = (page: number) => {
-    setActivePage(page);
-    setParams({ ...params, offset: (page - 1) * pageSize });
+    setParams(prev => ({ ...prev, page: page - 1 }));
   };
 
   const handleSearch = (value: string) => {
-    setSearch(value);
-    setActivePage(1);
-    setParams({ ...params, search: value, offset: 0 });
+    setLocalSearch(value);
+    setParams(prev => ({ ...prev, search: value, page: 0 }));
   };
 
   const handleCategoryFilter = (value: string | null) => {
-    setActivePage(1);
-    setParams({ ...params, category: value || 'all', offset: 0 });
+    setParams(prev => ({ ...prev, category: value || 'all', page: 0 }));
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -152,7 +150,7 @@ export function WAFRulesTab() {
           <TextInput
             placeholder="Search rules..."
             leftSection={<IconSearch size={16} />}
-            value={search}
+            value={localSearch}
             onChange={(e) => handleSearch(e.currentTarget.value)}
             w={250}
           />
@@ -224,7 +222,7 @@ export function WAFRulesTab() {
                 <Table.Td colSpan={6}>
                   <Stack align="center" py="xl" gap="xs">
                     <IconShieldCheck size={48} color="var(--mantine-color-dimmed)" stroke={1} />
-                    <Text c="dimmed">{search ? `No rules matching "${search}"` : "No rules found in database."}</Text>
+                    <Text c="dimmed">{localSearch ? `No rules matching "${localSearch}"` : "No rules found in database."}</Text>
                   </Stack>
                 </Table.Td>
               </Table.Tr>

@@ -12,7 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -20,14 +22,25 @@ import (
 )
 
 type EbpfProvider interface {
-	GetTopIPs(limit int) ([]IPStat, error)
+	GetTopIPs(limit int) ([]ebpf.IPStat, error)
 	ShunIP(ip string) error
 	UnshunIP(ip string) error
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 }
 
+type TitanProvider interface {
+	GetStatus() (enabled bool, engine string, activePorts int)
+}
+
+type GovernorProvider interface {
+	GetStatus(ctx context.Context) (active bool, memHooks, cpuHooks int, memPressure, cpuPressure float64)
+}
+
 var (
 	globalEbpfManager atomic.Value // stores EbpfProvider (interface)
+	globalTitan       atomic.Value // stores TitanProvider (interface)
+	globalGovernor    atomic.Value // stores GovernorProvider (interface)
+	globalVersion     atomic.Value // stores string
 	lastSnapshot      atomic.Pointer[MetricsSnapshot]
 
 	snapshotPool = sync.Pool{
@@ -58,6 +71,22 @@ func (s *MetricsSnapshot) Reset() {
 
 func SetEbpfManager(m EbpfProvider) {
 	globalEbpfManager.Store(m)
+}
+
+func SetTitanProvider(p TitanProvider) {
+	globalTitan.Store(p)
+}
+
+func SetGovernorProvider(p GovernorProvider) {
+	globalGovernor.Store(p)
+}
+
+func SetVersion(v string) {
+	globalVersion.Store(v)
+}
+
+func GetLastSnapshot() *MetricsSnapshot {
+	return lastSnapshot.Load()
 }
 
 // StartSnapshotLoop starts a background goroutine to periodically refresh the
@@ -92,6 +121,7 @@ func StartSnapshotLoop(ctx context.Context) {
 				if old != nil {
 					snapshotPool.Put(old)
 				}
+				MetricsBroadcaster.Broadcast(snap)
 			}
 
 			interval := time.Duration(td.TelemetryIntervalSeconds) * time.Second
@@ -208,19 +238,23 @@ type IPStat struct {
 
 // GoldenSignals represents the four golden signals of monitoring.
 type GoldenSignals struct {
-	RequestsTotal   float64 `json:"requestsTotal"`
-	ErrorsTotal     float64 `json:"errorsTotal"`
-	ErrorRate       float64 `json:"errorRate"`
-	AvgLatencyMs    float64 `json:"avgLatencyMs"`
-	P50LatencyMs    float64 `json:"p50LatencyMs"`
-	P95LatencyMs    float64 `json:"p95LatencyMs"`
-	P99LatencyMs    float64 `json:"p99LatencyMs"`
-	InFlightTotal   float64 `json:"inFlightTotal"`
-	BytesInTotal    float64 `json:"bytesInTotal"`
-	BytesOutTotal   float64 `json:"bytesOutTotal"`
-	ActiveConnTotal float64 `json:"activeConnTotal"`
-	RequestsToday   uint64  `json:"requestsToday"`
-	BytesToday      uint64  `json:"bytesToday"`
+	RequestsTotal    float64 `json:"requestsTotal"`
+	ErrorsTotal      float64 `json:"errorsTotal"`
+	ErrorRate        float64 `json:"errorRate"`
+	AvgLatencyMs     float64 `json:"avgLatencyMs"`
+	P50LatencyMs     float64 `json:"p50LatencyMs"`
+	P95LatencyMs     float64 `json:"p95LatencyMs"`
+	P99LatencyMs     float64 `json:"p99LatencyMs"`
+	InFlightTotal    float64 `json:"inFlightTotal"`
+	BytesInTotal     float64 `json:"bytesInTotal"`
+	BytesOutTotal    float64 `json:"bytesOutTotal"`
+	ActiveConnTotal  float64 `json:"activeConnTotal"`
+	RequestsToday    uint64  `json:"requestsToday"`
+	BytesToday       uint64  `json:"bytesToday"`
+	OpenCircuits     float64 `json:"openCircuits"`
+	HalfOpenCircuits float64 `json:"halfOpenCircuits"`
+	HealthyTargets   float64 `json:"healthyTargets"`
+	TotalTargets     float64 `json:"totalTargets"`
 }
 
 // RouteMetric holds per-route request metrics.
@@ -313,19 +347,28 @@ type CountryMetric struct {
 
 // SystemMetrics holds system-level gauge values.
 type SystemMetrics struct {
-	UptimeSeconds    float64 `json:"uptimeSeconds"`
-	Goroutines       float64 `json:"goroutines"`
-	MemoryAllocBytes float64 `json:"memoryAllocBytes"`
-	MemoryTotalBytes float64 `json:"memoryTotalAllocBytes"`
-	MemorySysBytes   float64 `json:"memorySysBytes"`
-	CPUUsage         float64 `json:"cpuUsagePercent"`
-	MemoryUsage      float64 `json:"memoryUsagePercent"`
-	CPUCores         int     `json:"cpuCores"`
-	MemoryTotalGB    float64 `json:"memoryTotalGB"`
-	StorageUsageGB   float64 `json:"storageUsageGB"`
-	StorageTotalGB   float64 `json:"storageTotalGB"`
-	StorageUsagePct  float64 `json:"storageUsagePercent"`
-	PublicIP         string  `json:"publicIp"`
+	UptimeSeconds            float64 `json:"uptimeSeconds"`
+	Goroutines               float64 `json:"goroutines"`
+	MemoryAllocBytes         float64 `json:"memoryAllocBytes"`
+	MemoryTotalBytes         float64 `json:"memoryTotalAllocBytes"`
+	MemorySysBytes           float64 `json:"memorySysBytes"`
+	CPUUsage                 float64 `json:"cpuUsagePercent"`
+	MemoryUsage              float64 `json:"memoryUsagePercent"`
+	CPUCores                 int     `json:"cpuCores"`
+	MemoryTotalGB            float64 `json:"memoryTotalGB"`
+	StorageUsageGB           float64 `json:"storageUsageGB"`
+	StorageTotalGB           float64 `json:"storageTotalGB"`
+	StorageUsagePct          float64 `json:"storageUsagePercent"`
+	PublicIP                 string  `json:"publicIp"`
+	Status                   string  `json:"status"`
+	Version                  string  `json:"version"`
+	TitanEnabled             bool    `json:"titanEnabled"`
+	NeuralSentinelEnabled    bool    `json:"neuralSentinelEnabled"`
+	GraphIntelligenceEnabled bool    `json:"graphIntelligenceEnabled"`
+	PredictiveAiEnabled      bool    `json:"predictiveAiEnabled"`
+	PqcEnabled               bool    `json:"pqcEnabled"`
+	TpmEnabled               bool    `json:"tpmEnabled"`
+	ResourceGovernorEnabled  bool    `json:"resourceGovernorEnabled"`
 }
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
@@ -393,7 +436,11 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 		if m := globalEbpfManager.Load(); m != nil {
 			if prov, ok := m.(EbpfProvider); ok {
 				if ips, err := prov.GetTopIPs(5); err == nil {
-					snap.Security.EbpfTopIPs = ips
+					converted := make([]IPStat, len(ips))
+					for i, ip := range ips {
+						converted[i] = IPStat{IP: ip.IP, Count: ip.Count}
+					}
+					snap.Security.EbpfTopIPs = converted
 				}
 			}
 		}
@@ -451,6 +498,31 @@ func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) G
 	req24h, bytes24h := GetSystemTrafficRolling24h(ctx)
 	gs.RequestsToday = req24h
 	gs.BytesToday = bytes24h
+
+	// Circuit breaker and health stats (process-wide)
+	if fam, ok := idx["gateon_circuit_breaker_state"]; ok {
+		for _, m := range fam.GetMetric() {
+			state := labelValue(m, "state")
+			val := m.GetGauge().GetValue()
+			switch state {
+			case "open":
+				gs.OpenCircuits += val
+			case "half-open":
+				gs.HalfOpenCircuits += val
+			}
+		}
+	}
+
+	if fam, ok := idx["gateon_target_health"]; ok {
+		for _, m := range fam.GetMetric() {
+			status := labelValue(m, "status")
+			val := m.GetGauge().GetValue()
+			gs.TotalTargets += val
+			if status == "healthy" {
+				gs.HealthyTargets += val
+			}
+		}
+	}
 
 	return gs
 }
@@ -980,6 +1052,12 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 		CPUUsage:         gaugeValue(idx, "gateon_cpu_usage_percent"),
 		MemoryUsage:      gaugeValue(idx, "gateon_memory_usage_percent"),
 		CPUCores:         runtime.NumCPU(),
+		Status:           "running",
+		Version:          "dev",
+	}
+
+	if v := globalVersion.Load(); v != nil {
+		sm.Version = v.(string)
 	}
 
 	if fam, ok := idx["gateon_memory_sys_bytes"]; ok && len(fam.GetMetric()) > 0 {
@@ -993,6 +1071,28 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	sm.StorageTotalGB = gaugeValue(idx, "gateon_storage_total_bytes") / (1024 * 1024 * 1024)
 	sm.StorageUsagePct = gaugeValue(idx, "gateon_storage_usage_percent")
 	sm.PublicIP = GetPublicIP(context.Background())
+
+	// Feature flags
+	sm.TitanEnabled = false
+	if v := globalTitan.Load(); v != nil {
+		if prov, ok := v.(TitanProvider); ok {
+			enabled, _, _ := prov.GetStatus()
+			sm.TitanEnabled = enabled
+		}
+	}
+
+	sm.PredictiveAiEnabled = ai.GlobalPredictor != nil
+	sm.NeuralSentinelEnabled = true // Isolation Forest is always active if initialized
+	sm.GraphIntelligenceEnabled = true
+	sm.PqcEnabled = true // ML-KEM/ML-DSA always available in binary
+
+	sm.ResourceGovernorEnabled = false
+	if v := globalGovernor.Load(); v != nil {
+		if prov, ok := v.(GovernorProvider); ok {
+			active, _, _, _, _ := prov.GetStatus(context.Background())
+			sm.ResourceGovernorEnabled = active
+		}
+	}
 
 	return sm
 }

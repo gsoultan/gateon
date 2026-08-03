@@ -1,6 +1,6 @@
 import { memo, useState, useMemo, useEffect } from "react";
 import { Table, Text, Paper, Group, Box, Progress, Pagination } from "@mantine/core";
-import { getCountryFlag, formatBytes } from "../../utils/format";
+import { getCountryFlag, formatBytes, safeToFixed } from "../../utils/format";
 import { useTableDensity } from "../../hooks/useTableDensity";
 
 const PAGE_SIZE = 10;
@@ -86,7 +86,7 @@ export const CountryTrafficTable = memo(function CountryTrafficTable({
                   : `${m.requests.toLocaleString()} req`}
               </Text>
               <Text size="xs" c="dimmed">
-                {percentage.toFixed(1)}%
+                {safeToFixed(percentage, 1)}%
               </Text>
             </Group>
             <Progress value={percentage} size="xs" radius="xl" color="blue" />

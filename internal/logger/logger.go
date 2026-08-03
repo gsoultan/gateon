@@ -198,7 +198,7 @@ var Broadcaster = &LogBroadcast{
 func (lb *LogBroadcast) Subscribe() (chan string, []string) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
-	ch := make(chan string, 100)
+	ch := make(chan string, 1000)
 	lb.subscribers[ch] = struct{}{}
 	hist := make([]string, len(lb.history))
 	copy(hist, lb.history)

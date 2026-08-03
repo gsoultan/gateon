@@ -41,6 +41,7 @@ import {
   IconUsers,
 } from "@tabler/icons-react";
 import { useRemoveMitigation, useApplyRecommendation, useSecurityThreat, useSecurityThreats } from "../hooks/useGateon";
+import { safeToFixed } from "../utils/format";
 import { notifications } from "@mantine/notifications";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
@@ -430,7 +431,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                         <Text size="xs" c="dimmed" fw={700}>ENTROPY</Text>
                       </Group>
                       <Badge variant="light" color={anomaly.entropy < 1.0 ? "red" : anomaly.entropy > 5.0 ? "blue" : "teal"} size="lg">
-                        {anomaly.entropy.toFixed(2)}
+                        {safeToFixed(anomaly.entropy, 2)}
                       </Badge>
                     </Stack>
                   </Tooltip>
@@ -653,7 +654,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                 variant="outline"
                 color={anomaly.score > 70 ? "red" : anomaly.score > 40 ? "orange" : "blue"}
               >
-                {anomaly.score.toFixed(0)}/100
+                {safeToFixed(anomaly.score, 0)}/100
               </Badge>
             </Group>
           )}
@@ -666,7 +667,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                 variant="light"
                 color={anomaly.reputation >= 80 ? "teal" : anomaly.reputation >= 50 ? "yellow" : "red"}
               >
-                {anomaly.reputation.toFixed(0)}%
+                {safeToFixed(anomaly.reputation, 0)}%
               </Badge>
             </Group>
           )}

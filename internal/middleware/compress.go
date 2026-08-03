@@ -102,8 +102,8 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 			}
 
 			// gRPC and SSE must not be compressed
-			contentType := r.Header.Get("Content-Type")
-			accept := r.Header.Get("Accept")
+			contentType := strings.ToLower(r.Header.Get("Content-Type"))
+			accept := strings.ToLower(r.Header.Get("Accept"))
 			if strings.HasPrefix(contentType, "application/grpc") ||
 				strings.HasPrefix(contentType, "text/event-stream") ||
 				strings.Contains(accept, "text/event-stream") {
@@ -150,8 +150,8 @@ func (w *compressWriter) WriteHeader(status int) {
 
 	// If we already know the content type is SSE, decide now to avoid buffering.
 	// This is critical for real-time responsiveness.
-	ct := w.ResponseWriter.Header().Get("Content-Type")
-	if strings.Contains(strings.ToLower(ct), "text/event-stream") {
+	ct := strings.ToLower(w.ResponseWriter.Header().Get("Content-Type"))
+	if strings.Contains(ct, "text/event-stream") || strings.HasPrefix(ct, "application/grpc") {
 		w.decide()
 	}
 }
@@ -187,7 +187,7 @@ func (w *compressWriter) decide() {
 	} else {
 		ct := h.Get("Content-Type")
 		contentType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
-		if strings.HasPrefix(ct, "application/grpc") || contentType == "text/event-stream" {
+		if strings.HasPrefix(contentType, "application/grpc") || contentType == "text/event-stream" {
 			w.should = false
 		} else if excluded := w.excluded[contentType]; excluded {
 			w.should = false

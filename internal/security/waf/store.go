@@ -139,9 +139,9 @@ func (s *Store) ListRules(ctx context.Context, limit, offset int, search, catego
 	var conditions []string
 
 	if search != "" {
-		conditions = append(conditions, "(id LIKE ? OR name LIKE ? OR directive LIKE ? OR category LIKE ?)")
+		conditions = append(conditions, "(id = ? OR id LIKE ? OR name LIKE ? OR directive LIKE ? OR category LIKE ?)")
 		searchArg := "%" + search + "%"
-		args = append(args, searchArg, searchArg, searchArg, searchArg)
+		args = append(args, search, searchArg, searchArg, searchArg, searchArg)
 	}
 
 	if category != "" && category != "all" {
@@ -161,7 +161,16 @@ func (s *Store) ListRules(ctx context.Context, limit, offset int, search, catego
 		return nil, 0, err
 	}
 
-	query += " ORDER BY id ASC"
+	// Sort by numeric ID if it looks like a number, else lexicographically.
+	// This ensures that rule 900 comes before 1000.
+	if s.dialect.Driver == db.DriverSQLite {
+		query += " ORDER BY (id+0) ASC, id ASC"
+	} else if s.dialect.Driver == db.DriverPostgres {
+		// Postgres: try to cast to integer for sorting if numeric, otherwise sort as text
+		query += " ORDER BY CASE WHEN id ~ '^[0-9]+$' THEN CAST(id AS INTEGER) ELSE 999999999 END ASC, id ASC"
+	} else {
+		query += " ORDER BY id ASC"
+	}
 	if limit > 0 {
 		query += " LIMIT ? OFFSET ?"
 		args = append(args, limit, offset)

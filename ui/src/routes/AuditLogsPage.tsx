@@ -41,6 +41,7 @@ import {
 } from '@tabler/icons-react';
 import { useAuditLogs } from '../hooks/useAuditLogs';
 import { useAuditArchives, getAuditArchive } from '../hooks/useAuditArchives';
+import { safeToFixed } from '../utils/format';
 import { useUrlFilters } from '../hooks/useUrlFilters';
 import { useIsMobile } from '../hooks/useMobile';
 import { format } from 'date-fns';
@@ -321,7 +322,7 @@ export default function AuditLogsPage() {
                               <IconFileZip size={16} color="var(--mantine-color-grape-6)" />
                               <Text size="sm" fw={500}>{archive.filename}</Text>
                             </Group>
-                            <Text size="xs">{(archive.size / 1024).toFixed(1)} KB</Text>
+                            <Text size="xs">{safeToFixed(archive.size / 1024, 1)} KB</Text>
                           </Group>
                           <Group justify="space-between" align="flex-end">
                             <Text size="xs" c="dimmed">{formatTimestamp(archive.createdAt)}</Text>
@@ -366,7 +367,7 @@ export default function AuditLogsPage() {
                             </Group>
                           </Table.Td>
                           <Table.Td>
-                            <Text size="xs">{(archive.size / 1024).toFixed(1)} KB</Text>
+                            <Text size="xs">{safeToFixed(archive.size / 1024, 1)} KB</Text>
                           </Table.Td>
                           <Table.Td>
                             <Text size="xs">{formatTimestamp(archive.createdAt)}</Text>

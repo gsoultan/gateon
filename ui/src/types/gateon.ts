@@ -1,3 +1,7 @@
+import type { MetricsSnapshot } from './metrics';
+
+export type { MetricsSnapshot };
+
 export type WafRule = {
   id: string;
   name: string;
@@ -15,8 +19,8 @@ export type ListWafRulesResponse = {
 };
 
 export type ListWafRulesRequest = {
-  limit?: number;
-  offset?: number;
+  pageSize?: number;
+  page?: number;
   search?: string;
   category?: string;
 };
@@ -186,6 +190,18 @@ export type StatusResponse = {
   clamavInstalled?: boolean;
   profile?: string;
   profilePinned?: boolean;
+  // Unified fields
+  uptimeSeconds?: number;
+  memoryUsageMb?: number;
+  memoryTotalMb?: number;
+  publicIp?: string;
+  titanEnabled?: boolean;
+  neuralSentinelEnabled?: boolean;
+  graphIntelligenceEnabled?: boolean;
+  predictiveAiEnabled?: boolean;
+  pqcEnabled?: boolean;
+  tpmEnabled?: boolean;
+  resourceGovernorEnabled?: boolean;
 };
 
 export type CertificateValidation = {

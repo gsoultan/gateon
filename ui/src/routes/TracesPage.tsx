@@ -43,6 +43,7 @@ import {
 import { useState, useMemo, useTransition } from "react";
 
 import { useTraces, useTrace } from "../hooks/useGateon";
+import { safeToFixed } from "../utils/format";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { useUrlFilters } from "../hooks/useUrlFilters";
 import type { Trace } from "../hooks/useGateon";
@@ -331,8 +332,8 @@ export default function TracesPage() {
                         radius="sm"
                       >
                         {trace.durationMs < 1
-                          ? trace.durationMs.toFixed(3)
-                          : trace.durationMs.toFixed(2)}
+                          ? safeToFixed(trace.durationMs, 3)
+                          : safeToFixed(trace.durationMs, 2)}
                         ms
                       </Badge>
                     </Table.Td>
@@ -526,7 +527,7 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">DURATION</Text>
-                  <Text size="sm">{fullTrace.durationMs.toFixed(3)} ms</Text>
+                  <Text size="sm">{safeToFixed(fullTrace.durationMs, 3)} ms</Text>
                 </Stack>
               </Grid.Col>
             </Grid>
@@ -539,7 +540,7 @@ export default function TracesPage() {
                   size="lg"
                   color={fullTrace.reputation >= 80 ? "teal" : fullTrace.reputation >= 50 ? "yellow" : "red"}
                 >
-                  {fullTrace.reputation.toFixed(0)}%
+                  {safeToFixed(fullTrace.reputation, 0)}%
                 </Badge>
               </Stack>
             )}
@@ -550,25 +551,25 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">ENTRYPOINT</Text>
-                  <Text size="sm">{fullTrace.entrypointDelayMs?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{safeToFixed(fullTrace.entrypointDelayMs, 3)} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">ROUTING</Text>
-                  <Text size="sm">{fullTrace.routeDelayMs?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{safeToFixed(fullTrace.routeDelayMs, 3)} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">MIDDLEWARE</Text>
-                  <Text size="sm">{fullTrace.middlewareDelayMs?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{safeToFixed(fullTrace.middlewareDelayMs, 3)} ms</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">SERVICE</Text>
-                  <Text size="sm">{fullTrace.serviceDelayMs?.toFixed(3) || "0.000"} ms</Text>
+                  <Text size="sm">{safeToFixed(fullTrace.serviceDelayMs, 3)} ms</Text>
                 </Stack>
               </Grid.Col>
             </Grid>

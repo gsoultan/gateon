@@ -1,6 +1,6 @@
 import { memo, useState, useMemo, useEffect } from "react";
 import { Table, Text, Paper, Group, Badge, Title, Pagination } from "@mantine/core";
-import { formatBytes } from "../../utils/format";
+import { formatBytes, safeToFixed } from "../../utils/format";
 import { useTableDensity } from "../../hooks/useTableDensity";
 
 const PAGE_SIZE = 10;
@@ -73,7 +73,7 @@ export const DomainStatsTable = memo(function DomainStatsTable({
                 : "teal"
           }
         >
-          {m.avgLatencySeconds.toFixed(3)}s
+          {safeToFixed(m.avgLatencySeconds, 3)}s
         </Text>
       </Table.Td>
     </Table.Tr>

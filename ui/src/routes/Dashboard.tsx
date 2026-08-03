@@ -199,9 +199,10 @@ export default function Dashboard() {
     const serviceBytes = new Map<string, number>();
 
     for (const stat of pathStats) {
+      if (!stat || !stat.host || !stat.path) continue;
       const key = `${stat.host}:${stat.path}`;
       const prevBytes = previousTotals.get(key) ?? 0;
-      const deltaBytes = Math.max(0, stat.bytesTotal - prevBytes);
+      const deltaBytes = Math.max(0, (stat.bytesTotal || 0) - prevBytes);
       if (deltaBytes <= 0) {
         continue;
       }
