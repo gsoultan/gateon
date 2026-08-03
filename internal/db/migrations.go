@@ -1430,16 +1430,15 @@ func init() {
 			`CREATE INDEX IF NOT EXISTS idx_user_mitigations_status_fp ON user_mitigations(status, fingerprint);`,
 			`CREATE INDEX IF NOT EXISTS idx_ip_mitigations_status_updated ON ip_mitigations(status, updated_at);`,
 
-			// system_metrics & client_authorities & users indexes
-			`CREATE INDEX IF NOT EXISTS idx_system_metrics_ts ON system_metrics(timestamp);`,
-			`CREATE INDEX IF NOT EXISTS idx_client_authorities_enabled ON client_authorities(enabled);`,
+			// users indexes
 			`CREATE INDEX IF NOT EXISTS idx_users_role_created ON users(role, created_at);`,
 		}
 
 		for _, q := range queries {
 			if _, err := db.Exec(q); err != nil {
 				errStr := strings.ToLower(err.Error())
-				if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "duplicate") || strings.Contains(errStr, "no such table") {
+				if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "duplicate") ||
+					strings.Contains(errStr, "no such table") || strings.Contains(errStr, "does not exist") {
 					continue
 				}
 				return err
