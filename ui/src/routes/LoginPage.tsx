@@ -40,8 +40,8 @@ export default function LoginPage() {
   const [enrollData, setEnrollData] = useState<{
     id: string;
     secret: string;
-    qr_code_url: string;
-    recovery_codes: string[];
+    qrCodeUrl: string;
+    recoveryCodes: string[];
   } | null>(null);
   const [tfaCode, setTfaCode] = useState("");
   const tfaInputRef = useRef<HTMLInputElement>(null);
@@ -107,10 +107,10 @@ export default function LoginPage() {
 
       if (res.ok) {
         const data = await res.json();
-        if (data.two_factor_required) {
+        if (data.twoFactorRequired) {
           setTempUser(data.user);
           setStep("2fa");
-        } else if (data.two_factor_setup_required) {
+        } else if (data.twoFactorSetupRequired) {
           // Administrator mandated 2FA but the user hasn't enrolled. Begin
           // first-time enrollment (re-uses the just-entered password).
           await startEnrollment(values.username, values.password);
@@ -411,7 +411,7 @@ export default function LoginPage() {
                     </Text>
                     <Group justify="center">
                       <Image
-                        src={enrollData.qr_code_url}
+                        src={enrollData.qrCodeUrl}
                         maw={180}
                         mx="auto"
                         fit="contain"
@@ -421,7 +421,7 @@ export default function LoginPage() {
                     <Text size="xs" c="dimmed" ta="center">
                       Or enter this secret manually: <Code>{enrollData.secret}</Code>
                     </Text>
-                    {enrollData.recovery_codes?.length > 0 && (
+                    {enrollData.recoveryCodes?.length > 0 && (
                       <>
                         <Text size="sm" fw={600}>
                           2. Save your recovery codes
@@ -433,7 +433,7 @@ export default function LoginPage() {
                           </Text>
                         </Alert>
                         <SimpleGrid cols={2} spacing="xs">
-                          {enrollData.recovery_codes.map((c) => (
+                          {enrollData.recoveryCodes.map((c) => (
                             <Code key={c} block>
                               {c}
                             </Code>

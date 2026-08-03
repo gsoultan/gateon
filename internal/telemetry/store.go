@@ -1891,12 +1891,12 @@ func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 			avg = lsum / float64(rc)
 		}
 		res = append(res, PathStats{
-			Host:         host,
-			Path:         p,
-			RequestCount: uint64(rc),
-			BytesTotal:   uint64(max(bsum, 0)),
-			LatencySum:   lsum,
-			AvgLatency:   float64(int(avg*1000+0.5)) / 1000.0,
+			Host:              host,
+			Path:              p,
+			RequestCount:      uint64(rc),
+			BytesTotal:        uint64(max(bsum, 0)),
+			LatencySumSeconds: lsum,
+			AvgLatencySeconds: float64(int(avg*1000+0.5)) / 1000.0,
 		})
 	}
 	return res
@@ -1957,11 +1957,11 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 			avg = lsum / float64(rc)
 		}
 		stats = append(stats, DomainStats{
-			Domain:       domain,
-			RequestCount: uint64(rc),
-			BytesTotal:   uint64(max(bsum, 0)),
-			LatencySum:   lsum,
-			AvgLatency:   float64(int(avg*1000+0.5)) / 1000.0,
+			Domain:            domain,
+			RequestCount:      uint64(rc),
+			BytesTotal:        uint64(max(bsum, 0)),
+			LatencySumSeconds: lsum,
+			AvgLatencySeconds: float64(int(avg*1000+0.5)) / 1000.0,
 		})
 	}
 	return stats
@@ -2079,12 +2079,12 @@ func GetDomainStatsHourly(day string, hour int) []DomainStats {
 			avg = lsum / float64(rc)
 		}
 		stats = append(stats, DomainStats{
-			Domain:       domain,
-			Hour:         hr,
-			RequestCount: uint64(rc),
-			BytesTotal:   uint64(max(bsum, 0)),
-			LatencySum:   lsum,
-			AvgLatency:   float64(int(avg*1000+0.5)) / 1000.0,
+			Domain:            domain,
+			Hour:              hr,
+			RequestCount:      uint64(rc),
+			BytesTotal:        uint64(max(bsum, 0)),
+			LatencySumSeconds: lsum,
+			AvgLatencySeconds: float64(int(avg*1000+0.5)) / 1000.0,
 		})
 	}
 	return stats

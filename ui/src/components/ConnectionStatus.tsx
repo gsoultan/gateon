@@ -1,6 +1,8 @@
-import { Stack, Text, Badge } from "@mantine/core";
+import { Stack, Text, Badge, Group, Tooltip } from "@mantine/core";
 import { useNetwork } from "@mantine/hooks";
 import { useGateonStatus } from "../hooks/useGateon";
+import { useRealTimeStore } from "../store/useRealTimeStore";
+import { IconBolt, IconBoltOff } from "@tabler/icons-react";
 
 type Connection = {
   label: string;
@@ -29,22 +31,32 @@ function deriveConnection(
 export function ConnectionStatus() {
   const { online } = useNetwork();
   const { data: status, isFetching, isError } = useGateonStatus();
+  const isRealTimeConnected = useRealTimeStore((state) => state.isConnected);
   const conn = deriveConnection(online, isFetching, isError, status?.status);
 
   return (
-    <Stack gap={0} align="flex-end">
-      <Text size="xs" fw={700} c="dimmed" lh={1}>
-        STATUS
-      </Text>
-      <Badge
-        size="sm"
-        color={conn.color}
-        variant="dot"
-        styles={{ root: { border: 0 } }}
-        aria-label={`Connection status: ${conn.label}`}
-      >
-        {conn.label}
-      </Badge>
-    </Stack>
+    <Group gap="xs">
+      <Tooltip label={isRealTimeConnected ? "Real-time stream active" : "Real-time stream disconnected"}>
+        {isRealTimeConnected ? (
+          <IconBolt size={14} color="var(--mantine-color-green-filled)" />
+        ) : (
+          <IconBoltOff size={14} color="var(--mantine-color-red-filled)" />
+        )}
+      </Tooltip>
+      <Stack gap={0} align="flex-end">
+        <Text size="xs" fw={700} c="dimmed" lh={1}>
+          STATUS
+        </Text>
+        <Badge
+          size="sm"
+          color={conn.color}
+          variant="dot"
+          styles={{ root: { border: 0 } }}
+          aria-label={`Connection status: ${conn.label}`}
+        >
+          {conn.label}
+        </Badge>
+      </Stack>
+    </Group>
   );
 }

@@ -21,7 +21,7 @@ export default function TopologyPage() {
     queryKey: ["routes", "all"],
     queryFn: async () => {
       try {
-        const res = await apiFetch("/v1/routes?page_size=1000");
+        const res = await apiFetch("/v1/routes?pageSize=1000");
         if (!res.ok) return [];
         const data = await res.json();
         return data?.routes || [];
@@ -36,7 +36,7 @@ export default function TopologyPage() {
     queryKey: ["services", "all"],
     queryFn: async () => {
       try {
-        const res = await apiFetch("/v1/services?page_size=1000");
+        const res = await apiFetch("/v1/services?pageSize=1000");
         if (!res.ok) return [];
         const data = await res.json();
         return data?.services || [];
@@ -51,10 +51,10 @@ export default function TopologyPage() {
     queryKey: ["entryPoints", "all"],
     queryFn: async () => {
       try {
-        const res = await apiFetch("/v1/entryPoints?page_size=1000");
+        const res = await apiFetch("/v1/entryPoints?pageSize=1000");
         if (!res.ok) return [];
         const data = await res.json();
-        return data?.entry_points || [];
+        return data?.entryPoints || [];
       } catch (e) {
         console.error("Failed to fetch entryPoints:", e);
         return [];
@@ -66,7 +66,7 @@ export default function TopologyPage() {
     queryKey: ["middlewares", "all"],
     queryFn: async () => {
       try {
-        const res = await apiFetch("/v1/middlewares?page_size=1000");
+        const res = await apiFetch("/v1/middlewares?pageSize=1000");
         if (!res.ok) return [];
         const data = await res.json();
         return data?.middlewares || [];

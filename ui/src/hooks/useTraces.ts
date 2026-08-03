@@ -10,7 +10,7 @@ export interface Trace {
   status: string;
   path: string;
   requestUri?: string;
-  source_ip: string;
+  sourceIp: string;
   userAgent?: string;
   method?: string;
   referer?: string;

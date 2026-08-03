@@ -70,7 +70,7 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          maxmind_license_key: config.maxmind_license_key,
+          maxmindLicenseKey: config.maxmindLicenseKey,
         }),
       });
       if (resp.ok) {
@@ -80,7 +80,7 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
           color: "green",
           icon: <IconCheck size={16} />,
         });
-        onChange({ ...config, db_path: "geoip/GeoLite2-City.mmdb" });
+        onChange({ ...config, dbPath: "geoip/GeoLite2-City.mmdb" });
         fetchStatus();
       } else {
         const msg = await resp.text();
@@ -124,11 +124,11 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
           icon: <IconCheck size={16} />,
         });
         if (edition === "asn") {
-          onChange({ ...config, asn_db_path: data.path });
+          onChange({ ...config, asnDbPath: data.path });
         } else if (edition === "country") {
-          onChange({ ...config, country_db_path: data.path });
+          onChange({ ...config, countryDbPath: data.path });
         } else {
-          onChange({ ...config, db_path: data.path });
+          onChange({ ...config, dbPath: data.path });
         }
         fetchStatus();
       } else {
@@ -200,8 +200,8 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
               label="Database Path"
               placeholder="e.g. geoip/GeoLite2-City.mmdb"
               description="Custom path to your MaxMind GeoLite2 City database"
-              value={config.db_path || ""}
-              onChange={(e) => onChange({ ...config, db_path: e.currentTarget.value })}
+              value={config.dbPath || ""}
+              onChange={(e) => onChange({ ...config, dbPath: e.currentTarget.value })}
               disabled={!config.enabled || disabled}
               style={{ flex: 1 }}
             />
@@ -225,8 +225,8 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
               label="ASN Database Path"
               placeholder="e.g. geoip/GeoLite2-ASN.mmdb"
               description="Path to your MaxMind GeoLite2 ASN database. Required to show the ASN of attack sources in Security Hub."
-              value={config.asn_db_path || ""}
-              onChange={(e) => onChange({ ...config, asn_db_path: e.currentTarget.value })}
+              value={config.asnDbPath || ""}
+              onChange={(e) => onChange({ ...config, asnDbPath: e.currentTarget.value })}
               disabled={!config.enabled || disabled}
               style={{ flex: 1 }}
             />
@@ -250,8 +250,8 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
               label="Country Database Path"
               placeholder="e.g. geoip/GeoLite2-Country.mmdb"
               description="Optional path to your MaxMind GeoLite2 Country database (geolocation fallback)."
-              value={config.country_db_path || ""}
-              onChange={(e) => onChange({ ...config, country_db_path: e.currentTarget.value })}
+              value={config.countryDbPath || ""}
+              onChange={(e) => onChange({ ...config, countryDbPath: e.currentTarget.value })}
               disabled={!config.enabled || disabled}
               style={{ flex: 1 }}
             />
@@ -275,8 +275,8 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
           <Switch
             label="Enable Automatic Updates"
             description="Periodically download the latest database from MaxMind"
-            checked={config.auto_update}
-            onChange={(e) => onChange({ ...config, auto_update: e.currentTarget.checked })}
+            checked={config.autoUpdate}
+            onChange={(e) => onChange({ ...config, autoUpdate: e.currentTarget.checked })}
             disabled={!config.enabled || disabled}
           />
 
@@ -285,9 +285,9 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             placeholder="Your MaxMind license key"
             description="Required for automatic updates. Get one at maxmind.com"
             type="password"
-            value={config.maxmind_license_key || ""}
-            onChange={(e) => onChange({ ...config, maxmind_license_key: e.currentTarget.value })}
-            disabled={!config.enabled || !config.auto_update || disabled}
+            value={config.maxmindLicenseKey || ""}
+            onChange={(e) => onChange({ ...config, maxmindLicenseKey: e.currentTarget.value })}
+            disabled={!config.enabled || !config.autoUpdate || disabled}
           />
 
           <NumberInput
@@ -295,9 +295,9 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             description="How often to check for updates"
             min={1}
             max={365}
-            value={config.update_interval_days || 30}
-            onChange={(val) => onChange({ ...config, update_interval_days: Number(val) })}
-            disabled={!config.enabled || !config.auto_update || disabled}
+            value={config.updateIntervalDays || 30}
+            onChange={(val) => onChange({ ...config, updateIntervalDays: Number(val) })}
+            disabled={!config.enabled || !config.autoUpdate || disabled}
           />
 
           <Button
@@ -305,7 +305,7 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             variant="light"
             onClick={handleUpdate}
             loading={updating}
-            disabled={!config.enabled || !config.maxmind_license_key || disabled}
+            disabled={!config.enabled || !config.maxmindLicenseKey || disabled}
           >
             Update From MaxMind Now
           </Button>
@@ -317,8 +317,8 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             description="Select countries to block. Request from these countries will be denied."
             placeholder="Select countries"
             data={COUNTRIES}
-            value={config.blocked_countries || []}
-            onChange={(val) => onChange({ ...config, blocked_countries: val })}
+            value={config.blockedCountries || []}
+            onChange={(val) => onChange({ ...config, blockedCountries: val })}
             disabled={!config.enabled || disabled}
             leftSection={<IconLock size={16} />}
             searchable
@@ -339,8 +339,8 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             description="If set, ONLY these countries will be allowed. Leave empty to allow all (unless blocked above)."
             placeholder="Select countries"
             data={COUNTRIES}
-            value={config.allowed_countries || []}
-            onChange={(val) => onChange({ ...config, allowed_countries: val })}
+            value={config.allowedCountries || []}
+            onChange={(val) => onChange({ ...config, allowedCountries: val })}
             disabled={!config.enabled || disabled}
             leftSection={<IconWorld size={16} />}
             searchable
@@ -359,8 +359,8 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
           <Switch
             label="Enable XDP Geofencing"
             description="Perform geofencing at the kernel level using eBPF/XDP for higher performance"
-            checked={config.xdp_geofencing}
-            onChange={(e) => onChange({ ...config, xdp_geofencing: e.currentTarget.checked })}
+            checked={config.xdpGeofencing}
+            onChange={(e) => onChange({ ...config, xdpGeofencing: e.currentTarget.checked })}
             disabled={!config.enabled || disabled}
           />
 

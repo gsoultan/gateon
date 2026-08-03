@@ -134,7 +134,7 @@ export default function RouteForm({
 
   const isMobile = useIsMobile();
   const routeType = form.state.values.type;
-  const epOptionsAll = (epData?.entry_points || []).map((ep) => ({
+  const epOptionsAll = (epData?.entryPoints || []).map((ep) => ({
     value: ep.id,
     label: `${ep.name} (${ep.address})`,
     type: ep.type,
@@ -150,7 +150,7 @@ export default function RouteForm({
     label: `${mw.name} (${mw.type})`,
   }));
 
-  const tlsOptOptions = (tlsOptData?.tls_options || []).map((opt) => ({
+  const tlsOptOptions = (tlsOptData?.tlsOptions || []).map((opt) => ({
     value: opt.id,
     label: opt.name,
   }));

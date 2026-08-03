@@ -133,7 +133,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
           <Table.ScrollContainer minWidth={300}>
             <Table>
               <Table.Tbody>
-                {metrics?.security?.top_threat_sources?.map((s: LabeledCount) => (
+                {metrics?.security?.topThreatSources?.map((s: LabeledCount) => (
                   <Table.Tr key={s.label}>
                     <Table.Td>
                       <Group gap="sm">
@@ -166,7 +166,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {metrics?.security?.ebpf_top_ips?.map((s: IPStat) => (
+                {metrics?.security?.ebpfTopIPs?.map((s: IPStat) => (
                   <Table.Tr key={s.ip}>
                     <Table.Td>
                       <Group gap="sm">
@@ -179,7 +179,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                     </Table.Td>
                   </Table.Tr>
                 ))}
-                {(!metrics?.security?.ebpf_top_ips || metrics.security.ebpf_top_ips.length === 0) && (
+                {(!metrics?.security?.ebpfTopIPs || metrics.security.ebpfTopIPs.length === 0) && (
                   <Table.Tr>
                     <Table.Td colSpan={2} ta="center" py="xl">
                       <Text size="sm" c="dimmed">No kernel telemetry available (eBPF might be disabled).</Text>
@@ -194,7 +194,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         <Card withBorder radius="md">
           <Title order={4} mb="md">Heaviest Hitters (Subnets)</Title>
           <Stack gap="sm">
-            {metrics?.security?.heavy_hitters?.map((h: HeavyHitter) => (
+            {metrics?.security?.heavyHitters?.map((h: HeavyHitter) => (
               <Box key={h.network} p="xs" style={{ border: '1px solid var(--mantine-color-red-light)', borderRadius: 'var(--mantine-radius-sm)' }} bg="var(--mantine-color-red-light)">
                 <Group justify="space-between">
                   <Group gap="xs">
@@ -210,7 +210,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                 </Group>
               </Box>
             ))}
-            {(!metrics?.security?.heavy_hitters || metrics.security.heavy_hitters.length === 0) && (
+            {(!metrics?.security?.heavyHitters || metrics.security.heavyHitters.length === 0) && (
               <Text size="sm" c="dimmed" ta="center" py="xl">No malicious subnets detected.</Text>
             )}
           </Stack>

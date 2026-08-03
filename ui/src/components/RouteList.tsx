@@ -77,7 +77,7 @@ export default function RouteList({
 
   const { data, isLoading, isFetching } = useRoutes({
     page: page - 1,
-    page_size: limit || pageSize,
+    pageSize: limit || pageSize,
     search: debouncedSearch.trim() || undefined,
     type: typeFilter && typeFilter !== "all" ? typeFilter : undefined,
     host: debouncedHost.trim() || undefined,

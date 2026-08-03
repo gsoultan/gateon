@@ -283,14 +283,14 @@ describe("traffic grouping builders", () => {
         id: "svc-users",
         name: "Users Service",
         weightedTargets: [],
-        loadBalancerPolicy: "round_robin",
+        loadBalancerPolicy: "roundRobin",
         healthCheckPath: "/health",
       },
       {
         id: "svc-health",
         name: "Health Service",
         weightedTargets: [],
-        loadBalancerPolicy: "round_robin",
+        loadBalancerPolicy: "roundRobin",
         healthCheckPath: "/health",
       },
     ];
@@ -401,7 +401,7 @@ describe("bandwidth helpers", () => {
         id: "svc-users",
         name: "Users Service",
         weightedTargets: [],
-        loadBalancerPolicy: "round_robin",
+        loadBalancerPolicy: "roundRobin",
         healthCheckPath: "/health",
       },
     ];

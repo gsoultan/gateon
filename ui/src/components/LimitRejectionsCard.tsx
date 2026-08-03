@@ -27,9 +27,9 @@ export function LimitRejectionsCard() {
   const stats = data as LimitStats | undefined;
   if (!stats) return null;
 
-  const rateTotal = sumValues(stats.rate_limit_rejected as Record<string, number>);
-  const inflightTotal = sumValues(stats.inflight_rejected as Record<string, number>);
-  const bufferingTotal = sumValues(stats.buffering_rejected as Record<string, number>);
+  const rateTotal = sumValues(stats.rateLimitRejected as Record<string, number>);
+  const inflightTotal = sumValues(stats.inflightRejected as Record<string, number>);
+  const bufferingTotal = sumValues(stats.bufferingRejected as Record<string, number>);
   const total = rateTotal + inflightTotal + bufferingTotal;
 
   if (total === 0 && history.length === 0) {
@@ -86,7 +86,7 @@ export function LimitRejectionsCard() {
                 {rateTotal}
               </Text>
               <Text size="xs" c="dimmed">
-                local: {(stats.rate_limit_rejected as Record<string, number>).local ?? 0} · redis: {(stats.rate_limit_rejected as Record<string, number>).redis ?? 0}
+                local: {(stats.rateLimitRejected as Record<string, number>).local ?? 0} · redis: {(stats.rateLimitRejected as Record<string, number>).redis ?? 0}
               </Text>
             </div>
           )}
@@ -99,7 +99,7 @@ export function LimitRejectionsCard() {
                 {inflightTotal}
               </Text>
               <Text size="xs" c="dimmed">
-                max_conn: {(stats.inflight_rejected as Record<string, number>).max_connections ?? 0} · per_ip: {(stats.inflight_rejected as Record<string, number>).max_connections_per_ip ?? 0}
+                maxConn: {(stats.inflightRejected as Record<string, number>).maxConnections ?? 0} · perIp: {(stats.inflightRejected as Record<string, number>).maxConnectionsPerIp ?? 0}
               </Text>
             </div>
           )}

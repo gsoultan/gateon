@@ -100,7 +100,7 @@ export default function ProfilePage() {
 
   const handle2FASuccess = () => {
     if (user) {
-      setAuth(token ?? "__cookie__", { ...user, two_factor_enabled: true });
+      setAuth(token ?? "__cookie__", { ...user, twoFactorEnabled: true });
     }
     notifications.show({
       title: "Two-factor authentication enabled",
@@ -128,7 +128,7 @@ export default function ProfilePage() {
   const username = user?.username ?? "Account";
   const role = user?.role ?? "viewer";
   const initial = user?.username?.charAt(0)?.toUpperCase();
-  const twoFactorEnabled = !!user?.two_factor_enabled;
+  const twoFactorEnabled = !!user?.twoFactorEnabled;
 
   return (
     <Stack gap="lg">

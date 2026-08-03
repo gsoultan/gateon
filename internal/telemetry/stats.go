@@ -22,12 +22,12 @@ const (
 
 // PathStats holds aggregated statistics for a host/path combination.
 type PathStats struct {
-	Host         string  `json:"host"`
-	Path         string  `json:"path"`
-	RequestCount uint64  `json:"request_count"`
-	BytesTotal   uint64  `json:"bytes_total"`
-	LatencySum   float64 `json:"latency_sum_seconds"`
-	AvgLatency   float64 `json:"avg_latency_seconds"`
+	Host              string  `json:"host"`
+	Path              string  `json:"path"`
+	RequestCount      uint64  `json:"requestCount"`
+	BytesTotal        uint64  `json:"bytesTotal"`
+	LatencySumSeconds float64 `json:"latencySumSeconds"`
+	AvgLatencySeconds float64 `json:"avgLatencySeconds"`
 }
 
 // TrafficSample represents a point in time for traffic/bandwidth charts.
@@ -39,12 +39,12 @@ type TrafficSample struct {
 
 // DomainStats holds aggregated statistics for a domain.
 type DomainStats struct {
-	Domain       string  `json:"domain"`
-	Hour         int     `json:"hour,omitzero"`
-	RequestCount uint64  `json:"request_count"`
-	BytesTotal   uint64  `json:"bytes_total"`
-	LatencySum   float64 `json:"latency_sum_seconds"`
-	AvgLatency   float64 `json:"avg_latency_seconds"`
+	Domain            string  `json:"domain"`
+	Hour              int     `json:"hour,omitzero"`
+	RequestCount      uint64  `json:"requestCount"`
+	BytesTotal        uint64  `json:"bytesTotal"`
+	LatencySumSeconds float64 `json:"latencySumSeconds"`
+	AvgLatencySeconds float64 `json:"avgLatencySeconds"`
 }
 
 type pathStatsShard struct {
@@ -250,12 +250,12 @@ func getInMemoryPathStats() []PathStats {
 			}
 
 			result = append(result, PathStats{
-				Host:         s.host,
-				Path:         s.path,
-				RequestCount: count,
-				BytesTotal:   bytes,
-				LatencySum:   sumS,
-				AvgLatency:   math.Round(avg*1000) / 1000, // Round to 3 decimal places
+				Host:              s.host,
+				Path:              s.path,
+				RequestCount:      count,
+				BytesTotal:        bytes,
+				LatencySumSeconds: sumS,
+				AvgLatencySeconds: math.Round(avg*1000) / 1000, // Round to 3 decimal places
 			})
 		}
 		shard.mu.RUnlock()

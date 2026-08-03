@@ -66,7 +66,7 @@ export default function AuditLogsPage() {
   // Active Logs Query
   const { data, isLoading, refetch, isFetching } = useAuditLogs({
     page: page - 1,
-    page_size: PAGE_SIZE,
+    pageSize: PAGE_SIZE,
     search: debouncedSearch,
   });
 
@@ -324,7 +324,7 @@ export default function AuditLogsPage() {
                             <Text size="xs">{(archive.size / 1024).toFixed(1)} KB</Text>
                           </Group>
                           <Group justify="space-between" align="flex-end">
-                            <Text size="xs" c="dimmed">{formatTimestamp(archive.created_at)}</Text>
+                            <Text size="xs" c="dimmed">{formatTimestamp(archive.createdAt)}</Text>
                             <Group gap="xs">
                               <ActionIcon
                                 variant="light"
@@ -369,7 +369,7 @@ export default function AuditLogsPage() {
                             <Text size="xs">{(archive.size / 1024).toFixed(1)} KB</Text>
                           </Table.Td>
                           <Table.Td>
-                            <Text size="xs">{formatTimestamp(archive.created_at)}</Text>
+                            <Text size="xs">{formatTimestamp(archive.createdAt)}</Text>
                           </Table.Td>
                           <Table.Td>
                             <Group gap="xs">

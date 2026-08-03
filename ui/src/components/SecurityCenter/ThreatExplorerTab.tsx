@@ -61,7 +61,7 @@ export function ThreatExplorerTab() {
     search,
     category: categoryFilter || "all",
     status: (mitigatedFilter === "mitigated") 
-      ? (mitigationSubTab === "user" ? "user_mitigated" : "ip_mitigated")
+      ? (mitigationSubTab === "user" ? "userMitigated" : "ipMitigated")
       : (mitigatedFilter || "all"),
   });
 
@@ -99,7 +99,7 @@ export function ThreatExplorerTab() {
     
     if (t.includes('waf') || t.includes('sqli') || t.includes('xss') || cat === 'injection') return <IconShieldLock size={16} />;
     if (t.includes('bot') || t.includes('scanner') || cat === 'scanner') return <IconRobot size={16} />;
-    if (t.includes('brute') || t.includes('impossible_travel')) return <IconUsers size={16} />;
+    if (t.includes('brute') || t.includes('impossibleTravel')) return <IconUsers size={16} />;
     if (t.includes('exploit') || t.includes('rce') || t.includes('lfi') || cat === 'malware') return <IconBug size={16} />;
     if (cat === 'dlp' || t.includes('leak')) return <IconShieldCheck size={16} />;
     if (cat === 'dos' || t.includes('ddos') || t.includes('flood')) return <IconBolt size={16} />;

@@ -32,7 +32,7 @@ export function KeyValueList({
     onChange(newConfig);
   };
 
-  const items = Object.entries(config)
+  const items = Object.entries(config || {})
     .filter(([k]) => k.startsWith(prefix))
     .map(([k, v]) => ({ fullKey: k, key: k.replace(prefix, ""), value: v }));
 
@@ -75,7 +75,7 @@ export function KeyValueList({
         variant="light"
         size="xs"
         leftSection={<IconPlus size={14} />}
-        onClick={() => updateConfig(`${prefix}new_key_${Date.now()}`, "")}
+        onClick={() => updateConfig(`${prefix}newKey_${Date.now()}`, "")}
         style={{ alignSelf: "flex-start" }}
       >
         Add {title}

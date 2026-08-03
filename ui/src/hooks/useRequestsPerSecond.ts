@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathStats } from "./usePathStats";
 
-/** Rolling req/s from path_stats delta between polls. */
+/** Rolling req/s from pathStats delta between polls. */
 export function useRequestsPerSecond(): number {
   const { data } = usePathStats();
   const [reqPerSec, setReqPerSec] = useState(0);

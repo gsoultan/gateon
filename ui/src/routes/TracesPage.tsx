@@ -137,7 +137,7 @@ export default function TracesPage() {
         t.id.toLowerCase().includes(lower) ||
         t.operationName.toLowerCase().includes(lower) ||
         t.serviceName.toLowerCase().includes(lower) ||
-        t.source_ip.toLowerCase().includes(lower) ||
+        t.sourceIp.toLowerCase().includes(lower) ||
         t.path.toLowerCase().includes(lower) ||
         t.status.toLowerCase().includes(lower)
       );
@@ -297,22 +297,22 @@ export default function TracesPage() {
                       <Badge variant="dot" color="blue" size="sm">{trace.serviceName}</Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Tooltip label={trace.source_ip && trace.source_ip !== "-" ? "Click to visualize IP route" : ""}>
+                      <Tooltip label={trace.sourceIp && trace.sourceIp !== "-" ? "Click to visualize IP route" : ""}>
                         <UnstyledButton 
-                          onClick={() => openVisualizer(trace.source_ip)}
-                          disabled={!trace.source_ip || trace.source_ip === "-"}
+                          onClick={() => openVisualizer(trace.sourceIp)}
+                          disabled={!trace.sourceIp || trace.sourceIp === "-"}
                         >
                           <Text 
                             size="sm" 
                             ff="monospace" 
-                            c={trace.source_ip && trace.source_ip !== "-" ? "blue.6" : "inherit"}
+                            c={trace.sourceIp && trace.sourceIp !== "-" ? "blue.6" : "inherit"}
                             style={{ 
-                              textDecoration: trace.source_ip && trace.source_ip !== "-" ? "underline" : "none",
+                              textDecoration: trace.sourceIp && trace.sourceIp !== "-" ? "underline" : "none",
                               textUnderlineOffset: '2px',
                               textDecorationStyle: 'dotted'
                             }}
                           >
-                            {trace.source_ip || "-"}
+                            {trace.sourceIp || "-"}
                           </Text>
                         </UnstyledButton>
                       </Tooltip>
@@ -520,7 +520,7 @@ export default function TracesPage() {
               <Grid.Col span={1}>
                 <Stack gap={4}>
                   <Text size="xs" fw={700} c="dimmed">SOURCE IP</Text>
-                  <Text size="sm" ff="monospace">{fullTrace.source_ip || "-"}</Text>
+                  <Text size="sm" ff="monospace">{fullTrace.sourceIp || "-"}</Text>
                 </Stack>
               </Grid.Col>
               <Grid.Col span={1}>
@@ -626,7 +626,7 @@ export default function TracesPage() {
                 <Text size="xs" fw={700} c="dimmed">REQUEST HEADERS</Text>
                 <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                   <Stack gap={2}>
-                    {Object.entries(fullTrace.requestHeaders).map(([key, value]) => (
+                    {Object.entries(fullTrace.requestHeaders || {}).map(([key, value]) => (
                       <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
                         <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
                         <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
@@ -653,7 +653,7 @@ export default function TracesPage() {
                 <Text size="xs" fw={700} c="dimmed">RESPONSE HEADERS</Text>
                 <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                   <Stack gap={2}>
-                    {Object.entries(fullTrace.responseHeaders).map(([key, value]) => (
+                    {Object.entries(fullTrace.responseHeaders || {}).map(([key, value]) => (
                       <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
                         <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
                         <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>

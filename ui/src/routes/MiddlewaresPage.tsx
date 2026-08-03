@@ -62,7 +62,7 @@ export default function MiddlewaresPage() {
 
   const { data, isLoading } = useMiddlewares({
     page: page - 1,
-    page_size: pageSize,
+    pageSize: pageSize,
     search: search,
   });
 
@@ -245,8 +245,8 @@ export default function MiddlewaresPage() {
                       <Text size="xs" c="dimmed" fw={700} style={{ textTransform: "uppercase" }}>Config Preview</Text>
                       <Text size="xs" c="dimmed" lineClamp={2} style={{ wordBreak: 'break-all' }}>
                         {mw.type === "wasm"
-                          ? mw.wasm_blob
-                            ? `WASM Module (${Math.round((mw.wasm_blob.length * 0.75) / 1024)} KB)`
+                          ? mw.wasmBlob
+                            ? `WASM Module (${Math.round((mw.wasmBlob.length * 0.75) / 1024)} KB)`
                             : "No module uploaded"
                           : JSON.stringify(mw.config)}
                       </Text>
@@ -313,8 +313,8 @@ export default function MiddlewaresPage() {
                           style={{ maxWidth: 300 }}
                         >
                           {mw.type === "wasm"
-                            ? mw.wasm_blob
-                              ? `WASM Module (${Math.round((mw.wasm_blob.length * 0.75) / 1024)} KB)`
+                            ? mw.wasmBlob
+                              ? `WASM Module (${Math.round((mw.wasmBlob.length * 0.75) / 1024)} KB)`
                               : "No module uploaded"
                             : JSON.stringify(mw.config)}
                         </Text>
@@ -440,9 +440,9 @@ export default function MiddlewaresPage() {
                   onChange={(config) =>
                     editingMW && setEditingMW({ ...editingMW, config })
                   }
-                  wasmBlob={editingMW?.wasm_blob}
+                  wasmBlob={editingMW?.wasmBlob}
                   onWasmBlobChange={(blob) =>
-                    editingMW && setEditingMW({ ...editingMW, wasm_blob: blob })
+                    editingMW && setEditingMW({ ...editingMW, wasmBlob: blob })
                   }
                 />
               </Card>
@@ -451,7 +451,7 @@ export default function MiddlewaresPage() {
             <Tabs.Panel value="raw">
               <JsonInput
                 label="Configuration (JSON)"
-                placeholder='{ "requests_per_minute": "100", "burst": "20" }'
+                placeholder='{ "requestsPerMinute": "100", "burst": "20" }'
                 validationError="Invalid JSON"
                 formatOnBlur
                 autosize
@@ -471,15 +471,15 @@ export default function MiddlewaresPage() {
                 <IconInfoCircle size={14} color="blue" />
                 <Text size="xs" c="dimmed">
                   {editingMW?.type === "ratelimit" &&
-                    "Keys: requests_per_minute, burst, per_ip (true/false), storage (local/redis)"}
+                    "Keys: requestsPerMinute, burst, perIp (true/false), storage (local/redis)"}
                   {editingMW?.type === "inflightreq" &&
-                    "Keys: amount (required), per_ip (true/false)"}
+                    "Keys: amount (required), perIp (true/false)"}
                   {editingMW?.type === "buffering" &&
-                    "Keys: max_request_body_bytes (required)"}
+                    "Keys: maxRequestBodyBytes (required)"}
                   {editingMW?.type === "auth" &&
-                    "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret; oidc: issuer, audience; oauth2: introspection_url, client_id, client_secret; paseto: secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
+                    "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwksUrl, secret; oidc: issuer, audience; oauth2: introspectionUrl, clientId, clientSecret; paseto: secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
                   {editingMW?.type === "headers" &&
-                    "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, add_response_X, set_response_X, del_request_X, del_response_X"}
+                    "Keys: stsSeconds, stsIncludeSubdomains, stsPreload, forceStsHeader; addRequest_X, setRequest_X, addResponse_X, setResponse_X, delRequest_X, delResponse_X"}
                   {editingMW?.type === "forwardedheaders" &&
                     "Keys: proto (http/https — force X-Forwarded-Proto), trustForwardHeader (true/false — honor inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES)"}
                   {editingMW?.type === "rewrite" &&
@@ -492,13 +492,13 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "replacepathregex" &&
                     "Keys: pattern, replacement"}
                   {editingMW?.type === "cors" &&
-                    "Keys: allowed_origins, allowed_methods, allowed_headers, exposed_headers, allow_credentials (true/false), max_age"}
+                    "Keys: allowedOrigins, allowedMethods, allowedHeaders, exposedHeaders, allowCredentials (true/false), maxAge"}
                   {editingMW?.type === "compress" &&
-                    "Keys: algorithm (auto/gzip/br), min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes"}
+                    "Keys: algorithm (auto/gzip/br), minResponseBodyBytes (1024), excludedContentTypes, includedContentTypes, maxBufferBytes"}
                   {editingMW?.type === "geoip" &&
-                    "Keys: db_path (required), header (default X-Forwarded-For), allow_countries, deny_countries, block_status_code"}
+                    "Keys: dbPath (required), header (default X-Forwarded-For), allowCountries, denyCountries, blockStatusCode"}
                   {editingMW?.type === "forwardauth" &&
-                    "Keys: address (required), authResponseHeaders, authRequestHeaders, trustForwardHeader, forwardBody, preserveRequestMethod, maxBodySize, tls_insecure_skip_verify"}
+                    "Keys: address (required), authResponseHeaders, authRequestHeaders, trustForwardHeader, forwardBody, preserveRequestMethod, maxBodySize, tlsInsecureSkipVerify"}
                   {editingMW?.type === "grpcweb" &&
                     "Required for grpc routes called from browsers. No config. Add to route and attach this middleware."}
                   {editingMW?.type === "errors" &&

@@ -8,8 +8,8 @@ function loadFromStorage() {
   if (typeof localStorage === "undefined") {
     return { apiUrl: DEFAULT_API_URL, refreshInterval: DEFAULT_REFRESH_INTERVAL };
   }
-  const savedUrl = localStorage.getItem("gateon_api_url");
-  const savedInterval = localStorage.getItem("gateon_refresh_interval");
+  const savedUrl = localStorage.getItem("gateonApiUrl");
+  const savedInterval = localStorage.getItem("gateonRefreshInterval");
   const apiUrl = savedUrl ?? DEFAULT_API_URL;
   const parsed = savedInterval ? parseInt(savedInterval, 10) : DEFAULT_REFRESH_INTERVAL;
   const refreshInterval = Number.isFinite(parsed)
@@ -28,9 +28,9 @@ export const useApiConfigStore = create<ApiConfigState>((set) => ({
   ...loadFromStorage(),
   setApiConfig: (apiUrl, refreshInterval) => {
     if (typeof localStorage !== "undefined") {
-      localStorage.setItem("gateon_api_url", apiUrl);
+      localStorage.setItem("gateonApiUrl", apiUrl);
       localStorage.setItem(
-        "gateon_refresh_interval",
+        "gateonRefreshInterval",
         String(Math.min(60, Math.max(1, refreshInterval)))
       );
     }

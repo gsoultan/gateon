@@ -100,10 +100,10 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"logs":        logs,
-			"total_count": total,
-			"page":        page,
-			"page_size":   pageSize,
+			"logs":       logs,
+			"totalCount": total,
+			"page":       page,
+			"pageSize":   pageSize,
 		})
 	})
 	mux.HandleFunc("GET /v1/audit/logs/watch", func(w http.ResponseWriter, r *http.Request) {

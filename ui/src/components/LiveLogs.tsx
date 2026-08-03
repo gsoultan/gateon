@@ -170,7 +170,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
         }
         if (deferredClientIpFilter) {
           const ip = String(
-            parsed.ip ?? parsed.remoteAddr ?? parsed.client_ip ?? "",
+            parsed.ip ?? parsed.remoteAddr ?? parsed.clientIp ?? "",
           ).toLowerCase();
           if (!ip.includes(ipLower)) return false;
         }

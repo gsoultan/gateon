@@ -196,10 +196,10 @@ export function MiddlewareConfigEditor({
           <NumberInput
             label="Min Response Body (bytes)"
             description="Only compress responses larger than this. Default: 1024"
-            value={parseInt(config.min_response_body_bytes) || 1024}
+            value={parseInt(config.minResponseBodyBytes) || 1024}
             onChange={(val) =>
               updateConfig(
-                "min_response_body_bytes",
+                "minResponseBodyBytes",
                 (val ?? 1024).toString()
               )
             }
@@ -209,29 +209,29 @@ export function MiddlewareConfigEditor({
             label="Excluded Content-Types"
             description="Comma-separated; never compress these (e.g. image/png,image/jpeg)"
             placeholder="image/png, image/jpeg, image/gif"
-            value={config.excluded_content_types || ""}
+            value={config.excludedContentTypes || ""}
             onChange={(e) =>
-              updateConfig("excluded_content_types", e.currentTarget.value)
+              updateConfig("excludedContentTypes", e.currentTarget.value)
             }
           />
           <TextInput
             label="Included Content-Types"
             description="If set, only compress these; leave empty to compress all except excluded"
             placeholder="text/html, application/json"
-            value={config.included_content_types || ""}
+            value={config.includedContentTypes || ""}
             onChange={(e) =>
-              updateConfig("included_content_types", e.currentTarget.value)
+              updateConfig("includedContentTypes", e.currentTarget.value)
             }
           />
           <NumberInput
             label="Max Buffer (bytes)"
             description="Responses larger than this bypass compression (stream through). Default: 10MB"
             value={
-              parseInt(config.max_buffer_bytes) || 10 * 1024 * 1024
+              parseInt(config.maxBufferBytes) || 10 * 1024 * 1024
             }
             onChange={(val) =>
               updateConfig(
-                "max_buffer_bytes",
+                "maxBufferBytes",
                 (val ?? 10 * 1024 * 1024).toString()
               )
             }
@@ -327,10 +327,10 @@ export function MiddlewareConfigEditor({
             <Switch
               label="TLS Insecure Skip Verify"
               description="Skip TLS cert verification (dev only)"
-              checked={config.tls_insecure_skip_verify === "true"}
+              checked={config.tlsInsecureSkipVerify === "true"}
               onChange={(e) =>
                 updateConfig(
-                  "tls_insecure_skip_verify",
+                  "tlsInsecureSkipVerify",
                   e.currentTarget.checked ? "true" : "false"
                 )
               }
@@ -378,8 +378,8 @@ export function MiddlewareConfigEditor({
           <TagsInput
             label="Allowed Origins"
             placeholder="*, https://example.com"
-            value={splitGrpcTags(config.allowed_origins)}
-            onChange={(val) => updateConfig("allowed_origins", joinGrpcTags(val))}
+            value={splitGrpcTags(config.allowedOrigins)}
+            onChange={(val) => updateConfig("allowedOrigins", joinGrpcTags(val))}
             description="CORS allowed origins for gRPC-Web requests."
             styles={{ input: { minHeight: 60 } }}
             clearable
@@ -387,16 +387,16 @@ export function MiddlewareConfigEditor({
           <Group grow>
             <NumberInput
               label="Max Age (seconds)"
-              value={parseInt(config.max_age) || 86400}
-              onChange={(val) => updateConfig("max_age", (val ?? 86400).toString())}
+              value={parseInt(config.maxAge) || 86400}
+              onChange={(val) => updateConfig("maxAge", (val ?? 86400).toString())}
               min={0}
             />
             <Switch
               label="Allow Credentials"
-              checked={config.allow_credentials === "true"}
+              checked={config.allowCredentials === "true"}
               onChange={(e) =>
                 updateConfig(
-                  "allow_credentials",
+                  "allowCredentials",
                   e.currentTarget.checked ? "true" : "false"
                 )
               }
@@ -412,25 +412,25 @@ export function MiddlewareConfigEditor({
     case "waf":
       return <WAFConfigEditor config={config} updateConfig={updateConfig} />;
 
-    case "file_security":
+    case "fileSecurity":
       return <FileSecurityConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "oidc":
       return <OIDCConfigEditor config={config} updateConfig={updateConfig} />;
 
-    case "security_headers":
+    case "securityHeaders":
       return <SecurityHeadersConfigEditor config={config} updateConfig={updateConfig} />;
 
-    case "bot_management":
+    case "botManagement":
       return <BotManagementConfigEditor config={config} updateConfig={updateConfig} />;
 
-    case "schema_validation":
+    case "schemaValidation":
       return <SchemaValidationConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "honeypot":
       return <HoneypotConfigEditor config={config} updateConfig={updateConfig} />;
 
-    case "request_id":
+    case "requestId":
       return <RequestIDConfigEditor />;
 
     case "turnstile":
@@ -457,25 +457,25 @@ export function MiddlewareConfigEditor({
           <TextInput
             label="Content-Type Filter (Optional)"
             placeholder="application/json"
-            value={config.content_type || ""}
-            onChange={(e) => updateConfig("content_type", e.currentTarget.value)}
+            value={config.contentType || ""}
+            onChange={(e) => updateConfig("contentType", e.currentTarget.value)}
             description="Only transform bodies with this content type (substring match)"
           />
           <Group grow>
             <TextInput
               label="Request Search"
               placeholder="foo"
-              value={config.request_search || ""}
+              value={config.requestSearch || ""}
               onChange={(e) =>
-                updateConfig("request_search", e.currentTarget.value)
+                updateConfig("requestSearch", e.currentTarget.value)
               }
             />
             <TextInput
               label="Request Replace"
               placeholder="bar"
-              value={config.request_replace || ""}
+              value={config.requestReplace || ""}
               onChange={(e) =>
-                updateConfig("request_replace", e.currentTarget.value)
+                updateConfig("requestReplace", e.currentTarget.value)
               }
             />
           </Group>
@@ -483,17 +483,17 @@ export function MiddlewareConfigEditor({
             <TextInput
               label="Response Search"
               placeholder="apple"
-              value={config.response_search || ""}
+              value={config.responseSearch || ""}
               onChange={(e) =>
-                updateConfig("response_search", e.currentTarget.value)
+                updateConfig("responseSearch", e.currentTarget.value)
               }
             />
             <TextInput
               label="Response Replace"
               placeholder="orange"
-              value={config.response_replace || ""}
+              value={config.responseReplace || ""}
               onChange={(e) =>
-                updateConfig("response_replace", e.currentTarget.value)
+                updateConfig("responseReplace", e.currentTarget.value)
               }
             />
           </Group>

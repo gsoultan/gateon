@@ -14,18 +14,18 @@ interface TitanSettingsCardProps {
 export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, onChange, disabled }) => {
   const titan = config.titan || {
     enabled: false,
-    enable_phantom: false,
-    enable_ai_predictor: false,
-    enable_pqc: false,
-    enable_governor: false,
+    enablePhantom: false,
+    enableAiPredictor: false,
+    enablePqc: false,
+    enableGovernor: false,
     aiModelPath: ''
   };
 
   const ebpf = config.ebpf || {
     enabled: false,
-    xdp_cuckoo_filter: false,
-    af_xdp_phantom: false,
-    xdp_ja4_blocklist: false
+    xdpCuckooFilter: false,
+    afXdpPhantom: false,
+    xdpJa4Blocklist: false
   };
 
   const handleChange = (key: keyof typeof titan, value: any) => {
@@ -76,19 +76,19 @@ export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, on
                     <Text fw={700}>Phantom Core (Kernel Bypass)</Text>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Enables io_uring and AF_XDP zero-copy proxying for sub-millisecond latency.
+                    Enables ioUring and AF_XDP zero-copy proxying for sub-millisecond latency.
                   </Text>
                   <Switch
-                    checked={titan.enable_phantom}
-                    onChange={(event) => handleChange('enable_phantom', event.currentTarget.checked)}
+                    checked={titan.enablePhantom}
+                    onChange={(event) => handleChange('enablePhantom', event.currentTarget.checked)}
                     label="Enable Phantom Proxying"
                     disabled={disabled}
                   />
                   <Switch
-                    checked={ebpf.af_xdp_phantom}
-                    onChange={(event) => handleEbpfChange('af_xdp_phantom', event.currentTarget.checked)}
+                    checked={ebpf.afXdpPhantom}
+                    onChange={(event) => handleEbpfChange('afXdpPhantom', event.currentTarget.checked)}
                     label="AF_XDP Port Redirection"
-                    disabled={disabled || !titan.enable_phantom}
+                    disabled={disabled || !titan.enablePhantom}
                   />
                 </Stack>
               </Card>
@@ -103,8 +103,8 @@ export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, on
                     WASM-based Transformer for traffic prediction and RL-adaptive rate limiting.
                   </Text>
                   <Switch
-                    checked={titan.enable_ai_predictor}
-                    onChange={(event) => handleChange('enable_ai_predictor', event.currentTarget.checked)}
+                    checked={titan.enableAiPredictor}
+                    onChange={(event) => handleChange('enableAiPredictor', event.currentTarget.checked)}
                     label="Enable AI Prediction"
                     disabled={disabled}
                   />
@@ -114,7 +114,7 @@ export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, on
                     value={titan.aiModelPath}
                     onChange={(event) => handleChange('aiModelPath', event.currentTarget.value)}
                     size="xs"
-                    disabled={disabled || !titan.enable_ai_predictor}
+                    disabled={disabled || !titan.enableAiPredictor}
                   />
                 </Stack>
               </Card>
@@ -129,20 +129,20 @@ export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, on
                     Post-Quantum Cryptography (ML-KEM/ML-DSA) and Cuckoo Filter blocklists.
                   </Text>
                   <Switch
-                    checked={titan.enable_pqc}
-                    onChange={(event) => handleChange('enable_pqc', event.currentTarget.checked)}
+                    checked={titan.enablePqc}
+                    onChange={(event) => handleChange('enablePqc', event.currentTarget.checked)}
                     label="Enable PQC Identity"
                     disabled={disabled}
                   />
                   <Switch
-                    checked={ebpf.xdp_cuckoo_filter}
-                    onChange={(event) => handleEbpfChange('xdp_cuckoo_filter', event.currentTarget.checked)}
+                    checked={ebpf.xdpCuckooFilter}
+                    onChange={(event) => handleEbpfChange('xdpCuckooFilter', event.currentTarget.checked)}
                     label="eBPF Cuckoo Filter (O(1) blocking)"
                     disabled={disabled}
                   />
                   <Switch
-                    checked={ebpf.xdp_ja4_blocklist}
-                    onChange={(event) => handleEbpfChange('xdp_ja4_blocklist', event.currentTarget.checked)}
+                    checked={ebpf.xdpJa4Blocklist}
+                    onChange={(event) => handleEbpfChange('xdpJa4Blocklist', event.currentTarget.checked)}
                     label="Kernel-Level JA4+ Hardening"
                     disabled={disabled}
                   />
@@ -159,8 +159,8 @@ export const TitanSettingsCard: React.FC<TitanSettingsCardProps> = ({ config, on
                     Real-time pressure monitoring and adaptive scavenging for 2GB RAM stability.
                   </Text>
                   <Switch
-                    checked={titan.enable_governor}
-                    onChange={(event) => handleChange('enable_governor', event.currentTarget.checked)}
+                    checked={titan.enableGovernor}
+                    onChange={(event) => handleChange('enableGovernor', event.currentTarget.checked)}
                     label="Enable Stability Governor"
                     disabled={disabled}
                   />

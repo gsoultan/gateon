@@ -55,7 +55,7 @@ export default function EntryPointsPage() {
 
   const { data, isLoading } = useEntryPoints({
     page: page - 1,
-    page_size: pageSize,
+    pageSize: pageSize,
     search: search,
   });
   const queryClient = useQueryClient();
@@ -98,7 +98,7 @@ export default function EntryPointsPage() {
     open();
   };
 
-  const entryPoints = data?.entry_points || [];
+  const entryPoints = data?.entryPoints || [];
   const totalCount = data?.totalCount || 0;
 
   const stats = useMemo(() => {

@@ -74,7 +74,7 @@ export function OverviewTab({
     const t = type.toLowerCase();
     if (t.includes('waf') || t.includes('sqli') || t.includes('xss')) return <IconShieldLock size={16} />;
     if (t.includes('bot') || t.includes('scanner')) return <IconRobot size={16} />;
-    if (t.includes('brute') || t.includes('impossible_travel')) return <IconUsers size={16} />;
+    if (t.includes('brute') || t.includes('impossibleTravel')) return <IconUsers size={16} />;
     if (t.includes('exploit') || t.includes('rce') || t.includes('lfi')) return <IconBug size={16} />;
     if (t.includes('entropy') || t.includes('fingerprint')) return <IconBolt size={16} />;
     return <IconAlertTriangle size={16} />;
@@ -88,7 +88,7 @@ export function OverviewTab({
       severity: anomaly.severity,
       description: anomaly.details,
       timestamp: anomaly.timestamp,
-      source: anomaly.source_ip,
+      source: anomaly.sourceIp,
       recommendation: anomaly.recommendation || "Investigate source IP and associated traffic patterns.",
       countryCode: anomaly.countryCode,
       ja3: anomaly.ja3,
@@ -123,25 +123,25 @@ export function OverviewTab({
   const wafEnabled = posture?.waf?.enabled;
 
   const funnelStages = React.useMemo(() => {
-    const f = metrics?.mitigation_funnel;
-    const ingress = f?.http_ingress || 0;
+    const f = metrics?.mitigationFunnel;
+    const ingress = f?.httpIngress || 0;
     const stages: { label: string; value: number; color: string }[] = [
       { label: "HTTP Ingress", value: ingress, color: "blue" },
-      { label: "WAF Block", value: f?.waf_blocked || 0, color: "orange" },
-      { label: "Fast-Path Block", value: f?.fast_path_blocked || 0, color: "red" },
-      { label: "Rate Limit", value: f?.rate_limited || 0, color: "yellow" },
+      { label: "WAF Block", value: f?.wafBlocked || 0, color: "orange" },
+      { label: "Fast-Path Block", value: f?.fastPathBlocked || 0, color: "red" },
+      { label: "Rate Limit", value: f?.rateLimited || 0, color: "yellow" },
     ];
-    if ((f?.bot_blocked || 0) > 0) stages.push({ label: "Bot Mitigation", value: f!.bot_blocked, color: "pink" });
-    if ((f?.file_security_blocked || 0) > 0) stages.push({ label: "File Security", value: f!.file_security_blocked, color: "red" });
-    if ((f?.deception_blocked || 0) > 0) stages.push({ label: "Deception/Trap", value: f!.deception_blocked, color: "grape" });
+    if ((f?.botBlocked || 0) > 0) stages.push({ label: "Bot Mitigation", value: f!.botBlocked, color: "pink" });
+    if ((f?.fileSecurityBlocked || 0) > 0) stages.push({ label: "File Security", value: f!.fileSecurityBlocked, color: "red" });
+    if ((f?.deceptionBlocked || 0) > 0) stages.push({ label: "Deception/Trap", value: f!.deceptionBlocked, color: "grape" });
     if ((f?.advancedSecurityBlocked || 0) > 0) stages.push({ label: "Advanced Sec", value: f!.advancedSecurityBlocked, color: "dark" });
-    if ((f?.geoip_blocked || 0) > 0) stages.push({ label: "GeoIP Block", value: f!.geoip_blocked, color: "indigo" });
-    if ((f?.auth_failures || 0) > 0) stages.push({ label: "Auth Failures", value: f!.auth_failures, color: "cyan" });
-    if ((f?.turnstile_failures || 0) > 0) stages.push({ label: "Turnstile Fail", value: f!.turnstile_failures, color: "violet" });
-    if ((f?.hmac_failures || 0) > 0) stages.push({ label: "HMAC Fail", value: f!.hmac_failures, color: "gray" });
+    if ((f?.geoipBlocked || 0) > 0) stages.push({ label: "GeoIP Block", value: f!.geoipBlocked, color: "indigo" });
+    if ((f?.authFailures || 0) > 0) stages.push({ label: "Auth Failures", value: f!.authFailures, color: "cyan" });
+    if ((f?.turnstileFailures || 0) > 0) stages.push({ label: "Turnstile Fail", value: f!.turnstileFailures, color: "violet" });
+    if ((f?.hmacFailures || 0) > 0) stages.push({ label: "HMAC Fail", value: f!.hmacFailures, color: "gray" });
     stages.push({ label: "Allowed (Passed)", value: f?.allowed || 0, color: "teal" });
     return { stages, ingress };
-  }, [metrics?.mitigation_funnel]);
+  }, [metrics?.mitigationFunnel]);
 
   return (
     <Stack gap="lg">
@@ -192,7 +192,7 @@ export function OverviewTab({
           <Group justify="space-between">
             <Stack gap={0}>
               <Text size="xs" c="dimmed" fw={700} tt="uppercase">Global Threat Score</Text>
-              <AnimatedTitle value={metrics?.security?.global_threat_score || 0} />
+              <AnimatedTitle value={metrics?.security?.globalThreatScore || 0} />
             </Stack>
             <ThemeIcon size="xl" color="orange" variant="light" radius="md">
               <IconActivity size={24} />
@@ -222,7 +222,7 @@ export function OverviewTab({
           <Group justify="space-between">
             <Stack gap={0}>
               <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated in 24h</Text>
-              <AnimatedTitle value={metrics?.security?.mitigated_today ?? 0} />
+              <AnimatedTitle value={metrics?.security?.mitigatedToday ?? 0} />
             </Stack>
             <ThemeIcon color="teal" variant="light" size="lg" radius="md">
               <IconShieldCheck size={20} />
@@ -280,19 +280,19 @@ export function OverviewTab({
             </Stack>
             {/* Separate, differently-scoped indicators: 5xx are failures of
                 already-allowed traffic; XDP drops are packet-level (not requests). */}
-            {((metrics?.mitigation_funnel?.server_errors || 0) > 0 ||
-              (metrics?.mitigation_funnel?.xdp_packets_dropped || 0) > 0) && (
+            {((metrics?.mitigationFunnel?.serverErrors || 0) > 0 ||
+              (metrics?.mitigationFunnel?.xdpPacketsDropped || 0) > 0) && (
               <Group gap="lg" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
                 <Group gap={6}>
                   <Text size="xs" c="dimmed">Server Errors (5xx of allowed):</Text>
                   <Text size="xs" fw={600} c="pink">
-                    {(metrics?.mitigation_funnel?.server_errors || 0).toLocaleString()}
+                    {(metrics?.mitigationFunnel?.serverErrors || 0).toLocaleString()}
                   </Text>
                 </Group>
                 <Group gap={6}>
                   <Text size="xs" c="dimmed">XDP/eBPF packets dropped:</Text>
                   <Text size="xs" fw={600} c="red">
-                    {(metrics?.mitigation_funnel?.xdp_packets_dropped || 0).toLocaleString()}
+                    {(metrics?.mitigationFunnel?.xdpPacketsDropped || 0).toLocaleString()}
                   </Text>
                 </Group>
               </Group>
@@ -345,7 +345,7 @@ export function OverviewTab({
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {metrics?.security?.recent_anomalies?.slice(0, 5).map((a: SecurityThreat) => (
+              {metrics?.security?.recentAnomalies?.slice(0, 5).map((a: SecurityThreat) => (
                 <Table.Tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(a)}>
                   <Table.Td>
                     <Group gap="sm" wrap="nowrap">
@@ -375,7 +375,7 @@ export function OverviewTab({
                   <Table.Td>
                     <Group gap={4}>
                       <Badge size="xs" variant="outline">{a.countryCode || 'XX'}</Badge>
-                      <Text size="sm" fw={500} ff="monospace" onClick={(e) => handleTraceClick(e, a.source_ip)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{a.source_ip}</Text>
+                      <Text size="sm" fw={500} ff="monospace" onClick={(e) => handleTraceClick(e, a.sourceIp)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{a.sourceIp}</Text>
                     </Group>
                   </Table.Td>
                   <Table.Td>
