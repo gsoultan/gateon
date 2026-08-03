@@ -3,6 +3,7 @@
 package proxy
 
 import (
+	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"sync/atomic"
@@ -11,6 +12,10 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+type transportContainer struct {
+	p http.RoundTripper
+}
 
 type targetState struct {
 	url                  string
@@ -31,7 +36,7 @@ type targetState struct {
 	activeConn      int32
 	activeConnGuage prometheus.Gauge
 	proxy           atomic.Pointer[httputil.ReverseProxy]
-	transport       atomic.Value // stores http.RoundTripper
+	transport       atomic.Value // stores *transportContainer
 }
 
 func newTargetState(rawURL string, weight int32) *targetState {

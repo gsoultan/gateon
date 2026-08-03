@@ -212,12 +212,12 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 
 	// Automated eBPF Shunning: If reputation is very low, push to XDP layer.
 	if r.Score < 20.0 {
-		if m := globalEbpfManager.Load(); m != nil {
-			if prov, ok := m.(EbpfProvider); ok {
+		if val := globalEbpfManager.Load(); val != nil {
+			if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
 				// Only shun if it's an IP. If it's a fingerprint, it's already
 				// handled by ReputationBlocker at L7.
 				if net.ParseIP(fingerprint) != nil {
-					_ = prov.ShunIP(fingerprint)
+					_ = container.p.ShunIP(fingerprint)
 				} else {
 					// It's a JA4+ fingerprint.
 					// We could call ShunJA4 here, but it's not yet implemented in XDP.
@@ -280,11 +280,11 @@ func ResetReputation(fingerprint string) {
 	shard.cache.Remove(fingerprint)
 	delete(shard.dirty, fingerprint)
 	// Automated eBPF Unshun: Restore access at XDP layer.
-	if m := globalEbpfManager.Load(); m != nil {
-		if prov, ok := m.(EbpfProvider); ok {
+	if val := globalEbpfManager.Load(); val != nil {
+		if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
 			// ONLY unshun if it's a valid IP. Fingerprints are handled at L7.
 			if net.ParseIP(fingerprint) != nil {
-				_ = prov.UnshunIP(fingerprint)
+				_ = container.p.UnshunIP(fingerprint)
 			}
 		}
 	}

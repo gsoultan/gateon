@@ -87,7 +87,7 @@ type telemetryMockWrapper struct {
 	*mockEbpfManager
 }
 
-func (w *telemetryMockWrapper) GetTopIPs(limit int) ([]telemetry.IPStat, error) { return nil, nil }
+func (w *telemetryMockWrapper) GetTopIPs(limit int) ([]ebpf.IPStat, error) { return nil, nil }
 
 func TestWAF_Shunning(t *testing.T) {
 	// Initialize telemetry store for escalation logic

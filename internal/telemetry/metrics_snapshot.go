@@ -28,18 +28,30 @@ type EbpfProvider interface {
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 }
 
+type ebpfProviderContainer struct {
+	p EbpfProvider
+}
+
 type TitanProvider interface {
 	GetStatus() (enabled bool, engine string, activePorts int)
+}
+
+type titanProviderContainer struct {
+	p TitanProvider
 }
 
 type GovernorProvider interface {
 	GetStatus(ctx context.Context) (active bool, memHooks, cpuHooks int, memPressure, cpuPressure float64)
 }
 
+type governorProviderContainer struct {
+	p GovernorProvider
+}
+
 var (
-	globalEbpfManager atomic.Value // stores EbpfProvider (interface)
-	globalTitan       atomic.Value // stores TitanProvider (interface)
-	globalGovernor    atomic.Value // stores GovernorProvider (interface)
+	globalEbpfManager atomic.Value // stores *ebpfProviderContainer
+	globalTitan       atomic.Value // stores *titanProviderContainer
+	globalGovernor    atomic.Value // stores *governorProviderContainer
 	globalVersion     atomic.Value // stores string
 	lastSnapshot      atomic.Pointer[MetricsSnapshot]
 
@@ -70,15 +82,15 @@ func (s *MetricsSnapshot) Reset() {
 }
 
 func SetEbpfManager(m EbpfProvider) {
-	globalEbpfManager.Store(m)
+	globalEbpfManager.Store(&ebpfProviderContainer{p: m})
 }
 
 func SetTitanProvider(p TitanProvider) {
-	globalTitan.Store(p)
+	globalTitan.Store(&titanProviderContainer{p: p})
 }
 
 func SetGovernorProvider(p GovernorProvider) {
-	globalGovernor.Store(p)
+	globalGovernor.Store(&governorProviderContainer{p: p})
 }
 
 func SetVersion(v string) {
@@ -433,9 +445,9 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 	snap.System = buildSystemMetrics(idx)
 
 	if heavy {
-		if m := globalEbpfManager.Load(); m != nil {
-			if prov, ok := m.(EbpfProvider); ok {
-				if ips, err := prov.GetTopIPs(5); err == nil {
+		if val := globalEbpfManager.Load(); val != nil {
+			if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
+				if ips, err := container.p.GetTopIPs(5); err == nil {
 					converted := make([]IPStat, len(ips))
 					for i, ip := range ips {
 						converted[i] = IPStat{IP: ip.IP, Count: ip.Count}
@@ -1075,8 +1087,8 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	// Feature flags
 	sm.TitanEnabled = false
 	if v := globalTitan.Load(); v != nil {
-		if prov, ok := v.(TitanProvider); ok {
-			enabled, _, _ := prov.GetStatus()
+		if container, ok := v.(*titanProviderContainer); ok && container.p != nil {
+			enabled, _, _ := container.p.GetStatus()
 			sm.TitanEnabled = enabled
 		}
 	}
@@ -1088,8 +1100,8 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 
 	sm.ResourceGovernorEnabled = false
 	if v := globalGovernor.Load(); v != nil {
-		if prov, ok := v.(GovernorProvider); ok {
-			active, _, _, _, _ := prov.GetStatus(context.Background())
+		if container, ok := v.(*governorProviderContainer); ok && container.p != nil {
+			active, _, _, _, _ := container.p.GetStatus(context.Background())
 			sm.ResourceGovernorEnabled = active
 		}
 	}

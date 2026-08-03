@@ -78,10 +78,13 @@ func ensureMigrationsTable(db *sql.DB, dialect Dialect) error {
 }
 
 func isApplied(db *sql.DB, dialect Dialect, id int) (bool, error) {
-	var count int
-	query := dialect.Rebind("SELECT COUNT(*) FROM migrations WHERE id = ?")
+	var count sql.NullInt64
+	query := dialect.Rebind("SELECT COALESCE(COUNT(*), 0) FROM migrations WHERE id = ?")
 	err := db.QueryRow(query, id).Scan(&count)
-	return count > 0, err
+	if err != nil {
+		return false, err
+	}
+	return count.Valid && count.Int64 > 0, nil
 }
 
 func markApplied(db *sql.DB, dialect Dialect, id int, name string) error {
