@@ -12,6 +12,7 @@ import {
   IconPlugConnected,
   IconAlertTriangle,
 } from "@tabler/icons-react";
+import { safeToFixed } from "../utils/format";
 import {
   useGateonStatus,
   usePathStats,
@@ -28,8 +29,8 @@ export function GlobalHealthBar() {
 
   const reqsLabel = useMemo(() => {
     const totalReqs = pathStats?.reduce((s, p) => s + (p.requestCount ?? 0), 0) ?? 0;
-    if (totalReqs >= 1_000_000) return `${(totalReqs / 1_000_000).toFixed(1)}M`;
-    if (totalReqs >= 1000) return `${(totalReqs / 1000).toFixed(1)}K`;
+    if (totalReqs >= 1_000_000) return `${safeToFixed(totalReqs / 1_000_000, 1)}M`;
+    if (totalReqs >= 1000) return `${safeToFixed(totalReqs / 1000, 1)}K`;
     return String(totalReqs);
   }, [pathStats]);
 

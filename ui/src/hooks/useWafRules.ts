@@ -3,7 +3,7 @@ import { apiFetch } from "./api";
 import type { WafRule, ListWafRulesResponse, ListWafRulesRequest, CreateWafRuleRequest, UpdateWafRuleRequest } from "../types/gateon";
 import { useState } from "react";
 
-export function useWafRules(initialParams: ListWafRulesRequest = { limit: 10, offset: 0 }) {
+export function useWafRules(initialParams: ListWafRulesRequest = { pageSize: 10, page: 0 }) {
   const queryClient = useQueryClient();
   const [params, setParams] = useState<ListWafRulesRequest>(initialParams);
 
@@ -11,12 +11,15 @@ export function useWafRules(initialParams: ListWafRulesRequest = { limit: 10, of
     queryKey: ["waf-rules", params],
     queryFn: async () => {
       const queryParams = new URLSearchParams();
-      if (params.limit) queryParams.set("limit", params.limit.toString());
-      if (params.offset) queryParams.set("offset", params.offset.toString());
+      if (params.pageSize !== undefined) queryParams.set("pageSize", params.pageSize.toString());
+      if (params.page !== undefined) queryParams.set("page", params.page.toString());
       if (params.search) queryParams.set("search", params.search);
       if (params.category && params.category !== "all") queryParams.set("category", params.category);
 
       const resp = await apiFetch(`/v1/waf/rules?${queryParams.toString()}`);
+      if (!resp.ok) {
+        throw new Error(await resp.text());
+      }
       const data: ListWafRulesResponse = await resp.json();
       return {
         rules: data.rules || [],

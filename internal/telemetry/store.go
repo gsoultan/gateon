@@ -186,6 +186,10 @@ var (
 		subscribers: make(map[chan SecurityThreat]struct{}),
 	}
 
+	MetricsBroadcaster = &Broadcaster[*MetricsSnapshot]{
+		subscribers: make(map[chan *MetricsSnapshot]struct{}),
+	}
+
 	// ipMaliciousFingerprints tracks unique malicious fingerprints per IP for escalation to IP shunning.
 	// map[IP]map[Fingerprint]struct{}
 	ipMaliciousFingerprints, _ = lru.NewARC(10000)
@@ -231,7 +235,7 @@ type Broadcaster[T any] struct {
 func (b *Broadcaster[T]) Subscribe() chan T {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	ch := make(chan T, 10)
+	ch := make(chan T, 1000)
 	if b.subscribers == nil {
 		b.subscribers = make(map[chan T]struct{})
 	}
@@ -258,6 +262,7 @@ func (b *Broadcaster[T]) Broadcast(data T) {
 		select {
 		case ch <- data:
 		default:
+			// Drain if full to make room for newest (optional, but let's just stick to non-blocking)
 		}
 	}
 }

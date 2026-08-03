@@ -4,7 +4,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
@@ -17,33 +16,15 @@ func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 			return
 		}
 
-		query := r.URL.Query()
-		limitStr := query.Get("limit")
-		offsetStr := query.Get("offset")
-		search := query.Get("search")
-		category := query.Get("category")
+		page, pageSize, search := ParsePagination(r)
+		category := r.URL.Query().Get("category")
 
-		var limit, offset int
-		if limitStr != "" {
-			var err error
-			limit, err = strconv.Atoi(limitStr)
-			if err != nil {
-				WriteHTTPError(w, http.StatusBadRequest, "Invalid limit")
-				return
-			}
-		}
-		if offsetStr != "" {
-			var err error
-			offset, err = strconv.Atoi(offsetStr)
-			if err != nil {
-				WriteHTTPError(w, http.StatusBadRequest, "Invalid offset")
-				return
-			}
-		}
+		// Calculate offset from page
+		offset := page * pageSize
 
 		res, err := apiService.ListWafRules(r.Context(), &gateonv1.ListWafRulesRequest{
-			Limit:    int32(limit),
-			Offset:   int32(offset),
+			Limit:    pageSize,
+			Offset:   offset,
 			Search:   search,
 			Category: category,
 		})

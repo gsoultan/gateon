@@ -583,24 +583,26 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 		SetSSEHeaders(w)
 
+		ch := telemetry.MetricsBroadcaster.Subscribe()
+		defer telemetry.MetricsBroadcaster.Unsubscribe(ch)
+
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 			return
 		}
 
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
+		// Send initial snapshot
+		if snap := telemetry.GetLastSnapshot(); snap != nil {
+			data, _ := json.Marshal(snap)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
+			flusher.Flush()
+		}
 
 		for {
 			select {
-			case <-ticker.C:
-				// Match the non-watch /v1/diag/metrics budget so transient DB
-				// slowness doesn't deadline an otherwise-legitimate snapshot.
-				ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-				snap, err := telemetry.CollectMetricsSnapshot(ctx, 50, 0)
-				cancel()
-				if err != nil {
+			case snap, ok := <-ch:
+				if !ok {
 					return
 				}
 				data, _ := json.Marshal(snap)

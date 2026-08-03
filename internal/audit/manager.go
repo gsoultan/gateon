@@ -71,7 +71,7 @@ type Broadcaster struct {
 func (b *Broadcaster) Subscribe() chan AuditEntry {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	ch := make(chan AuditEntry, 10)
+	ch := make(chan AuditEntry, 1000)
 	b.subscribers[ch] = struct{}{}
 	return ch
 }

@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { queryClient } from "../queryClient";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
-import { useApiConfigStore } from "../store/useApiConfigStore";
+import { useRealTimeStore } from "../store/useRealTimeStore";
 
 export type AggStats = {
   totalRequests: number;
@@ -16,15 +16,42 @@ export type AggStats = {
   memoryUsage: number;
 };
 
+const queryKey = ["agg-stats"];
+
 export function useAggStats() {
-  const refreshIntervalSec = useApiConfigStore((s) => s.refreshInterval);
-  return useQuery<AggStats>({
-    queryKey: ["agg-stats"],
+  const queryClient = useQueryClient();
+  const subscribe = useRealTimeStore(state => state.subscribe);
+
+  const query = useQuery<AggStats>({
+    queryKey,
     queryFn: async () => {
       const res = await apiFetch("/v1/diag/agg-stats");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
-    refetchInterval: refreshIntervalSec * 1000,
-  }, queryClient);
+  });
+
+  useEffect(() => {
+    return subscribe('metrics', (snap) => {
+      const gs = snap.goldenSignals;
+      if (!gs) return;
+
+      const newStats: AggStats = {
+        totalRequests: gs.requestsTotal,
+        totalBandwidthBytes: gs.bytesInTotal + gs.bytesOutTotal,
+        totalErrors: gs.errorsTotal,
+        activeConnections: gs.activeConnTotal,
+        openCircuits: gs.openCircuits,
+        halfOpenCircuits: gs.halfOpenCircuits,
+        healthyTargets: gs.healthyTargets,
+        totalTargets: gs.totalTargets,
+        cpuUsage: snap.system?.cpuUsagePercent || 0,
+        memoryUsage: snap.system?.memoryUsagePercent || 0,
+      };
+
+      queryClient.setQueryData(queryKey, newStats);
+    });
+  }, [queryClient, subscribe]);
+
+  return query;
 }

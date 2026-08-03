@@ -1,13 +1,13 @@
 import { useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, getApiUrl } from "./api";
+import { apiFetch } from "./api";
 import type { MetricsSnapshot } from "../types/metrics";
-import { useSSEWorker } from "./useSSEWorker";
+import { useRealTimeStore } from "../store/useRealTimeStore";
 
 export function useMetricsSnapshot(limit?: number, page?: number) {
   const queryClient = useQueryClient();
-  const { parseSSE } = useSSEWorker();
   const queryKey = useMemo(() => ["metrics-snapshot", limit, page], [limit, page]);
+  const subscribe = useRealTimeStore(state => state.subscribe);
 
   const query = useQuery<MetricsSnapshot>({
     queryKey,
@@ -25,25 +25,13 @@ export function useMetricsSnapshot(limit?: number, page?: number) {
   });
 
   useEffect(() => {
-    // Only use SSE for the default view (page 1) to avoid confusing behavior during pagination
+    // Only use SSE for the default view to avoid confusing behavior during pagination
     if (page && page > 1) return;
 
-    const url = getApiUrl("/v1/diag/metrics/watch");
-    const eventSource = new EventSource(url, { withCredentials: true });
-
-    eventSource.onmessage = async (event) => {
-      try {
-        const newData = await parseSSE(event.data) as MetricsSnapshot;
-        queryClient.setQueryData(queryKey, newData);
-      } catch (err) {
-        console.error("Failed to parse metrics snapshot SSE", err);
-      }
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [queryClient, queryKey]);
+    return subscribe('metrics', (newData) => {
+      queryClient.setQueryData(queryKey, newData);
+    });
+  }, [queryClient, queryKey, subscribe, page]);
 
   return query;
 }

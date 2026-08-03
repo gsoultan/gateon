@@ -12,6 +12,10 @@ export type GoldenSignals = {
   activeConnTotal: number;
   requestsToday: number;
   bytesToday: number;
+  openCircuits: number;
+  halfOpenCircuits: number;
+  healthyTargets: number;
+  totalTargets: number;
 };
 
 export type RouteMetric = {
@@ -116,6 +120,16 @@ export type SystemMetrics = {
   storageUsageGb: number;
   storageTotalGb: number;
   storageUsagePercent: number;
+  publicIp: string;
+  status: string;
+  version: string;
+  titanEnabled: boolean;
+  neuralSentinelEnabled: boolean;
+  graphIntelligenceEnabled: boolean;
+  predictiveAiEnabled: boolean;
+  pqcEnabled: boolean;
+  tpmEnabled: boolean;
+  resourceGovernorEnabled: boolean;
 };
 
 export type MetricsSnapshot = {

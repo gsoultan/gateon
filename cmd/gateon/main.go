@@ -400,16 +400,8 @@ type ebpfAdapter struct {
 	*ebpf.Holder
 }
 
-func (a *ebpfAdapter) GetTopIPs(limit int) ([]telemetry.IPStat, error) {
-	ips, err := a.Holder.GetTopIPs(limit)
-	if err != nil {
-		return nil, err
-	}
-	res := make([]telemetry.IPStat, len(ips))
-	for i, ip := range ips {
-		res[i] = telemetry.IPStat{IP: ip.IP, Count: ip.Count}
-	}
-	return res, nil
+func (a *ebpfAdapter) GetTopIPs(limit int) ([]ebpf.IPStat, error) {
+	return a.Holder.GetTopIPs(limit)
 }
 
 func (a *ebpfAdapter) ShunIP(ip string) error {
