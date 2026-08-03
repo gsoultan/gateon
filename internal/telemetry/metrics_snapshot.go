@@ -325,6 +325,7 @@ type SystemMetrics struct {
 	StorageUsageGB   float64 `json:"storageUsageGB"`
 	StorageTotalGB   float64 `json:"storageTotalGB"`
 	StorageUsagePct  float64 `json:"storageUsagePercent"`
+	PublicIP         string  `json:"publicIp"`
 }
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
@@ -409,7 +410,7 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 
 	if fam, ok := idx["gateon_active_anomaly_score_average"]; ok {
 		if m := fam.GetMetric(); len(m) > 0 {
-			snap.ActiveAnomalyScoreAverage = m[0].GetGauge().GetValue()
+			snap.ActiveAnomalyScoreAverage = SafeFloat(m[0].GetGauge().GetValue())
 		}
 	}
 
@@ -474,7 +475,7 @@ func computeGoldenSignals(idx map[string]*dto.MetricFamily, match func(*dto.Metr
 		}
 	}
 	if gs.RequestsTotal > 0 {
-		gs.ErrorRate = (gs.ErrorsTotal / gs.RequestsTotal) * 100
+		gs.ErrorRate = SafeFloat((gs.ErrorsTotal / gs.RequestsTotal) * 100)
 	}
 
 	// Latency from histogram
@@ -490,12 +491,12 @@ func computeGoldenSignals(idx map[string]*dto.MetricFamily, match func(*dto.Metr
 			totalCount += h.GetSampleCount()
 		}
 		if totalCount > 0 {
-			gs.AvgLatencyMs = (totalSum / float64(totalCount)) * 1000
+			gs.AvgLatencyMs = SafeFloat((totalSum / float64(totalCount)) * 1000)
 		}
 		p := estimatePercentiles(fam, []float64{0.50, 0.95, 0.99}, match)
-		gs.P50LatencyMs = p[0] * 1000
-		gs.P95LatencyMs = p[1] * 1000
-		gs.P99LatencyMs = p[2] * 1000
+		gs.P50LatencyMs = SafeFloat(p[0] * 1000)
+		gs.P95LatencyMs = SafeFloat(p[1] * 1000)
+		gs.P99LatencyMs = SafeFloat(p[2] * 1000)
 	}
 
 	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", match)
@@ -640,7 +641,7 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 			rm := getOrCreateRoute(routeMap, route)
 			h := m.GetHistogram()
 			if h.GetSampleCount() > 0 {
-				rm.AvgLatency = (h.GetSampleSum() / float64(h.GetSampleCount())) * 1000
+				rm.AvgLatency = SafeFloat((h.GetSampleSum() / float64(h.GetSampleCount())) * 1000)
 			}
 		}
 	}
@@ -679,13 +680,13 @@ func buildMiddlewareMetrics(idx map[string]*dto.MetricFamily) MiddlewareMetrics 
 	mm.CacheMisses = sumCounter(idx, "gateon_middleware_cache_misses_total", nil)
 	total := mm.CacheHits + mm.CacheMisses
 	if total > 0 {
-		mm.CacheHitRate = (mm.CacheHits / total) * 100
+		mm.CacheHitRate = SafeFloat((mm.CacheHits / total) * 100)
 	}
 	mm.AuthFailures = collectLabeledCounts(idx, "gateon_middleware_auth_failures_total", "auth_type")
 	mm.CompressBytesIn = sumCounter(idx, "gateon_middleware_compress_bytes_in_total", nil)
 	mm.CompressBytesOut = sumCounter(idx, "gateon_middleware_compress_bytes_out_total", nil)
 	if mm.CompressBytesIn > 0 {
-		mm.CompressionRatio = (1 - mm.CompressBytesOut/mm.CompressBytesIn) * 100
+		mm.CompressionRatio = SafeFloat((1 - mm.CompressBytesOut/mm.CompressBytesIn) * 100)
 	}
 
 	if fam, ok := idx["gateon_middleware_turnstile_total"]; ok {
@@ -991,6 +992,7 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	sm.StorageUsageGB = gaugeValue(idx, "gateon_storage_usage_bytes") / (1024 * 1024 * 1024)
 	sm.StorageTotalGB = gaugeValue(idx, "gateon_storage_total_bytes") / (1024 * 1024 * 1024)
 	sm.StorageUsagePct = gaugeValue(idx, "gateon_storage_usage_percent")
+	sm.PublicIP = GetPublicIP(context.Background())
 
 	return sm
 }
@@ -1262,7 +1264,7 @@ func GetServiceGoldenSignals(ctx context.Context, serviceID string) GoldenSignal
 		}
 	}
 	if gs.RequestsTotal > 0 {
-		gs.ErrorRate = (gs.ErrorsTotal / gs.RequestsTotal) * 100
+		gs.ErrorRate = SafeFloat((gs.ErrorsTotal / gs.RequestsTotal) * 100)
 	}
 
 	// Latency from histogram
@@ -1278,12 +1280,12 @@ func GetServiceGoldenSignals(ctx context.Context, serviceID string) GoldenSignal
 			totalCount += h.GetSampleCount()
 		}
 		if totalCount > 0 {
-			gs.AvgLatencyMs = (totalSum / float64(totalCount)) * 1000
+			gs.AvgLatencyMs = SafeFloat((totalSum / float64(totalCount)) * 1000)
 		}
 		p := estimatePercentiles(fam, []float64{0.50, 0.95, 0.99}, isService)
-		gs.P50LatencyMs = p[0] * 1000
-		gs.P95LatencyMs = p[1] * 1000
-		gs.P99LatencyMs = p[2] * 1000
+		gs.P50LatencyMs = SafeFloat(p[0] * 1000)
+		gs.P95LatencyMs = SafeFloat(p[1] * 1000)
+		gs.P99LatencyMs = SafeFloat(p[2] * 1000)
 	}
 
 	gs.InFlightTotal = sumGauge(idx, "gateon_requests_in_flight", isService)

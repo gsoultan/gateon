@@ -979,7 +979,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 
 		res := make([]*gateonv1.Anomaly, 0, len(userMitigations)+len(ipMitigations))
 		for _, m := range userMitigations {
-			res = append(res, &gateonv1.Anomaly{
+			a := &gateonv1.Anomaly{
 				Source:         m.Fingerprint,
 				Type:           m.Type,
 				Mitigated:      true,
@@ -992,10 +992,12 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Ja4:            m.Fingerprint,
 				Ja4H:           m.JA4H,
 				Ja4Plus:        m.Fingerprint,
-			})
+			}
+			populateAnomalyGeo(ctx, a, m.Fingerprint)
+			res = append(res, a)
 		}
 		for _, m := range ipMitigations {
-			res = append(res, &gateonv1.Anomaly{
+			a := &gateonv1.Anomaly{
 				Source:         m.IP,
 				Type:           "ip_shunning",
 				Mitigated:      true,
@@ -1005,7 +1007,9 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Severity:       "high",
 				ActionTaken:    "blocked",
 				Recommendation: "IP address is mitigated/shunned based on threat intelligence.",
-			})
+			}
+			populateAnomalyGeo(ctx, a, m.IP)
+			res = append(res, a)
 		}
 
 		// Sort combined list by timestamp

@@ -45,20 +45,20 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 
 	if d.Config == nil || d.Config.EnableSequenceValidation {
 		mu.Lock()
-		anomalies = append(anomalies, d.detectCoordinatedSequences(data)...)
-		anomalies = append(anomalies, d.detectSharedBehavioralClusters(data)...)
+		anomalies = append(anomalies, d.detectCoordinatedSequences(ctx, data)...)
+		anomalies = append(anomalies, d.detectSharedBehavioralClusters(ctx, data)...)
 		mu.Unlock()
 	}
 
 	// 2. Multi-IP attacks via fingerprinting
 	mu.Lock()
-	anomalies = append(anomalies, d.detectMultiIPAttacks(data, threshold)...)
+	anomalies = append(anomalies, d.detectMultiIPAttacks(ctx, data, threshold)...)
 	mu.Unlock()
 
 	// 3. Impossible Travel detection
 	if d.Config == nil || d.Config.EnableImpossibleTravel {
 		mu.Lock()
-		anomalies = append(anomalies, d.detectImpossibleTravel(data)...)
+		anomalies = append(anomalies, d.detectImpossibleTravel(ctx, data)...)
 		mu.Unlock()
 	}
 
@@ -156,6 +156,8 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 					Details:     strings.Join(reasons, "; "),
 					Time:        stats.LastSeen,
 					ActionTaken: actionTaken,
+					Latitude:    anomaly.Latitude,
+					Longitude:   anomaly.Longitude,
 					Confidence:  math.Min(1.0, float64(score)/threshold),
 					Reputation:  rep,
 				}
@@ -179,7 +181,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 	return anomalies
 }
 
-func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData) []*gateonv1.Anomaly {
+func (d *SecurityThreatDetector) detectCoordinatedSequences(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	totalIPs := len(data.IPStats)
 	pathPopularityStr := data.PathPopularity
@@ -288,6 +290,9 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(data *DiagnosticData
 				ClusterSize:    int32(ipCount),
 				Confidence:     math.Min(1.0, score/150.0),
 			}
+			if len(ipList) > 0 {
+				populateAnomalyGeo(ctx, anomaly, ipList[0])
+			}
 			anomalies = append(anomalies, anomaly)
 		}
 	}
@@ -307,7 +312,7 @@ func (d *SecurityThreatDetector) calculateShannonEntropy(counts map[string]int, 
 	return entropy
 }
 
-func (d *SecurityThreatDetector) detectSharedBehavioralClusters(data *DiagnosticData) []*gateonv1.Anomaly {
+func (d *SecurityThreatDetector) detectSharedBehavioralClusters(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	if len(data.IPStats) < 5 {
 		return nil
@@ -346,13 +351,16 @@ func (d *SecurityThreatDetector) detectSharedBehavioralClusters(data *Diagnostic
 				ClusterSize:    int32(len(ips)),
 				Confidence:     0.9,
 			}
+			if len(ips) > 0 {
+				populateAnomalyGeo(ctx, anomaly, ips[0])
+			}
 			anomalies = append(anomalies, anomaly)
 		}
 	}
 	return anomalies
 }
 
-func (d *SecurityThreatDetector) detectImpossibleTravel(data *DiagnosticData) []*gateonv1.Anomaly {
+func (d *SecurityThreatDetector) detectImpossibleTravel(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	for fp, stats := range data.FingerprintStats {
 		if len(stats.Countries) < 2 {
@@ -748,7 +756,7 @@ func (d *SecurityThreatDetector) getAdaptiveRecommendation(score int, primaryTyp
 	}
 }
 
-func (d *SecurityThreatDetector) detectMultiIPAttacks(data *DiagnosticData, threshold float64) []*gateonv1.Anomaly {
+func (d *SecurityThreatDetector) detectMultiIPAttacks(ctx context.Context, data *DiagnosticData, threshold float64) []*gateonv1.Anomaly {
 	var anomalies []*gateonv1.Anomaly
 	for fp, stats := range data.FingerprintStats {
 		if len(stats.IPs) > 3 {
