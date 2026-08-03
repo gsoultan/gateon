@@ -106,7 +106,8 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 			accept := strings.ToLower(r.Header.Get("Accept"))
 			if strings.HasPrefix(contentType, "application/grpc") ||
 				strings.HasPrefix(contentType, "text/event-stream") ||
-				strings.Contains(accept, "text/event-stream") {
+				strings.Contains(accept, "text/event-stream") ||
+				r.URL.Path == "/v1/watch" || r.URL.Path == "/v1/logs" {
 				next.ServeHTTP(w, r)
 				return
 			}

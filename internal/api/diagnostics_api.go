@@ -972,15 +972,56 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 	offset := int(req.GetOffset())
 
 	status := req.GetStatus()
-	if status == "mitigated" {
-		// Combine User and IP mitigations
-		userMitigations, totalUser := telemetry.GetUserMitigations(ctx, limit, offset)
-		ipMitigations, totalIP := telemetry.GetIPMitigations(ctx, limit, offset)
+	if status == "mitigated" || status == "user_mitigated" || status == "userMitigated" || status == "ip_mitigated" || status == "ipMitigated" {
+		var mitigations []telemetry.CombinedMitigation
+		var total int
 
-		res := make([]*gateonv1.Anomaly, 0, len(userMitigations)+len(ipMitigations))
-		for _, m := range userMitigations {
+		if status == "user_mitigated" || status == "userMitigated" {
+			// Fetch only user mitigations
+			userMitigations, t := telemetry.GetUserMitigations(ctx, limit, offset)
+			total = t
+			mitigations = make([]telemetry.CombinedMitigation, len(userMitigations))
+			for i, m := range userMitigations {
+				mitigations[i] = telemetry.CombinedMitigation{
+					SourceType:    "user",
+					Source:        m.Fingerprint,
+					JA4H:          m.JA4H,
+					Type:          m.Type,
+					Category:      m.Category,
+					Status:        m.Status,
+					Reason:        m.Reason,
+					MitigatedAt:   m.MitigatedAt,
+					UnmitigatedAt: m.UnmitigatedAt,
+					UpdatedAt:     m.UpdatedAt,
+				}
+			}
+		} else if status == "ip_mitigated" || status == "ipMitigated" {
+			// Fetch only IP mitigations
+			ipMitigations, t := telemetry.GetIPMitigations(ctx, limit, offset)
+			total = t
+			mitigations = make([]telemetry.CombinedMitigation, len(ipMitigations))
+			for i, m := range ipMitigations {
+				mitigations[i] = telemetry.CombinedMitigation{
+					SourceType:    "ip",
+					Source:        m.IP,
+					Type:          "ip_shunning",
+					Category:      "threat_intel",
+					Status:        m.Status,
+					Reason:        m.Reason,
+					MitigatedAt:   m.MitigatedAt,
+					UnmitigatedAt: m.UnmitigatedAt,
+					UpdatedAt:     m.UpdatedAt,
+				}
+			}
+		} else {
+			// Combined "mitigated" status
+			mitigations, total = telemetry.GetCombinedMitigations(ctx, limit, offset)
+		}
+
+		res := make([]*gateonv1.Anomaly, 0, len(mitigations))
+		for _, m := range mitigations {
 			a := &gateonv1.Anomaly{
-				Source:         m.Fingerprint,
+				Source:         m.Source,
 				Type:           m.Type,
 				Mitigated:      true,
 				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
@@ -988,86 +1029,20 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Category:       m.Category,
 				Severity:       "high",
 				ActionTaken:    "blocked",
-				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
-				Ja4:            m.Fingerprint,
+				Recommendation: "Source is mitigated based on threat intelligence.",
+				Ja4:            m.Source,
 				Ja4H:           m.JA4H,
-				Ja4Plus:        m.Fingerprint,
+				Ja4Plus:        m.Source,
 			}
-			populateAnomalyGeo(ctx, a, m.Fingerprint)
-			res = append(res, a)
-		}
-		for _, m := range ipMitigations {
-			a := &gateonv1.Anomaly{
-				Source:         m.IP,
-				Type:           "ip_shunning",
-				Mitigated:      true,
-				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
-				Description:    m.Reason,
-				Category:       "threat_intel",
-				Severity:       "high",
-				ActionTaken:    "blocked",
-				Recommendation: "IP address is mitigated/shunned based on threat intelligence.",
+			if m.SourceType == "ip" {
+				a.Recommendation = "IP address is mitigated/shunned at the network layer."
+			} else {
+				a.Recommendation = "User/Fingerprint is mitigated based on behavioral patterns."
 			}
-			populateAnomalyGeo(ctx, a, m.IP)
+			populateAnomalyGeo(ctx, a, m.Source)
 			res = append(res, a)
 		}
 
-		// Sort combined list by timestamp
-		slices.SortFunc(res, func(a, b *gateonv1.Anomaly) int {
-			return cmp.Compare(b.Timestamp, a.Timestamp)
-		})
-
-		// Apply paging to combined list if needed, but for now we just return both
-		// because the limit/offset was applied individually.
-		// To be perfectly accurate we should fetch all and then page, but let's keep it simple.
-
-		return &gateonv1.ListSecurityThreatsResponse{
-			Threats:    res,
-			TotalCount: int32(totalUser + totalIP),
-		}, nil
-	}
-
-	if status == "user_mitigated" {
-		userMitigations, total := telemetry.GetUserMitigations(ctx, limit, offset)
-		res := make([]*gateonv1.Anomaly, 0, len(userMitigations))
-		for _, m := range userMitigations {
-			res = append(res, &gateonv1.Anomaly{
-				Source:         m.Fingerprint,
-				Type:           m.Type,
-				Mitigated:      true,
-				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
-				Description:    m.Reason,
-				Category:       m.Category,
-				Severity:       "high",
-				ActionTaken:    "blocked",
-				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
-				Ja4:            m.Fingerprint,
-				Ja4H:           m.JA4H,
-				Ja4Plus:        m.Fingerprint,
-			})
-		}
-		return &gateonv1.ListSecurityThreatsResponse{
-			Threats:    res,
-			TotalCount: int32(total),
-		}, nil
-	}
-
-	if status == "ip_mitigated" {
-		ipMitigations, total := telemetry.GetIPMitigations(ctx, limit, offset)
-		res := make([]*gateonv1.Anomaly, 0, len(ipMitigations))
-		for _, m := range ipMitigations {
-			res = append(res, &gateonv1.Anomaly{
-				Source:         m.IP,
-				Type:           "ip_shunning",
-				Mitigated:      true,
-				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
-				Description:    m.Reason,
-				Category:       "threat_intel",
-				Severity:       "high",
-				ActionTaken:    "blocked",
-				Recommendation: "IP is shunned at the network layer via eBPF/XDP.",
-			})
-		}
 		return &gateonv1.ListSecurityThreatsResponse{
 			Threats:    res,
 			TotalCount: int32(total),

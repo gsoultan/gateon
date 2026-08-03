@@ -14,6 +14,7 @@ import {
   Box, 
   Table, 
   Button,
+  Skeleton,
 } from '@mantine/core';
 import { DonutChart } from '@mantine/charts';
 import { 
@@ -345,52 +346,69 @@ export function OverviewTab({
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {metrics?.security?.recentAnomalies?.slice(0, 5).map((a: SecurityThreat) => (
-                <Table.Tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(a)}>
-                  <Table.Td>
-                    <Group gap="sm" wrap="nowrap">
-                      <ThemeIcon 
-                        variant="light" 
-                        color={getSeverityColor(a.severity)} 
-                        size="md" 
-                        radius="md"
-                      >
-                        {getThreatIcon(a.type || '')}
-                      </ThemeIcon>
-                      <Stack gap={0}>
-                        <Group gap={4}>
-                          <Text size="sm" fw={700}>{(a.type || 'Unknown').replace(/_/g, ' ').toUpperCase()}</Text>
-                          {a.recommendation?.includes("Smart Insight:") && (
-                            <Tooltip label="Deep intelligence analysis available">
-                              <Badge size="xs" color="blue" variant="outline" p={4} style={{ borderStyle: 'dashed' }}>
-                                <IconBrain size={10} />
-                              </Badge>
-                            </Tooltip>
-                          )}
-                        </Group>
-                        <Text size="xs" c="dimmed" maw={300} truncate="end">{a.details}</Text>
-                      </Stack>
-                    </Group>
-                  </Table.Td>
-                  <Table.Td>
-                    <Group gap={4}>
-                      <Badge size="xs" variant="outline">{a.countryCode || 'XX'}</Badge>
-                      <Text size="sm" fw={500} ff="monospace" onClick={(e) => handleTraceClick(e, a.sourceIp)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{a.sourceIp}</Text>
-                    </Group>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge color={getSeverityColor(a.severity)} variant="filled" size="sm">
-                      {a.severity}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>
-                    <Group gap={4} wrap="nowrap">
-                      <IconClock size={12} color="gray" />
-                      <Text size="xs" c="dimmed">{safeFormatDate(a.timestamp, 'HH:mm:ss')}</Text>
-                    </Group>
+              {!metrics ? (
+                Array(5).fill(0).map((_, i) => (
+                  <Table.Tr key={i}>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                    <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+                  </Table.Tr>
+                ))
+              ) : metrics.security?.recentAnomalies?.length === 0 ? (
+                <Table.Tr>
+                  <Table.Td colSpan={4}>
+                    <Text ta="center" py="xl" c="dimmed">No recent critical events.</Text>
                   </Table.Td>
                 </Table.Tr>
-              ))}
+              ) : (
+                metrics.security?.recentAnomalies?.slice(0, 5).map((a: SecurityThreat) => (
+                  <Table.Tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(a)}>
+                    <Table.Td>
+                      <Group gap="sm" wrap="nowrap">
+                        <ThemeIcon 
+                          variant="light" 
+                          color={getSeverityColor(a.severity)} 
+                          size="md" 
+                          radius="md"
+                        >
+                          {getThreatIcon(a.type || '')}
+                        </ThemeIcon>
+                        <Stack gap={0}>
+                          <Group gap={4}>
+                            <Text size="sm" fw={700}>{(a.type || 'Unknown').replace(/_/g, ' ').toUpperCase()}</Text>
+                            {a.recommendation?.includes("Smart Insight:") && (
+                              <Tooltip label="Deep intelligence analysis available">
+                                <Badge size="xs" color="blue" variant="outline" p={4} style={{ borderStyle: 'dashed' }}>
+                                  <IconBrain size={10} />
+                                </Badge>
+                              </Tooltip>
+                            )}
+                          </Group>
+                          <Text size="xs" c="dimmed" maw={300} truncate="end">{a.details}</Text>
+                        </Stack>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap={4}>
+                        <Badge size="xs" variant="outline">{a.countryCode || 'XX'}</Badge>
+                        <Text size="sm" fw={500} ff="monospace" onClick={(e) => handleTraceClick(e, a.sourceIp)} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{a.sourceIp}</Text>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge color={getSeverityColor(a.severity)} variant="filled" size="sm">
+                        {a.severity}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap={4} wrap="nowrap">
+                        <IconClock size={12} color="gray" />
+                        <Text size="xs" c="dimmed">{safeFormatDate(a.timestamp, 'HH:mm:ss')}</Text>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))
+              )}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>

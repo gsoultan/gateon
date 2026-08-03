@@ -17,6 +17,7 @@ import {
   Pagination,
   ThemeIcon,
   Tabs,
+  Skeleton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -141,13 +142,113 @@ export function ThreatExplorerTab() {
     openTrace();
   };
 
-  if (isLoading) {
-    return (
-      <Center py="xl">
-        <Loader size="lg" />
-      </Center>
-    );
-  }
+  const renderTableContent = () => {
+    if (isLoading) {
+      return Array(5).fill(0).map((_, i) => (
+        <Table.Tr key={i}>
+          <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+          <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+          <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+          <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+          <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+          <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+          <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
+        </Table.Tr>
+      ));
+    }
+
+    if (threats.length === 0) {
+      return (
+        <Table.Tr>
+          <Table.Td colSpan={7}>
+            <Center py="xl">
+              <Stack align="center" gap="xs">
+                <IconShieldCheck size={48} color="var(--mantine-color-teal-6)" style={{ opacity: 0.5 }} />
+                <Text fw={700} c="dimmed">No threats found</Text>
+                <Text size="xs" c="dimmed">Everything looks quiet for this selection.</Text>
+              </Stack>
+            </Center>
+          </Table.Td>
+        </Table.Tr>
+      );
+    }
+
+    return threats.map((threat, index) => (
+      <Table.Tr key={index} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(threat)}>
+        <Table.Td>
+          <Text size="xs" c="dimmed">
+            {safeFormatDate(threat.timestamp, 'MMM d, HH:mm:ss')}
+          </Text>
+        </Table.Td>
+        <Table.Td>
+          <Group gap={4}>
+            <Text size="sm" fw={700} ff="monospace">{threat.source}</Text>
+            <Tooltip label="Trace Visualizer">
+              <ActionIcon variant="subtle" size="xs" onClick={(e) => handleTraceClick(e, threat.source)}>
+                <IconMap2 size={12} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        </Table.Td>
+        <Table.Td>
+          <Tooltip label={threat.requestUri || '/'}>
+            <Text size="xs" c="dimmed" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {threat.requestUri || '/'}
+            </Text>
+          </Tooltip>
+        </Table.Td>
+        <Table.Td>
+          <Group gap="sm" wrap="nowrap">
+            <ThemeIcon 
+              variant="light" 
+              color={getSeverityColor(threat.severity)} 
+              size="sm"
+            >
+              {getThreatIcon(threat.type || '', threat.category)}
+            </ThemeIcon>
+            <Stack gap={0}>
+              <Text size="xs" fw={700} style={{ textTransform: 'uppercase' }}>
+                {threat.type?.replace(/_/g, ' ')}
+              </Text>
+              <Text size="xs" c="dimmed">{threat.category}</Text>
+            </Stack>
+          </Group>
+        </Table.Td>
+        <Table.Td>
+          <Badge color={getSeverityColor(threat.severity)} variant="outline" size="xs">
+            {threat.severity}
+          </Badge>
+        </Table.Td>
+        <Table.Td>
+          <Badge color={threat.mitigated ? "teal" : "orange"} variant="light" size="xs">
+            {threat.mitigated ? "Mitigated" : "Detected"}
+          </Badge>
+        </Table.Td>
+        <Table.Td>
+          <Group gap={4}>
+            <Button 
+              size="compact-xs" 
+              variant="light" 
+              onClick={() => handleRowClick(threat)}
+            >
+              Details
+            </Button>
+            {threat.mitigated && canWrite && (
+              <Button 
+                size="compact-xs" 
+                variant="subtle" 
+                color="red"
+                loading={unmitigating === threat.source}
+                onClick={(e) => handleUnmitigate(e, threat)}
+              >
+                Allow
+              </Button>
+            )}
+          </Group>
+        </Table.Td>
+      </Table.Tr>
+    ));
+  };
 
   if (error) {
     return (
@@ -218,109 +319,7 @@ export function ThreatExplorerTab() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {threats.length > 0 ? (
-                threats.map((threat, index) => (
-                  <Table.Tr key={index} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(threat)}>
-                    <Table.Td>
-                      <Text size="xs" c="dimmed">
-                        {safeFormatDate(threat.timestamp, 'MMM d, HH:mm:ss')}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={4}>
-                        <Text size="sm" fw={700} ff="monospace">{threat.source}</Text>
-                        <Tooltip label="Trace Visualizer">
-                          <ActionIcon variant="subtle" size="xs" onClick={(e) => handleTraceClick(e, threat.source)}>
-                            <IconMap2 size={12} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Tooltip label={threat.requestUri || '/'}>
-                        <Text size="xs" c="dimmed" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {threat.requestUri || '/'}
-                        </Text>
-                      </Tooltip>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap="sm" wrap="nowrap">
-                        <ThemeIcon 
-                          variant="light" 
-                          color={getSeverityColor(threat.severity)} 
-                          size="md" 
-                          radius="md"
-                        >
-                          {getThreatIcon(threat.type, threat.category)}
-                        </ThemeIcon>
-                        <Stack gap={0}>
-                          <Group gap={4}>
-                            <Text size="sm" fw={600}>{threat.type.replace(/_/g, ' ').toUpperCase()}</Text>
-                            {threat.recommendation?.includes("Smart Insight:") && (
-                              <Tooltip label="Deep intelligence analysis available">
-                                <Badge size="xs" color="blue" variant="outline" p={4} style={{ borderStyle: 'dashed' }}>
-                                  <IconBrain size={10} />
-                                </Badge>
-                              </Tooltip>
-                            )}
-                          </Group>
-                          <Group gap={4}>
-                            <Badge size="xs" variant="light" color="gray">{threat.category || 'N/A'}</Badge>
-                            <Text size="xs" c="dimmed" truncate maw={200}>{threat.description}</Text>
-                          </Group>
-                        </Stack>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={getSeverityColor(threat.severity)} variant="filled" size="sm">
-                        {threat.severity}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {threat.actionTaken === "blocked" || threat.actionTaken === "shunned" || threat.actionTaken === "challenged" ? (
-                        <Badge color="red" leftSection={<IconShieldLock size={12} />} variant="light">
-                          Blocked
-                        </Badge>
-                      ) : threat.mitigated ? (
-                        <Badge color="teal" leftSection={<IconShieldCheck size={12} />} variant="light">
-                          Mitigated
-                        </Badge>
-                      ) : (
-                        <Badge color="orange" leftSection={<IconAlertTriangle size={12} />} variant="light">
-                          Detected
-                        </Badge>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap="xs">
-                        <Button variant="subtle" size="xs" onClick={() => handleRowClick(threat)}>
-                          Details
-                        </Button>
-                        {threat.mitigated && (
-                          <Tooltip label="Unmitigate / Whitelist">
-                            <ActionIcon 
-                              variant="light" 
-                              color="blue" 
-                              size="sm" 
-                              onClick={(e) => handleUnmitigate(e, threat)}
-                              loading={unmitigating === threat.source}
-                              disabled={!canWrite}
-                            >
-                              <IconUserCheck size={14} />
-                            </ActionIcon>
-                          </Tooltip>
-                        )}
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                ))
-              ) : (
-                <Table.Tr>
-                  <Table.Td colSpan={7}>
-                    <Text ta="center" py="xl" c="dimmed">No threats match your filters.</Text>
-                  </Table.Td>
-                </Table.Tr>
-              )}
+              {renderTableContent()}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
