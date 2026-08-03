@@ -34,7 +34,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
   onChange,
   disabled,
 }) => {
-  const audit = config.audit || { enabled: false, sign_entries: false };
+  const audit = config.audit || { enabled: false, signEntries: false };
 
   const updateAudit = (value: Partial<AuditConfig>) => {
     onChange({
@@ -46,8 +46,8 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
     });
   };
 
-  const retentionDays = audit.retention_days || 0;
-  const archiveOnRetention = !!audit.archive_on_retention;
+  const retentionDays = audit.retentionDays || 0;
+  const archiveOnRetention = !!audit.archiveOnRetention;
 
   return (
     <Card withBorder radius="md" p="xl" shadow="sm">
@@ -82,20 +82,20 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                   <Text size="xs" c="dimmed">Sign audit log entries with HMAC-SHA256 to prevent tampering.</Text>
                 </Stack>
                 <Switch
-                  checked={audit.sign_entries}
-                  onChange={(e) => updateAudit({ sign_entries: e.currentTarget.checked })}
+                  checked={audit.signEntries}
+                  onChange={(e) => updateAudit({ signEntries: e.currentTarget.checked })}
                   disabled={disabled}
                 />
               </Group>
 
-              {audit.sign_entries && (
+              {audit.signEntries && (
                 <Stack gap={6}>
                   <TextInput
                     label="Signature Key"
                     placeholder="Enter a secret key, or generate one — leave blank to auto-generate on save"
                     type="password"
-                    value={audit.signature_key || ""}
-                    onChange={(e) => updateAudit({ signature_key: e.currentTarget.value })}
+                    value={audit.signatureKey || ""}
+                    onChange={(e) => updateAudit({ signatureKey: e.currentTarget.value })}
                     disabled={disabled}
                     leftSection={<IconFingerprint size={16} />}
                   />
@@ -108,7 +108,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                       variant="light"
                       leftSection={<IconRefresh size={14} />}
                       disabled={disabled}
-                      onClick={() => updateAudit({ signature_key: generateSignatureKey() })}
+                      onClick={() => updateAudit({ signatureKey: generateSignatureKey() })}
                     >
                       Generate key
                     </Button>
@@ -128,7 +128,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                     min={0}
                     max={3650}
                     value={retentionDays}
-                    onChange={(val) => updateAudit({ retention_days: Number(val) })}
+                    onChange={(val) => updateAudit({ retentionDays: Number(val) })}
                     disabled={disabled}
                     w={100}
                     suffix=" days"
@@ -147,7 +147,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                   </Stack>
                   <Switch
                     checked={archiveOnRetention}
-                    onChange={(e) => updateAudit({ archive_on_retention: e.currentTarget.checked })}
+                    onChange={(e) => updateAudit({ archiveOnRetention: e.currentTarget.checked })}
                     disabled={disabled || retentionDays === 0}
                   />
                 </Group>

@@ -106,7 +106,7 @@ export default function SettingsPage() {
     redis: { enabled: false },
     otel: { enabled: false },
     log: { level: "info", development: true, format: "text" },
-    management: { bind: "0.0.0.0", port: "8080", allowed_ips: ["0.0.0.0/0", "::/0"] },
+    management: { bind: "0.0.0.0", port: "8080", allowedIps: ["0.0.0.0/0", "::/0"] },
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -270,9 +270,9 @@ export default function SettingsPage() {
         redis: redis,
         otel: otel,
         transport: {
-          max_idle_conns: 20000,
-          max_idle_conns_per_host: 2000,
-          idle_conn_timeout_seconds: 90,
+          maxIdleConns: 20000,
+          maxIdleConnsPerHost: 2000,
+          idleConnTimeoutSeconds: 90,
         },
       });
     }
@@ -435,7 +435,7 @@ export default function SettingsPage() {
                         label="ACME Server"
                         placeholder="https://acme-v02.api.letsencrypt.org/directory"
                         disabled={formDisabled}
-                        value={tls.acme.ca_server || ""}
+                        value={tls.acme.caServer || ""}
                         onChange={(e) =>
                           setConfig({
                             ...config,
@@ -443,7 +443,7 @@ export default function SettingsPage() {
                               ...tls,
                               acme: {
                                 ...tls.acme!,
-                                ca_server: e.currentTarget.value,
+                                caServer: e.currentTarget.value,
                               },
                             },
                           })
@@ -458,7 +458,7 @@ export default function SettingsPage() {
                           { label: "TLS-ALPN-01", value: "tls-alpn" },
                           { label: "DNS-01", value: "dns" },
                         ]}
-                        value={tls.acme.challenge_type || "http"}
+                        value={tls.acme.challengeType || "http"}
                         onChange={(v) =>
                           setConfig({
                             ...config,
@@ -466,7 +466,7 @@ export default function SettingsPage() {
                               ...tls,
                               acme: {
                                 ...tls.acme!,
-                                challenge_type: v || "http",
+                                challengeType: v || "http",
                               },
                             },
                           })
@@ -640,13 +640,13 @@ export default function SettingsPage() {
                 label="Max Idle Conns"
                 description="Total idle connections (default 10000)"
                 disabled={formDisabled}
-                value={transport.max_idle_conns || ""}
+                value={transport.maxIdleConns || ""}
                 onChange={(val) =>
                   setConfig({
                     ...config,
                     transport: {
                       ...transport,
-                      max_idle_conns: val ? Number(val) : 0,
+                      maxIdleConns: val ? Number(val) : 0,
                     },
                   })
                 }
@@ -658,13 +658,13 @@ export default function SettingsPage() {
                 label="Max Idle Conns Per Host"
                 description="Per backend host (default 1000)"
                 disabled={formDisabled}
-                value={transport.max_idle_conns_per_host || ""}
+                value={transport.maxIdleConnsPerHost || ""}
                 onChange={(val) =>
                   setConfig({
                     ...config,
                     transport: {
                       ...transport,
-                      max_idle_conns_per_host: val ? Number(val) : 0,
+                      maxIdleConnsPerHost: val ? Number(val) : 0,
                     },
                   })
                 }
@@ -676,13 +676,13 @@ export default function SettingsPage() {
                 label="Idle Conn Timeout (seconds)"
                 description="Default 90"
                 disabled={formDisabled}
-                value={transport.idle_conn_timeout_seconds || ""}
+                value={transport.idleConnTimeoutSeconds || ""}
                 onChange={(val) =>
                   setConfig({
                     ...config,
                     transport: {
                       ...transport,
-                      idle_conn_timeout_seconds: val ? Number(val) : 0,
+                      idleConnTimeoutSeconds: val ? Number(val) : 0,
                     },
                   })
                 }
@@ -797,13 +797,13 @@ export default function SettingsPage() {
                 placeholder="admin.example.com"
                 description="If set, the management interface will only be accessible via this domain."
                 disabled={formDisabled}
-                value={(config.management?.allowed_hosts || [])[0] || ""}
+                value={(config.management?.allowedHosts || [])[0] || ""}
                 onChange={(e) =>
                   setConfig({
                     ...config,
                     management: {
                       ...(config.management || {}),
-                      allowed_hosts: e.currentTarget.value ? [e.currentTarget.value] : [],
+                      allowedHosts: e.currentTarget.value ? [e.currentTarget.value] : [],
                     },
                   })
                 }
@@ -813,13 +813,13 @@ export default function SettingsPage() {
                 label="Allowed IPs (comma-separated CIDRs)"
                 placeholder="0.0.0.0/0, ::/0"
                 disabled={formDisabled}
-                value={(config.management?.allowed_ips || []).join(", ")}
+                value={(config.management?.allowedIps || []).join(", ")}
                 onChange={(e) =>
                   setConfig({
                     ...config,
                     management: {
                       ...(config.management || {}),
-                      allowed_ips: e.currentTarget.value
+                      allowedIps: e.currentTarget.value
                         .split(",")
                         .map((s) => s.trim())
                         .filter(Boolean),
@@ -954,13 +954,13 @@ export default function SettingsPage() {
                 disabled={formDisabled}
                 min={1}
                 max={365}
-                value={config.log?.audit_log_retention_days ?? 90}
+                value={config.log?.auditLogRetentionDays ?? 90}
                 onChange={(v) =>
                   setConfig({
                     ...config,
                     log: {
                       ...(config.log || {}),
-                      audit_log_retention_days: typeof v === 'number' ? v : 90,
+                      auditLogRetentionDays: typeof v === 'number' ? v : 90,
                     },
                   })
                 }
@@ -1000,13 +1000,13 @@ export default function SettingsPage() {
                     label="PASETO Symmetric Key"
                     placeholder="32 characters minimum"
                     disabled={formDisabled}
-                    value={config?.auth?.paseto_secret || ""}
+                    value={config?.auth?.pasetoSecret || ""}
                     onChange={(e) =>
                       setConfig({
                         ...config,
                         auth: {
                           ...(config?.auth || {}),
-                          paseto_secret: e.currentTarget.value,
+                          pasetoSecret: e.currentTarget.value,
                         },
                       })
                     }
@@ -1021,7 +1021,7 @@ export default function SettingsPage() {
                               ...config,
                               auth: {
                                 ...(config?.auth || {}),
-                                paseto_secret: generateRandomString(32),
+                                pasetoSecret: generateRandomString(32),
                               },
                             })
                           }
@@ -1046,10 +1046,10 @@ export default function SettingsPage() {
                         { value: "mariadb", label: "MariaDB" },
                       ]}
                       value={
-                        config?.auth?.database_config?.driver ||
+                        config?.auth?.databaseConfig?.driver ||
                         inferDriver(
-                          config?.auth?.database_url,
-                          config?.auth?.sqlite_path
+                          config?.auth?.databaseUrl,
+                          config?.auth?.sqlitePath
                         )
                       }
                       onChange={(v) =>
@@ -1057,16 +1057,16 @@ export default function SettingsPage() {
                           ...config,
                           auth: {
                             ...(config?.auth || {}),
-                            database_config: {
-                              ...(config?.auth?.database_config || {}),
+                            databaseConfig: {
+                              ...(config?.auth?.databaseConfig || {}),
                               driver: (v as DatabaseConfig["driver"]) || "sqlite",
-                              host: v && v !== "sqlite" ? config?.auth?.database_config?.host || "127.0.0.1" : undefined,
+                              host: v && v !== "sqlite" ? config?.auth?.databaseConfig?.host || "127.0.0.1" : undefined,
                               port: v === "postgres" ? 5432 : v === "mysql" || v === "mariadb" ? 3306 : undefined,
-                              database: v && v !== "sqlite" ? config?.auth?.database_config?.database || "gateon" : undefined,
-                              ssl_mode: v === "postgres" ? "disable" : undefined,
+                              database: v && v !== "sqlite" ? config?.auth?.databaseConfig?.database || "gateon" : undefined,
+                              sslMode: v === "postgres" ? "disable" : undefined,
                             },
-                            database_url: undefined,
-                            sqlite_path: undefined,
+                            databaseUrl: undefined,
+                            sqlitePath: undefined,
                           },
                         })
                       }
@@ -1074,18 +1074,18 @@ export default function SettingsPage() {
                       radius="md"
                       mb="md"
                     />
-                    {(config?.auth?.database_config?.driver === "sqlite" ||
-                      !config?.auth?.database_config?.driver) && (
+                    {(config?.auth?.databaseConfig?.driver === "sqlite" ||
+                      !config?.auth?.databaseConfig?.driver) && (
                       <TextInput
                         label="SQLite path"
                         placeholder="gateon.db"
                         disabled={formDisabled}
                         value={
-                          config?.auth?.database_config?.sqlite_path ??
-                          config?.auth?.sqlite_path ??
-                          (config?.auth?.database_url &&
-                          !config.auth.database_url.includes("://")
-                            ? config.auth.database_url
+                          config?.auth?.databaseConfig?.sqlitePath ??
+                          config?.auth?.sqlitePath ??
+                          (config?.auth?.databaseUrl &&
+                          !config.auth.databaseUrl.includes("://")
+                            ? config.auth.databaseUrl
                             : "")
                         }
                         onChange={(e) =>
@@ -1093,35 +1093,35 @@ export default function SettingsPage() {
                             ...config,
                             auth: {
                               ...(config?.auth || {}),
-                              database_config: {
-                                ...(config?.auth?.database_config || {}),
+                              databaseConfig: {
+                                ...(config?.auth?.databaseConfig || {}),
                                 driver: "sqlite",
-                                sqlite_path: e.currentTarget.value || "gateon.db",
+                                sqlitePath: e.currentTarget.value || "gateon.db",
                               },
-                              database_url: undefined,
-                              sqlite_path: undefined,
+                              databaseUrl: undefined,
+                              sqlitePath: undefined,
                             },
                           })
                         }
                         radius="md"
                       />
                     )}
-                    {(config?.auth?.database_config?.driver === "postgres" ||
-                      config?.auth?.database_config?.driver === "mysql" ||
-                      config?.auth?.database_config?.driver === "mariadb") && (
+                    {(config?.auth?.databaseConfig?.driver === "postgres" ||
+                      config?.auth?.databaseConfig?.driver === "mysql" ||
+                      config?.auth?.databaseConfig?.driver === "mariadb") && (
                       <Stack gap="md">
                         <TextInput
                           label="Host"
                           placeholder="127.0.0.1"
                           disabled={formDisabled}
-                          value={config?.auth?.database_config?.host || ""}
+                          value={config?.auth?.databaseConfig?.host || ""}
                           onChange={(e) =>
                             setConfig({
                               ...config,
                               auth: {
                                 ...(config?.auth || {}),
-                                database_config: {
-                                  ...(config?.auth?.database_config || {}),
+                                databaseConfig: {
+                                  ...(config?.auth?.databaseConfig || {}),
                                   host: e.currentTarget.value,
                                 },
                               },
@@ -1132,7 +1132,7 @@ export default function SettingsPage() {
                         <NumberInput
                           label="Port"
                           placeholder={
-                            config?.auth?.database_config?.driver === "postgres"
+                            config?.auth?.databaseConfig?.driver === "postgres"
                               ? "5432"
                               : "3306"
                           }
@@ -1140,8 +1140,8 @@ export default function SettingsPage() {
                           max={65535}
                           disabled={formDisabled}
                           value={
-                            config?.auth?.database_config?.port ||
-                            (config?.auth?.database_config?.driver === "postgres"
+                            config?.auth?.databaseConfig?.port ||
+                            (config?.auth?.databaseConfig?.driver === "postgres"
                               ? 5432
                               : 3306)
                           }
@@ -1150,8 +1150,8 @@ export default function SettingsPage() {
                               ...config,
                               auth: {
                                 ...(config?.auth || {}),
-                                database_config: {
-                                  ...(config?.auth?.database_config || {}),
+                                databaseConfig: {
+                                  ...(config?.auth?.databaseConfig || {}),
                                   port: typeof v === "string" ? parseInt(v, 10) || 0 : v ?? 0,
                                 },
                               },
@@ -1163,14 +1163,14 @@ export default function SettingsPage() {
                           label="User"
                           placeholder="gateon"
                           disabled={formDisabled}
-                          value={config?.auth?.database_config?.user || ""}
+                          value={config?.auth?.databaseConfig?.user || ""}
                           onChange={(e) =>
                             setConfig({
                               ...config,
                               auth: {
                                 ...(config?.auth || {}),
-                                database_config: {
-                                  ...(config?.auth?.database_config || {}),
+                                databaseConfig: {
+                                  ...(config?.auth?.databaseConfig || {}),
                                   user: e.currentTarget.value,
                                 },
                               },
@@ -1183,14 +1183,14 @@ export default function SettingsPage() {
                           type="password"
                           placeholder="••••••••"
                           disabled={formDisabled}
-                          value={config?.auth?.database_config?.password || ""}
+                          value={config?.auth?.databaseConfig?.password || ""}
                           onChange={(e) =>
                             setConfig({
                               ...config,
                               auth: {
                                 ...(config?.auth || {}),
-                                database_config: {
-                                  ...(config?.auth?.database_config || {}),
+                                databaseConfig: {
+                                  ...(config?.auth?.databaseConfig || {}),
                                   password: e.currentTarget.value,
                                 },
                               },
@@ -1206,8 +1206,8 @@ export default function SettingsPage() {
                                     ...config,
                                     auth: {
                                       ...(config?.auth || {}),
-                                      database_config: {
-                                        ...(config?.auth?.database_config || {}),
+                                      databaseConfig: {
+                                        ...(config?.auth?.databaseConfig || {}),
                                         password: generateRandomString(24),
                                       },
                                     },
@@ -1224,14 +1224,14 @@ export default function SettingsPage() {
                           label="Database"
                           placeholder="gateon"
                           disabled={formDisabled}
-                          value={config?.auth?.database_config?.database || ""}
+                          value={config?.auth?.databaseConfig?.database || ""}
                           onChange={(e) =>
                             setConfig({
                               ...config,
                               auth: {
                                 ...(config?.auth || {}),
-                                database_config: {
-                                  ...(config?.auth?.database_config || {}),
+                                databaseConfig: {
+                                  ...(config?.auth?.databaseConfig || {}),
                                   database: e.currentTarget.value,
                                 },
                               },
@@ -1239,7 +1239,7 @@ export default function SettingsPage() {
                           }
                           radius="md"
                         />
-                        {config?.auth?.database_config?.driver === "postgres" && (
+                        {config?.auth?.databaseConfig?.driver === "postgres" && (
                           <Select
                             label="SSL mode"
                             data={[
@@ -1248,15 +1248,15 @@ export default function SettingsPage() {
                               { value: "verify-ca", label: "verify-ca" },
                               { value: "verify-full", label: "verify-full" },
                             ]}
-                            value={config?.auth?.database_config?.ssl_mode || "disable"}
+                            value={config?.auth?.databaseConfig?.sslMode || "disable"}
                             onChange={(v) =>
                               setConfig({
                                 ...config,
                                 auth: {
                                   ...(config?.auth || {}),
-                                  database_config: {
-                                    ...(config?.auth?.database_config || {}),
-                                    ssl_mode: v || "disable",
+                                  databaseConfig: {
+                                    ...(config?.auth?.databaseConfig || {}),
+                                    sslMode: v || "disable",
                                   },
                                 },
                               })
@@ -1424,7 +1424,7 @@ export default function SettingsPage() {
                   ...config,
                   waf: {
                     ...(config.waf || {
-                      use_crs: true,
+                      useCrs: true,
                       paranoiaLevel: 1,
                     }),
                     enabled: e.currentTarget.checked,
@@ -1446,13 +1446,13 @@ export default function SettingsPage() {
               <Group grow>
                 <Switch
                   label="Use OWASP Core Rule Set (CRS)"
-                  checked={config.waf.use_crs}
+                  checked={config.waf.useCrs}
                   onChange={(e) =>
                     setConfig({
                       ...config,
                       waf: {
                         ...config.waf!,
-                        use_crs: e.currentTarget.checked,
+                        useCrs: e.currentTarget.checked,
                       },
                     })
                   }
@@ -1490,11 +1490,11 @@ export default function SettingsPage() {
                       },
                     })
                   }
-                  disabled={formDisabled || !config.waf.use_crs}
+                  disabled={formDisabled || !config.waf.useCrs}
                 />
               </Group>
 
-              {config.waf.use_crs && (
+              {config.waf.useCrs && (
                 <>
                   <Divider label="Global Protection Categories" labelPosition="center" />
                   <Group grow align="flex-start">
@@ -1568,8 +1568,8 @@ export default function SettingsPage() {
                           label="Allowed Admin IPs"
                           description="IPs allowed to access /wp-admin and /wp-login.php"
                           placeholder="1.2.3.4, 5.6.7.8"
-                          value={config.waf.allowed_admin_ips || []}
-                          onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, allowed_admin_ips: v } })}
+                          value={config.waf.allowedAdminIps || []}
+                          onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, allowedAdminIps: v } })}
                           disabled={formDisabled}
                         />
                       )}
@@ -1623,18 +1623,18 @@ export default function SettingsPage() {
                       <Switch
                         label="Auto Update Rules"
                         description="Periodically check for CRS updates"
-                        checked={config.waf.auto_update_rules}
-                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, auto_update_rules: e.currentTarget.checked } })}
+                        checked={config.waf.autoUpdateRules}
+                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, autoUpdateRules: e.currentTarget.checked } })}
                         disabled={formDisabled}
                       />
                     </Stack>
                     <Stack gap="xs">
                       <NumberInput
                         label="Update Interval (hours)"
-                        value={config.waf.update_interval_hours || 24}
-                        onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, update_interval_hours: parseInt(v?.toString() || "24") } })}
+                        value={config.waf.updateIntervalHours || 24}
+                        onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, updateIntervalHours: parseInt(v?.toString() || "24") } })}
                         min={1}
-                        disabled={formDisabled || !config.waf.auto_update_rules}
+                        disabled={formDisabled || !config.waf.autoUpdateRules}
                       />
                     </Stack>
                   </Group>
@@ -1642,9 +1642,9 @@ export default function SettingsPage() {
                     label="Rules Source URL"
                     description="URL to CRS rules ZIP (leave empty for default)"
                     placeholder="https://github.com/coreruleset/coreruleset/archive/refs/tags/v4.0.0.zip"
-                    value={config.waf.rules_url || ""}
-                    onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, rules_url: e.currentTarget.value } })}
-                    disabled={formDisabled || !config.waf.auto_update_rules}
+                    value={config.waf.rulesUrl || ""}
+                    onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, rulesUrl: e.currentTarget.value } })}
+                    disabled={formDisabled || !config.waf.autoUpdateRules}
                   />
 
                   <Divider label="ClamAV Anti-Malware" labelPosition="center" />
@@ -1715,14 +1715,14 @@ export default function SettingsPage() {
                         { value: '1', label: 'Local Installation' },
                         { value: '2', label: 'Docker Container' },
                       ]}
-                      value={config.waf.clamav?.installation_mode?.toString() || '2'}
+                      value={config.waf.clamav?.installationMode?.toString() || '2'}
                       onChange={(val) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
                           clamav: {
                             ...(config.waf!.clamav || {}),
-                            installation_mode: parseInt(val || '2')
+                            installationMode: parseInt(val || '2')
                           }
                         }
                       })}
@@ -1731,14 +1731,14 @@ export default function SettingsPage() {
                     <Switch
                       label="Auto-Install/Manage"
                       description="Let Gateon handle installation and lifecycle"
-                      checked={config.waf.clamav?.auto_install}
+                      checked={config.waf.clamav?.autoInstall}
                       onChange={(e) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
                           clamav: {
                             ...(config.waf!.clamav || {}),
-                            auto_install: e.currentTarget.checked
+                            autoInstall: e.currentTarget.checked
                           }
                         }
                       })}
@@ -1769,14 +1769,14 @@ export default function SettingsPage() {
                       label="Full Scan Schedule"
                       description="Cron expression for full system scans"
                       placeholder="0 2 * * *"
-                      value={config.waf.clamav?.full_scan_schedule || ""}
+                      value={config.waf.clamav?.fullScanSchedule || ""}
                       onChange={(e) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
                           clamav: {
                             ...(config.waf!.clamav || {}),
-                            full_scan_schedule: e.currentTarget.value
+                            fullScanSchedule: e.currentTarget.value
                           }
                         }
                       })}
@@ -1788,23 +1788,23 @@ export default function SettingsPage() {
                     <Switch
                       label="Low Resource Mode"
                       description="Optimize for 1GB RAM / 2 Cores"
-                      checked={config.waf.clamav?.low_resource_mode}
+                      checked={config.waf.clamav?.lowResourceMode}
                       onChange={(e) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
                           clamav: {
                             ...(config.waf!.clamav || {}),
-                            low_resource_mode: e.currentTarget.checked
+                            lowResourceMode: e.currentTarget.checked
                           }
                         }
                       })}
                       disabled={formDisabled || !config.waf.malwareDetection}
                     />
-                    {config.waf.clamav?.installation_mode === 2 && (
+                    {config.waf.clamav?.installationMode === 2 && (
                       <TextInput
                         label="Docker Image"
-                        value={config.waf.clamav?.docker_image || ""}
+                        value={config.waf.clamav?.dockerImage || ""}
                         placeholder="clamav/clamav:latest"
                         onChange={(e) => setConfig({
                           ...config,
@@ -1812,7 +1812,7 @@ export default function SettingsPage() {
                             ...config.waf!,
                             clamav: {
                               ...(config.waf!.clamav || {}),
-                              docker_image: e.currentTarget.value
+                              dockerImage: e.currentTarget.value
                             }
                           }
                         })}
@@ -1836,13 +1836,13 @@ export default function SettingsPage() {
                   <Group grow>
                     <Switch
                       label="Enable Bot Management"
-                      checked={config.waf.bot_management?.enabled}
+                      checked={config.waf.botManagement?.enabled}
                       onChange={(e) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
-                          bot_management: {
-                            ...(config.waf!.bot_management || {}),
+                          botManagement: {
+                            ...(config.waf!.botManagement || {}),
                             enabled: e.currentTarget.checked
                           }
                         }
@@ -1851,33 +1851,33 @@ export default function SettingsPage() {
                     />
                     <Switch
                       label="Browser Integrity"
-                      checked={config.waf.bot_management?.enable_browser_integrity}
+                      checked={config.waf.botManagement?.enableBrowserIntegrity}
                       onChange={(e) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
-                          bot_management: {
-                            ...(config.waf!.bot_management || {}),
-                            enable_browser_integrity: e.currentTarget.checked
+                          botManagement: {
+                            ...(config.waf!.botManagement || {}),
+                            enableBrowserIntegrity: e.currentTarget.checked
                           }
                         }
                       })}
-                      disabled={formDisabled || !config.waf.bot_management?.enabled}
+                      disabled={formDisabled || !config.waf.botManagement?.enabled}
                     />
                     <Switch
                       label="JS Challenge"
-                      checked={config.waf.bot_management?.enable_js_challenge}
+                      checked={config.waf.botManagement?.enableJsChallenge}
                       onChange={(e) => setConfig({
                         ...config,
                         waf: {
                           ...config.waf!,
-                          bot_management: {
-                            ...(config.waf!.bot_management || {}),
-                            enable_js_challenge: e.currentTarget.checked
+                          botManagement: {
+                            ...(config.waf!.botManagement || {}),
+                            enableJsChallenge: e.currentTarget.checked
                           }
                         }
                       })}
-                      disabled={formDisabled || !config.waf.bot_management?.enabled}
+                      disabled={formDisabled || !config.waf.botManagement?.enabled}
                     />
                   </Group>
                 </>
@@ -1887,13 +1887,13 @@ export default function SettingsPage() {
                 label="Custom Global Directives"
                 description="Coraza/ModSecurity compatible directives applied globally."
                 placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
-                value={config.waf.custom_directives || ""}
+                value={config.waf.customDirectives || ""}
                 onChange={(e) =>
                   setConfig({
                     ...config,
                     waf: {
                       ...config.waf!,
-                      custom_directives: e.currentTarget.value,
+                      customDirectives: e.currentTarget.value,
                     },
                   })
                 }
@@ -1929,8 +1929,8 @@ export default function SettingsPage() {
                   ha: {
                     ...(config.ha || {
                       priority: 100,
-                      virtual_router_id: 51,
-                      advert_int: 1,
+                      virtualRouterId: 51,
+                      advertInt: 1,
                     }),
                     enabled: e.currentTarget.checked,
                   },
@@ -1957,8 +1957,8 @@ export default function SettingsPage() {
                   label="Virtual Router ID"
                   min={1}
                   max={255}
-                  value={config.ha.virtual_router_id}
-                  onChange={(v) => setConfig({...config, ha: {...config.ha!, virtual_router_id: Number(v)}})}
+                  value={config.ha.virtualRouterId}
+                  onChange={(v) => setConfig({...config, ha: {...config.ha!, virtualRouterId: Number(v)}})}
                   disabled={formDisabled}
                 />
                 <NumberInput
@@ -1973,8 +1973,8 @@ export default function SettingsPage() {
               <TextInput
                 label="Virtual IPs (comma-separated)"
                 placeholder="192.168.1.100/24"
-                value={(config.ha.virtual_ips || []).join(", ")}
-                onChange={(e) => setConfig({...config, ha: {...config.ha!, virtual_ips: e.currentTarget.value.split(",").map(s => s.trim()).filter(Boolean)}})}
+                value={(config.ha.virtualIps || []).join(", ")}
+                onChange={(e) => setConfig({...config, ha: {...config.ha!, virtualIps: e.currentTarget.value.split(",").map(s => s.trim()).filter(Boolean)}})}
                 disabled={formDisabled}
               />
               {canEditGlobal && (
@@ -1998,13 +1998,13 @@ export default function SettingsPage() {
             </Group>
             <Switch
               label="Enable AI Detection"
-              checked={config.anomaly_detection?.enabled || false}
+              checked={config.anomalyDetection?.enabled || false}
               onChange={(e) =>
                 setConfig({
                   ...config,
-                  anomaly_detection: {
-                    ...(config.anomaly_detection || {
-                      check_interval_seconds: 60,
+                  anomalyDetection: {
+                    ...(config.anomalyDetection || {
+                      checkIntervalSeconds: 60,
                       sensitivity: 0.5,
                     }),
                     enabled: e.currentTarget.checked,
@@ -2018,14 +2018,14 @@ export default function SettingsPage() {
             Monitor traffic patterns in-process and detect anomalies in real-time.
           </Text>
 
-          {config.anomaly_detection?.enabled && (
+          {config.anomalyDetection?.enabled && (
             <Stack gap="sm">
               <Group grow>
                 <NumberInput
                   label="Check Interval (s)"
                   min={10}
-                  value={config.anomaly_detection.check_interval_seconds}
-                  onChange={(v) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, check_interval_seconds: Number(v)}})}
+                  value={config.anomalyDetection.checkIntervalSeconds}
+                  onChange={(v) => setConfig({...config, anomalyDetection: {...config.anomalyDetection!, checkIntervalSeconds: Number(v)}})}
                   disabled={formDisabled}
                 />
                 <NumberInput
@@ -2034,8 +2034,8 @@ export default function SettingsPage() {
                   step={0.1}
                   min={0}
                   max={1}
-                  value={config.anomaly_detection.sensitivity}
-                  onChange={(v) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, sensitivity: Number(v)}})}
+                  value={config.anomalyDetection.sensitivity}
+                  onChange={(v) => setConfig({...config, anomalyDetection: {...config.anomalyDetection!, sensitivity: Number(v)}})}
                   disabled={formDisabled}
                 />
                 <NumberInput
@@ -2044,8 +2044,8 @@ export default function SettingsPage() {
                   step={1}
                   min={1}
                   max={100}
-                  value={config.anomaly_detection.security_threat_threshold || 15.0}
-                  onChange={(v) => setConfig({...config, anomaly_detection: {...config.anomaly_detection!, security_threat_threshold: Number(v)}})}
+                  value={config.anomalyDetection.securityThreatThreshold || 15.0}
+                  onChange={(v) => setConfig({...config, anomalyDetection: {...config.anomalyDetection!, securityThreatThreshold: Number(v)}})}
                   disabled={formDisabled}
                 />
               </Group>
@@ -2123,7 +2123,7 @@ export default function SettingsPage() {
                 />
               )}
               {netInfo?.ebpf?.attached ? (
-                netInfo.ebpf.attach_mode === "generic" ? (
+                netInfo.ebpf.attachMode === "generic" ? (
                   <Text size="xs" c="yellow">
                     <IconAlertTriangle size={12} style={{ verticalAlign: "middle" }} /> XDP attached to{" "}
                     {netInfo.ebpf.interface} in generic (SKB) mode — native driver mode is
@@ -2140,54 +2140,54 @@ export default function SettingsPage() {
                   <Text size="sm">
                     eBPF is enabled but the XDP program is not attached, so eBPF drop
                     metrics will read 0.
-                    {netInfo.ebpf.load_error ? ` Reason: ${netInfo.ebpf.load_error}` : " Verify the selected interface exists and the gateway has CAP_NET_ADMIN."}
+                    {netInfo.ebpf.loadError ? ` Reason: ${netInfo.ebpf.loadError}` : " Verify the selected interface exists and the gateway has CAP_NET_ADMIN."}
                   </Text>
                 </Alert>
               ) : null}
               <Switch
                 label="XDP Rate Limiting"
                 description="Drop packets at the network driver level"
-                checked={config.ebpf.xdp_rate_limit || false}
-                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdp_rate_limit: e.currentTarget.checked}})}
+                checked={config.ebpf.xdpRateLimit || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdpRateLimit: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
               <Switch
                 label="XDP IP Shunning"
                 description="Automatically shun malicious IPs at the driver level (IPS)"
-                checked={config.ebpf.xdp_ip_shunning || false}
-                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdp_ip_shunning: e.currentTarget.checked}})}
+                checked={config.ebpf.xdpIpShunning || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdpIpShunning: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
               <Switch
                 label="TC Filtering"
                 description="Kernel-level traffic classification and filtering"
-                checked={config.ebpf.tc_filtering || false}
-                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, tc_filtering: e.currentTarget.checked}})}
+                checked={config.ebpf.tcFiltering || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, tcFiltering: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
               <Divider label="Port Knocking" labelPosition="left" />
               <Switch
                 label="Enable Port Knocking"
                 description="Hide management port until a secret sequence of knocks is received (XDP)."
-                checked={config.ebpf.enable_knocking || false}
-                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, enable_knocking: e.currentTarget.checked}})}
+                checked={config.ebpf.enableKnocking || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, enableKnocking: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
-              {config.ebpf.enable_knocking && (
+              {config.ebpf.enableKnocking && (
                 <>
                   <NumberInput
                     label="Management Port to Hide"
                     placeholder="8080"
-                    value={config.ebpf.mgmt_port || 8080}
-                    onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, mgmt_port: Number(val)}})}
+                    value={config.ebpf.mgmtPort || 8080}
+                    onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, mgmtPort: Number(val)}})}
                     disabled={formDisabled}
                   />
                   <TagsInput
                     label="Knocking Sequence (Ports)"
                     description="The sequence of ports to knock (e.g. 7000, 8000, 9000)."
                     placeholder="7000, 8000, 9000"
-                    value={(config.ebpf.knocking_sequence || []).map(String)}
-                    onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, knocking_sequence: val.map(Number)}})}
+                    value={(config.ebpf.knockingSequence || []).map(String)}
+                    onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, knockingSequence: val.map(Number)}})}
                     disabled={formDisabled}
                   />
                 </>

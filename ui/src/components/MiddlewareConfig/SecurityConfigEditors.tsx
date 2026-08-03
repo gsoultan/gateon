@@ -32,13 +32,13 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       <Switch
         label="Use OWASP CRS"
         description="Enable OWASP Core Rule Set (recommended)"
-        checked={config.use_crs !== "false"}
+        checked={config.useCrs !== "false"}
         onChange={(e) =>
-          updateConfig("use_crs", e.currentTarget.checked ? "true" : "false")
+          updateConfig("useCrs", e.currentTarget.checked ? "true" : "false")
         }
       />
 
-      {config.use_crs !== "false" && (
+      {config.useCrs !== "false" && (
         <>
           <Divider label="Protection Categories" labelPosition="center" />
           <Group grow>
@@ -146,20 +146,20 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
               <Switch
                 label="Behavioral Profiling"
                 description="Detect robotic patterns and path jumping"
-                checked={config.behavioral_profiling === "true"}
-                onChange={(e) => updateConfig("behavioral_profiling", e.currentTarget.checked ? "true" : "false")}
+                checked={config.behavioralProfiling === "true"}
+                onChange={(e) => updateConfig("behavioralProfiling", e.currentTarget.checked ? "true" : "false")}
               />
               <Switch
                 label="Impossible Travel"
                 description="Detect logins from geographically impossible distances"
-                checked={config.impossible_travel === "true"}
-                onChange={(e) => updateConfig("impossible_travel", e.currentTarget.checked ? "true" : "false")}
+                checked={config.impossibleTravel === "true"}
+                onChange={(e) => updateConfig("impossibleTravel", e.currentTarget.checked ? "true" : "false")}
               />
               <Switch
                 label="Device Posture Check"
                 description="Alert on fingerprint changes for same session"
-                checked={config.device_posture === "true"}
-                onChange={(e) => updateConfig("device_posture", e.currentTarget.checked ? "true" : "false")}
+                checked={config.devicePosture === "true"}
+                onChange={(e) => updateConfig("devicePosture", e.currentTarget.checked ? "true" : "false")}
               />
             </Stack>
           </Group>
@@ -170,10 +170,10 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
               <Switch
                 label="Enable Entropy Check"
                 description="Fast-path detection of obfuscated payloads (shellcode/malware)"
-                checked={config.disable_entropy !== "true"}
+                checked={config.disableEntropy !== "true"}
                 onChange={(e) =>
                   updateConfig(
-                    "disable_entropy",
+                    "disableEntropy",
                     e.currentTarget.checked ? "false" : "true"
                   )
                 }
@@ -185,13 +185,13 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
                 description="Threshold for entropy check (0.0-8.0). Default: 5.8"
                 decimalScale={1}
                 step={0.1}
-                value={parseFloat(config.entropy_threshold) || 5.8}
+                value={parseFloat(config.entropyThreshold) || 5.8}
                 onChange={(val) =>
-                  updateConfig("entropy_threshold", (val ?? 5.8).toString())
+                  updateConfig("entropyThreshold", (val ?? 5.8).toString())
                 }
                 min={0}
                 max={8}
-                disabled={config.disable_entropy === "true"}
+                disabled={config.disableEntropy === "true"}
               />
             </Stack>
           </Group>
@@ -220,15 +220,15 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
             <NumberInput
               label="Request Body Limit"
               description="Max request body size in bytes. 0 = unlimited."
-              value={parseInt(config.request_body_limit) || 0}
-              onChange={(val) => updateConfig("request_body_limit", (val ?? 0).toString())}
+              value={parseInt(config.requestBodyLimit) || 0}
+              onChange={(val) => updateConfig("requestBodyLimit", (val ?? 0).toString())}
               min={0}
             />
             <NumberInput
               label="Response Body Limit"
               description="Max response body size in bytes. 0 = unlimited."
-              value={parseInt(config.response_body_limit) || 0}
-              onChange={(val) => updateConfig("response_body_limit", (val ?? 0).toString())}
+              value={parseInt(config.responseBodyLimit) || 0}
+              onChange={(val) => updateConfig("responseBodyLimit", (val ?? 0).toString())}
               min={0}
             />
           </Group>
@@ -281,9 +281,9 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       <Switch
         label="Audit Only"
         description="Log matched rules but do not block requests (SecRuleEngine DetectionOnly)"
-        checked={config.audit_only === "true"}
+        checked={config.auditOnly === "true"}
         onChange={(e) =>
-          updateConfig("audit_only", e.currentTarget.checked ? "true" : "false")
+          updateConfig("auditOnly", e.currentTarget.checked ? "true" : "false")
         }
       />
     </Stack>
@@ -333,20 +333,20 @@ export function BotManagementConfigEditor({ config, updateConfig }: EditorProps)
       <Switch
         label="Browser Integrity Check"
         description="Verify request is from a legitimate browser using Sec-Fetch-* headers"
-        checked={isEnabled("enable_browser_integrity")}
-        onChange={(e) => toggle("enable_browser_integrity", e.currentTarget.checked)}
+        checked={isEnabled("enableBrowserIntegrity")}
+        onChange={(e) => toggle("enableBrowserIntegrity", e.currentTarget.checked)}
       />
       <Switch
         label="JS Challenge"
         description="Serve a non-interactive JS challenge to verify browser capability"
-        checked={isEnabled("enable_js_challenge")}
-        onChange={(e) => toggle("enable_js_challenge", e.currentTarget.checked)}
+        checked={isEnabled("enableJsChallenge")}
+        onChange={(e) => toggle("enableJsChallenge", e.currentTarget.checked)}
       />
       <NumberInput
         label="Challenge Timeout"
         description="How long a solved challenge remains valid (seconds). Default: 3600"
-        value={parseInt(config.challenge_timeout) || 3600}
-        onChange={(val) => updateConfig("challenge_timeout", (val ?? 3600).toString())}
+        value={parseInt(config.challengeTimeout) || 3600}
+        onChange={(val) => updateConfig("challengeTimeout", (val ?? 3600).toString())}
         min={60}
       />
       <TextInput
@@ -354,8 +354,8 @@ export function BotManagementConfigEditor({ config, updateConfig }: EditorProps)
         description="Secret used for signing challenge tokens"
         placeholder="gateon-default-secret"
         type="password"
-        value={config.secret_key || ""}
-        onChange={(e) => updateConfig("secret_key", e.currentTarget.value)}
+        value={config.secretKey || ""}
+        onChange={(e) => updateConfig("secretKey", e.currentTarget.value)}
       />
     </Stack>
   );
@@ -435,7 +435,7 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
         throw new Error("upload response missing path");
       }
 
-      updateConfig("db_path", data.path);
+      updateConfig("dbPath", data.path);
       setUploadSuccess(`Uploaded successfully: ${data.path}`);
     } catch (err: any) {
       setUploadError(err?.message || "Upload failed");
@@ -450,8 +450,8 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
         label="GeoIP Database Path"
         description="Path to GeoLite2-Country.mmdb. Or set GATEON_GEOIP_DB_PATH env"
         placeholder="/etc/gateon/GeoLite2-Country.mmdb"
-        value={config.db_path || ""}
-        onChange={(e) => updateConfig("db_path", e.currentTarget.value)}
+        value={config.dbPath || ""}
+        onChange={(e) => updateConfig("dbPath", e.currentTarget.value)}
       />
       <Group gap="xs" align="end">
         <FileButton accept=".mmdb" onChange={handleUpload}>
@@ -479,8 +479,8 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
         label="Allow Countries"
         description="ISO 3166-1 alpha-2 codes (e.g. US, GB, DE). Empty = allow all except deny list."
         placeholder="US, GB, DE, FR"
-        value={splitTags(config.allow_countries)}
-        onChange={(val) => updateConfig("allow_countries", joinTags(val))}
+        value={splitTags(config.allowCountries)}
+        onChange={(val) => updateConfig("allowCountries", joinTags(val))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
@@ -488,8 +488,8 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
         label="Deny Countries"
         description="ISO codes to always block. Takes precedence over allow list."
         placeholder="CN, RU"
-        value={splitTags(config.deny_countries)}
-        onChange={(val) => updateConfig("deny_countries", joinTags(val))}
+        value={splitTags(config.denyCountries)}
+        onChange={(val) => updateConfig("denyCountries", joinTags(val))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
@@ -548,9 +548,9 @@ export function HMACConfigEditor({ config, updateConfig }: EditorProps) {
       <NumberInput
         label="Body Limit (bytes)"
         description="Max body size to read for HMAC. Default: 1MB"
-        value={parseInt(config.body_limit) || 1048576}
+        value={parseInt(config.bodyLimit) || 1048576}
         onChange={(val) =>
-          updateConfig("body_limit", (val ?? 1048576).toString())
+          updateConfig("bodyLimit", (val ?? 1048576).toString())
         }
         min={1024}
       />
@@ -564,28 +564,28 @@ export function XFCCConfigEditor({ config, updateConfig }: EditorProps) {
       <Text size="sm">Extract and forward client certificate details to backend services via X-Forwarded-Client-Cert header.</Text>
       <Switch
         label="Forward By"
-        checked={config.forward_by === "true"}
-        onChange={(e) => updateConfig("forward_by", e.currentTarget.checked ? "true" : "false")}
+        checked={config.forwardBy === "true"}
+        onChange={(e) => updateConfig("forwardBy", e.currentTarget.checked ? "true" : "false")}
       />
       <Switch
         label="Forward Hash"
-        checked={config.forward_hash === "true"}
-        onChange={(e) => updateConfig("forward_hash", e.currentTarget.checked ? "true" : "false")}
+        checked={config.forwardHash === "true"}
+        onChange={(e) => updateConfig("forwardHash", e.currentTarget.checked ? "true" : "false")}
       />
       <Switch
         label="Forward Subject"
-        checked={config.forward_subject === "true"}
-        onChange={(e) => updateConfig("forward_subject", e.currentTarget.checked ? "true" : "false")}
+        checked={config.forwardSubject === "true"}
+        onChange={(e) => updateConfig("forwardSubject", e.currentTarget.checked ? "true" : "false")}
       />
       <Switch
         label="Forward URI"
-        checked={config.forward_uri === "true"}
-        onChange={(e) => updateConfig("forward_uri", e.currentTarget.checked ? "true" : "false")}
+        checked={config.forwardUri === "true"}
+        onChange={(e) => updateConfig("forwardUri", e.currentTarget.checked ? "true" : "false")}
       />
       <Switch
         label="Forward DNS"
-        checked={config.forward_dns === "true"}
-        onChange={(e) => updateConfig("forward_dns", e.currentTarget.checked ? "true" : "false")}
+        checked={config.forwardDns === "true"}
+        onChange={(e) => updateConfig("forwardDns", e.currentTarget.checked ? "true" : "false")}
       />
     </Stack>
   );
@@ -601,14 +601,14 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
     setImporting(true);
     try {
       const ips = await getCloudflareIPs();
-      const newIps = [...ips.ipv4_cidrs, ...ips.ipv6_cidrs];
-      const current = config.allow_list
-        ? config.allow_list.split(",").map((s) => s.trim())
+      const newIps = [...ips.ipv4Cidrs, ...ips.ipv6Cidrs];
+      const current = config.allowList
+        ? config.allowList.split(",").map((s) => s.trim())
         : [];
       const merged = Array.from(new Set([...current, ...newIps]))
         .filter(Boolean)
         .join(", ");
-      updateConfig("allow_list", merged);
+      updateConfig("allowList", merged);
     } catch (err) {
       console.error("Failed to import Cloudflare IPs:", err);
     } finally {
@@ -622,8 +622,8 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
         label="Allow List"
         description="IPs or CIDRs to allow. If set, only these are allowed."
         placeholder="10.0.0.0/8, 192.168.1.1"
-        value={splitTags(config.allow_list)}
-        onChange={(val) => updateConfig("allow_list", joinTags(val))}
+        value={splitTags(config.allowList)}
+        onChange={(val) => updateConfig("allowList", joinTags(val))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
@@ -641,8 +641,8 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
         label="Deny List"
         description="IPs or CIDRs to always block."
         placeholder="10.0.0.100, 192.168.0.0/24"
-        value={splitTags(config.deny_list)}
-        onChange={(val) => updateConfig("deny_list", joinTags(val))}
+        value={splitTags(config.denyList)}
+        onChange={(val) => updateConfig("denyList", joinTags(val))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
@@ -662,7 +662,7 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
 }
 
 export function PolicyConfigEditor({ config, onChange }: { config: Record<string, string>; onChange: (config: Record<string, string>) => void }) {
-  const rules = Object.entries(config)
+  const rules = Object.entries(config || {})
     .filter(([k]) => k.startsWith("rule_"))
     .map(([k, v]) => ({
       name: k.replace("rule_", ""),
@@ -678,8 +678,8 @@ export function PolicyConfigEditor({ config, onChange }: { config: Record<string
     const id = Date.now();
     onChange({
       ...config,
-      [`rule_new_rule_${id}`]: "true",
-      [`message_new_rule_${id}`]: "",
+      [`ruleNewRule_${id}`]: "true",
+      [`messageNewRule_${id}`]: "",
     });
   };
 
@@ -701,7 +701,7 @@ export function PolicyConfigEditor({ config, onChange }: { config: Record<string
           <Group justify="space-between" align="flex-end">
             <TextInput
               label="Rule Name"
-              placeholder="e.g. admin_only"
+              placeholder="e.g. adminOnly"
               value={rule.name}
               onChange={(e) => {
                 const newName = e.currentTarget.value;
@@ -751,10 +751,10 @@ export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) 
       <Switch
         label="Enable ClamAV Scanning"
         description="Stream file uploads to ClamAV for virus detection"
-        checked={isEnabled("enable_clamav")}
-        onChange={(e) => toggle("enable_clamav", e.currentTarget.checked)}
+        checked={isEnabled("enableClamav")}
+        onChange={(e) => toggle("enableClamav", e.currentTarget.checked)}
       />
-      {isEnabled("enable_clamav") && (
+      {isEnabled("enableClamav") && (
         <TextInput
           label="ClamAV Address"
           description="TCP or Unix socket address (e.g. tcp://localhost:3310)"
@@ -768,16 +768,16 @@ export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) 
         label="Allowed MIME Types"
         description="Only allow these MIME types. If set, others are blocked."
         placeholder="image/jpeg, image/png, application/pdf"
-        value={splitTags(config.allowed_mime_types)}
-        onChange={(val) => updateConfig("allowed_mime_types", joinTags(val))}
+        value={splitTags(config.allowedMimeTypes)}
+        onChange={(val) => updateConfig("allowedMimeTypes", joinTags(val))}
         clearable
       />
       <TagsInput
         label="Blocked MIME Types"
         description="Always block these MIME types."
         placeholder="application/x-msdownload, application/x-sh"
-        value={splitTags(config.blocked_mime_types)}
-        onChange={(val) => updateConfig("blocked_mime_types", joinTags(val))}
+        value={splitTags(config.blockedMimeTypes)}
+        onChange={(val) => updateConfig("blockedMimeTypes", joinTags(val))}
         clearable
       />
       <NumberInput
@@ -790,8 +790,8 @@ export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) 
       <Switch
         label="Strict Magic Number Check"
         description="Verify that file extension matches its magic number/content"
-        checked={config.strict_magic !== "false"}
-        onChange={(e) => updateConfig("strict_magic", e.currentTarget.checked ? "true" : "false")}
+        checked={config.strictMagic !== "false"}
+        onChange={(e) => updateConfig("strictMagic", e.currentTarget.checked ? "true" : "false")}
       />
     </Stack>
   );
@@ -815,16 +815,16 @@ export function OIDCConfigEditor({ config, updateConfig }: EditorProps) {
         <TextInput
           label="Client ID"
           placeholder="your-client-id"
-          value={config.client_id || ""}
-          onChange={(e) => updateConfig("client_id", e.currentTarget.value)}
+          value={config.clientId || ""}
+          onChange={(e) => updateConfig("clientId", e.currentTarget.value)}
           required
         />
         <TextInput
           label="Client Secret"
           placeholder="your-client-secret"
           type="password"
-          value={config.client_secret || ""}
-          onChange={(e) => updateConfig("client_secret", e.currentTarget.value)}
+          value={config.clientSecret || ""}
+          onChange={(e) => updateConfig("clientSecret", e.currentTarget.value)}
           required
         />
       </Group>
@@ -832,8 +832,8 @@ export function OIDCConfigEditor({ config, updateConfig }: EditorProps) {
         label="Redirect URL"
         description="Callback URL (e.g. https://your-gateon/auth/callback)"
         placeholder="https://..."
-        value={config.redirect_url || ""}
-        onChange={(e) => updateConfig("redirect_url", e.currentTarget.value)}
+        value={config.redirectUrl || ""}
+        onChange={(e) => updateConfig("redirectUrl", e.currentTarget.value)}
         required
       />
       <TagsInput

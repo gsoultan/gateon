@@ -6,15 +6,15 @@ import type { Anomaly } from "../../types/gateon";
 import "leaflet/dist/leaflet.css";
 
 // Theme-aware basemaps. The component chrome (legend/empty-state) is tuned for a
-// dark basemap, so in dark mode we use CARTO dark_all; in light mode CARTO light_all
+// dark basemap, so in dark mode we use CARTO darkAll; in light mode CARTO lightAll
 // keeps labels readable. Both fall back to OSM attribution requirements.
 const TILES = {
   dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    url: "https://{s}.basemaps.cartocdn.com/darkAll/{z}/{x}/{y}{r}.png",
     bg: "#0f172a",
   },
   light: {
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    url: "https://{s}.basemaps.cartocdn.com/lightAll/{z}/{x}/{y}{r}.png",
     bg: "#e5e7eb",
   },
 } as const;

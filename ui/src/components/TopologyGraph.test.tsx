@@ -36,7 +36,7 @@ describe("TopologyGraph", () => {
           { url: "http://10.0.0.1:8080", weight: 1 },
           { url: "http://10.0.0.2:8080", weight: 1 },
         ],
-        loadBalancerPolicy: "round_robin",
+        loadBalancerPolicy: "roundRobin",
         healthCheckPath: "/healthz",
       },
     ];

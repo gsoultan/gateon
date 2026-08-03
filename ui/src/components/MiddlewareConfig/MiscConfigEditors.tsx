@@ -3,36 +3,36 @@ import { KeyValueList } from "./KeyValueList";
 
 export const CORS_PRESETS: Record<string, Record<string, string>> = {
   permissive: {
-    allowed_origins: "*",
-    allowed_methods: "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
-    allowed_headers: "*",
-    exposed_headers: "*",
-    allow_credentials: "true",
-    max_age: "86400",
+    allowedOrigins: "*",
+    allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
+    allowedHeaders: "*",
+    exposedHeaders: "*",
+    allowCredentials: "true",
+    maxAge: "86400",
   },
   standard: {
-    allowed_origins: "*",
-    allowed_methods: "GET, POST, OPTIONS",
-    allowed_headers: "Content-Type, Authorization, Accept",
-    exposed_headers: "Content-Length, Content-Type",
-    allow_credentials: "true",
-    max_age: "3600",
+    allowedOrigins: "*",
+    allowedMethods: "GET, POST, OPTIONS",
+    allowedHeaders: "Content-Type, Authorization, Accept",
+    exposedHeaders: "Content-Length, Content-Type",
+    allowCredentials: "true",
+    maxAge: "3600",
   },
   "grpc-web": {
-    allowed_origins: "*",
-    allowed_methods: "POST, OPTIONS",
-    allowed_headers: "Content-Type, X-User-Agent, X-Grpc-Web, Grpc-Timeout",
-    exposed_headers: "Grpc-Status, Grpc-Message, Grpc-Encoding, Grpc-Accept-Encoding, X-Grpc-Web, X-Accept-Content-Transfer-Encoding, X-Accept-Response-Streaming",
-    allow_credentials: "true",
-    max_age: "86400",
+    allowedOrigins: "*",
+    allowedMethods: "POST, OPTIONS",
+    allowedHeaders: "Content-Type, X-User-Agent, X-Grpc-Web, Grpc-Timeout",
+    exposedHeaders: "Grpc-Status, Grpc-Message, Grpc-Encoding, Grpc-Accept-Encoding, X-Grpc-Web, X-Accept-Content-Transfer-Encoding, X-Accept-Response-Streaming",
+    allowCredentials: "true",
+    maxAge: "86400",
   },
   restricted: {
-    allowed_origins: "",
-    allowed_methods: "GET",
-    allowed_headers: "Accept",
-    exposed_headers: "",
-    allow_credentials: "false",
-    max_age: "600",
+    allowedOrigins: "",
+    allowedMethods: "GET",
+    allowedHeaders: "Accept",
+    exposedHeaders: "",
+    allowCredentials: "false",
+    maxAge: "600",
   },
 };
 
@@ -116,8 +116,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
       <TagsInput
         label="Allowed Origins"
         placeholder="*, https://example.com"
-        value={splitTags(config.allowed_origins)}
-        onChange={(val) => updateConfig("allowed_origins", joinTags(val))}
+        value={splitTags(config.allowedOrigins)}
+        onChange={(val) => updateConfig("allowedOrigins", joinTags(val))}
         description="List of origins (e.g. *, https://example.com). Press Enter to add."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -126,8 +126,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
         label="Allowed Methods"
         placeholder="GET, POST, PUT, DELETE, OPTIONS"
         data={["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]}
-        value={splitTags(config.allowed_methods)}
-        onChange={(val) => updateConfig("allowed_methods", joinTags(val))}
+        value={splitTags(config.allowedMethods)}
+        onChange={(val) => updateConfig("allowedMethods", joinTags(val))}
         description="List of HTTP methods. Select from dropdown or type and press Enter."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -136,8 +136,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
         label="Allowed Headers"
         placeholder="Content-Type, Authorization, X-Request-ID"
         data={["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "X-Request-ID"]}
-        value={splitTags(config.allowed_headers)}
-        onChange={(val) => updateConfig("allowed_headers", joinTags(val))}
+        value={splitTags(config.allowedHeaders)}
+        onChange={(val) => updateConfig("allowedHeaders", joinTags(val))}
         description="List of headers. Select from dropdown or type and press Enter."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -146,8 +146,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
         label="Exposed Headers"
         placeholder="X-Custom-Header, Content-Length"
         data={["Content-Length", "Content-Range", "X-Custom-Header"]}
-        value={splitTags(config.exposed_headers)}
-        onChange={(val) => updateConfig("exposed_headers", joinTags(val))}
+        value={splitTags(config.exposedHeaders)}
+        onChange={(val) => updateConfig("exposedHeaders", joinTags(val))}
         description="Headers that can be accessed from the client."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -155,16 +155,16 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
       <Group grow>
         <NumberInput
           label="Max Age (seconds)"
-          value={parseInt(config.max_age) || 86400}
-          onChange={(val) => updateConfig("max_age", (val ?? 86400).toString())}
+          value={parseInt(config.maxAge) || 86400}
+          onChange={(val) => updateConfig("maxAge", (val ?? 86400).toString())}
           min={0}
         />
         <Switch
           label="Allow Credentials"
-          checked={config.allow_credentials === "true"}
+          checked={config.allowCredentials === "true"}
           onChange={(e) =>
             updateConfig(
-              "allow_credentials",
+              "allowCredentials",
               e.currentTarget.checked ? "true" : "false"
             )
           }

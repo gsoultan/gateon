@@ -8,30 +8,30 @@ export interface AuditLogsResponse {
   logs: AuditLog[];
   totalCount?: number;
   page?: number;
-  page_size?: number;
+  pageSize?: number;
 }
 
 export interface AuditLogsParams {
   page?: number;
-  page_size?: number;
+  pageSize?: number;
   search?: string;
 }
 
 export function useAuditLogs(params: AuditLogsParams = {}) {
-  const { page = 0, page_size = 50, search = "" } = params;
+  const { page = 0, pageSize = 50, search = "" } = params;
   const queryClient = useQueryClient();
   const subscribe = useRealTimeStore((s: any) => s.subscribe);
-  const queryKey = ["audit-logs", page, page_size, search];
+  const queryKey = ["audit-logs", page, pageSize, search];
 
   const query = useQuery<AuditLogsResponse>({
     queryKey,
     queryFn: async () => {
-      const res = await api.listAuditLogs({ page, pageSize: page_size, search });
+      const res = await api.listAuditLogs({ page, pageSize: pageSize, search });
       return {
         logs: res.logs as any,
         totalCount: res.totalCount,
         page: res.page,
-        page_size: res.pageSize,
+        pageSize: res.pageSize,
       };
     },
   });
@@ -43,17 +43,17 @@ export function useAuditLogs(params: AuditLogsParams = {}) {
 
     return subscribe("audit", (newEntry: AuditLog) => {
       queryClient.setQueryData<AuditLogsResponse>(queryKey, (old) => {
-        if (!old) return { logs: [newEntry], totalCount: 1, page, page_size };
+        if (!old) return { logs: [newEntry], totalCount: 1, page, pageSize };
         const exists = old.logs.some((l) => l.id === newEntry.id);
         if (exists) return old;
         return {
           ...old,
-          logs: [newEntry, ...old.logs].slice(0, page_size),
+          logs: [newEntry, ...old.logs].slice(0, pageSize),
           totalCount: (old.totalCount ?? old.logs.length) + 1,
         };
       });
     });
-  }, [page, page_size, search, queryClient, queryKey, subscribe]);
+  }, [page, pageSize, search, queryClient, queryKey, subscribe]);
 
   return query;
 }

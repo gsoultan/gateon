@@ -144,7 +144,7 @@ export default function SecurityCommandCenter() {
     setInstalling(true);
     setSudoOpened(false);
     try {
-      const data = await installClamav({ mode, sudo_password: password });
+      const data = await installClamav({ mode, sudoPassword: password });
       if (data.success) {
         notifications.show({
           title: 'Installation Started',
@@ -168,7 +168,7 @@ export default function SecurityCommandCenter() {
   };
 
   const handleUninstall = async (password?: string) => {
-    const mode = globalConfig?.waf?.clamav?.installation_mode;
+    const mode = globalConfig?.waf?.clamav?.installationMode;
     if (mode === 1 && !password) {
       setPendingMode(3); // 3 for uninstall
       setSudoOpened(true);
@@ -178,7 +178,7 @@ export default function SecurityCommandCenter() {
     setUninstalling(true);
     setSudoOpened(false);
     try {
-      const data = await uninstallClamav({ sudo_password: password });
+      const data = await uninstallClamav({ sudoPassword: password });
       if (data.success) {
         notifications.show({
           title: 'Uninstallation Started',
@@ -220,17 +220,17 @@ export default function SecurityCommandCenter() {
   const securityScore = React.useMemo(() => {
     if (!metrics) return 100;
     const base = 100;
-    const penalty = (metrics.activeSuspiciousSessions * 2) + 
-                    (metrics.activeUnverifiedClients * 0.5) +
-                    (metrics.activeAnomalyScoreAverage * 0.1);
+    const penalty = ((metrics.activeSuspiciousSessions || 0) * 2) + 
+                    ((metrics.activeUnverifiedClients || 0) * 0.5) +
+                    ((metrics.activeAnomalyScoreAverage || 0) * 0.1);
     return Math.max(Math.round(base - penalty), 0);
   }, [metrics]);
 
   const scoreColor = securityScore > 85 ? 'teal' : securityScore > 65 ? 'blue' : securityScore > 40 ? 'orange' : 'red';
 
   const threatTypeData = React.useMemo(() => {
-    if (!metrics?.security?.top_threat_types) return [];
-    return metrics.security.top_threat_types.map((t: any) => ({
+    if (!metrics?.security?.topThreatTypes) return [];
+    return metrics.security.topThreatTypes.map((t: any) => ({
       name: (t.label || '').toUpperCase(),
       value: t.value,
       color: getThreatColor(t.label)
@@ -242,15 +242,15 @@ export default function SecurityCommandCenter() {
   }, [threatTypeData]);
 
   const countryData = React.useMemo(() => {
-    if (!metrics?.security?.threats_by_country) return [];
-    return metrics.security.threats_by_country.map((t: any) => ({
+    if (!metrics?.security?.threatsByCountry) return [];
+    return metrics.security.threatsByCountry.map((t: any) => ({
       country: t.label,
       threats: t.value
     }));
   }, [metrics]);
 
   const trendData = React.useMemo(() => {
-    if (!metrics?.security?.attack_trend) return [];
+    if (!metrics?.security?.attackTrend) return [];
     const bounds =
       trendRange === 'all'
         ? null
@@ -259,7 +259,7 @@ export default function SecurityCommandCenter() {
     // selections stay readable.
     const spanMs = bounds ? bounds.endTs - bounds.startTs : Number.POSITIVE_INFINITY;
     const isWideSpan = spanMs > 2 * DAY_MS;
-    return metrics.security.attack_trend
+    return metrics.security.attackTrend
       .filter((t: any) => !bounds || (t.ts >= bounds.startTs && t.ts < bounds.endTs))
       .map((t: any) => {
         const date = new Date(t.ts);

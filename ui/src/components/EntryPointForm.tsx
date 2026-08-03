@@ -80,7 +80,7 @@ export function EntryPointForm({
       tls: { enabled: false },
       readTimeoutMs: DEFAULT_TIMEOUT_MS,
       writeTimeoutMs: DEFAULT_TIMEOUT_MS,
-      max_connections: 0,
+      maxConnections: 0,
       accessLogEnabled: true,
     } as EntryPoint,
     onSubmit: async ({ value }) => {
@@ -114,7 +114,7 @@ export function EntryPointForm({
         "writeTimeoutMs",
         initialData.writeTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       );
-      form.setFieldValue("max_connections", initialData.max_connections || 0);
+      form.setFieldValue("maxConnections", initialData.maxConnections || 0);
       form.setFieldValue(
         "accessLogEnabled",
         initialData.accessLogEnabled ?? true,

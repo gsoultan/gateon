@@ -15,8 +15,8 @@ export interface EbpfStatus {
   enabled: boolean;
   attached: boolean;
   interface?: string;
-  load_error?: string;
-  attach_mode?: string; // "native" or "generic" (SKB fallback)
+  loadError?: string;
+  attachMode?: string; // "native" or "generic" (SKB fallback)
 }
 
 export interface SystemInterfaces {

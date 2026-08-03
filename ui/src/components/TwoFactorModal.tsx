@@ -112,7 +112,7 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
           <>
             <Text size="sm" fw={500}>1. Scan this QR Code</Text>
             <Group justify="center">
-              <Image src={setupData.qr_code_url} maw={200} mx="auto" fit="contain" alt="2FA QR Code" />
+              <Image src={setupData.qrCodeUrl} maw={200} mx="auto" fit="contain" alt="2FA QR Code" />
             </Group>
             <Text size="xs" c="dimmed" ta="center">
               Or enter secret manually: <Code>{setupData.secret}</Code>
@@ -126,7 +126,7 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
             </Alert>
             <Paper withBorder p="xs" bg="var(--mantine-color-gray-0)">
               <SimpleGrid cols={2} spacing="xs">
-                {setupData.recovery_codes.map((c) => (
+                {setupData.recoveryCodes.map((c) => (
                   <Code key={c} block>{c}</Code>
                 ))}
               </SimpleGrid>

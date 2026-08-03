@@ -68,7 +68,12 @@ func ParsePagination(r *http.Request) (page, pageSize int32, search string) {
 			page = int32(p)
 		}
 	}
-	if pageSizeStr := q.Get("page_size"); pageSizeStr != "" {
+	// Support both snake_case and camelCase for frontend compatibility
+	pageSizeStr := q.Get("pageSize")
+	if pageSizeStr == "" {
+		pageSizeStr = q.Get("page_size")
+	}
+	if pageSizeStr != "" {
 		if ps, err := strconv.Atoi(pageSizeStr); err == nil {
 			pageSize = int32(ps)
 		}

@@ -103,7 +103,10 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 
 			// gRPC and SSE must not be compressed
 			contentType := r.Header.Get("Content-Type")
-			if strings.HasPrefix(contentType, "application/grpc") || strings.HasPrefix(contentType, "text/event-stream") {
+			accept := r.Header.Get("Accept")
+			if strings.HasPrefix(contentType, "application/grpc") ||
+				strings.HasPrefix(contentType, "text/event-stream") ||
+				strings.Contains(accept, "text/event-stream") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -144,6 +147,13 @@ func (w *compressWriter) WriteHeader(status int) {
 	}
 	w.status = status
 	w.wroteHeader = true
+
+	// If we already know the content type is SSE, decide now to avoid buffering.
+	// This is critical for real-time responsiveness.
+	ct := w.ResponseWriter.Header().Get("Content-Type")
+	if strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		w.decide()
+	}
 }
 
 func (w *compressWriter) Write(b []byte) (int, error) {

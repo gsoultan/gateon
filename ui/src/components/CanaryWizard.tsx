@@ -32,11 +32,11 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serviceId: service.id,
-          target_weights: targetWeights,
-          duration_minutes: Number(duration),
+          targetWeights: targetWeights,
+          durationMinutes: Number(duration),
           steps: Number(steps),
-          max_error_rate: Number(maxErrorRate),
-          max_p99_latency_ms: Number(maxP99Latency)
+          maxErrorRate: Number(maxErrorRate),
+          maxP99LatencyMs: Number(maxP99Latency)
         })
       })
       if (!res.ok) throw new Error(await res.text())

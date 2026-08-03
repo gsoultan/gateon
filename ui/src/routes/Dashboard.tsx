@@ -227,7 +227,7 @@ export default function Dashboard() {
   }, [pathStats, routeMatchers, serviceNameById]);
 
   const combinedTrafficHistory = useMemo(() => {
-    const history = metricsSnap?.traffic_history ?? [];
+    const history = metricsSnap?.trafficHistory ?? [];
     const samples: RequestDeltaSample[] = history.map((h) => ({
       ts: h.ts,
       requests: h.requests,
@@ -239,11 +239,11 @@ export default function Dashboard() {
     const sessionDeltas = requestDeltaHistory.filter((s) => s.ts >= historyBucketEndTs);
 
     return [...samples, ...sessionDeltas];
-  }, [metricsSnap?.traffic_history, requestDeltaHistory]);
+  }, [metricsSnap?.trafficHistory, requestDeltaHistory]);
 
   const combinedBandwidthHistory = useMemo(() => {
     // Currently history doesn't have breakdown by router/service, so we just use total
-    const history = metricsSnap?.traffic_history ?? [];
+    const history = metricsSnap?.trafficHistory ?? [];
     const samples: BandwidthDeltaSample[] = history.map((h) => ({
       ts: h.ts,
       totalBytes: h.bytes,
@@ -257,7 +257,7 @@ export default function Dashboard() {
     const sessionDeltas = bandwidthDeltaHistory.filter((s) => s.ts >= historyBucketEndTs);
 
     return [...samples, ...sessionDeltas];
-  }, [metricsSnap?.traffic_history, bandwidthDeltaHistory]);
+  }, [metricsSnap?.trafficHistory, bandwidthDeltaHistory]);
 
   // Coarsen the resolution automatically so that wide spans never produce more
   // than MAX_CHART_BUCKETS data points (bounded client memory/CPU).
@@ -350,43 +350,43 @@ export default function Dashboard() {
   const groupedBandwidthLoading = groupedTrafficLoading;
 
   const ipDistributionData = useMemo(() => {
-    if (!metricsSnap?.ip_metrics) return [];
-    return metricsSnap.ip_metrics
+    if (!metricsSnap?.ipMetrics) return [];
+    return metricsSnap.ipMetrics
       .sort((a, b) => b.requests - a.requests)
       .slice(0, 5)
       .map((m) => ({ group: m.ip, requests: m.requests }));
   }, [metricsSnap]);
 
   const countryDistributionData = useMemo(() => {
-    if (!metricsSnap?.country_metrics) return [];
-    return metricsSnap.country_metrics
+    if (!metricsSnap?.countryMetrics) return [];
+    return metricsSnap.countryMetrics
       .sort((a, b) => b.requests - a.requests)
       .slice(0, 5)
       .map((m) => ({ group: m.country, name: m.countryName, requests: m.requests }));
   }, [metricsSnap]);
 
   const protocolDistributionData = useMemo(() => {
-    if (!metricsSnap?.protocol_metrics) return [];
-    return metricsSnap.protocol_metrics.map((m) => ({
+    if (!metricsSnap?.protocolMetrics) return [];
+    return metricsSnap.protocolMetrics.map((m) => ({
       group: m.label.toUpperCase(),
       requests: m.value,
     }));
   }, [metricsSnap]);
 
   const domainDistributionData = useMemo(() => {
-    if (!metricsSnap?.domain_metrics) return [];
-    return metricsSnap.domain_metrics
+    if (!metricsSnap?.domainMetrics) return [];
+    return metricsSnap.domainMetrics
       .sort((a, b) => b.requests - a.requests)
       .slice(0, 5)
       .map((m) => ({ group: m.domain, requests: m.requests }));
   }, [metricsSnap]);
 
   const domainBandwidthData = useMemo(() => {
-    if (!metricsSnap?.domain_metrics) return [];
-    return metricsSnap.domain_metrics
-      .sort((a, b) => b.bytes_in + b.bytes_out - (a.bytes_in + a.bytes_out))
+    if (!metricsSnap?.domainMetrics) return [];
+    return metricsSnap.domainMetrics
+      .sort((a, b) => b.bytesIn + b.bytesOut - (a.bytesIn + a.bytesOut))
       .slice(0, 5)
-      .map((m) => ({ group: m.domain, requests: m.bytes_in + m.bytes_out }));
+      .map((m) => ({ group: m.domain, requests: m.bytesIn + m.bytesOut }));
   }, [metricsSnap]);
 
   const groupedTrafficCharts = useMemo(
@@ -449,25 +449,25 @@ export default function Dashboard() {
   );
 
   const ipBandwidthData = useMemo(() => {
-    if (!metricsSnap?.ip_metrics) return [];
-    return metricsSnap.ip_metrics
-      .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
+    if (!metricsSnap?.ipMetrics) return [];
+    return metricsSnap.ipMetrics
+      .sort((a, b) => (b.bytesIn + b.bytesOut) - (a.bytesIn + a.bytesOut))
       .slice(0, 5)
-      .map((m) => ({ group: m.ip, requests: m.bytes_in + m.bytes_out }));
+      .map((m) => ({ group: m.ip, requests: m.bytesIn + m.bytesOut }));
   }, [metricsSnap]);
 
   const countryBandwidthData = useMemo(() => {
-    if (!metricsSnap?.country_metrics) return [];
-    return metricsSnap.country_metrics
-      .sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))
+    if (!metricsSnap?.countryMetrics) return [];
+    return metricsSnap.countryMetrics
+      .sort((a, b) => (b.bytesIn + b.bytesOut) - (a.bytesIn + a.bytesOut))
       .slice(0, 5)
-      .map((m) => ({ group: m.country, name: m.countryName, requests: m.bytes_in + m.bytes_out }));
+      .map((m) => ({ group: m.country, name: m.countryName, requests: m.bytesIn + m.bytesOut }));
   }, [metricsSnap]);
 
   const totalRequests = agg?.totalRequests ?? 0;
-  const totalBandwidthBytes = agg?.total_bandwidth_bytes ?? 0;
-  const requestsToday = metricsSnap?.golden_signals?.requests_today ?? 0;
-  const bytesToday = metricsSnap?.golden_signals?.bytes_today ?? 0;
+  const totalBandwidthBytes = agg?.totalBandwidthBytes ?? 0;
+  const requestsToday = metricsSnap?.goldenSignals?.requestsToday ?? 0;
+  const bytesToday = metricsSnap?.goldenSignals?.bytesToday ?? 0;
 
   const trafficMetrics = [
     {
@@ -486,7 +486,7 @@ export default function Dashboard() {
     },
     {
       label: "Mitigated Threats",
-      value: formatCompact(metricsSnap?.security?.mitigated_today || 0),
+      value: formatCompact(metricsSnap?.security?.mitigatedToday || 0),
       icon: IconShieldExclamation,
       color: "red" as const,
       description: "Threats blocked in last 24h",
@@ -500,7 +500,7 @@ export default function Dashboard() {
     },
     {
       label: "eBPF Drops",
-      value: formatCompact(metricsSnap?.middleware?.ebpf_dropped_packets?.reduce((acc, val) => acc + val.value, 0) || 0),
+      value: formatCompact(metricsSnap?.middleware?.ebpfDroppedPackets?.reduce((acc, val) => acc + val.value, 0) || 0),
       icon: IconShieldOff,
       color: "violet" as const,
       description: "Kernel-level drops in last 24h",
@@ -760,7 +760,7 @@ export default function Dashboard() {
         </SimpleGrid>
 
         <Box mt="md">
-          <DomainStatsTable metrics={metricsSnap?.hourly_domain_metrics ?? []} />
+          <DomainStatsTable metrics={metricsSnap?.hourlyDomainMetrics ?? []} />
         </Box>
       </Card>
 

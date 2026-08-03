@@ -31,7 +31,7 @@ export default function ServicesPage() {
 
   const { data, isLoading } = useServices({
     page: page - 1,
-    page_size: pageSize,
+    pageSize: pageSize,
     search: search,
   })
   const queryClient = useQueryClient()

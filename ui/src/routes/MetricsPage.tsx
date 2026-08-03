@@ -110,17 +110,17 @@ function GoldenSignalsSection({ gs }: { gs: GoldenSignals }) {
   const cards = [
     {
       label: "Total Requests",
-      value: formatNumber(gs.requests_total),
+      value: formatNumber(gs.requestsTotal),
       icon: IconTransferIn,
       color: "indigo",
       description: "All HTTP requests processed",
     },
     {
       label: "Error Rate",
-      value: `${gs.error_rate.toFixed(2)}%`,
+      value: `${gs.errorRate.toFixed(2)}%`,
       icon: IconAlertTriangle,
-      color: errorRateColor(gs.error_rate),
-      description: `${formatNumber(gs.errors_total)} errors of ${formatNumber(gs.requests_total)} requests`,
+      color: errorRateColor(gs.errorRate),
+      description: `${formatNumber(gs.errorsTotal)} errors of ${formatNumber(gs.requestsTotal)} requests`,
     },
     {
       label: "Avg Latency",
@@ -131,35 +131,35 @@ function GoldenSignalsSection({ gs }: { gs: GoldenSignals }) {
     },
     {
       label: "P95 Latency",
-      value: formatLatency(gs.p95_latency_ms),
+      value: formatLatency(gs.p95LatencyMs),
       icon: IconGauge,
-      color: latencyColor(gs.p95_latency_ms),
+      color: latencyColor(gs.p95LatencyMs),
       description: "95th percentile response time",
     },
     {
       label: "P99 Latency",
-      value: formatLatency(gs.p99_latency_ms),
+      value: formatLatency(gs.p99LatencyMs),
       icon: IconFlame,
-      color: latencyColor(gs.p99_latency_ms),
+      color: latencyColor(gs.p99LatencyMs),
       description: "99th percentile response time",
     },
     {
       label: "In-Flight",
-      value: formatNumber(gs.in_flight_total),
+      value: formatNumber(gs.inFlightTotal),
       icon: IconActivity,
       color: "cyan",
       description: "Currently processing requests",
     },
     {
       label: "Traffic In",
-      value: formatBytes(gs.bytes_in_total),
+      value: formatBytes(gs.bytesInTotal),
       icon: IconArrowDown,
       color: "blue",
       description: "Total inbound bytes",
     },
     {
       label: "Traffic Out",
-      value: formatBytes(gs.bytes_out_total),
+      value: formatBytes(gs.bytesOutTotal),
       icon: IconArrowUp,
       color: "violet",
       description: "Total outbound bytes",
@@ -228,9 +228,9 @@ function GoldenSignalsSection({ gs }: { gs: GoldenSignals }) {
 
 function LatencyPercentilesCard({ gs }: { gs: GoldenSignals }) {
   const items = [
-    { label: "P50", value: gs.p50_latency_ms, color: "green" },
-    { label: "P95", value: gs.p95_latency_ms, color: "yellow" },
-    { label: "P99", value: gs.p99_latency_ms, color: "red" },
+    { label: "P50", value: gs.p50LatencyMs, color: "green" },
+    { label: "P95", value: gs.p95LatencyMs, color: "yellow" },
+    { label: "P99", value: gs.p99LatencyMs, color: "red" },
     { label: "Avg", value: gs.avgLatencyMs, color: "blue" },
   ];
   const maxVal = Math.max(...items.map((i) => i.value), 1);
@@ -391,9 +391,9 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                         <Badge
                           size="sm"
                           variant="light"
-                          color={errorRateColor(r.error_rate)}
+                          color={errorRateColor(r.errorRate)}
                         >
-                          {r.error_rate.toFixed(1)}%
+                          {r.errorRate.toFixed(1)}%
                         </Badge>
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>
@@ -402,7 +402,7 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                         </Text>
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>
-                        <Text size="sm">{r.in_flight}</Text>
+                        <Text size="sm">{r.inFlight}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4}>
@@ -423,7 +423,7 @@ function RouteMetricsSection({ routes }: { routes: RouteMetric[] | null }) {
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap="wrap">
-                          {Object.entries(r.statusCodes)
+                          {Object.entries(r.statusCodes || {})
                             .sort(([a], [b]) => a.localeCompare(b))
                             .map(([code, count]) => (
                               <Tooltip
@@ -512,9 +512,9 @@ function LabeledCountList({ items }: { items: LabeledCount[] | null }) {
 }
 
 function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
-  const cacheTotal = mw.cache_hits + mw.cache_misses;
-  const retriesTotal = mw.retries_success + mw.retries_failure;
-  const turnstileTotal = mw.turnstile_pass + mw.turnstile_fail;
+  const cacheTotal = mw.cacheHits + mw.cacheMisses;
+  const retriesTotal = mw.retriesSuccess + mw.retriesFailure;
+  const turnstileTotal = mw.turnstilePass + mw.turnstileFail;
 
   return (
     <Card shadow="sm" padding="lg" radius="lg" withBorder>
@@ -528,11 +528,11 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
       </Group>
       <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
         <MiddlewareCard title="Rate Limiting" icon={IconShield} color="red">
-          <LabeledCountList items={mw.rate_limit_rejected} />
+          <LabeledCountList items={mw.rateLimitRejected} />
         </MiddlewareCard>
 
         <MiddlewareCard title="WAF Blocks" icon={IconShieldCheck} color="orange">
-          <LabeledCountList items={mw.waf_blocked} />
+          <LabeledCountList items={mw.wafBlocked} />
         </MiddlewareCard>
 
         <MiddlewareCard title="Cache" icon={IconDatabase} color="teal">
@@ -543,16 +543,16 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
                   Hit Rate
                 </Text>
                 <Text size="sm" fw={700} c="teal">
-                  {mw.cache_hit_rate.toFixed(1)}%
+                  {mw.cacheHitRate.toFixed(1)}%
                 </Text>
               </Group>
-              <Progress value={mw.cache_hit_rate} color="teal" size="sm" radius="md" />
+              <Progress value={mw.cacheHitRate} color="teal" size="sm" radius="md" />
               <Group justify="space-between">
                 <Text size="xs" c="dimmed">
-                  Hits: {formatNumber(mw.cache_hits)}
+                  Hits: {formatNumber(mw.cacheHits)}
                 </Text>
                 <Text size="xs" c="dimmed">
-                  Misses: {formatNumber(mw.cache_misses)}
+                  Misses: {formatNumber(mw.cacheMisses)}
                 </Text>
               </Group>
             </Stack>
@@ -564,32 +564,32 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
         </MiddlewareCard>
 
         <MiddlewareCard title="Auth Failures" icon={IconLock} color="red">
-          <LabeledCountList items={mw.auth_failures} />
+          <LabeledCountList items={mw.authFailures} />
         </MiddlewareCard>
 
         <MiddlewareCard title="Compression" icon={IconCloud} color="blue">
-          {mw.compress_bytes_in > 0 ? (
+          {mw.compressBytesIn > 0 ? (
             <Stack gap="xs">
               <Group justify="space-between">
                 <Text size="xs" c="dimmed">
                   Ratio
                 </Text>
                 <Text size="sm" fw={700} c="blue">
-                  {mw.compression_ratio.toFixed(1)}%
+                  {mw.compressionRatio.toFixed(1)}%
                 </Text>
               </Group>
               <Progress
-                value={mw.compression_ratio}
+                value={mw.compressionRatio}
                 color="blue"
                 size="sm"
                 radius="md"
               />
               <Group justify="space-between">
                 <Text size="xs" c="dimmed">
-                  In: {formatBytes(mw.compress_bytes_in)}
+                  In: {formatBytes(mw.compressBytesIn)}
                 </Text>
                 <Text size="xs" c="dimmed">
-                  Out: {formatBytes(mw.compress_bytes_out)}
+                  Out: {formatBytes(mw.compressBytesOut)}
                 </Text>
               </Group>
             </Stack>
@@ -605,16 +605,16 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
             <Stack gap="xs">
               <Group justify="space-between">
                 <Text size="xs" c="green">
-                  Pass: {formatNumber(mw.turnstile_pass)}
+                  Pass: {formatNumber(mw.turnstilePass)}
                 </Text>
                 <Text size="xs" c="red">
-                  Fail: {formatNumber(mw.turnstile_fail)}
+                  Fail: {formatNumber(mw.turnstileFail)}
                 </Text>
               </Group>
               <Progress
                 value={
                   turnstileTotal > 0
-                    ? (mw.turnstile_pass / turnstileTotal) * 100
+                    ? (mw.turnstilePass / turnstileTotal) * 100
                     : 0
                 }
                 color="green"
@@ -630,17 +630,17 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
         </MiddlewareCard>
 
         <MiddlewareCard title="GeoIP Blocks" icon={IconNetwork} color="orange">
-          <LabeledCountList items={mw.geoip_blocked} />
+          <LabeledCountList items={mw.geoipBlocked} />
         </MiddlewareCard>
 
         <MiddlewareCard title="Retries" icon={IconRefresh} color="violet">
           {retriesTotal > 0 ? (
             <Group justify="space-between">
               <Text size="xs" c="green">
-                Success: {formatNumber(mw.retries_success)}
+                Success: {formatNumber(mw.retriesSuccess)}
               </Text>
               <Text size="xs" c="red">
-                Failed: {formatNumber(mw.retries_failure)}
+                Failed: {formatNumber(mw.retriesFailure)}
               </Text>
             </Group>
           ) : (
@@ -660,9 +660,9 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
           <Badge
             size="xs"
             variant="light"
-            color={mw.hmac_failures > 0 ? "red" : "gray"}
+            color={mw.hmacFailures > 0 ? "red" : "gray"}
           >
-            {formatNumber(mw.hmac_failures)}
+            {formatNumber(mw.hmacFailures)}
           </Badge>
         </Group>
         <Group gap="xs">
@@ -670,7 +670,7 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
             Config Reloads:
           </Text>
           <Badge size="xs" variant="light" color="blue">
-            {formatNumber(mw.config_reloads)}
+            {formatNumber(mw.configReloads)}
           </Badge>
         </Group>
         <Group gap="xs">
@@ -678,7 +678,7 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
             Cache Invalidations:
           </Text>
           <Badge size="xs" variant="light" color="orange">
-            {formatNumber(mw.cache_invalidations)}
+            {formatNumber(mw.cacheInvalidations)}
           </Badge>
         </Group>
       </Group>
@@ -705,8 +705,8 @@ function TLSCertificatesSection({ certs }: { certs: TLSCertMetric[] | null }) {
     );
   }
 
-  const sorted = [...certs].sort((a, b) => a.days_remaining - b.days_remaining);
-  const expiringSoon = sorted.filter((c) => c.days_remaining < 30);
+  const sorted = [...certs].sort((a, b) => a.daysRemaining - b.daysRemaining);
+  const expiringSoon = sorted.filter((c) => c.daysRemaining < 30);
 
   return (
     <Card shadow="sm" padding="lg" radius="lg" withBorder>
@@ -741,18 +741,18 @@ function TLSCertificatesSection({ certs }: { certs: TLSCertMetric[] | null }) {
       )}
       <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
         {sorted.map((cert) => {
-          const color = certExpiryColor(cert.days_remaining);
-          const expiryDate = new Date(cert.expiry_epoch * 1000);
+          const color = certExpiryColor(cert.daysRemaining);
+          const expiryDate = new Date(cert.expiryEpoch * 1000);
           return (
-            <Paper key={`${cert.domain}-${cert.cert_name}`} p="md" radius="md" withBorder>
+            <Paper key={`${cert.domain}-${cert.certName}`} p="md" radius="md" withBorder>
               <Group justify="space-between" mb="xs">
                 <div style={{ minWidth: 0 }}>
                   <Text size="sm" fw={700} lineClamp={1}>
-                    {cert.domain || cert.cert_name}
+                    {cert.domain || cert.certName}
                   </Text>
-                  {cert.domain && cert.cert_name && cert.domain !== cert.cert_name && (
+                  {cert.domain && cert.certName && cert.domain !== cert.certName && (
                     <Text size="xs" c="dimmed" lineClamp={1}>
-                      {cert.cert_name}
+                      {cert.certName}
                     </Text>
                   )}
                 </div>
@@ -763,7 +763,7 @@ function TLSCertificatesSection({ certs }: { certs: TLSCertMetric[] | null }) {
                   sections={[
                     {
                       value: Math.min(
-                        (cert.days_remaining / 365) * 100,
+                        (cert.daysRemaining / 365) * 100,
                         100
                       ),
                       color,
@@ -771,7 +771,7 @@ function TLSCertificatesSection({ certs }: { certs: TLSCertMetric[] | null }) {
                   ]}
                   label={
                     <Text ta="center" size="xs" fw={700} c={color}>
-                      {Math.floor(cert.days_remaining)}
+                      {Math.floor(cert.daysRemaining)}
                     </Text>
                   }
                 />
@@ -786,9 +786,9 @@ function TLSCertificatesSection({ certs }: { certs: TLSCertMetric[] | null }) {
                 mt={4}
                 fullWidth
               >
-                {cert.days_remaining < 0
+                {cert.daysRemaining < 0
                   ? "EXPIRED"
-                  : `${Math.floor(cert.days_remaining)} days remaining`}
+                  : `${Math.floor(cert.daysRemaining)} days remaining`}
               </Badge>
             </Paper>
           );
@@ -899,10 +899,10 @@ function SystemMetricsSection({ sys }: { sys: SystemMetrics }) {
   const items = [
     {
       label: "Uptime",
-      value: formatDuration(sys.uptime_seconds),
+      value: formatDuration(sys.uptimeSeconds),
       icon: IconClock,
       color: "green",
-      description: `${sys.uptime_seconds.toFixed(0)}s total`,
+      description: `${sys.uptimeSeconds.toFixed(0)}s total`,
     },
     {
       label: "Goroutines",
@@ -913,21 +913,21 @@ function SystemMetricsSection({ sys }: { sys: SystemMetrics }) {
     },
     {
       label: "Heap Memory",
-      value: formatBytes(sys.memory_alloc_bytes),
+      value: formatBytes(sys.memoryAllocBytes),
       icon: IconDatabase,
       color: "violet",
       description: "Current heap allocation",
     },
     {
       label: "Total Allocated",
-      value: formatBytes(sys.memory_total_alloc_bytes),
+      value: formatBytes(sys.memoryTotalAllocBytes),
       icon: IconServer,
       color: "grape",
       description: "Cumulative allocations",
     },
     {
       label: "System Memory",
-      value: formatBytes(sys.memory_sys_bytes),
+      value: formatBytes(sys.memorySysBytes),
       icon: IconServer,
       color: "indigo",
       description: "Memory obtained from OS",
@@ -1021,18 +1021,18 @@ export default function MetricsPage() {
         <MetricsSkeleton />
       ) : data ? (
         <Stack gap="lg">
-          {data.golden_signals && <GoldenSignalsSection gs={data.golden_signals} />}
+          {data.goldenSignals && <GoldenSignalsSection gs={data.goldenSignals} />}
 
           <SimpleGrid cols={{ base: 1, md: 2 }}>
-            {data.golden_signals && <LatencyPercentilesCard gs={data.golden_signals} />}
+            {data.goldenSignals && <LatencyPercentilesCard gs={data.goldenSignals} />}
             {data.system && <SystemMetricsSection sys={data.system} />}
           </SimpleGrid>
 
-          <RouteMetricsSection routes={data.route_metrics} />
+          <RouteMetricsSection routes={data.routeMetrics} />
           {data.middleware && <MiddlewareMetricsSection mw={data.middleware} />}
 
           <SimpleGrid cols={{ base: 1, md: 2 }}>
-            {data.tls_certificates && <TLSCertificatesSection certs={data.tls_certificates} />}
+            {data.tlsCertificates && <TLSCertificatesSection certs={data.tlsCertificates} />}
             {data.targets && <TargetHealthSection targets={data.targets} />}
           </SimpleGrid>
         </Stack>

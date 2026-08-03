@@ -15,8 +15,8 @@ export function RatelimitConfigEditor({ config, onChange }: RatelimitConfigEdito
       <Group grow>
         <NumberInput
           label="Requests Per Minute"
-          value={parseInt(config.requests_per_minute) || 0}
-          onChange={(val) => updateConfig("requests_per_minute", val.toString())}
+          value={parseInt(config.requestsPerMinute) || 0}
+          onChange={(val) => updateConfig("requestsPerMinute", val.toString())}
           min={1}
         />
         <NumberInput
@@ -45,7 +45,7 @@ export function RatelimitConfigEditor({ config, onChange }: RatelimitConfigEdito
             { label: "JA4H Fingerprint (Recommended)", value: "ja4h" },
             { label: "Detailed Fingerprint (Strict)", value: "fingerprint" },
           ]}
-          value={config.strategy || (config.per_tenant === "true" ? "tenant" : "ip")}
+          value={config.strategy || (config.perTenant === "true" ? "tenant" : "ip")}
           onChange={(val) => updateConfig("strategy", val || "ip")}
         />
         <Stack gap="xs">

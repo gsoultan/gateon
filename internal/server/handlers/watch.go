@@ -5,10 +5,12 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"google.golang.org/protobuf/proto"
 )
 
 // WatchEvent represents a multiplexed event sent over the shared SSE connection.
@@ -43,6 +45,9 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 		eventCh := make(chan WatchEvent, 10)
 
 		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+
 			for {
 				select {
 				case <-r.Context().Done():
@@ -51,19 +56,33 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 					eventCh <- WatchEvent{Type: "audit", Data: log}
 				case threat := <-threatCh:
 					eventCh <- WatchEvent{Type: "threat", Data: threat}
+				case <-ticker.C:
+					eventCh <- WatchEvent{Type: "heartbeat", Data: time.Now().Unix()}
 				}
 			}
 		}()
 
-		enc := json.NewEncoder(w)
 		for {
 			select {
 			case <-r.Context().Done():
 				return
 			case ev := <-eventCh:
-				_, _ = w.Write([]byte("data: "))
-				_ = enc.Encode(ev)
-				_, _ = w.Write([]byte("\n"))
+				if ev.Type == "heartbeat" {
+					_, _ = w.Write([]byte(": heartbeat\n\n"))
+				} else {
+					_, _ = w.Write([]byte("data: "))
+					var jsonData []byte
+					if msg, ok := ev.Data.(proto.Message); ok {
+						// Protobuf message: use protojson for camelCase
+						data, _ := ProtojsonOptions().Marshal(msg)
+						jsonData = []byte(`{"type":"` + ev.Type + `","data":` + string(data) + `}`)
+					} else {
+						// Native struct (like AuditEntry) already has camelCase tags
+						jsonData, _ = json.Marshal(ev)
+					}
+					_, _ = w.Write(jsonData)
+					_, _ = w.Write([]byte("\n\n"))
+				}
 				flusher.Flush()
 			}
 		}

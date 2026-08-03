@@ -147,7 +147,7 @@ export type TLSOption = {
   minTlsVersion?: string;
   maxTlsVersion?: string;
   cipherSuites?: string[];
-  prefer_server_cipher_suites?: boolean;
+  preferServerCipherSuites?: boolean;
   clientAuthType?: string;
   sniStrict?: boolean;
   alpnProtocols?: string[];
@@ -216,8 +216,8 @@ export type ClientAuthority = {
 export type AcmeConfig = {
   enabled: boolean;
   email?: string;
-  ca_server?: string;
-  challenge_type?: string;
+  caServer?: string;
+  challengeType?: string;
   dnsProvider?: string;
   dnsConfig?: Record<string, string>;
 };
@@ -232,7 +232,7 @@ export type TlsConfig = {
   clientAuthType?: string;
   cipherSuites?: string[];
   certificates?: Certificate[];
-  client_authorities?: ClientAuthority[];
+  clientAuthorities?: ClientAuthority[];
   acme?: AcmeConfig;
 };
 
@@ -256,34 +256,34 @@ export type LogConfig = {
   pathStatsRetentionDays?: number;
   accessLogRetentionDays?: number;
   securityThreatRetentionDays?: number;
-  audit_log_retention_days?: number;
+  auditLogRetentionDays?: number;
 };
 
 export type TransportConfig = {
-  max_idle_conns?: number;
-  max_idle_conns_per_host?: number;
-  idle_conn_timeout_seconds?: number;
+  maxIdleConns?: number;
+  maxIdleConnsPerHost?: number;
+  idleConnTimeoutSeconds?: number;
 };
 
 export type DatabaseConfig = {
   driver?: "sqlite" | "postgres" | "mysql" | "mariadb";
-  sqlite_path?: string;
+  sqlitePath?: string;
   host?: string;
   port?: number;
   user?: string;
   password?: string;
   database?: string;
-  ssl_mode?: string;
+  sslMode?: string;
 };
 
 export type AuthConfig = {
   enabled?: boolean;
-  paseto_secret?: string;
-  /** @deprecated Use database_config or database_url. */
-  sqlite_path?: string;
+  pasetoSecret?: string;
+  /** @deprecated Use databaseConfig or databaseUrl. */
+  sqlitePath?: string;
   /** Fallback connection string (encrypted when GATEON_ENCRYPTION_KEY is set) */
-  database_url?: string;
-  database_config?: DatabaseConfig;
+  databaseUrl?: string;
+  databaseConfig?: DatabaseConfig;
 };
 
 export type User = {
@@ -291,18 +291,18 @@ export type User = {
   username: string;
   password?: string;
   role: "admin" | "operator" | "viewer";
-  two_factor_enabled?: boolean;
-  two_factor_secret?: string;
-  recovery_codes?: string[];
+  twoFactorEnabled?: boolean;
+  twoFactorSecret?: string;
+  recoveryCodes?: string[];
   disabled?: boolean;
-  two_factor_pending?: boolean;
+  twoFactorPending?: boolean;
 };
 
 export type LoginResponse = {
   token: string;
   user: User;
-  two_factor_required?: boolean;
-  two_factor_setup_required?: boolean;
+  twoFactorRequired?: boolean;
+  twoFactorSetupRequired?: boolean;
 };
 
 export type Setup2FARequest = {
@@ -311,8 +311,8 @@ export type Setup2FARequest = {
 
 export type Setup2FAResponse = {
   secret: string;
-  qr_code_url: string;
-  recovery_codes: string[];
+  qrCodeUrl: string;
+  recoveryCodes: string[];
 };
 
 export type Verify2FARequest = {
@@ -333,12 +333,12 @@ export type IsSetupRequiredResponse = {
 export type SetupRequest = {
   adminUsername: string;
   adminPassword: string;
-  paseto_secret: string;
-  management_bind: string;
-  management_port: string;
+  pasetoSecret: string;
+  managementBind: string;
+  managementPort: string;
   // Optional for first-run wizard database selection
-  database_url?: string;
-  database_config?: DatabaseConfig;
+  databaseUrl?: string;
+  databaseConfig?: DatabaseConfig;
 };
 
 export type SetupResponse = {
@@ -351,14 +351,14 @@ export type Middleware = {
   name: string;
   type: string;
   config: Record<string, string>;
-  wasm_blob?: string; // base64 encoded
+  wasmBlob?: string; // base64 encoded
 };
 
 export type WafConfig = {
   enabled: boolean;
-  use_crs: boolean;
+  useCrs: boolean;
   paranoiaLevel: number;
-  custom_directives?: string;
+  customDirectives?: string;
   sqli?: boolean;
   xss?: boolean;
   lfi?: boolean;
@@ -375,28 +375,28 @@ export type WafConfig = {
   ransomwareDetection?: boolean;
   dlp?: boolean;
   anomalyThreshold?: number;
-  bot_management?: BotManagementConfig;
-  requestBody_limit?: number;
-  responseBody_limit?: number;
+  botManagement?: BotManagementConfig;
+  requestBodyLimit?: number;
+  responseBodyLimit?: number;
   auditLogPath?: string;
   auditLogRelevantOnly?: boolean;
-  allowed_admin_ips?: string[];
-  auto_update_rules?: boolean;
-  update_interval_hours?: number;
-  rules_url?: string;
+  allowedAdminIps?: string[];
+  autoUpdateRules?: boolean;
+  updateIntervalHours?: number;
+  rulesUrl?: string;
   clamavAddr?: string;
   clamav?: ClamavConfig;
-  entropy_threshold?: number;
-  disable_entropy?: boolean;
+  entropyThreshold?: number;
+  disableEntropy?: boolean;
   trustCloudflareHeaders?: boolean;
 };
 
 export type ClamavConfig = {
-  installation_mode?: ClamavInstallationMode;
-  auto_install?: boolean;
-  docker_image?: string;
-  full_scan_schedule?: string;
-  low_resource_mode?: boolean;
+  installationMode?: ClamavInstallationMode;
+  autoInstall?: boolean;
+  dockerImage?: string;
+  fullScanSchedule?: string;
+  lowResourceMode?: boolean;
   clamavAddr?: string;
 };
 
@@ -408,64 +408,64 @@ export enum ClamavInstallationMode {
 
 export type BotManagementConfig = {
   enabled?: boolean;
-  enable_js_challenge?: boolean;
-  enable_browser_integrity?: boolean;
-  challenge_timeout_seconds?: number;
-  secret_key?: string;
+  enableJsChallenge?: boolean;
+  enableBrowserIntegrity?: boolean;
+  challengeTimeoutSeconds?: number;
+  secretKey?: string;
 };
 
 export type HaConfig = {
   enabled?: boolean;
   interface?: string;
-  virtual_router_id?: number;
+  virtualRouterId?: number;
   priority?: number;
-  virtual_ips?: string[];
-  advert_int?: number;
-  auth_pass?: string;
-  enable_gossip?: boolean;
-  gossip_bind_addr?: string;
-  gossip_bind_port?: number;
-  gossip_peers?: string[];
+  virtualIps?: string[];
+  advertInt?: number;
+  authPass?: string;
+  enableGossip?: boolean;
+  gossipBindAddr?: string;
+  gossipBindPort?: number;
+  gossipPeers?: string[];
 };
 
 export type AnomalyDetectionConfig = {
   enabled?: boolean;
-  prometheus_url?: string;
-  check_interval_seconds?: number;
+  prometheusUrl?: string;
+  checkIntervalSeconds?: number;
   sensitivity?: number;
-  security_threat_threshold?: number;
-  anomaly_retention_days?: number;
-  enable_behavioral_fingerprinting?: boolean;
-  enable_brute_force_detection?: boolean;
-  enable_exploit_detection?: boolean;
+  securityThreatThreshold?: number;
+  anomalyRetentionDays?: number;
+  enableBehavioralFingerprinting?: boolean;
+  enableBruteForceDetection?: boolean;
+  enableExploitDetection?: boolean;
 };
 
 export type EbpfConfig = {
   enabled?: boolean;
-  xdp_rate_limit?: boolean;
-  tc_filtering?: boolean;
+  xdpRateLimit?: boolean;
+  tcFiltering?: boolean;
   interface?: string;
-  xdp_ip_shunning?: boolean;
-  xdp_load_balancing?: boolean;
-  enable_knocking?: boolean;
-  mgmt_port?: number;
-  knocking_sequence?: number[];
-  xdp_cuckoo_filter?: boolean;
-  af_xdp_phantom?: boolean;
-  xdp_ja4_blocklist?: boolean;
+  xdpIpShunning?: boolean;
+  xdpLoadBalancing?: boolean;
+  enableKnocking?: boolean;
+  mgmtPort?: number;
+  knockingSequence?: number[];
+  xdpCuckooFilter?: boolean;
+  afXdpPhantom?: boolean;
+  xdpJa4Blocklist?: boolean;
 };
 
 export interface GeoIPConfig {
   enabled?: boolean;
-  db_path?: string;
-  asn_db_path?: string;
-  country_db_path?: string;
-  maxmind_license_key?: string;
-  auto_update?: boolean;
-  update_interval_days?: number;
-  blocked_countries?: string[];
-  allowed_countries?: string[];
-  xdp_geofencing?: boolean;
+  dbPath?: string;
+  asnDbPath?: string;
+  countryDbPath?: string;
+  maxmindLicenseKey?: string;
+  autoUpdate?: boolean;
+  updateIntervalDays?: number;
+  blockedCountries?: string[];
+  allowedCountries?: string[];
+  xdpGeofencing?: boolean;
 }
 
 export type GlobalConfig = {
@@ -477,11 +477,11 @@ export type GlobalConfig = {
   transport?: TransportConfig;
   waf?: WafConfig;
   ha?: HaConfig;
-  anomaly_detection?: AnomalyDetectionConfig;
+  anomalyDetection?: AnomalyDetectionConfig;
   ebpf?: EbpfConfig;
   management?: ManagementConfig;
   geoip?: GeoIPConfig;
-  security_advanced?: SecurityAdvancedConfig;
+  securityAdvanced?: SecurityAdvancedConfig;
   alerting?: AlertingConfig;
   audit?: AuditConfig;
   profile?: string;
@@ -490,10 +490,10 @@ export type GlobalConfig = {
 
 export type TitanConfig = {
   enabled: boolean;
-  enable_phantom: boolean;
-  enable_ai_predictor: boolean;
-  enable_pqc: boolean;
-  enable_governor: boolean;
+  enablePhantom: boolean;
+  enableAiPredictor: boolean;
+  enablePqc: boolean;
+  enableGovernor: boolean;
   aiModelPath: string;
 };
 
@@ -507,27 +507,27 @@ export type AlertDispatcher = {
   id: string;
   name: string;
   type: string;
-  webhook_url?: string;
-  slack_channel?: string;
-  telegram_bot_token?: string;
-  telegram_chat_id?: string;
+  webhookUrl?: string;
+  slackChannel?: string;
+  telegramBotToken?: string;
+  telegramChatId?: string;
 };
 
 export type AlertPlaybook = {
   id: string;
   name: string;
-  event_type: string;
+  eventType: string;
   threshold: number;
-  dispatcher_ids: string[];
+  dispatcherIds: string[];
   action: string;
 };
 
 export type AuditConfig = {
   enabled: boolean;
-  sign_entries: boolean;
-  signature_key?: string;
-  retention_days?: number;
-  archive_on_retention?: boolean;
+  signEntries: boolean;
+  signatureKey?: string;
+  retentionDays?: number;
+  archiveOnRetention?: boolean;
 };
 
 export type SecurityAdvancedConfig = {
@@ -537,19 +537,19 @@ export type SecurityAdvancedConfig = {
   behavioral?: BehavioralConfig;
   pow?: PowConfig;
   ipReputation?: IPReputationConfig;
-  tls_binding?: TlsBindingConfig;
+  tlsBinding?: TlsBindingConfig;
 };
 
 export type TlsBindingConfig = {
   enabled: boolean;
-  cookie_name?: string;
+  cookieName?: string;
 };
 
 export type IPReputationConfig = {
   enabled?: boolean;
-  feed_urls?: string[];
-  update_interval_hours?: number;
-  block_threshold?: number;
+  feedUrls?: string[];
+  updateIntervalHours?: number;
+  blockThreshold?: number;
   integrations?: IPReputationIntegration[];
 };
 
@@ -557,27 +557,27 @@ export type IPReputationIntegration = {
   id: string;
   name: string;
   type: string; // "abuseipdb", "virustotal", etc.
-  api_key: string;
+  apiKey: string;
   enabled: boolean;
-  confidence_threshold?: number;
+  confidenceThreshold?: number;
 };
 
 export type DeceptionConfig = {
   enabled: boolean;
-  honeypot_paths: string[];
-  inject_invisible_links: boolean;
-  invisible_link_paths: string[];
-  honey_forms?: string[];
-  canary_header?: string;
-  canary_token?: string;
-  enable_troll_response?: boolean;
+  honeypotPaths: string[];
+  injectInvisibleLinks: boolean;
+  invisibleLinkPaths: string[];
+  honeyForms?: string[];
+  canaryHeader?: string;
+  canaryToken?: string;
+  enableTrollResponse?: boolean;
 };
 
 export type TarpitConfig = {
   enabled: boolean;
-  delay_base_ms: number;
-  delay_max_ms: number;
-  score_threshold: number;
+  delayBaseMs: number;
+  delayMaxMs: number;
+  scoreThreshold: number;
 };
 
 export type EntropyConfig = {
@@ -587,22 +587,22 @@ export type EntropyConfig = {
 
 export type BehavioralConfig = {
   enabled: boolean;
-  enable_impossible_travel: boolean;
-  enable_sequence_validation: boolean;
+  enableImpossibleTravel: boolean;
+  enableSequenceValidation: boolean;
 };
 
 export type PowConfig = {
   enabled: boolean;
   difficulty: number;
-  score_threshold: number;
+  scoreThreshold: number;
 };
 
 export type ManagementConfig = {
   bind?: string;
   port?: string;
-  allowed_ips?: string[];
-  allow_public_management?: boolean;
-  allowed_hosts?: string[];
+  allowedIps?: string[];
+  allowPublicManagement?: boolean;
+  allowedHosts?: string[];
 };
 
 export enum EntryPointType {
@@ -629,7 +629,7 @@ export type EntryPoint = {
   tls?: TlsConfig;
   readTimeoutMs?: number;
   writeTimeoutMs?: number;
-  max_connections?: number;
+  maxConnections?: number;
   accessLogEnabled?: boolean;
 };
 
@@ -637,42 +637,42 @@ export type ListRoutesResponse = {
   routes: Route[];
   totalCount: number;
   page: number;
-  page_size: number;
+  pageSize: number;
 };
 
 export type ListServicesResponse = {
   services: Service[];
   totalCount: number;
   page: number;
-  page_size: number;
+  pageSize: number;
 };
 
 export type ListMiddlewaresResponse = {
   middlewares: Middleware[];
   totalCount: number;
   page: number;
-  page_size: number;
+  pageSize: number;
 };
 
 export type ListEntryPointsResponse = {
-  entry_points: EntryPoint[];
+  entryPoints: EntryPoint[];
   totalCount: number;
   page: number;
-  page_size: number;
+  pageSize: number;
 };
 
 export type ListTLSOptionsResponse = {
-  tls_options: TLSOption[];
+  tlsOptions: TLSOption[];
   totalCount: number;
   page: number;
-  page_size: number;
+  pageSize: number;
 };
 
 export type ListUsersResponse = {
   users: User[];
   totalCount: number;
   page: number;
-  page_size: number;
+  pageSize: number;
 };
 
 export type CertificateStatus = {
@@ -726,8 +726,8 @@ export type HandshakeError = {
 
 export type GossipStatus = {
   enabled: boolean;
-  members_count: number;
-  member_names: string[];
+  membersCount: number;
+  memberNames: string[];
   messagesSent: number;
   messagesReceived: number;
 };
@@ -831,8 +831,8 @@ export type GetDiagnosticsResponse = {
 };
 
 export type GetCloudflareIPsResponse = {
-  ipv4_cidrs: string[];
-  ipv6_cidrs: string[];
+  ipv4Cidrs: string[];
+  ipv6Cidrs: string[];
 };
 
 export type TraceHop = {
@@ -842,7 +842,7 @@ export type TraceHop = {
   longitude: number;
   countryCode: string;
   city: string;
-  rtt_ms: number;
+  rttMs: number;
 };
 
 export type TraceRouteResponse = {
@@ -894,7 +894,7 @@ export type MitigateThreatResponse = {
 
 export type InstallClamavRequest = {
   mode: ClamavInstallationMode;
-  sudo_password?: string;
+  sudoPassword?: string;
 };
 
 export type InstallClamavResponse = {
@@ -938,7 +938,7 @@ export type AuditLog = {
 export type AuditArchive = {
   filename: string;
   size: number;
-  created_at: string;
+  createdAt: string;
 };
 
 export type ListAuditArchivesResponse = {
@@ -950,9 +950,9 @@ export type GetAuditArchiveResponse = {
 };
 
 export type LimitStats = {
-  rate_limit_rejected: Record<string, number>;
-  inflight_rejected: Record<string, number>;
-  buffering_rejected: Record<string, number>;
+  rateLimitRejected: Record<string, number>;
+  inflightRejected: Record<string, number>;
+  bufferingRejected: Record<string, number>;
 };
 
 export type AggStats = {

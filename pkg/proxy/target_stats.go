@@ -16,12 +16,12 @@ const (
 type TargetStats struct {
 	URL          string `json:"url"`
 	Alive        bool   `json:"alive"`
-	CircuitState string `json:"circuit_state"` // CLOSED, OPEN, HALF-OPEN
-	RequestCount uint64 `json:"request_count"`
-	ErrorCount   uint64 `json:"error_count"`
-	AvgLatencyMs uint64 `json:"avg_latency_ms"`
-	AvgLatencyUs uint64 `json:"avg_latency_us"`
-	ActiveConn   int32  `json:"active_conn"`
+	CircuitState string `json:"circuitState"` // CLOSED, OPEN, HALF-OPEN
+	RequestCount uint64 `json:"requestCount"`
+	ErrorCount   uint64 `json:"errorCount"`
+	AvgLatencyMs uint64 `json:"avgLatencyMs"`
+	AvgLatencyUs uint64 `json:"avgLatencyUs"`
+	ActiveConn   int32  `json:"activeConn"`
 }
 
 func targetStatsFromState(t *targetState) TargetStats {

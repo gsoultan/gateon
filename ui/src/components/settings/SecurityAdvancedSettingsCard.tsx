@@ -43,12 +43,12 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
   onChange,
   disabled,
 }) => {
-  const security = config.security_advanced || ({} as SecurityAdvancedConfig);
+  const security = config.securityAdvanced || ({} as SecurityAdvancedConfig);
 
   const updateSection = (section: keyof SecurityAdvancedConfig, value: any) => {
     onChange({
       ...config,
-      security_advanced: {
+      securityAdvanced: {
         ...security,
         [section]: {
           ...(security[section] || {}),
@@ -70,9 +70,9 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
       id: Math.random().toString(36).substring(7),
       name: "AbuseIPDB",
       type: "abuseipdb",
-      api_key: "",
+      apiKey: "",
       enabled: true,
-      confidence_threshold: 80,
+      confidenceThreshold: 80,
     });
     updateSection("ipReputation", { integrations });
   };
@@ -128,8 +128,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   label="Honeypot Paths"
                   description="Accessing these paths triggers an immediate block. Recommended: /.env, /wp-admin, /config.php"
                   placeholder="/.env, /wp-admin, /_backup"
-                  value={security.deception?.honeypot_paths || []}
-                  onChange={(val) => updateSection("deception", { honeypot_paths: val })}
+                  value={security.deception?.honeypotPaths || []}
+                  onChange={(val) => updateSection("deception", { honeypotPaths: val })}
                   disabled={disabled}
                 />
                 <Group justify="space-between" mt="xs">
@@ -138,26 +138,26 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text size="xs" c="dimmed">Inject hidden links into HTML responses to trap automated crawlers.</Text>
                   </Stack>
                   <Switch
-                    checked={security.deception?.inject_invisible_links}
-                    onChange={(e) => updateSection("deception", { inject_invisible_links: e.currentTarget.checked })}
+                    checked={security.deception?.injectInvisibleLinks}
+                    onChange={(e) => updateSection("deception", { injectInvisibleLinks: e.currentTarget.checked })}
                     disabled={disabled}
                   />
                 </Group>
-                {security.deception?.inject_invisible_links && (
+                {security.deception?.injectInvisibleLinks && (
                   <>
                     <TagsInput
                       label="Invisible Link Paths"
                       placeholder="/system-config, /hidden-admin"
-                      value={security.deception?.invisible_link_paths || []}
-                      onChange={(val) => updateSection("deception", { invisible_link_paths: val })}
+                      value={security.deception?.invisibleLinkPaths || []}
+                      onChange={(val) => updateSection("deception", { invisibleLinkPaths: val })}
                       disabled={disabled}
                     />
                     <TagsInput
                       label="Honey Forms (POST Targets)"
                       description="Injected hidden forms that block clients if submitted."
                       placeholder="/v1/admin/login, /debug/leak"
-                      value={security.deception?.honey_forms || []}
-                      onChange={(val) => updateSection("deception", { honey_forms: val })}
+                      value={security.deception?.honeyForms || []}
+                      onChange={(val) => updateSection("deception", { honeyForms: val })}
                       disabled={disabled}
                     />
                     <SimpleGrid cols={2}>
@@ -165,16 +165,16 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                         label="Canary Header"
                         description="Attractive-looking header injected into response."
                         placeholder="X-Gateon-Internal-Debug"
-                        value={security.deception?.canary_header || ""}
-                        onChange={(e) => updateSection("deception", { canary_header: e.currentTarget.value })}
+                        value={security.deception?.canaryHeader || ""}
+                        onChange={(e) => updateSection("deception", { canaryHeader: e.currentTarget.value })}
                         disabled={disabled}
                       />
                       <TextInput
                         label="Canary Token"
                         description="The token to watch for in subsequent requests."
                         placeholder="debug-mode-admin-true"
-                        value={security.deception?.canary_token || ""}
-                        onChange={(e) => updateSection("deception", { canary_token: e.currentTarget.value })}
+                        value={security.deception?.canaryToken || ""}
+                        onChange={(e) => updateSection("deception", { canaryToken: e.currentTarget.value })}
                         disabled={disabled}
                       />
                     </SimpleGrid>
@@ -182,8 +182,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                       <Text size="sm">Enable Troll Response</Text>
                       <Switch
                         size="sm"
-                        checked={security.deception?.enable_troll_response}
-                        onChange={(e) => updateSection("deception", { enable_troll_response: e.currentTarget.checked })}
+                        checked={security.deception?.enableTrollResponse}
+                        onChange={(e) => updateSection("deception", { enableTrollResponse: e.currentTarget.checked })}
                         disabled={disabled}
                       />
                     </Group>
@@ -222,24 +222,24 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     id="tarpit-delay-base"
                     label="Base Delay (ms)"
                     description="Initial delay applied to the first suspicious request. Recommended: 500ms."
-                    value={security.tarpit?.delay_base_ms}
-                    onChange={(val) => updateSection("tarpit", { delay_base_ms: val })}
+                    value={security.tarpit?.delayBaseMs}
+                    onChange={(val) => updateSection("tarpit", { delayBaseMs: val })}
                     disabled={disabled}
                     min={0}
                   />
                   <NumberInput
                     label="Max Delay (ms)"
                     description="Maximum delay for repeated suspicious requests. Recommended: 5000ms."
-                    value={security.tarpit?.delay_max_ms}
-                    onChange={(val) => updateSection("tarpit", { delay_max_ms: val })}
+                    value={security.tarpit?.delayMaxMs}
+                    onChange={(val) => updateSection("tarpit", { delayMaxMs: val })}
                     disabled={disabled}
                     min={0}
                   />
                   <NumberInput
                     label="Score Threshold"
                     description="Start tarpitting when IP threat score exceeds this. Recommended: 7.0."
-                    value={security.tarpit?.score_threshold}
-                    onChange={(val) => updateSection("tarpit", { score_threshold: val })}
+                    value={security.tarpit?.scoreThreshold}
+                    onChange={(val) => updateSection("tarpit", { scoreThreshold: val })}
                     disabled={disabled}
                     decimalScale={1}
                   />
@@ -280,8 +280,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   <NumberInput
                     label="Score Threshold"
                     description="Serve challenge when IP threat score exceeds this. Recommended: 5.0."
-                    value={security.pow?.score_threshold}
-                    onChange={(val) => updateSection("pow", { score_threshold: val })}
+                    value={security.pow?.scoreThreshold}
+                    onChange={(val) => updateSection("pow", { scoreThreshold: val })}
                     disabled={disabled}
                     decimalScale={1}
                   />
@@ -317,24 +317,24 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     label="Feed URLs"
                     description="URLs of IP reputation feeds (text/plain). Recommended: AbuseIPDB, Emerging Threats."
                     placeholder="https://example.com/bad-ips.txt"
-                    value={security.ipReputation?.feed_urls || []}
-                    onChange={(val) => updateSection("ipReputation", { feed_urls: val })}
+                    value={security.ipReputation?.feedUrls || []}
+                    onChange={(val) => updateSection("ipReputation", { feedUrls: val })}
                     disabled={disabled}
                   />
                   <SimpleGrid cols={2}>
                     <NumberInput
                       label="Update Interval (h)"
                       description="How often to sync feeds. Recommended: 24h."
-                      value={security.ipReputation?.update_interval_hours}
-                      onChange={(val) => updateSection("ipReputation", { update_interval_hours: val })}
+                      value={security.ipReputation?.updateIntervalHours}
+                      onChange={(val) => updateSection("ipReputation", { updateIntervalHours: val })}
                       disabled={disabled}
                       min={1}
                     />
                     <NumberInput
                       label="Block Threshold"
                       description="Minimum score to block. Recommended: 80.0."
-                      value={security.ipReputation?.block_threshold}
-                      onChange={(val) => updateSection("ipReputation", { block_threshold: val })}
+                      value={security.ipReputation?.blockThreshold}
+                      onChange={(val) => updateSection("ipReputation", { blockThreshold: val })}
                       disabled={disabled}
                       decimalScale={1}
                     />
@@ -381,8 +381,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                           </SimpleGrid>
                           <PasswordInput
                             label="API Key"
-                            value={integration.api_key}
-                            onChange={(e) => updateIntegration(index, { api_key: e.currentTarget.value })}
+                            value={integration.apiKey}
+                            onChange={(e) => updateIntegration(index, { apiKey: e.currentTarget.value })}
                             size="xs"
                             disabled={disabled}
                           />
@@ -390,8 +390,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                             <NumberInput
                               label="Confidence Threshold"
                               description="Score above which to consider IP malicious."
-                              value={integration.confidence_threshold}
-                              onChange={(val) => updateIntegration(index, { confidence_threshold: Number(val) })}
+                              value={integration.confidenceThreshold}
+                              onChange={(val) => updateIntegration(index, { confidenceThreshold: Number(val) })}
                               size="xs"
                               min={0}
                               max={100}
@@ -482,8 +482,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     </Stack>
                     <Switch
                       size="sm"
-                      checked={security.behavioral?.enable_impossible_travel}
-                      onChange={(e) => updateSection("behavioral", { enable_impossible_travel: e.currentTarget.checked })}
+                      checked={security.behavioral?.enableImpossibleTravel}
+                      onChange={(e) => updateSection("behavioral", { enableImpossibleTravel: e.currentTarget.checked })}
                       disabled={disabled}
                     />
                   </Group>
@@ -494,8 +494,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     </Stack>
                     <Switch
                       size="sm"
-                      checked={security.behavioral?.enable_sequence_validation}
-                      onChange={(e) => updateSection("behavioral", { enable_sequence_validation: e.currentTarget.checked })}
+                      checked={security.behavioral?.enableSequenceValidation}
+                      onChange={(e) => updateSection("behavioral", { enableSequenceValidation: e.currentTarget.checked })}
                       disabled={disabled}
                     />
                   </Group>
@@ -517,18 +517,18 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   </Text>
                 </Stack>
                 <Switch
-                  checked={security.tls_binding?.enabled}
-                  onChange={(e) => updateSection("tls_binding", { enabled: e.currentTarget.checked })}
+                  checked={security.tlsBinding?.enabled}
+                  onChange={(e) => updateSection("tlsBinding", { enabled: e.currentTarget.checked })}
                   disabled={disabled}
                 />
               </Group>
-              {security.tls_binding?.enabled && (
+              {security.tlsBinding?.enabled && (
                 <TextInput
                   label="Cookie Name"
-                  description="The name of the session cookie to bind. Recommended: session, auth_token, or your app's session ID."
+                  description="The name of the session cookie to bind. Recommended: session, authToken, or your app's session ID."
                   placeholder="session"
-                  value={security.tls_binding?.cookie_name || ""}
-                  onChange={(e) => updateSection("tls_binding", { cookie_name: e.currentTarget.value })}
+                  value={security.tlsBinding?.cookieName || ""}
+                  onChange={(e) => updateSection("tlsBinding", { cookieName: e.currentTarget.value })}
                   disabled={disabled}
                 />
               )}

@@ -29,14 +29,14 @@ import (
 
 type AuditEntry struct {
 	ID           string    `json:"id"`
-	UserID       string    `json:"user_id"`
+	UserID       string    `json:"userId"`
 	Action       string    `json:"action"`
 	Resource     string    `json:"resource"`
 	Details      string    `json:"details"`
 	Timestamp    time.Time `json:"timestamp"`
-	IPAddress    string    `json:"ip_address"`
+	IPAddress    string    `json:"ipAddress"`
 	Signature    string    `json:"signature"`
-	PreviousHash string    `json:"previous_hash"`
+	PreviousHash string    `json:"previousHash"`
 }
 
 type AuditManager struct {

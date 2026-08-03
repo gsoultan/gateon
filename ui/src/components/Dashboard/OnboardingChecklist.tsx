@@ -57,11 +57,11 @@ export const OnboardingChecklist = memo(function OnboardingChecklist() {
   const dismissed = usePreferencesStore((s) => s.onboardingDismissed);
   const setDismissed = usePreferencesStore((s) => s.setOnboardingDismissed);
 
-  const entryPoints = useEntryPoints({ page: 0, page_size: 1 });
-  const services = useServices({ page: 0, page_size: 1 });
-  const routes = useRoutes({ page: 0, page_size: 1 });
+  const entryPoints = useEntryPoints({ page: 0, pageSize: 1 });
+  const services = useServices({ page: 0, pageSize: 1 });
+  const routes = useRoutes({ page: 0, pageSize: 1 });
   // Fetch a generous page so we can inspect middleware types for protection.
-  const middlewares = useMiddlewares({ page: 0, page_size: 100 });
+  const middlewares = useMiddlewares({ page: 0, pageSize: 100 });
 
   const isLoading =
     entryPoints.isLoading ||

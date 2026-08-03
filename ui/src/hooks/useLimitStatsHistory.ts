@@ -7,22 +7,22 @@ const LIMIT_HISTORY_LEN = 24;
 function sumLimitStats(stats: LimitStats | undefined): number {
   if (!stats) return 0;
   const r =
-    stats.rate_limit_rejected && typeof stats.rate_limit_rejected === "object"
-      ? Object.values(stats.rate_limit_rejected).reduce(
+    stats.rateLimitRejected && typeof stats.rateLimitRejected === "object"
+      ? Object.values(stats.rateLimitRejected).reduce(
           (a, b) => a + Number(b),
           0
         )
       : 0;
   const i =
-    stats.inflight_rejected && typeof stats.inflight_rejected === "object"
-      ? Object.values(stats.inflight_rejected).reduce(
+    stats.inflightRejected && typeof stats.inflightRejected === "object"
+      ? Object.values(stats.inflightRejected).reduce(
           (a, b) => a + Number(b),
           0
         )
       : 0;
   const b =
-    stats.buffering_rejected && typeof stats.buffering_rejected === "object"
-      ? Object.values(stats.buffering_rejected).reduce(
+    stats.bufferingRejected && typeof stats.bufferingRejected === "object"
+      ? Object.values(stats.bufferingRejected).reduce(
           (a, v) => a + Number(v),
           0
         )

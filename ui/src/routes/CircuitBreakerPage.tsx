@@ -33,7 +33,7 @@ export default function CircuitBreakerPage() {
   const [page, setPage] = useState(1);
   const { data, isLoading } = useRoutes({
     page: page - 1,
-    page_size: PAGE_SIZE,
+    pageSize: PAGE_SIZE,
   });
   const { data: aggStats } = useAggStats();
   const { data: events } = useCircuitBreakerEvents();

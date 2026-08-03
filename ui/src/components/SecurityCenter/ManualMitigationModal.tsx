@@ -50,7 +50,7 @@ export function ManualMitigationModal({ opened, onClose }: ManualMitigationModal
       <Stack gap="md">
         <TextInput
           label="Source (IP or Fingerprint)"
-          placeholder="e.g., 1.2.3.4 or ja4_fingerprint..."
+          placeholder="e.g., 1.2.3.4 or ja4Fingerprint..."
           required
           value={source}
           onChange={(e) => setSource(e.currentTarget.value)}
@@ -72,7 +72,7 @@ export function ManualMitigationModal({ opened, onClose }: ManualMitigationModal
             { value: "abuse", label: "Abuse / Spam" },
             { value: "injection", label: "Injection Attack" },
             { value: "scanner", label: "Vulnerability Scanner" },
-            { value: "threat_intel", label: "Threat Intelligence" },
+            { value: "threatIntel", label: "Threat Intelligence" },
           ]}
           value={category}
           onChange={setCategory}

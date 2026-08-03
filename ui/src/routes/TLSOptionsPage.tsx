@@ -74,7 +74,7 @@ export default function TLSOptionsPage() {
 
   const { data, isLoading } = useTLSOptions({
     page: page - 1,
-    page_size: pageSize,
+    pageSize: pageSize,
     search: search,
   });
   const { data: caList } = useClientAuthorities();
@@ -143,7 +143,7 @@ export default function TLSOptionsPage() {
       minTlsVersion: "TLS1.2",
       maxTlsVersion: "TLS1.3",
       cipherSuites: [],
-      prefer_server_cipher_suites: true,
+      preferServerCipherSuites: true,
       sniStrict: false,
       alpnProtocols: ["h2", "http/1.1"],
     });
@@ -161,7 +161,7 @@ export default function TLSOptionsPage() {
     }
   };
 
-  const tlsOptions = data?.tls_options || [];
+  const tlsOptions = data?.tlsOptions || [];
   const totalCount = data?.totalCount || 0;
 
   const isInsecureVersion = (ver?: string) => ver === "TLS1.0" || ver === "TLS1.1";
@@ -424,12 +424,12 @@ export default function TLSOptionsPage() {
           <Group grow>
             <Switch
               label="Prefer Server Cipher Suites"
-              checked={editingOption?.prefer_server_cipher_suites || false}
+              checked={editingOption?.preferServerCipherSuites || false}
               onChange={(e) =>
                 editingOption &&
                 setEditingOption({
                   ...editingOption,
-                  prefer_server_cipher_suites: e.currentTarget.checked,
+                  preferServerCipherSuites: e.currentTarget.checked,
                 })
               }
             />

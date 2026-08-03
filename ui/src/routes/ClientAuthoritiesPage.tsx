@@ -116,7 +116,7 @@ export default function ClientAuthoritiesPage() {
   const handleSaveCA = () => {
     if (!editingCA) return
     
-    let updatedCAs = [...(config.tls?.client_authorities || [])]
+    let updatedCAs = [...(config.tls?.clientAuthorities || [])]
     const index = updatedCAs.findIndex(c => c.id === editingCA.id)
     
     if (index >= 0) {
@@ -129,7 +129,7 @@ export default function ClientAuthoritiesPage() {
       ...config,
       tls: {
         ...(config.tls || { enabled: false }),
-        client_authorities: updatedCAs
+        clientAuthorities: updatedCAs
       }
     }
     
@@ -139,12 +139,12 @@ export default function ClientAuthoritiesPage() {
   }
 
   const removeCA = (id: string) => {
-    const updatedCAs = (config.tls?.client_authorities || []).filter(c => c.id !== id)
+    const updatedCAs = (config.tls?.clientAuthorities || []).filter(c => c.id !== id)
     const updatedConfig = {
       ...config,
       tls: {
         ...(config.tls || { enabled: false }),
-        client_authorities: updatedCAs
+        clientAuthorities: updatedCAs
       }
     }
     setConfig(updatedConfig)
@@ -161,7 +161,7 @@ export default function ClientAuthoritiesPage() {
     open()
   }
 
-  const cas = config.tls?.client_authorities || []
+  const cas = config.tls?.clientAuthorities || []
   const PAGE_SIZE = 10
   const [page, setPage] = useState(1)
   const paginatedCas = useMemo(() => {

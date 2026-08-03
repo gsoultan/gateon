@@ -21,7 +21,7 @@ import type {
 
 export type PaginationParams = {
   page?: number;
-  page_size?: number;
+  pageSize?: number;
   search?: string;
 };
 
@@ -36,8 +36,8 @@ function buildQueryStringInternal(params?: PaginationParams | RouteListParams): 
   if (!params) return "";
   const q = new URLSearchParams();
   if (params.page !== undefined) q.set("page", params.page.toString());
-  if (params.page_size !== undefined)
-    q.set("page_size", params.page_size.toString());
+  if (params.pageSize !== undefined)
+    q.set("pageSize", params.pageSize.toString());
   if (params.search) q.set("search", params.search);
   const rp = params as RouteListParams;
   if (rp.type) q.set("type", rp.type);
@@ -121,8 +121,8 @@ export async function setupGateon(req: SetupRequest): Promise<SetupResponse> {
 }
 
 export async function testDbConnection(payload: {
-  database_url?: string;
-  database_config?: DatabaseConfig;
+  databaseUrl?: string;
+  databaseConfig?: DatabaseConfig;
 }): Promise<boolean> {
   const res = await apiFetch("/v1/setup/test-db", {
     method: "POST",
@@ -206,7 +206,7 @@ export async function installClamav(req: InstallClamavRequest): Promise<InstallC
   return res.json();
 }
 
-export async function uninstallClamav(req: { sudo_password?: string }): Promise<UninstallClamavResponse> {
+export async function uninstallClamav(req: { sudoPassword?: string }): Promise<UninstallClamavResponse> {
   const res = await apiFetch("/v1/security/clamav/uninstall", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

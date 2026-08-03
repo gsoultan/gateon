@@ -62,23 +62,23 @@ type DbFields = {
 function buildDbPayload(f: DbFields): { payload?: any; error?: string } {
   if (f.useUrl) {
     if (!f.url) return { error: "Please provide a database connection string (URL)" };
-    return { payload: { database_url: f.url } };
+    return { payload: { databaseUrl: f.url } };
   }
   if (f.driver === "sqlite") {
     if (!f.sqlitePath) return { error: "Please provide a path for the SQLite database file" };
-    return { payload: { database_config: { driver: "sqlite", sqlite_path: f.sqlitePath } } };
+    return { payload: { databaseConfig: { driver: "sqlite", sqlitePath: f.sqlitePath } } };
   }
   if (!f.host || !f.port || !f.name) return { error: "Please fill host, port and database" };
   return {
     payload: {
-      database_config: {
+      databaseConfig: {
         driver: f.driver,
         host: f.host,
         port: Number(f.port) || 0,
         user: f.user,
         password: f.password,
         database: f.name,
-        ssl_mode: f.driver === "postgres" ? f.sslMode || "disable" : "",
+        sslMode: f.driver === "postgres" ? f.sslMode || "disable" : "",
       },
     },
   };
@@ -106,38 +106,38 @@ export default function SetupPage() {
   };
 
   const managementDbFields = (): DbFields => ({
-    useUrl: form.values.database_use_url,
-    url: form.values.database_url,
-    driver: form.values.database_driver,
-    sqlitePath: form.values.sqlite_path,
-    host: form.values.db_host,
-    port: form.values.db_port,
-    user: form.values.db_user,
-    password: form.values.db_password,
-    name: form.values.db_name,
-    sslMode: form.values.db_ssl_mode,
+    useUrl: form.values.databaseUseUrl,
+    url: form.values.databaseUrl,
+    driver: form.values.databaseDriver,
+    sqlitePath: form.values.sqlitePath,
+    host: form.values.dbHost,
+    port: form.values.dbPort,
+    user: form.values.dbUser,
+    password: form.values.dbPassword,
+    name: form.values.dbName,
+    sslMode: form.values.dbSslMode,
   });
 
   const loggingDbFields = (): DbFields => ({
-    useUrl: form.values.logging_use_url,
-    url: form.values.logging_url,
-    driver: form.values.logging_driver,
-    sqlitePath: form.values.logging_sqlite_path,
-    host: form.values.log_db_host,
-    port: form.values.log_db_port,
-    user: form.values.log_db_user,
-    password: form.values.log_db_password,
-    name: form.values.log_db_name,
-    sslMode: form.values.log_db_ssl_mode,
+    useUrl: form.values.loggingUseUrl,
+    url: form.values.loggingUrl,
+    driver: form.values.loggingDriver,
+    sqlitePath: form.values.loggingSqlitePath,
+    host: form.values.logDbHost,
+    port: form.values.logDbPort,
+    user: form.values.logDbUser,
+    password: form.values.logDbPassword,
+    name: form.values.logDbName,
+    sslMode: form.values.logDbSslMode,
   });
 
   const nextStep = async () => {
     const adminValid = form.validateField("adminUsername").hasError === false &&
       form.validateField("adminPassword").hasError === false &&
-      form.validateField("confirm_password").hasError === false;
-    const securityValid = form.validateField("paseto_secret").hasError === false;
-    const managementValid = form.validateField("management_bind").hasError === false &&
-      form.validateField("management_port").hasError === false;
+      form.validateField("confirmPassword").hasError === false;
+    const securityValid = form.validateField("pasetoSecret").hasError === false;
+    const managementValid = form.validateField("managementBind").hasError === false &&
+      form.validateField("managementPort").hasError === false;
 
     if (wizardStep === 0 && !adminValid) {
       form.validate();
@@ -156,7 +156,7 @@ export default function SetupPage() {
       }
       if (!(await testDb(payload))) return;
     }
-    if (wizardStep === 3 && !form.values.logging_use_same) {
+    if (wizardStep === 3 && !form.values.loggingUseSame) {
       // Logging step: test the dedicated logging database connection
       const { payload, error: dbError } = buildDbPayload(loggingDbFields());
       if (dbError) {
@@ -182,46 +182,46 @@ export default function SetupPage() {
     initialValues: {
       adminUsername: "admin",
       adminPassword: "",
-      confirm_password: "",
-      paseto_secret: "",
-      management_bind: "0.0.0.0",
-      management_port: "8080",
+      confirmPassword: "",
+      pasetoSecret: "",
+      managementBind: "0.0.0.0",
+      managementPort: "8080",
       // Database fields
-      database_driver: "sqlite",
-      database_use_url: false,
-      database_url: "",
-      sqlite_path: "gateon.db",
-      db_host: "127.0.0.1",
-      db_port: "",
-      db_user: "",
-      db_password: "",
-      db_name: "gateon",
-      db_ssl_mode: "disable",
+      databaseDriver: "sqlite",
+      databaseUseUrl: false,
+      databaseUrl: "",
+      sqlitePath: "gateon.db",
+      dbHost: "127.0.0.1",
+      dbPort: "",
+      dbUser: "",
+      dbPassword: "",
+      dbName: "gateon",
+      dbSslMode: "disable",
       // Logging database fields (defaults to reusing the management database)
-      logging_use_same: true,
-      logging_driver: "sqlite",
-      logging_use_url: false,
-      logging_url: "",
-      logging_sqlite_path: "gateon-logs.db",
-      log_db_host: "127.0.0.1",
-      log_db_port: "",
-      log_db_user: "",
-      log_db_password: "",
-      log_db_name: "gateon_logs",
-      log_db_ssl_mode: "disable",
+      loggingUseSame: true,
+      loggingDriver: "sqlite",
+      loggingUseUrl: false,
+      loggingUrl: "",
+      loggingSqlitePath: "gateon-logs.db",
+      logDbHost: "127.0.0.1",
+      logDbPort: "",
+      logDbUser: "",
+      logDbPassword: "",
+      logDbName: "gateonLogs",
+      logDbSslMode: "disable",
     },
     validate: {
       adminUsername: (value) => (value.length < 3 ? "Username too short" : null),
       adminPassword: (val) => (val.length < 8 ? "Password must be at least 8 characters" : null),
-      confirm_password: (val, values) => (val !== values.adminPassword ? "Passwords do not match" : null),
-      paseto_secret: (val) => (val.length !== 32 ? "Secret must be exactly 32 characters" : null),
-      management_bind: (val) => (!val ? "Bind address is required" : null),
-      management_port: (val) => (!val ? "Port is required" : null),
+      confirmPassword: (val, values) => (val !== values.adminPassword ? "Passwords do not match" : null),
+      pasetoSecret: (val) => (val.length !== 32 ? "Secret must be exactly 32 characters" : null),
+      managementBind: (val) => (!val ? "Bind address is required" : null),
+      managementPort: (val) => (!val ? "Port is required" : null),
     },
   });
 
   useEffect(() => {
-    form.setFieldValue("paseto_secret", generateRandomString(32));
+    form.setFieldValue("pasetoSecret", generateRandomString(32));
   }, []);
 
   const handleSubmit = async (values: typeof form.values) => {
@@ -231,37 +231,37 @@ export default function SetupPage() {
       const payload: any = {
         adminUsername: values.adminUsername,
         adminPassword: values.adminPassword,
-        paseto_secret: values.paseto_secret,
-        management_bind: values.management_bind,
-        management_port: values.management_port,
+        pasetoSecret: values.pasetoSecret,
+        managementBind: values.managementBind,
+        managementPort: values.managementPort,
       };
-      if (values.database_use_url) {
-        payload.database_url = values.database_url;
+      if (values.databaseUseUrl) {
+        payload.databaseUrl = values.databaseUrl;
       } else {
-        if (values.database_driver === "sqlite") {
-          payload.database_config = {
+        if (values.databaseDriver === "sqlite") {
+          payload.databaseConfig = {
             driver: "sqlite",
-            sqlite_path: values.sqlite_path,
+            sqlitePath: values.sqlitePath,
           };
         } else {
-          payload.database_config = {
-            driver: values.database_driver,
-            host: values.db_host,
-            port: Number(values.db_port) || 0,
-            user: values.db_user,
-            password: values.db_password,
-            database: values.db_name,
-            ssl_mode: values.database_driver === "postgres" ? values.db_ssl_mode || "disable" : "",
+          payload.databaseConfig = {
+            driver: values.databaseDriver,
+            host: values.dbHost,
+            port: Number(values.dbPort) || 0,
+            user: values.dbUser,
+            password: values.dbPassword,
+            database: values.dbName,
+            sslMode: values.databaseDriver === "postgres" ? values.dbSslMode || "disable" : "",
           };
         }
       }
       // Dedicated logging database (when the user opted out of reusing the management store)
-      if (!values.logging_use_same) {
+      if (!values.loggingUseSame) {
         const { payload: logPayload } = buildDbPayload(loggingDbFields());
-        if (logPayload?.database_url) {
-          payload.logging_database_url = logPayload.database_url;
-        } else if (logPayload?.database_config) {
-          payload.logging_database_config = logPayload.database_config;
+        if (logPayload?.databaseUrl) {
+          payload.loggingDatabaseUrl = logPayload.databaseUrl;
+        } else if (logPayload?.databaseConfig) {
+          payload.loggingDatabaseConfig = logPayload.databaseConfig;
         }
       }
       const res = await setupGateon(payload);
@@ -394,7 +394,7 @@ export default function SetupPage() {
                                   onClick={() => {
                                     const pwd = generateRandomString(16);
                                     form.setFieldValue("adminPassword", pwd);
-                                    form.setFieldValue("confirm_password", pwd);
+                                    form.setFieldValue("confirmPassword", pwd);
                                   }}
                                   variant="subtle"
                                 >
@@ -410,7 +410,7 @@ export default function SetupPage() {
                           required
                           size="md"
                           leftSection={<IconShieldCheck size={rem(18)} stroke={1.5} />}
-                          {...form.getInputProps("confirm_password")}
+                          {...form.getInputProps("confirmPassword")}
                         />
                       </SimpleGrid>
                     </Stack>
@@ -436,12 +436,12 @@ export default function SetupPage() {
                       size="md"
                       ff="monospace"
                       rightSectionWidth={68}
-                      {...form.getInputProps("paseto_secret")}
+                      {...form.getInputProps("pasetoSecret")}
                       rightSection={
                         <Group gap={0}>
                           <Tooltip label={clipboard.copied ? "Copied" : "Copy Secret"}>
                             <ActionIcon
-                              onClick={() => clipboard.copy(form.values.paseto_secret)}
+                              onClick={() => clipboard.copy(form.values.pasetoSecret)}
                               variant="subtle"
                               color={clipboard.copied ? "teal" : "gray"}
                             >
@@ -450,7 +450,7 @@ export default function SetupPage() {
                           </Tooltip>
                           <Tooltip label="Regenerate">
                             <ActionIcon
-                              onClick={() => form.setFieldValue("paseto_secret", generateRandomString(32))}
+                              onClick={() => form.setFieldValue("pasetoSecret", generateRandomString(32))}
                               variant="subtle"
                             >
                               <IconRefresh size="1.1rem" />
@@ -481,37 +481,37 @@ export default function SetupPage() {
                           { value: "mysql", label: "MySQL" },
                           { value: "mariadb", label: "MariaDB" },
                         ]}
-                        {...form.getInputProps("database_driver")}
+                        {...form.getInputProps("databaseDriver")}
                       />
                       <Checkbox
                         mt={28}
                         label="Use connection string (URL)"
-                        {...form.getInputProps("database_use_url", { type: 'checkbox' })}
+                        {...form.getInputProps("databaseUseUrl", { type: 'checkbox' })}
                       />
                     </SimpleGrid>
 
-                    {form.values.database_use_url ? (
+                    {form.values.databaseUseUrl ? (
                       <TextInput
                         mt="md"
                         label="Connection string"
                         placeholder="e.g. postgres://user:pass@host:5432/db?sslmode=disable"
-                        {...form.getInputProps("database_url")}
+                        {...form.getInputProps("databaseUrl")}
                       />
-                    ) : form.values.database_driver === 'sqlite' ? (
+                    ) : form.values.databaseDriver === 'sqlite' ? (
                       <TextInput
                         mt="md"
                         label="SQLite file path"
                         placeholder="gateon.db"
-                        {...form.getInputProps("sqlite_path")}
+                        {...form.getInputProps("sqlitePath")}
                       />
                     ) : (
                       <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
-                        <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("db_host")} />
-                        <TextInput label="Port" placeholder={form.values.database_driver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("db_port")} />
-                        <TextInput label="User" placeholder="gateon" {...form.getInputProps("db_user")} />
-                        <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("db_password")} />
-                        <TextInput label="Database" placeholder="gateon" {...form.getInputProps("db_name")} />
-                        {form.values.database_driver === 'postgres' && (
+                        <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("dbHost")} />
+                        <TextInput label="Port" placeholder={form.values.databaseDriver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("dbPort")} />
+                        <TextInput label="User" placeholder="gateon" {...form.getInputProps("dbUser")} />
+                        <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("dbPassword")} />
+                        <TextInput label="Database" placeholder="gateon" {...form.getInputProps("dbName")} />
+                        {form.values.databaseDriver === 'postgres' && (
                           <Select
                             label="SSL mode"
                             data={[
@@ -520,7 +520,7 @@ export default function SetupPage() {
                               { value: 'verify-ca', label: 'verify-ca' },
                               { value: 'verify-full', label: 'verify-full' },
                             ]}
-                            {...form.getInputProps("db_ssl_mode")}
+                            {...form.getInputProps("dbSslMode")}
                           />
                         )}
                       </SimpleGrid>
@@ -532,22 +532,22 @@ export default function SetupPage() {
                         loading={loading}
                         onClick={async () => {
                           try {
-                            const useUrl = form.values.database_use_url;
-                            const driver = form.values.database_driver;
+                            const useUrl = form.values.databaseUseUrl;
+                            const driver = form.values.databaseDriver;
                             const payload: any = {};
                             if (useUrl) {
-                              payload.database_url = form.values.database_url;
+                              payload.databaseUrl = form.values.databaseUrl;
                             } else if (driver === 'sqlite') {
-                              payload.database_config = { driver: 'sqlite', sqlite_path: form.values.sqlite_path };
+                              payload.databaseConfig = { driver: 'sqlite', sqlitePath: form.values.sqlitePath };
                             } else {
-                              payload.database_config = {
+                              payload.databaseConfig = {
                                 driver,
-                                host: form.values.db_host,
-                                port: Number(form.values.db_port) || 0,
-                                user: form.values.db_user,
-                                password: form.values.db_password,
-                                database: form.values.db_name,
-                                ssl_mode: driver === 'postgres' ? form.values.db_ssl_mode || 'disable' : '',
+                                host: form.values.dbHost,
+                                port: Number(form.values.dbPort) || 0,
+                                user: form.values.dbUser,
+                                password: form.values.dbPassword,
+                                database: form.values.dbName,
+                                sslMode: driver === 'postgres' ? form.values.dbSslMode || 'disable' : '',
                               };
                             }
                             setLoading(true);
@@ -581,10 +581,10 @@ export default function SetupPage() {
                     </Text>
                     <Checkbox
                       label="Use the same database as management"
-                      {...form.getInputProps("logging_use_same", { type: 'checkbox' })}
+                      {...form.getInputProps("loggingUseSame", { type: 'checkbox' })}
                     />
 
-                    {!form.values.logging_use_same && (
+                    {!form.values.loggingUseSame && (
                       <Box mt="md">
                         <SimpleGrid cols={{ base: 1, sm: 2 }}>
                           <Select
@@ -595,37 +595,37 @@ export default function SetupPage() {
                               { value: "mysql", label: "MySQL" },
                               { value: "mariadb", label: "MariaDB" },
                             ]}
-                            {...form.getInputProps("logging_driver")}
+                            {...form.getInputProps("loggingDriver")}
                           />
                           <Checkbox
                             mt={28}
                             label="Use connection string (URL)"
-                            {...form.getInputProps("logging_use_url", { type: 'checkbox' })}
+                            {...form.getInputProps("loggingUseUrl", { type: 'checkbox' })}
                           />
                         </SimpleGrid>
 
-                        {form.values.logging_use_url ? (
+                        {form.values.loggingUseUrl ? (
                           <TextInput
                             mt="md"
                             label="Connection string"
                             placeholder="e.g. postgres://user:pass@host:5432/db?sslmode=disable"
-                            {...form.getInputProps("logging_url")}
+                            {...form.getInputProps("loggingUrl")}
                           />
-                        ) : form.values.logging_driver === 'sqlite' ? (
+                        ) : form.values.loggingDriver === 'sqlite' ? (
                           <TextInput
                             mt="md"
                             label="SQLite file path"
                             placeholder="gateon-logs.db"
-                            {...form.getInputProps("logging_sqlite_path")}
+                            {...form.getInputProps("loggingSqlitePath")}
                           />
                         ) : (
                           <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
-                            <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("log_db_host")} />
-                            <TextInput label="Port" placeholder={form.values.logging_driver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("log_db_port")} />
-                            <TextInput label="User" placeholder="gateon" {...form.getInputProps("log_db_user")} />
-                            <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("log_db_password")} />
-                            <TextInput label="Database" placeholder="gateon_logs" {...form.getInputProps("log_db_name")} />
-                            {form.values.logging_driver === 'postgres' && (
+                            <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("logDbHost")} />
+                            <TextInput label="Port" placeholder={form.values.loggingDriver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("logDbPort")} />
+                            <TextInput label="User" placeholder="gateon" {...form.getInputProps("logDbUser")} />
+                            <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("logDbPassword")} />
+                            <TextInput label="Database" placeholder="gateonLogs" {...form.getInputProps("logDbName")} />
+                            {form.values.loggingDriver === 'postgres' && (
                               <Select
                                 label="SSL mode"
                                 data={[
@@ -634,7 +634,7 @@ export default function SetupPage() {
                                   { value: 'verify-ca', label: 'verify-ca' },
                                   { value: 'verify-full', label: 'verify-full' },
                                 ]}
-                                {...form.getInputProps("log_db_ssl_mode")}
+                                {...form.getInputProps("logDbSslMode")}
                               />
                             )}
                           </SimpleGrid>
@@ -688,14 +688,14 @@ export default function SetupPage() {
                         required
                         size="md"
                         leftSection={<IconServer size={rem(18)} stroke={1.5} />}
-                        {...form.getInputProps("management_bind")}
+                        {...form.getInputProps("managementBind")}
                       />
                       <TextInput
                         label="Port"
                         placeholder="8080"
                         required
                         size="md"
-                        {...form.getInputProps("management_port")}
+                        {...form.getInputProps("managementPort")}
                       />
                     </SimpleGrid>
                   </Box>
@@ -715,33 +715,33 @@ export default function SetupPage() {
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">PASETO Secret:</Text>
-                        <Code>•••••••• ({form.values.paseto_secret.length} chars)</Code>
+                        <Code>•••••••• ({form.values.pasetoSecret.length} chars)</Code>
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">Database:</Text>
-                        {form.values.database_use_url ? (
-                          <Code>{form.values.database_url || '—'}</Code>
-                        ) : form.values.database_driver === 'sqlite' ? (
-                          <Code>sqlite:{form.values.sqlite_path}</Code>
+                        {form.values.databaseUseUrl ? (
+                          <Code>{form.values.databaseUrl || '—'}</Code>
+                        ) : form.values.databaseDriver === 'sqlite' ? (
+                          <Code>sqlite:{form.values.sqlitePath}</Code>
                         ) : (
-                          <Code>{`${form.values.database_driver}://${form.values.db_user ? form.values.db_user + '@' : ''}${form.values.db_host}:${form.values.db_port}/${form.values.db_name}`}</Code>
+                          <Code>{`${form.values.databaseDriver}://${form.values.dbUser ? form.values.dbUser + '@' : ''}${form.values.dbHost}:${form.values.dbPort}/${form.values.dbName}`}</Code>
                         )}
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">Logging DB:</Text>
-                        {form.values.logging_use_same ? (
+                        {form.values.loggingUseSame ? (
                           <Code>same as management</Code>
-                        ) : form.values.logging_use_url ? (
-                          <Code>{form.values.logging_url || '—'}</Code>
-                        ) : form.values.logging_driver === 'sqlite' ? (
-                          <Code>sqlite:{form.values.logging_sqlite_path}</Code>
+                        ) : form.values.loggingUseUrl ? (
+                          <Code>{form.values.loggingUrl || '—'}</Code>
+                        ) : form.values.loggingDriver === 'sqlite' ? (
+                          <Code>sqlite:{form.values.loggingSqlitePath}</Code>
                         ) : (
-                          <Code>{`${form.values.logging_driver}://${form.values.log_db_user ? form.values.log_db_user + '@' : ''}${form.values.log_db_host}:${form.values.log_db_port}/${form.values.log_db_name}`}</Code>
+                          <Code>{`${form.values.loggingDriver}://${form.values.logDbUser ? form.values.logDbUser + '@' : ''}${form.values.logDbHost}:${form.values.logDbPort}/${form.values.logDbName}`}</Code>
                         )}
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">Management API:</Text>
-                        <Code>{form.values.management_bind}:{form.values.management_port}</Code>
+                        <Code>{form.values.managementBind}:{form.values.managementPort}</Code>
                       </Group>
                     </Stack>
                   </Paper>

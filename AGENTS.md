@@ -67,4 +67,14 @@ All backend source files (Go, Protobuf) MUST include the following copyright hea
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 ```
 
+## Obsidian Integration
+This project uses a dedicated Obsidian vault as an **Agentic Second Brain** to optimize context retrieval and reduce token costs.
+
+- **Vault Location**: `~/Documents/ObsidianVault/Gateon`
+- **Workflow**:
+    1. **Discovery**: Before reading files, check the Obsidian graph for structural context.
+    2. **Mapping**: Use the bi-directional links between file nodes to understand dependencies.
+    3. **Memory**: Access symlinked `.serena/memories` and `.junie/skills` directly within the vault.
+- **Sync**: Re-export the graph after major changes using `rtk graphify export obsidian --dir ~/Documents/ObsidianVault/Gateon`.
+
 <!-- END sqz-agents-guidance -->

@@ -13,7 +13,7 @@ export interface SiemStatus {
   endpoint?: string;
   format?: string;
   transport?: string;
-  queue_size?: number;
+  queueSize?: number;
   stats: SiemStats;
 }
 

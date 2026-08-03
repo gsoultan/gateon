@@ -27,9 +27,9 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         <NumberInput
           label="STS Seconds (max-age)"
           description="Set > 0 to add Strict-Transport-Security. 0 = disabled."
-          value={parseInt(config.sts_seconds) || 0}
+          value={parseInt(config.stsSeconds) || 0}
           onChange={(val) =>
-            updateConfig("sts_seconds", (val ?? 0).toString())
+            updateConfig("stsSeconds", (val ?? 0).toString())
           }
           min={0}
           placeholder="31536000"
@@ -37,10 +37,10 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         <Switch
           label="Include Subdomains"
           description="stsIncludeSubdomains"
-          checked={config.sts_include_subdomains === "true"}
+          checked={config.stsIncludeSubdomains === "true"}
           onChange={(e) =>
             updateConfig(
-              "sts_include_subdomains",
+              "stsIncludeSubdomains",
               e.currentTarget.checked ? "true" : "false"
             )
           }
@@ -51,10 +51,10 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         <Switch
           label="Preload"
           description="Allow HSTS preload list submission"
-          checked={config.sts_preload === "true"}
+          checked={config.stsPreload === "true"}
           onChange={(e) =>
             updateConfig(
-              "sts_preload",
+              "stsPreload",
               e.currentTarget.checked ? "true" : "false"
             )
           }
@@ -62,10 +62,10 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         <Switch
           label="Force STS (HTTP dev)"
           description="Add header over HTTP (for development)"
-          checked={config.force_sts_header === "true"}
+          checked={config.forceStsHeader === "true"}
           onChange={(e) =>
             updateConfig(
-              "force_sts_header",
+              "forceStsHeader",
               e.currentTarget.checked ? "true" : "false"
             )
           }
@@ -76,7 +76,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Add Request Headers"
-        prefix="add_request_"
+        prefix="addRequest_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />
@@ -85,7 +85,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Set Request Headers"
-        prefix="set_request_"
+        prefix="setRequest_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />
@@ -94,7 +94,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Add Response Headers"
-        prefix="add_response_"
+        prefix="addResponse_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />
@@ -102,7 +102,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Set Response Headers"
-        prefix="set_response_"
+        prefix="setResponse_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />

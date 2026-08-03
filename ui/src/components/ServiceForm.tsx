@@ -61,7 +61,7 @@ export function ServiceForm({
   });
 
   const discoverMutation = useMutation({
-    mutationFn: async (args: { url: string; tls_config?: any }) => {
+    mutationFn: async (args: { url: string; tlsConfig?: any }) => {
       const res = await apiFetch("/v1/discover/grpc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -103,7 +103,7 @@ export function ServiceForm({
         proxyProtocolEnabled: false,
         proxyProtocolVersion: ProxyProtocolVersion.PROXY_PROTOCOL_VERSION_UNSPECIFIED,
       }],
-      loadBalancerPolicy: "round_robin",
+      loadBalancerPolicy: "roundRobin",
       healthCheckPath: "",
       healthCheckPort: 0,
       healthCheckProtocol: "",
@@ -218,7 +218,7 @@ export function ServiceForm({
       );
       form.setFieldValue(
         "loadBalancerPolicy",
-        initialData.loadBalancerPolicy || "round_robin",
+        initialData.loadBalancerPolicy || "roundRobin",
       );
       form.setFieldValue("healthCheckPath", initialData.healthCheckPath || "");
       form.setFieldValue("healthCheckPort", initialData.healthCheckPort ?? 0);
@@ -614,13 +614,13 @@ export function ServiceForm({
             const isL4 = bt === "tcp" || bt === "udp";
             const options = isL4
               ? [
-                  { label: "Round Robin", value: "round_robin" },
-                  { label: "Least Connections (TCP)", value: "least_conn" },
+                  { label: "Round Robin", value: "roundRobin" },
+                  { label: "Least Connections (TCP)", value: "leastConn" },
                 ]
               : [
-                  { label: "Round Robin", value: "round_robin" },
-                  { label: "Least Connections", value: "least_conn" },
-                  { label: "Weighted Round Robin", value: "weighted_round_robin" },
+                  { label: "Round Robin", value: "roundRobin" },
+                  { label: "Least Connections", value: "leastConn" },
+                  { label: "Weighted Round Robin", value: "weightedRoundRobin" },
                 ];
             return (
               <Tooltip
@@ -637,7 +637,7 @@ export function ServiceForm({
                     data={options}
                     value={field.state.value}
                     onBlur={field.handleBlur}
-                    onChange={(v) => field.handleChange(v || "round_robin")}
+                    onChange={(v) => field.handleChange(v || "roundRobin")}
                   />
                 </div>
               </Tooltip>
@@ -774,7 +774,7 @@ export function ServiceForm({
 
                       discoverMutation.mutate({
                         url,
-                        tls_config: form.state.values.tlsClientConfig,
+                        tlsConfig: form.state.values.tlsClientConfig,
                       });
                     };
 

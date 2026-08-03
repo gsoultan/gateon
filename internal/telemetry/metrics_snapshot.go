@@ -106,46 +106,46 @@ func StartSnapshotLoop(ctx context.Context) {
 // MetricsSnapshot holds a structured view of all Prometheus metrics for the UI.
 type MetricsSnapshot struct {
 	// Golden signals
-	GoldenSignals GoldenSignals `json:"golden_signals,omitzero"`
+	GoldenSignals GoldenSignals `json:"goldenSignals,omitzero"`
 
 	// Per-route request metrics broken down by status code.
-	RouteMetrics []RouteMetric `json:"route_metrics,omitzero"`
+	RouteMetrics []RouteMetric `json:"routeMetrics,omitzero"`
 
 	// Middleware counters (rate limit, WAF, cache, auth, compress, turnstile, geoip, hmac).
 	Middleware MiddlewareMetrics `json:"middleware,omitzero"`
 
 	// TLS certificate expiry information.
-	TLSCertificates []TLSCertMetric `json:"tls_certificates,omitzero"`
+	TLSCertificates []TLSCertMetric `json:"tlsCertificates,omitzero"`
 
 	// Target health and connection status.
 	Targets []TargetMetric `json:"targets,omitzero"`
 
 	// IP-based metrics
-	IPMetrics []IPMetric `json:"ip_metrics,omitzero"`
+	IPMetrics []IPMetric `json:"ipMetrics,omitzero"`
 
 	// Country-based metrics
-	CountryMetrics []CountryMetric `json:"country_metrics,omitzero"`
+	CountryMetrics []CountryMetric `json:"countryMetrics,omitzero"`
 
 	// Protocol-based metrics
-	ProtocolMetrics []LabeledCount `json:"protocol_metrics,omitzero"`
+	ProtocolMetrics []LabeledCount `json:"protocolMetrics,omitzero"`
 
 	// Domain-based metrics
-	DomainMetrics []DomainMetric `json:"domain_metrics,omitzero"`
+	DomainMetrics []DomainMetric `json:"domainMetrics,omitzero"`
 
 	// Hourly domain metrics (current hour)
-	HourlyDomainMetrics []DomainStats `json:"hourly_domain_metrics,omitzero"`
+	HourlyDomainMetrics []DomainStats `json:"hourlyDomainMetrics,omitzero"`
 
 	// Rolling 24h domain metrics
-	DomainStatsRolling24h []DomainStats `json:"domain_stats_rolling24h,omitzero"`
+	DomainStatsRolling24h []DomainStats `json:"domainStatsRolling24h,omitzero"`
 
 	// Traffic history for charts (last 24-48 hours)
-	TrafficHistory []TrafficSample `json:"traffic_history,omitzero"`
+	TrafficHistory []TrafficSample `json:"trafficHistory,omitzero"`
 
 	// Active threats
-	ActiveSuspiciousSessions  float64        `json:"active_suspicious_sessions"`
-	ActiveUnverifiedClients   float64        `json:"active_unverified_clients"`
-	ActiveShunnedEntities     []LabeledCount `json:"active_shunned_entities,omitzero"`
-	ActiveAnomalyScoreAverage float64        `json:"active_anomaly_score_average"`
+	ActiveSuspiciousSessions  float64        `json:"activeSuspiciousSessions"`
+	ActiveUnverifiedClients   float64        `json:"activeUnverifiedClients"`
+	ActiveShunnedEntities     []LabeledCount `json:"activeShunnedEntities,omitzero"`
+	ActiveAnomalyScoreAverage float64        `json:"activeAnomalyScoreAverage"`
 
 	// System-level gauges.
 	System SystemMetrics `json:"system,omitzero"`
@@ -154,7 +154,7 @@ type MetricsSnapshot struct {
 	Security SecurityInsights `json:"security,omitzero"`
 
 	// Reconciled mitigation funnel (single-unit, server-computed).
-	MitigationFunnel MitigationFunnel `json:"mitigation_funnel,omitzero"`
+	MitigationFunnel MitigationFunnel `json:"mitigationFunnel,omitzero"`
 }
 
 // MitigationFunnel holds a reconciled, single-unit (HTTP request) view of how
@@ -169,36 +169,36 @@ type MetricsSnapshot struct {
 // traffic) and XDPPacketsDropped (packets dropped below the HTTP layer, a
 // different unit) are reported separately and are NOT funnel stages.
 type MitigationFunnel struct {
-	HTTPIngress           float64 `json:"http_ingress"`
-	WAFBlocked            float64 `json:"waf_blocked"`
-	FastPathBlocked       float64 `json:"fast_path_blocked"`
-	RateLimited           float64 `json:"rate_limited"`
-	GeoIPBlocked          float64 `json:"geoip_blocked"`
-	AuthFailures          float64 `json:"auth_failures"`
-	TurnstileFailures     float64 `json:"turnstile_failures"`
-	HMACFailures          float64 `json:"hmac_failures"`
-	BotBlocked            float64 `json:"bot_blocked"`
-	FileSecurityBlocked   float64 `json:"file_security_blocked"`
-	DeceptionBlocked      float64 `json:"deception_blocked"`
-	AdvancedSecurityBlock float64 `json:"advanced_security_blocked"`
-	TotalMitigated        float64 `json:"total_mitigated"`
+	HTTPIngress           float64 `json:"httpIngress"`
+	WAFBlocked            float64 `json:"wafBlocked"`
+	FastPathBlocked       float64 `json:"fastPathBlocked"`
+	RateLimited           float64 `json:"rateLimited"`
+	GeoIPBlocked          float64 `json:"geoipBlocked"`
+	AuthFailures          float64 `json:"authFailures"`
+	TurnstileFailures     float64 `json:"turnstileFailures"`
+	HMACFailures          float64 `json:"hmacFailures"`
+	BotBlocked            float64 `json:"botBlocked"`
+	FileSecurityBlocked   float64 `json:"fileSecurityBlocked"`
+	DeceptionBlocked      float64 `json:"deceptionBlocked"`
+	AdvancedSecurityBlock float64 `json:"advancedSecurityBlocked"`
+	TotalMitigated        float64 `json:"totalMitigated"`
 	Allowed               float64 `json:"allowed"`
-	ServerErrors          float64 `json:"server_errors"`
-	XDPPacketsDropped     float64 `json:"xdp_packets_dropped"`
+	ServerErrors          float64 `json:"serverErrors"`
+	XDPPacketsDropped     float64 `json:"xdpPacketsDropped"`
 }
 
 type SecurityInsights struct {
-	TopThreatSources  []LabeledCount    `json:"top_threat_sources,omitzero"`
-	TopThreatTypes    []LabeledCount    `json:"top_threat_types,omitzero"`
-	ThreatsByCountry  []LabeledCount    `json:"threats_by_country,omitzero"`
-	AttackTrend       []TrafficSample   `json:"attack_trend,omitzero"`
-	RecentAnomalies   []*SecurityThreat `json:"recent_anomalies,omitzero"`
-	TotalAnomalies    int64             `json:"total_anomalies"`
-	ActiveThreats     int               `json:"active_threats"`
-	MitigatedToday    int               `json:"mitigated_today"`
-	HeavyHitters      []HeavyHitter     `json:"heavy_hitters,omitzero"`
-	GlobalThreatScore float64           `json:"global_threat_score"`
-	EbpfTopIPs        []IPStat          `json:"ebpf_top_ips,omitzero"`
+	TopThreatSources  []LabeledCount    `json:"topThreatSources,omitzero"`
+	TopThreatTypes    []LabeledCount    `json:"topThreatTypes,omitzero"`
+	ThreatsByCountry  []LabeledCount    `json:"threatsByCountry,omitzero"`
+	AttackTrend       []TrafficSample   `json:"attackTrend,omitzero"`
+	RecentAnomalies   []*SecurityThreat `json:"recentAnomalies,omitzero"`
+	TotalAnomalies    int64             `json:"totalAnomalies"`
+	ActiveThreats     int               `json:"activeThreats"`
+	MitigatedToday    int               `json:"mitigatedToday"`
+	HeavyHitters      []HeavyHitter     `json:"heavyHitters,omitzero"`
+	GlobalThreatScore float64           `json:"globalThreatScore"`
+	EbpfTopIPs        []IPStat          `json:"ebpfTopIPs,omitzero"`
 }
 
 type IPStat struct {
@@ -208,19 +208,19 @@ type IPStat struct {
 
 // GoldenSignals represents the four golden signals of monitoring.
 type GoldenSignals struct {
-	RequestsTotal   float64 `json:"requests_total"`
-	ErrorsTotal     float64 `json:"errors_total"`
-	ErrorRate       float64 `json:"error_rate"`
-	AvgLatencyMs    float64 `json:"avg_latency_ms"`
-	P50LatencyMs    float64 `json:"p50_latency_ms"`
-	P95LatencyMs    float64 `json:"p95_latency_ms"`
-	P99LatencyMs    float64 `json:"p99_latency_ms"`
-	InFlightTotal   float64 `json:"in_flight_total"`
-	BytesInTotal    float64 `json:"bytes_in_total"`
-	BytesOutTotal   float64 `json:"bytes_out_total"`
-	ActiveConnTotal float64 `json:"active_conn_total"`
-	RequestsToday   uint64  `json:"requests_today"`
-	BytesToday      uint64  `json:"bytes_today"`
+	RequestsTotal   float64 `json:"requestsTotal"`
+	ErrorsTotal     float64 `json:"errorsTotal"`
+	ErrorRate       float64 `json:"errorRate"`
+	AvgLatencyMs    float64 `json:"avgLatencyMs"`
+	P50LatencyMs    float64 `json:"p50LatencyMs"`
+	P95LatencyMs    float64 `json:"p95LatencyMs"`
+	P99LatencyMs    float64 `json:"p99LatencyMs"`
+	InFlightTotal   float64 `json:"inFlightTotal"`
+	BytesInTotal    float64 `json:"bytesInTotal"`
+	BytesOutTotal   float64 `json:"bytesOutTotal"`
+	ActiveConnTotal float64 `json:"activeConnTotal"`
+	RequestsToday   uint64  `json:"requestsToday"`
+	BytesToday      uint64  `json:"bytesToday"`
 }
 
 // RouteMetric holds per-route request metrics.
@@ -229,38 +229,38 @@ type RouteMetric struct {
 	Service     string             `json:"service"`
 	Requests    float64            `json:"requests"`
 	Errors      float64            `json:"errors"`
-	ErrorRate   float64            `json:"error_rate"`
-	AvgLatency  float64            `json:"avg_latency_ms"`
-	InFlight    float64            `json:"in_flight"`
-	BytesIn     float64            `json:"bytes_in"`
-	BytesOut    float64            `json:"bytes_out"`
-	StatusCodes map[string]float64 `json:"status_codes,omitzero"`
+	ErrorRate   float64            `json:"errorRate"`
+	AvgLatency  float64            `json:"avgLatencyMs"`
+	InFlight    float64            `json:"inFlight"`
+	BytesIn     float64            `json:"bytesIn"`
+	BytesOut    float64            `json:"bytesOut"`
+	StatusCodes map[string]float64 `json:"statusCodes,omitzero"`
 	Failures    []LabeledCount     `json:"failures,omitzero"`
 }
 
 // MiddlewareMetrics holds counters for all middleware instrumentation.
 type MiddlewareMetrics struct {
-	RateLimitRejected  []LabeledCount `json:"rate_limit_rejected,omitzero"`
-	WAFBlocked         []LabeledCount `json:"waf_blocked,omitzero"`
-	FastPathBlocked    []LabeledCount `json:"fast_path_blocked,omitzero"`
-	CacheHits          float64        `json:"cache_hits"`
-	CacheMisses        float64        `json:"cache_misses"`
-	CacheHitRate       float64        `json:"cache_hit_rate"`
-	AuthFailures       []LabeledCount `json:"auth_failures,omitzero"`
-	CompressBytesIn    float64        `json:"compress_bytes_in"`
-	CompressBytesOut   float64        `json:"compress_bytes_out"`
-	CompressionRatio   float64        `json:"compression_ratio"`
-	TurnstilePass      float64        `json:"turnstile_pass"`
-	TurnstileFail      float64        `json:"turnstile_fail"`
-	GeoIPBlocked       []LabeledCount `json:"geoip_blocked,omitzero"`
-	HMACFailures       float64        `json:"hmac_failures"`
-	RetriesSuccess     float64        `json:"retries_success"`
-	RetriesFailure     float64        `json:"retries_failure"`
-	ConfigReloads      float64        `json:"config_reloads"`
-	CacheInvalidations float64        `json:"cache_invalidations"`
-	MitigatedThreats   []LabeledCount `json:"mitigated_threats,omitzero"`
-	BotMitigations     []LabeledCount `json:"bot_mitigations,omitzero"`
-	EbpfDroppedPackets []LabeledCount `json:"ebpf_dropped_packets,omitzero"`
+	RateLimitRejected  []LabeledCount `json:"rateLimitRejected,omitzero"`
+	WAFBlocked         []LabeledCount `json:"wafBlocked,omitzero"`
+	FastPathBlocked    []LabeledCount `json:"fastPathBlocked,omitzero"`
+	CacheHits          float64        `json:"cacheHits"`
+	CacheMisses        float64        `json:"cacheMisses"`
+	CacheHitRate       float64        `json:"cacheHitRate"`
+	AuthFailures       []LabeledCount `json:"authFailures,omitzero"`
+	CompressBytesIn    float64        `json:"compressBytesIn"`
+	CompressBytesOut   float64        `json:"compressBytesOut"`
+	CompressionRatio   float64        `json:"compressionRatio"`
+	TurnstilePass      float64        `json:"turnstilePass"`
+	TurnstileFail      float64        `json:"turnstileFail"`
+	GeoIPBlocked       []LabeledCount `json:"geoipBlocked,omitzero"`
+	HMACFailures       float64        `json:"hmacFailures"`
+	RetriesSuccess     float64        `json:"retriesSuccess"`
+	RetriesFailure     float64        `json:"retriesFailure"`
+	ConfigReloads      float64        `json:"configReloads"`
+	CacheInvalidations float64        `json:"cacheInvalidations"`
+	MitigatedThreats   []LabeledCount `json:"mitigatedThreats,omitzero"`
+	BotMitigations     []LabeledCount `json:"botMitigations,omitzero"`
+	EbpfDroppedPackets []LabeledCount `json:"ebpfDroppedPackets,omitzero"`
 }
 
 // LabeledCount is a metric value with a descriptive label.
@@ -273,9 +273,9 @@ type LabeledCount struct {
 // TLSCertMetric holds certificate expiry information.
 type TLSCertMetric struct {
 	Domain      string  `json:"domain"`
-	CertName    string  `json:"cert_name"`
-	ExpiryEpoch float64 `json:"expiry_epoch"`
-	DaysRemain  float64 `json:"days_remaining"`
+	CertName    string  `json:"certName"`
+	ExpiryEpoch float64 `json:"expiryEpoch"`
+	DaysRemain  float64 `json:"daysRemaining"`
 }
 
 // TargetMetric holds target health and connection info.
@@ -283,48 +283,48 @@ type TargetMetric struct {
 	Route      string  `json:"route"`
 	Target     string  `json:"target"`
 	Healthy    bool    `json:"healthy"`
-	ActiveConn float64 `json:"active_conn"`
+	ActiveConn float64 `json:"activeConn"`
 }
 
 // DomainMetric holds per-domain request metrics.
 type DomainMetric struct {
 	Domain   string  `json:"domain"`
 	Requests float64 `json:"requests"`
-	BytesIn  float64 `json:"bytes_in"`
-	BytesOut float64 `json:"bytes_out"`
+	BytesIn  float64 `json:"bytesIn"`
+	BytesOut float64 `json:"bytesOut"`
 }
 
 // IPMetric holds metrics per IP.
 type IPMetric struct {
 	IP       string  `json:"ip"`
 	Requests float64 `json:"requests"`
-	BytesIn  float64 `json:"bytes_in"`
-	BytesOut float64 `json:"bytes_out"`
+	BytesIn  float64 `json:"bytesIn"`
+	BytesOut float64 `json:"bytesOut"`
 }
 
 // CountryMetric holds metrics per country.
 type CountryMetric struct {
 	Country     string  `json:"country"`
-	CountryName string  `json:"country_name"`
+	CountryName string  `json:"countryName"`
 	Requests    float64 `json:"requests"`
-	BytesIn     float64 `json:"bytes_in"`
-	BytesOut    float64 `json:"bytes_out"`
+	BytesIn     float64 `json:"bytesIn"`
+	BytesOut    float64 `json:"bytesOut"`
 }
 
 // SystemMetrics holds system-level gauge values.
 type SystemMetrics struct {
-	UptimeSeconds    float64 `json:"uptime_seconds"`
+	UptimeSeconds    float64 `json:"uptimeSeconds"`
 	Goroutines       float64 `json:"goroutines"`
-	MemoryAllocBytes float64 `json:"memory_alloc_bytes"`
-	MemoryTotalBytes float64 `json:"memory_total_alloc_bytes"`
-	MemorySysBytes   float64 `json:"memory_sys_bytes"`
-	CPUUsage         float64 `json:"cpu_usage_percent"`
-	MemoryUsage      float64 `json:"memory_usage_percent"`
-	CPUCores         int     `json:"cpu_cores"`
-	MemoryTotalGB    float64 `json:"memory_total_gb"`
-	StorageUsageGB   float64 `json:"storage_usage_gb"`
-	StorageTotalGB   float64 `json:"storage_total_gb"`
-	StorageUsagePct  float64 `json:"storage_usage_percent"`
+	MemoryAllocBytes float64 `json:"memoryAllocBytes"`
+	MemoryTotalBytes float64 `json:"memoryTotalAllocBytes"`
+	MemorySysBytes   float64 `json:"memorySysBytes"`
+	CPUUsage         float64 `json:"cpuUsagePercent"`
+	MemoryUsage      float64 `json:"memoryUsagePercent"`
+	CPUCores         int     `json:"cpuCores"`
+	MemoryTotalGB    float64 `json:"memoryTotalGB"`
+	StorageUsageGB   float64 `json:"storageUsageGB"`
+	StorageTotalGB   float64 `json:"storageTotalGB"`
+	StorageUsagePct  float64 `json:"storageUsagePercent"`
 }
 
 // CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.

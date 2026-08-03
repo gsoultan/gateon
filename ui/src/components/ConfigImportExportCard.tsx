@@ -63,7 +63,7 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
       setDryRunDiff(null);
       try {
         const body = await file.text();
-        const res = await fetch(`${base}/v1/config/import${dryRun ? "?dry_run=true" : ""}`, {
+        const res = await fetch(`${base}/v1/config/import${dryRun ? "?dryRun=true" : ""}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAuthHeaders() },
           body,

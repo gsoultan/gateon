@@ -85,7 +85,7 @@ type StatusReport struct {
 	Endpoint  string `json:"endpoint,omitzero"`
 	Format    string `json:"format,omitzero"`
 	Transport string `json:"transport,omitzero"`
-	QueueSize int    `json:"queue_size,omitzero"`
+	QueueSize int    `json:"queueSize,omitzero"`
 	Stats     Stats  `json:"stats"`
 }
 

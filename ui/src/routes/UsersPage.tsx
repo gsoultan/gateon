@@ -48,7 +48,7 @@ export default function UsersPage() {
   const density = useTableDensity();
   const { data, refetch, isLoading } = useUsers({
     page: page - 1,
-    page_size: pageSize,
+    pageSize: pageSize,
     search: search,
   });
   const [opened, { open, close }] = useDisclosure(false);
@@ -104,7 +104,7 @@ export default function UsersPage() {
 
   // putUser persists a partial change while preserving the rest of the user's
   // state, so toggling one flag never silently resets the others (the backend
-  // applies disabled and two_factor_pending from whatever the body contains).
+  // applies disabled and twoFactorPending from whatever the body contains).
   const putUser = async (user: User, changes: Partial<User>) => {
     try {
       const res = await apiFetch("/v1/users", {
@@ -115,8 +115,8 @@ export default function UsersPage() {
           username: user.username,
           role: user.role,
           disabled: user.disabled ?? false,
-          two_factor_pending: user.two_factor_pending ?? false,
-          two_factor_enabled: user.two_factor_enabled ?? false,
+          twoFactorPending: user.twoFactorPending ?? false,
+          twoFactorEnabled: user.twoFactorEnabled ?? false,
           ...changes,
         }),
       });
@@ -141,8 +141,8 @@ export default function UsersPage() {
     // Admin acting on another user: an admin can only MANDATE 2FA (set/clear the
     // pending requirement); they never see the secret. The user enrolls on their
     // next login. Mandating is a no-op once 2FA is already enabled.
-    if (isAdmin && !user.two_factor_enabled) {
-      putUser(user, { two_factor_pending: !user.two_factor_pending });
+    if (isAdmin && !user.twoFactorEnabled) {
+      putUser(user, { twoFactorPending: !user.twoFactorPending });
     }
   };
 
@@ -244,11 +244,11 @@ export default function UsersPage() {
               Disabled
             </Badge>
           )}
-          {user.two_factor_enabled ? (
+          {user.twoFactorEnabled ? (
             <Badge size="xs" color="green" variant="light">
               2FA
             </Badge>
-          ) : user.two_factor_pending ? (
+          ) : user.twoFactorPending ? (
             <Badge size="xs" color="orange" variant="light">
               2FA pending
             </Badge>
@@ -285,9 +285,9 @@ export default function UsersPage() {
             label={
               currentUser?.id === user.id
                 ? "Manage your two-factor authentication"
-                : user.two_factor_enabled
+                : user.twoFactorEnabled
                   ? "User has 2FA enabled"
-                  : user.two_factor_pending
+                  : user.twoFactorPending
                     ? "2FA required — click to cancel requirement"
                     : "Require this user to set up 2FA"
             }
@@ -295,9 +295,9 @@ export default function UsersPage() {
             <ActionIcon
               variant="subtle"
               color={
-                user.two_factor_enabled
+                user.twoFactorEnabled
                   ? "green"
-                  : user.two_factor_pending
+                  : user.twoFactorPending
                     ? "orange"
                     : "gray"
               }
@@ -305,7 +305,7 @@ export default function UsersPage() {
               disabled={
                 !(
                   currentUser?.id === user.id ||
-                  (isAdmin && !user.two_factor_enabled)
+                  (isAdmin && !user.twoFactorEnabled)
                 )
               }
             >
@@ -417,9 +417,9 @@ export default function UsersPage() {
                       </Stack>
                       <Group gap={4}>
                          {user.disabled && <Badge size="xs" color="red" variant="light">Disabled</Badge>}
-                         {user.two_factor_enabled ? (
+                         {user.twoFactorEnabled ? (
                             <Badge size="xs" color="green" variant="light">2FA</Badge>
-                          ) : user.two_factor_pending ? (
+                          ) : user.twoFactorPending ? (
                             <Badge size="xs" color="orange" variant="light">2FA pending</Badge>
                           ) : null}
                       </Group>
@@ -438,9 +438,9 @@ export default function UsersPage() {
                       </Tooltip>
                       <ActionIcon
                         variant="light"
-                        color={user.two_factor_enabled ? "green" : user.two_factor_pending ? "orange" : "gray"}
+                        color={user.twoFactorEnabled ? "green" : user.twoFactorPending ? "orange" : "gray"}
                         onClick={() => handle2FA(user)}
-                        disabled={!(currentUser?.id === user.id || (isAdmin && !user.two_factor_enabled))}
+                        disabled={!(currentUser?.id === user.id || (isAdmin && !user.twoFactorEnabled))}
                       >
                         <IconShieldLock size={16} />
                       </ActionIcon>

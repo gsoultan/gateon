@@ -77,7 +77,7 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
       dispatchers: (alerting.dispatchers || []).filter((d) => d.id !== id),
       playbooks: (alerting.playbooks || []).map(pb => ({
         ...pb,
-        dispatcher_ids: (pb.dispatcher_ids || []).filter(dID => dID !== id)
+        dispatcherIds: (pb.dispatcherIds || []).filter(dID => dID !== id)
       }))
     });
   };
@@ -172,7 +172,7 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
                       <div>
                         <Text fw={600}>{pb.name}</Text>
                         <Group gap="xs" mt={4}>
-                          <Badge size="xs" variant="outline">{pb.event_type}</Badge>
+                          <Badge size="xs" variant="outline">{pb.eventType}</Badge>
                           <Badge size="xs" color="orange">Score ≥ {pb.threshold}</Badge>
                           <Badge size="xs" color="indigo">{pb.action}</Badge>
                         </Group>
@@ -197,9 +197,9 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
                   setEditingPlaybook({
                     id: generateRandomString(8),
                     name: "",
-                    event_type: "waf_threat",
+                    eventType: "wafThreat",
                     threshold: 0.5,
-                    dispatcher_ids: [],
+                    dispatcherIds: [],
                     action: "notify",
                   });
                   setPlaybookModalOpen(true);
@@ -242,31 +242,31 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
               <>
                 <TextInput
                   label="Webhook URL"
-                  value={editingDispatcher.webhook_url}
-                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhook_url: e.currentTarget.value })}
+                  value={editingDispatcher.webhookUrl}
+                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhookUrl: e.currentTarget.value })}
                   required
                 />
                 <TextInput
                   label="Channel (optional)"
                   placeholder="#alerts"
-                  value={editingDispatcher.slack_channel}
-                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, slack_channel: e.currentTarget.value })}
+                  value={editingDispatcher.slackChannel}
+                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, slackChannel: e.currentTarget.value })}
                 />
               </>
             )}
             {editingDispatcher.type === "discord" && (
               <TextInput
                 label="Webhook URL"
-                value={editingDispatcher.webhook_url}
-                onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhook_url: e.currentTarget.value })}
+                value={editingDispatcher.webhookUrl}
+                onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhookUrl: e.currentTarget.value })}
                 required
               />
             )}
             {editingDispatcher.type === "webhook" && (
               <TextInput
                 label="Webhook URL"
-                value={editingDispatcher.webhook_url}
-                onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhook_url: e.currentTarget.value })}
+                value={editingDispatcher.webhookUrl}
+                onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhookUrl: e.currentTarget.value })}
                 required
               />
             )}
@@ -275,15 +275,15 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
                 <TextInput
                   label="Bot Token"
                   placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-                  value={editingDispatcher.telegram_bot_token}
-                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, telegram_bot_token: e.currentTarget.value })}
+                  value={editingDispatcher.telegramBotToken}
+                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, telegramBotToken: e.currentTarget.value })}
                   required
                 />
                 <TextInput
                   label="Chat ID"
                   placeholder="-100123456789"
-                  value={editingDispatcher.telegram_chat_id}
-                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, telegram_chat_id: e.currentTarget.value })}
+                  value={editingDispatcher.telegramChatId}
+                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, telegramChatId: e.currentTarget.value })}
                   required
                 />
               </>
@@ -313,13 +313,13 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
                 label="Trigger Event"
                 data={[
                   { value: "all", label: "All Threats" },
-                  { value: "waf_threat", label: "WAF Threat" },
-                  { value: "high_anomaly", label: "High Anomaly Score" },
-                  { value: "impossible_travel", label: "Impossible Travel" },
-                  { value: "auth_failure", label: "Auth Failures" },
+                  { value: "wafThreat", label: "WAF Threat" },
+                  { value: "highAnomaly", label: "High Anomaly Score" },
+                  { value: "impossibleTravel", label: "Impossible Travel" },
+                  { value: "authFailure", label: "Auth Failures" },
                 ]}
-                value={editingPlaybook.event_type}
-                onChange={(val) => setEditingPlaybook({ ...editingPlaybook, event_type: val || "all" })}
+                value={editingPlaybook.eventType}
+                onChange={(val) => setEditingPlaybook({ ...editingPlaybook, eventType: val || "all" })}
               />
               <NumberInput
                 label="Score Threshold"
@@ -346,12 +346,12 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
                 <Switch
                   key={d.id}
                   label={d.name}
-                  checked={(editingPlaybook.dispatcher_ids || []).includes(d.id)}
+                  checked={(editingPlaybook.dispatcherIds || []).includes(d.id)}
                   onChange={(e) => {
                     const ids = e.currentTarget.checked
-                      ? [...(editingPlaybook.dispatcher_ids || []), d.id]
-                      : (editingPlaybook.dispatcher_ids || []).filter(id => id !== d.id);
-                    setEditingPlaybook({ ...editingPlaybook, dispatcher_ids: ids });
+                      ? [...(editingPlaybook.dispatcherIds || []), d.id]
+                      : (editingPlaybook.dispatcherIds || []).filter(id => id !== d.id);
+                    setEditingPlaybook({ ...editingPlaybook, dispatcherIds: ids });
                   }}
                 />
               ))}

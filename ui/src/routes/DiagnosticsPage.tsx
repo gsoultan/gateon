@@ -80,14 +80,19 @@ const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
 );
 
 const SystemStatCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
-  <Paper withBorder p="md" radius="lg" shadow="xs">
-    <Group justify="space-between" mb="xs">
-      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", letterSpacing: 1 }}>
+  <Paper withBorder p="md" radius="lg" shadow="xs" style={{ overflow: "hidden" }}>
+    <Group justify="space-between" mb="xs" wrap="nowrap">
+      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", letterSpacing: 1 }} truncate>
         {title}
       </Text>
       {icon}
     </Group>
-    <Title order={3} fw={900}>
+    <Title order={3} fw={900} style={{ 
+      overflow: "hidden", 
+      textOverflow: "ellipsis", 
+      whiteSpace: "nowrap",
+      fontSize: typeof value === 'string' && value.length > 20 ? 'var(--mantine-font-size-md)' : undefined
+    }}>
       {value || "---"}
     </Title>
   </Paper>
