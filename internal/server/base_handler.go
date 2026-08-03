@@ -4,9 +4,7 @@ package server
 
 import (
 	"context"
-	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -94,8 +92,10 @@ func CreateBaseHandler(
 			epID = id
 		}
 
-		// On the management entrypoint, we do NOT serve user-defined proxy routes.
-		if epID != "management" {
+		allowPublic := isPublicManagementAllowed(r, epID, deps.GlobalReg)
+		isMgmtAPI := allowPublic && isGateonManagementAPIPath(r.URL.Path)
+
+		if epID != "management" && !isMgmtAPI {
 			rt := router.SelectRoute(r, deps.RouteStore)
 			if rs := middleware.GetRequestState(r); rs != nil {
 				rs.TRoute = time.Now().UnixNano()
@@ -114,31 +114,9 @@ func CreateBaseHandler(
 
 			// Security: If no user route matched on a NON-management entrypoint,
 			// block access to the internal API/UI unless explicitly allowed.
-			if !isHealthPath(r.URL.Path) {
-				gc := deps.GlobalReg.Get(r.Context())
-				allowPublic := false
-				if gc != nil && gc.Management != nil {
-					allowPublic = gc.Management.AllowPublicManagement
-					if !allowPublic && len(gc.Management.AllowedHosts) > 0 {
-						host := r.Host
-						if h, _, err := net.SplitHostPort(r.Host); err == nil {
-							host = h
-						}
-						for _, allowedHost := range gc.Management.AllowedHosts {
-							if host == allowedHost {
-								allowPublic = true
-								break
-							}
-						}
-					}
-				}
-				if os.Getenv("GATEON_ALLOW_PUBLIC_MANAGEMENT") == "true" {
-					allowPublic = true
-				}
-				if !allowPublic {
-					http.NotFound(w, r)
-					return
-				}
+			if !isHealthPath(r.URL.Path) && !allowPublic {
+				http.NotFound(w, r)
+				return
 			}
 		}
 

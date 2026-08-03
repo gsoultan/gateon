@@ -66,19 +66,92 @@ func (s *MetricsSnapshot) Reset() {
 	if s == nil {
 		return
 	}
-	// Use reflection or manual clear for complex structs.
-	// For now, just re-initialize the slices to reuse capacity.
+
+	// Clear slices and their underlying arrays to allow GC of pointers/maps
+	// while preserving capacity for reuse.
+	clearSlice(s.RouteMetrics)
 	s.RouteMetrics = s.RouteMetrics[:0]
+
+	clearSlice(s.TLSCertificates)
 	s.TLSCertificates = s.TLSCertificates[:0]
+
+	clearSlice(s.Targets)
 	s.Targets = s.Targets[:0]
+
+	clearSlice(s.IPMetrics)
 	s.IPMetrics = s.IPMetrics[:0]
+
+	clearSlice(s.CountryMetrics)
 	s.CountryMetrics = s.CountryMetrics[:0]
+
+	clearSlice(s.ProtocolMetrics)
 	s.ProtocolMetrics = s.ProtocolMetrics[:0]
+
+	clearSlice(s.DomainMetrics)
 	s.DomainMetrics = s.DomainMetrics[:0]
+
+	clearSlice(s.HourlyDomainMetrics)
 	s.HourlyDomainMetrics = s.HourlyDomainMetrics[:0]
+
+	clearSlice(s.DomainStatsRolling24h)
 	s.DomainStatsRolling24h = s.DomainStatsRolling24h[:0]
+
+	clearSlice(s.TrafficHistory)
 	s.TrafficHistory = s.TrafficHistory[:0]
+
+	clearSlice(s.ActiveShunnedEntities)
 	s.ActiveShunnedEntities = s.ActiveShunnedEntities[:0]
+
+	// Reset nested structs
+	s.GoldenSignals = GoldenSignals{}
+	s.System = SystemMetrics{}
+	s.MitigationFunnel = MitigationFunnel{}
+
+	// Reset Middleware metrics
+	clearSlice(s.Middleware.RateLimitRejected)
+	s.Middleware.RateLimitRejected = s.Middleware.RateLimitRejected[:0]
+	clearSlice(s.Middleware.WAFBlocked)
+	s.Middleware.WAFBlocked = s.Middleware.WAFBlocked[:0]
+	clearSlice(s.Middleware.FastPathBlocked)
+	s.Middleware.FastPathBlocked = s.Middleware.FastPathBlocked[:0]
+	clearSlice(s.Middleware.AuthFailures)
+	s.Middleware.AuthFailures = s.Middleware.AuthFailures[:0]
+	clearSlice(s.Middleware.GeoIPBlocked)
+	s.Middleware.GeoIPBlocked = s.Middleware.GeoIPBlocked[:0]
+	clearSlice(s.Middleware.MitigatedThreats)
+	s.Middleware.MitigatedThreats = s.Middleware.MitigatedThreats[:0]
+	clearSlice(s.Middleware.BotMitigations)
+	s.Middleware.BotMitigations = s.Middleware.BotMitigations[:0]
+	clearSlice(s.Middleware.EbpfDroppedPackets)
+	s.Middleware.EbpfDroppedPackets = s.Middleware.EbpfDroppedPackets[:0]
+
+	// Reset Security insights
+	clearSlice(s.Security.TopThreatSources)
+	s.Security.TopThreatSources = s.Security.TopThreatSources[:0]
+	clearSlice(s.Security.TopThreatTypes)
+	s.Security.TopThreatTypes = s.Security.TopThreatTypes[:0]
+	clearSlice(s.Security.ThreatsByCountry)
+	s.Security.ThreatsByCountry = s.Security.ThreatsByCountry[:0]
+	clearSlice(s.Security.AttackTrend)
+	s.Security.AttackTrend = s.Security.AttackTrend[:0]
+	clearSlice(s.Security.RecentAnomalies)
+	s.Security.RecentAnomalies = s.Security.RecentAnomalies[:0]
+	clearSlice(s.Security.HeavyHitters)
+	s.Security.HeavyHitters = s.Security.HeavyHitters[:0]
+	clearSlice(s.Security.EbpfTopIPs)
+	s.Security.EbpfTopIPs = s.Security.EbpfTopIPs[:0]
+
+	s.Security.TotalAnomalies = 0
+	s.Security.ActiveThreats = 0
+	s.Security.MitigatedToday = 0
+	s.Security.GlobalThreatScore = 0
+}
+
+func clearSlice[T any](s []T) {
+	for i := range s {
+		var zero T
+		s[i] = zero
+	}
 }
 
 func SetEbpfManager(m EbpfProvider) {

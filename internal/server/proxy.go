@@ -34,8 +34,11 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, grpc
 		isMgmt = m
 	}
 
+	allowPublic := isPublicManagementAllowed(r, "", s.GlobalStore)
+	isMgmtAPI := (isMgmt || allowPublic) && isGateonManagementAPIPath(r.URL.Path)
+
 	// 1. Try to find and handle a user-defined route first (priority)
-	if !isMgmt {
+	if !isMgmt && !isMgmtAPI {
 		var rt *gateonv1.Route
 		if rs := middleware.GetRequestState(r); rs != nil {
 			if matched, ok := rs.MatchedRoute.(*gateonv1.Route); ok {

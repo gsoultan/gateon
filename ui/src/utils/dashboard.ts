@@ -255,14 +255,20 @@ export function aggregateBandwidthSamples(
       routerBytes: 0,
       serviceBytes: 0,
     };
-    const routerTotal = Object.values(sample.routerBytes).reduce(
-      (sum, value) => sum + value,
-      0,
-    );
-    const serviceTotal = Object.values(sample.serviceBytes).reduce(
-      (sum, value) => sum + value,
-      0,
-    );
+    const routerTotal =
+      sample.routerBytes && typeof sample.routerBytes === "object"
+        ? Object.values(sample.routerBytes).reduce(
+            (sum, value) => sum + (Number(value) || 0),
+            0,
+          )
+        : 0;
+    const serviceTotal =
+      sample.serviceBytes && typeof sample.serviceBytes === "object"
+        ? Object.values(sample.serviceBytes).reduce(
+            (sum, value) => sum + (Number(value) || 0),
+            0,
+          )
+        : 0;
     grouped.set(bucketTs, {
       totalBytes: existing.totalBytes + sample.totalBytes,
       routerBytes: existing.routerBytes + routerTotal,
@@ -545,14 +551,20 @@ export function buildHourlyBandwidthData(
       routerBytes: 0,
       serviceBytes: 0,
     };
-    const routerTotal = Object.values(sample.routerBytes).reduce(
-      (sum, value) => sum + value,
-      0,
-    );
-    const serviceTotal = Object.values(sample.serviceBytes).reduce(
-      (sum, value) => sum + value,
-      0,
-    );
+    const routerTotal =
+      sample.routerBytes && typeof sample.routerBytes === "object"
+        ? Object.values(sample.routerBytes).reduce(
+            (sum, value) => sum + (Number(value) || 0),
+            0,
+          )
+        : 0;
+    const serviceTotal =
+      sample.serviceBytes && typeof sample.serviceBytes === "object"
+        ? Object.values(sample.serviceBytes).reduce(
+            (sum, value) => sum + (Number(value) || 0),
+            0,
+          )
+        : 0;
     grouped.set(bucketTs, {
       totalBytes: existing.totalBytes + sample.totalBytes,
       routerBytes: existing.routerBytes + routerTotal,
