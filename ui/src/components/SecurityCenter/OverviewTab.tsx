@@ -34,7 +34,7 @@ import {
 } from '@tabler/icons-react';
 import { Alert, Anchor, Tooltip } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { format } from 'date-fns';
+import { safeFormatDate, safeToLocaleString } from '../../utils/format';
 import { useAnimateValue } from '../../hooks/useAnimateValue';
 import { useDisclosure } from '@mantine/hooks';
 import { SecurityAnomalyModal } from '../SecurityAnomalyModal';
@@ -261,7 +261,7 @@ export function OverviewTab({
                   <Box key={step.label}>
                     <Group justify="space-between" mb={4}>
                       <Text size="sm" fw={500}>{step.label}</Text>
-                      <Text size="sm" c="dimmed">{step.value.toLocaleString()}</Text>
+                      <Text size="sm" c="dimmed">{safeToLocaleString(step.value)}</Text>
                     </Group>
                     <Box h={8} style={{ borderRadius: '100px', overflow: 'hidden' }} bg="light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4))">
                       <Box
@@ -386,7 +386,7 @@ export function OverviewTab({
                   <Table.Td>
                     <Group gap={4} wrap="nowrap">
                       <IconClock size={12} color="gray" />
-                      <Text size="xs" c="dimmed">{a.timestamp ? format(new Date(a.timestamp), 'HH:mm:ss') : 'N/A'}</Text>
+                      <Text size="xs" c="dimmed">{safeFormatDate(a.timestamp, 'HH:mm:ss')}</Text>
                     </Group>
                   </Table.Td>
                 </Table.Tr>

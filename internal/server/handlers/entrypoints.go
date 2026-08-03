@@ -13,13 +13,15 @@ import (
 )
 
 func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
-	mux.HandleFunc("GET /v1/entryPoints", func(w http.ResponseWriter, r *http.Request) {
+	listEPs := func(w http.ResponseWriter, r *http.Request) {
 		page, pageSize, search := ParsePagination(r)
 		eps, total := d.EpService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListEntryPointsResponse{
 			EntryPoints: eps, TotalCount: total, Page: page, PageSize: pageSize,
 		})
-	})
+	}
+	mux.HandleFunc("GET /v1/entryPoints", listEPs)
+	mux.HandleFunc("GET /v1/entrypoints", listEPs)
 	mux.HandleFunc("PUT /v1/entryPoints", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceEntryPoints) {
 			return
@@ -67,9 +69,5 @@ func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 		audit.Log(r.Context(), userID, "delete", "entrypoint", "Deleted entrypoint: "+id, request.GetClientIP(r, true))
 
 		w.WriteHeader(http.StatusNoContent)
-	})
-	// Backward compatibility for lowercase
-	mux.HandleFunc("GET /v1/entrypoints", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/v1/entryPoints?"+r.URL.RawQuery, http.StatusMovedPermanently)
 	})
 }

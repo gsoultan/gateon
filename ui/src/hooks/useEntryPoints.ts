@@ -9,7 +9,13 @@ export function useEntryPoints(params?: PaginationParams) {
     queryFn: async () => {
       const res = await apiFetch(`/v1/entryPoints${buildQueryString(params)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const json = await res.json();
+      return {
+        entryPoints: json.entryPoints || json.entry_points || [],
+        totalCount: json.totalCount ?? json.total_count ?? 0,
+        page: json.page ?? 1,
+        pageSize: json.pageSize ?? json.page_size ?? 10,
+      };
     },
   });
 }

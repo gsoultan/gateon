@@ -41,7 +41,7 @@ import {
   IconUsers,
 } from "@tabler/icons-react";
 import { useRemoveMitigation, useApplyRecommendation, useSecurityThreat, useSecurityThreats } from "../hooks/useGateon";
-import { safeToFixed } from "../utils/format";
+import { safeToFixed, safeToDateLocaleString } from "../utils/format";
 import { notifications } from "@mantine/notifications";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
@@ -257,7 +257,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                 </Text>
               </Group>
               <Text size="sm" ml={26}>
-                {new Date(anomaly.timestamp).toLocaleString()}
+                {safeToDateLocaleString(anomaly.timestamp)}
               </Text>
             </Stack>
           </Grid.Col>
@@ -615,7 +615,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
                           </Group>
                           <Text size="xs" c="dimmed">{h.description}</Text>
                         </Stack>
-                        <Text size="xs" c="dimmed">{new Date(h.timestamp).toLocaleString()}</Text>
+                        <Text size="xs" c="dimmed">{safeToDateLocaleString(h.timestamp)}</Text>
                       </Group>
                     </Box>
                     {i < history.length - 1 && <Divider />}

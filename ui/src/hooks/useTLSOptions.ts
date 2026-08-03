@@ -9,7 +9,15 @@ export function useTLSOptions(params?: PaginationParams) {
     queryFn: async () => {
       const res = await apiFetch(`/v1/tls-options${buildQueryString(params)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const json = await res.json();
+      const opts = json.tlsOptions || json.options || json.tls_options || [];
+      return {
+        tlsOptions: opts,
+        options: opts,
+        totalCount: json.totalCount ?? json.total_count ?? 0,
+        page: json.page ?? 1,
+        pageSize: json.pageSize ?? json.page_size ?? 10,
+      } as ListTLSOptionsResponse;
     },
   });
 }

@@ -9,7 +9,7 @@ export function useClientAuthorities() {
       const res = await apiFetch("/v1/global");
       if (!res.ok) throw new Error(await res.text());
       const config: GlobalConfig = await res.json();
-      return config.tls?.clientAuthorities || [];
+      return config.tls?.clientAuthorities || (config as any)?.tls?.client_authorities || [];
     },
   });
 }

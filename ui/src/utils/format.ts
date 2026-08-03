@@ -1,3 +1,5 @@
+import { format } from "date-fns";
+
 export function formatCompact(num: number | undefined | null): string {
   if (num === undefined || num === null || isNaN(num as number)) return "0";
   const n = num as number;
@@ -23,6 +25,28 @@ export function safeToFixed(val: number | undefined | null, decimals = 1): strin
 export function safeToLocaleString(val: number | undefined | null): string {
   if (val === undefined || val === null || isNaN(Number(val))) return "0";
   return Number(val).toLocaleString();
+}
+
+export function safeFormatDate(dateVal: any, formatStr: string, fallback = 'N/A'): string {
+  if (!dateVal) return fallback;
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return fallback;
+    return format(d, formatStr);
+  } catch {
+    return fallback;
+  }
+}
+
+export function safeToDateLocaleString(dateVal: any, fallback = 'N/A'): string {
+  if (!dateVal) return fallback;
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleString();
+  } catch {
+    return fallback;
+  }
 }
 
 export function formatHourLabel(ts: number): string {

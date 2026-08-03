@@ -40,7 +40,7 @@ import { SecurityAnomalyModal } from "../SecurityAnomalyModal";
 import { ManualMitigationModal } from "./ManualMitigationModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
 import type { Anomaly } from "../../types/gateon";
-import { format } from "date-fns";
+import { safeFormatDate } from "../../utils/format";
 import { getSeverityColor } from "../../utils/security";
 import { notifications } from "@mantine/notifications";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -223,7 +223,7 @@ export function ThreatExplorerTab() {
                   <Table.Tr key={index} style={{ cursor: 'pointer' }} onClick={() => handleRowClick(threat)}>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
-                        {format(new Date(threat.timestamp), 'MMM d, HH:mm:ss')}
+                        {safeFormatDate(threat.timestamp, 'MMM d, HH:mm:ss')}
                       </Text>
                     </Table.Td>
                     <Table.Td>

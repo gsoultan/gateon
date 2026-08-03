@@ -161,8 +161,8 @@ export default function TLSOptionsPage() {
     }
   };
 
-  const tlsOptions = data?.tlsOptions || [];
-  const totalCount = data?.totalCount || 0;
+  const tlsOptions = data?.tlsOptions || (data as any)?.options || [];
+  const totalCount = data?.totalCount || (data as any)?.total_count || 0;
 
   const isInsecureVersion = (ver?: string) => ver === "TLS1.0" || ver === "TLS1.1";
 
@@ -230,7 +230,7 @@ export default function TLSOptionsPage() {
                   </Table.Td>
                 </Table.Tr>
               ) : (
-                tlsOptions.map((opt) => (
+                tlsOptions.map((opt: any) => (
                   <Table.Tr key={opt.id}>
                     <Table.Td>
                       <Stack gap={2}>
