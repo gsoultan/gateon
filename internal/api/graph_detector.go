@@ -60,7 +60,7 @@ func (d *HybridGraphAnomalyDetector) Detect(ctx context.Context, data *Diagnosti
 			}
 
 			if len(ips) >= 5 {
-				anomalies = append(anomalies, &gateonv1.Anomaly{
+				anomaly := &gateonv1.Anomaly{
 					Type:           "graph_coordinated_fp",
 					Severity:       "high",
 					Description:    fmt.Sprintf("Graph Intelligence detected cluster around fingerprint %s: %d distinct IPs sharing behavior across cluster.", nodeID[3:], len(ips)),
@@ -69,7 +69,11 @@ func (d *HybridGraphAnomalyDetector) Detect(ctx context.Context, data *Diagnosti
 					ClusterSize:    int32(len(ips)),
 					Timestamp:      time.Now().Format(time.RFC3339),
 					Recommendation: "Cluster of IPs sharing the same JA4 fingerprint detected. High likelihood of automated botnet activity.",
-				})
+				}
+				if len(ips) > 0 {
+					populateAnomalyGeo(ctx, anomaly, ips[0])
+				}
+				anomalies = append(anomalies, anomaly)
 			}
 		}
 	}

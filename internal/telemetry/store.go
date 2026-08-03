@@ -313,33 +313,33 @@ type RequestTrace = TraceRecord
 
 type TraceRecord struct {
 	ID              string    `json:"id"`
-	OperationName   string    `json:"operation_name"`
-	ServiceName     string    `json:"service_name"`
-	DurationMs      float64   `json:"duration_ms"`
+	OperationName   string    `json:"operationName"`
+	ServiceName     string    `json:"serviceName"`
+	DurationMs      float64   `json:"durationMs"`
 	Timestamp       time.Time `json:"timestamp,omitzero"`
 	Status          string    `json:"status"`
 	Path            string    `json:"path"`
-	SourceIP        string    `json:"source_ip"`
+	SourceIP        string    `json:"sourceIp"`
 	Fingerprint     string    `json:"fingerprint"`
-	CountryCode     string    `json:"country_code"`
-	UserAgent       string    `json:"user_agent"`
+	CountryCode     string    `json:"countryCode"`
+	UserAgent       string    `json:"userAgent"`
 	Method          string    `json:"method"`
 	Referer         string    `json:"referer"`
-	RequestURI      string    `json:"request_uri"`
-	RequestHeaders  string    `json:"request_headers"`
-	RequestBody     string    `json:"request_body"`
-	ResponseHeaders string    `json:"response_headers"`
-	ResponseBody    string    `json:"response_body"`
+	RequestURI      string    `json:"requestUri"`
+	RequestHeaders  string    `json:"requestHeaders"`
+	RequestBody     string    `json:"requestBody"`
+	ResponseHeaders string    `json:"responseHeaders"`
+	ResponseBody    string    `json:"responseBody"`
 	JA4             string    `json:"ja4"`
 	JA4H            string    `json:"ja4h"`
-	RouteID         string    `json:"route_id"`
+	RouteID         string    `json:"routeId"`
 	Recommendation  string    `json:"recommendation"`
 	Reputation      float64   `json:"reputation"`
 	// Breakdown timings in milliseconds
-	EntrypointDelay float64 `json:"entrypoint_delay_ms"`
-	RouteDelay      float64 `json:"route_delay_ms"`
-	MiddlewareDelay float64 `json:"middleware_delay_ms"`
-	ServiceDelay    float64 `json:"service_delay_ms"`
+	EntrypointDelay float64 `json:"entrypointDelayMs"`
+	RouteDelay      float64 `json:"routeDelayMs"`
+	MiddlewareDelay float64 `json:"middlewareDelayMs"`
+	ServiceDelay    float64 `json:"serviceDelayMs"`
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
 	rawRespHeader map[string][]string
@@ -354,6 +354,8 @@ type SecurityThreat struct {
 	Score           float64   `json:"score"`
 	Details         string    `json:"details"`
 	Time            time.Time `json:"timestamp,omitzero"`
+	Latitude        float64   `json:"latitude,omitzero"`
+	Longitude       float64   `json:"longitude,omitzero"`
 	JA4             string    `json:"ja4"`
 	JA4H            string    `json:"ja4h"`
 	RouteID         string    `json:"routeId"`
@@ -363,8 +365,6 @@ type SecurityThreat struct {
 	ASN             string    `json:"asn"`
 	ActionTaken     string    `json:"actionTaken"`
 	CountryCode     string    `json:"countryCode"`
-	Latitude        float64   `json:"latitude"`
-	Longitude       float64   `json:"longitude"`
 	Mitigated       bool      `json:"mitigated"`
 	RequestHeaders  string    `json:"requestHeaders"`
 	RequestBody     string    `json:"requestBody"`
@@ -390,18 +390,18 @@ type UserMitigation struct {
 	Status        string     `json:"status"`
 	Reason        string     `json:"reason"`
 	Category      string     `json:"category"`
-	MitigatedAt   time.Time  `json:"mitigated_at"`
-	UnmitigatedAt *time.Time `json:"unmitigated_at,omitempty"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	MitigatedAt   time.Time  `json:"mitigatedAt"`
+	UnmitigatedAt *time.Time `json:"unmitigatedAt,omitempty"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 type IPMitigation struct {
 	IP            string     `json:"ip"`
 	Status        string     `json:"status"`
 	Reason        string     `json:"reason"`
-	MitigatedAt   time.Time  `json:"mitigated_at"`
-	UnmitigatedAt *time.Time `json:"unmitigated_at,omitempty"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	MitigatedAt   time.Time  `json:"mitigatedAt"`
+	UnmitigatedAt *time.Time `json:"unmitigatedAt,omitempty"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 type ThreatFilter struct {
@@ -1895,8 +1895,8 @@ func GetPathStatsWindow(ctx context.Context, days int) []PathStats {
 			Path:              p,
 			RequestCount:      uint64(rc),
 			BytesTotal:        uint64(max(bsum, 0)),
-			LatencySumSeconds: lsum,
-			AvgLatencySeconds: float64(int(avg*1000+0.5)) / 1000.0,
+			LatencySumSeconds: SafeFloat(lsum),
+			AvgLatencySeconds: SafeFloat(float64(int(avg*1000+0.5)) / 1000.0),
 		})
 	}
 	return res
@@ -1960,8 +1960,8 @@ func GetDomainStatsWindow(ctx context.Context, days int) []DomainStats {
 			Domain:            domain,
 			RequestCount:      uint64(rc),
 			BytesTotal:        uint64(max(bsum, 0)),
-			LatencySumSeconds: lsum,
-			AvgLatencySeconds: float64(int(avg*1000+0.5)) / 1000.0,
+			LatencySumSeconds: SafeFloat(lsum),
+			AvgLatencySeconds: SafeFloat(float64(int(avg*1000+0.5)) / 1000.0),
 		})
 	}
 	return stats

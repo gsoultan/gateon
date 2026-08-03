@@ -38,7 +38,7 @@ export function RouteStats({ routeId }: RouteStatsProps) {
                 <Text size="xs">Reqs: {s.requestCount}</Text>
                 <Text size="xs">Errs: {s.errorCount}</Text>
                 <Text size="xs">Active: {s.activeConn}</Text>
-                <Text size="xs">Avg Lat: {s.avgLatencyMs.toFixed(2)}ms</Text>
+                <Text size="xs">Avg Lat: {Number(s.avgLatencyMs || 0).toFixed(2)}ms</Text>
                 <Text size="xs" fw={700} c={s.alive ? 'green' : 'orange'}>
                   Circuit: {(s as any).circuitState ?? (s.alive ? 'CLOSED' : 'OPEN')}
                 </Text>

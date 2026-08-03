@@ -4,6 +4,7 @@ package telemetry
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -57,7 +58,75 @@ var (
 	ipCache   = make(map[string]publicIPInfo)
 	cacheMu   sync.RWMutex
 	lastFetch time.Time
+
+	publicIPCache   string
+	lastIPFetch     time.Time
+	publicIPCacheMu sync.RWMutex
 )
+
+const publicIPCacheTTL = 1 * time.Hour
+
+// GetPublicIP returns the server's public IP address by querying multiple providers.
+func GetPublicIP(ctx context.Context) string {
+	publicIPCacheMu.RLock()
+	if publicIPCache != "" && time.Since(lastIPFetch) < publicIPCacheTTL {
+		ip := publicIPCache
+		publicIPCacheMu.RUnlock()
+		return ip
+	}
+	publicIPCacheMu.RUnlock()
+
+	publicIPCacheMu.Lock()
+	defer publicIPCacheMu.Unlock()
+
+	// Double check after acquiring lock
+	if publicIPCache != "" && time.Since(lastIPFetch) < publicIPCacheTTL {
+		return publicIPCache
+	}
+
+	providers := []string{
+		"https://api.ipify.org",
+		"https://ifconfig.me/ip",
+		"https://ipinfo.io/ip",
+		"https://ident.me",
+		"https://v4.ident.me",
+	}
+
+	// Use a slightly longer timeout for the whole process but keep individual attempts short
+	client := http.Client{Timeout: 3 * time.Second}
+	for _, url := range providers {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			continue
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		ipStr := string(bytes.TrimSpace(body))
+		if net.ParseIP(ipStr) != nil {
+			publicIPCache = ipStr
+			lastIPFetch = time.Now()
+			return ipStr
+		}
+	}
+
+	publicIPCache = "unknown"
+	lastIPFetch = time.Now()
+	return "unknown"
+}
 
 // InitGeoIP initializes the global GeoIP database for background country resolution.
 func InitGeoIP(dbPath string) error {

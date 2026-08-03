@@ -220,10 +220,11 @@ export default function SecurityCommandCenter() {
   const securityScore = React.useMemo(() => {
     if (!metrics) return 100;
     const base = 100;
-    const penalty = ((metrics.activeSuspiciousSessions || 0) * 2) + 
-                    ((metrics.activeUnverifiedClients || 0) * 0.5) +
-                    ((metrics.activeAnomalyScoreAverage || 0) * 0.1);
-    return Math.max(Math.round(base - penalty), 0);
+    const penalty = ((Number(metrics.activeSuspiciousSessions) || 0) * 2) + 
+                    ((Number(metrics.activeUnverifiedClients) || 0) * 0.5) +
+                    ((Number(metrics.activeAnomalyScoreAverage) || 0) * 0.1);
+    const score = Math.max(Math.round(base - penalty), 0);
+    return isNaN(score) ? 100 : score;
   }, [metrics]);
 
   const scoreColor = securityScore > 85 ? 'teal' : securityScore > 65 ? 'blue' : securityScore > 40 ? 'orange' : 'red';

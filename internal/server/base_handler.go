@@ -65,12 +65,6 @@ func CreateBaseHandler(
 		middleware.Recovery(),
 		middleware.Nonce(),
 		middleware.Compress(),
-		func(next http.Handler) http.Handler {
-			if deps.MgmtCORS != nil {
-				return deps.MgmtCORS.Handler(next)
-			}
-			return next
-		},
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended", ExtraImgSrc: managementImgSrc}),
 		middleware.XSSRecognition("gateon-management"),
 		middleware.SQLiRecognition("gateon-management"),
@@ -83,7 +77,7 @@ func CreateBaseHandler(
 		authInternal = middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
 	}
 
-	return middleware.Telemetry("gateon")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Limit request body size to prevent DoS via large payloads.
 		// Default is 10MB, but GeoIP database uploads can be much larger.
 		limit := int64(10 * 1024 * 1024)
@@ -169,11 +163,18 @@ func CreateBaseHandler(
 				finalInternal.ServeHTTP(w, r)
 				return
 			}
-			// Require Authorization header; do not accept auth token in URL.
+			// Require Authorization header; accepts auth token in URL for WebSockets/SSE.
 			authInternal.ServeHTTP(w, r)
 			return
 		}
 
 		finalInternal.ServeHTTP(w, r)
-	}))
+	})
+
+	// Apply Telemetry and CORS at the very edge to ensure they cover all responses, including auth failures.
+	h := middleware.Telemetry("gateon")(mainHandler)
+	if deps.MgmtCORS != nil {
+		h = deps.MgmtCORS.Handler(h)
+	}
+	return h
 }

@@ -69,6 +69,15 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
   });
   const history = (historyData?.threats || []).filter(h => h.id !== anomaly?.id);
 
+  const displaySource = useMemo(() => {
+    if (!anomaly) return "";
+    if (anomaly.sourceIps && anomaly.sourceIps.length > 0) {
+      if (anomaly.sourceIps.length === 1) return anomaly.sourceIps[0];
+      return `${anomaly.sourceIps.length} IPs Cluster`;
+    }
+    return anomaly.source;
+  }, [anomaly]);
+
   const triggeredRules = useMemo(() => {
     if (!anomaly?.triggeredRules) return [];
     try {
@@ -261,7 +270,7 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
               </Group>
               <Group gap="xs" ml={26} wrap="nowrap">
                 <Text size="sm" ff="monospace">
-                  {anomaly.source}
+                  {displaySource}
                 </Text>
                 <Tooltip label="Visual Trace">
                   <ActionIcon 

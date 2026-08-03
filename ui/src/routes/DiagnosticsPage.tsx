@@ -99,16 +99,16 @@ const SystemStatCard: React.FC<{ title: string; value: string | number; icon: Re
 );
 
 const DependencyBadge: React.FC<{ dep: DependencyHealth }> = ({ dep }) => (
-  <Paper withBorder p="sm" radius="md" bg="var(--mantine-color-gray-0)">
+  <Paper withBorder p="sm" radius="md" shadow="xs">
     <Group justify="space-between">
       <Text size="sm" fw={700}>{dep.name}</Text>
-      <Badge color={dep.healthy ? "teal" : "red"} variant="dot">
+      <Badge color={dep.healthy ? "teal" : "red"} variant="light" size="sm">
         {dep.healthy ? "Healthy" : "Degraded"}
       </Badge>
     </Group>
     <Group justify="space-between" mt={4}>
-      <Text size="xs" c="dimmed">Latency: {dep.latencyMs}</Text>
-      {dep.error && <Text size="xs" c="red" fw={500} truncate maw={200}>{dep.error}</Text>}
+      <Text size="xs" c="dimmed">Latency: {dep.latencyMs || "0ms"}</Text>
+      {dep.error && <Text size="xs" c="red" fw={500} truncate maw={160} style={{ cursor: 'help' }} title={dep.error}>{dep.error}</Text>}
     </Group>
   </Paper>
 );

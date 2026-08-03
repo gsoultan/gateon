@@ -254,8 +254,8 @@ func getInMemoryPathStats() []PathStats {
 				Path:              s.path,
 				RequestCount:      count,
 				BytesTotal:        bytes,
-				LatencySumSeconds: sumS,
-				AvgLatencySeconds: math.Round(avg*1000) / 1000, // Round to 3 decimal places
+				LatencySumSeconds: SafeFloat(sumS),
+				AvgLatencySeconds: SafeFloat(math.Round(avg*1000) / 1000), // Round to 3 decimal places
 			})
 		}
 		shard.mu.RUnlock()
@@ -264,9 +264,6 @@ func getInMemoryPathStats() []PathStats {
 }
 
 // GetPathStats returns a list of aggregated path statistics.
-// When the persistent store is enabled, it queries the DB first and falls back
-// to in-memory stats when the DB returns no results (e.g. unflushed data,
-// query errors, or remote DB connectivity issues).
 func GetPathStats(ctx context.Context) []PathStats {
 	if IsStoreEnabled() {
 		days := CurrentRetentionDays()
@@ -278,6 +275,14 @@ func GetPathStats(ctx context.Context) []PathStats {
 		}
 	}
 	return getInMemoryPathStats()
+}
+
+// SafeFloat ensures a float64 value is finite and not NaN for JSON serialization.
+func SafeFloat(f float64) float64 {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0
+	}
+	return f
 }
 
 // evictPathStatsLocked removes about 25% of keys from the shard map.

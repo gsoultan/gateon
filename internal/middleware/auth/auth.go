@@ -270,7 +270,7 @@ func ClearSessionCookie(w http.ResponseWriter, isTLS bool) {
 }
 
 // ExtractToken returns the token from Cookie (gateon_session), Authorization Bearer,
-// or query params (token, access_token, auth) for WebSocket clients that cannot set headers.
+// or query params (token, access_token, auth) to support WebSocket, SSE, and CLI clients.
 func ExtractToken(r *http.Request) string {
 	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		return c.Value
@@ -278,16 +278,14 @@ func ExtractToken(r *http.Request) string {
 	if t := bearerToken(r); t != "" {
 		return t
 	}
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		if t := r.URL.Query().Get("token"); t != "" {
-			return t
-		}
-		if t := r.URL.Query().Get("access_token"); t != "" {
-			return t
-		}
-		if t := r.URL.Query().Get("auth"); t != "" {
-			return t
-		}
+	if t := r.URL.Query().Get("token"); t != "" {
+		return t
+	}
+	if t := r.URL.Query().Get("access_token"); t != "" {
+		return t
+	}
+	if t := r.URL.Query().Get("auth"); t != "" {
+		return t
 	}
 	return ""
 }

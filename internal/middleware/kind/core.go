@@ -261,7 +261,7 @@ func contentSecurityPolicy(secure bool, extraImgSrc []string, nonce string) stri
 		scriptSrc += fmt.Sprintf(" 'nonce-%s'", nonce)
 	}
 
-	csp := fmt.Sprintf("default-src 'self'; script-src %s; style-src 'self' 'unsafe-inline'; img-src %s; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';", scriptSrc, imgSrc)
+	csp := fmt.Sprintf("default-src 'self'; script-src %s; style-src 'self' 'unsafe-inline'; img-src %s; connect-src 'self' wss: https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';", scriptSrc, imgSrc)
 	if secure {
 		csp += " upgrade-insecure-requests;"
 	}
