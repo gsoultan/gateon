@@ -907,6 +907,7 @@ func createWAFInstance(cfg WAFConfig) (coraza.WAF, error) {
 SecWebAppId gateon
 SecAction "id:99002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
 Include @crs-setup.conf.example
+SecAction "id:99200,phase:1,nolog,pass,t:none,setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE'"
 `, pl)
 
 		// Basic enforcement and common rules
