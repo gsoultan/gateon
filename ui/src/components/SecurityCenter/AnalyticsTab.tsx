@@ -16,6 +16,7 @@ import {
 import { AreaChart, BarChart, DonutChart } from '@mantine/charts';
 import { IconMapPin, IconActivity, IconTarget, IconCpu } from '@tabler/icons-react';
 import type { MetricsSnapshot, LabeledCount, DonutChartDataItem, HeavyHitter, IPStat } from '../../types/metrics';
+import { safeToFixed, safeToLocaleString } from '../../utils/format';
 
 interface CountryData {
   country: string;
@@ -175,7 +176,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                       </Group>
                     </Table.Td>
                     <Table.Td ta="right">
-                      <Text size="sm" fw={500}>{s.count.toLocaleString()}</Text>
+                      <Text size="sm" fw={500}>{safeToLocaleString(s.count)}</Text>
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -203,7 +204,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                     </ThemeIcon>
                     <Stack gap={0}>
                       <Text size="sm" fw={700} ff="monospace">{h.network}</Text>
-                      <Text size="xs" c="dimmed">{h.count} threats ({h.percentage.toFixed(1)}%)</Text>
+                      <Text size="xs" c="dimmed">{h.count} threats ({safeToFixed(h.percentage, 1)}%)</Text>
                     </Stack>
                   </Group>
                   <Badge color="red" variant="filled">CRITICAL</Badge>

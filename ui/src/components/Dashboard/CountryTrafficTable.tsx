@@ -1,6 +1,6 @@
 import { memo, useState, useMemo, useEffect } from "react";
 import { Table, Text, Paper, Group, Box, Progress, Pagination } from "@mantine/core";
-import { getCountryFlag, formatBytes, safeToFixed } from "../../utils/format";
+import { getCountryFlag, formatBytes, safeToFixed, safeToLocaleString } from "../../utils/format";
 import { useTableDensity } from "../../hooks/useTableDensity";
 
 const PAGE_SIZE = 10;
@@ -83,7 +83,7 @@ export const CountryTrafficTable = memo(function CountryTrafficTable({
               <Text size="xs" fw={700}>
                 {isBandwidth
                   ? formatBytes(m.requests)
-                  : `${m.requests.toLocaleString()} req`}
+                  : `${safeToLocaleString(m.requests)} req`}
               </Text>
               <Text size="xs" c="dimmed">
                 {safeToFixed(percentage, 1)}%

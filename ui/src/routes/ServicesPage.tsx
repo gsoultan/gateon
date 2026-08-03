@@ -240,14 +240,15 @@ export default function ServicesPage() {
                   </Table.Tr>
                 )}
                 {services.map(s => {
-                  const isExpanded = expandedIds.has(s.id)
-                  const firstTarget = s.weightedTargets[0]?.url || ''
-                  const hasMore = s.weightedTargets.length > 1
+                  const targets = s.weightedTargets || (s as any).weighted_targets || [];
+                  const isExpanded = expandedIds.has(s.id);
+                  const firstTarget = targets[0]?.url || '';
+                  const hasMore = targets.length > 1;
                   return (
                     <Fragment key={s.id}>
                       <Table.Tr>
                         <Table.Td>
-                          {s.weightedTargets.length > 0 && (
+                          {targets.length > 0 && (
                             <ActionIcon
                               variant="subtle"
                               size="sm"
@@ -273,7 +274,7 @@ export default function ServicesPage() {
                             </Tooltip>
                             {hasMore && (
                               <Badge variant="light" color="blue" size="xs">
-                                +{s.weightedTargets.length - 1} more
+                                +{targets.length - 1} more
                               </Badge>
                             )}
                           </Stack>
@@ -308,7 +309,7 @@ export default function ServicesPage() {
                           <Table.Td colSpan={6} py="xs" style={{ backgroundColor: 'var(--mantine-color-dark-7)' }}>
                             <Stack gap={6} pl="md">
                               <Text size="xs" fw={600} c="dimmed">All targets</Text>
-                              {s.weightedTargets.map((t, i) => (
+                              {targets.map((t: any, i: number) => (
                                 <Group key={i} gap="sm">
                                   <Text size="xs" ff="monospace" c="dimmed">
                                     {t.url}

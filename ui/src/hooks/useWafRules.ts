@@ -22,8 +22,8 @@ export function useWafRules(initialParams: ListWafRulesRequest = { pageSize: 10,
       }
       const data: ListWafRulesResponse = await resp.json();
       return {
-        rules: data.rules || [],
-        total: data.total || 0,
+        rules: data.rules || (data as any).Rules || [],
+        total: data.total ?? (data as any).Total ?? 0,
       };
     },
   });

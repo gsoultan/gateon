@@ -150,7 +150,7 @@ export default function RouteForm({
     label: `${mw.name} (${mw.type})`,
   }));
 
-  const tlsOptOptions = (tlsOptData?.tlsOptions || []).map((opt) => ({
+  const tlsOptOptions = ((tlsOptData as any)?.tlsOptions || (tlsOptData as any)?.options || []).map((opt: any) => ({
     value: opt.id,
     label: opt.name,
   }));

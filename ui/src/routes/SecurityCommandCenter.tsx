@@ -41,6 +41,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import type { GlobalConfig, DeepScanStatus } from '../types/gateon';
 import { format } from 'date-fns';
 
+import { safeFormatDate } from '../utils/format';
+
 import { OverviewTab } from '../components/SecurityCenter/OverviewTab';
 import { ThreatExplorerTab } from '../components/SecurityCenter/ThreatExplorerTab';
 import { IncidentsTab } from '../components/SecurityCenter/IncidentsTab';
@@ -220,9 +222,10 @@ export default function SecurityCommandCenter() {
   const securityScore = React.useMemo(() => {
     if (!metrics) return 100;
     const base = 100;
-    const penalty = ((Number(metrics.activeSuspiciousSessions) || 0) * 2) + 
-                    ((Number(metrics.activeUnverifiedClients) || 0) * 0.5) +
-                    ((Number(metrics.activeAnomalyScoreAverage) || 0) * 0.1);
+    const activeSuspicious = Number(metrics.activeSuspiciousSessions ?? (metrics as any)?.active_suspicious_sessions ?? 0);
+    const activeUnverified = Number(metrics.activeUnverifiedClients ?? (metrics as any)?.active_unverified_clients ?? 0);
+    const activeAnomalyAvg = Number(metrics.activeAnomalyScoreAverage ?? (metrics as any)?.active_anomaly_score_average ?? 0);
+    const penalty = (activeSuspicious * 2) + (activeUnverified * 0.5) + (activeAnomalyAvg * 0.1);
     const score = Math.max(Math.round(base - penalty), 0);
     return isNaN(score) ? 100 : score;
   }, [metrics]);
@@ -316,7 +319,7 @@ export default function SecurityCommandCenter() {
                   </Button>
                   {scanStatus?.lastScan && !scanning && (
                     <Text size="10px" c="dimmed" ta="right" fw={500}>
-                      Last scan: {format(new Date(scanStatus.lastScan), 'MMM d, HH:mm')}
+                      Last scan: {safeFormatDate(scanStatus.lastScan, 'MMM d, HH:mm')}
                     </Text>
                   )}
                 </Stack>

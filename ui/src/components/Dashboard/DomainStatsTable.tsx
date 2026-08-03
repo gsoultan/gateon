@@ -1,6 +1,6 @@
 import { memo, useState, useMemo, useEffect } from "react";
 import { Table, Text, Paper, Group, Badge, Title, Pagination } from "@mantine/core";
-import { formatBytes, safeToFixed } from "../../utils/format";
+import { formatBytes, safeToFixed, safeToLocaleString } from "../../utils/format";
 import { useTableDensity } from "../../hooks/useTableDensity";
 
 const PAGE_SIZE = 10;
@@ -53,7 +53,7 @@ export const DomainStatsTable = memo(function DomainStatsTable({
       </Table.Td>
       <Table.Td>
         <Badge variant="light" color="brand" size="sm">
-          {m.requestCount.toLocaleString()}
+          {safeToLocaleString(m.requestCount ?? (m as any).request_count)}
         </Badge>
       </Table.Td>
       <Table.Td>

@@ -20,6 +20,7 @@ import {
 } from "@tabler/icons-react";
 import { useReputations } from "../hooks/useReputations";
 import { useTableDensity } from "../hooks/useTableDensity";
+import { safeToFixed, safeFormatDate } from "../utils/format";
 
 export function ReputationMonitor() {
   const { data, isLoading } = useReputations(20);
@@ -107,7 +108,7 @@ export function ReputationMonitor() {
                     <Stack gap={4}>
                       <Group justify="space-between">
                         <Text size="xs" fw={700} c={getScoreColor(rep.score)}>
-                          {rep.score.toFixed(0)}%
+                          {safeToFixed(rep.score, 0)}%
                         </Text>
                         {rep.score >= 80 ? (
                           <IconCircleCheck size={14} color="var(--mantine-color-teal-6)" />
@@ -146,10 +147,7 @@ export function ReputationMonitor() {
                   </Table.Td>
                   <Table.Td>
                     <Text size="xs" c="dimmed">
-                      {(() => {
-                        const date = new Date(rep.lastEvent);
-                        return isNaN(date.getTime()) ? 'N/A' : date.toLocaleTimeString();
-                      })()}
+                      {safeFormatDate(rep.lastEvent, 'HH:mm:ss')}
                     </Text>
                   </Table.Td>
                 </Table.Tr>

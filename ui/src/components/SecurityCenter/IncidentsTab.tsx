@@ -26,7 +26,7 @@ import { useSecurityIncidents } from "../../hooks/useSecurityIncidents";
 import { useSecurityPosture } from "../../hooks/useSecurityPosture";
 import { useTableDensity } from "../../hooks/useTableDensity";
 import { getSeverityColor } from "../../utils/security";
-import { format } from "date-fns";
+import { safeToFixed, safeFormatDate } from "../../utils/format";
 
 function PostureStatusCards() {
   const { data: posture } = useSecurityPosture();
@@ -260,11 +260,11 @@ export function IncidentsTab() {
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Text fw={600}>{inc.score.toFixed(1)}</Text>
+                      <Text fw={600}>{safeToFixed(inc.score, 1)}</Text>
                     </Table.Td>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
-                        {inc.lastSeen ? format(new Date(inc.lastSeen), "MMM d, HH:mm:ss") : "—"}
+                        {safeFormatDate(inc.lastSeen, "MMM d, HH:mm:ss")}
                       </Text>
                     </Table.Td>
                   </Table.Tr>

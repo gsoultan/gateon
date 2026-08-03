@@ -1,5 +1,5 @@
 import { useState, useMemo, useTransition, useEffect } from "react";
-import { safeToFixed } from "../utils/format";
+import { safeToFixed, safeToLocaleString } from "../utils/format";
 import { usePathStats } from "../hooks/useGateon";
 import {
   Table,
@@ -167,7 +167,7 @@ export function PathStatsTable() {
                   </Table.Td>
                   <Table.Td ta="right">
                     <Badge variant="flat" color="gray">
-                      {stat.requestCount.toLocaleString()}
+                      {safeToLocaleString(stat.requestCount ?? (stat as any).request_count)}
                     </Badge>
                   </Table.Td>
                   <Table.Td ta="right">
