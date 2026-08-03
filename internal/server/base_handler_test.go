@@ -260,3 +260,71 @@ func TestBaseHandler_BodyLimit(t *testing.T) {
 		}
 	})
 }
+
+func TestBaseHandler_ManagementAPIPriority(t *testing.T) {
+	uiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("UI"))
+	})
+	// Simulate Server.HandleProxyOrLocal behavior:
+	// If it's a management API path on an allowed management context, route to internal API.
+	// Otherwise, route to proxied target.
+	proxyOrLocalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allowPublic := isPublicManagementAllowed(r, "http-80", &mockGlobalReg{
+			config: &gateonv1.GlobalConfig{
+				Management: &gateonv1.ManagementConfig{
+					AllowPublicManagement: true,
+				},
+			},
+		})
+		isMgmtAPI := allowPublic && isGateonManagementAPIPath(r.URL.Path)
+		if isMgmtAPI {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Internal API"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Proxied Target"))
+	})
+
+	deps := BaseHandlerDeps{
+		ProxyHandler: proxyOrLocalHandler,
+		RouteStore:   &mockRouteStore{},
+		GlobalReg: &mockGlobalReg{
+			config: &gateonv1.GlobalConfig{
+				Management: &gateonv1.ManagementConfig{
+					AllowPublicManagement: true,
+				},
+			},
+		},
+	}
+
+	handler := CreateBaseHandler(uiHandler, deps, nil, nil)
+
+	paths := []string{
+		"/v1/status",
+		"/v1/agg-stats",
+		"/v1/path-stats",
+		"/v1/global",
+		"/v1/security/posture",
+		"/gateon.v1.ApiService/ListSecurityThreats",
+	}
+
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest("GET", p, nil)
+			ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "http-80")
+			req = req.WithContext(ctx)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Errorf("expected 200 for %s, got %d", p, rr.Code)
+			}
+			body := rr.Body.String()
+			if body != "Internal API" {
+				t.Errorf("expected Internal API for %s, but got %s", p, body)
+			}
+		})
+	}
+}

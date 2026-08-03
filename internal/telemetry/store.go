@@ -1810,26 +1810,26 @@ func unmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 	// large body/header strings into the final TraceRecord.
 	type summary struct {
 		ID              string    `json:"id"`
-		OperationName   string    `json:"operation_name"`
-		ServiceName     string    `json:"service_name"`
-		DurationMs      float64   `json:"duration_ms"`
+		OperationName   string    `json:"operationName"`
+		ServiceName     string    `json:"serviceName"`
+		DurationMs      float64   `json:"durationMs"`
 		Timestamp       time.Time `json:"timestamp"`
 		Status          string    `json:"status"`
 		Path            string    `json:"path"`
-		SourceIP        string    `json:"source_ip"`
+		SourceIP        string    `json:"sourceIp"`
 		Method          string    `json:"method"`
-		UserAgent       string    `json:"user_agent"`
+		UserAgent       string    `json:"userAgent"`
 		Referer         string    `json:"referer"`
 		JA4             string    `json:"ja4"`
 		JA4H            string    `json:"ja4h"`
 		Fingerprint     string    `json:"fingerprint"`
-		CountryCode     string    `json:"country_code"`
-		RouteID         string    `json:"route_id"`
+		CountryCode     string    `json:"countryCode"`
+		RouteID         string    `json:"routeId"`
 		Reputation      float64   `json:"reputation"`
-		EntrypointDelay float64   `json:"entrypoint_delay_ms"`
-		RouteDelay      float64   `json:"route_delay_ms"`
-		MiddlewareDelay float64   `json:"middleware_delay_ms"`
-		ServiceDelay    float64   `json:"service_delay_ms"`
+		EntrypointDelay float64   `json:"entrypointDelayMs"`
+		RouteDelay      float64   `json:"routeDelayMs"`
+		MiddlewareDelay float64   `json:"middlewareDelayMs"`
+		ServiceDelay    float64   `json:"serviceDelayMs"`
 	}
 	var s summary
 	if err := json.Unmarshal(data, &s); err != nil {

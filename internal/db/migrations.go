@@ -1394,4 +1394,57 @@ func init() {
 		_, err := db.Exec(query)
 		return err
 	})
+	Register(55, "add_gateon_management_indexes", func(db *sql.DB, dialect Dialect) error {
+		queries := []string{
+			// waf_rules indexes
+			`CREATE INDEX IF NOT EXISTS idx_waf_rules_enabled ON waf_rules(enabled);`,
+			`CREATE INDEX IF NOT EXISTS idx_waf_rules_category ON waf_rules(category);`,
+			`CREATE INDEX IF NOT EXISTS idx_waf_rules_paranoia_level ON waf_rules(paranoia_level);`,
+			`CREATE INDEX IF NOT EXISTS idx_waf_rules_category_enabled ON waf_rules(category, enabled);`,
+
+			// security_threats indexes
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_ja4 ON security_threats(ja4);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_ja4h ON security_threats(ja4h);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_ja4_ja4h ON security_threats(ja4, ja4h);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_ts_cat ON security_threats(timestamp, category);`,
+			`CREATE INDEX IF NOT EXISTS idx_security_threats_ts_action ON security_threats(timestamp, action_taken);`,
+
+			// traces indexes
+			`CREATE INDEX IF NOT EXISTS idx_traces_ja4 ON traces(ja4);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_ja4h ON traces(ja4h);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_source_ip ON traces(source_ip);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_ts_status ON traces(timestamp, status);`,
+			`CREATE INDEX IF NOT EXISTS idx_traces_path_ts ON traces(path, timestamp);`,
+
+			// audit_logs indexes
+			`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_ts ON audit_logs(user_id, timestamp);`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_logs_action_ts ON audit_logs(action, timestamp);`,
+
+			// path_stats & domain_stats indexes
+			`CREATE INDEX IF NOT EXISTS idx_path_stats_updated_at ON path_stats(updated_at);`,
+			`CREATE INDEX IF NOT EXISTS idx_path_stats_host_path ON path_stats(host, path);`,
+			`CREATE INDEX IF NOT EXISTS idx_domain_stats_updated_at ON domain_stats(updated_at);`,
+
+			// user_mitigations & ip_mitigations indexes
+			`CREATE INDEX IF NOT EXISTS idx_user_mitigations_updated_at ON user_mitigations(updated_at);`,
+			`CREATE INDEX IF NOT EXISTS idx_user_mitigations_status_fp ON user_mitigations(status, fingerprint);`,
+			`CREATE INDEX IF NOT EXISTS idx_ip_mitigations_status_updated ON ip_mitigations(status, updated_at);`,
+
+			// system_metrics & client_authorities & users indexes
+			`CREATE INDEX IF NOT EXISTS idx_system_metrics_ts ON system_metrics(timestamp);`,
+			`CREATE INDEX IF NOT EXISTS idx_client_authorities_enabled ON client_authorities(enabled);`,
+			`CREATE INDEX IF NOT EXISTS idx_users_role_created ON users(role, created_at);`,
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "duplicate") || strings.Contains(errStr, "no such table") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

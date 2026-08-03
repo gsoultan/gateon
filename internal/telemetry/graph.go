@@ -42,7 +42,21 @@ func AddGraphEdge(u, v string, weight float64) {
 	shards := getGlobalGraph()
 	s := shards[idx]
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.edges[u] == nil {
+		// Global node limit per shard to ensure 2GB RAM stability
+		if len(s.edges) >= 5000 {
+			// Evict a few random nodes to make room (simple scavenging)
+			evicted := 0
+			for k := range s.edges {
+				delete(s.edges, k)
+				evicted++
+				if evicted >= 100 {
+					break
+				}
+			}
+		}
 		s.edges[u] = make(map[string]float64)
 	}
 	s.edges[u][v] += weight
@@ -58,7 +72,6 @@ func AddGraphEdge(u, v string, weight float64) {
 			}
 		}
 	}
-	s.mu.Unlock()
 }
 
 // GetGraphSnapshot returns a copy of the graph for analysis.

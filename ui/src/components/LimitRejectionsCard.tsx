@@ -4,8 +4,9 @@ import { useLimitStatsHistory } from "../hooks/useGateon";
 import { Sparkline } from "./Sparkline";
 import type { LimitStats } from "../types/gateon";
 
-function sumValues(obj: Record<string, number>): number {
-  return Object.values(obj).reduce((a, b) => a + b, 0);
+function sumValues(obj: Record<string, number> | null | undefined): number {
+  if (!obj || typeof obj !== "object") return 0;
+  return Object.values(obj).reduce((a, b) => a + Number(b || 0), 0);
 }
 
 export function LimitRejectionsCard() {
@@ -24,12 +25,16 @@ export function LimitRejectionsCard() {
       </Card>
     );
 
-  const stats = data as LimitStats | undefined;
+  const stats = data as any;
   if (!stats) return null;
 
-  const rateTotal = sumValues(stats.rateLimitRejected as Record<string, number>);
-  const inflightTotal = sumValues(stats.inflightRejected as Record<string, number>);
-  const bufferingTotal = sumValues(stats.bufferingRejected as Record<string, number>);
+  const rateObj = stats.rateLimitRejected ?? stats.rate_limit_rejected ?? {};
+  const inflightObj = stats.inflightRejected ?? stats.inflight_rejected ?? {};
+  const bufferingObj = stats.bufferingRejected ?? stats.buffering_rejected ?? {};
+
+  const rateTotal = sumValues(rateObj);
+  const inflightTotal = sumValues(inflightObj);
+  const bufferingTotal = sumValues(bufferingObj);
   const total = rateTotal + inflightTotal + bufferingTotal;
 
   if (total === 0 && history.length === 0) {
@@ -86,7 +91,7 @@ export function LimitRejectionsCard() {
                 {rateTotal}
               </Text>
               <Text size="xs" c="dimmed">
-                local: {(stats.rateLimitRejected as Record<string, number>).local ?? 0} · redis: {(stats.rateLimitRejected as Record<string, number>).redis ?? 0}
+                local: {rateObj.local ?? 0} · redis: {rateObj.redis ?? 0}
               </Text>
             </div>
           )}
@@ -99,7 +104,7 @@ export function LimitRejectionsCard() {
                 {inflightTotal}
               </Text>
               <Text size="xs" c="dimmed">
-                maxConn: {(stats.inflightRejected as Record<string, number>).maxConnections ?? 0} · perIp: {(stats.inflightRejected as Record<string, number>).maxConnectionsPerIp ?? 0}
+                maxConn: {inflightObj.maxConnections ?? inflightObj.max_connections ?? 0} · perIp: {inflightObj.maxConnectionsPerIp ?? inflightObj.max_connections_per_ip ?? 0}
               </Text>
             </div>
           )}

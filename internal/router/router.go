@@ -457,7 +457,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	routeLabel := cmp.Or(rt.Name, rt.Id)
 	chain = append(chain,
 		middleware.AccessLog(routeLabel),
-		middleware.Metrics(routeLabel),
+		middleware.MetricsWithService(routeLabel, rt.ServiceId),
 		middleware.IPMitigation(),
 		middleware.UserMitigation(),
 		middleware.ReputationBlocker(routeLabel),

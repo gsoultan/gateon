@@ -6,24 +6,29 @@ const LIMIT_HISTORY_LEN = 24;
 
 function sumLimitStats(stats: LimitStats | undefined): number {
   if (!stats) return 0;
+  const s = stats as any;
+  const rateObj = (s.rateLimitRejected ?? s.rate_limit_rejected) as Record<string, number> | undefined;
+  const inflightObj = (s.inflightRejected ?? s.inflight_rejected) as Record<string, number> | undefined;
+  const bufferingObj = (s.bufferingRejected ?? s.buffering_rejected) as Record<string, number> | undefined;
+
   const r =
-    stats.rateLimitRejected && typeof stats.rateLimitRejected === "object"
-      ? Object.values(stats.rateLimitRejected).reduce(
-          (a, b) => a + Number(b),
+    rateObj && typeof rateObj === "object"
+      ? Object.values(rateObj).reduce(
+          (a: number, b: number) => a + Number(b || 0),
           0
         )
       : 0;
   const i =
-    stats.inflightRejected && typeof stats.inflightRejected === "object"
-      ? Object.values(stats.inflightRejected).reduce(
-          (a, b) => a + Number(b),
+    inflightObj && typeof inflightObj === "object"
+      ? Object.values(inflightObj).reduce(
+          (a: number, b: number) => a + Number(b || 0),
           0
         )
       : 0;
   const b =
-    stats.bufferingRejected && typeof stats.bufferingRejected === "object"
-      ? Object.values(stats.bufferingRejected).reduce(
-          (a, v) => a + Number(v),
+    bufferingObj && typeof bufferingObj === "object"
+      ? Object.values(bufferingObj).reduce(
+          (a: number, v: number) => a + Number(v || 0),
           0
         )
       : 0;

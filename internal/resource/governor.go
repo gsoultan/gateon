@@ -84,7 +84,10 @@ func (g *Governor) checkMemory(ctx context.Context) {
 	if v.UsedPercent > 80 {
 		logger.L.LogWarn("high memory pressure detected", "used_percent", v.UsedPercent)
 		g.mu.RLock()
-		hooks := g.memoryHooks
+		hooks := make(map[string]ScavengeHook, len(g.memoryHooks))
+		for k, v := range g.memoryHooks {
+			hooks[k] = v
+		}
 		g.mu.RUnlock()
 
 		for name, hook := range hooks {
@@ -103,7 +106,10 @@ func (g *Governor) checkCPU(ctx context.Context) {
 	if percentages[0] > 90 {
 		logger.L.LogWarn("high CPU pressure detected", "used_percent", percentages[0])
 		g.mu.RLock()
-		hooks := g.cpuHooks
+		hooks := make(map[string]ScavengeHook, len(g.cpuHooks))
+		for k, v := range g.cpuHooks {
+			hooks[k] = v
+		}
 		g.mu.RUnlock()
 
 		for name, hook := range hooks {
