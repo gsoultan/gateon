@@ -134,7 +134,7 @@ func (s *Store) ListRules(ctx context.Context, limit, offset int, search, catego
 	var total int
 
 	query := "SELECT id, name, directive, enabled, paranoia_level, category, created_at, updated_at FROM waf_rules"
-	countQuery := "SELECT COUNT(*) FROM waf_rules"
+	countQuery := "SELECT COALESCE(COUNT(*), 0) FROM waf_rules"
 	var args []any
 	var conditions []string
 
@@ -156,10 +156,12 @@ func (s *Store) ListRules(ctx context.Context, limit, offset int, search, catego
 	}
 
 	// Get total count
-	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(countQuery), args...).Scan(&total)
+	var totalCount sql.NullInt64
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(countQuery), args...).Scan(&totalCount)
 	if err != nil {
 		return nil, 0, err
 	}
+	total = int(totalCount.Int64)
 
 	// Sort by numeric ID if it looks like a number, else lexicographically.
 	// This ensures that rule 900 comes before 1000.
@@ -872,15 +874,15 @@ func (s *Store) Seed(ctx context.Context) error {
 
 	now := time.Now()
 	query := s.dialect.Rebind("INSERT INTO waf_rules (id, name, directive, enabled, paranoia_level, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-	checkQuery := s.dialect.Rebind("SELECT COUNT(*) FROM waf_rules WHERE id = ?")
+	checkQuery := s.dialect.Rebind("SELECT COALESCE(COUNT(*), 0) FROM waf_rules WHERE id = ?")
 
 	for _, r := range initialRules {
-		var count int
+		var count sql.NullInt64
 		err := s.db.QueryRowContext(ctx, checkQuery, r.ID).Scan(&count)
 		if err != nil {
 			return fmt.Errorf("check rule %s: %w", r.ID, err)
 		}
-		if count == 0 {
+		if !count.Valid || count.Int64 == 0 {
 			_, err := s.db.ExecContext(ctx, query,
 				r.ID, r.Name, r.Directive, r.Enabled, r.ParanoiaLevel, r.Category, now, now)
 			if err != nil {

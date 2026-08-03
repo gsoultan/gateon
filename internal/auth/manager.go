@@ -65,13 +65,13 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 }
 
 func (m *Manager) IsSetupDone() bool {
-	var count int
+	var count sql.NullInt64
 	q := m.dialect.Rebind(QueryCountUsers)
 	err := m.db.QueryRow(q).Scan(&count)
 	if err != nil {
 		return false
 	}
-	return count > 0
+	return count.Valid && count.Int64 > 0
 }
 
 func (m *Manager) Authenticate(username, password string) (string, *gateonv1.User, error) {

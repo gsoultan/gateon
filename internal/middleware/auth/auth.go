@@ -285,9 +285,24 @@ func ExtractToken(r *http.Request) string {
 		return t
 	}
 	if t := r.URL.Query().Get("auth"); t != "" {
-		return t
+		if isWebSocketOrSSE(r) {
+			return t
+		}
 	}
 	return ""
+}
+
+func isWebSocketOrSSE(r *http.Request) bool {
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return true
+	}
+	if strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") {
+		return true
+	}
+	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "text/event-stream") {
+		return true
+	}
+	return false
 }
 
 // bearerToken returns the Bearer token from the Authorization header.

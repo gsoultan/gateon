@@ -69,7 +69,9 @@ func (f *backendTransportFactory) TransportFor(state *targetState, req *http.Req
 	// Fast path: use cached transport in targetState if no client cert identity is selected
 	if selectedIdentity == nil {
 		if v := state.transport.Load(); v != nil {
-			return v.(http.RoundTripper)
+			if container, ok := v.(*transportContainer); ok {
+				return container.p
+			}
 		}
 	}
 
@@ -81,7 +83,7 @@ func (f *backendTransportFactory) TransportFor(state *targetState, req *http.Req
 	if v, ok := f.cache.Load(cacheKey); ok {
 		rt := v.(http.RoundTripper)
 		if selectedIdentity == nil {
-			state.transport.Store(rt)
+			state.transport.Store(&transportContainer{p: rt})
 		}
 		return rt
 	}
@@ -90,13 +92,13 @@ func (f *backendTransportFactory) TransportFor(state *targetState, req *http.Req
 	if v, loaded := f.cache.LoadOrStore(cacheKey, rt); loaded {
 		rt = v.(http.RoundTripper)
 		if selectedIdentity == nil {
-			state.transport.Store(rt)
+			state.transport.Store(&transportContainer{p: rt})
 		}
 		return rt
 	}
 
 	if selectedIdentity == nil {
-		state.transport.Store(rt)
+		state.transport.Store(&transportContainer{p: rt})
 	}
 	return rt
 }

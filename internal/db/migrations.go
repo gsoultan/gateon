@@ -1382,4 +1382,16 @@ func init() {
 		_, err := db.Exec(query)
 		return err
 	})
+	Register(54, "ensure_waf_rules_id_type", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		if dialect.Driver == DriverPostgres {
+			query = `ALTER TABLE waf_rules ALTER COLUMN id TYPE VARCHAR(255) USING id::text;`
+		} else if dialect.Driver == DriverMySQL {
+			query = `ALTER TABLE waf_rules MODIFY COLUMN id VARCHAR(255);`
+		} else {
+			return nil
+		}
+		_, err := db.Exec(query)
+		return err
+	})
 }

@@ -27,8 +27,8 @@ func TestPathStats(t *testing.T) {
 			if s.BytesTotal != 250 {
 				t.Errorf("expected 250 bytes total for example.com/api, got %d", s.BytesTotal)
 			}
-			if s.AvgLatency != 0.15 {
-				t.Errorf("expected 0.15 avg latency for example.com/api, got %f", s.AvgLatency)
+			if s.AvgLatencySeconds != 0.15 {
+				t.Errorf("expected 0.15 avg latency for example.com/api, got %f", s.AvgLatencySeconds)
 			}
 		} else if s.Host == "other.com" && s.Path == "/" {
 			if s.RequestCount != 1 {
@@ -37,8 +37,8 @@ func TestPathStats(t *testing.T) {
 			if s.BytesTotal != 300 {
 				t.Errorf("expected 300 bytes total for other.com/, got %d", s.BytesTotal)
 			}
-			if s.AvgLatency != 0.5 {
-				t.Errorf("expected 0.5 avg latency for other.com/, got %f", s.AvgLatency)
+			if s.AvgLatencySeconds != 0.5 {
+				t.Errorf("expected 0.5 avg latency for other.com/, got %f", s.AvgLatencySeconds)
 			}
 		}
 	}

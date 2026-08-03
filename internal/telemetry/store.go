@@ -1476,9 +1476,9 @@ func MarkIPMitigated(ip string, reason string) {
 	}
 
 	// Real-time eBPF synchronization for immediate effect at XDP layer
-	if m := globalEbpfManager.Load(); m != nil {
-		if prov, ok := m.(EbpfProvider); ok {
-			_ = prov.ShunIP(ip)
+	if val := globalEbpfManager.Load(); val != nil {
+		if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
+			_ = container.p.ShunIP(ip)
 		}
 	}
 }
@@ -1499,11 +1499,11 @@ func MarkIPUnmitigated(ip string) {
 	}
 
 	// Real-time eBPF synchronization to restore access immediately
-	if m := globalEbpfManager.Load(); m != nil {
-		if prov, ok := m.(EbpfProvider); ok {
+	if val := globalEbpfManager.Load(); val != nil {
+		if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
 			// ONLY unshun if it's a valid IP.
 			if net.ParseIP(ip) != nil {
-				_ = prov.UnshunIP(ip)
+				_ = container.p.UnshunIP(ip)
 			}
 		}
 	}
