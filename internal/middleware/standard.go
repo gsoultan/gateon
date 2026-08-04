@@ -39,6 +39,10 @@ func Fingerprinting() Middleware {
 func IPMitigation() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			rs := GetRequestState(r)
 			trustCloudflare := config.EffectiveTrustCloudflare()
 			ip := request.GetClientIP(r, trustCloudflare)
@@ -74,6 +78,10 @@ func IPMitigation() Middleware {
 func UserMitigation() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			// Skip mitigation checks for non-functional assets (favicon, robots.txt, etc.)
 			// to avoid phantom requests breaking security isolation in E2E tests and production.
 			path := r.URL.Path
