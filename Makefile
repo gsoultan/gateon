@@ -12,7 +12,7 @@ GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
-	buf generate
+	./scripts/buf-generate.sh
 
 ## models: compile the default WASM-based AI traffic prediction model.
 models:

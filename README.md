@@ -92,7 +92,7 @@ Uninstall: `gateon uninstall`. See [doc/services.md](doc/services.md) for packag
 
 2. **Generate gRPC code**:
    ```bash
-   rtk buf generate
+   make proto
    ```
 
 3. **Build & Run (with UI)**:
@@ -140,8 +140,6 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 2) Regenerate Go bindings (output goes to `proto/gateon/v1/`):
 ```bash
-buf generate
-# or via Make:
 make proto
 ```
 

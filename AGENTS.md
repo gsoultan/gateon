@@ -87,6 +87,7 @@ To ensure the application remains stable and migrations run smoothly, follow the
 - **Postgres Compatibility**: Always test migrations against Postgres if possible, as it is more strict about types (e.g., `INTEGER` vs `TIMESTAMP`) than SQLite.
 - **Auto-Fixing**: If a system-level table (like `migrations`) is in a bad state, implement auto-fixing logic in `internal/db/migration.go` before running pending migrations.
 - **Mandatory Build**: Run both backend and frontend builds at the end of every task to verify that the changes haven't introduced any compilation errors. NEVER submit if either build fails.
+    - **Protobuf**: `make proto` (if you changed any `.proto` files)
     - **Backend**: `rtk go build -o gateon ./cmd/gateon`
     - **Frontend**: `cd ui && rtk bun run build`
 
