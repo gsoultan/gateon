@@ -1446,4 +1446,187 @@ func init() {
 		}
 		return nil
 	})
+
+	Register(56, "create_config_tables", func(db *sql.DB, dialect Dialect) error {
+		queries := []string{
+			`CREATE TABLE IF NOT EXISTS routes (
+				id VARCHAR(255) PRIMARY KEY,
+				name TEXT NOT NULL,
+				type VARCHAR(20) NOT NULL,
+				entrypoints TEXT NOT NULL,
+				rule TEXT NOT NULL,
+				priority INTEGER NOT NULL DEFAULT 0,
+				middlewares TEXT NOT NULL,
+				service_id VARCHAR(255) NOT NULL,
+				tls_config TEXT NOT NULL DEFAULT '',
+				disabled BOOLEAN DEFAULT FALSE,
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`,
+			`CREATE TABLE IF NOT EXISTS services (
+				id VARCHAR(255) PRIMARY KEY,
+				name TEXT NOT NULL,
+				type VARCHAR(20) NOT NULL,
+				config TEXT NOT NULL,
+				load_balancer TEXT NOT NULL DEFAULT '',
+				health_check TEXT NOT NULL DEFAULT '',
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`,
+			`CREATE TABLE IF NOT EXISTS entrypoints (
+				id VARCHAR(255) PRIMARY KEY,
+				name TEXT NOT NULL,
+				address TEXT NOT NULL,
+				protocol VARCHAR(10) NOT NULL,
+				http_config TEXT NOT NULL DEFAULT '',
+				tls_config TEXT NOT NULL DEFAULT '',
+				quic_config TEXT NOT NULL DEFAULT '',
+				forwarded_headers TEXT NOT NULL DEFAULT '',
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`,
+			`CREATE TABLE IF NOT EXISTS middlewares (
+				id VARCHAR(255) PRIMARY KEY,
+				name TEXT NOT NULL,
+				type VARCHAR(50) NOT NULL,
+				config TEXT NOT NULL,
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`,
+			`CREATE TABLE IF NOT EXISTS tls_options (
+				id VARCHAR(255) PRIMARY KEY,
+				min_version VARCHAR(20) DEFAULT '',
+				max_version VARCHAR(20) DEFAULT '',
+				cipher_suites TEXT NOT NULL DEFAULT '',
+				curve_preferences TEXT NOT NULL DEFAULT '',
+				alpn TEXT NOT NULL DEFAULT '',
+				client_auth TEXT NOT NULL DEFAULT '',
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);`,
+		}
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	Register(57, "update_config_tables_schema", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				// services
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS backend_type TEXT NOT NULL DEFAULT 'http';`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS load_balancer_policy TEXT NOT NULL DEFAULT 'round_robin';`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS health_check_path TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS weighted_targets TEXT NOT NULL DEFAULT '[]';`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS discovery_url TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS tls_client_config TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS health_check_port INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS health_check_protocol TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS health_check_type INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS l4_health_check_interval_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS l4_health_check_timeout_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS l4_udp_session_timeout_s INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS l4_proxy_protocol BOOLEAN NOT NULL DEFAULT FALSE;`,
+
+				// tls_options
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS min_tls_version TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS max_tls_version TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS alpn_protocols TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS client_auth_type TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS client_authority_ids TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS prefer_server_cipher_suites BOOLEAN NOT NULL DEFAULT FALSE;`,
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS sni_strict BOOLEAN NOT NULL DEFAULT FALSE;`,
+			}
+		default: // sqlite and others
+			queries = []string{
+				// services
+				`ALTER TABLE services ADD COLUMN backend_type TEXT NOT NULL DEFAULT 'http';`,
+				`ALTER TABLE services ADD COLUMN load_balancer_policy TEXT NOT NULL DEFAULT 'round_robin';`,
+				`ALTER TABLE services ADD COLUMN health_check_path TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN weighted_targets TEXT NOT NULL DEFAULT '[]';`,
+				`ALTER TABLE services ADD COLUMN discovery_url TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN tls_client_config TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN health_check_port INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN health_check_protocol TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE services ADD COLUMN health_check_type INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN l4_health_check_interval_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN l4_health_check_timeout_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN l4_udp_session_timeout_s INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE services ADD COLUMN l4_proxy_protocol BOOLEAN NOT NULL DEFAULT 0;`,
+
+				// tls_options
+				`ALTER TABLE tls_options ADD COLUMN min_tls_version TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN max_tls_version TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN alpn_protocols TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN client_auth_type TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN client_authority_ids TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE tls_options ADD COLUMN prefer_server_cipher_suites BOOLEAN NOT NULL DEFAULT 0;`,
+				`ALTER TABLE tls_options ADD COLUMN sni_strict BOOLEAN NOT NULL DEFAULT 0;`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				// Ignore errors about columns already existing for non-Postgres
+				if dialect.Driver != DriverPostgres && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+					continue
+				}
+				if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+					continue
+				}
+				return err
+			}
+		}
+
+		// Optional: Data migration from old columns to new columns
+		_, _ = db.Exec("UPDATE services SET backend_type = type WHERE backend_type = 'http' AND type != ''")
+		_, _ = db.Exec("UPDATE services SET load_balancer_policy = load_balancer WHERE load_balancer_policy = 'round_robin' AND load_balancer != ''")
+		_, _ = db.Exec("UPDATE services SET health_check_path = health_check WHERE health_check_path = '' AND health_check != ''")
+
+		_, _ = db.Exec("UPDATE tls_options SET min_tls_version = min_version WHERE min_tls_version = '' AND min_version != ''")
+		_, _ = db.Exec("UPDATE tls_options SET max_tls_version = max_version WHERE max_tls_version = '' AND max_version != ''")
+		_, _ = db.Exec("UPDATE tls_options SET alpn_protocols = alpn WHERE alpn_protocols = '' AND alpn != ''")
+		_, _ = db.Exec("UPDATE tls_options SET client_auth_type = client_auth WHERE client_auth_type = '' AND client_auth != ''")
+
+		return nil
+	})
+
+	Register(58, "align_entrypoints_schema", func(db *sql.DB, dialect Dialect) error {
+		var queries []string
+		switch dialect.Driver {
+		case DriverPostgres:
+			queries = []string{
+				`ALTER TABLE entrypoints ADD COLUMN IF NOT EXISTS type INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN IF NOT EXISTS protocols TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE entrypoints ADD COLUMN IF NOT EXISTS read_timeout_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN IF NOT EXISTS write_timeout_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN IF NOT EXISTS max_connections INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN IF NOT EXISTS access_log_enabled BOOLEAN NOT NULL DEFAULT FALSE;`,
+			}
+		default: // sqlite and others
+			queries = []string{
+				`ALTER TABLE entrypoints ADD COLUMN type INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN protocols TEXT NOT NULL DEFAULT '';`,
+				`ALTER TABLE entrypoints ADD COLUMN read_timeout_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN write_timeout_ms INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN max_connections INTEGER NOT NULL DEFAULT 0;`,
+				`ALTER TABLE entrypoints ADD COLUMN access_log_enabled BOOLEAN NOT NULL DEFAULT 0;`,
+			}
+		}
+
+		for _, q := range queries {
+			if _, err := db.Exec(q); err != nil {
+				if dialect.Driver != DriverPostgres && (strings.Contains(strings.ToLower(err.Error()), "duplicate column") || strings.Contains(strings.ToLower(err.Error()), "already exists")) {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }

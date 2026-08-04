@@ -27,6 +27,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/redis"
+	"github.com/gsoultan/gateon/internal/repositories/stores"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
@@ -220,6 +221,33 @@ func main() {
 	go gov.Start(ctx)
 
 	port := getPort()
+
+	// Initialize configuration registries. Default to database-backed if a management
+	// database is configured; otherwise fall back to file-based registries.
+	var routeStore config.RouteStore
+	var serviceStore config.ServiceStore
+	var epStore config.EntryPointStore
+	var mwStore config.MiddlewareStore
+	var tlsOptStore config.TLSOptionStore
+
+	if authManager != nil && authManager.DB() != nil {
+		dbConn := authManager.DB()
+		dialect := authManager.Dialect()
+		routeStore = stores.NewDBRouteRegistry(dbConn, dialect)
+		serviceStore = stores.NewDBServiceRegistry(dbConn, dialect)
+		epStore = stores.NewDBEntryPointRegistry(dbConn, dialect)
+		mwStore = stores.NewDBMiddlewareRegistry(dbConn, dialect)
+		tlsOptStore = stores.NewDBTLSOptionRegistry(dbConn, dialect)
+		logger.L.LogInfo("using database-backed configuration storage")
+	} else {
+		routeStore = config.NewRouteRegistry(getEnvDefault("ROUTES_FILE", "routes.json"))
+		serviceStore = config.NewServiceRegistry(getEnvDefault("SERVICES_FILE", "services.json"))
+		epStore = config.NewEntryPointRegistry(getEnvDefault("ENTRYPOINTS_FILE", "entrypoints.json"))
+		mwStore = config.NewMiddlewareRegistry(getEnvDefault("MIDDLEWARES_FILE", "middlewares.json"))
+		tlsOptStore = config.NewTLSOptionRegistry(getEnvDefault("TLS_OPTIONS_FILE", "tls_options.json"))
+		logger.L.LogInfo("using file-based configuration storage")
+	}
+
 	s, err := server.NewServer(
 		server.WithLogger(logger.Default()),
 		server.WithGlobalRegistry(globalReg),
@@ -232,11 +260,11 @@ func main() {
 		server.WithGovernor(gov),
 		server.WithPort(port),
 		server.WithVersion(version()),
-		server.WithRouteRegistry(config.NewRouteRegistry(getEnvDefault("ROUTES_FILE", "routes.json"))),
-		server.WithServiceRegistry(config.NewServiceRegistry(getEnvDefault("SERVICES_FILE", "services.json"))),
-		server.WithEntryPointRegistry(config.NewEntryPointRegistry(getEnvDefault("ENTRYPOINTS_FILE", "entrypoints.json"))),
-		server.WithMiddlewareRegistry(config.NewMiddlewareRegistry(getEnvDefault("MIDDLEWARES_FILE", "middlewares.json"))),
-		server.WithTLSOptionRegistry(config.NewTLSOptionRegistry(getEnvDefault("TLS_OPTIONS_FILE", "tls_options.json"))),
+		server.WithRouteRegistry(routeStore),
+		server.WithServiceRegistry(serviceStore),
+		server.WithEntryPointRegistry(epStore),
+		server.WithMiddlewareRegistry(mwStore),
+		server.WithTLSOptionRegistry(tlsOptStore),
 		server.WithWafRules(waf.GetStore()),
 	)
 	if err != nil {

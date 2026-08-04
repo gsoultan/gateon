@@ -25,12 +25,16 @@ type EntryPointRegistry struct {
 }
 
 func NewEntryPointRegistry(path string) *EntryPointRegistry {
-	reg := &EntryPointRegistry{
-		path: path,
-	}
+	reg := NewEmptyEntryPointRegistry()
+	reg.path = path
+	reg.load()
+	return reg
+}
+
+func NewEmptyEntryPointRegistry() *EntryPointRegistry {
+	reg := &EntryPointRegistry{}
 	initial := make(map[string]*gateonv1.EntryPoint)
 	reg.entryPoints.Store(&initial)
-	reg.load()
 	return reg
 }
 
@@ -179,4 +183,12 @@ func (r *EntryPointRegistry) Delete(ctx context.Context, id string) error {
 	delete(newMap, id)
 	r.entryPoints.Store(&newMap)
 	return r.saveLocked()
+}
+
+func (r *EntryPointRegistry) Mu() *sync.RWMutex {
+	return &r.mu
+}
+
+func (r *EntryPointRegistry) EntryPoints() *atomic.Pointer[map[string]*gateonv1.EntryPoint] {
+	return &r.entryPoints
 }

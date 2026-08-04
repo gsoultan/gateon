@@ -41,7 +41,7 @@ var (
 		SuspiciousReferer: `(?i)(evil\.com|attacker|hacker|exploit|malicious|pwned)`,
 		SSRF:              `(?i)(169\.254\.169\.254|metadata\.google\.internal|instance-data|v1/meta-data|latest/meta-data|localhost|127\.0\.0\.1|0\.0\.0\.0)`,
 		NoSQLI:            `(?i)(\$gt|\$ne|\$in|\$where|\$regex|\$expr|\$exists)`,
-		CommandInjection:  `(?i)(;|\d|\||&|\$\(|\x60)(?i)(cat|ls|id|whoami|pwd|uname|netstat|nc|bash|curl|wget|powershell|cmd|type|dir)`,
+		CommandInjection:  `(?i)(;|\d|\||&|\$\(|\x60)(?i)\b(cat|ls|id|whoami|pwd|uname|netstat|nc|bash|curl|wget|powershell|cmd|type|dir)\b`,
 		ProtoPollution:    `(?i)(__proto__|constructor\.prototype)`,
 		HoneypotPaths: []string{
 			"/admin/setup.php",

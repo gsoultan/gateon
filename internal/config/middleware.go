@@ -24,12 +24,16 @@ type MiddlewareRegistry struct {
 }
 
 func NewMiddlewareRegistry(path string) *MiddlewareRegistry {
-	reg := &MiddlewareRegistry{
-		middlewares: make(map[string]*gateonv1.Middleware),
-		path:        path,
-	}
+	reg := NewEmptyMiddlewareRegistry()
+	reg.path = path
 	reg.load()
 	return reg
+}
+
+func NewEmptyMiddlewareRegistry() *MiddlewareRegistry {
+	return &MiddlewareRegistry{
+		middlewares: make(map[string]*gateonv1.Middleware),
+	}
 }
 
 func (r *MiddlewareRegistry) load() {
@@ -156,4 +160,12 @@ func (r *MiddlewareRegistry) Delete(ctx context.Context, id string) error {
 
 	delete(r.middlewares, id)
 	return r.saveLocked()
+}
+
+func (r *MiddlewareRegistry) Mu() *sync.RWMutex {
+	return &r.mu
+}
+
+func (r *MiddlewareRegistry) Middlewares() map[string]*gateonv1.Middleware {
+	return r.middlewares
 }

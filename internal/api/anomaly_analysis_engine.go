@@ -78,20 +78,30 @@ func (e *AnomalyAnalysisEngine) SetLowPower(enabled bool) {
 }
 
 var commonCRSRules = map[string]string{
-	"920300": "Request Missing an Accept Header",
-	"920320": "Missing User-Agent Header",
-	"920350": "Host Header is a IP Address",
-	"930100": "Local File Inclusion",
-	"930110": "Local File Inclusion (Traversals)",
-	"932100": "Remote Command Execution (RCE)",
-	"932110": "RCE: Shell Command Injection",
-	"933100": "PHP Injection Attack",
-	"941100": "XSS: Script Tag Injection",
-	"942100": "SQL Injection Attack",
-	"210001": "Online Gambling Site Detection",
-	"210002": "Malicious JavaScript Detection",
-	"210003": "PHP Vulnerability Exploit Attempt",
-	"210004": "Arbitrary File Upload Execution Attempt",
+	"920300":  "Request Missing an Accept Header",
+	"920320":  "Missing User-Agent Header",
+	"920350":  "Host Header is a IP Address",
+	"920420":  "Protocol: Content-Type Not Allowed",
+	"920180":  "Protocol: POST Missing Content-Length",
+	"930100":  "Local File Inclusion",
+	"930110":  "Local File Inclusion (Traversals)",
+	"932100":  "Remote Command Execution (RCE)",
+	"932110":  "RCE: Shell Command Injection",
+	"933100":  "PHP Injection Attack",
+	"934100":  "Generic Application Attack",
+	"941100":  "XSS: Script Tag Injection",
+	"942100":  "SQL Injection Attack",
+	"949110":  "Inbound Anomaly Score Exceeded",
+	"1900001": "Fast-Path: Signature Match",
+	"1900002": "Fast-Path: High Entropy Payload",
+	"1900003": "Fast-Path: Fingerprint Mismatch",
+	"1900004": "Fast-Path: Protocol Violation",
+	"1900005": "Fast-Path: Suspicious Client",
+	"1990002": "Fast-Path: Malformed Security Token",
+	"210001":  "Online Gambling Site Detection",
+	"210002":  "Malicious JavaScript Detection",
+	"210003":  "PHP Vulnerability Exploit Attempt",
+	"210004":  "Arbitrary File Upload Execution Attempt",
 }
 
 func getRuleDescription(id string) string {
@@ -319,7 +329,11 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 			}
 			data.IPStats[th.SourceIP] = stats
 		}
-		stats.WAFHits++
+		if th.Mitigated {
+			stats.WAFHits++
+		} else {
+			stats.WAFWarnings++
+		}
 		if th.TriggeredRules != "" {
 			if stats.WAFRules == nil {
 				stats.WAFRules = make(map[string]int)

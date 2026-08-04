@@ -34,15 +34,19 @@ type RouteRegistry struct {
 }
 
 func NewRouteRegistry(path string) *RouteRegistry {
-	reg := &RouteRegistry{
+	reg := NewEmptyRouteRegistry()
+	reg.path = path
+	reg.load()
+	return reg
+}
+
+func NewEmptyRouteRegistry() *RouteRegistry {
+	return &RouteRegistry{
 		routes:      make(map[string]*gateonv1.Route),
 		hostIndex:   make(map[string][]*gateonv1.Route),
 		hostTries:   make(map[string]*PathTrie),
 		hostRegexes: make(map[string][]*gateonv1.Route),
-		path:        path,
 	}
-	reg.load()
-	return reg
 }
 
 func (r *RouteRegistry) load() {
@@ -351,4 +355,16 @@ func (r *RouteRegistry) Delete(ctx context.Context, id string) error {
 	delete(r.routes, id)
 	r.rebuildSortedLocked()
 	return r.saveLocked()
+}
+
+func (r *RouteRegistry) Mu() *sync.RWMutex {
+	return &r.mu
+}
+
+func (r *RouteRegistry) Routes() map[string]*gateonv1.Route {
+	return r.routes
+}
+
+func (r *RouteRegistry) RebuildSortedLocked() {
+	r.rebuildSortedLocked()
 }

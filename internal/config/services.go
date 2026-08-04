@@ -24,12 +24,16 @@ type ServiceRegistry struct {
 }
 
 func NewServiceRegistry(path string) *ServiceRegistry {
-	reg := &ServiceRegistry{
-		services: make(map[string]*gateonv1.Service),
-		path:     path,
-	}
+	reg := NewEmptyServiceRegistry()
+	reg.path = path
 	reg.load()
 	return reg
+}
+
+func NewEmptyServiceRegistry() *ServiceRegistry {
+	return &ServiceRegistry{
+		services: make(map[string]*gateonv1.Service),
+	}
 }
 
 func (r *ServiceRegistry) load() {
@@ -150,4 +154,12 @@ func (r *ServiceRegistry) Delete(ctx context.Context, id string) error {
 
 	delete(r.services, id)
 	return r.saveLocked()
+}
+
+func (r *ServiceRegistry) Mu() *sync.RWMutex {
+	return &r.mu
+}
+
+func (r *ServiceRegistry) Services() map[string]*gateonv1.Service {
+	return r.services
 }

@@ -77,4 +77,17 @@ This project uses a dedicated Obsidian vault as an **Agentic Second Brain** to o
     3. **Memory**: Access symlinked `.serena/memories` and `.junie/skills` directly within the vault.
 - **Sync**: Re-export the graph after major changes using `rtk graphify export obsidian --dir ~/Documents/ObsidianVault/Gateon`.
 
+## Database Migrations & Schema Consistency
+To ensure the application remains stable and migrations run smoothly, follow these rules:
+
+- **Permanent Fixes**: Never apply "quick fixes" that bypass the migration system. If a database schema needs to change, always use a new migration.
+- **Migration Order**: Never modify existing migration files (e.g., `Register(1, ...)` to `Register(56, ...)`). If you need to change the schema established by a previous migration, add a NEW migration with a higher ID (e.g., `57`).
+- **Query Stability**: Do NOT change SQL queries in existing migrations. Changing them after they have already run on some environments will lead to inconsistent database states ("If you change the query you fuck").
+- **Schema Alignment**: When updating Protobuf definitions, immediately update the corresponding database repository stores (`internal/repositories/stores/`) and add a new migration to align the database schema.
+- **Postgres Compatibility**: Always test migrations against Postgres if possible, as it is more strict about types (e.g., `INTEGER` vs `TIMESTAMP`) than SQLite.
+- **Auto-Fixing**: If a system-level table (like `migrations`) is in a bad state, implement auto-fixing logic in `internal/db/migration.go` before running pending migrations.
+- **Mandatory Build**: Run both backend and frontend builds at the end of every task to verify that the changes haven't introduced any compilation errors. NEVER submit if either build fails.
+    - **Backend**: `rtk go build -o gateon ./cmd/gateon`
+    - **Frontend**: `cd ui && rtk bun run build`
+
 <!-- END sqz-agents-guidance -->

@@ -1,22 +1,21 @@
-version: v2
+version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: github.com/gsoultan/gateon/proto
 plugins:
-  - remote: buf.build/protocolbuffers/go:v1.36.11
+  - name: go
     out: proto
-    opt:
-      - paths=source_relative
-  - remote: buf.build/grpc/go:v1.5.1
+    opt: paths=source_relative
+  - name: go-grpc
     out: proto
-    opt:
-      - paths=source_relative
-  - remote: buf.build/connectrpc/go:v1.18.1
+    opt: paths=source_relative
+  - name: connect-go
     out: proto
-    opt:
-      - paths=source_relative
-  - remote: buf.build/bufbuild/es:v1.10.0
+    opt: paths=source_relative
+  - name: es
     out: ui/src/services/gen
     opt: target=ts
-  - remote: buf.build/connectrpc/es:v1.4.0
+  - name: connect-es
     out: ui/src/services/gen
     opt: target=ts
-inputs:
-  - directory: proto
