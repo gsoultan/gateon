@@ -475,11 +475,59 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// only to operator-declared gRPC routes, not based on a spoofable request header.
 	mwFactory.SetRouteType(rt.Type)
 
-	// Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	routeLabel := cmp.Or(rt.Name, rt.Id)
+	ctx := context.Background()
+
+	// 1. Infrastructure Middlewares (Recovery, Logging & Monitoring)
+	// Recovery is outer-most to catch panics in logging or metrics.
 	chain = append(chain,
+		middleware.Recovery(),
 		middleware.AccessLog(routeLabel),
 		middleware.MetricsWithService(routeLabel, rt.ServiceId),
+	)
+
+	// 2. Identify and resolve CORS/gRPC-Web early.
+	// We MUST place these outer to security blockers (IP shunning, WAF, etc.)
+	// to ensure that even blocked requests include the necessary CORS headers
+	// and that preflight (OPTIONS) requests are handled correctly without
+	// triggering false security alerts.
+	var userMiddlewares []middleware.Middleware
+	var corsMiddleware middleware.Middleware
+	hasCORS := false
+
+	if mwStore != nil {
+		for _, mid := range rt.Middlewares {
+			mid = strings.TrimSpace(mid)
+			if mid == "" {
+				continue
+			}
+			if mwConf, ok := mwStore.Get(ctx, mid); ok && mwConf != nil {
+				mw, err := mwFactory.Create(mwConf, routeLabel)
+				if err != nil {
+					continue
+				}
+				if strings.EqualFold(mwConf.Type, "cors") || strings.EqualFold(mwConf.Type, "grpcweb") {
+					if !hasCORS {
+						corsMiddleware = mw
+						hasCORS = true
+					}
+				} else {
+					userMiddlewares = append(userMiddlewares, mw)
+				}
+			}
+		}
+	}
+
+	// Default CORS Bypass for preflight requests if no CORS middleware is configured.
+	// This restores v1.5.0 behavior where OPTIONS requests were automatically allowed.
+	if hasCORS {
+		chain = append(chain, corsMiddleware)
+	} else {
+		chain = append(chain, middleware.BypassCORS())
+	}
+
+	// 3. Infrastructure Blockers & Lifecycle (inner to CORS)
+	chain = append(chain,
 		middleware.IPMitigation(),
 		middleware.UserMitigation(),
 		middleware.ReputationBlocker(routeLabel),
@@ -494,18 +542,10 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 				}
 			})
 		},
-		middleware.Recovery(),
 		middleware.Debugger(globalStore),
 	)
 
-	// Default CORS Bypass for preflight requests if no CORS middleware is configured.
-	// This restores v1.5.0 behavior where OPTIONS requests were automatically allowed.
-	if !RouteHasMiddlewareType(context.Background(), rt, mwStore, "cors") &&
-		!RouteHasMiddlewareType(context.Background(), rt, mwStore, "grpcweb") {
-		chain = append(chain, middleware.BypassCORS())
-	}
-
-	// Advanced Security Middlewares
+	// 4. Advanced Security Middlewares
 	if globalStore != nil {
 		if gcfg := globalStore.Get(context.Background()); gcfg != nil && gcfg.SecurityAdvanced != nil {
 			adv := gcfg.SecurityAdvanced
@@ -564,28 +604,8 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		})
 	})
 
-	// Resolve and append user-defined middlewares from the registry
-	for _, mid := range rt.Middlewares {
-		mid = strings.TrimSpace(mid)
-		if mid == "" {
-			continue
-		}
-
-		if mwStore != nil {
-			if mwConf, ok := mwStore.Get(context.Background(), mid); ok {
-				mw, err := mwFactory.Create(mwConf, routeLabel)
-				if err == nil {
-					wrapped := func(next http.Handler) http.Handler {
-						h := mw(next)
-						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							h.ServeHTTP(w, r)
-						})
-					}
-					chain = append(chain, wrapped)
-				}
-			}
-		}
-	}
+	// 5. User-defined Middlewares (already resolved during CORS identification)
+	chain = append(chain, userMiddlewares...)
 
 	// Global WAF: when enabled in the global config, protect every route with the
 	// full OWASP CRS (plus malware/ransomware detection) without requiring a

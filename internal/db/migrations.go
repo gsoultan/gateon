@@ -1359,8 +1359,10 @@ func init() {
 		var query string
 		if dialect.Driver == DriverMySQL {
 			query = "UPDATE waf_rules SET directive = REPLACE(directive, CONCAT('id:', id), CONCAT('id:1', id)), id = CONCAT('1', id) WHERE LENGTH(id) = 6 AND (id LIKE '9%' OR id LIKE '1%' OR id LIKE '2%')"
+		} else if dialect.Driver == DriverPostgres {
+			query = "UPDATE waf_rules SET directive = REPLACE(directive, 'id:' || id::text, 'id:1' || id::text), id = '1' || id::text WHERE LENGTH(id::text) = 6 AND (id::text LIKE '9%' OR id::text LIKE '1%' OR id::text LIKE '2%')"
 		} else {
-			// SQLite and Postgres use ||
+			// SQLite uses ||
 			query = "UPDATE waf_rules SET directive = REPLACE(directive, 'id:' || id, 'id:1' || id), id = '1' || id WHERE LENGTH(id) = 6 AND (id LIKE '9%' OR id LIKE '1%' OR id LIKE '2%')"
 		}
 		_, err := db.Exec(query)

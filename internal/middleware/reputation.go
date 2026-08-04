@@ -19,6 +19,10 @@ type reputationHandler struct {
 }
 
 func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if IsCorsPreflight(r) {
+		h.next.ServeHTTP(w, r)
+		return
+	}
 	fpID := telemetry.GetIPFingerprint(r)
 	// Never block localhost or management traffic
 	if fpID == "127.0.0.1" || fpID == "::1" || fpID == "localhost" {

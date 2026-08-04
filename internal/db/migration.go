@@ -6,6 +6,9 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
+
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 // Migration represents a single database migration.
@@ -55,12 +58,17 @@ func ensureMigrationsTable(db *sql.DB, dialect Dialect) error {
 	var query string
 	switch dialect.Driver {
 	case DriverPostgres:
-		// Check if table exists and has correct id type
+		// Check if table exists and has correct id type.
+		// We filter by current_schema() to avoid matching tables in other schemas.
 		var dataType string
-		err := db.QueryRow("SELECT data_type FROM information_schema.columns WHERE table_name = 'migrations' AND column_name = 'id'").Scan(&dataType)
-		if err == nil && dataType != "integer" {
-			// Try to fix it
-			_, _ = db.Exec("ALTER TABLE migrations ALTER COLUMN id TYPE INTEGER USING id::integer")
+		err := db.QueryRow("SELECT data_type FROM information_schema.columns WHERE table_name = 'migrations' AND column_name = 'id' AND table_schema = current_schema()").Scan(&dataType)
+		if err == nil && strings.ToLower(dataType) != "integer" {
+			// Try to fix it. We use USING id::integer to convert existing data if possible.
+			if _, err := db.Exec("ALTER TABLE migrations ALTER COLUMN id TYPE INTEGER USING id::integer"); err != nil {
+				// Log the error but continue; the subsequent CREATE TABLE IF NOT EXISTS might still be useful,
+				// though the migrations will likely fail if the column type is still wrong.
+				logger.L.LogError("failed to fix migrations table id type", "error", err, "current_type", dataType)
+			}
 		}
 
 		query = `CREATE TABLE IF NOT EXISTS migrations (
