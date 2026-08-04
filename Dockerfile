@@ -36,6 +36,7 @@ RUN go mod download
 # proto + grpc + buf code generators.
 RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
+    go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest && \
     go install github.com/bufbuild/buf/cmd/buf@latest
 ENV PATH="/go/bin:${PATH}"
 
@@ -43,7 +44,8 @@ COPY . .
 # Bring in the compiled UI and embed it (sync_assets copies ui/dist ->
 # internal/ui/dist, which ui.go embeds via //go:embed all:dist).
 COPY --from=ui /ui/dist ./ui/dist
-RUN buf generate && \
+COPY --from=ui /ui/node_modules ./ui/node_modules
+RUN PATH="${PATH}:/src/ui/node_modules/.bin" buf generate && \
     go run ./scripts/sync_assets.go && \
     go generate ./internal/ebpf/... && \
     go mod tidy

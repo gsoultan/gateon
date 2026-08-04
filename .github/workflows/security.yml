@@ -27,11 +27,21 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Bun dependencies
+        run: bun install --cwd ui
+
       - name: Install buf and proto plugins
-        run: go install github.com/bufbuild/buf/cmd/buf@latest
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
+          go install github.com/bufbuild/buf/cmd/buf@latest
 
       - name: Generate proto
-        run: buf generate
+        run: PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
 
       - name: Tidy go modules
         run: go mod tidy
@@ -55,11 +65,21 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Bun dependencies
+        run: bun install --cwd ui
+
       - name: Install buf and proto plugins
-        run: go install github.com/bufbuild/buf/cmd/buf@latest
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
+          go install github.com/bufbuild/buf/cmd/buf@latest
 
       - name: Generate proto
-        run: buf generate
+        run: PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
 
       - name: Tidy go modules
         run: go mod tidy
