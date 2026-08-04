@@ -201,6 +201,21 @@ func (m Matcher) Match(r *http.Request) bool {
 	return m.matchInner(r)
 }
 
+func (m Matcher) HasHost() bool {
+	if m.negated {
+		return false // Negated rule might not imply a specific host
+	}
+	if len(m.orParts) > 0 {
+		for _, part := range m.orParts {
+			if part.HasHost() {
+				return true
+			}
+		}
+		return false
+	}
+	return m.host != "" || m.hostRegex != nil
+}
+
 func (m Matcher) matchInner(r *http.Request) bool {
 	host := ""
 	if rs := request.GetRequestState(r); rs != nil && rs.StrippedHost != "" {
@@ -295,6 +310,13 @@ func (m Matcher) RequiredHeaders() map[string]string {
 // Used by SNI to select certificates for multi-host TLS.
 func HostFromRule(rule string) string {
 	return GetMatcher(rule).host
+}
+
+// RouteHasHostRule returns true if the rule explicitly matches against a host
+// (via Host() or HostRegexp()). This is used to prioritize host-specific routes
+// over generic management endpoints when they overlap (e.g. /v1).
+func RouteHasHostRule(rule string) bool {
+	return GetMatcher(rule).HasHost()
 }
 
 // RouteHostIsExact returns true if routeHost is an exact host (e.g. api.example.com),

@@ -4,7 +4,7 @@ package auth
 
 // SQL queries for user management. Dialect.Rebind replaces ? with $N (Postgres) as needed.
 const (
-	QueryCountUsers           = "SELECT COALESCE(COUNT(*), 0) FROM users"
+	QueryCountUsers           = "SELECT 1 FROM users LIMIT 1"
 	QueryUserByUsername       = "SELECT id, username, password, role, failed_attempts, locked_until, two_factor_enabled, two_factor_secret, recovery_codes, disabled, two_factor_pending FROM users WHERE username = ?"
 	QueryUserByID             = "SELECT id, username, password, role, failed_attempts, locked_until, two_factor_enabled, two_factor_secret, recovery_codes, disabled, two_factor_pending FROM users WHERE id = ?"
 	QueryCountUsersSearch     = "SELECT COALESCE(COUNT(*), 0) FROM users WHERE username LIKE ?"

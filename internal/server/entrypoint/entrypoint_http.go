@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -74,6 +75,13 @@ func resolveEPTimeouts(epID string, ep *gateonv1.EntryPoint, deps *Deps) (readTi
 // without requiring a gateon restart.
 func dynamicTimeouts(ep *gateonv1.EntryPoint, deps *Deps, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip deadlines for long-lived connections (WebSocket and SSE)
+		if r.Header.Get("Upgrade") != "" ||
+			strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
 		rc := http.NewResponseController(w)
 		now := time.Now()

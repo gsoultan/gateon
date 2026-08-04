@@ -874,15 +874,17 @@ func (s *Store) Seed(ctx context.Context) error {
 
 	now := time.Now()
 	query := s.dialect.Rebind("INSERT INTO waf_rules (id, name, directive, enabled, paranoia_level, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-	checkQuery := s.dialect.Rebind("SELECT COALESCE(COUNT(*), 0) FROM waf_rules WHERE id = ?")
+	checkQuery := s.dialect.Rebind("SELECT 1 FROM waf_rules WHERE id = ?")
 
 	for _, r := range initialRules {
-		var count sql.NullInt64
-		err := s.db.QueryRowContext(ctx, checkQuery, r.ID).Scan(&count)
+		rows, err := s.db.QueryContext(ctx, checkQuery, r.ID)
 		if err != nil {
 			return fmt.Errorf("check rule %s: %w", r.ID, err)
 		}
-		if !count.Valid || count.Int64 == 0 {
+		exists := rows.Next()
+		rows.Close()
+
+		if !exists {
 			_, err := s.db.ExecContext(ctx, query,
 				r.ID, r.Name, r.Directive, r.Enabled, r.ParanoiaLevel, r.Category, now, now)
 			if err != nil {
