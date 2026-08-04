@@ -543,3 +543,11 @@ func (m *Manager) Close() error {
 	}
 	return nil
 }
+
+func (m *Manager) DB() *sql.DB {
+	return m.db
+}
+
+func (m *Manager) Dialect() db.Dialect {
+	return m.dialect
+}

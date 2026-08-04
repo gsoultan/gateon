@@ -278,6 +278,13 @@ func ExtractToken(r *http.Request) string {
 	if t := bearerToken(r); t != "" {
 		return t
 	}
+
+	// Query parameters are only accepted for WebSocket/SSE to prevent token leakage in browser history
+	// for standard web requests, while still allowing auth for protocols that don't support headers well.
+	if !isWebSocketOrSSE(r) {
+		return ""
+	}
+
 	if t := r.URL.Query().Get("token"); t != "" {
 		return t
 	}

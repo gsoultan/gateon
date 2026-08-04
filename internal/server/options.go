@@ -16,7 +16,7 @@ import (
 type ServerOption func(*Server) error
 
 // WithRouteRegistry sets the route store (DIP: accepts implementation, stores interface).
-func WithRouteRegistry(r *config.RouteRegistry) ServerOption {
+func WithRouteRegistry(r config.RouteStore) ServerOption {
 	return func(s *Server) error {
 		s.RouteStore = r
 		return nil
@@ -24,7 +24,7 @@ func WithRouteRegistry(r *config.RouteRegistry) ServerOption {
 }
 
 // WithServiceRegistry sets the service store.
-func WithServiceRegistry(r *config.ServiceRegistry) ServerOption {
+func WithServiceRegistry(r config.ServiceStore) ServerOption {
 	return func(s *Server) error {
 		s.ServiceStore = r
 		return nil
@@ -32,7 +32,7 @@ func WithServiceRegistry(r *config.ServiceRegistry) ServerOption {
 }
 
 // WithEntryPointRegistry sets the entrypoint store.
-func WithEntryPointRegistry(r *config.EntryPointRegistry) ServerOption {
+func WithEntryPointRegistry(r config.EntryPointStore) ServerOption {
 	return func(s *Server) error {
 		s.EpStore = r
 		return nil
@@ -40,7 +40,7 @@ func WithEntryPointRegistry(r *config.EntryPointRegistry) ServerOption {
 }
 
 // WithMiddlewareRegistry sets the middleware store.
-func WithMiddlewareRegistry(r *config.MiddlewareRegistry) ServerOption {
+func WithMiddlewareRegistry(r config.MiddlewareStore) ServerOption {
 	return func(s *Server) error {
 		s.MwStore = r
 		return nil
@@ -48,7 +48,7 @@ func WithMiddlewareRegistry(r *config.MiddlewareRegistry) ServerOption {
 }
 
 // WithTLSOptionRegistry sets the TLS option store.
-func WithTLSOptionRegistry(r *config.TLSOptionRegistry) ServerOption {
+func WithTLSOptionRegistry(r config.TLSOptionStore) ServerOption {
 	return func(s *Server) error {
 		s.TLSOptStore = r
 		return nil

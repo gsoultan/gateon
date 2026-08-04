@@ -55,6 +55,14 @@ func ensureMigrationsTable(db *sql.DB, dialect Dialect) error {
 	var query string
 	switch dialect.Driver {
 	case DriverPostgres:
+		// Check if table exists and has correct id type
+		var dataType string
+		err := db.QueryRow("SELECT data_type FROM information_schema.columns WHERE table_name = 'migrations' AND column_name = 'id'").Scan(&dataType)
+		if err == nil && dataType != "integer" {
+			// Try to fix it
+			_, _ = db.Exec("ALTER TABLE migrations ALTER COLUMN id TYPE INTEGER USING id::integer")
+		}
+
 		query = `CREATE TABLE IF NOT EXISTS migrations (
 			id INTEGER PRIMARY KEY,
 			name TEXT NOT NULL,

@@ -460,8 +460,10 @@ func (d *SecurityThreatDetector) analyzeTraffic(stats *IPStats, reasons *[]strin
 
 func (d *SecurityThreatDetector) analyzeWAF(stats *IPStats, reasons *[]string, primaryType *string) int {
 	score := 0
-	if stats.WAFHits > 0 {
+	if stats.WAFHits > 0 || stats.WAFWarnings > 0 {
 		score += stats.WAFHits * 40
+		score += stats.WAFWarnings * 5
+
 		if len(stats.WAFRules) > 0 {
 			var ruleDetails []string
 			for rule, count := range stats.WAFRules {
@@ -470,10 +472,18 @@ func (d *SecurityThreatDetector) analyzeWAF(stats *IPStats, reasons *[]string, p
 			slices.Sort(ruleDetails)
 			*reasons = append(*reasons, fmt.Sprintf("WAF security rules triggered: %s", strings.Join(ruleDetails, ", ")))
 		} else {
-			*reasons = append(*reasons, fmt.Sprintf("WAF security rules triggered (%d times)", stats.WAFHits))
+			hits := stats.WAFHits + stats.WAFWarnings
+			*reasons = append(*reasons, fmt.Sprintf("WAF security rules triggered (%d times)", hits))
 		}
-		if *primaryType == "security_threat" {
-			*primaryType = "waf_violation"
+
+		if stats.WAFHits > 0 {
+			if *primaryType == "security_threat" {
+				*primaryType = "waf_violation"
+			}
+		} else if stats.WAFWarnings > 0 {
+			if *primaryType == "security_threat" {
+				*primaryType = "suspicious_activity"
+			}
 		}
 	}
 	return score

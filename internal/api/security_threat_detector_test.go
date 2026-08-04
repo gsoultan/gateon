@@ -171,7 +171,7 @@ func TestSecurityThreatDetector_WAFHits(t *testing.T) {
 			{SourceIP: "8.8.8.8", Path: "/api", Method: "POST", Status: "403 Forbidden", Timestamp: now},
 		},
 		SecurityThreats: []*telemetry.SecurityThreat{
-			{SourceIP: "8.8.8.8", Type: "waf_violation", Time: now},
+			{SourceIP: "8.8.8.8", Type: "waf_violation", Time: now, Mitigated: true},
 		},
 	}
 

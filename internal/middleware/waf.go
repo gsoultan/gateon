@@ -156,8 +156,32 @@ func (c WAFConfig) Fingerprint() string {
 // on that framing, so they are skipped for gRPC traffic. The CRS engine still
 // inspects gRPC request headers and the URI.
 func isGRPCRequest(r *http.Request) bool {
-	return strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+	ct := r.Header.Get("Content-Type")
+	return strings.HasPrefix(ct, "application/grpc") || strings.HasPrefix(ct, "application/connect")
 }
+
+const grpcCompatDirective = `
+# CRS Protocol Enforcement gRPC Compatibility
+# ------------------------------------------------------------------------
+# 920420: Content-Type not allowed. gRPC uses application/grpc or application/connect.
+# We extend the allowed list to include gRPC and ConnectRPC families.
+SecAction "id:99007,phase:1,nolog,pass,t:none,setvar:'tx.allowed_request_content_type=|application/grpc| |application/grpc-web| |application/grpc-web+proto| |application/grpc-web+json| |application/connect+proto| |application/connect+json|'"
+
+# 920180: POST without Content-Length or Transfer-Encoding.
+# gRPC over HTTP/2 does not require these. We disable it for gRPC.
+SecRule TX:grpc_mode "@eq 1" \
+    "id:99008,phase:1,nolog,pass,ctl:ruleRemoveById=920180"
+
+# 920350: Host header is an IP address.
+# In internal microservices/gRPC, this is often legitimate.
+SecRule TX:grpc_mode "@eq 1" \
+    "id:99009,phase:1,nolog,pass,ctl:ruleRemoveById=920350"
+
+# 920300: Request Missing an Accept Header.
+# Many gRPC clients do not send an Accept header.
+SecRule TX:grpc_mode "@eq 1" \
+    "id:99010,phase:1,nolog,pass,ctl:ruleRemoveById=920300"
+`
 
 var (
 	reputationStrings [101]string
@@ -235,6 +259,14 @@ var crsRuleExplanations = map[int]struct {
 		Explanation:    "The request is missing a mandatory size header (Content-Length) for a POST operation.",
 		Recommendation: "Ensure your client or proxy sends a proper Content-Length header for all POST/PUT requests.",
 	},
+	920300: {
+		Explanation:    "The request is missing the 'Accept' header, which many servers use to determine the response format.",
+		Recommendation: "Ensure your client sends a valid 'Accept' header (e.g., 'application/json' or '*/*').",
+	},
+	920350: {
+		Explanation:    "The 'Host' header contains a numeric IP address instead of a domain name.",
+		Recommendation: "In production, use domain names for all requests. For internal services, you can whitelist this rule if IP-based access is required.",
+	},
 	920420: {
 		Explanation:    "The 'Content-Type' header value is not permitted by the security policy.",
 		Recommendation: "Check if the application expects this specific content type. If legitimate, add it to the allowed list.",
@@ -266,6 +298,30 @@ var crsRuleExplanations = map[int]struct {
 	949110: {
 		Explanation:    "This request was blocked because its total 'Anomaly Score' exceeded the threshold after triggering multiple security rules.",
 		Recommendation: "Review the individual violations categorized below. For legitimate traffic, use the one-click resolution to whitelist the specific rules.",
+	},
+	1900001: {
+		Explanation:    "Gateon Fast-Path: A known attack signature (SQLi, XSS, or RCE) was matched in the request URI or headers.",
+		Recommendation: "Review the flagged field for malicious content. If this is a false positive, consider adjusting the Fast-Path sensitivity.",
+	},
+	1900002: {
+		Explanation:    "Gateon Fast-Path: High Shannon entropy detected in request components, suggesting obfuscated shellcode or binary injection.",
+		Recommendation: "Check if the request contains legitimate binary data or encrypted payloads that should be whitelisted.",
+	},
+	1900003: {
+		Explanation:    "Gateon Fast-Path: Client fingerprint mismatch detected. The TLS/HTTP fingerprint does not match the declared User-Agent.",
+		Recommendation: "This indicates a spoofed client or automated bot. Verify the legitimacy of the client.",
+	},
+	1900004: {
+		Explanation:    "Gateon Fast-Path: HTTP protocol violation detected (e.g., forbidden 'Connection' header in HTTP/2).",
+		Recommendation: "Ensure your client follows the HTTP/2 or HTTP/3 protocol specifications strictly.",
+	},
+	1900005: {
+		Explanation:    "Gateon Fast-Path: The client claims to be a modern browser but is missing mandatory browser headers.",
+		Recommendation: "Review the client's traffic patterns. Legitimate browsers always send standard headers like 'Accept-Encoding'.",
+	},
+	1990002: {
+		Explanation:    "Gateon Fast-Path: Malformed security token structure detected in the Authorization header.",
+		Recommendation: "Ensure your client is sending a valid security token (JWT, Paseto).",
 	},
 	100008: {
 		Explanation:    "A common web shell filename (e.g., c99.php, shell.php) was detected in the request URI.",
@@ -924,6 +980,8 @@ SecAction "id:99200,phase:1,nolog,pass,t:none,setvar:'tx.allowed_methods=GET HEA
 
 		if cfg.GRPCMode {
 			sb.WriteString("SecAction \"id:99006,phase:1,nolog,pass,setvar:tx.grpc_mode=1\"\n")
+			sb.WriteString(grpcCompatDirective)
+			sb.WriteByte('\n')
 		}
 
 		// Load dynamic rules from database
@@ -1146,9 +1204,18 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	telemetry.RegisterRecommendation(GetRequestID(r), recommendation)
 
 	rules := ""
-	if typeStr == "fast_path_signature" {
+	switch typeStr {
+	case "fast_path_signature":
 		rules = "[1900001]"
-	} else if typeStr == "fast_path_malformed_token" {
+	case "fast_path_entropy":
+		rules = "[1900002]"
+	case "fast_path_fingerprint":
+		rules = "[1900003]"
+	case "fast_path_protocol_violation":
+		rules = "[1900004]"
+	case "fast_path_suspicious_client":
+		rules = "[1900005]"
+	case "fast_path_malformed_token":
 		rules = "[1990002]"
 	}
 

@@ -24,12 +24,16 @@ type TLSOptionRegistry struct {
 }
 
 func NewTLSOptionRegistry(path string) *TLSOptionRegistry {
-	reg := &TLSOptionRegistry{
-		options: make(map[string]*gateonv1.TLSOption),
-		path:    path,
-	}
+	reg := NewEmptyTLSOptionRegistry()
+	reg.path = path
 	reg.load()
 	return reg
+}
+
+func NewEmptyTLSOptionRegistry() *TLSOptionRegistry {
+	return &TLSOptionRegistry{
+		options: make(map[string]*gateonv1.TLSOption),
+	}
 }
 
 func (r *TLSOptionRegistry) load() {
@@ -156,4 +160,12 @@ func (r *TLSOptionRegistry) Delete(ctx context.Context, id string) error {
 
 	delete(r.options, id)
 	return r.saveLocked()
+}
+
+func (r *TLSOptionRegistry) Mu() *sync.RWMutex {
+	return &r.mu
+}
+
+func (r *TLSOptionRegistry) Options() map[string]*gateonv1.TLSOption {
+	return r.options
 }
