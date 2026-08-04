@@ -208,11 +208,11 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
       );
     }
 
-    const { time, level, message, ...rest } = entry.parsed;
+    const { time, level, message, msg: messageAlias, ...rest } = entry.parsed;
     
     const formattedTime = time ? new Date(String(time)).toLocaleTimeString() : "";
     const logLevel = level ? String(level).toUpperCase() : "INFO";
-    const msg = message || "";
+    const msg = message || messageAlias || "";
 
     return (
       <Group gap="xs" align="flex-start" wrap="nowrap">

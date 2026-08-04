@@ -285,9 +285,7 @@ func ExtractToken(r *http.Request) string {
 		return t
 	}
 	if t := r.URL.Query().Get("auth"); t != "" {
-		if isWebSocketOrSSE(r) {
-			return t
-		}
+		return t
 	}
 	return ""
 }

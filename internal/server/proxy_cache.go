@@ -82,6 +82,12 @@ func transportConfigFromGlobal(gc *gateonv1.GlobalConfig) *proxy.TransportConfig
 	return cfg
 }
 
+// Count returns the number of active proxies in the cache.
+func (c *ProxyCache) Count() int {
+	m := c.proxies.Load().(map[string]http.Handler)
+	return len(m)
+}
+
 // GetOrCreate returns a cached proxy handler for the route or creates one.
 func (c *ProxyCache) GetOrCreate(rt *gateonv1.Route) http.Handler {
 	// Lock-free read path

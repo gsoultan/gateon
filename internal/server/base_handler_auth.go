@@ -82,6 +82,8 @@ func isGateonManagementAPIPath(path string) bool {
 		"/v1/certificates",
 		"/v1/certs",
 		"/v1/diagnostics",
+		"/v1/diag",
+		"/v1/logs",
 		"/v1/traces",
 		"/v1/security",
 		"/v1/ai-advisory",

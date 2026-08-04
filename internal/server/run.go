@@ -238,6 +238,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 				return
 			case <-ticker.C:
 				s.SyncProxies()
+				// Heartbeat log for live observability
+				logger.L.LogDebug("gateway heartbeat", "active_proxies", s.proxyCache().Count())
 			}
 		}
 	})

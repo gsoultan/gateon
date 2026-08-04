@@ -75,52 +75,17 @@ func CreateBaseHandler(
 		authInternal = middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
 	}
 
-	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Limit request body size to prevent DoS via large payloads.
-		// Default is 10MB, but GeoIP database uploads can be much larger.
-		limit := int64(10 * 1024 * 1024)
-		if r.URL.Path == "/v1/geoip/upload" {
-			limit = 512 * 1024 * 1024 // 512MB for GeoIP database
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, limit)
-
-		rs := middleware.GetRequestState(r)
+	// mgmtLogic defines the internal handler for management API, UI, and auth.
+	// It is separated so that MgmtCORS can be applied only to this path.
+	mgmtLogic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gc := deps.GlobalReg.Get(r.Context())
 		epID := ""
-		if rs != nil {
+		if rs := middleware.GetRequestState(r); rs != nil {
 			epID = rs.EntryPointID
 		} else if id, ok := r.Context().Value(middleware.EntryPointIDContextKey).(string); ok {
 			epID = id
 		}
 
-		allowPublic := isPublicManagementAllowed(r, epID, deps.GlobalReg)
-		isMgmtAPI := allowPublic && isGateonManagementAPIPath(r.URL.Path)
-
-		if epID != "management" && !isMgmtAPI {
-			rt := router.SelectRoute(r, deps.RouteStore)
-			if rs := middleware.GetRequestState(r); rs != nil {
-				rs.TRoute = time.Now().UnixNano()
-			}
-			if rt != nil {
-				// Avoid double-routing in HandleProxyOrLocal by passing the matched route in context.
-				if rs := middleware.GetRequestState(r); rs != nil {
-					rs.MatchedRoute = rt
-					handler.ServeHTTP(w, r)
-				} else {
-					ctx := context.WithValue(r.Context(), middleware.MatchedRouteContextKey, rt)
-					handler.ServeHTTP(w, r.WithContext(ctx))
-				}
-				return
-			}
-
-			// Security: If no user route matched on a NON-management entrypoint,
-			// block access to the internal API/UI unless explicitly allowed.
-			if !isHealthPath(r.URL.Path) && !allowPublic {
-				http.NotFound(w, r)
-				return
-			}
-		}
-
-		gc := deps.GlobalReg.Get(r.Context())
 		// Management entrypoint ALWAYS requires auth checks for API paths,
 		// even if auth is disabled globally for the gateway's proxy traffic.
 		if needsAuth(gc, deps) || epID == "management" {
@@ -149,10 +114,63 @@ func CreateBaseHandler(
 		finalInternal.ServeHTTP(w, r)
 	})
 
-	// Apply Telemetry and CORS at the very edge to ensure they cover all responses, including auth failures.
-	h := middleware.Telemetry("gateon")(mainHandler)
+	var mgmtHandler http.Handler = mgmtLogic
 	if deps.MgmtCORS != nil {
-		h = deps.MgmtCORS.Handler(h)
+		mgmtHandler = deps.MgmtCORS.Handler(mgmtLogic)
 	}
-	return h
+
+	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Limit request body size to prevent DoS via large payloads.
+		// Default is 10MB, but GeoIP database uploads can be much larger.
+		limit := int64(10 * 1024 * 1024)
+		if r.URL.Path == "/v1/geoip/upload" {
+			limit = 512 * 1024 * 1024 // 512MB for GeoIP database
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+
+		rs := middleware.GetRequestState(r)
+		epID := ""
+		if rs != nil {
+			epID = rs.EntryPointID
+		} else if id, ok := r.Context().Value(middleware.EntryPointIDContextKey).(string); ok {
+			epID = id
+		}
+
+		allowPublic := isPublicManagementAllowed(r, epID, deps.GlobalReg)
+		isMgmt := epID == "management"
+
+		// Rule: Proxy routes generally take precedence over management logic.
+		// On the management entrypoint, we are more restrictive: proxy routes only win if
+		// they don't overlap with management API paths, UNLESS the route has an explicit
+		// Host() rule (indicating explicit intent to host that domain's traffic).
+		rt := router.SelectRoute(r, deps.RouteStore)
+		if rt != nil {
+			canShadow := !isMgmt || !isGateonManagementAPIPath(r.URL.Path) || router.RouteHasHostRule(rt.Rule)
+			if canShadow {
+				if rs := middleware.GetRequestState(r); rs != nil {
+					rs.TRoute = time.Now().UnixNano()
+					rs.MatchedRoute = rt
+					handler.ServeHTTP(w, r)
+				} else {
+					ctx := context.WithValue(r.Context(), middleware.MatchedRouteContextKey, rt)
+					handler.ServeHTTP(w, r.WithContext(ctx))
+				}
+				return
+			}
+		}
+
+		// Security: If no user route matched on a NON-management entrypoint,
+		// block access to the internal API/UI unless explicitly allowed.
+		isMgmtAPI := (isMgmt || allowPublic) && isGateonManagementAPIPath(r.URL.Path)
+		if !isMgmt && !isMgmtAPI && !isHealthPath(r.URL.Path) && !allowPublic {
+			http.NotFound(w, r)
+			return
+		}
+
+		mgmtHandler.ServeHTTP(w, r)
+	})
+
+	// Apply Telemetry at the edge to ensure it covers all responses.
+	// MgmtCORS is now applied conditionally inside mainHandler for better isolation.
+	return middleware.Telemetry("gateon")(mainHandler)
 }

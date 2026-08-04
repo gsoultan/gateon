@@ -13,6 +13,8 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"github.com/rs/cors"
+	"github.com/stretchr/testify/assert"
 )
 
 type mockRouteStore struct{}
@@ -83,6 +85,157 @@ func (m *mockGlobalReg) Update(ctx context.Context, config *gateonv1.GlobalConfi
 
 func (m *mockGlobalReg) ConfigFileExists() bool {
 	return true
+}
+
+type mockRouteStoreWithRoutes struct {
+	mockRouteStore
+	routes []*gateonv1.Route
+}
+
+func (m *mockRouteStoreWithRoutes) List(ctx context.Context) []*gateonv1.Route {
+	return m.routes
+}
+
+func (m *mockRouteStoreWithRoutes) GetTrieByHost(host string) (*config.PathTrie, []*gateonv1.Route) {
+	return nil, m.routes
+}
+
+func (m *mockRouteStoreWithRoutes) GetWildcardTrie() (*config.PathTrie, []*gateonv1.Route) {
+	return nil, m.routes
+}
+
+func TestCreateBaseHandler_CORSBypassProxy(t *testing.T) {
+	// 1. Setup mocks
+	// Define a route for /v1/invoices
+	rt := &gateonv1.Route{
+		Id:   "invoice-route",
+		Rule: "PathPrefix(`/v1/invoices`)",
+	}
+	routeStore := &mockRouteStoreWithRoutes{routes: []*gateonv1.Route{rt}}
+	globalStore := &mockGlobalReg{config: &gateonv1.GlobalConfig{}}
+
+	// 2. Setup MgmtCORS with a restricted origin
+	mgmtCors := cors.New(cors.Options{
+		AllowedOrigins: []string{"https://mgmt.allowed.id"},
+	})
+
+	// Proxy handler that adds its own CORS header to simulate route CORS middleware
+	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "https://proxy.allowed.id")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("proxied"))
+	})
+
+	deps := BaseHandlerDeps{
+		ProxyHandler: proxyHandler,
+		RouteStore:   routeStore,
+		GlobalReg:    globalStore,
+		MgmtCORS:     mgmtCors,
+	}
+
+	handler := CreateBaseHandler(http.NotFoundHandler(), deps, nil, http.NewServeMux())
+
+	// 3. Test preflight request from a DIFFERENT origin (the one that was previously blocked)
+	req := httptest.NewRequest("OPTIONS", "https://api.mulford.id/v1/invoices", nil)
+	req.Header.Set("Origin", "https://cms.mulford.id")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// In the fixed implementation, MgmtCORS is bypassed for proxy routes.
+	// Since our mock proxyHandler adds the header, it should be present.
+	// If MgmtCORS was still intercepting, it would return 204 with no headers (because origin mismatch).
+	assert.Equal(t, "https://proxy.allowed.id", w.Header().Get("Access-Control-Allow-Origin"), "Proxy CORS should NOT be shadowed by MgmtCORS")
+}
+
+func TestCreateBaseHandler_CORSBypassGRPC(t *testing.T) {
+	// 1. Setup mocks
+	// Define a route for gRPC
+	rt := &gateonv1.Route{
+		Id:   "grpc-route",
+		Rule: "PathPrefix(`/poseidon.employee.EmployeeService/`)",
+	}
+	routeStore := &mockRouteStoreWithRoutes{routes: []*gateonv1.Route{rt}}
+	globalStore := &mockGlobalReg{config: &gateonv1.GlobalConfig{}}
+
+	// 2. Setup MgmtCORS with a restricted origin
+	mgmtCors := cors.New(cors.Options{
+		AllowedOrigins: []string{"https://mgmt.allowed.id"},
+	})
+
+	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "https://cms.mulford.id")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("proxied-grpc"))
+	})
+
+	deps := BaseHandlerDeps{
+		ProxyHandler: proxyHandler,
+		RouteStore:   routeStore,
+		GlobalReg:    globalStore,
+		MgmtCORS:     mgmtCors,
+	}
+
+	handler := CreateBaseHandler(http.NotFoundHandler(), deps, nil, http.NewServeMux())
+
+	// 3. Test gRPC-web preflight request
+	req := httptest.NewRequest("OPTIONS", "https://grpc.mulford.id/poseidon.employee.EmployeeService/SignIn", nil)
+	req.Header.Set("Origin", "https://cms.mulford.id")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, "https://cms.mulford.id", w.Header().Get("Access-Control-Allow-Origin"), "gRPC Proxy CORS should NOT be shadowed by MgmtCORS")
+}
+
+func TestCreateBaseHandler_CORSBypassHostSpecific(t *testing.T) {
+	// 1. Setup mocks
+	// Define a route for /v1/invoices WITH a Host rule
+	rt := &gateonv1.Route{
+		Id:   "invoice-route",
+		Rule: "Host(`api.mulford.id`) && PathPrefix(`/v1/invoices`)",
+	}
+	routeStore := &mockRouteStoreWithRoutes{routes: []*gateonv1.Route{rt}}
+	globalStore := &mockGlobalReg{config: &gateonv1.GlobalConfig{}}
+
+	// 2. Setup MgmtCORS with a restricted origin
+	mgmtCors := cors.New(cors.Options{
+		AllowedOrigins: []string{"https://mgmt.allowed.id"},
+	})
+
+	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "https://cms.mulford.id")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("proxied"))
+	})
+
+	deps := BaseHandlerDeps{
+		ProxyHandler: proxyHandler,
+		RouteStore:   routeStore,
+		GlobalReg:    globalStore,
+		MgmtCORS:     mgmtCors,
+	}
+
+	handler := CreateBaseHandler(http.NotFoundHandler(), deps, nil, http.NewServeMux())
+
+	// 3. Test preflight request for the proxy route
+	// We use the management entrypoint ID to simulate the most difficult case
+	req := httptest.NewRequest("OPTIONS", "https://api.mulford.id/v1/invoices", nil)
+	req.Header.Set("Origin", "https://cms.mulford.id")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+
+	// Inject management entrypoint ID
+	ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Even on management entrypoint, because the route has a Host rule matching the request,
+	// it should bypass MgmtCORS and be handled by the proxy.
+	assert.Equal(t, "https://cms.mulford.id", w.Header().Get("Access-Control-Allow-Origin"), "Host-specific route should bypass MgmtCORS even on management entrypoint")
 }
 
 func TestCreateBaseHandler_Security(t *testing.T) {
@@ -306,6 +459,8 @@ func TestBaseHandler_ManagementAPIPriority(t *testing.T) {
 		"/v1/agg-stats",
 		"/v1/path-stats",
 		"/v1/global",
+		"/v1/logs",
+		"/v1/diag/sys",
 		"/v1/security/posture",
 		"/gateon.v1.ApiService/ListSecurityThreats",
 	}
