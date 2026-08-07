@@ -9,6 +9,23 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Migrations run at startup and gateon advertises Postgres support, but the
+    # suite only ever exercised SQLite — the permissive one. A service container
+    # costs nothing here and turns "should work on Postgres" into a checked fact.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gateon
+          POSTGRES_PASSWORD: gateon
+          POSTGRES_DB: gateon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -53,6 +70,8 @@ jobs:
         run: go build ./...
 
       - name: Test
+        env:
+          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
         run: go test ./...
 
       - name: Benchmarks (allocs/perf regression check)
