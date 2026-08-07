@@ -45,7 +45,9 @@ ui/package-lock.json
 ui/src/services/gen/*
 gateon.exe
 gateon_test.exe
-go.sum
+# go.sum is the checksum lockfile and MUST be tracked: gateon is an
+# application, and CI builds with -mod=readonly, which fails outright
+# without it. Ignoring it also gives up supply-chain verification.
 proto/gateon/v1/*.go
 
 # Test artifacts (SQLite scratch DBs + Pebble trace stores).

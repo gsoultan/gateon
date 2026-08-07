@@ -319,36 +319,51 @@ func TestWAFCorpus_EngineBlocksUnambiguousMarkers(t *testing.T) {
 	}
 }
 
-// TestWAFCorpus_JavascriptSchemeAmbiguity documents the one place retiring the
-// fast path changed behaviour, and why the change is correct.
+// TestWAFCorpus_JavascriptSchemeAmbiguity pins where the line sits between a
+// script URI that is an attack and a string that merely mentions one.
 //
-// The fast path blocked any value containing the substring "javascript:". That
-// caught the reflected XSS form — but it also refused javascript:void(0), the
-// most common no-op link on the web, and every redirect/callback parameter that
-// legitimately carries such a value. The engine draws the line by intent
-// instead: a scheme inside a URI attribute is a link that runs code and blocks;
-// a bare scheme in a parameter value is an ambiguous string and passes, because
-// only the application knows whether it reflects that value into an href.
+// The retired fast path blocked any value containing the substring
+// "javascript:", which refused prose about the scheme along with the attacks.
+// The engine draws the line by intent: a script URI that actually *invokes*
+// something is a payload and blocks (gwaf rule 3011, added in v0.2.1 and
+// validated at 0 false positives over 10,473 benign samples), while a bare
+// mention with no call is text and passes.
+//
+// This is a tighter line than gwaf v0.2.0 drew — javascript:void(0) in a
+// parameter now blocks, because void(0) is an invocation. That is defensible:
+// a redirect parameter carrying a script URI is an open-redirect-to-XSS shape,
+// not ordinary traffic. What must not regress is the substring behaviour, so
+// the mention cases below are the ones that matter.
 func TestWAFCorpus_JavascriptSchemeAmbiguity(t *testing.T) {
 	h := wafCorpusHandler(t)
 
-	// Exploitable shape: scheme in a URI attribute. Must block.
-	blocked := `/?html=%3Ca%20href%3D%22javascript%3Aalert(1)%22%3E`
-	if got := serveCorpus(h, "GET", blocked, ""); got != http.StatusForbidden {
-		t.Errorf("javascript: in an href attribute got %d, want 403", got)
+	// Invocation — an attack shape. Must block.
+	blocked := []struct{ name, url string }{
+		{"scheme in href attribute", `/?html=%3Ca%20href%3D%22javascript%3Aalert(1)%22%3E`},
+		{"scheme invoking in a param", "/?u=javascript:alert(1)"},
+		{"scheme in a redirect param", "/?next=javascript:void(0)"},
+	}
+	for _, tc := range blocked {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serveCorpus(h, "GET", tc.url, ""); got != http.StatusForbidden {
+				t.Errorf("%s: got %d, want 403 — a script URI that invokes something "+
+					"is a payload", tc.name, got)
+			}
+		})
 	}
 
-	// Ambiguous shape: bare scheme in a parameter value. Must pass — blocking
-	// these is the false-positive class the fast path produced.
+	// Mention without a call — text. Must pass. Blocking these is the
+	// false-positive class the substring fast path produced.
 	allowed := []struct{ name, url string }{
-		{"void no-op link", "/?next=javascript:void(0)"},
-		{"redirect param", "/?returnUrl=javascript:history.back()"},
+		{"prose about the scheme", "/?text=the%20javascript:%20scheme%20is%20blocked"},
+		{"documentation phrasing", "/?doc=use%20javascript:%20URIs%20with%20care"},
+		{"ordinary relative redirect", "/?next=/dashboard/settings"},
 	}
 	for _, tc := range allowed {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := serveCorpus(h, "GET", tc.url, ""); got != http.StatusOK {
-				t.Errorf("%s: got %d, want 200 — bare javascript: in a param value "+
-					"is ambiguous and must not be blocked as a substring", tc.name, got)
+				t.Errorf("%s: got %d, want 200 — a mention of the scheme with no "+
+					"invocation is text, not an attack", tc.name, got)
 			}
 		})
 	}
