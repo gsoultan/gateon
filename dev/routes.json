@@ -1,0 +1,26 @@
+[
+  {
+    "id": "api-route",
+    "name": "API (own WAF override + rate limit, strips /api)",
+    "type": "http",
+    "rule": "PathPrefix(`/api`)",
+    "service_id": "api-service",
+    "middlewares": [
+      "waf-protect",
+      "ratelimit-dev",
+      "strip-api",
+      "cors-allow-all"
+    ]
+  },
+  {
+    "id": "web-route",
+    "name": "Web catch-all (protected by the global WAF, no per-route setup)",
+    "type": "http",
+    "rule": "PathPrefix(`/`)",
+    "service_id": "whoami-service",
+    "middlewares": [
+      "dev-headers",
+      "cors-allow-all"
+    ]
+  }
+]
