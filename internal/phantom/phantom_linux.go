@@ -29,6 +29,11 @@ type linuxCore struct {
 	activePorts atomic.Int32
 	ctx         context.Context
 	cancel      context.CancelFunc
+	// reactorDone is closed when the reactor goroutine has returned. Close
+	// waits on it before freeing the ring: cancelling the context only asks the
+	// reactor to stop, and unmapping the ring while it is still running is a
+	// use-after-free.
+	reactorDone chan struct{}
 	mu          sync.RWMutex
 }
 
@@ -50,14 +55,19 @@ func newPhantomCore(ebpf EbpfManager) PhantomCore {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go rea.Run(ctx)
+	reactorDone := make(chan struct{})
+	go func() {
+		defer close(reactorDone)
+		rea.Run(ctx)
+	}()
 
 	return &linuxCore{
-		ring:   ring,
-		rea:    rea,
-		ebpf:   ebpf,
-		ctx:    ctx,
-		cancel: cancel,
+		ring:        ring,
+		rea:         rea,
+		ebpf:        ebpf,
+		ctx:         ctx,
+		cancel:      cancel,
+		reactorDone: reactorDone,
 	}
 }
 
@@ -190,6 +200,15 @@ func (c *linuxCore) Close() error {
 	defer c.mu.Unlock()
 	if c.cancel != nil {
 		c.cancel()
+	}
+	// Wait for the reactor to actually return before releasing the ring.
+	// cancel() only signals it; uring.Ring.Close unmaps the submission and
+	// completion queues, so freeing them while the reactor still holds a
+	// pointer into that memory is a use-after-free — it faulted with SIGSEGV in
+	// freeRing on every CI run.
+	if c.reactorDone != nil {
+		<-c.reactorDone
+		c.reactorDone = nil
 	}
 	if c.ring != nil {
 		err := c.ring.Close()
