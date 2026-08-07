@@ -39,7 +39,10 @@ tls_options.json
 internal/ui/dist/*
 !internal/ui/dist/.gitkeep
 .junie
-ui/bun.lock
+# ui/bun.lock MUST be tracked. Without it every CI run re-resolves the
+# caret ranges in package.json against npm, so builds are not reproducible
+# and a single upstream unpublish breaks them — which is exactly what
+# @tanstack/router-core@1.171.19 did. It is the frontend's go.sum.
 ui/.bun-cache
 ui/package-lock.json
 ui/src/services/gen/*
