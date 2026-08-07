@@ -9,10 +9,7 @@ import (
 )
 
 func TestWAF_GRPCCompatibility(t *testing.T) {
-	mw, err := WAF(WAFConfig{
-		UseCRS:   true,
-		GRPCMode: true,
-	})
+	mw, err := WAF(WAFConfig{})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
 	}

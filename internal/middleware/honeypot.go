@@ -3,9 +3,11 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,6 +23,46 @@ var (
 	honeypotBlocklist = make(map[string]time.Time)
 	blocklistMu       sync.RWMutex
 )
+
+// maxHoneypotBlocklist caps the blocklist. Entries are keyed by client IP and
+// otherwise only removed when that same address returns after its ban expires,
+// so a scan from many sources would retain every one of them forever. At the
+// cap we sweep expired entries first and, if that frees nothing, refuse to grow
+// — a ban that cannot be recorded is far cheaper than an unbounded map fed by
+// attacker-chosen keys.
+const maxHoneypotBlocklist = 10_000
+
+// defaultHoneypotPaths lists the trap paths used when deception is active but
+// the operator configured none.
+//
+// Every entry must be a path no legitimate client ever requests. /admin and
+// /wp-admin were deliberately removed: they are the front door of most admin
+// panels and of every WordPress install, so trapping them by default bans the
+// first real administrator to sign in — and behind CGNAT or a corporate egress,
+// everyone sharing that address. Operators who front no such app can still add
+// them explicitly via SecurityAdvanced.Deception.HoneypotPaths.
+func defaultHoneypotPaths() []string {
+	return []string{"/.env", "/.git", "/config.php", "/backup.sql", "/.aws", "/.ssh"}
+}
+
+// blockHoneypotIP records a ban, keeping the blocklist bounded.
+func blockHoneypotIP(clientIP string, until time.Time) {
+	blocklistMu.Lock()
+	defer blocklistMu.Unlock()
+
+	if _, exists := honeypotBlocklist[clientIP]; !exists && len(honeypotBlocklist) >= maxHoneypotBlocklist {
+		now := time.Now()
+		for ip, exp := range honeypotBlocklist {
+			if now.After(exp) {
+				delete(honeypotBlocklist, ip)
+			}
+		}
+		if len(honeypotBlocklist) >= maxHoneypotBlocklist {
+			return
+		}
+	}
+	honeypotBlocklist[clientIP] = until
+}
 
 // HoneypotConfig defines the configuration for the Honeypot middleware.
 type HoneypotConfig struct {
@@ -58,7 +100,7 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 
 			if len(paths) == 0 {
 				// Use defaults if none configured but middleware is active
-				paths = []string{"/.env", "/wp-admin", "/admin", "/.git", "/config.php", "/backup.sql", "/.aws", "/.ssh"}
+				paths = defaultHoneypotPaths()
 			}
 
 			path := r.URL.Path
@@ -66,9 +108,7 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 			// Check for breadcrumb triggers first
 			if strings.HasPrefix(path, "/_gateon_trap_") {
 				recordHoneypotThreat(r, "dynamic_breadcrumb")
-				blocklistMu.Lock()
-				honeypotBlocklist[clientIP] = time.Now().Add(24 * time.Hour)
-				blocklistMu.Unlock()
+				blockHoneypotIP(clientIP, time.Now().Add(24*time.Hour))
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
@@ -80,10 +120,7 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 				// Exact match or prefix match for directories
 				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
 					recordHoneypotThreat(r, trapPath)
-
-					blocklistMu.Lock()
-					honeypotBlocklist[clientIP] = time.Now().Add(24 * time.Hour)
-					blocklistMu.Unlock()
+					blockHoneypotIP(clientIP, time.Now().Add(24*time.Hour))
 
 					// Return 403 Forbidden to the attacker
 					http.Error(w, "Forbidden", http.StatusForbidden)
@@ -111,6 +148,18 @@ type breadcrumbWriter struct {
 	request     *http.Request
 	wroteHeader bool
 	isHTML      bool
+}
+
+// Hijack forwards to the underlying writer so a WebSocket upgrade behind the
+// honeypot breadcrumb middleware can take the raw connection. Breadcrumb
+// injection only touches an HTML response body, which a hijacked connection
+// does not have.
+func (w *breadcrumbWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hj.Hijack()
 }
 
 func (w *breadcrumbWriter) WriteHeader(code int) {
@@ -186,10 +235,7 @@ func Honeypot(cfg HoneypotConfig) Middleware {
 				// Exact match or prefix match for directories
 				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
 					recordHoneypotThreat(r, trapPath)
-
-					blocklistMu.Lock()
-					honeypotBlocklist[clientIP] = time.Now().Add(24 * time.Hour)
-					blocklistMu.Unlock()
+					blockHoneypotIP(clientIP, time.Now().Add(24*time.Hour))
 
 					// Return 403 Forbidden to the attacker
 					http.Error(w, "Forbidden", http.StatusForbidden)
@@ -228,19 +274,10 @@ func recordHoneypotThreat(r *http.Request, trapPath string) {
 func parseHoneypotConfig(cfg map[string]string) HoneypotConfig {
 	pathsStr := cfg["paths"]
 	if pathsStr == "" {
-		// Default common trap paths if none provided
-		return HoneypotConfig{
-			Paths: []string{
-				"/.env",
-				"/wp-admin",
-				"/admin",
-				"/.git",
-				"/config.php",
-				"/backup.sql",
-				"/.aws",
-				"/.ssh",
-			},
-		}
+		// Same default list as the global honeypot, and for the same reason:
+		// a trap that bans an address for 24 hours must only cover paths no
+		// legitimate client requests. See defaultHoneypotPaths.
+		return HoneypotConfig{Paths: defaultHoneypotPaths()}
 	}
 
 	parts := strings.Split(pathsStr, ",")

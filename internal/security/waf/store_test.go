@@ -8,12 +8,18 @@ import (
 	"testing"
 )
 
-func TestStore_SeedAndReload(t *testing.T) {
-	// Use in-memory SQLite for testing
+// TestStore_DoesNotSeedDefaultRules pins the inversion of what this test used
+// to assert. gateon's default rules were 75 SecLang rows seeded into every
+// install; they are now compiled into the binary, so a fresh database must come
+// up with none of them.
+//
+// It matters that Seed is exercised rather than skipped: a Seed that quietly
+// reinserted the defaults would undo migration 60 on the next restart, and the
+// only visible symptom would be 75 unenforceable SecLang rows reappearing.
+func TestStore_DoesNotSeedDefaultRules(t *testing.T) {
 	databaseURL := "sqlite::memory:"
 
-	err := InitStore(databaseURL)
-	if err != nil {
+	if err := InitStore(databaseURL); err != nil {
 		t.Fatalf("InitStore failed: %v", err)
 	}
 
@@ -22,21 +28,127 @@ func TestStore_SeedAndReload(t *testing.T) {
 		t.Fatal("GetStore returned nil")
 	}
 
-	rules := store.GetAllRules()
-	if len(rules) == 0 {
-		t.Error("expected rules to be seeded, got 0")
+	if err := store.Seed(context.Background()); err != nil {
+		t.Fatalf("Seed failed: %v", err)
 	}
 
-	// Verify some specific rule
-	found := false
-	for _, r := range rules {
-		if r.ID == "1900300" {
-			found = true
-			break
+	for _, r := range store.GetAllRules() {
+		if _, seeded := RetirementByID(r.ID); seeded {
+			t.Errorf("retired default rule %s (%s) is present in the database", r.ID, r.Name)
+		}
+		for _, s := range defaultSpecs {
+			if r.ID == fmt.Sprint(s.id) {
+				t.Errorf("built-in rule %d is also stored in the database; it would "+
+					"be compiled twice and collide on ID", s.id)
+			}
 		}
 	}
-	if !found {
-		t.Error("expected rule 1900300 to be found")
+}
+
+// TestStore_CompiledRulesRejectsUnconvertedRules covers the state an install
+// lands in immediately after the engine migration: rows that are still SecLang.
+//
+// They must not be silently skipped. A skipped rule and an enforced rule look
+// identical from the dashboard, so an operator would believe a protection is
+// running when nothing can execute it.
+func TestStore_CompiledRulesRejectsUnconvertedRules(t *testing.T) {
+	databaseURL := "sqlite::memory:"
+	_ = InitStore(databaseURL)
+	store := GetStore()
+	ctx := context.Background()
+	_, _ = store.db.Exec("DELETE FROM waf_rules")
+
+	legacy := &Rule{
+		ID:            "2000001",
+		Name:          "Legacy SecLang rule",
+		Directive:     `SecRule ARGS "@rx evil" "id:2000001,phase:2,deny"`,
+		Format:        FormatSecLang,
+		Enabled:       true,
+		ParanoiaLevel: 1,
+		Category:      "Test",
+	}
+	if err := store.AddRule(ctx, legacy); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+
+	typed := &Rule{
+		ID:   "2000002",
+		Name: "Typed rule",
+		Definition: `{"phase":"request_body","targets":["args"],
+			"transforms":["urldecode","lowercase"],
+			"operator":{"kind":"contains","pattern":"evil"},
+			"severity":"critical","confidence":"high","msg":"Evil detected",
+			"tags":["test"]}`,
+		Format:        FormatGateon,
+		Enabled:       true,
+		ParanoiaLevel: 1,
+		Category:      "Test",
+	}
+	if err := store.AddRule(ctx, typed); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+
+	set, problems := store.CompiledRules(1)
+	if len(set) != 1 {
+		t.Fatalf("compiled %d rules, want 1", len(set))
+	}
+	if set[0].ID != 2000002 {
+		t.Errorf("compiled rule %d, want 2000002", set[0].ID)
+	}
+	if len(problems) != 1 {
+		t.Fatalf("reported %d problems, want 1", len(problems))
+	}
+	if problems[0].ID != "2000001" {
+		t.Errorf("reported rule %s, want 2000001", problems[0].ID)
+	}
+}
+
+// TestStore_CompiledRulesRespectsParanoiaLevel keeps the stored level meaning
+// what it did under Coraza, where the directive builder filtered on it.
+func TestStore_CompiledRulesRespectsParanoiaLevel(t *testing.T) {
+	databaseURL := "sqlite::memory:"
+	_ = InitStore(databaseURL)
+	store := GetStore()
+	ctx := context.Background()
+	_, _ = store.db.Exec("DELETE FROM waf_rules")
+
+	def := `{"phase":"request_body","targets":["args"],
+		"operator":{"kind":"contains","pattern":"noisy"},
+		"severity":"warning","confidence":"medium","msg":"Noisy heuristic",
+		"tags":["test"]}`
+
+	if err := store.AddRule(ctx, &Rule{
+		ID: "2000003", Name: "PL2 rule", Definition: def, Format: FormatGateon,
+		Enabled: true, ParanoiaLevel: 2, Category: "Test",
+	}); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+
+	if set, _ := store.CompiledRules(1); len(set) != 0 {
+		t.Errorf("a PL2 rule compiled at PL1: %d rules", len(set))
+	}
+	if set, problems := store.CompiledRules(2); len(set) != 1 || len(problems) != 0 {
+		t.Errorf("at PL2 got %d rules and %d problems, want 1 and 0", len(set), len(problems))
+	}
+}
+
+// TestStore_HashedRuleIDsAreStable guards the identifier a dashboard-authored
+// rule gets. gwaf identifies a rule by a number that appears in every decision,
+// audit record and exception, so a UUID-backed rule whose number changed
+// between restarts would silently repoint every exception written against it.
+func TestStore_HashedRuleIDsAreStable(t *testing.T) {
+	t.Parallel()
+
+	const uuid = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+	first := hashedRuleID(uuid)
+	if first != hashedRuleID(uuid) {
+		t.Error("hashedRuleID is not deterministic")
+	}
+	if first < userRuleIDMin {
+		t.Errorf("hashedRuleID produced %d, inside the engine's reserved range", first)
+	}
+	if hashedRuleID(uuid) == hashedRuleID("a-different-rule") {
+		t.Error("two distinct rule identifiers collided")
 	}
 }
 
@@ -144,6 +256,12 @@ func TestStore_ListRules(t *testing.T) {
 	}
 	if len(rules) != 5 {
 		t.Errorf("expected 5 rules on page 2, got %d", len(rules))
+	}
+	// The total is the size of the whole result set, not of the page, so it
+	// must not change as the caller walks pages — a dashboard paginator that
+	// re-reads it per page would otherwise jump around.
+	if total != 15 {
+		t.Errorf("expected total 15 on page 2, got %d", total)
 	}
 
 	// Test Search by ID

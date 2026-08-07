@@ -98,13 +98,21 @@ func (h *ProxyHandler) DrainAndClose(timeout time.Duration) {
 		case <-ticker.C:
 			continue
 		case <-timer.C:
-			h.routeName = h.routeName + " (drain timeout)"
+			// Do not mutate routeName here: it is read concurrently by the
+			// health-check goroutine as a Prometheus label.
+			logger.L.LogWarn("proxy drain timed out with in-flight requests",
+				"route", h.RouteName(), "timeout", timeout)
 			goto finish
 		}
 	}
 
 finish:
 	h.Close()
+}
+
+// RouteName returns the label of the route this handler serves.
+func (h *ProxyHandler) RouteName() string {
+	return h.routeName
 }
 
 func (h *ProxyHandler) activeConnCount() int32 {

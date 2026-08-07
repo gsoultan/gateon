@@ -3,8 +3,10 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -84,6 +86,20 @@ func (bw *transformResponseWriter) Write(b []byte) (int, error) {
 func (bw *transformResponseWriter) WriteHeader(code int) {
 	bw.status = code
 	bw.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards to the underlying writer so a WebSocket upgrade behind this
+// middleware can take the raw connection. Without it, wrapping the writer to
+// buffer the body silently strips the http.Hijacker the proxy asserts on, and
+// every upgrade on a route with body transformation fails with 500. Body
+// transformation does not apply to a hijacked connection anyway — there is no
+// HTTP response body to rewrite once the socket is switched to WebSocket.
+func (bw *transformResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := bw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hj.Hijack()
 }
 
 func (bw *transformResponseWriter) Flush() {
