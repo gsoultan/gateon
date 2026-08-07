@@ -59,7 +59,7 @@ jobs:
           go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 
       - name: Install Bun dependencies
-        run: bun install --cwd ui
+        run: bun install --frozen-lockfile --cwd ui
 
       - name: Generate proto
         run: PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate

@@ -31,7 +31,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install Bun dependencies
-        run: bun install --cwd ui
+        run: bun install --frozen-lockfile --cwd ui
 
       - name: Install buf and proto plugins
         run: |
@@ -86,7 +86,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install Bun dependencies
-        run: bun install --cwd ui
+        run: bun install --frozen-lockfile --cwd ui
 
       - name: Install buf and proto plugins
         run: |

@@ -40,7 +40,7 @@ jobs:
 
       - name: Lint UI (accessibility gate)
         run: |
-          bun install --cwd ui
+          bun install --frozen-lockfile --cwd ui
           (cd ui && bun run lint)
 
       - name: Generate all artifacts
