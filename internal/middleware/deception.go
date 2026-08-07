@@ -3,8 +3,10 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -118,6 +120,17 @@ func (w *deceptionResponseWriter) WriteHeader(code int) {
 	}
 	w.wroteHeader = true
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards to the underlying writer so a WebSocket upgrade behind the
+// deception middleware can take the raw connection. Breadcrumb injection only
+// applies to an HTML response body, which a hijacked connection does not have.
+func (w *deceptionResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hj.Hijack()
 }
 
 func (w *deceptionResponseWriter) Write(b []byte) (int, error) {

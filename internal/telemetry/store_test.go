@@ -5,7 +5,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,9 +58,7 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 
 func TestSecurityTelemetryUpdates(t *testing.T) {
 	// Initialize store with a file for stability in tests
-	dbPath := "gateon_telemetry_test.db"
-	_ = os.Remove(dbPath)
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "gateon_telemetry_test.db")
 
 	_ = InitPathStatsStore(dbPath, 1)
 	defer func() {

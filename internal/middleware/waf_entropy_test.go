@@ -13,7 +13,6 @@ func TestWAFEntropyFalsePositive(t *testing.T) {
 	highEntropyToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoyNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
 
 	cfg := WAFConfig{
-		UseCRS:  false,
 		RouteID: "test-route",
 	}
 

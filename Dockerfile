@@ -61,6 +61,19 @@ FROM gcr.io/distroless/static-debian12:nonroot
 # gateway does not over-subscribe host cores under a CPU limit. Default to the
 # balanced resource profile; override GATEON_PROFILE / GOMEMLIMIT at deploy time.
 ENV GATEON_PROFILE=standard
+# Config lives at /etc/gateon. Without these the process resolves every config
+# file relative to its working directory — "/" in a scratch image — so an
+# operator who mounts /etc/gateon/global.json gets a gateway that silently
+# starts on built-in defaults, and the built-in default has the WAF switched
+# off. Naming the paths makes a missing mount a startup error instead.
+ENV GATEON_CONFIG_DIR=/etc/gateon \
+    GLOBAL_CONFIG_FILE=/etc/gateon/global.json \
+    ROUTES_FILE=/etc/gateon/routes.json \
+    SERVICES_FILE=/etc/gateon/services.json \
+    ENTRYPOINTS_FILE=/etc/gateon/entrypoints.json \
+    MIDDLEWARES_FILE=/etc/gateon/middlewares.json \
+    TLS_OPTIONS_FILE=/etc/gateon/tls_options.json
+WORKDIR /var/lib/gateon
 COPY --from=builder /out/gateon /usr/local/bin/gateon
 EXPOSE 8080
 USER nonroot:nonroot
