@@ -52,7 +52,10 @@ func main() {
 			log.Fatalf("seed: create %s: %v", a.username, err)
 		}
 	}
-	log.Printf("seed: admin/operator/viewer ready in %s (password: %s)", *db, *password)
+	// The password is deliberately not logged. It is a known dev default and
+	// scripts/dev.sh prints it in its banner, so echoing it here buys nothing
+	// and writes a credential into whatever collects this output.
+	log.Printf("seed: admin/operator/viewer ready in %s", *db)
 }
 
 func envOr(key, def string) string {
