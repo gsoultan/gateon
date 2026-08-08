@@ -89,6 +89,14 @@ jobs:
     name: e2e-ui (playwright)
     runs-on: ubuntu-latest
     continue-on-error: true
+    # A hard ceiling, because the suite has already demonstrated it can run
+    # away: workers is 1, retries is 2, and the slowest tests allow 180s, so a
+    # run where most tests time out is 104 x 3 x 180s — the better part of a
+    # day — and one such run sat at 1h37m before this was added. The Playwright
+    # globalTimeout below is set lower so the usual outcome is a graceful exit
+    # with a report; this is the backstop for when the runner is wedged and
+    # Playwright itself never gets to decide.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
