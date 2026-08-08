@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAppsProxying(t *testing.T) {
@@ -98,7 +99,7 @@ func TestAppsProxying(t *testing.T) {
 		t.Logf("Response body: %s", string(body))
 
 		headers := data["headers"].(map[string]interface{})
-		
+
 		// Verify pgAdmin specific headers injected by middleware
 		if headers["X-Script-Name"] != "/pgadmin4" {
 			t.Errorf("Expected X-Script-Name: /pgadmin4, got %v", headers["X-Script-Name"])
@@ -106,7 +107,7 @@ func TestAppsProxying(t *testing.T) {
 		if headers["X-Scheme"] != "https" {
 			t.Errorf("Expected X-Scheme: https, got %v", headers["X-Scheme"])
 		}
-		
+
 		// Verify standard proxy headers
 		if headers["X-Forwarded-Proto"] != "https" {
 			t.Errorf("Expected X-Forwarded-Proto: https, got %v", headers["X-Forwarded-Proto"])
@@ -124,6 +125,15 @@ func TestAppsProxying(t *testing.T) {
 			t.Fatalf("Failed to connect to Gateon: %v", err)
 		}
 		defer conn.Close()
+
+		// This is a hand-rolled upgrade over a raw connection, so nothing here
+		// times out on its own: if the gateway does not answer, ReadString
+		// blocks until the whole package hits `go test`'s 10-minute limit and
+		// the panic names the package rather than this test. A deadline turns
+		// that into an immediate, attributable failure.
+		if err := conn.SetDeadline(time.Now().Add(20 * time.Second)); err != nil {
+			t.Fatalf("Failed to set connection deadline: %v", err)
+		}
 
 		// Send WebSocket upgrade request
 		fmt.Fprintf(conn, "GET /synology/ws HTTP/1.1\r\n")
@@ -155,7 +165,7 @@ func TestAppsProxying(t *testing.T) {
 		// Test bidirectional communication (Fast!)
 		message := "Hello WebSocket\n"
 		fmt.Fprint(conn, message)
-		
+
 		reply, err := reader.ReadString('\n')
 		if err != nil {
 			t.Fatalf("Failed to read reply: %v", err)
