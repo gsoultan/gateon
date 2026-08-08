@@ -1,0 +1,97 @@
+{
+  "tls": {
+    "enabled": true,
+    "certificates": [
+      {
+        "id": "test-cert",
+        "name": "Test Certificate",
+        "cert_file": "tests/e2e/cert.pem",
+        "key_file": "tests/e2e/key.pem",
+        "validation": {
+          "valid": true,
+          "recommended_ciphers": [
+            "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256"
+          ]
+        }
+      }
+    ]
+  },
+  "redis": {},
+  "otel": {},
+  "log": {
+    "level": "debug",
+    "development": true,
+    "format": "text",
+    "path_stats_retention_days": 7
+  },
+  "auth": {
+    "paseto_secret": "12345678901234567890123456789012",
+    "database_url": "gateon_test.db"
+  },
+  "transport": {},
+  "waf": {
+    "enabled": true,
+    "use_crs": true,
+    "paranoia_level": 1,
+    "sqli": true,
+    "xss": true,
+    "lfi": true,
+    "rce": true,
+    "protocol": true,
+    "anomaly_threshold": 1,
+    "clamav": {
+      "installation_mode": 2,
+      "docker_image": "clamav/clamav:latest",
+      "full_scan_schedule": "0 2 * * *",
+      "low_resource_mode": true,
+      "clamav_addr": "tcp://localhost:3310"
+    },
+    "audit_only": true
+  },
+  "ha": {},
+  "anomaly_detection": {
+    "check_interval_seconds": 3600,
+    "sensitivity": 0.5,
+    "security_threat_threshold": 999999
+  },
+  "ebpf": {},
+  "management": {
+    "bind": "0.0.0.0",
+    "port": "8080",
+    "allowed_ips": [
+      "0.0.0.0/0",
+      "::/0"
+    ]
+  },
+  "geoip": {
+    "enabled": true,
+    "auto_update": true,
+    "update_interval_days": 30
+  },
+  "debugger": {
+    "max_captures": 1000,
+    "max_body_size": 65536
+  },
+  "security_advanced": {
+    "deception": {
+      "enabled": true,
+      "honeypot_paths": [
+        "/secret-admin"
+      ]
+    },
+    "tarpit": {
+      "enabled": true
+    },
+    "entropy": {},
+    "behavioral": {},
+    "pow": {
+      "secret": "changeme"
+    },
+    "ip_reputation": {}
+  },
+  "alerting": {},
+  "audit": {},
+  "profile": "standard"
+}

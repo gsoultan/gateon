@@ -131,3 +131,5 @@ telemetry_pebble/
 # config-filename ignores above.
 !/dev/*.json
 /tests/**/audit/
+# Same as dev/: the e2e config is fixture data, not local runtime config.
+!/tests/e2e/config/*.json
