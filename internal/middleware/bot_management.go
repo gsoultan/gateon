@@ -8,8 +8,10 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +91,7 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 						HttpOnly: true,
 						MaxAge:   cfg.ChallengeTimeoutSeconds,
 					})
-					http.Redirect(w, r, r.FormValue("redirect"), http.StatusFound)
+					http.Redirect(w, r, safeRedirectTarget(r.FormValue("redirect")), http.StatusFound)
 					return
 				}
 
@@ -130,11 +132,58 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 	}
 }
 
+// safeRedirectTarget reduces a redirect target to a path that cannot leave this
+// origin, falling back to "/" for anything it cannot vouch for.
+//
+// The challenge page round-trips the original URL through the client, so by the
+// time it comes back as a form value it is attacker-controlled. Handing that
+// straight to http.Redirect turns the challenge into an open redirect that
+// borrows the gateway's own domain to launder a phishing link — worse here than
+// in most places, because the victim reaches it by passing a security check.
+//
+// A leading-slash test is not enough on its own: browsers read "//evil.com" as
+// protocol-relative, and some normalise the backslash in "/\evil.com" to a
+// second slash and do the same. Parsing and then rejecting anything carrying a
+// scheme or host covers both without guessing at browser quirks.
+func safeRedirectTarget(raw string) string {
+	if raw == "" {
+		return "/"
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.Opaque != "" {
+		return "/"
+	}
+	// Test the decoded path, not the escaped one: EscapedPath percent-encodes
+	// the backslash to %5C, which would slip past a check written against the
+	// escaped form even though the input is plainly an attempt at
+	// protocol-relative.
+	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") || strings.HasPrefix(u.Path, `/\`) {
+		return "/"
+	}
+	p := u.EscapedPath()
+	if u.RawQuery != "" {
+		return p + "?" + u.RawQuery
+	}
+	return p
+}
+
 func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
 	nonce := GenerateNonce()
+
+	// Escape before interpolating: this lands in a double-quoted HTML attribute
+	// and the request URI is entirely attacker-chosen, so a path of
+	// `/"><base href="https://evil.com/">` would otherwise close the attribute
+	// and repoint every relative URL on the page — including the form action
+	// and the seed fetch — at the attacker. The CSP below blocks injected
+	// inline script, but it does not stop <base>, <meta refresh> or a
+	// substituted form, so the escape is the actual fix and the CSP is
+	// defence in depth. RequestURI() rather than String() keeps any scheme or
+	// host out of the value to begin with.
+	redirectTo := html.EscapeString(safeRedirectTarget(r.URL.RequestURI()))
+
 	// A simple stealthy JS challenge.
 	// In a real implementation, this would be more complex and obfuscated.
-	html := fmt.Sprintf(`
+	page := fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -170,12 +219,12 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
         })();
     </script>
 </body>
-</html>`, r.URL.String(), nonce)
+</html>`, redirectTo, nonce)
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", nonce))
 	w.WriteHeader(http.StatusForbidden) // Or 403 to indicate challenge required
-	_, _ = w.Write([]byte(html))
+	_, _ = w.Write([]byte(page))
 }
 
 func verifyChallengeToken(token, secret, ua, ip string) bool {
