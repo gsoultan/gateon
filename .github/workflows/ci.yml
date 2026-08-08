@@ -126,6 +126,19 @@ jobs:
       - name: Build gateon
         run: go build -o gateon ./cmd/gateon
 
+      # The e2e config points TLS at tests/e2e/cert.pem, which is generated
+      # rather than committed — a checked-in private key is a liability even
+      # when it is only for a test listener. env.go makes its own for the Go
+      # suite; the Playwright harness reads these paths straight from the
+      # config, so they have to exist before the gateway starts.
+      - name: Generate e2e TLS certificate
+        working-directory: tests/e2e
+        run: |
+          openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+            -keyout key.pem -out cert.pem \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
       - name: Install Playwright and Chromium
         run: |
           bun install --frozen-lockfile --cwd tests/e2e
