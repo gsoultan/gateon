@@ -38,7 +38,30 @@ type linuxCore struct {
 }
 
 // newPhantomCore returns the Linux-specific TITAN core implementation.
+//
+// The io_uring listener is opt-in via GATEON_PHANTOM=1. It was on by default
+// and wrapped every listener on every Linux deployment, which cost more than it
+// bought:
+//
+//   - A single accept error killed the listener. iouringListener.Accept
+//     returned io_uring's error straight to http.Server.Serve, which treats a
+//     non-temporary accept failure as fatal, so one EINVAL took down the whole
+//     server. Observed in CI as `Management server failed: invalid argument`
+//     on :8080 and again on :8085, after which every later test failed waiting
+//     for a port that was no longer listening.
+//   - Accepted connections came back as iouringConn rather than *net.TCPConn,
+//     so a hijacked WebSocket did its reads and writes through io_uring. The
+//     upgrade stalled: the gateway wrote nothing at all and the client sat
+//     until its own deadline.
+//
+// Neither is inherent to io_uring, and the Accept path is hardened below. But
+// an optimization with no benchmark behind it should not be the default when it
+// can take the management plane offline, so it now has to be asked for.
 func newPhantomCore(ebpf EbpfManager) PhantomCore {
+	if os.Getenv("GATEON_PHANTOM") != "1" {
+		return &linuxCore{ebpf: ebpf}
+	}
+
 	// Attempt to initialize io_uring with a large enough queue size.
 	// io_uring is used to optimize ingress HTTP handling.
 	ring, err := uring.New(8192)
@@ -259,8 +282,16 @@ func (l *iouringListener) Accept() (net.Conn, error) {
 		return nil, l.ctx.Err()
 	}
 
+	// Fall back rather than surface the error. http.Server.Serve treats a
+	// non-temporary accept error as fatal and stops serving, so returning
+	// io_uring's error here means one bad completion takes the listener down
+	// for good — which is how a single EINVAL silently ended the management
+	// server mid-run. The standard accept path is always available, so an
+	// io_uring failure should cost this one connection at most.
 	if err := event.Error(); err != nil {
-		return nil, err
+		logger.L.LogWarn("io_uring accept failed, falling back to standard accept",
+			"error", err)
+		return l.TCPListener.Accept()
 	}
 
 	newFd := int(event.Res)
