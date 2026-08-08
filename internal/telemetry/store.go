@@ -1231,7 +1231,7 @@ func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThre
 		}
 	}
 	if t.JA4 == "" {
-		ja4 := r.Header.Get("X-JA4-Fingerprint")
+		ja4 := JA4FromTrustedHeader(r)
 		if ja4 == "" {
 			// Try to get from context if request state is missing (unlikely in entrypoint but possible in tests)
 			if ja4Val, ok := r.Context().Value(fingerprintCtxKey).(*ClientFingerprint); ok {
