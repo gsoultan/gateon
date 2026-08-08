@@ -76,3 +76,68 @@ jobs:
 
       - name: Benchmarks (allocs/perf regression check)
         run: go test -run '^$' -bench . -benchmem -benchtime 50000x ./pkg/proxy/ ./internal/telemetry/
+
+
+  # The Playwright suite was untracked and therefore never ran anywhere. It
+  # covers the dashboard — RBAC, the Security Hub, mitigation flows, diagnostics
+  # — which nothing else exercises. It is a separate job because it needs
+  # browsers and boots the whole gateway, and it is allowed to fail for now:
+  # the suite is only just back under CI and blocking every PR on a suite whose
+  # baseline nobody has seen yet would stall the queue. Remove
+  # continue-on-error once a green run is the norm.
+  e2e-ui:
+    name: e2e-ui (playwright)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install buf and proto plugins
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@latest
+          bun install --frozen-lockfile --cwd ui
+
+      - name: Generate all artifacts
+        run: |
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
+      # playwright.config.ts starts gateon itself from the repo root, with the
+      # e2e config and mockbin on PATH, so the binary has to exist there.
+      - name: Build gateon
+        run: go build -o gateon ./cmd/gateon
+
+      - name: Install Playwright and Chromium
+        run: |
+          bun install --frozen-lockfile --cwd tests/e2e
+          cd tests/e2e && bunx playwright install --with-deps chromium
+
+      - name: Run Playwright suite
+        working-directory: tests/e2e
+        run: bunx playwright test --reporter=list
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 7
