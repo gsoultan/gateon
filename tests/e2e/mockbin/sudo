@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "sudo $*" >> /tmp/mock.log
+while [[ "$1" == -* ]]; do shift; done
+"$@"

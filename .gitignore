@@ -65,7 +65,23 @@ test_*.db-wal
 telemetry_pebble/
 /graphify-out/
 /.serena/
-/tests/
+# The integration suite is source and must be tracked. It was excluded
+# wholesale, which meant 426 files — the Go e2e tests and 104 Playwright
+# tests — existed only on developer machines: CI's `go test ./...` never saw
+# tests/e2e, and the UI suite could not run at all. Ignore the artifacts
+# instead of the suite.
+/tests/**/node_modules/
+/tests/**/test-results/
+/tests/**/playwright-report/
+/tests/**/.auth/
+/tests/**/telemetry_pebble/
+/tests/**/*.db
+/tests/**/*.db-shm
+/tests/**/*.db-wal
+/tests/**/*.pem
+/tests/e2e/mock_backend/mock_backend
+/tests/e2e/test_out.txt
+/tests/e2e/test_run.log
 /gateon
 /gateon.db
 /gateon.db-shm
@@ -114,3 +130,4 @@ telemetry_pebble/
 # Sample dev config is intentional fixture data — track it despite the
 # config-filename ignores above.
 !/dev/*.json
+/tests/**/audit/
