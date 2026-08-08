@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "nice $*" >> /tmp/mock.log
+while [[ "$#" -gt 0 ]] && [[ "$1" != "clamscan" ]] && [[ "$1" != "clamdscan" ]] && [[ "$1" != "freshclam" ]] && [[ "$1" != "nice" ]]; do shift; done
+"$@"
