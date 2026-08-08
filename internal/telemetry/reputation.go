@@ -151,8 +151,13 @@ func GetReputationScore(fingerprint string) float64 {
 		return 100.0
 	}
 	shard := getRepShard(fingerprint)
-	// Use Peek instead of Get to avoid updating LRU and internal mutex contention
-	// during the high-frequency WAF check. ARC has its own internal lock.
+	// Use Peek instead of Get to avoid updating LRU ordering during the
+	// high-frequency WAF check. The shard read lock is still required: writers
+	// such as DecreaseReputation mutate the stored *Reputation in place, so
+	// reading Score without it is a data race.
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
 	if val, ok := shard.cache.Peek(fingerprint); ok {
 		score := val.(*Reputation).Score
 		logger.L.LogDebug("Reputation cache HIT", "fingerprint", fingerprint, "score", score)

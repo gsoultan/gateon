@@ -14,12 +14,10 @@ require (
 	github.com/cilium/ebpf v0.22.0
 	github.com/cloudflare/circl v1.6.3
 	github.com/cockroachdb/pebble v1.1.5
-	github.com/corazawaf/coraza-coreruleset v0.0.0-20240226094324-415b1017abdc
-	github.com/corazawaf/coraza/v3 v3.7.0
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/e-XpertSolutions/go-iforest/v2 v2.0.0
-	github.com/go-git/go-git/v5 v5.19.1
+	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/go-zookeeper/zk v1.0.4
 	github.com/godzie44/go-uring v0.0.0-20250501163612-d16a9e597639
@@ -28,6 +26,7 @@ require (
 	github.com/google/go-tpm v0.9.8
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
+	github.com/gsoultan/gwaf v0.2.1
 	github.com/h2non/filetype v1.1.3
 	github.com/hashicorp/consul/api v1.33.7
 	github.com/hashicorp/golang-lru v0.5.4
@@ -102,7 +101,6 @@ require (
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
 	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
-	github.com/corazawaf/libinjection-go v0.3.2 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
@@ -194,12 +192,8 @@ require (
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/shoenig/go-m1cpu v0.2.1 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
-	github.com/tidwall/gjson v1.19.0 // indirect
-	github.com/tidwall/match v1.2.0 // indirect
-	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
-	github.com/valllabh/ocsf-schema-golang v1.0.3 // indirect
 	github.com/vishvananda/netlink v1.1.0 // indirect
 	github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df // indirect
 	github.com/x448/float16 v0.8.4 // indirect
@@ -233,7 +227,6 @@ require (
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	rsc.io/binaryregexp v0.2.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.0 // indirect

@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "freshclam $*" >> /tmp/mock.log
+echo "Database updated"
+exit 0

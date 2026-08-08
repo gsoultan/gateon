@@ -44,6 +44,7 @@ type ApiService struct {
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 	WafRules           *waf.Store
+	WafExceptions      *waf.ExceptionStore
 	PhantomCore        phantom.PhantomCore
 	Governor           *resource.Governor
 
@@ -227,6 +228,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		WafUpdater:         cfg.WafUpdater,
 		ClamAVManager:      cfg.ClamAVManager,
 		WafRules:           cfg.WafRules,
+		WafExceptions:      cfg.WafExceptions,
 		PhantomCore:        cfg.PhantomCore,
 		Governor:           cfg.Governor,
 	}

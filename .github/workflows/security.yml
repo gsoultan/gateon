@@ -31,7 +31,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install Bun dependencies
-        run: bun install --cwd ui
+        run: bun install --frozen-lockfile --cwd ui
 
       - name: Install buf and proto plugins
         run: |
@@ -42,6 +42,23 @@ jobs:
 
       - name: Generate proto
         run: PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+
+      # bpf2go compiles the XDP program with clang, and its output is not
+      # committed, so the toolchain has to be present before `go generate`.
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      # The scanners type-check the tree, so the generated sources have to
+      # exist first: bpf2go emits loadGateon_ebpf for internal/ebpf, and the UI
+      # build produces internal/ui/dist for the go:embed. Without this step
+      # every scanner fails to compile rather than reporting findings, which is
+      # how this workflow was red while telling us nothing. ci.yml already does
+      # the same thing.
+      - name: Generate all artifacts
+        run: go generate ./...
 
       - name: Tidy go modules
         run: go mod tidy
@@ -69,7 +86,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install Bun dependencies
-        run: bun install --cwd ui
+        run: bun install --frozen-lockfile --cwd ui
 
       - name: Install buf and proto plugins
         run: |
@@ -80,6 +97,23 @@ jobs:
 
       - name: Generate proto
         run: PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+
+      # bpf2go compiles the XDP program with clang, and its output is not
+      # committed, so the toolchain has to be present before `go generate`.
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      # The scanners type-check the tree, so the generated sources have to
+      # exist first: bpf2go emits loadGateon_ebpf for internal/ebpf, and the UI
+      # build produces internal/ui/dist for the go:embed. Without this step
+      # every scanner fails to compile rather than reporting findings, which is
+      # how this workflow was red while telling us nothing. ci.yml already does
+      # the same thing.
+      - name: Generate all artifacts
+        run: go generate ./...
 
       - name: Tidy go modules
         run: go mod tidy
@@ -133,6 +167,18 @@ jobs:
           exit-code: "1"
           format: sarif
           output: trivy.sarif
+          # Skip package-manager caches. ui/bunfig.toml deliberately keeps
+          # bun's cache inside the project (dir = ".bun-cache"), so a CI
+          # `bun install` materialises it and Trivy — which walks the working
+          # tree, not the index, and so does not care that it is gitignored —
+          # finds lockfiles vendored *inside* cached tarballs. Those describe
+          # some other project's dependency tree, not ours: the three HIGH
+          # findings this produced were `braces` and friends inside
+          # ui/.bun-cache/uri-js@4.4.1/yarn.lock, which nothing here installs
+          # or ships. Scanning them reports vulnerabilities no change to this
+          # repository can fix, which is the fastest way to teach people to
+          # ignore the scanner.
+          skip-dirs: "ui/.bun-cache,**/node_modules"
 
       - name: Upload Trivy SARIF
         if: always()

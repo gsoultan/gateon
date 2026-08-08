@@ -25,6 +25,7 @@ import { useWafRules } from '../../hooks/useWafRules';
 import type {WafRule} from '../../types/gateon';
 import { notifications } from '@mantine/notifications';
 import { usePermissions } from '../../hooks/usePermissions';
+import { RuleDefinitionEditor } from './RuleDefinitionEditor';
 
 export function WAFRulesTab() {
   const { canWrite } = usePermissions();
@@ -202,7 +203,7 @@ export function WAFRulesTab() {
             <Table.Tr>
               <Table.Th>Name</Table.Th>
               <Table.Th>Category</Table.Th>
-              <Table.Th>Directive</Table.Th>
+              <Table.Th>Definition</Table.Th>
               <Table.Th>Paranoia</Table.Th>
               <Table.Th>Status</Table.Th>
               <Table.Th />
@@ -267,19 +268,9 @@ export function WAFRulesTab() {
                 onChange={(val) => setEditingRule({ ...editingRule!, paranoiaLevel: Number(val) })}
               />
             </Group>
-            <Textarea
-              label="Coraza Directive (SecLang)"
-              placeholder='SecRule REQUEST_URI "@contains /secret" "id:12345,phase:1,deny,status:403"'
-              required
-              minRows={4}
+            <RuleDefinitionEditor
               value={editingRule?.directive || ''}
-              onChange={(e) => setEditingRule({ ...editingRule!, directive: e.target.value })}
-              description={
-                <Group gap={4} mt={4}>
-                  <IconInfoCircle size={14} />
-                  <Text size="xs">Ensure the rule has a unique ID and correct SecLang syntax.</Text>
-                </Group>
-              }
+              onChange={(next) => setEditingRule({ ...editingRule!, directive: next })}
             />
             <Switch
               label="Rule Enabled"

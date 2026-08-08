@@ -3,18 +3,17 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/gsoultan/gateon/internal/db"
-	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 func TestWAF_PHPAttacks(t *testing.T) {
 	mw, err := WAF(WAFConfig{
-		UseCRS:     true,
 		DisablePHP: false,
 	})
 	if err != nil {
@@ -60,7 +59,6 @@ func TestWAF_PHPAttacks(t *testing.T) {
 
 func TestWAF_NodeJSAttacks(t *testing.T) {
 	mw, err := WAF(WAFConfig{
-		UseCRS:        true,
 		DisableNodeJS: false,
 	})
 	if err != nil {
@@ -78,11 +76,33 @@ func TestWAF_NodeJSAttacks(t *testing.T) {
 		body       string
 		expectCode int
 	}{
+		// Unambiguous Node.js RCE — caught by ruleset rule 1100016.
 		{
-			name:       "NodeJS/Generic injection in query",
+			name:       "NodeJS/require child_process exec",
 			method:     "GET",
-			url:        "/?test=process.env",
+			url:        "/?t=require('child_process').execSync('id')",
 			expectCode: http.StatusForbidden,
+		},
+		{
+			name:       "NodeJS/constructor sandbox escape",
+			method:     "GET",
+			url:        "/?t=e.constructor.constructor('return%20process')()",
+			expectCode: http.StatusForbidden,
+		},
+		{
+			name:       "NodeJS/mainModule require pivot",
+			method:     "GET",
+			url:        "/?t=global.process.mainModule.require('fs')",
+			expectCode: http.StatusForbidden,
+		},
+		// Bare "process.env" is a plain property access that appears in docs and
+		// config text. It must NOT be blocked — doing so was a false-positive
+		// class of the retired fast path.
+		{
+			name:       "NodeJS/bare process.env is not an attack",
+			method:     "GET",
+			url:        "/?msg=process.env%20holds%20the%20config",
+			expectCode: http.StatusOK,
 		},
 	}
 
@@ -99,27 +119,14 @@ func TestWAF_NodeJSAttacks(t *testing.T) {
 }
 
 func TestWAF_IPReputation(t *testing.T) {
-	// Initialize a test store with the IP reputation rule
-	d, _, _ := db.Open("sqlite::memory:")
-	// Manually create table for test
-	_, _ = d.Exec(`CREATE TABLE waf_rules (id TEXT PRIMARY KEY, name TEXT, directive TEXT, enabled INTEGER, paranoia_level INTEGER, category TEXT, created_at DATETIME, updated_at DATETIME)`)
-
-	store := waf.NewStore(d)
-	_ = store.AddRule(t.Context(), &waf.Rule{
-		ID:            "910001",
-		Name:          "IP Reputation Blocking",
-		Directive:     `SecRule TX:ip_reputation_block_flag "@eq 1" "id:910001,phase:2,deny,status:403,msg:'IP Reputation block',tag:'reputation',severity:CRITICAL"`,
-		Enabled:       true,
-		ParanoiaLevel: 1,
-		Category:      "Reputation",
-	})
-
+	// Reputation no longer travels through a request header. Under Coraza it
+	// was written into X-Gateon-Reputation and read back by a SecRule, which
+	// meant gateon had to strip six headers from client input on every request
+	// so a client could not assert its own reputation. It now crosses as a
+	// resolver value, which removes the vector rather than defending it.
 	mw, err := WAF(WAFConfig{
-		UseCRS:             true,
 		EnableIPReputation: true,
-		WafRules:           store,
-		// Set the flag in phase 1, and the rule in waf.go is also phase 1.
-		Directives: `SecRule REQUEST_HEADERS:X-Block-Me "@eq 1" "id:2000,phase:1,nolog,pass,setvar:tx.ip_reputation_block_flag=1"`,
+		ParanoiaLevel:      1,
 	})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
@@ -129,12 +136,27 @@ func TestWAF_IPReputation(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
+	// A hostile behavioural score reaches rule 1910002 through the resolver.
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("X-Block-Me", "1")
+	rs := &request.RequestState{Reputation: 5}
+	req = req.WithContext(context.WithValue(req.Context(), request.RequestStateContextKey{}, rs))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusForbidden {
-		t.Errorf("expected status 403 (IP Reputation), got %d", rr.Code)
+		t.Errorf("expected status 403 (IP reputation), got %d", rr.Code)
+	}
+
+	// A client cannot talk its way out of it, nor into someone else's block:
+	// the header is not an input any more.
+	good := httptest.NewRequest("GET", "/", nil)
+	good.Header.Set("X-Gateon-Reputation", "0")
+	goodState := &request.RequestState{Reputation: 100}
+	good = good.WithContext(context.WithValue(good.Context(), request.RequestStateContextKey{}, goodState))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, good)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("a spoofed reputation header changed the verdict: got %d", rr.Code)
 	}
 }

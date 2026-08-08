@@ -4,6 +4,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 )
 
@@ -1631,4 +1632,180 @@ func init() {
 		}
 		return nil
 	})
+
+	// Migration 56 created the services table with the legacy NOT NULL columns
+	// "type" and "config", which migration 57 superseded by backend_type and the
+	// dedicated target/health-check columns. Nothing writes the legacy columns
+	// any more, so every service insert on a schema created by migration 56
+	// fails with "NOT NULL constraint failed: services.type", leaving the
+	// gateway without any backend. Their contents were copied over by migration
+	// 57, so the obsolete columns can be dropped.
+	Register(59, "drop_legacy_services_columns", func(db *sql.DB, dialect Dialect) error {
+		legacyColumns := []string{"type", "config", "load_balancer", "health_check"}
+
+		for _, column := range legacyColumns {
+			query := fmt.Sprintf("ALTER TABLE services DROP COLUMN %s;", column)
+			if dialect.Driver == DriverPostgres {
+				query = fmt.Sprintf("ALTER TABLE services DROP COLUMN IF EXISTS %s;", column)
+			}
+			if _, err := db.Exec(query); err != nil {
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "no such column") || strings.Contains(errStr, "does not exist") ||
+					strings.Contains(errStr, "no such table") {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
+	})
+
+	// The WAF engine moved from Coraza to gwaf, and with it the rule format
+	// from SecLang text to a typed definition. Three things change here.
+	//
+	// The `definition` column holds the new format and `format` records which
+	// one a row is in, so a rule that has not been converted is identifiable
+	// rather than merely broken. `directive` is deliberately kept: it is the
+	// operator's original text, it is the only record of what an unconverted
+	// rule was meant to do, and dropping it would make a failed conversion
+	// unrecoverable.
+	//
+	// gateon's own default rules are no longer rows at all — they are compiled
+	// into the binary — so the seeded copies are removed. They are identified
+	// by ID against the frozen list of what gateon seeded, never by "everything
+	// that looks like a default", so an operator's edited copy of a default is
+	// left alone for the conversion step to handle.
+	Register(60, "waf_rules_typed_definition", func(db *sql.DB, dialect Dialect) error {
+		if !TableExists(db, dialect, "waf_rules") {
+			return nil
+		}
+
+		textType := "TEXT"
+		if dialect.Driver == DriverMySQL {
+			textType = "LONGTEXT"
+		}
+		for _, col := range []struct{ name, spec string }{
+			{"definition", textType},
+			{"format", "VARCHAR(32)"},
+			{"conversion_note", textType},
+		} {
+			query := fmt.Sprintf("ALTER TABLE waf_rules ADD COLUMN %s %s", col.name, col.spec)
+			if dialect.Driver == DriverPostgres {
+				query = fmt.Sprintf("ALTER TABLE waf_rules ADD COLUMN IF NOT EXISTS %s %s", col.name, col.spec)
+			}
+			if _, err := db.Exec(query); err != nil {
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "duplicate column") || strings.Contains(errStr, "already exists") {
+					continue
+				}
+				return err
+			}
+		}
+
+		// Everything still on the old format is marked as such. The store
+		// refuses to load a seclang row, so an unconverted rule stops being
+		// enforced rather than being guessed at.
+		if _, err := db.Exec(dialect.Rebind(
+			"UPDATE waf_rules SET format = ? WHERE format IS NULL OR format = ''"),
+			"seclang"); err != nil {
+			return err
+		}
+
+		return deleteSeededWAFRules(db, dialect)
+	})
+
+	// Rule exceptions get a table of their own.
+	//
+	// They used to be generated SecLang rules containing ctl:ruleRemoveById,
+	// which made a suppression indistinguishable from a detection: it appeared
+	// in the rule list, carried a rule ID, and could be edited into something
+	// that suppressed more than intended. An exception is a different kind of
+	// object and is stored as one.
+	Register(61, "create_waf_exceptions_table", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `CREATE TABLE IF NOT EXISTS waf_exceptions (
+				id VARCHAR(255) PRIMARY KEY,
+				rule_id BIGINT NOT NULL,
+				path TEXT NOT NULL DEFAULT '',
+				target VARCHAR(64) NOT NULL DEFAULT '',
+				key_name VARCHAR(255) NOT NULL DEFAULT '',
+				note TEXT NOT NULL DEFAULT '',
+				enabled BOOLEAN NOT NULL DEFAULT TRUE,
+				created_at TIMESTAMPTZ NOT NULL
+			)`
+		case DriverMySQL:
+			query = `CREATE TABLE IF NOT EXISTS waf_exceptions (
+				id VARCHAR(255) PRIMARY KEY,
+				rule_id BIGINT NOT NULL,
+				path TEXT,
+				target VARCHAR(64) NOT NULL DEFAULT '',
+				key_name VARCHAR(255) NOT NULL DEFAULT '',
+				note TEXT,
+				enabled BOOLEAN NOT NULL DEFAULT TRUE,
+				created_at DATETIME NOT NULL
+			)`
+		default:
+			query = `CREATE TABLE IF NOT EXISTS waf_exceptions (
+				id TEXT PRIMARY KEY,
+				rule_id INTEGER NOT NULL,
+				path TEXT NOT NULL DEFAULT '',
+				target TEXT NOT NULL DEFAULT '',
+				key_name TEXT NOT NULL DEFAULT '',
+				note TEXT NOT NULL DEFAULT '',
+				enabled BOOLEAN NOT NULL DEFAULT TRUE,
+				created_at DATETIME NOT NULL
+			)`
+		}
+		if _, err := db.Exec(query); err != nil {
+			return err
+		}
+		idx := "CREATE INDEX IF NOT EXISTS idx_waf_exceptions_rule ON waf_exceptions (rule_id)"
+		_, err := db.Exec(idx)
+		return err
+	})
+}
+
+// seededWAFRuleIDs are the rules gateon used to seed into waf_rules and now
+// compiles into the binary. The list is frozen: it describes history, so
+// regenerating it from current code would make the migration meaningless.
+var seededWAFRuleIDs = []string{
+	"1900300", "1900015", "1210001", "1210002", "1210003", "1210004",
+	"1900001", "1900012", "1900013", "1900011", "1900010",
+	"1900400", "1900401", "1900402",
+	"1910000", "1910001", "1910002",
+	"1900200", "1900201",
+	"1100010", "1100011", "1100013", "1100014",
+	"1100001", "1100002", "1100003", "1100012",
+	"1100004", "1100005", "1100006", "1100007", "1100008", "1100009",
+	"1110000", "1110001", "1110003", "1110002",
+	"1120010", "1120011",
+	"1130000", "1130001", "1130004", "1130002", "1130003",
+	"1130005", "1130006", "1130007",
+	"1140000", "1140002", "1140001",
+	"1141000", "1141002", "1141001",
+	"1150000", "1150001", "1150002",
+	"1142000",
+	"1151000", "1151001", "1151002",
+	"1160000", "1170000", "1170001",
+	"1151003", "1151004", "1151005",
+	"1140003", "1120012", "1150003", "1110004",
+	"1151006", "1151007", "1151008",
+	"1180000", "1190000",
+}
+
+// deleteSeededWAFRules removes gateon's own default rules from the table.
+//
+// They are deleted one ID at a time rather than with an IN clause so that a
+// single unexpected row cannot fail the whole migration, and so the statement
+// stays parameterised on every dialect.
+func deleteSeededWAFRules(db *sql.DB, dialect Dialect) error {
+	query := dialect.Rebind("DELETE FROM waf_rules WHERE id = ?")
+	for _, id := range seededWAFRuleIDs {
+		if _, err := db.Exec(query, id); err != nil {
+			return fmt.Errorf("remove seeded WAF rule %s: %w", id, err)
+		}
+	}
+	return nil
 }

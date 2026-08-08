@@ -39,37 +39,54 @@ tls_options.json
 internal/ui/dist/*
 !internal/ui/dist/.gitkeep
 .junie
-ui/bun.lock
+# ui/bun.lock MUST be tracked. Without it every CI run re-resolves the
+# caret ranges in package.json against npm, so builds are not reproducible
+# and a single upstream unpublish breaks them — which is exactly what
+# @tanstack/router-core@1.171.19 did. It is the frontend's go.sum.
 ui/.bun-cache
 ui/package-lock.json
 ui/src/services/gen/*
 gateon.exe
 gateon_test.exe
-go.sum
+# go.sum is the checksum lockfile and MUST be tracked: gateon is an
+# application, and CI builds with -mod=readonly, which fails outright
+# without it. Ignoring it also gives up supply-chain verification.
 proto/gateon/v1/*.go
 
-# Test artifacts (SQLite scratch DBs)
-internal/telemetry/test_telemetry_audit.db
-internal/telemetry/test_telemetry_audit.db-shm
-internal/telemetry/test_telemetry_audit.db-wal
-test_traces.db
-test_traces.db-shm
-test_traces.db-wal
-internal/telemetry/telemetry_pebble/
+# Test artifacts (SQLite scratch DBs + Pebble trace stores).
+# Tests should write to t.TempDir(); these patterns are a safety net for any
+# that regress to a working-directory-relative path.
+*_test.db
+*_test.db-shm
+*_test.db-wal
+test_*.db
+test_*.db-shm
+test_*.db-wal
+telemetry_pebble/
 /graphify-out/
 /.serena/
-/telemetry_pebble
-/tests/
-/internal/api/telemetry_pebble/
-/internal/middleware/telemetry_pebble/
+# The integration suite is source and must be tracked. It was excluded
+# wholesale, which meant 426 files — the Go e2e tests and 104 Playwright
+# tests — existed only on developer machines: CI's `go test ./...` never saw
+# tests/e2e, and the UI suite could not run at all. Ignore the artifacts
+# instead of the suite.
+/tests/**/node_modules/
+/tests/**/test-results/
+/tests/**/playwright-report/
+/tests/**/.auth/
+/tests/**/telemetry_pebble/
+/tests/**/*.db
+/tests/**/*.db-shm
+/tests/**/*.db-wal
+/tests/**/*.pem
+/tests/e2e/mock_backend/mock_backend
+/tests/e2e/test_out.txt
+/tests/e2e/test_run.log
 /gateon
 /gateon.db
 /gateon.db-shm
 /gateon.db-wal
 /gateon_bin
-/gateon_test.db
-/gateon_test.db-shm
-/gateon_test.db-wal
 /.agents/*
 /agent/*
 /.claude/
@@ -98,3 +115,21 @@ internal/telemetry/telemetry_pebble/
 /.kiro/
 /audit/
 /internal/middleware/audit/
+
+# Dev runtime state (scripts/dev.sh)
+/dev/.data/
+
+# Runtime WAF audit logs (written under package dirs at runtime)
+/internal/router/audit/
+/internal/server/audit/
+# Stray build artifacts and backups
+/mock_backend
+*.bak
+/graphify_help_full.txt
+/ui/graphify-out/
+# Sample dev config is intentional fixture data — track it despite the
+# config-filename ignores above.
+!/dev/*.json
+/tests/**/audit/
+# Same as dev/: the e2e config is fixture data, not local runtime config.
+!/tests/e2e/config/*.json

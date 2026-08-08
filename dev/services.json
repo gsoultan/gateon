@@ -1,0 +1,24 @@
+[
+  {
+    "id": "whoami-service",
+    "name": "Whoami Service",
+    "backend_type": "http",
+    "load_balancer_policy": "round_robin",
+    "weighted_targets": [
+      { "url": "http://127.0.0.1:9001" }
+    ],
+    "health_check_type": 1,
+    "health_check_path": "/healthz"
+  },
+  {
+    "id": "api-service",
+    "name": "API Service",
+    "backend_type": "http",
+    "load_balancer_policy": "round_robin",
+    "weighted_targets": [
+      { "url": "http://127.0.0.1:9002" }
+    ],
+    "health_check_type": 1,
+    "health_check_path": "/healthz"
+  }
+]

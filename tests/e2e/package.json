@@ -1,0 +1,14 @@
+{
+  "name": "e2e",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@types/bun": "latest",
+    "@types/node": "^26.1.1"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

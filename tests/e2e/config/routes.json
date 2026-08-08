@@ -1,0 +1,78 @@
+[
+  {
+    "id": "blocked-route",
+    "name": "Blocked Route",
+    "type": "http",
+    "rule": "PathPrefix(`/blocked`)",
+    "middlewares": [
+      "trust-headers",
+      "block-ip"
+    ],
+    "service_id": "mock-service"
+  },
+  {
+    "id": "grpc-route",
+    "name": "gRPC Route",
+    "type": "grpc",
+    "rule": "PathPrefix(`/test.TestService`)",
+    "middlewares": [
+      "grpc-web-mw"
+    ],
+    "service_id": "grpc-service"
+  },
+  {
+    "id": "pgadmin-route",
+    "name": "pgAdmin Route",
+    "type": "http",
+    "rule": "PathPrefix(`/pgadmin4`)",
+    "middlewares": [
+      "pgadmin-headers",
+      "waf-blocking",
+      "strip-pgadmin"
+    ],
+    "service_id": "mock-service"
+  },
+  {
+    "id": "ratelimit-route",
+    "name": "Rate Limit Route",
+    "type": "http",
+    "rule": "PathPrefix(`/ratelimit`)",
+    "middlewares": [
+      "ratelimit-strict"
+    ],
+    "service_id": "mock-service"
+  },
+  {
+    "id": "synology-route",
+    "name": "Synology Route",
+    "type": "http",
+    "rule": "PathPrefix(`/synology`)",
+    "middlewares": [
+      "waf-blocking",
+      "strip-synology"
+    ],
+    "service_id": "mock-service"
+  },
+  {
+    "id": "tcp-route",
+    "name": "TCP Route",
+    "type": "tcp",
+    "entrypoints": [
+      "tcp"
+    ],
+    "rule": "Host(`*`)",
+    "service_id": "tcp-service"
+  },
+  {
+    "id": "test-route",
+    "name": "Test Route",
+    "type": "http",
+    "rule": "PathPrefix(`/test`)",
+    "middlewares": [
+      "add-header",
+      "waf-full",
+      "cors-allow-all"
+    ],
+    "service_id": "mock-service"
+  }
+]

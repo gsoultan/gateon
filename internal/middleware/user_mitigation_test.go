@@ -6,7 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/request"
@@ -15,9 +15,7 @@ import (
 
 func TestUserMitigationMiddleware(t *testing.T) {
 	// Initialize telemetry store
-	dbPath := "gateon_mw_user_mit_test.db"
-	_ = os.Remove(dbPath)
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "gateon_mw_user_mit_test.db")
 
 	_ = telemetry.InitPathStatsStore(dbPath, 1)
 	defer telemetry.ClosePathStatsStore(context.Background())
@@ -111,9 +109,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 func TestIPMitigationMiddleware(t *testing.T) {
 	// Initialize telemetry store
-	dbPath := "gateon_mw_ip_mit_test.db"
-	_ = os.Remove(dbPath)
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "gateon_mw_ip_mit_test.db")
 
 	_ = telemetry.InitPathStatsStore(dbPath, 1)
 	defer telemetry.ClosePathStatsStore(context.Background())
