@@ -6,6 +6,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
+  // Stop the whole run rather than let it grind on. With one worker, two
+  // retries and per-test timeouts up to 180s, a bad run is bounded only by
+  // 104 x 3 x 180s, and a broken gateway makes almost every test take its full
+  // timeout — the failure mode this suite hits most often. 30 minutes is well
+  // clear of a healthy run and still leaves room, inside the job's 45-minute
+  // ceiling, for Playwright to write its report instead of being killed.
+  globalTimeout: 30 * 60 * 1000,
   reporter: 'html',
   use: {
     baseURL: 'http://localhost:8080',
