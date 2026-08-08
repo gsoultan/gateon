@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -46,7 +47,22 @@ func defaultHoneypotPaths() []string {
 }
 
 // blockHoneypotIP records a ban, keeping the blocklist bounded.
+//
+// Loopback is never banned. The ban lasts 24 hours, lives only in memory, and
+// has no expiry path other than waiting it out or restarting the process, so
+// recording one against 127.0.0.1 takes out every local caller at once: health
+// checks, the management API, and an administrator browsing the dashboard from
+// the same host. That is a self-inflicted outage triggered by anything local
+// touching a trap path, and it buys nothing — an attacker who can originate
+// from loopback is already inside the machine. telemetry.RecordSecurityThreat
+// drops loopback sources for the same reason.
+//
+// The request itself is still refused; only the durable ban is skipped.
 func blockHoneypotIP(clientIP string, until time.Time) {
+	if httputil.IsLoopback(clientIP) {
+		return
+	}
+
 	blocklistMu.Lock()
 	defer blocklistMu.Unlock()
 
