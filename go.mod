@@ -17,7 +17,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/e-XpertSolutions/go-iforest/v2 v2.0.0
-	github.com/go-git/go-git/v5 v5.19.1
+	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/go-zookeeper/zk v1.0.4
 	github.com/godzie44/go-uring v0.0.0-20250501163612-d16a9e597639

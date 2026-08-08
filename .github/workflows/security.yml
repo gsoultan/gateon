@@ -167,6 +167,18 @@ jobs:
           exit-code: "1"
           format: sarif
           output: trivy.sarif
+          # Skip package-manager caches. ui/bunfig.toml deliberately keeps
+          # bun's cache inside the project (dir = ".bun-cache"), so a CI
+          # `bun install` materialises it and Trivy — which walks the working
+          # tree, not the index, and so does not care that it is gitignored —
+          # finds lockfiles vendored *inside* cached tarballs. Those describe
+          # some other project's dependency tree, not ours: the three HIGH
+          # findings this produced were `braces` and friends inside
+          # ui/.bun-cache/uri-js@4.4.1/yarn.lock, which nothing here installs
+          # or ships. Scanning them reports vulnerabilities no change to this
+          # repository can fix, which is the fastest way to teach people to
+          # ignore the scanner.
+          skip-dirs: "ui/.bun-cache,**/node_modules"
 
       - name: Upload Trivy SARIF
         if: always()
