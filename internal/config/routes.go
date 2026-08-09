@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -200,6 +201,52 @@ func (r *RouteRegistry) GetWildcardTrie() (*PathTrie, []*gateonv1.Route) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.wildcardTrie, r.wildcardRegexes
+}
+
+// RouteLister is the part of a route store RouteOrigins needs: the ability to
+// enumerate routes. Taking the narrow interface rather than the whole store
+// keeps the dependency honest and makes the function testable without standing
+// up a registry.
+type RouteLister interface {
+	List(ctx context.Context) []*gateonv1.Route
+}
+
+// RouteOrigins returns the hostnames the routing table says this gateway
+// answers on, taken from the Host() matchers in route rules.
+//
+// It exists so the WAF can tell a redirect or fetch destination on this site
+// from one somewhere else without reading the request's Host header — which the
+// attacker writes, and which made "Host: evil.tld" with
+// "redirect_to=https://evil.tld/" compare same-origin in gwaf v0.4.0. A route's
+// rule is configuration; a header is not.
+//
+// Routes that match on a path alone contribute nothing, which is correct: they
+// say what this gateway serves, not what it is called.
+func RouteOrigins(ctx context.Context, store RouteLister) []string {
+	if store == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, rt := range store.List(ctx) {
+		h := hostFromRule(rt.GetRule())
+		// A wildcard is a matching pattern, not a name this gateway is reachable
+		// at, and it must not become an origin. "Host(`*`)" is the catch-all
+		// every default route uses; declaring it would hand the off-origin rules
+		// a literal "*" to compare against, and an operator who saw the rule
+		// enabled would have no idea it could never match. "*.example.com" is
+		// excluded for the same reason — gwaf already accepts subdomains of a
+		// declared origin, so the concrete parent is what belongs here.
+		if h == "" || strings.Contains(h, "*") {
+			continue
+		}
+		seen[h] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for h := range seen {
+		out = append(out, h)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func hostFromRule(rule string) string {

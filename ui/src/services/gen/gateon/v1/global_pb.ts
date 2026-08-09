@@ -1949,6 +1949,21 @@ export class WafConfig extends Message<WafConfig> {
    */
   ssrfProtection = false;
 
+  /**
+   * The hostnames this gateway answers on, used to tell a redirect or fetch
+   * destination on this site from one somewhere else.
+   *
+   * This has to be configuration. The engine previously compared against the
+   * request's Host header, which an attacker supplies as freely as the
+   * destination — "Host: evil.tld" with "redirect_to=https://evil.tld/" compared
+   * same-origin and passed. Left empty, gateon derives these from the Host()
+   * rules in the routing table; set it when a route matches on something other
+   * than a host, or when the gateway is reached by a name no route names.
+   *
+   * @generated from field: repeated string origins = 42;
+   */
+  origins: string[] = [];
+
   constructor(data?: PartialMessage<WafConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1998,6 +2013,7 @@ export class WafConfig extends Message<WafConfig> {
     { no: 39, name: "audit_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 40, name: "app_profiles", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 41, name: "ssrf_protection", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 42, name: "origins", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WafConfig {
