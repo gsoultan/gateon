@@ -16,10 +16,14 @@ import { execSync } from 'child_process';
  * arrived first.
  */
 async function gotoSettingsLoaded(page: import('@playwright/test').Page) {
-  const configLoaded = page.waitForResponse(
-    (r) => r.url().includes('/v1/global') && r.status() === 200,
-    { timeout: 30000 },
-  );
+  // Not fatal if it never arrives. This runs in afterEach as well as beforeEach,
+  // and a cleanup that throws masks the real failure with its own — the run
+  // reports "Cleanup failed: waitForResponse timeout" and says nothing about the
+  // assertion that actually broke. A missing config response is handled by the
+  // waits on the controls themselves.
+  const configLoaded = page
+    .waitForResponse((r) => r.url().includes('/v1/global') && r.status() === 200, { timeout: 20000 })
+    .catch(() => undefined);
   await page.goto('/settings', { waitUntil: 'load' });
   await configLoaded;
   // The response has landed; give React the tick it needs to commit the state

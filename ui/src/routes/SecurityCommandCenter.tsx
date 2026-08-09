@@ -32,7 +32,8 @@ import {
   IconBrain,
   IconAlertTriangle,
   IconCode,
-  IconBolt
+  IconBolt,
+  IconRobot
 } from '@tabler/icons-react';
 import { useGateonStatus, apiFetch, useMetricsSnapshot, installClamav, uninstallClamav } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
@@ -46,6 +47,7 @@ import { safeFormatDate } from '../utils/format';
 import { OverviewTab } from '../components/SecurityCenter/OverviewTab';
 import { ThreatExplorerTab } from '../components/SecurityCenter/ThreatExplorerTab';
 import { IncidentsTab } from '../components/SecurityCenter/IncidentsTab';
+import { AnomalyEngineTab } from '../components/SecurityCenter/AnomalyEngineTab';
 import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { WAFRulesTab } from '../components/SecurityCenter/WAFRulesTab';
@@ -369,6 +371,7 @@ export default function SecurityCommandCenter() {
           <Tabs.List mb="lg" className="scrollable-tabs-list">
             <Tabs.Tab value="overview" leftSection={<IconDashboard size={16} />}>Overview</Tabs.Tab>
             <Tabs.Tab value="explorer" leftSection={<IconSearch size={16} />}>Threat Explorer</Tabs.Tab>
+            <Tabs.Tab value="anomalies" leftSection={<IconRobot size={16} />}>Anomaly Engine</Tabs.Tab>
             <Tabs.Tab value="incidents" leftSection={<IconAlertTriangle size={16} />}>Incidents</Tabs.Tab>
             <Tabs.Tab value="analytics" leftSection={<IconActivity size={16} />}>Analytics & Trends</Tabs.Tab>
             <Tabs.Tab value="advisory" leftSection={<IconBrain size={16} />}>AI Advisory</Tabs.Tab>
@@ -387,6 +390,10 @@ export default function SecurityCommandCenter() {
 
           <Tabs.Panel value="explorer">
             <ThreatExplorerTab />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="anomalies">
+            <AnomalyEngineTab />
           </Tabs.Panel>
 
           <Tabs.Panel value="incidents">

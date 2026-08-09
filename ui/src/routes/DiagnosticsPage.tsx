@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, lazy, Suspense } from "react";
 import {
+  Button,
   Card,
   Group,
   Stack,
@@ -25,6 +26,7 @@ import {
   Center,
   Loader,
 } from "@mantine/core";
+import { Link } from "@tanstack/react-router";
 import { getDiagnostics, applyRecommendation } from "../hooks/api";
 import type { RouteDiagnostic, MiddlewareDiagnostic, Anomaly, DependencyHealth } from "../types/gateon";
 // Lazy-loaded: AnomalyMap pulls in Leaflet (the heavy `viz-vendor` chunk), so it
@@ -608,134 +610,33 @@ const DiagnosticsPage: React.FC = () => {
         </Card>
 
         {/* Anomaly Detection Engine */}
+        {/* The anomaly engine lives in the Security Hub.
+            It used to be rendered here as well, which meant threats could be
+            mitigated from two pages through two code paths -- and three of the
+            e2e tests covering those flows were failing. This page is about
+            whether the gateway is healthy; acting on threats belongs where the
+            rest of the security tooling is. */}
         <Card withBorder radius="lg" shadow="sm" p="lg">
-          <Stack gap="md">
-            <Group justify="space-between">
-              <Group gap="xs">
-                <IconRobot size={24} color={theme.colors.indigo[6]} />
-                <Title order={3} fw={900}>Anomaly Intelligence Engine</Title>
-              </Group>
-              <Badge variant="dot" color="indigo" size="lg">Autonomous Protection</Badge>
+          <Group justify="space-between" align="center">
+            <Group gap="xs">
+              <IconRobot size={22} color={theme.colors.indigo[6]} />
+              <div>
+                <Title order={4} fw={800}>Threat analysis moved to the Security Hub</Title>
+                <Text size="xs" c="dimmed">
+                  Active threats, recommendations and mitigation now live in one place, alongside the
+                  threat explorer and WAF rules.
+                </Text>
+              </div>
             </Group>
-            
-            <Suspense fallback={<Loader size="sm" />}>
-              <AnomalyMap anomalies={sortedAnomalies} onTrace={openVisualizer} />
-            </Suspense>
-
-            <Text size="sm" c="dimmed">
-              Real-time heuristic analysis of traffic patterns and security events. 
-              The engine identifies potential threats and provides actionable recommendations.
-            </Text>
-
-            <Tabs defaultValue="active" variant="pills" radius="md">
-              <Tabs.List mb="md" className="scrollable-tabs-list">
-                <Tabs.Tab value="active" leftSection={<IconAlertTriangle size={14} />} color="red">
-                  Active Threats ({activeThreats.length})
-                </Tabs.Tab>
-                <Tabs.Tab value="mitigated" leftSection={<IconCircleCheck size={14} />} color="teal">
-                  Mitigated ({mitigatedThreats.length})
-                </Tabs.Tab>
-              </Tabs.List>
-
-              <Tabs.Panel value="active">
-                <Stack gap="md">
-                  <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
-                    <SeverityStatCard label="Critical" count={activeStats.critical} color="red" icon={<IconShieldExclamation size={14} />} />
-                    <SeverityStatCard label="High" count={activeStats.high} color="orange" icon={<IconShield size={14} />} />
-                    <SeverityStatCard label="Medium" count={activeStats.medium} color="yellow" icon={<IconInfoCircle size={14} />} />
-                    <SeverityStatCard label="Low" count={activeStats.low} color="blue" icon={<IconInfoCircle size={14} />} />
-                  </SimpleGrid>
-
-                  {activeThreats.length > 0 ? (
-                    <>
-                      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                        {pagedActiveThreats.map((a) => (
-                          <AnomalyCard 
-                            key={`${a.type}-${a.source}-${a.timestamp}`} 
-                            anomaly={a} 
-                            onApply={() => handleApplyRecommendation(a)}
-                            applying={applying === `${a.type}-${a.source}`}
-                            onTrace={openVisualizer}
-                            onClick={() => onAnomalyClick(a)}
-                            canWrite={canWrite}
-                          />
-                        ))}
-                      </SimpleGrid>
-                      {activeTotalPages > 1 && (
-                        <Center mt="xs">
-                          <Pagination
-                            total={activeTotalPages}
-                            value={activePage}
-                            onChange={setActivePage}
-                            color="red"
-                            size="sm"
-                            radius="md"
-                          />
-                        </Center>
-                      )}
-                    </>
-                  ) : (
-                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed", backgroundColor: "var(--mantine-color-blue-0)" }}>
-                      <Stack align="center" gap="xs">
-                        <IconCircleCheck size={40} color={theme.colors.teal[3]} />
-                        <Text fw={700} c="teal">No Active Threats</Text>
-                        <Text size="xs" c="dimmed">No immediate threats detected in your network.</Text>
-                      </Stack>
-                    </Paper>
-                  )}
-                </Stack>
-              </Tabs.Panel>
-
-              <Tabs.Panel value="mitigated">
-                <Stack gap="md">
-                  <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
-                    <SeverityStatCard label="Critical" count={mitigatedStats.critical} color="red" icon={<IconShieldExclamation size={14} />} />
-                    <SeverityStatCard label="High" count={mitigatedStats.high} color="orange" icon={<IconShield size={14} />} />
-                    <SeverityStatCard label="Medium" count={mitigatedStats.medium} color="yellow" icon={<IconInfoCircle size={14} />} />
-                    <SeverityStatCard label="Low" count={mitigatedStats.low} color="blue" icon={<IconInfoCircle size={14} />} />
-                  </SimpleGrid>
-
-                  {mitigatedThreats.length > 0 ? (
-                    <>
-                      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                        {pagedMitigatedThreats.map((a) => (
-                          <AnomalyCard 
-                            key={`${a.type}-${a.source}-${a.timestamp}`} 
-                            anomaly={a} 
-                            onApply={() => handleApplyRecommendation(a)}
-                            applying={applying === `${a.type}-${a.source}`}
-                            onTrace={openVisualizer}
-                            onClick={() => onAnomalyClick(a)}
-                            canWrite={canWrite}
-                          />
-                        ))}
-                      </SimpleGrid>
-                      {mitigatedTotalPages > 1 && (
-                        <Center mt="xs">
-                          <Pagination
-                            total={mitigatedTotalPages}
-                            value={mitigatedPage}
-                            onChange={setMitigatedPage}
-                            color="teal"
-                            size="sm"
-                            radius="md"
-                          />
-                        </Center>
-                      )}
-                    </>
-                  ) : (
-                    <Paper p="xl" withBorder radius="lg" style={{ borderStyle: "dashed", backgroundColor: "var(--mantine-color-blue-0)" }}>
-                      <Stack align="center" gap="xs">
-                        <IconInfoCircle size={40} color={theme.colors.gray[3]} />
-                        <Text fw={700} c="dimmed">No Mitigated Threats</Text>
-                        <Text size="xs" c="dimmed">History of mitigated threats will appear here.</Text>
-                      </Stack>
-                    </Paper>
-                  )}
-                </Stack>
-              </Tabs.Panel>
-            </Tabs>
-          </Stack>
+            <Button
+              variant="light"
+              leftSection={<IconShieldLock size={16} />}
+              component={Link}
+              to="/security-center"
+            >
+              Open Security Hub
+            </Button>
+          </Group>
         </Card>
 
         {/* Troubleshooting Tips */}
