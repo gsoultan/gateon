@@ -41,6 +41,7 @@ type GlobalAndAuthAPI interface {
 	InstallClamav(ctx context.Context, req *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error)
 	UninstallClamav(ctx context.Context, req *gateonv1.UninstallClamavRequest) (*gateonv1.UninstallClamavResponse, error)
 	RunDeepScan(ctx context.Context, req *gateonv1.RunDeepScanRequest) (*gateonv1.RunDeepScanResponse, error)
+	GetClamavScanStatus(ctx context.Context, req *gateonv1.GetClamavScanStatusRequest) (*gateonv1.GetClamavScanStatusResponse, error)
 	Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error)
 	Verify2FA(ctx context.Context, req *gateonv1.Verify2FARequest) (*gateonv1.Verify2FAResponse, error)
 	GetSecurityThreat(ctx context.Context, req *gateonv1.GetSecurityThreatRequest) (*gateonv1.GetSecurityThreatResponse, error)

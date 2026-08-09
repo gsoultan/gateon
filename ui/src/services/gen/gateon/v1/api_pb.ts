@@ -90,6 +90,86 @@ export class RunDeepScanResponse extends Message<RunDeepScanResponse> {
 }
 
 /**
+ * @generated from message gateon.v1.GetClamavScanStatusRequest
+ */
+export class GetClamavScanStatusRequest extends Message<GetClamavScanStatusRequest> {
+  constructor(data?: PartialMessage<GetClamavScanStatusRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gateon.v1.GetClamavScanStatusRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClamavScanStatusRequest {
+    return new GetClamavScanStatusRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetClamavScanStatusRequest {
+    return new GetClamavScanStatusRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetClamavScanStatusRequest {
+    return new GetClamavScanStatusRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetClamavScanStatusRequest | PlainMessage<GetClamavScanStatusRequest> | undefined, b: GetClamavScanStatusRequest | PlainMessage<GetClamavScanStatusRequest> | undefined): boolean {
+    return proto3.util.equals(GetClamavScanStatusRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gateon.v1.GetClamavScanStatusResponse
+ */
+export class GetClamavScanStatusResponse extends Message<GetClamavScanStatusResponse> {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success = false;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message = "";
+
+  /**
+   * @generated from field: gateon.v1.DeepScanStatus status = 3;
+   */
+  status?: DeepScanStatus;
+
+  constructor(data?: PartialMessage<GetClamavScanStatusResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gateon.v1.GetClamavScanStatusResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "success", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "status", kind: "message", T: DeepScanStatus },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClamavScanStatusResponse {
+    return new GetClamavScanStatusResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetClamavScanStatusResponse {
+    return new GetClamavScanStatusResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetClamavScanStatusResponse {
+    return new GetClamavScanStatusResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetClamavScanStatusResponse | PlainMessage<GetClamavScanStatusResponse> | undefined, b: GetClamavScanStatusResponse | PlainMessage<GetClamavScanStatusResponse> | undefined): boolean {
+    return proto3.util.equals(GetClamavScanStatusResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gateon.v1.DeepScanStatus
  */
 export class DeepScanStatus extends Message<DeepScanStatus> {

@@ -42,6 +42,7 @@ import {
   IconCertificate,
   IconShieldLock,
   IconShieldCheck,
+  IconVirus,
   IconLockAccess,
   IconSettingsAutomation,
   IconRefresh,
@@ -92,8 +93,17 @@ export function Shell() {
     setColorScheme(next);
   }, [setColorScheme]);
 
+  const clamavInstalled = !!status?.clamavInstalled;
+
   const securityLinks = useMemo(() => [
     { label: "Security Hub", to: "/security-center", icon: IconShieldCheck },
+    // Only listed once the daemon is actually installed. An operator without
+    // ClamAV has nothing to manage here, and a permanent dead entry teaches
+    // people to ignore the section. The route still exists for anyone who
+    // follows a link or bookmark to it.
+    ...(clamavInstalled
+      ? [{ label: "Antivirus", to: "/clamav", icon: IconVirus }]
+      : []),
     // Audit Logs are now accessible to Viewers (ResourceDiagnostics).
     { label: "Audit Logs", to: "/audit-logs", icon: IconTimeline },
     { label: "Certificates", to: "/certificates", icon: IconCertificate },
@@ -104,7 +114,7 @@ export function Shell() {
     },
     { label: "TLS Options", to: "/tls-options", icon: IconLockAccess },
     { label: "Middlewares", to: "/middlewares", icon: IconSettingsAutomation },
-  ], [isViewer]);
+  ], [isViewer, clamavInstalled]);
 
   const systemLinks = useMemo(() => [
     { label: "Docs", to: "/docs", icon: IconBook2 },
