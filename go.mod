@@ -22,7 +22,7 @@ require (
 	github.com/go-zookeeper/zk v1.0.4
 	github.com/godzie44/go-uring v0.0.0-20250501163612-d16a9e597639
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/google/cel-go v0.28.0
+	github.com/google/cel-go v0.29.0
 	github.com/google/go-tpm v0.9.8
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
