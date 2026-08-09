@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "brew $*" >> /tmp/mock.log
+case "$1" in install) touch /tmp/clamav_apt_installed; echo "Installed via brew" ;; uninstall) rm -f /tmp/clamav_apt_installed; echo "Uninstalled via brew" ;; *) exit 0 ;; esac; exit 0

@@ -29,6 +29,10 @@ import (
 
 const clientRemoteAddrContextKey contextKey = 1
 
+// healthCheckTransportKey is the cache key of the shared health-check
+// transport, which is not bound to any particular target.
+const healthCheckTransportKey = "__healthcheck"
+
 type backendTransportFactory struct {
 	tlsConfig        *tls.Config
 	transportConfig  *TransportConfig
@@ -45,12 +49,12 @@ func newBackendTransportFactory(tlsConfig *tls.Config, transportConfig *Transpor
 }
 
 func (f *backendTransportFactory) HealthCheckTransport() http.RoundTripper {
-	if v, ok := f.cache.Load("__healthcheck"); ok {
+	if v, ok := f.cache.Load(healthCheckTransportKey); ok {
 		return v.(http.RoundTripper)
 	}
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.TLSClientConfig = f.tlsConfig
-	if v, loaded := f.cache.LoadOrStore("__healthcheck", t); loaded {
+	if v, loaded := f.cache.LoadOrStore(healthCheckTransportKey, t); loaded {
 		return v.(http.RoundTripper)
 	}
 	return t
@@ -108,14 +112,50 @@ func (f *backendTransportFactory) Close() {
 		return
 	}
 	f.cache.Range(func(_, value any) bool {
-		if c, ok := value.(interface{ CloseIdleConnections() }); ok {
-			c.CloseIdleConnections()
-		}
-		if c, ok := value.(interface{ Close() error }); ok {
-			_ = c.Close()
-		}
+		closeTransport(value)
 		return true
 	})
+}
+
+// PruneExcept closes and evicts cached transports whose target is no longer
+// part of the active target set. Service discovery replaces targets over time
+// and, without pruning, every retired backend would keep its transport and
+// idle connections alive for the lifetime of the process.
+func (f *backendTransportFactory) PruneExcept(activeURLs map[string]struct{}) {
+	if f == nil {
+		return
+	}
+	f.cache.Range(func(key, value any) bool {
+		k, ok := key.(string)
+		if !ok || k == healthCheckTransportKey {
+			return true
+		}
+		if _, active := activeURLs[targetURLFromTransportKey(k)]; active {
+			return true
+		}
+		f.cache.Delete(key)
+		closeTransport(value)
+		return true
+	})
+}
+
+// targetURLFromTransportKey extracts the raw target URL from a cache key built
+// by newTargetStateWithProxy ("<scheme>|<transportScheme>|<rawURL>[|...]").
+func targetURLFromTransportKey(key string) string {
+	parts := strings.Split(key, "|")
+	if len(parts) < 3 {
+		return ""
+	}
+	return parts[2]
+}
+
+func closeTransport(value any) {
+	if c, ok := value.(interface{ CloseIdleConnections() }); ok {
+		c.CloseIdleConnections()
+	}
+	if c, ok := value.(interface{ Close() error }); ok {
+		_ = c.Close()
+	}
 }
 
 func (f *backendTransportFactory) buildTransport(state *targetState, selectedIdentity *tlsClientIdentity) http.RoundTripper {

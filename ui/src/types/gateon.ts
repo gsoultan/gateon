@@ -405,7 +405,29 @@ export type WafConfig = {
   entropyThreshold?: number;
   disableEntropy?: boolean;
   trustCloudflareHeaders?: boolean;
+  appProfiles?: string[];
+  ssrfProtection?: boolean;
 };
+
+/**
+ * Platform exception profiles the engine ships.
+ *
+ * These are a closed set compiled into the gateway, not something the API
+ * discovers, so they are listed here rather than fetched — the values must match
+ * `AppProfile` in internal/security/waf/appprofile.go. A name the backend does
+ * not recognise is logged there and loads nothing, which is why this list is the
+ * only place the dashboard offers.
+ *
+ * A profile is not a compatibility mode and does not disable a rule. Each entry
+ * suppresses a named rule on a named path and field, because the platform's
+ * ordinary traffic is a superset of an attack shape there.
+ */
+export const WAF_APP_PROFILES = [
+  { value: "wordpress", label: "WordPress" },
+  { value: "drupal", label: "Drupal" },
+  { value: "laravel", label: "Laravel" },
+  { value: "issue_tracker", label: "Issue tracker (Jira, GitLab)" },
+] as const;
 
 export type ClamavConfig = {
   installationMode?: ClamavInstallationMode;

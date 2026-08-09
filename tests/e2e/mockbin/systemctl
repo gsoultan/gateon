@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "systemctl $*" >> /tmp/mock.log
+exit 0

@@ -461,6 +461,20 @@ type pathStatsStore struct {
 	lastTier              config.Tier
 }
 
+// PathStatsStoreReady reports whether the telemetry store initialised.
+//
+// This exists so a readiness probe can tell the difference between a gateway
+// that is serving with observability and one that is serving blind. Startup
+// deliberately does not abort when the store fails to open — refusing traffic
+// because a trace database is locked would trade an outage for a logging gap —
+// but the instance must not then claim to be ready, or an orchestrator will
+// route production traffic to it and complete a rollout past it.
+func PathStatsStoreReady() bool {
+	storeMu.RLock()
+	defer storeMu.RUnlock()
+	return store != nil
+}
+
 // InitPathStatsStore initializes the database-backed store.
 // databaseURL: sqlite:path, postgres://..., mysql://..., mariadb://...
 // Plain path (e.g. "gateon.db") is treated as SQLite.
@@ -472,6 +486,30 @@ func InitPathStatsStore(databaseURL string, retentionDays int) error {
 		return nil
 	}
 	return initStore(databaseURL, retentionDays)
+}
+
+// resolveTraceDir picks the directory for the Pebble trace store.
+//
+// GATEON_TRACE_DIR overrides the location outright, so an operator can relocate
+// traces without a rebuild. Otherwise Pebble is placed next to a file-backed
+// SQLite DB. An in-memory DSN gets a temp dir rather than the working directory:
+// such a DB is ephemeral by definition, so persisting traces beside the CWD both
+// outlives its own data and litters whichever directory the process (or a
+// `go test` run) happens to start from.
+func resolveTraceDir(databaseURL string, isSQLite bool) string {
+	if dir := strings.TrimSpace(os.Getenv("GATEON_TRACE_DIR")); dir != "" {
+		return dir
+	}
+	if !isSQLite {
+		return "telemetry_pebble"
+	}
+	// Same path extraction logic as db.Open, to find the DB's directory.
+	dsn := strings.TrimPrefix(databaseURL, "sqlite:")
+	dsn = strings.TrimPrefix(dsn, "//")
+	if dsn == ":memory:" || dsn == "" {
+		return filepath.Join(os.TempDir(), "gateon-telemetry-pebble")
+	}
+	return filepath.Join(filepath.Dir(dsn), "telemetry_pebble")
 }
 
 func initStore(databaseURL string, retentionDays int) error {
@@ -487,21 +525,7 @@ func initStore(databaseURL string, retentionDays int) error {
 		}
 	}
 
-	// Initialize Pebble for traces
-	pebbleDir := "telemetry_pebble"
-	if dialect.Driver == db.DriverSQLite {
-		// Place Pebble next to SQLite db if it's a file.
-		// We use the same path extraction logic as db.Open to find the DB's directory.
-		dsn := databaseURL
-		if strings.HasPrefix(dsn, "sqlite:") {
-			dsn = strings.TrimPrefix(dsn, "sqlite:")
-			dsn = strings.TrimPrefix(dsn, "//")
-		}
-		// If DSN is not a memory DB, use its directory for Pebble.
-		if dsn != ":memory:" && dsn != "" {
-			pebbleDir = filepath.Join(filepath.Dir(dsn), "telemetry_pebble")
-		}
-	}
+	pebbleDir := resolveTraceDir(databaseURL, dialect.Driver == db.DriverSQLite)
 	_ = os.MkdirAll(pebbleDir, 0755)
 	// Size Pebble's in-memory structures by resource profile (default Pebble uses
 	// an 8 MiB cache + generous memtables) and compress trace blobs with Zstd
@@ -1207,7 +1231,7 @@ func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThre
 		}
 	}
 	if t.JA4 == "" {
-		ja4 := r.Header.Get("X-JA4-Fingerprint")
+		ja4 := JA4FromTrustedHeader(r)
 		if ja4 == "" {
 			// Try to get from context if request state is missing (unlikely in entrypoint but possible in tests)
 			if ja4Val, ok := r.Context().Value(fingerprintCtxKey).(*ClientFingerprint); ok {

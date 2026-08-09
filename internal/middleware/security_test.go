@@ -6,7 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,14 +15,24 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gwaf/rules"
+	"github.com/gsoultan/gwaf/rules/op"
+	"github.com/gsoultan/gwaf/types"
 )
 
 func TestWAF_AuditLogAndBodyLimits(t *testing.T) {
 	// Minimal WAF with body limit and custom rule
 	mw, err := WAF(WAFConfig{
-		UseCRS:           false,
 		RequestBodyLimit: 10, // Very small limit
-		Directives:       `SecRule ARGS "blockme" "id:1,deny,status:403"`,
+		ExtraRules: rules.Set{{
+			ID:       1000001,
+			Phase:    types.PhaseRequestBody,
+			Targets:  []types.Target{{Kind: types.TargetArgs}},
+			Op:       op.Contains("blockme"),
+			Actions:  []rules.Action{rules.BlockWithStatus(403)},
+			Severity: types.SeverityCritical, Confidence: types.Certain,
+			Msg: "test rule",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
@@ -91,9 +101,7 @@ func (w *telemetryMockWrapper) GetTopIPs(limit int) ([]ebpf.IPStat, error) { ret
 
 func TestWAF_Shunning(t *testing.T) {
 	// Initialize telemetry store for escalation logic
-	dbPath := "gateon_shun_test.db"
-	_ = os.Remove(dbPath)
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "gateon_shun_test.db")
 
 	_ = telemetry.InitPathStatsStore(dbPath, 1)
 	defer telemetry.ClosePathStatsStore(context.Background())
@@ -105,9 +113,16 @@ func TestWAF_Shunning(t *testing.T) {
 	telemetry.SetEbpfManager(&telemetryMockWrapper{mockEbpf})
 
 	mw, err := WAF(WAFConfig{
-		UseCRS:      false,
 		EbpfManager: mockEbpf,
-		Directives:  `SecRule ARGS "shunme" "id:1,deny,status:403,severity:CRITICAL"`,
+		ExtraRules: rules.Set{{
+			ID:       1000002,
+			Phase:    types.PhaseRequestBody,
+			Targets:  []types.Target{{Kind: types.TargetArgs}},
+			Op:       op.Contains("shunme"),
+			Actions:  []rules.Action{rules.BlockWithStatus(403)},
+			Severity: types.SeverityCritical, Confidence: types.Certain,
+			Msg: "shun test rule",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)

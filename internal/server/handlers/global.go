@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/audit"
@@ -360,7 +361,21 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	// /healthz answers "is the process alive"; /readyz answers "should this
+	// instance receive traffic", and those are different questions. A static
+	// 200 on /readyz means an orchestrator cannot tell a healthy gateway from
+	// one whose telemetry never opened, so it routes production traffic to a
+	// blind instance and completes the rollout past it.
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		var notReady []string
+		if !telemetry.PathStatsStoreReady() {
+			notReady = append(notReady, "telemetry store")
+		}
+		if len(notReady) > 0 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("not ready: " + strings.Join(notReady, ", ")))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready"))
 	})

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "dev-headers",
+    "name": "Dev response headers",
+    "type": "headers",
+    "config": {
+      "set_response_X-Served-By": "gateon-dev"
+    }
+  },
+  {
+    "id": "cors-allow-all",
+    "name": "CORS (permissive, dev only)",
+    "type": "cors",
+    "config": {
+      "allowed_origins": "*",
+      "allowed_methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "allowed_headers": "Content-Type,Authorization"
+    }
+  },
+  {
+    "id": "waf-protect",
+    "name": "WAF (blocking)",
+    "type": "waf",
+    "config": {
+      "sqli": "true",
+      "xss": "true",
+      "lfi": "true",
+      "rce": "true",
+      "anomaly_threshold": "5",
+      "audit_only": "false"
+    }
+  },
+  {
+    "id": "ratelimit-dev",
+    "name": "Rate limit (dev)",
+    "type": "ratelimit",
+    "config": {
+      "average": "20",
+      "burst": "40"
+    }
+  },
+  {
+    "id": "strip-api",
+    "name": "Strip /api prefix",
+    "type": "stripprefix",
+    "config": {
+      "prefixes": "/api"
+    }
+  }
+]

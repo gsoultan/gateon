@@ -63,7 +63,19 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	nonce := GenerateNonce()
 	salt := strconv.FormatInt(time.Now().UnixNano(), 36)
-	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), telemetry.GetIPFingerprint(r), salt)
+
+	// Hash the fingerprint rather than interpolating it. GetIPFingerprint falls
+	// back to the raw X-Forwarded-For header when no JA4 is available, and reads
+	// it without any trusted-proxy check, so its value is attacker-controlled in
+	// the general case. challengeID reaches three sinks below — a response
+	// header, a JSON body, and the nonce'd <script> — and the script is the
+	// dangerous one: input that closes the string literal executes with a valid
+	// CSP nonce, so the CSP does nothing to stop it. Hashing makes the value hex
+	// by construction, which is safe in all three contexts at once, and stops
+	// echoing a client's own fingerprint back to it. Truncating to 8 bytes keeps
+	// the ID short; it identifies a challenge, it is not a secret.
+	fpSum := sha256.Sum256([]byte(telemetry.GetIPFingerprint(r)))
+	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), hex.EncodeToString(fpSum[:8]), salt)
 
 	w.Header().Set("X-Gateon-Pow-ID", challengeID)
 	w.Header().Set(PowHeaderChallenge, salt)

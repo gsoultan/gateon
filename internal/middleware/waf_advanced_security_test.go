@@ -23,7 +23,6 @@ func TestWAF_AdvancedSecurityRules(t *testing.T) {
 	}
 
 	mw, err := WAF(WAFConfig{
-		UseCRS:                    true,
 		EnableIPReputation:        true,
 		EnableDOSProtection:       true,
 		EnableMalwareDetection:    true,
@@ -117,22 +116,10 @@ func TestWAF_AdvancedSecurityRules(t *testing.T) {
 	}
 
 	t.Run("DLP Detection", func(t *testing.T) {
-		// DLP rule 1130000 is disabled by default in Seed. Enable it for this test.
-		err := store.UpdateRule(t.Context(), &waf.Rule{
-			ID:            "1130000",
-			Name:          "DLP: Credit Card Number Detection",
-			Directive:     `SecRule RESPONSE_BODY "@rx \b4[0-9]{12}(?:[0-9]{3})?\b" "id:1130000,phase:4,deny,status:403,msg:'Credit card number detected in response',tag:'dlp',tag:'compliance',severity:CRITICAL"`,
-			Enabled:       true,
-			ParanoiaLevel: 1,
-			Category:      "DLP",
-		})
-		if err != nil {
-			t.Fatalf("failed to enable DLP rule: %v", err)
-		}
-
-		// Re-initialize WAF to load the enabled rule
+		// Rule 1130000 is a built-in now rather than a disabled database row, so
+		// enabling DLP is the whole opt-in. The row that used to be toggled
+		// here no longer exists.
 		mw, _ := WAF(WAFConfig{
-			UseCRS:                   true,
 			EnableDLP:                true,
 			EnableResponseInspection: true,
 			WafRules:                 store,

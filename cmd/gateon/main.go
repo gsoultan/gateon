@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -239,12 +240,22 @@ func main() {
 		mwStore = stores.NewDBMiddlewareRegistry(dbConn, dialect)
 		tlsOptStore = stores.NewDBTLSOptionRegistry(dbConn, dialect)
 		logger.L.LogInfo("using database-backed configuration storage")
+
+		// A database-backed store starts out empty, which would silently discard
+		// the configuration files supplied by the operator. Import them once.
+		seedConfigFromFiles(ctx, dbConfigStores{
+			routes:      routeStore,
+			services:    serviceStore,
+			entryPoints: epStore,
+			middlewares: mwStore,
+			tlsOptions:  tlsOptStore,
+		})
 	} else {
-		routeStore = config.NewRouteRegistry(getEnvDefault("ROUTES_FILE", "routes.json"))
-		serviceStore = config.NewServiceRegistry(getEnvDefault("SERVICES_FILE", "services.json"))
-		epStore = config.NewEntryPointRegistry(getEnvDefault("ENTRYPOINTS_FILE", "entrypoints.json"))
-		mwStore = config.NewMiddlewareRegistry(getEnvDefault("MIDDLEWARES_FILE", "middlewares.json"))
-		tlsOptStore = config.NewTLSOptionRegistry(getEnvDefault("TLS_OPTIONS_FILE", "tls_options.json"))
+		routeStore = config.NewRouteRegistry(getEnvDefault(routesFileEnv, routesFileDefault))
+		serviceStore = config.NewServiceRegistry(getEnvDefault(servicesFileEnv, servicesFileDefault))
+		epStore = config.NewEntryPointRegistry(getEnvDefault(entryPointsFileEnv, entryPointsFileDefault))
+		mwStore = config.NewMiddlewareRegistry(getEnvDefault(middlewaresFileEnv, middlewaresFileDefault))
+		tlsOptStore = config.NewTLSOptionRegistry(getEnvDefault(tlsOptionsFileEnv, tlsOptionsFileDefault))
 		logger.L.LogInfo("using file-based configuration storage")
 	}
 
@@ -299,9 +310,16 @@ func buildUIAssets(uiPath *string) {
 }
 
 func initConfigRegistries() (*config.GlobalRegistry, string) {
-	globalFile := os.Getenv("GLOBAL_CONFIG_FILE")
-	if globalFile == "" {
-		globalFile = "global.json"
+	globalFile := getEnvDefault("GLOBAL_CONFIG_FILE", "global.json")
+
+	// A missing global.json is not an error — first run reaches the setup
+	// wizard through it — but it must be visible. The zero-value config has the
+	// WAF switched off, so an operator who mistyped a path or forgot a mount
+	// otherwise gets an unprotected gateway that looks healthy.
+	if _, err := os.Stat(globalFile); err != nil {
+		logger.L.LogWarn("global config not found; starting on built-in defaults "+
+			"(WAF disabled) — set GATEON_CONFIG_DIR or GLOBAL_CONFIG_FILE if this is unintended",
+			"path", globalFile, "config_dir", config.ConfigDir())
 	}
 	return config.NewGlobalRegistry(globalFile), globalFile
 }
@@ -404,11 +422,19 @@ func getUIHandler(uiPath string) http.Handler {
 	return ui.Handler()
 }
 
+// getEnvDefault resolves a config file path: an explicit env var wins,
+// otherwise the default filename is taken relative to config.ConfigDir().
+//
+// Resolving through ConfigDir is what makes GATEON_CONFIG_DIR mean something.
+// Before this, the per-file env vars were the only lever and each default was a
+// bare filename resolved against the process working directory — so a packaged
+// install with /etc/gateon/routes.json loaded nothing unless the operator also
+// set ROUTES_FILE, and the failure was silent.
 func getEnvDefault(key, def string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
 	}
-	return def
+	return filepath.Join(config.ConfigDir(), def)
 }
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".

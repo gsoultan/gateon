@@ -1,0 +1,48 @@
+{
+  "log": {
+    "level": "info",
+    "development": true,
+    "format": "text",
+    "path_stats_retention_days": 7
+  },
+  "auth": {
+    "paseto_secret": "dev-secret-please-change-me-0123",
+    "database_url": "dev/.data/gateon-dev.db"
+  },
+  "waf": {
+    "enabled": true,
+    "use_crs": true,
+    "paranoia_level": 1,
+    "sqli": true,
+    "xss": true,
+    "lfi": true,
+    "rce": true,
+    "protocol": true,
+    "anomaly_threshold": 5,
+    "audit_only": false
+  },
+  "management": {
+    "bind": "127.0.0.1",
+    "port": "8080",
+    "allowed_ips": [
+      "127.0.0.1/32",
+      "::1/128"
+    ]
+  },
+  "geoip": {
+    "enabled": false
+  },
+  "anomaly_detection": {
+    "security_threat_threshold": 999999
+  },
+  "tls": {},
+  "redis": {},
+  "otel": {},
+  "transport": {},
+  "ha": {},
+  "ebpf": {},
+  "alerting": {},
+  "audit": {},
+  "debugger": {},
+  "security_advanced": {}
+}

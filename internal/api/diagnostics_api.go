@@ -1221,47 +1221,64 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 		globalCfg.Waf = &gateonv1.WafConfig{Enabled: true, UseCrs: true}
 	}
 
-	// Build a targeted exclusion directive
-	exclusionID := 100000 + (time.Now().Unix() % 100000)
 	uri := threat.RequestURI
 	if uri == "" {
 		uri = "/"
 	}
 
-	// Construct the ctl actions
-	var ctlActions strings.Builder
-	for i, id := range ruleIDs {
-		if i > 0 {
-			ctlActions.WriteString(",")
-		}
-		fmt.Fprintf(&ctlActions, "ctl:ruleRemoveById=%s", id)
+	// Suppression is an exception, not a generated rule.
+	//
+	// The previous implementation wrote a SecLang rule containing
+	// ctl:ruleRemoveById, which meant the suppression appeared in the rule list
+	// as if it were a detection and its scope was whatever the generated
+	// directive happened to say. An exception names the rule it suppresses, is
+	// always scoped, and records why.
+	idsStr := strings.Join(ruleIDs, ", ")
+	if s.WafExceptions == nil {
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: false,
+			Message: "Exception store is not available.",
+		}, nil
 	}
 
-	idsStr := strings.Join(ruleIDs, ", ")
-	finalDirective := fmt.Sprintf("SecRule REQUEST_URI \"@beginsWith %s\" \"id:%d,phase:1,pass,nolog,%s\"",
-		uri, exclusionID, ctlActions.String())
+	// An exception is scoped by path, so the query string has to go: the
+	// recorded threat carries a full request URI, and "/search?q=<script>" as a
+	// path prefix matches nothing at all — the exception would be stored, the
+	// dashboard would report success, and the request would keep being blocked.
+	scope := uri
+	if i := strings.IndexByte(scope, '?'); i >= 0 {
+		scope = scope[:i]
+	}
+	if scope == "" {
+		scope = "/"
+	}
+	// The exact path, not a prefix.
+	//
+	// An exception is a hole in the firewall, so it gets the narrowest scope
+	// that fixes the reported false positive. Widening it to a subtree would
+	// suppress the rule for endpoints nobody has looked at, and the operator
+	// who clicked one button on one request would have no reason to expect it.
+	// A trailing "/*" would also be wrong rather than merely broad: it matches
+	// the subtree *below* the path and not the path itself, so the very request
+	// that was reported would still be blocked.
 
-	if s.WafRules != nil {
-		err := s.WafRules.AddRule(ctx, &waf.Rule{
-			ID:            strconv.Itoa(int(exclusionID)),
-			Name:          fmt.Sprintf("Auto-Exclusion: %s", uri),
-			Directive:     finalDirective,
-			Enabled:       true,
-			ParanoiaLevel: 1,
-			Category:      "Exclusion",
+	for _, id := range ruleIDs {
+		ruleID, convErr := strconv.ParseUint(id, 10, 32)
+		if convErr != nil {
+			continue
+		}
+		exErr := s.WafExceptions.Add(ctx, &waf.Exception{
+			ID:      fmt.Sprintf("fp-%d-%d", ruleID, time.Now().UnixNano()),
+			RuleID:  uint32(ruleID),
+			Path:    scope,
+			Note:    fmt.Sprintf("Marked as a false positive from the security dashboard for %s", uri),
+			Enabled: true,
 		})
-		if err != nil {
-			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to save exclusion to database: %v", err)}, nil
-		}
-	} else {
-		// Fallback to global config if store is not available
-		globalCfg := s.Globals.Get(ctx)
-		if globalCfg.Waf == nil {
-			globalCfg.Waf = &gateonv1.WafConfig{Enabled: true, UseCrs: true}
-		}
-		globalCfg.Waf.CustomDirectives += "\n" + finalDirective + "\n"
-		if err := s.Globals.Update(ctx, globalCfg); err != nil {
-			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update global config: %v", err)}, nil
+		if exErr != nil {
+			return &gateonv1.ApplyRecommendationResponse{
+				Success: false,
+				Message: fmt.Sprintf("Failed to save the exception: %v", exErr),
+			}, nil
 		}
 	}
 
@@ -1271,7 +1288,7 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
-		Message: fmt.Sprintf("Rules [%s] have been excluded for path '%s'. IP reputation reset.", idsStr, uri),
+		Message: fmt.Sprintf("Rules [%s] are now excepted for '%s'. IP reputation reset.", idsStr, scope),
 	}, nil
 }
 

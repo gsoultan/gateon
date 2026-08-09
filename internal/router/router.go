@@ -494,6 +494,13 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	var userMiddlewares []middleware.Middleware
 	var corsMiddleware middleware.Middleware
 	hasCORS := false
+	// hasWAF records whether this route attached its own "waf" middleware and it
+	// built successfully. It gates the gateway-wide WAF below: a route with its
+	// own WAF is an explicit override and must not also run the global one.
+	// Setting it only on a successful Create is deliberate — if the per-route WAF
+	// fails to build, hasWAF stays false and the global WAF still covers the
+	// route, so a misconfigured override fails safe rather than open.
+	hasWAF := false
 
 	if mwStore != nil {
 		for _, mid := range rt.Middlewares {
@@ -512,18 +519,21 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 						hasCORS = true
 					}
 				} else {
+					if strings.EqualFold(mwConf.Type, "waf") {
+						hasWAF = true
+					}
 					userMiddlewares = append(userMiddlewares, mw)
 				}
 			}
 		}
 	}
 
-	// Default CORS Bypass for preflight requests if no CORS middleware is configured.
-	// This restores v1.5.0 behavior where OPTIONS requests were automatically allowed.
 	if hasCORS {
-		chain = append(chain, corsMiddleware)
-	} else {
-		chain = append(chain, middleware.BypassCORS())
+		// Publish the matched route before CORS runs so a CORS violation is
+		// reported against the real route id. RouteName is deliberately left
+		// untouched here: the security middlewares below key their metrics-skip
+		// behavior off an unset name.
+		chain = append(chain, withMatchedRoute(rt), corsMiddleware)
 	}
 
 	// 3. Infrastructure Blockers & Lifecycle (inner to CORS)
@@ -614,7 +624,16 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// uncompressed data (running before Gzip) and on the request path it runs
 	// after Auth, avoiding inspection of blocked/unauthenticated traffic and
 	// preventing interference with high-entropy auth headers.
-	if gwaf, err := mwFactory.CreateGlobalWAF(); err != nil {
+	//
+	// A route that attached its own "waf" middleware is skipped here: that
+	// middleware is an explicit override (its own paranoia level, audit-only,
+	// DLP, gRPC relaxations) and already ran in userMiddlewares above, so
+	// applying the global WAF too would inspect every request twice and record
+	// each block under two route ids. One WAF per request: the route's config
+	// where present, the global WAF everywhere else.
+	if hasWAF {
+		logger.L.LogDebug("route has its own WAF middleware; skipping global WAF", "route", routeLabel)
+	} else if gwaf, err := mwFactory.CreateGlobalWAF(); err != nil {
 		logger.L.LogError("failed to build global WAF middleware", "error", err, "route", routeLabel)
 	} else if gwaf != nil {
 		chain = append(chain, gwaf)
@@ -638,4 +657,18 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	}
 
 	return h
+}
+
+// withMatchedRoute publishes the matched route on the request state so that
+// middlewares running before the route name is assigned can still report the
+// route they belong to by its identifier.
+func withMatchedRoute(rt *gateonv1.Route) middleware.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if rs := request.GetRequestState(r); rs != nil && rs.MatchedRoute == nil {
+				rs.MatchedRoute = rt
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

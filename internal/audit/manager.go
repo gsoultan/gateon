@@ -374,6 +374,9 @@ func (m *AuditManager) archiveLogs(cutoff time.Time) error {
 	filename := fmt.Sprintf("audit_archive_%s_to_%s_%s.json.br", first, last, uuid.NewString()[:8])
 	path := filepath.Join(archiveDir, filename)
 
+	// #nosec G304 -- path is filepath.Join of a fixed archive directory and a
+	// name this function just built from two timestamps and a UUID. Nothing
+	// attacker-supplied is in it.
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -436,6 +439,10 @@ func GetArchive(filename string) ([]byte, error) {
 	// Actually, "open it through gateon ui" might mean download or view.
 	// If it's a JSON archive, viewing it in UI is better.
 
+	// #nosec G304 -- filename is passed through filepath.Base above, which
+	// strips every directory component including "..", and is then joined to a
+	// fixed archive directory. That is the traversal defence; gosec sees only
+	// that a variable reached os.Open.
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

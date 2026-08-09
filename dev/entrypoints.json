@@ -1,0 +1,9 @@
+[
+  {
+    "id": "web",
+    "name": "Web (plain HTTP)",
+    "address": ":8000",
+    "type": 0,
+    "protocol": 0
+  }
+]

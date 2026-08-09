@@ -8,36 +8,24 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"hash"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/corazawaf/coraza-coreruleset"
-	"github.com/corazawaf/coraza/v3"
-	"github.com/corazawaf/coraza/v3/collection"
-	"github.com/corazawaf/coraza/v3/types"
-	"github.com/corazawaf/coraza/v3/types/variables"
-	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
 	"github.com/gsoultan/gateon/internal/security/reputation"
-	"github.com/gsoultan/gateon/internal/security/scanner"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gwaf"
+	"github.com/gsoultan/gwaf/rules"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -45,16 +33,40 @@ import (
 
 // WAFConfig configures the WAF middleware.
 type WAFConfig struct {
-	UseCRS           bool   // Use OWASP CRS (default true)
-	ParanoiaLevel    int    // CRS paranoia level 1-4 (default 1)
-	DirectivesFile   string // Optional path to custom directives file
-	TrustCloudflare  bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
-	AuditOnly        bool   // If true, log matches but do not block (SecRuleEngine DetectionOnly)
-	GlobalDirectives string // Combined global rules from GlobalConfig
-	Directives       string // Custom SecLang directives (replaces DirectivesFile)
-	RouteID          string // Route identifier for metrics
+	ParanoiaLevel   int    // CRS paranoia level 1-4 (default 1)
+	DirectivesFile  string // Optional path to custom directives file
+	TrustCloudflare bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
+	AuditOnly       bool   // If true, log matches but do not block (detection-only mode)
 
-	// Specific CRS protections (only used if UseCRS is true)
+	// AllowedMethods is the HTTP method allowlist. Empty means the default set.
+	// It replaces the SecLang tx.allowed_methods variable that the directive
+	// preamble used to seed for CRS rule 911.
+	AllowedMethods map[string]bool
+
+	// DisableProtocolChecks turns off the request-level protocol enforcement
+	// that replaced CRS rules 911 and 920.
+	DisableProtocolChecks bool
+
+	// FailOpen permits a request the engine could not fully analyse — one that
+	// exhausted its inspection budget, exceeded a limit, or carried ambiguous
+	// framing. The default is to fail closed.
+	//
+	// Under Coraza this was never a decision anyone made: a processing error
+	// fell through to the next handler, so the gateway failed open silently and
+	// nothing recorded that it had. Making it a field means the choice is
+	// stated, appears in the config fingerprint, and can differ by tier.
+	// Configure with the "fail_open" key or GATEON_WAF_FAIL_OPEN.
+	FailOpen bool
+	// ExtraRules are typed rules supplied programmatically, replacing the
+	// SecLang "Directives" string. A rule is now a value that either compiles
+	// or does not, rather than text concatenated into a directive block where a
+	// typo produced a rule that silently never fired.
+	ExtraRules rules.Set
+	RouteID    string // Route identifier for metrics
+
+	// Per-family switches. They used to choose which OWASP CRS files to load;
+	// they now select over gateon's own corpus by category and tag, which says
+	// what a rule detects rather than which file it was filed in.
 	DisableSQLI               bool
 	DisableXSS                bool
 	DisableLFI                bool
@@ -89,17 +101,20 @@ type WAFConfig struct {
 	EbpfManager                 ebpf.Manager
 	Reputation                  *reputation.IPReputationStore
 	AllowedAdminIps             []string // IPs allowed to access WP admin
-	RulesPath                   string   // Path to external WAF rules (CRS)
 	WafRules                    *waf.Store
 
-	// GRPCMode relaxes the CRS Protocol-Enforcement rules that are structurally
-	// incompatible with the gRPC/HTTP-2 transport (see grpcCompatDirective) and
-	// skips the binary-hostile fast-paths for gRPC requests. It MUST be derived
-	// from the trusted server-side route type (rt.Type == "grpc"), never from a
-	// client-supplied header: a single shared WAF instance protects every route,
-	// so gating on the request Content-Type would let an attacker disable body
-	// inspection on a plain HTTP route by spoofing "Content-Type: application/grpc".
-	GRPCMode bool
+	// AppProfiles names the platforms behind this route — "wordpress",
+	// "drupal", "laravel", "issue_tracker" — each loading the scoped exceptions
+	// that platform needs so it does not block on its own ordinary traffic.
+	// Configure with the "app_profiles" key (comma-separated) or the
+	// app_profiles field on the global WAF config.
+	AppProfiles []string
+
+	// EnableSSRFProtection blocks an off-origin URL in a parameter the server
+	// fetches. Off by default: registering a webhook or importing an avatar is
+	// the same request shape, so only a deployment that knows it never fetches
+	// user-supplied URLs can say this is always an attack.
+	EnableSSRFProtection bool
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -108,8 +123,8 @@ type WAFConfig struct {
 func (c WAFConfig) Fingerprint() string {
 	h := sha256.New()
 	// Boolean and integer fields
-	fmt.Fprintf(h, "b:%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v\n",
-		c.UseCRS, c.TrustCloudflare, c.AuditOnly, c.DisableSQLI, c.DisableXSS,
+	fmt.Fprintf(h, "b:%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v%v\n",
+		c.TrustCloudflare, c.AuditOnly, c.DisableSQLI, c.DisableXSS,
 		c.DisableLFI, c.DisableRCE, c.DisablePHP, c.DisableScanner, c.DisableProtocol,
 		c.DisableJava, c.DisableNodeJS, c.DisableWordPress, c.EnableIPReputation,
 		c.EnableDOSProtection, c.EnableMalwareDetection, c.EnableRansomwareDetection,
@@ -117,14 +132,24 @@ func (c WAFConfig) Fingerprint() string {
 		c.EnableFingerprintValidation, c.EnableConfidenceScoring)
 	fmt.Fprintf(h, "i:%d%d%d%d%d%t\n",
 		c.ParanoiaLevel, c.AnomalyThreshold, c.RequestBodyLimit,
-		c.ResponseBodyLimit, int(c.EntropyThreshold*100), c.GRPCMode)
+		c.ResponseBodyLimit, int(c.EntropyThreshold*100), c.FailOpen)
 	// String fields
-	fmt.Fprintf(h, "s:%s|%s|%s|%s|%s\n",
-		c.DirectivesFile, c.GlobalDirectives, c.Directives, c.AuditLogPath, c.RulesPath)
+	fmt.Fprintf(h, "s:%s\n", c.AuditLogPath)
+	// Programmatic rules are part of the policy, so two configs differing only
+	// in them must not share a cached engine.
+	for i := range c.ExtraRules {
+		fmt.Fprintf(h, "r:%d|%s\n", c.ExtraRules[i].ID, c.ExtraRules[i].Msg)
+	}
+
 	// Slices
 	if len(c.AllowedAdminIps) > 0 {
 		fmt.Fprintf(h, "a:%s\n", strings.Join(c.AllowedAdminIps, ","))
 	}
+	// Platform profiles change which exceptions load and the SSRF opt-in changes
+	// which rules do, so two configs differing only in these describe different
+	// engines and must not share a cached one. Both are written unconditionally:
+	// an empty profile list is a meaningful value, not an absent one.
+	fmt.Fprintf(h, "p:%s|%t\n", waf.AppProfileFingerprint(c.AppProfiles), c.EnableSSRFProtection)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -150,66 +175,9 @@ func (c WAFConfig) Fingerprint() string {
 // rules) and buffering it would break gRPC streaming. CRS still inspects the
 // (text) gRPC request headers and URI, preserving real attack coverage.
 
-// isGRPCRequest reports whether the request carries a gRPC or gRPC-Web payload.
-// gRPC frames are binary protobuf with high Shannon entropy and binary "-bin"
-// metadata headers; the deterministic byte/entropy fast-paths would false-positive
-// on that framing, so they are skipped for gRPC traffic. The CRS engine still
-// inspects gRPC request headers and the URI.
-func isGRPCRequest(r *http.Request) bool {
-	ct := r.Header.Get("Content-Type")
-	return strings.HasPrefix(ct, "application/grpc") || strings.HasPrefix(ct, "application/connect")
-}
-
-const grpcCompatDirective = `
-# CRS Protocol Enforcement gRPC Compatibility
-# ------------------------------------------------------------------------
-# 920420: Content-Type not allowed. gRPC uses application/grpc or application/connect.
-# We extend the allowed list to include gRPC and ConnectRPC families.
-SecAction "id:99007,phase:1,nolog,pass,t:none,setvar:'tx.allowed_request_content_type=|application/grpc| |application/grpc-web| |application/grpc-web+proto| |application/grpc-web+json| |application/connect+proto| |application/connect+json|'"
-
-# 920180: POST without Content-Length or Transfer-Encoding.
-# gRPC over HTTP/2 does not require these. We disable it for gRPC.
-SecRule TX:grpc_mode "@eq 1" \
-    "id:99008,phase:1,nolog,pass,ctl:ruleRemoveById=920180"
-
-# 920350: Host header is an IP address.
-# In internal microservices/gRPC, this is often legitimate.
-SecRule TX:grpc_mode "@eq 1" \
-    "id:99009,phase:1,nolog,pass,ctl:ruleRemoveById=920350"
-
-# 920300: Request Missing an Accept Header.
-# Many gRPC clients do not send an Accept header.
-SecRule TX:grpc_mode "@eq 1" \
-    "id:99010,phase:1,nolog,pass,ctl:ruleRemoveById=920300"
-`
-
 var (
 	reputationStrings [101]string
-	wafInstanceCache  sync.Map // map[string]coraza.WAF
-	hashPool          = sync.Pool{
-		New: func() any {
-			return sha256.New()
-		},
-	}
-	fastScanner = scanner.NewScanner([]string{
-		"SELECT ", "UNION ", "INSERT ", "DELETE ", "UPDATE ", "DROP ", "EXEC ", "sleep(", "benchmark(", "waitfor delay", // SQLi
-		"<script", "javascript:", "onload=", "onerror=", "eval(", "atob(", "alert(", "confirm(", "prompt(", // XSS
-		"/etc/passwd", "/etc/shadow", "/bin/sh", "cmd.exe", "/proc/self/", "/windows/system32", // LFI/RCE
-		"<?php", "base64_decode", "shell_exec", "system(", "passthru(", "exec(", // PHP
-		"authorized_keys", "id_rsa", "id_dsa", ".ssh/", // Creds
-		"powershell", "curl http", "wget http", "python -c", "perl -e", "ruby -e", // RCE
-		"nessustoken", "qualys-scan", "acunetix", "sqlmap", "nikto", "nmap", "masscan", // Scanners
-		"zgrab", "gobuster", "dirb", "dirbuster", "ffuf", "hydra", "burp", "metasploit", // Scanners
-		"w3af", "absenthe", "blackwidow", "commix", "darkstat", "dnsmap", "dnsrecon", // Scanners
-		"runtime.exec", "java.lang.Runtime", "java.lang.ProcessBuilder", "javax.crypto", // Java
-		"os/exec", "net/http/httputil", "reflect.ValueOf", "unsafe.Pointer", // Golang
-		"wp-admin", "wp-login", "wp-config.php", "xmlrpc.php", "wp-json", // WordPress
-		"wp-links-opml.php", "wp-config-sample.php", "readme.html", "license.txt", // WP info
-		"log4j", "jndi:ldap", "jndi:rmi", "${jndi:", // Log4j
-		"{{", "#{", "<%", "spring.datasource", "spring.cloud", // SSTI / Spring
-		"fs.readFile", "child_process", "process.env", // NodeJS
-		"metadata.google.internal", "169.254.169.254", // SSRF
-	})
+	wafInstanceCache  sync.Map // map[string]*gwaf.WAF
 
 	safeHeaders = map[string]bool{
 		"Authorization":        true,
@@ -243,358 +211,6 @@ var (
 	}
 )
 
-var crsRuleExplanations = map[int]struct {
-	Explanation    string
-	Recommendation string
-}{
-	911100: {
-		Explanation:    "The HTTP method used (e.g., PUT, DELETE) is not allowed by your security policy for this path.",
-		Recommendation: "Ensure you are using standard methods like GET or POST, or update the 'Allowed Methods' in Gateon settings.",
-	},
-	920170: {
-		Explanation:    "The request is a GET or HEAD but includes a message body, which is technically non-standard and often blocked by security policies.",
-		Recommendation: "Ensure your client is not sending a body with GET requests. If this is required by your API, use the 'Mark as False Positive' button to allow it for this path.",
-	},
-	920180: {
-		Explanation:    "The request is missing a mandatory size header (Content-Length) for a POST operation.",
-		Recommendation: "Ensure your client or proxy sends a proper Content-Length header for all POST/PUT requests.",
-	},
-	920300: {
-		Explanation:    "The request is missing the 'Accept' header, which many servers use to determine the response format.",
-		Recommendation: "Ensure your client sends a valid 'Accept' header (e.g., 'application/json' or '*/*').",
-	},
-	920350: {
-		Explanation:    "The 'Host' header contains a numeric IP address instead of a domain name.",
-		Recommendation: "In production, use domain names for all requests. For internal services, you can whitelist this rule if IP-based access is required.",
-	},
-	920420: {
-		Explanation:    "The 'Content-Type' header value is not permitted by the security policy.",
-		Recommendation: "Check if the application expects this specific content type. If legitimate, add it to the allowed list.",
-	},
-	932100: {
-		Explanation:    "A system command execution pattern (RCE) was detected. The request looks like an attempt to run commands on the server.",
-		Recommendation: "If this is a false positive, it might be due to shell-like characters in your input. Consider whitelisting this specific field.",
-	},
-	941010: {
-		Explanation:    "The request path (URI) triggered a security filter for suspicious characters or restricted file extensions.",
-		Recommendation: "This often happens with complex identifiers like UUIDs in the path. If the path is legitimate, use the 'Mark as False Positive' button.",
-	},
-	941100: {
-		Explanation:    "A script injection pattern (XSS) was detected. The input contains characters that could be executed by a browser.",
-		Recommendation: "Sanitize your input by removing HTML tags or use the 'Mark as False Positive' button if this is expected data.",
-	},
-	941110: {
-		Explanation:    "A direct script tag (<script>) was detected. This is a very high-confidence indicator of a script injection attempt.",
-		Recommendation: "Do not include raw HTML or script tags in request parameters unless absolutely necessary and encoded.",
-	},
-	942100: {
-		Explanation:    "A database query pattern (SQLi) was detected. The request contains keywords like 'SELECT', 'DROP', or '--' that look like database commands.",
-		Recommendation: "Avoid using SQL keywords or special characters like single quotes in your request data. For tokens/hashes, use the auto-fix button.",
-	},
-	942270: {
-		Explanation:    "A classic SQL 'UNION' attack pattern was detected, commonly used to steal data from databases.",
-		Recommendation: "Verify if the request data contains accidental SQL-like syntax. This is a high-risk violation.",
-	},
-	949110: {
-		Explanation:    "This request was blocked because its total 'Anomaly Score' exceeded the threshold after triggering multiple security rules.",
-		Recommendation: "Review the individual violations categorized below. For legitimate traffic, use the one-click resolution to whitelist the specific rules.",
-	},
-	1900001: {
-		Explanation:    "Gateon Fast-Path: A known attack signature (SQLi, XSS, or RCE) was matched in the request URI or headers.",
-		Recommendation: "Review the flagged field for malicious content. If this is a false positive, consider adjusting the Fast-Path sensitivity.",
-	},
-	1900002: {
-		Explanation:    "Gateon Fast-Path: High Shannon entropy detected in request components, suggesting obfuscated shellcode or binary injection.",
-		Recommendation: "Check if the request contains legitimate binary data or encrypted payloads that should be whitelisted.",
-	},
-	1900003: {
-		Explanation:    "Gateon Fast-Path: Client fingerprint mismatch detected. The TLS/HTTP fingerprint does not match the declared User-Agent.",
-		Recommendation: "This indicates a spoofed client or automated bot. Verify the legitimacy of the client.",
-	},
-	1900004: {
-		Explanation:    "Gateon Fast-Path: HTTP protocol violation detected (e.g., forbidden 'Connection' header in HTTP/2).",
-		Recommendation: "Ensure your client follows the HTTP/2 or HTTP/3 protocol specifications strictly.",
-	},
-	1900005: {
-		Explanation:    "Gateon Fast-Path: The client claims to be a modern browser but is missing mandatory browser headers.",
-		Recommendation: "Review the client's traffic patterns. Legitimate browsers always send standard headers like 'Accept-Encoding'.",
-	},
-	1990002: {
-		Explanation:    "Gateon Fast-Path: Malformed security token structure detected in the Authorization header.",
-		Recommendation: "Ensure your client is sending a valid security token (JWT, Paseto).",
-	},
-	100008: {
-		Explanation:    "A common web shell filename (e.g., c99.php, shell.php) was detected in the request URI.",
-		Recommendation: "This is a high-confidence indicator of a malware or compromise attempt. If this is a legitimate file, ensure it is properly registered.",
-	},
-	100009: {
-		Explanation:    "A ransomware-related filename (e.g., README_FOR_DECRYPT.txt) was detected in the request URI.",
-		Recommendation: "This strongly suggests a ransomware presence or scan. Investigate the client source immediately.",
-	},
-	110000: {
-		Explanation:    "A known vulnerability scanner (e.g., Nikto, sqlmap, Acunetix) was detected based on its User-Agent or headers.",
-		Recommendation: "Block this IP if it's not an authorized security scan. Automated tools are often the first step in an attack.",
-	},
-	120010: {
-		Explanation:    "A 'Header Flood' (DDoS) attempt was detected. The request contains an excessive number of headers.",
-		Recommendation: "This is likely a denial-of-service attempt. The IP has been automatically mitigated to protect service availability.",
-	},
-	130000: {
-		Explanation:    "Sensitive data (Credit Card Number) was detected in the response body, triggering a Data Leakage Prevention (DLP) block.",
-		Recommendation: "Ensure your application is not accidentally exposing sensitive customer data. Check the response logs to identify the source.",
-	},
-	130001: {
-		Explanation:    "Sensitive data (US Social Security Number) was detected in the response body, triggering a DLP block.",
-		Recommendation: "Exposure of PII like SSNs is a critical compliance violation. Audit the backend service for data leaks.",
-	},
-	130005: {
-		Explanation:    "A Slack Webhook URL was detected in the response body, which could allow unauthorized message posting.",
-		Recommendation: "Revoke the Slack Webhook immediately and ensure it is not hardcoded in the application response.",
-	},
-	130006: {
-		Explanation:    "A GitHub Personal Access Token (PAT) was detected in the response body.",
-		Recommendation: "Revoke the GitHub token immediately and check for accidental exposure in logs or API responses.",
-	},
-	130007: {
-		Explanation:    "A Google OAuth Client Secret was detected in the response body.",
-		Recommendation: "Rotate the OAuth Client Secret in the Google Cloud Console and audit the backend logic.",
-	},
-	140000: {
-		Explanation:    "A time-based 'Blind SQL Injection' attempt was detected (e.g., using sleep() or waitfor delay).",
-		Recommendation: "The attacker is trying to infer database content based on response delays. This is a highly sophisticated attack.",
-	},
-	100014: {
-		Explanation:    "A 'Shellshock' (CVE-2014-6271) exploit attempt was detected in the request headers.",
-		Recommendation: "Ensure your environment is patched against old RCE vulnerabilities. This is a classic automated exploit attempt.",
-	},
-}
-
-func getRuleCategory(id int) string {
-	switch {
-	case id >= 911000 && id <= 911999:
-		return "Access Policy"
-	case id >= 920000 && id <= 920999:
-		return "Protocol Compliance"
-	case id >= 921000 && id <= 921999:
-		return "Request Integrity"
-	case id >= 930000 && id <= 930999:
-		return "File System Protection"
-	case id >= 931000 && id <= 931999:
-		return "Remote Resource Access"
-	case id >= 932000 && id <= 932999:
-		return "Command Execution (RCE)"
-	case id >= 933000 && id <= 933999:
-		return "PHP Security"
-	case id >= 934000 && id <= 934999:
-		return "NodeJS Security"
-	case id >= 941000 && id <= 941999:
-		return "Script Injection (XSS)"
-	case id >= 942000 && id <= 942999:
-		return "Database Injection (SQLi)"
-	case id >= 943000 && id <= 943999:
-		return "Session Security"
-	case id >= 944000 && id <= 944999:
-		return "Java Security"
-	case id >= 950000 && id <= 959999:
-		return "Data Leakage (DLP)"
-	default:
-		return "Security Policy"
-	}
-}
-
-func getWAFDetails(ruleID int, originalDetails string) (explanation, recommendation string) {
-	if info, ok := crsRuleExplanations[ruleID]; ok {
-		return info.Explanation, info.Recommendation
-	}
-	if originalDetails == "" {
-		originalDetails = fmt.Sprintf("Rule %d triggered a security block.", ruleID)
-	}
-	return originalDetails, "Review the security logs for more details or contact your administrator if you believe this is a false positive."
-}
-
-func generateSmartInsight(t types.Transaction, it *types.Interruption) (explanation, recommendation, triggeredRules string) {
-	if it == nil {
-		return "", "", ""
-	}
-	matchedRules := t.MatchedRules()
-	ruleID := it.RuleID
-
-	// Default values
-	explanation, recommendation = getWAFDetails(ruleID, "")
-	attackRules := make([]int, 0)
-
-	var detailsSb strings.Builder
-
-	// If it's the Anomaly Score rule, we aggregate everything.
-	if ruleID == 949110 {
-		detailsSb.WriteString("Request blocked due to suspicious patterns. The following violations were found:\n")
-
-		// Group by category for better readability
-		byCategory := make(map[string][]string)
-		highParanoia := false
-
-		for _, mr := range matchedRules {
-			id := mr.Rule().ID()
-			// Skip internal/setup/reporting rules to avoid noise
-			if id == 949110 || (id >= 900000 && id <= 901999) || (id >= 1900000 && id <= 1901999) || (id >= 99000 && id <= 99999) || (id >= 949000 && id <= 949999) || (id >= 980000 && id <= 980999) {
-				continue
-			}
-
-			// Detect high paranoia level rules (usually ending in 13, 14, 15... or having it in the msg)
-			if strings.Contains(strings.ToLower(mr.Message()), "paranoia") || id%100 >= 13 {
-				highParanoia = true
-			}
-
-			attackRules = append(attackRules, id)
-
-			location := "unknown location"
-			if len(mr.MatchedDatas()) > 0 {
-				md := mr.MatchedDatas()[0]
-				varName := md.Variable().Name()
-				if key := md.Key(); key != "" {
-					location = fmt.Sprintf("'%s' in %s", key, varName)
-				} else {
-					location = varName
-				}
-			}
-
-			msg := mr.Message()
-			if msg == "" {
-				if info, ok := crsRuleExplanations[id]; ok {
-					msg = info.Explanation
-				}
-			}
-			if msg == "" {
-				msg = "Suspicious pattern detected"
-			}
-
-			cat := getRuleCategory(id)
-			item := fmt.Sprintf("• %s (Rule %d, at %s)", msg, id, location)
-			byCategory[cat] = append(byCategory[cat], item)
-		}
-
-		// Sort categories to have consistent output
-		cats := make([]string, 0, len(byCategory))
-		for k := range byCategory {
-			cats = append(cats, k)
-		}
-		slices.Sort(cats)
-
-		for _, cat := range cats {
-			fmt.Fprintf(&detailsSb, "\n[%s]\n", cat)
-			for _, item := range byCategory[cat] {
-				detailsSb.WriteString(item + "\n")
-			}
-		}
-
-		explanation = detailsSb.String()
-
-		// Context-aware recommendation
-		uri := ""
-		if len(matchedRules) > 0 {
-			uri = matchedRules[0].URI()
-		}
-		uriLower := strings.ToLower(uri)
-
-		// Path-specific recommendations
-		pathRec := ""
-		if strings.Contains(uriLower, "token") || strings.Contains(uriLower, "refresh") || strings.Contains(uriLower, "login") || strings.Contains(uriLower, "auth") {
-			pathRec = "This endpoint handles sensitive authentication data. Cryptographic tokens often look like database or script attacks. If this is legitimate traffic, click 'Mark as False Positive' to automatically whitelist these patterns for this path."
-		} else if containsUUID(uri) {
-			pathRec = "This path contains a UUID or complex identifier. These can sometimes trigger false positives in path-based security rules (like Rule 941010). If this is legitimate traffic, use the 'Mark as False Positive' button to create a targeted exclusion."
-		} else {
-			pathRec = "Review the violations above. If these are expected behaviors for your application, use the 'Mark as False Positive' button to create a targeted exclusion and restore the client's reputation."
-		}
-
-		if pathRec != "" {
-			recommendation = pathRec
-		}
-
-		if highParanoia {
-			recommendation += "\n\nHint: Multiple high-paranoia rules were triggered. These rules are very strict and often cause false positives. If this traffic is legitimate, consider lowering the CRS Paranoia Level in settings."
-		} else if len(attackRules) > 3 {
-			recommendation += "\n\nHint: Multiple security violations detected. This usually indicates either a complex false positive or a multi-stage attack."
-		}
-	} else {
-		// Single rule block
-		var mr types.MatchedRule
-		for _, r := range matchedRules {
-			if r.Rule().ID() == ruleID {
-				mr = r
-				break
-			}
-		}
-
-		if mr != nil {
-			attackRules = append(attackRules, ruleID)
-
-			msg := mr.Message()
-			if msg == "" {
-				if info, ok := crsRuleExplanations[ruleID]; ok {
-					msg = info.Explanation
-				}
-			}
-			if msg == "" {
-				msg = "Security signature match"
-			}
-
-			if len(mr.MatchedDatas()) > 0 {
-				md := mr.MatchedDatas()[0]
-				val := md.Value()
-				if len(val) > 50 {
-					val = val[:47] + "..."
-				}
-				explanation = fmt.Sprintf("Security violation: %s (Rule %d). The value '%s' at %s matched a known threat signature.", msg, ruleID, val, md.Variable().Name())
-
-				// Smart Token Detection in matched data:
-				for _, md := range mr.MatchedDatas() {
-					v := md.Value()
-					if len(v) > 80 && (isJWT(v) || isPaseto(v) || entropy.CalculateString(v) > 4.5) {
-						recommendation += "\nSmart Insight: The blocked value appears to be a legitimate security token or cryptographic hash. Use the 'Mark as False Positive' button to automatically create a targeted exclusion for this field."
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// Add fingerprint/entropy insights if recorded in context (for fast-path threats)
-	// ... (rest of the switch stays the same)
-	if ca, ok := t.(interface {
-		GetCollection(variables.RuleVariable) collection.Collection
-	}); ok {
-		if tx, ok := ca.GetCollection(variables.TX).(collection.Keyed); ok {
-			if typeStr := tx.Get("fast_path_type"); len(typeStr) > 0 {
-				switch typeStr[0] {
-				case "fast_path_entropy":
-					explanation = "High Shannon Entropy detected in request components, suggesting obfuscated shellcode, encrypted payloads, or binary injection."
-					recommendation = "Review the flagged field for unusual character distributions. If this is legitimate binary data, consider whitelisting the field or endpoint."
-				case "fast_path_fingerprint":
-					explanation = "Client fingerprint mismatch: The TLS/HTTP fingerprint does not match the declared User-Agent, indicating a spoofed client or automated bot."
-					recommendation = "The request appears to be coming from a tool masquerading as a browser. Verify the legitimacy of the client or enforce CAPTCHA/JS challenges."
-				case "fast_path_protocol_violation":
-					explanation = "HTTP/2 or HTTP/3 protocol violation detected (e.g., forbidden 'Connection' header). This is common in poorly implemented bots or exploit scripts."
-					recommendation = "Check if the client is using an outdated or non-standard HTTP library. Legitimate browsers do not violate these protocol rules."
-				case "fast_path_suspicious_client":
-					explanation = "The client claims to be a modern browser but is missing mandatory headers like 'Accept-Encoding', suggesting a scripted attack."
-					recommendation = "Review the client's traffic patterns. If this is a legitimate automated tool, ensure it sends standard browser-like headers."
-				case "fast_path_malformed_token":
-					explanation = "Malformed security token structure detected in the Authorization header."
-					recommendation = "Ensure your client is sending a valid security token (JWT, Paseto). If you are using a custom token format, you may need to adjust the Gateon Fast-Path settings."
-				}
-			}
-		}
-	}
-
-	if len(attackRules) > 0 {
-		if b, err := json.Marshal(attackRules); err == nil {
-			triggeredRules = string(b)
-		}
-	}
-
-	return explanation, recommendation, triggeredRules
-}
-
 func init() {
 	for i := 0; i <= 100; i++ {
 		reputationStrings[i] = strconv.Itoa(i)
@@ -613,15 +229,15 @@ func getReputationString(score float64) string {
 	return reputationStrings[s]
 }
 
-// WAF returns a middleware that applies OWASP Coraza WAF with optional CRS.
+// WAF returns a middleware that inspects requests with gwaf.
 func WAF(cfg WAFConfig) (Middleware, error) {
-	// createWAFInstance correctly uses WafRules if provided.
-	waf, err := createWAFInstance(cfg)
+	// The decision hook is set per engine rather than per request: it closes
+	// over nothing request-specific, and the observation the recorder needs is
+	// assembled at the call site where the request is still in scope.
+	engine, err := newWAFEngine(cfg, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	wrappedWaf := &wafWrapper{waf: waf, routeID: cfg.RouteID, cfg: cfg}
 
 	return func(next http.Handler) http.Handler {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -667,6 +283,20 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				return
 			}
 
+			// Protocol enforcement, ahead of everything else: a request with
+			// conflicting framing should not be inspected and forwarded, it
+			// should be refused, and doing it first keeps the cost off the
+			// path for conforming traffic.
+			if !cfg.DisableProtocolChecks {
+				if v := checkProtocol(r, cfg.AllowedMethods); v != nil {
+					recordFastPathThreat(r, cfg.RouteID, "protocol_violation", v.reason)
+					if !cfg.AuditOnly {
+						http.Error(w, "Forbidden by Security Policy ("+v.reason+")", v.status)
+						return
+					}
+				}
+			}
+
 			// 4. Cloudflare IP trust
 			if cfg.TrustCloudflare {
 				clientIP := request.GetClientIP(r, true)
@@ -676,8 +306,6 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					r.RemoteAddr = clientIP
 				}
 			}
-
-			grpcRequest := cfg.GRPCMode && isGRPCRequest(r)
 
 			// 5. Adaptive WAF reputation scoring
 			repScore := 100.0
@@ -698,77 +326,23 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				return
 			}
 
-			// 6. Fast Path Signature & Entropy checks
-			if !grpcRequest {
-				rawURI := r.RequestURI
-				if matches := fastScanner.FindAll(rawURI); len(matches) > 0 {
-					details := "Request URI match: " + strings.Join(matches, ", ")
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-					if !cfg.AuditOnly {
-						http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-						return
-					}
-				}
-
-				unescapedURI, _ := url.PathUnescape(rawURI)
-				if unescapedURI != "" && unescapedURI != rawURI {
-					if matches := fastScanner.FindAll(unescapedURI); len(matches) > 0 {
-						details := "Unescaped Request URI match: " + strings.Join(matches, ", ")
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						if !cfg.AuditOnly {
-							http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-							return
-						}
-					}
-				}
-
-				if referer := r.Header.Get("Referer"); referer != "" {
-					if matches := fastScanner.FindAll(referer); len(matches) > 0 {
-						details := "Referer header match: " + strings.Join(matches, ", ")
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						if !cfg.AuditOnly {
-							http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-							return
-						}
-					}
-				}
-				if ua := r.Header.Get("User-Agent"); ua != "" {
-					if matches := fastScanner.FindAll(ua); len(matches) > 0 {
-						details := "User-Agent header match: " + strings.Join(matches, ", ")
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_signature", details)
-						if !cfg.AuditOnly {
-							http.Error(w, "Forbidden by Security Fast-Path (Signature Match)", http.StatusForbidden)
-							return
-						}
-					}
-				}
-			}
+			// The Aho-Corasick signature prefilter that used to run here was
+			// retired. It blocked on a substring hit before the engine ran,
+			// which made every literal a standalone rule with no grammar behind
+			// it: bare SQL keywords refused "delete my account", WordPress paths
+			// broke WordPress, and everything it caught with security value the
+			// gwaf engine already catches by intent — in the URI and in the
+			// headers alike. Keeping it was a fast path that *skipped* the
+			// accurate check rather than cheapening it. The entropy,
+			// fingerprint, and token checks below stay: those are gateon-owned
+			// signals the stateless engine cannot produce.
 
 			// Check entropy of common fields to detect shellcode/obfuscation
-			if !grpcRequest && !cfg.DisableEntropy {
-				threshold := cfg.EntropyThreshold
-				if threshold <= 0 {
-					threshold = 5.8
-				}
-				// Adaptive Entropy: If reputation is high, increase threshold to reduce false positives
-				if repScore > 90 {
-					threshold += 0.5
-				} else if repScore < 20 {
-					threshold -= 0.5
-				}
-
-				for key, vals := range r.Header {
-					if isSafeHeader(key) {
-						continue
-					}
-					for _, val := range vals {
-						// High entropy in unknown headers is still suspicious.
-						if len(val) > 64 && entropy.IsSuspicious(val, threshold) {
-							recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", fmt.Sprintf("High entropy in header %s: %.2f (threshold %.2f)", key, entropy.CalculateString(val), threshold))
-							http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
-							return
-						}
-					}
+			if !cfg.DisableEntropy {
+				if detail, found := suspiciousHeaderEntropy(r, cfg, repScore); found {
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", detail)
+					http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
+					return
 				}
 			}
 
@@ -804,34 +378,11 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			}
 
 			// 2. Body Entropy Check (Fast-Path)
-			if cfg.EnableBodyEntropy && !grpcRequest && r.ContentLength > 0 && r.ContentLength < 1024*1024 {
-				peeked, err := peekBody(r, 2048)
-				if err == nil && len(peeked) > 64 {
-					if rs != nil {
-						rs.ExecutedEntropy = true
-					}
-					threshold := cfg.EntropyThreshold
-					if threshold <= 0 {
-						threshold = 5.8
-					}
-					// Adaptive Entropy: Content-Type awareness
-					ct := strings.ToLower(r.Header.Get("Content-Type"))
-					if strings.Contains(ct, "json") || strings.Contains(ct, "xml") || strings.Contains(ct, "form") {
-						threshold += 0.2 // Allow slightly higher entropy for structured data
-					}
-
-					if repScore > 90 {
-						threshold += 0.5
-					} else if repScore < 20 {
-						threshold -= 0.5
-					}
-
-					if entropy.IsSuspiciousBytes(peeked, threshold) {
-						ent := entropy.Calculate(peeked)
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", fmt.Sprintf("High entropy in request body: %.2f (threshold %.2f)", ent, threshold))
-						http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
-						return
-					}
+			if cfg.EnableBodyEntropy && r.ContentLength > 0 && r.ContentLength < maxBodyEntropyScan {
+				if detail, found := suspiciousBodyEntropy(r, rs, cfg, repScore); found {
+					recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", detail)
+					http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
+					return
 				}
 			}
 
@@ -874,301 +425,88 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				}
 			}
 
-			// Manual Transaction Management
-			tx := wrappedWaf.NewTransaction()
-			tx.(*txWrapper).r = r
-			defer tx.ProcessLogging()
-			defer tx.Close()
-
-			// Process Request Headers & URI
-			it, err := processRequest(tx, r)
-			if err != nil {
-				logger.L.LogError("WAF failed to process request", "error", err)
-				next.ServeHTTP(w, r)
-				return
+			tx, decision, err := engine.inspectRequest(r, repScore)
+			// inspectRequest returns a live transaction on every path, error
+			// included, so the audit trail survives a failed inspection. Guard
+			// the nil case anyway: this defer runs on the request path, and a
+			// future early return here would otherwise panic on every request
+			// rather than honour cfg.FailOpen below.
+			if tx != nil {
+				defer tx.Close()
 			}
-			if it != nil && !cfg.AuditOnly {
-				status := it.Status
-				if status == 0 {
-					status = http.StatusForbidden
+
+			observe := func(d gwaf.Decision) {
+				matches := tx.Matches()
+				obs := wafObservation{
+					decision: d, matches: matches, request: r,
+					routeID: cfg.RouteID, cfg: cfg, repScore: repScore,
 				}
-				w.WriteHeader(status)
-				_, _ = w.Write([]byte("Forbidden by Security Policy (WAF)"))
-				return
+				recordWAFDecision(obs)
+				engine.audit.record(d, matches, obs)
 			}
 
-			if !cfg.EnableResponseInspection || grpcRequest {
+			if err != nil {
+				// The engine could not finish inspecting. Whether that permits
+				// the request is a policy decision, not an accident of control
+				// flow: under Coraza this path fell through to the next handler
+				// and the gateway failed open with nothing recording that it
+				// had.
+				logger.L.LogError("WAF could not inspect the request",
+					"error", err, "route", cfg.RouteID, "fail_open", cfg.FailOpen)
+				if !cfg.FailOpen {
+					http.Error(w, "Forbidden by Security Policy (request could not be inspected)",
+						http.StatusForbidden)
+					return
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Wrap ResponseWriter for Phase 3/4 (DLP / Response Inspection)
-			// We buffer the response to allow changing status code if a rule matches in Phase 3/4.
+			if decision != nil {
+				observe(*decision)
+				if !cfg.AuditOnly {
+					status := decision.Status()
+					if status == 0 {
+						status = http.StatusForbidden
+					}
+					http.Error(w, "Forbidden by Security Policy (WAF)", status)
+					return
+				}
+			} else {
+				observe(tx.Decision())
+			}
+
+			if !cfg.EnableResponseInspection {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Response inspection. The response is streamed through the engine
+			// rather than buffered: the previous implementation accumulated the
+			// entire upstream response in memory before writing any of it, which
+			// is an unbounded allocation keyed on upstream behaviour and breaks
+			// server-sent events and any long-lived stream.
+			//
+			// The cost of streaming is that headers are committed before the body
+			// is seen, so a response-body match can no longer change the status
+			// code. It truncates the response instead, which is the honest
+			// trade: the leaked bytes stop either way, and a client that received
+			// a 200 with a truncated body is strictly better off than one that
+			// waited for the whole thing to be buffered.
 			ww := &wafResponseWriter{
 				ResponseWriter: w,
 				tx:             tx,
-				buf:            &bytes.Buffer{},
 				auditOnly:      cfg.AuditOnly,
+				onDecision:     observe,
+				bufLimit:       responseBufferLimit(cfg),
 			}
 			next.ServeHTTP(ww, r)
-			if !ww.interrupted {
-				// Process remaining body if any
-				it, err := tx.ProcessResponseBody()
-				if err == nil && it != nil && !cfg.AuditOnly {
-					ww.interrupted = true
-					ww.ResponseWriter.WriteHeader(http.StatusForbidden)
-					_, _ = ww.ResponseWriter.Write([]byte("Forbidden by Security Policy (Response Blocked)"))
-					return
-				}
-				// Flush buffer
-				if ww.status == 0 {
-					ww.status = http.StatusOK
-				}
-				// If not interrupted, write the original status and buffered body
-				if !ww.headerWritten {
-					w.WriteHeader(ww.status)
-				}
-				_, _ = w.Write(ww.buf.Bytes())
-			}
+			ww.finish()
 		})
 		return h
 	}, nil
 }
 
-func createWAFInstance(cfg WAFConfig) (coraza.WAF, error) {
-	wafConfig := coraza.NewWAFConfig()
-	var sb strings.Builder
-
-	// Build directives string... (existing logic)
-
-	if cfg.UseCRS {
-		pl := cfg.ParanoiaLevel
-		if pl < 1 {
-			pl = 1
-		}
-		if pl > 4 {
-			pl = 4
-		}
-		engineDirective := "SecRuleEngine On\n"
-		if cfg.AuditOnly {
-			engineDirective = "SecRuleEngine DetectionOnly\n"
-		}
-
-		sb.WriteString(engineDirective)
-		threshold := cfg.AnomalyThreshold
-		if threshold <= 0 {
-			threshold = 5
-		}
-		_, _ = fmt.Fprintf(&sb, `SecAction "id:99000,phase:1,nolog,pass,setvar:tx.paranoia_level=%d"
-SecWebAppId gateon
-SecAction "id:99002,phase:1,nolog,pass,initcol:ip=%%{REMOTE_ADDR},setvar:tx.dos_burst_time_slice=60,setvar:tx.dos_counter_threshold=100,setvar:tx.dos_block_timeout=600"
-Include @crs-setup.conf.example
-SecAction "id:99200,phase:1,nolog,pass,t:none,setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE'"
-`, pl)
-
-		// Basic enforcement and common rules
-		sb.WriteString("Include @owasp_crs/REQUEST-901-INITIALIZATION.conf\n")
-		// Override defaults from CRS initialization with our configured thresholds
-		_, _ = fmt.Fprintf(&sb, "SecAction \"id:99099,phase:1,nolog,pass,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d\"\n", threshold, threshold)
-
-		// Inject dynamic variables for rules (must be before loading database rules that use them)
-		allowedIps := "127.0.0.1"
-		if len(cfg.AllowedAdminIps) > 0 {
-			allowedIps = strings.Join(append([]string{"127.0.0.1"}, cfg.AllowedAdminIps...), " ")
-		}
-		_, _ = fmt.Fprintf(&sb, "SecAction \"id:99005,phase:1,nolog,pass,setvar:tx.allowed_admin_ips=%s\"\n", allowedIps)
-
-		if cfg.GRPCMode {
-			sb.WriteString("SecAction \"id:99006,phase:1,nolog,pass,setvar:tx.grpc_mode=1\"\n")
-			sb.WriteString(grpcCompatDirective)
-			sb.WriteByte('\n')
-		}
-
-		// Load dynamic rules from database
-		if cfg.WafRules != nil {
-			rules := cfg.WafRules.GetEnabledRules()
-			for _, r := range rules {
-				if r.ParanoiaLevel <= pl {
-					sb.WriteString(r.Directive)
-					sb.WriteByte('\n')
-				}
-			}
-		}
-
-		if cfg.EnableIPReputation {
-			sb.WriteString("SecRule REQUEST_HEADERS:X-Gateon-Ip-Reputation-Block \"@eq 1\" \"id:99201,phase:1,pass,log,msg:'IP Reputation hit',tag:'reputation',severity:CRITICAL,setvar:tx.anomaly_score=+5,setvar:tx.inbound_anomaly_score=+5\"\n")
-		}
-
-		sb.WriteString("Include @owasp_crs/REQUEST-905-COMMON-EXCEPTIONS.conf\n")
-
-		if !cfg.DisableProtocol {
-			sb.WriteString("Include @owasp_crs/REQUEST-911-METHOD-ENFORCEMENT.conf\n")
-			sb.WriteString("Include @owasp_crs/REQUEST-920-PROTOCOL-ENFORCEMENT.conf\n")
-			sb.WriteString("Include @owasp_crs/REQUEST-921-PROTOCOL-ATTACK.conf\n")
-		}
-		if !cfg.DisableScanner {
-			sb.WriteString("Include @owasp_crs/REQUEST-913-SCANNER-DETECTION.conf\n")
-		}
-		if !cfg.DisableLFI {
-			sb.WriteString("Include @owasp_crs/REQUEST-930-APPLICATION-ATTACK-LFI.conf\n")
-			sb.WriteString("Include @owasp_crs/REQUEST-931-APPLICATION-ATTACK-RFI.conf\n")
-		}
-		if !cfg.DisableRCE {
-			sb.WriteString("Include @owasp_crs/REQUEST-932-APPLICATION-ATTACK-RCE.conf\n")
-		}
-		if !cfg.DisablePHP {
-			sb.WriteString("Include @owasp_crs/REQUEST-933-APPLICATION-ATTACK-PHP.conf\n")
-		}
-		if !cfg.DisableXSS {
-			sb.WriteString("Include @owasp_crs/REQUEST-941-APPLICATION-ATTACK-XSS.conf\n")
-		}
-		if !cfg.DisableSQLI {
-			sb.WriteString("Include @owasp_crs/REQUEST-942-APPLICATION-ATTACK-SQLI.conf\n")
-		}
-		sb.WriteString("Include @owasp_crs/REQUEST-943-APPLICATION-ATTACK-SESSION-FIXATION.conf\n")
-		if !cfg.DisableJava {
-			sb.WriteString("Include @owasp_crs/REQUEST-944-APPLICATION-ATTACK-JAVA.conf\n")
-		}
-		if !cfg.DisableNodeJS {
-			sb.WriteString("Include @owasp_crs/REQUEST-934-APPLICATION-ATTACK-GENERIC.conf\n")
-		}
-
-		sb.WriteString("Include @owasp_crs/REQUEST-949-BLOCKING-EVALUATION.conf\n")
-		sb.WriteString("SecRuleUpdateActionById 949110 \"deny,status:403\"\n")
-		// Manually add evaluation rules to ensure blocking if anomaly score is exceeded.
-		// We check both ANOMALY_SCORE and inbound_anomaly_score just in case.
-		sb.WriteString("SecRule TX:ANOMALY_SCORE \"@ge %{tx.inbound_anomaly_score_threshold}\" \"id:99491,phase:2,deny,status:403,msg:'Inbound Anomaly Score Exceeded (Score: %{TX.ANOMALY_SCORE})',tag:'anomaly-evaluation'\"\n")
-		sb.WriteString("SecRule TX:inbound_anomaly_score \"@ge %{tx.inbound_anomaly_score_threshold}\" \"id:99492,phase:2,deny,status:403,msg:'Inbound Anomaly Score Exceeded (Score: %{TX.inbound_anomaly_score})',tag:'anomaly-evaluation'\"\n")
-		// Ensure immediate interruption for any high-severity attack regardless of score
-		sb.WriteString("SecRule TX:sql_injection_score \"@ge 5\" \"id:99493,phase:2,deny,status:403,msg:'SQL Injection Detected',tag:'attack-sqli'\"\n")
-		sb.WriteString("SecRule TX:xss_score \"@ge 5\" \"id:99494,phase:2,deny,status:403,msg:'XSS Detected',tag:'attack-xss'\"\n")
-
-		if cfg.EnableResponseInspection {
-			if cfg.EnableDLP {
-				sb.WriteString("Include @owasp_crs/RESPONSE-950-DATA-LEAKAGES.conf\n")
-			}
-			if !cfg.DisableSQLI {
-				sb.WriteString("Include @owasp_crs/RESPONSE-951-DATA-LEAKAGES-SQL.conf\n")
-			}
-			if !cfg.DisableJava {
-				sb.WriteString("Include @owasp_crs/RESPONSE-952-DATA-LEAKAGES-JAVA.conf\n")
-			}
-			if !cfg.DisablePHP {
-				sb.WriteString("Include @owasp_crs/RESPONSE-953-DATA-LEAKAGES-PHP.conf\n")
-			}
-			sb.WriteString("Include @owasp_crs/RESPONSE-954-DATA-LEAKAGES-IIS.conf\n")
-			sb.WriteString("Include @owasp_crs/RESPONSE-959-BLOCKING-EVALUATION.conf\n")
-			sb.WriteString("SecRuleUpdateActionById 959100 \"deny,status:403\"\n")
-			sb.WriteString("Include @owasp_crs/RESPONSE-980-CORRELATION.conf\n")
-		}
-
-		if cfg.RulesPath != "" {
-			wafConfig = wafConfig.WithRootFS(os.DirFS(cfg.RulesPath))
-		} else {
-			wafConfig = wafConfig.WithRootFS(fsWrapper{coreruleset.FS})
-		}
-	}
-
-	if auditPath := resolveAuditLogPath(cfg); auditPath != "" {
-		if err := ensureAuditLogFile(auditPath); err == nil {
-			auditEngine := "On"
-			if cfg.AuditLogRelevantOnly {
-				auditEngine = "RelevantOnly"
-			}
-			_, _ = fmt.Fprintf(&sb, `
-SecAuditEngine %s
-SecAuditLogParts ABIJDEFHKZ
-SecAuditLogType Serial
-SecAuditLog "%s"
-`, auditEngine, strings.ReplaceAll(auditPath, "\\", "/"))
-		}
-	}
-
-	if sb.Len() > 0 {
-		wafConfig = wafConfig.WithDirectives(sb.String())
-	}
-	if cfg.GlobalDirectives != "" {
-		wafConfig = wafConfig.WithDirectives(cfg.GlobalDirectives)
-	}
-	if cfg.Directives != "" {
-		wafConfig = wafConfig.WithDirectives(cfg.Directives)
-	}
-	if cfg.DirectivesFile != "" {
-		wafConfig = wafConfig.WithDirectivesFromFile(cfg.DirectivesFile)
-	} else if !cfg.UseCRS && cfg.Directives == "" {
-		wafConfig = wafConfig.WithDirectives(`SecRuleEngine Off`)
-	}
-
-	if cfg.RequestBodyLimit > 0 || cfg.EnableMalwareDetection || cfg.EnableRansomwareDetection {
-		limit := cfg.RequestBodyLimit
-		if limit <= 0 {
-			limit = 10 * 1024 * 1024
-		}
-		wafConfig = wafConfig.WithRequestBodyLimit(limit)
-		memLimit := int64(limit) / 10
-		if memLimit < 1024*1024 {
-			memLimit = 1024 * 1024
-		}
-		memLimit = min(memLimit, int64(limit))
-		wafConfig = wafConfig.WithRequestBodyInMemoryLimit(int(memLimit))
-		wafConfig = wafConfig.WithDirectives("SecRequestBodyAccess On")
-	}
-
-	if cfg.EnableResponseInspection && cfg.ResponseBodyLimit > 0 {
-		wafConfig = wafConfig.WithResponseBodyLimit(cfg.ResponseBodyLimit)
-		wafConfig = wafConfig.WithDirectives("SecResponseBodyAccess On")
-		wafConfig = wafConfig.WithDirectives(`SecResponseBodyMimeType text/plain text/html text/xml application/json application/xml application/xhtml+xml`)
-	}
-
-	// Create a unique key for the compiled WAF instance based on all directives
-	// and critical settings. This allows multiple routes to share the same
-	// expensive-to-compile WAF instance.
-	h := hashPool.Get().(hash.Hash)
-	h.Reset()
-	defer hashPool.Put(h)
-
-	// Hash all directives in order
-	io.WriteString(h, sb.String())
-	io.WriteString(h, cfg.GlobalDirectives)
-	io.WriteString(h, cfg.Directives)
-	io.WriteString(h, cfg.DirectivesFile)
-	if cfg.RequestBodyLimit > 0 {
-		_, _ = fmt.Fprintf(h, "|reqLimit:%d", cfg.RequestBodyLimit)
-	}
-	if cfg.ResponseBodyLimit > 0 {
-		_, _ = fmt.Fprintf(h, "|respLimit:%d", cfg.ResponseBodyLimit)
-	}
-	key := hex.EncodeToString(h.Sum(nil))
-
-	if val, ok := wafInstanceCache.Load(key); ok {
-		return val.(coraza.WAF), nil
-	}
-
-	wafConfig = wafConfig.WithErrorCallback(func(mr types.MatchedRule) {
-		ruleID := strconv.Itoa(mr.Rule().ID())
-		logger.L.LogWarn("WAF matched rule",
-			"event", "waf_match",
-			"rule_id", ruleID,
-			"client_ip", mr.ClientIPAddress(),
-			"uri", mr.URI(),
-			"severity", mr.Rule().Severity().String(),
-			"message", mr.ErrorLog())
-	})
-
-	instance, err := coraza.NewWAF(wafConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	// Store in cache (or use existing if someone beat us to it)
-	if actual, loaded := wafInstanceCache.LoadOrStore(key, instance); loaded {
-		return actual.(coraza.WAF), nil
-	}
-
-	return instance, nil
-}
-
-// recordFastPathThreat records a security threat detected by the fast-path.
 func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	clientIP := request.GetClientIP(r, true)
 	category := "general"
@@ -1308,326 +646,8 @@ func hasPrefixFold(s, prefix string) bool {
 	return strings.EqualFold(s[:len(prefix)], prefix)
 }
 
-type wafWrapper struct {
-	mu      sync.RWMutex
-	waf     coraza.WAF
-	routeID string
-	cfg     WAFConfig
-}
-
-func (w *wafWrapper) NewTransaction() types.Transaction {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return &txWrapper{
-		Transaction: w.waf.NewTransaction(),
-		routeID:     w.routeID,
-		cfg:         w.cfg,
-	}
-}
-
-func (w *wafWrapper) NewTransactionWithID(id string) types.Transaction {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return &txWrapper{
-		Transaction: w.waf.NewTransactionWithID(id),
-		routeID:     w.routeID,
-		cfg:         w.cfg,
-	}
-}
-
-type txWrapper struct {
-	types.Transaction
-	r       *http.Request
-	routeID string
-	cfg     WAFConfig
-}
-
-func (t *txWrapper) ProcessLogging() {
-	fingerprint := ""
-	ja4 := ""
-	ja4h := ""
-	if t.r != nil {
-		if rs := request.GetRequestState(t.r); rs != nil {
-			fingerprint = rs.JA4Plus
-			ja4 = rs.JA4
-			ja4h = rs.JA4H
-		}
-	}
-	interrupted := t.IsInterrupted()
-	var it *types.Interruption
-	if interrupted {
-		it = t.Interruption()
-		logger.L.LogInfo("WAF Transaction Interrupted", "rule_id", it.RuleID, "action", it.Action, "route", t.routeID)
-	}
-	matchedRules := t.MatchedRules()
-	if len(matchedRules) > 0 {
-		anomalyScore := 0
-		clientIP := ""
-		uri := ""
-		severity := "notice"
-		category := "general"
-		repScore := 100.0
-		ua := ""
-		method := ""
-		isCritical := false
-
-		if ca, ok := t.Transaction.(interface {
-			GetCollection(variables.RuleVariable) collection.Collection
-		}); ok {
-			if c, ok := ca.GetCollection(variables.TX).(collection.Keyed); ok {
-				// Thoroughly check for anomaly scores
-				findScore := func(name string) int {
-					if vals := c.Get(name); len(vals) > 0 {
-						s, _ := strconv.Atoi(vals[0])
-						return s
-					}
-					return 0
-				}
-
-				anomalyScore = findScore("anomaly_score")
-				if s := findScore("inbound_anomaly_score"); s > anomalyScore {
-					anomalyScore = s
-				}
-				// CRS v4 specific scores
-				for i := 1; i <= 4; i++ {
-					if s := findScore(fmt.Sprintf("anomaly_score_pl%d", i)); s > anomalyScore {
-						anomalyScore = s
-					}
-				}
-			}
-
-			if c, ok := ca.GetCollection(variables.RequestHeaders).(collection.Keyed); ok {
-				if vals := c.Get("X-Gateon-Reputation"); len(vals) > 0 {
-					if f, err := strconv.ParseFloat(vals[0], 64); err == nil {
-						repScore = f
-					}
-				}
-				if vals := c.Get("X-Gateon-JA4"); len(vals) > 0 && ja4 == "" {
-					ja4 = vals[0]
-				}
-				if fingerprint == "" && ja4 != "" {
-					if ja4h == "" && t.r != nil {
-						ja4h = telemetry.GetCachedJA4H(t.r)
-					}
-					fingerprint = ja4 + "_" + ja4h
-				}
-				if vals := c.Get("User-Agent"); len(vals) > 0 {
-					ua = vals[0]
-				}
-			}
-
-			if c, ok := ca.GetCollection(variables.RequestMethod).(collection.Single); ok {
-				method = c.Get()
-			}
-		}
-
-		logger.L.LogInfo("WAF Rules Matched",
-			"count", len(matchedRules),
-			"anomaly_score", anomalyScore,
-			"interrupted", interrupted,
-			"route", t.routeID,
-			"threshold", t.cfg.AnomalyThreshold)
-
-		if anomalyScore == 0 && !interrupted {
-			// Ensure reputation hits are always recorded even if anomaly score is 0
-			isReputation := false
-			for _, rule := range matchedRules {
-				tags := rule.Rule().Tags()
-				for _, tag := range tags {
-					if strings.Contains(strings.ToLower(tag), "reputation") {
-						isReputation = true
-						break
-					}
-				}
-				if isReputation {
-					break
-				}
-			}
-			if !isReputation {
-				return
-			}
-		}
-
-		for _, rule := range matchedRules {
-			if clientIP == "" {
-				clientIP = rule.ClientIPAddress()
-			}
-			if uri == "" {
-				uri = rule.URI()
-			}
-			if rule.Rule().Severity() <= types.RuleSeverityCritical {
-				isCritical = true
-			}
-
-			// Optimized: identify category from tags in a single pass
-			if category == "general" || category == "" {
-				category = getCategoryFromTags(rule.Rule().Tags())
-			}
-
-			if interrupted && rule.Rule().ID() == it.RuleID {
-				severity = strings.ToLower(rule.Rule().Severity().String())
-			}
-		}
-
-		if clientIP == "" || uri == "" {
-			// Fallback to last matched rule if the interrupting one isn't in matched rules
-			// OR if not interrupted at all.
-			last := matchedRules[len(matchedRules)-1]
-			if clientIP == "" {
-				clientIP = last.ClientIPAddress()
-			}
-			if uri == "" {
-				uri = last.URI()
-			}
-		}
-
-		if interrupted {
-			ruleID := strconv.Itoa(it.RuleID)
-			telemetry.RequestFailuresTotal.WithLabelValues(t.routeID, "waf:"+ruleID).Inc()
-		}
-
-		if clientIP != "" && interrupted {
-			telemetry.GetAggregator().RecordWAFBlock(clientIP)
-
-			// IPS feature: automatically shun IPs at L3/L4 via eBPF.
-			if t.cfg.EbpfManager != nil && isCritical {
-				shouldShun := repScore < 50 || anomalyScore >= 20 || !t.cfg.UseCRS
-				if !shouldShun {
-					for _, rule := range matchedRules {
-						id := rule.Rule().ID()
-						if id >= 100001 && id <= 100013 {
-							shouldShun = true
-							break
-						}
-					}
-				}
-
-				if shouldShun && clientIP != "127.0.0.1" && clientIP != "::1" && clientIP != "localhost" {
-					// We no longer shun IPs at the kernel level by default to avoid blocking
-					// innocent users on shared IPs (NAT/CGNAT).
-					// Instead, we rely on WAF's L7 block and the fingerprint-based mitigation
-					// recorded below, which is more precise and follows the JA4+ blocking policy.
-					// _ = t.cfg.EbpfManager.ShunIP(clientIP)
-				} else if anomalyScore >= 10 && clientIP != "127.0.0.1" && clientIP != "::1" && clientIP != "localhost" {
-					_ = t.cfg.EbpfManager.SetAdaptiveRateLimit(clientIP, time.Second)
-				}
-			}
-		}
-
-		// Record security threat for telemetry and UI
-		explanation, recommendation, triggeredRules := generateSmartInsight(t.Transaction, it)
-		telemetry.RegisterRecommendation(t.ID(), recommendation)
-
-		confidence := 0.8
-		ent := 0.0
-		for _, mr := range matchedRules {
-			for _, md := range mr.MatchedDatas() {
-				if v := md.Value(); len(v) > 0 {
-					e := entropy.CalculateString(v)
-					if e > ent {
-						ent = e
-					}
-				}
-			}
-		}
-
-		if t.cfg.EnableConfidenceScoring {
-			confidence = calculateConfidence(repScore, severity, anomalyScore, false)
-		}
-
-		actionTaken := "detected"
-		if interrupted {
-			actionTaken = "blocked"
-		}
-
-		telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(t.r, telemetry.SecurityThreat{
-			ID:             fmt.Sprintf("waf-%s-%s", actionTaken, t.ID()),
-			Type:           "waf_" + actionTaken,
-			SourceIP:       clientIP,
-			Fingerprint:    fingerprint,
-			Score:          100, // Explicit block is a high priority threat
-			Details:        explanation,
-			Recommendation: recommendation,
-			Time:           time.Now(),
-			RouteID:        t.routeID,
-			RequestURI:     uri,
-			Category:       category,
-			Severity:       severity,
-			ActionTaken:    actionTaken,
-			Mitigated:      interrupted,
-			JA4:            ja4,
-			JA4H:           ja4h,
-			UserAgent:      ua,
-			Method:         method,
-			Confidence:     confidence,
-			Entropy:        ent,
-			TriggeredRules: triggeredRules,
-		}))
-	}
-	t.Transaction.ProcessLogging()
-}
-
-// fsWrapper wraps an fs.FS to convert backslashes to forward slashes,
-// which is required for embed.FS to work correctly on Windows.
-type fsWrapper struct {
-	fs.FS
-}
-
-func (f fsWrapper) Open(name string) (fs.File, error) {
-	return f.FS.Open(strings.ReplaceAll(name, "\\", "/"))
-}
-
-// resolveAuditLogPath returns the audit log path to use. When the operator left
-// the field blank it derives a stable default under the Gateon data directory so
-// auditing "just works" without anyone having to hand-pick a writable path.
-func resolveAuditLogPath(cfg WAFConfig) string {
-	if p := strings.TrimSpace(cfg.AuditLogPath); p != "" {
-		return p
-	}
-	name := sanitizeAuditName(cfg.RouteID)
-	if name == "" {
-		name = "waf"
-	}
-	return filepath.Join(config.DataDir(), "audit", "waf", name+"_audit.log")
-}
-
-// sanitizeAuditName makes a route/middleware identifier safe to use as a filename
-// component (no path separators or other surprising characters).
-func sanitizeAuditName(s string) string {
-	s = strings.TrimSpace(s)
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	return strings.Trim(b.String(), "._")
-}
-
-// ensureAuditLogFile creates the audit log's parent directory and the file itself
-// if they do not yet exist, so Coraza's SecAuditLog directive has somewhere to
-// write. It is idempotent and safe to call on every (re)build of the WAF.
-func ensureAuditLogFile(path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return fmt.Errorf("create audit log dir %q: %w", dir, err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
-	if err != nil {
-		return fmt.Errorf("create audit log file %q: %w", path, err)
-	}
-	return f.Close()
-}
-
-// parseWAFConfig parses middleware config map into WAFConfig.
+// parseWAFConfig turns the middleware's string configuration into a typed one.
 func parseWAFConfig(cfg map[string]string) WAFConfig {
-	useCRS := true
-	if v, ok := cfg["use_crs"]; ok {
-		useCRS = strings.TrimSpace(strings.ToLower(v)) != "false"
-	}
 	pl := 1
 	if v := cfg["paranoia_level"]; v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 1 && n <= 4 {
@@ -1669,11 +689,13 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 	disableEntropy := strings.TrimSpace(strings.ToLower(cfg["disable_entropy"])) == "true" ||
 		strings.TrimSpace(strings.ToLower(cfg["disable_entropy"])) == "1"
 
+	// Availability over inspection is a deliberate choice, so it is only true
+	// when someone wrote it down. An unset key means fail closed.
+	failOpen := strings.TrimSpace(strings.ToLower(cfg["fail_open"])) == "true" ||
+		strings.TrimSpace(strings.ToLower(cfg["fail_open"])) == "1"
+
 	return WAFConfig{
-		UseCRS:                      useCRS,
 		ParanoiaLevel:               pl,
-		Directives:                  strings.TrimSpace(cfg["directives"]),
-		DirectivesFile:              strings.TrimSpace(cfg["directives_file"]),
 		TrustCloudflare:             request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
 		AuditOnly:                   auditOnly,
 		DisableSQLI:                 isFalse("sqli"),
@@ -1697,14 +719,38 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		AnomalyThreshold:            anomalyThreshold,
 		EntropyThreshold:            entropyThreshold,
 		DisableEntropy:              disableEntropy,
+		FailOpen:                    failOpen,
+		AllowedMethods:              parseAllowedMethods(cfg["allowed_methods"]),
+		DisableProtocolChecks:       isFalse("protocol"),
 		RequestBodyLimit:            intVal(cfg["request_body_limit"]),
 		ResponseBodyLimit:           intVal(cfg["response_body_limit"]),
 		AuditLogPath:                strings.TrimSpace(cfg["audit_log_path"]),
 		AuditLogRelevantOnly:        strings.TrimSpace(strings.ToLower(cfg["audit_log_relevant_only"])) != "false",
 		RouteID:                     routeID,
 		AllowedAdminIps:             allowedAdminIps,
-		RulesPath:                   strings.TrimSpace(cfg["rules_path"]),
+		AppProfiles:                 parseAppProfiles(cfg["app_profiles"]),
+		EnableSSRFProtection:        strings.TrimSpace(strings.ToLower(cfg["ssrf_protection"])) == "true",
 	}
+}
+
+// parseAppProfiles reads the comma-separated platform list.
+//
+// Validation is deliberately not done here. An unrecognised name has to survive
+// as far as the engine build, which is the one place that knows the profile set
+// of the linked engine and can log it against a route; dropping it here would
+// turn a typo into silence.
+func parseAppProfiles(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func intVal(v string) int {
@@ -1824,219 +870,180 @@ func isBase64URL(s string) bool {
 	return true
 }
 
-func getCategoryFromTags(tags []string) string {
-	for _, tag := range tags {
-		// Optimization: avoid ToLower allocation if possible, or use a smaller set of checks.
-		t := strings.ToLower(tag)
-		if strings.Contains(t, "sqli") {
-			return "sqli"
-		}
-		if strings.Contains(t, "xss") {
-			return "xss"
-		}
-		if strings.Contains(t, "rce") || strings.Contains(t, "php") || strings.Contains(t, "injection") {
-			return "rce"
-		}
-		if strings.Contains(t, "lfi") {
-			return "lfi"
-		}
-		if strings.Contains(t, "scanner") || strings.Contains(t, "bot") {
-			return "bot"
-		}
-		if strings.Contains(t, "protocol") {
-			return "protocol"
-		}
-		if strings.Contains(t, "wordpress") || strings.Contains(t, "wp_scan") {
-			return "wp_scan"
-		}
-		if strings.Contains(t, "malware") {
-			return "malware"
-		}
-		if strings.Contains(t, "ransomware") {
-			return "ransomware"
-		}
-		if strings.Contains(t, "reputation") {
-			return "reputation"
-		}
-	}
-	return "general"
-}
-
-func containsUUID(s string) bool {
-	// A standard UUID has 36 characters and 4 hyphens: 8-4-4-4-12
-	// We look for this pattern heuristically.
-	count := 0
-	for _, r := range s {
-		if r == '-' {
-			count++
-		}
-	}
-	if count < 4 {
-		return false
-	}
-	// Check for hex segments
-	parts := strings.Split(s, "/")
-	for _, p := range parts {
-		if len(p) == 36 && strings.Count(p, "-") == 4 {
-			return true
-		}
-	}
-	return false
-}
-
-func processRequest(tx types.Transaction, r *http.Request) (*types.Interruption, error) {
-	// 1. Process Connection
-	clientIP, clientPort := splitAddr(r.RemoteAddr)
-	serverIP, serverPort := splitAddr(r.Host)
-	tx.ProcessConnection(clientIP, clientPort, serverIP, serverPort)
-
-	// 2. Process URI
-	tx.ProcessURI(r.RequestURI, r.Method, r.Proto)
-
-	// 3. Add Request Headers
-	for k, v := range r.Header {
-		for _, vv := range v {
-			tx.AddRequestHeader(k, vv)
-		}
-	}
-
-	// 4. Add GET Arguments (required for ARGS_GET)
-	// Optimized: Parse RawQuery manually to avoid map[string][]string allocations from r.URL.Query()
-	rawQuery := r.URL.RawQuery
-	for rawQuery != "" {
-		key := rawQuery
-		if i := strings.IndexAny(key, "&;"); i >= 0 {
-			key, rawQuery = key[:i], key[i+1:]
-		} else {
-			rawQuery = ""
-		}
-		if key == "" {
-			continue
-		}
-		value := ""
-		if i := strings.IndexByte(key, '='); i >= 0 {
-			key, value = key[:i], key[i+1:]
-		}
-		k, _ := url.QueryUnescape(key)
-		v, _ := url.QueryUnescape(value)
-		tx.AddGetRequestArgument(k, v)
-	}
-
-	// 5. Process Request Headers
-	if it := tx.ProcessRequestHeaders(); it != nil {
-		return it, nil
-	}
-
-	// 6. Process Request Body (triggers Phase 2)
-	// Skip request body inspection for gRPC and known safe large traffic if reputation is high.
-	if r.Body != nil && r.Body != http.NoBody && !isGRPCRequest(r) {
-		// Buffer only what WAF consumes to restore it for downstream handlers (proxy).
-		// We use a TeeReader to capture the read data and MultiReader to stitch it back.
-		buf := &bytes.Buffer{}
-		originalBody := r.Body
-		r.Body = struct {
-			io.Reader
-			io.Closer
-		}{
-			Reader: io.TeeReader(originalBody, buf),
-			Closer: originalBody,
-		}
-
-		it, _, err := tx.ReadRequestBodyFrom(r.Body)
-
-		// Restore the body for downstream. MultiReader serves the buffered part first,
-		// then continues with the remaining original body.
-		r.Body = struct {
-			io.Reader
-			io.Closer
-		}{
-			Reader: io.MultiReader(buf, originalBody),
-			Closer: originalBody,
-		}
-
-		if err != nil {
-			return nil, err
-		}
-		if it != nil {
-			return it, nil
-		}
-	}
-
-	return tx.ProcessRequestBody()
-}
-
+// wafResponseWriter runs the response phases over the upstream response.
+//
+// Response-body inspection has to buffer, and this is the one place in the WAF
+// where that is true. Bytes already written to the client cannot be recalled,
+// so a data-leak rule that inspected a streamed response could only report the
+// leak after it had happened — which is not what a DLP control is for. The
+// previous implementation buffered the *entire* response, an allocation bounded
+// only by upstream behaviour; this one buffers to an explicit ceiling.
+//
+// Past the ceiling the buffer is flushed and the remainder streams through
+// uninspected. That is a real limit and it is stated rather than hidden: the
+// alternative is either an unbounded buffer or refusing large responses
+// outright, and inspecting the first N bytes is what every response-inspecting
+// proxy actually does.
+//
+// Header-phase rules do not need any of this, so a config with response
+// inspection enabled but no body rules never buffers at all.
 type wafResponseWriter struct {
 	http.ResponseWriter
-	tx            types.Transaction
+	tx            *gwaf.Transaction
 	status        int
-	buf           *bytes.Buffer
-	interrupted   bool
+	blocked       bool
 	headerWritten bool
+	flushed       bool
 	auditOnly     bool
+	onDecision    func(gwaf.Decision)
+
+	buf      bytes.Buffer
+	bufLimit int
 }
 
-func (w *wafResponseWriter) Header() http.Header {
-	return w.ResponseWriter.Header()
-}
-
+// WriteHeader runs the response-headers phase and holds the status back while
+// the body is being buffered, so a body rule can still change it.
 func (w *wafResponseWriter) WriteHeader(status int) {
-	if w.interrupted || w.headerWritten {
+	if w.blocked || w.headerWritten {
 		return
 	}
+	w.headerWritten = true
 	w.status = status
-	// We don't call w.ResponseWriter.WriteHeader yet because we might need to change it to 403
-	// but we must process headers in Coraza
-	for k, vv := range w.Header() {
-		for _, v := range vv {
-			w.tx.AddResponseHeader(k, v)
+
+	w.tx.SetResponseStatus(status)
+	for name, values := range w.Header() {
+		for _, v := range values {
+			w.tx.AddResponseHeader(name, v)
 		}
 	}
-	it := w.tx.ProcessResponseHeaders(status, "HTTP/1.1")
-	if it != nil && !w.auditOnly {
-		w.interrupted = true
-		w.headerWritten = true
-		w.ResponseWriter.WriteHeader(http.StatusForbidden)
-		_, _ = w.ResponseWriter.Write([]byte("Forbidden by Security Policy (Response Header Blocked)"))
+	if d := w.tx.ProcessResponseHeaders(); d.Blocked() && !w.auditOnly {
+		w.block(d)
 		return
+	}
+	if w.bufLimit <= 0 {
+		w.commitHeader()
 	}
 }
 
 func (w *wafResponseWriter) Write(b []byte) (int, error) {
-	if w.interrupted {
-		return 0, nil
+	if w.blocked {
+		// The response is refused. Reporting the write as accepted keeps the
+		// upstream handler from logging an error about a client that is not
+		// the reason the write went nowhere.
+		return len(b), nil
 	}
-	if !w.headerWritten && !w.interrupted && w.status == 0 {
+	if !w.headerWritten {
 		w.WriteHeader(http.StatusOK)
-	}
-	if w.interrupted {
-		return 0, nil
+		if w.blocked {
+			return len(b), nil
+		}
 	}
 
-	it, _, err := w.tx.WriteResponseBody(b)
-	if err == nil && it != nil && !w.auditOnly {
-		w.interrupted = true
-		if !w.headerWritten {
-			w.headerWritten = true
-			w.ResponseWriter.WriteHeader(http.StatusForbidden)
-			_, _ = w.ResponseWriter.Write([]byte("Forbidden by Security Policy (Response Body Blocked)"))
-		}
-		return 0, fmt.Errorf("interrupted")
+	if d := w.tx.WriteResponseBody(b); d.Blocked() && !w.auditOnly {
+		w.block(d)
+		return len(b), nil
 	}
-	return w.buf.Write(b)
+
+	if w.bufLimit > 0 && !w.flushed {
+		if w.buf.Len()+len(b) <= w.bufLimit {
+			w.buf.Write(b)
+			return len(b), nil
+		}
+		// The ceiling is reached: everything from here on is uninspectable, so
+		// commit what is held and stop buffering.
+		if err := w.flush(); err != nil {
+			return 0, err
+		}
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// finish runs the response-body phase and releases whatever is still buffered.
+// It must be called once the upstream handler has returned.
+func (w *wafResponseWriter) finish() {
+	if w.blocked {
+		return
+	}
+	if d := w.tx.ProcessResponseBody(); d.Blocked() && !w.auditOnly {
+		w.block(d)
+		return
+	}
+	_ = w.flush()
+	if !w.headerWritten {
+		w.WriteHeader(http.StatusOK)
+		_ = w.flush()
+	}
+}
+
+// flush commits the held status and buffered bytes.
+func (w *wafResponseWriter) flush() error {
+	if w.flushed {
+		return nil
+	}
+	w.flushed = true
+	w.commitHeader()
+	if w.buf.Len() == 0 {
+		return nil
+	}
+	_, err := w.ResponseWriter.Write(w.buf.Bytes())
+	w.buf.Reset()
+	return err
+}
+
+func (w *wafResponseWriter) commitHeader() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	w.ResponseWriter.WriteHeader(w.status)
+}
+
+// block refuses the response.
+func (w *wafResponseWriter) block(d gwaf.Decision) {
+	w.blocked = true
+	w.buf.Reset()
+	if w.onDecision != nil {
+		w.onDecision(d)
+	}
+	if w.flushed {
+		// Headers are already on the wire, so the status cannot be changed.
+		// Sending nothing further is all that is left, and it still stops the
+		// remainder of the leak.
+		return
+	}
+	w.flushed = true
+	status := d.Status()
+	if status == 0 {
+		status = http.StatusForbidden
+	}
+	w.ResponseWriter.WriteHeader(status)
+	_, _ = w.ResponseWriter.Write([]byte("Forbidden by Security Policy (response blocked)"))
 }
 
 func (w *wafResponseWriter) Status() int {
 	if w.status == 0 {
-		return 200
+		return http.StatusOK
 	}
 	return w.status
 }
 
-func (w *wafResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
+// Flush forwards to the underlying writer once buffering is done, so streaming
+// responses keep working. While the body is still being buffered for
+// inspection there is deliberately nothing to flush.
+func (w *wafResponseWriter) Flush() {
+	if w.blocked {
+		return
 	}
-	return nil, nil, fmt.Errorf("response writer does not support hijacking")
+	if f, ok := w.ResponseWriter.(http.Flusher); ok && w.flushed {
+		f.Flush()
+	}
+}
+
+func (w *wafResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hj.Hijack()
 }
 
 func splitAddr(addr string) (string, int) {
@@ -2049,4 +1056,104 @@ func splitAddr(addr string) (string, int) {
 		return host, port
 	}
 	return addr, 0
+}
+
+// defaultResponseBufferLimit bounds response-body inspection when the config
+// names no limit of its own. One mebibyte holds an API response or an HTML page
+// whole, which is where leaked credentials and card numbers actually appear,
+// without letting a large download sit in memory.
+const defaultResponseBufferLimit = 1 << 20
+
+// responseBufferLimit reports how many response bytes may be held for
+// inspection. Zero means the response is not buffered at all.
+func responseBufferLimit(cfg WAFConfig) int {
+	if !cfg.EnableResponseInspection {
+		return 0
+	}
+	if cfg.ResponseBodyLimit > 0 {
+		return cfg.ResponseBodyLimit
+	}
+	return defaultResponseBufferLimit
+}
+
+// Entropy fast-path.
+//
+// A high Shannon entropy value in a place that normally holds text is a cheap
+// proxy for packed shellcode or an obfuscated payload, and it costs one pass
+// over the bytes. The threshold moves with reputation because the same value
+// means different things from a client with history and one without.
+
+const (
+	// defaultEntropyThreshold is the bits-per-byte above which a text field is
+	// treated as suspicious. Ordinary text sits well below it; compressed or
+	// encrypted data sits near 8.
+	defaultEntropyThreshold = 5.8
+
+	// minEntropySample is the shortest value worth scoring. Shannon entropy on
+	// a handful of bytes is noise.
+	minEntropySample = 64
+
+	// maxBodyEntropyScan bounds the bodies considered at all, and
+	// bodyEntropyPeek how much of one is read.
+	maxBodyEntropyScan = 1024 * 1024
+	bodyEntropyPeek    = 2048
+)
+
+// entropyThreshold applies the configured value and the reputation adjustment.
+func entropyThreshold(cfg WAFConfig, reputation float64) float64 {
+	threshold := cfg.EntropyThreshold
+	if threshold <= 0 {
+		threshold = defaultEntropyThreshold
+	}
+	switch {
+	case reputation > 90:
+		threshold += 0.5
+	case reputation < 20:
+		threshold -= 0.5
+	}
+	return threshold
+}
+
+// suspiciousHeaderEntropy reports the first header whose value scores above the
+// threshold, along with the detail to record.
+func suspiciousHeaderEntropy(r *http.Request, cfg WAFConfig, reputation float64) (string, bool) {
+	threshold := entropyThreshold(cfg, reputation)
+	for key, values := range r.Header {
+		if isSafeHeader(key) {
+			continue
+		}
+		for _, v := range values {
+			if len(v) <= minEntropySample || !entropy.IsSuspicious(v, threshold) {
+				continue
+			}
+			return fmt.Sprintf("High entropy in header %s: %.2f (threshold %.2f)",
+				key, entropy.CalculateString(v), threshold), true
+		}
+	}
+	return "", false
+}
+
+// suspiciousBodyEntropy scores the head of the request body.
+func suspiciousBodyEntropy(r *http.Request, rs *request.RequestState, cfg WAFConfig, reputation float64) (string, bool) {
+	peeked, err := peekBody(r, bodyEntropyPeek)
+	if err != nil || len(peeked) <= minEntropySample {
+		return "", false
+	}
+	if rs != nil {
+		rs.ExecutedEntropy = true
+	}
+
+	threshold := entropyThreshold(cfg, reputation)
+	// Structured payloads carry more punctuation and less repetition than prose,
+	// so they score higher without being suspicious.
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	if strings.Contains(ct, "json") || strings.Contains(ct, "xml") || strings.Contains(ct, "form") {
+		threshold += 0.2
+	}
+
+	if !entropy.IsSuspiciousBytes(peeked, threshold) {
+		return "", false
+	}
+	return fmt.Sprintf("High entropy in request body: %.2f (threshold %.2f)",
+		entropy.Calculate(peeked), threshold), true
 }

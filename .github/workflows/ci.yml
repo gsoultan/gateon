@@ -9,6 +9,23 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Migrations run at startup and gateon advertises Postgres support, but the
+    # suite only ever exercised SQLite — the permissive one. A service container
+    # costs nothing here and turns "should work on Postgres" into a checked fact.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gateon
+          POSTGRES_PASSWORD: gateon
+          POSTGRES_DB: gateon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -40,7 +57,7 @@ jobs:
 
       - name: Lint UI (accessibility gate)
         run: |
-          bun install --cwd ui
+          bun install --frozen-lockfile --cwd ui
           (cd ui && bun run lint)
 
       - name: Generate all artifacts
@@ -53,7 +70,98 @@ jobs:
         run: go build ./...
 
       - name: Test
+        env:
+          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
         run: go test ./...
 
       - name: Benchmarks (allocs/perf regression check)
         run: go test -run '^$' -bench . -benchmem -benchtime 50000x ./pkg/proxy/ ./internal/telemetry/
+
+
+  # The Playwright suite was untracked and therefore never ran anywhere. It
+  # covers the dashboard — RBAC, the Security Hub, mitigation flows, diagnostics
+  # — which nothing else exercises. It is a separate job because it needs
+  # browsers and boots the whole gateway, and it is allowed to fail for now:
+  # the suite is only just back under CI and blocking every PR on a suite whose
+  # baseline nobody has seen yet would stall the queue. Remove
+  # continue-on-error once a green run is the norm.
+  e2e-ui:
+    name: e2e-ui (playwright)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # A hard ceiling, because the suite has already demonstrated it can run
+    # away: workers is 1, retries is 2, and the slowest tests allow 180s, so a
+    # run where most tests time out is 104 x 3 x 180s — the better part of a
+    # day — and one such run sat at 1h37m before this was added. The Playwright
+    # globalTimeout below is set lower so the usual outcome is a graceful exit
+    # with a report; this is the backstop for when the runner is wedged and
+    # Playwright itself never gets to decide.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install buf and proto plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
+          go install github.com/bufbuild/buf/cmd/buf@latest
+          bun install --frozen-lockfile --cwd ui
+
+      - name: Generate all artifacts
+        run: |
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
+      # playwright.config.ts starts gateon itself from the repo root, with the
+      # e2e config and mockbin on PATH, so the binary has to exist there.
+      - name: Build gateon
+        run: go build -o gateon ./cmd/gateon
+
+      # The e2e config points TLS at tests/e2e/cert.pem, which is generated
+      # rather than committed — a checked-in private key is a liability even
+      # when it is only for a test listener. env.go makes its own for the Go
+      # suite; the Playwright harness reads these paths straight from the
+      # config, so they have to exist before the gateway starts.
+      - name: Generate e2e TLS certificate
+        working-directory: tests/e2e
+        run: |
+          openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+            -keyout key.pem -out cert.pem \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+      - name: Install Playwright and Chromium
+        run: |
+          bun install --frozen-lockfile --cwd tests/e2e
+          cd tests/e2e && bunx playwright install --with-deps chromium
+
+      - name: Run Playwright suite
+        working-directory: tests/e2e
+        run: bunx playwright test --reporter=list
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 7

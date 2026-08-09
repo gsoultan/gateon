@@ -14,6 +14,10 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/time/rate"
+
+	"github.com/gsoultan/gwaf/rules"
+	"github.com/gsoultan/gwaf/rules/op"
+	"github.com/gsoultan/gwaf/types"
 )
 
 func TestJWTValidator(t *testing.T) {
@@ -524,8 +528,7 @@ func TestIPFilter_WithXForwardedFor(t *testing.T) {
 }
 
 func TestWAF_PassesNormalRequest(t *testing.T) {
-	// UseCRS=false yields minimal pass-through WAF (avoids CRS file resolution in tests)
-	mw, err := WAF(WAFConfig{UseCRS: false})
+	mw, err := WAF(WAFConfig{})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
 	}
@@ -544,8 +547,15 @@ func TestWAF_PassesNormalRequest(t *testing.T) {
 
 func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
 	mw, err := WAF(WAFConfig{
-		UseCRS:     false,
-		Directives: `SecRule ARGS "blockme" "id:1,deny,status:403"`,
+		ExtraRules: rules.Set{{
+			ID:       1000001,
+			Phase:    types.PhaseRequestBody,
+			Targets:  []types.Target{{Kind: types.TargetArgs}},
+			Op:       op.Contains("blockme"),
+			Actions:  []rules.Action{rules.BlockWithStatus(403)},
+			Severity: types.SeverityCritical, Confidence: types.Certain,
+			Msg: "test rule",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)

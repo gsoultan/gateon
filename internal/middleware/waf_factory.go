@@ -110,7 +110,6 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		pl = 1
 	}
 	cfg := WAFConfig{
-		UseCRS:        w.GetUseCrs(),
 		ParanoiaLevel: pl,
 		// Full OWASP CRS attack coverage stays enabled (Disable*=false).
 		// Opt-in, false-positive-prone groups honour the explicit proto flag:
@@ -134,11 +133,11 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		EnableConfidenceScoring:     w.GetEnableConfidenceScoring(),
 		AuditOnly:                   w.GetAuditOnly(),
 		TrustCloudflare:             w.GetTrustCloudflareHeaders(),
-		GlobalDirectives:            w.GetCustomDirectives(),
+		AppProfiles:                 w.GetAppProfiles(),
+		EnableSSRFProtection:        w.GetSsrfProtection(),
 		RouteID:                     "gateon-global-waf",
 		EbpfManager:                 f.ebpfManager,
 		Reputation:                  f.reputation,
-		GRPCMode:                    grpcMode,
 		WafRules:                    waf.GetStore(),
 	}
 	// Apply the resolved tier baseline, then honour an explicit DLP opt-in as an
@@ -150,13 +149,12 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		cfg.EnableResponseInspection = true
 	}
 
-	// When auto-update has fetched fresh rules to disk, prefer them.
-	if w.GetAutoUpdateRules() {
-		rulesPath := filepath.Join(f.dataDir, "waf", "rules")
-		if _, err := os.Stat(rulesPath); err == nil {
-			cfg.RulesPath = rulesPath
-		}
-	}
+	// Rules are no longer fetched from disk. gateon's corpus is compiled into
+	// the binary and gwaf's core ruleset ships with the engine, so "update the
+	// rules" is now "upgrade gateon" — which is also what makes the rules
+	// something gateon tests rather than something each install downloads a
+	// possibly-different copy of. The auto_update_rules setting is kept on the
+	// wire so existing configuration still loads; it no longer does anything.
 
 	mw, err := WAF(cfg)
 	if err != nil {
@@ -260,10 +258,9 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 		return cached.(Middleware), nil
 	}
 	wafCfg := parseWAFConfig(cfg)
-	wafCfg.GlobalDirectives = globalDirectives
+	warnUnexecutableDirectives(globalDirectives, wafCfg.RouteID)
 	wafCfg.EbpfManager = f.ebpfManager
 	wafCfg.Reputation = f.reputation
-	wafCfg.GRPCMode = grpcMode
 	wafCfg.WafRules = waf.GetStore()
 
 	mw, err := WAF(wafCfg)
@@ -310,4 +307,21 @@ func wafConfigKey(cfg map[string]string) string {
 	}
 	h := sha256.Sum256([]byte(b.String()))
 	return "waf:" + hex.EncodeToString(h[:])
+}
+
+// warnUnexecutableDirectives reports SecLang configuration that is no longer
+// executed.
+//
+// The custom_directives field carried operator-written ModSecurity text into
+// the Coraza engine. gateon has no SecLang engine now, so the text cannot run.
+// Ignoring it silently would leave an operator looking at a populated
+// configuration field believing it protects something, which is the same
+// failure as a rule that fails to compile and is quietly skipped.
+func warnUnexecutableDirectives(directives, routeID string) {
+	if strings.TrimSpace(directives) == "" {
+		return
+	}
+	logger.L.LogWarn("custom SecLang directives are configured but no longer executed",
+		"route", routeID,
+		"detail", "the WAF engine no longer parses SecLang; re-author these as typed rules in the dashboard")
 }

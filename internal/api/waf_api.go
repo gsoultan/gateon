@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -35,7 +36,7 @@ func (s *ApiService) ListWafRules(ctx context.Context, req *gateonv1.ListWafRule
 		resp.Rules = append(resp.Rules, &gateonv1.WafRule{
 			Id:            r.ID,
 			Name:          r.Name,
-			Directive:     r.Directive,
+			Directive:     ruleBody(&r),
 			Enabled:       r.Enabled,
 			ParanoiaLevel: int32(r.ParanoiaLevel),
 			Category:      r.Category,
@@ -54,10 +55,12 @@ func (s *ApiService) CreateWafRule(ctx context.Context, req *gateonv1.CreateWafR
 	r := &waf.Rule{
 		ID:            req.Rule.Id,
 		Name:          req.Rule.Name,
-		Directive:     req.Rule.Directive,
 		Enabled:       req.Rule.Enabled,
 		ParanoiaLevel: int(req.Rule.ParanoiaLevel),
 		Category:      req.Rule.Category,
+	}
+	if err := ruleBodyToRule(req.Rule.Directive, r); err != nil {
+		return &gateonv1.CreateWafRuleResponse{Success: false}, err
 	}
 
 	if err := s.WafRules.AddRule(ctx, r); err != nil {
@@ -71,7 +74,7 @@ func (s *ApiService) CreateWafRule(ctx context.Context, req *gateonv1.CreateWafR
 		Rule: &gateonv1.WafRule{
 			Id:            r.ID,
 			Name:          r.Name,
-			Directive:     r.Directive,
+			Directive:     ruleBody(r),
 			Enabled:       r.Enabled,
 			ParanoiaLevel: int32(r.ParanoiaLevel),
 			Category:      r.Category,
@@ -89,10 +92,12 @@ func (s *ApiService) UpdateWafRule(ctx context.Context, req *gateonv1.UpdateWafR
 	r := &waf.Rule{
 		ID:            req.Rule.Id,
 		Name:          req.Rule.Name,
-		Directive:     req.Rule.Directive,
 		Enabled:       req.Rule.Enabled,
 		ParanoiaLevel: int(req.Rule.ParanoiaLevel),
 		Category:      req.Rule.Category,
+	}
+	if err := ruleBodyToRule(req.Rule.Directive, r); err != nil {
+		return &gateonv1.UpdateWafRuleResponse{Success: false}, err
 	}
 
 	if err := s.WafRules.UpdateRule(ctx, r); err != nil {
@@ -116,4 +121,48 @@ func (s *ApiService) DeleteWafRule(ctx context.Context, req *gateonv1.DeleteWafR
 	s.logAudit(ctx, "delete", "waf_rule", fmt.Sprintf("Deleted WAF rule: %s", req.Id))
 
 	return &gateonv1.DeleteWafRuleResponse{Success: true}, nil
+}
+
+// ruleBodyToRule fills in the stored form of a rule from the request's rule
+// body.
+//
+// The wire field is still called "directive" because it is the same free-text
+// rule body it always was; what changed is the language written in it. A typed
+// definition is stored and enforced. Anything else is refused at the point of
+// authoring with a message saying so, rather than stored and quietly never
+// run — an operator who saves a rule and is told it worked will believe they
+// are protected.
+func ruleBodyToRule(body string, r *waf.Rule) error {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return fmt.Errorf("a rule needs a definition")
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return fmt.Errorf(
+			"this looks like a SecLang directive. The WAF engine no longer parses " +
+				"SecLang; rules are now written as a JSON definition, for example: " +
+				`{"phase":"request_body","targets":["args"],` +
+				`"operator":{"kind":"contains","pattern":"evil"},` +
+				`"severity":"critical","confidence":"high","msg":"Evil detected"}`)
+	}
+	def, err := waf.ParseDefinition(trimmed)
+	if err != nil {
+		return err
+	}
+	if err := def.Validate(); err != nil {
+		return err
+	}
+	r.Definition = trimmed
+	r.Format = waf.FormatGateon
+	return nil
+}
+
+// ruleBody is what the dashboard shows and edits: the typed definition when
+// there is one, and otherwise the original SecLang so an operator converting a
+// legacy rule can still see what it used to say.
+func ruleBody(r *waf.Rule) string {
+	if r.Definition != "" {
+		return r.Definition
+	}
+	return r.Directive
 }

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "http-plain",
+    "address": ":8081",
+    "type": 0,
+    "protocol": 0
+  },
+  {
+    "id": "http",
+    "address": ":8282",
+    "type": 0,
+    "protocol": 0,
+    "tls": {
+      "enabled": true
+    }
+  },
+  {
+    "id": "grpc",
+    "address": ":8085",
+    "type": 1,
+    "protocol": 0
+  },
+  {
+    "id": "tcp",
+    "address": ":8086",
+    "type": 2,
+    "protocol": 0
+  }
+]

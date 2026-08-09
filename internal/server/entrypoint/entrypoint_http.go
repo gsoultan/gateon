@@ -107,8 +107,9 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	isMgmt := IsManagementAddress(ep.Address, deps)
 	chain := []middleware.Middleware{
+		middleware.GlobalCORS(),
 		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
-		middleware.Metrics("gateon-" + epLabel),
+		middleware.Metrics("gateon-"+epLabel),
 		middleware.IPMitigation(),
 		middleware.UserMitigation(),
 		middleware.Recovery(),
