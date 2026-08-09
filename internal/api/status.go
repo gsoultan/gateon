@@ -16,9 +16,6 @@ import (
 )
 
 func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest) (*gateonv1.GetStatusResponse, error) {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
 	routesCount := 0
 	if s.Routes != nil {
 		routesCount = len(s.Routes.List(ctx))
@@ -43,8 +40,8 @@ func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest
 	return &gateonv1.GetStatusResponse{
 		Status:              "running",
 		Version:             s.Version,
-		Uptime:              int64(time.Since(telemetry.GetStartTime()).Seconds()),
-		MemoryUsage:         int64(m.Alloc),
+		Uptime:              int64(stats.UptimeSeconds),
+		MemoryUsage:         int64(stats.MemoryAllocBytes),
 		RoutesCount:         int32(routesCount),
 		ServicesCount:       int32(servicesCount),
 		EntryPointsCount:    int32(entryPointsCount),

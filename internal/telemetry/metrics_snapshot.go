@@ -1128,8 +1128,13 @@ func getOrCreateDomain(m map[string]*DomainMetric, domain string) *DomainMetric 
 }
 
 func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
+	// Uptime is read directly rather than off the gauge. The gauge is only as
+	// fresh as the collector's last tick, so this endpoint reported a gateway
+	// several seconds younger than /v1/status said it was — for the same
+	// process, queried in the same second. Elapsed time is the one figure here
+	// that can be computed exactly at any instant, so it is.
 	sm := SystemMetrics{
-		UptimeSeconds:    gaugeValue(idx, "gateon_uptime_seconds"),
+		UptimeSeconds:    GetSystemStats().UptimeSeconds,
 		Goroutines:       gaugeValue(idx, "gateon_goroutines"),
 		MemoryAllocBytes: gaugeValue(idx, "gateon_memory_alloc_bytes"),
 		MemoryTotalBytes: gaugeValue(idx, "gateon_memory_total_alloc_bytes"),

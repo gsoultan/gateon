@@ -451,6 +451,20 @@ var (
 	lastStorageUsage atomic.Pointer[float64]
 	lastStorageTotal atomic.Pointer[float64]
 	lastStoragePct   atomic.Pointer[float64]
+
+	// Latest Go runtime sample, published by the collector below.
+	//
+	// These exist so no request path calls runtime.ReadMemStats. It stops the
+	// world, and four endpoints were each calling it per request: three
+	// dashboard pollers could pause the gateway three times to answer three
+	// questions about the same instant — and still disagree, because each read
+	// happened at a different one. The collector already samples this for its
+	// gauges, so publishing what it read costs nothing and makes every endpoint
+	// quote the same number.
+	lastMemAlloc      atomic.Uint64
+	lastMemSys        atomic.Uint64
+	lastMemTotalAlloc atomic.Uint64
+	lastGoroutines    atomic.Int64
 )
 
 // InitStartTime records the gateway start time for uptime tracking.
@@ -473,6 +487,15 @@ type SystemStats struct {
 	StorageUsageBytes   uint64
 	StorageTotalBytes   uint64
 	MemoryTotalBytes    uint64
+
+	// Go runtime, from the collector's most recent sample. Every endpoint that
+	// reports these reads them here, so /v1/status, /v1/diag/metrics and
+	// /v1/diag/sys describe one instant rather than three.
+	MemoryAllocBytes      uint64
+	MemorySysBytes        uint64
+	MemoryTotalAllocBytes uint64
+	Goroutines            int
+	UptimeSeconds         float64
 }
 
 // GetSystemStats returns the current system metrics.
@@ -495,6 +518,26 @@ func GetSystemStats() SystemStats {
 	}
 	if v, err := mem.VirtualMemory(); err == nil {
 		stats.MemoryTotalBytes = v.Total
+	}
+	stats.MemoryAllocBytes = lastMemAlloc.Load()
+	stats.MemorySysBytes = lastMemSys.Load()
+	stats.MemoryTotalAllocBytes = lastMemTotalAlloc.Load()
+	stats.Goroutines = int(lastGoroutines.Load())
+	if !startTime.IsZero() {
+		stats.UptimeSeconds = time.Since(startTime).Seconds()
+	}
+
+	// Before the collector's first tick the runtime fields are zero, which would
+	// render as "0 goroutines" rather than "not known yet". Reading them once
+	// here is bounded — it happens at most until the first tick — and keeps the
+	// first dashboard load after a restart from showing an empty machine.
+	if stats.Goroutines == 0 {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		stats.MemoryAllocBytes = m.Alloc
+		stats.MemorySysBytes = m.Sys
+		stats.MemoryTotalAllocBytes = m.TotalAlloc
+		stats.Goroutines = runtime.NumGoroutine()
 	}
 	return stats
 }
@@ -545,12 +588,20 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 		if !startTime.IsZero() {
 			UptimeSeconds.Set(time.Since(startTime).Seconds())
 		}
-		goroutinesGauge.Set(float64(runtime.NumGoroutine()))
+		goroutines := runtime.NumGoroutine()
+		goroutinesGauge.Set(float64(goroutines))
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 		memoryAllocGauge.Set(float64(m.Alloc))
 		memoryTotalGauge.Set(float64(m.TotalAlloc))
 		memorySysGauge.Set(float64(m.Sys))
+
+		// Publish the same sample the gauges just took, so the REST endpoints
+		// answer from it instead of stopping the world again for their own.
+		lastGoroutines.Store(int64(goroutines))
+		lastMemAlloc.Store(m.Alloc)
+		lastMemSys.Store(m.Sys)
+		lastMemTotalAlloc.Store(m.TotalAlloc)
 
 		// System-wide metrics
 		if v, err := mem.VirtualMemory(); err == nil {
