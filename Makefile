@@ -20,14 +20,16 @@ models:
 
 ## ebpf: compile the XDP/eBPF C program and (re)generate the bpf2go Go bindings.
 ##       Requires a Linux host with clang/llvm + libbpf headers + kernel headers.
-##       The generated gateon_ebpf_bpf*.go and *.o files MUST be committed so a
-##       plain `go build` works on any platform without the BPF toolchain.
+##       The generated gateon_ebpf_bpf*.go and *.o are build artifacts and are
+##       NOT committed — ci.yml, security.yml, release.yml and the Dockerfile all
+##       install clang and run this step, the same way proto/ and ui/services/gen
+##       are regenerated rather than tracked. On macOS use `make ebpf-docker`.
 ebpf:
 	go generate ./internal/ebpf/...
 
 ## ebpf-docker: same as `ebpf` but runs the codegen inside a Linux container so
 ##              it is reproducible from macOS/Windows (no local BPF toolchain
-##              needed). Generated artifacts land in the working tree to commit.
+##              needed). Generated artifacts land in the working tree, ignored.
 ebpf-docker:
 	docker build -f internal/ebpf/Dockerfile.gen -t gateon-ebpf-gen .
 	docker run --rm -v "$(CURDIR)":/src -w /src gateon-ebpf-gen \

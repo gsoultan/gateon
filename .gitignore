@@ -133,3 +133,21 @@ telemetry_pebble/
 /tests/**/audit/
 # Same as dev/: the e2e config is fixture data, not local runtime config.
 !/tests/e2e/config/*.json
+
+# bpf2go output, generated from internal/ebpf/bpf/*.c by `make ebpf`. Every
+# build path that needs it regenerates it — ci.yml, security.yml, release.yml
+# and the Dockerfile each install clang and run `go generate ./internal/ebpf/...`
+# — so tracking a 29 KB clang-version-specific ELF would only add churn. Same
+# treatment as proto/gateon/v1/*.go and ui/src/services/gen/*.
+/internal/ebpf/gateon_ebpf_bpf*.go
+/internal/ebpf/gateon_ebpf_bpf*.o
+
+# Per-editor AI harness config, alongside /.claude/, /.junie and /.kiro/ above.
+# Each tool's installer writes these and hardcodes absolute paths from the
+# machine that generated them, so they are local settings, not shared config.
+/.ai/
+/.clinerules
+/.cursor/
+/.gemini/
+/.windsurfrules
+/opencode.json
