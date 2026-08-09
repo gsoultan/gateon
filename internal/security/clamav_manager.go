@@ -530,7 +530,13 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	}
 
 	if modified {
-		err = os.WriteFile(targetPath, []byte(strings.Join(lines, "\n")), 0o600)
+		// #nosec G306 -- targetPath is clamd's own configuration file
+		// (/etc/clamav/clamd.conf and friends), and clamd runs as the clamav
+		// user, not as gateon. 0600 makes the daemon unable to read its own
+		// config and it fails to start. This was tightened to 0600 once and
+		// reverted: the mode of a file another process must read is that
+		// process's requirement, not ours.
+		err = os.WriteFile(targetPath, []byte(strings.Join(lines, "\n")), 0o644)
 		if err == nil {
 			// Try to restart clamd if it's running
 			if _, err := exec.LookPath("systemctl"); err == nil {

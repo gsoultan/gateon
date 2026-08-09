@@ -94,31 +94,13 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 		ResponseInspection: cfg.EnableResponseInspection,
 		DisabledCategories: categories,
 		DisabledTags:       tags,
+		AppProfiles:        cfg.AppProfiles,
+		SSRFProtection:     cfg.EnableSSRFProtection,
 		OnDecision:         onDecision,
 	}
 
 	policy.ExtraRules = append(policy.ExtraRules, cfg.ExtraRules...)
-
-	if cfg.WafRules != nil {
-		extra, problems := cfg.WafRules.CompiledRules(policy.ParanoiaLevel)
-		policy.ExtraRules = append(policy.ExtraRules, extra...)
-		// A stored rule that cannot be compiled is logged once per engine build,
-		// not swallowed. The operator sees a rule listed as enabled in the
-		// dashboard; if nothing can execute it they have to be told, or they
-		// believe they have a protection that does not exist.
-		for _, p := range problems {
-			logger.L.LogWarn("WAF rule is not enforceable",
-				"rule", p.ID, "name", p.Name, "route", cfg.RouteID, "error", p.Err)
-		}
-	}
-
-	if store := secwaf.GetExceptionStore(); store != nil {
-		exceptions, problems := store.Compiled()
-		policy.Exceptions = exceptions
-		for _, err := range problems {
-			logger.L.LogWarn("WAF exception is not applied", "route", cfg.RouteID, "error", err)
-		}
-	}
+	loadOperatorTuning(&policy, cfg)
 
 	w, err := policy.NewEngine()
 	if err != nil {
@@ -138,6 +120,38 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 		policy:           policy,
 		allowedAdminNets: secwaf.ParseAllowedAdminIPs(cfg.AllowedAdminIps),
 	}, nil
+}
+
+// loadOperatorTuning folds the dashboard-authored parts of the policy in: the
+// stored rules, the stored exceptions, and the platform profiles.
+//
+// Everything it cannot apply is logged rather than swallowed, and that is the
+// reason it exists as one function. All three failures are the same failure —
+// the operator is looking at a dashboard that says a protection or a suppression
+// is in force, and it is not. Silence there is worse than the misconfiguration,
+// because nothing else will ever reveal it.
+func loadOperatorTuning(policy *secwaf.Policy, cfg WAFConfig) {
+	if cfg.WafRules != nil {
+		extra, problems := cfg.WafRules.CompiledRules(policy.ParanoiaLevel)
+		policy.ExtraRules = append(policy.ExtraRules, extra...)
+		for _, p := range problems {
+			logger.L.LogWarn("WAF rule is not enforceable",
+				"rule", p.ID, "name", p.Name, "route", cfg.RouteID, "error", p.Err)
+		}
+	}
+
+	if store := secwaf.GetExceptionStore(); store != nil {
+		exceptions, problems := store.Compiled()
+		policy.Exceptions = exceptions
+		for _, err := range problems {
+			logger.L.LogWarn("WAF exception is not applied", "route", cfg.RouteID, "error", err)
+		}
+	}
+
+	for _, name := range policy.UnknownAppProfiles() {
+		logger.L.LogWarn("WAF app profile is not recognised",
+			"profile", name, "route", cfg.RouteID, "known", secwaf.AppProfileNames())
+	}
 }
 
 // wafLimits maps the configured byte ceilings onto the engine's.

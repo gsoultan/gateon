@@ -37,6 +37,24 @@ const (
 	IDLoopbackSSRF       types.RuleID = 11003
 )
 
+// IDSSRFParam is gwaf's server-side-fetch rule: an absolute off-origin URL in a
+// parameter the application will itself retrieve — "url", "callback", "webhook",
+// "feed". The ID is the one gwaf documents for it.
+//
+// It is opt-in rather than paranoia-gated, and that distinction is the whole
+// point. Paranoia level asks "how much depth will you pay for?", and this rule
+// does not answer that question — it is cheap and precise. It asks a different
+// one: does this application fetch user-supplied URLs by design? Registering a
+// webhook, importing an avatar and subscribing to a feed are all "hand the
+// server a foreign URL and let it fetch that", which is byte-for-byte what SSRF
+// is. Only the deployment knows which it is, so raising paranoia must not switch
+// this on behind the operator's back.
+//
+// The navigation half of the same comparison — "redirect_to", "next", "goto" —
+// needs no flag and ships in gwaf's default set, because an application sending
+// its own users to another origin has no ordinary reading.
+const IDSSRFParam types.RuleID = 1016
+
 // wpHardeningMinParanoia is the paranoia level at which direct PHP execution
 // anywhere under wp-content is blocked, not just inside the upload directories.
 //
@@ -122,6 +140,17 @@ type Policy struct {
 
 	// Exceptions suppress specific rules, replacing SecRuleRemoveById.
 	Exceptions []rules.Exception
+
+	// AppProfiles names the platforms this route serves, each selecting a set of
+	// scoped exceptions for the false positives that platform generates against
+	// itself. See AppProfile.
+	AppProfiles []string
+
+	// SSRFProtection admits IDSSRFParam, which blocks an off-origin URL in a
+	// parameter the server itself fetches. It is a statement about the
+	// application — that it does not take user-supplied URLs to retrieve — and
+	// not a depth setting, which is why it is a flag and not a paranoia level.
+	SSRFProtection bool
 
 	// Logger receives engine diagnostics.
 	Logger Logger
@@ -214,6 +243,20 @@ func (p Policy) Ruleset() rules.Set {
 		set = append(set, s.rule())
 	}
 
+	set = append(set, p.optInRules(pl)...)
+	return append(set, p.ExtraRules...)
+}
+
+// optInRules are gwaf's core rules that its default set deliberately omits, and
+// which gateon admits once it can tell the deployment is not the one each is
+// wrong for.
+//
+// They are separated from Ruleset because they are selected on a different
+// basis: everything in defaultSpecs is filtered by one uniform rule, while each
+// of these carries its own argument for when it becomes correct.
+func (p Policy) optInRules(pl int) rules.Set {
+	var set rules.Set
+
 	if pl >= crlfRuleMinParanoia && !p.tagDisabled([]string{"crlf", "response-splitting"}) {
 		set = append(set, core.CRLFHeaderRule(IDCRLFHeaderInjection))
 	}
@@ -230,7 +273,15 @@ func (p Policy) Ruleset() rules.Set {
 		set = append(set, core.LoopbackSSRFRule(IDLoopbackSSRF))
 	}
 
-	return append(set, p.ExtraRules...)
+	// Unlike the three above, this one is not reachable by raising paranoia:
+	// whether the application fetches user-supplied URLs is a property of the
+	// application, not of how strict the operator wants to be. The tag switch
+	// still applies, so turning SSRF detection off turns this off too.
+	if p.SSRFProtection && !p.tagDisabled([]string{"ssrf"}) {
+		set = append(set, core.SSRFParamRule(IDSSRFParam))
+	}
+
+	return set
 }
 
 func (p Policy) tagDisabled(tags []string) bool {
@@ -274,13 +325,30 @@ func (p Policy) Options() []gwaf.Option {
 		opts = append(opts, gwaf.WithoutCoreRuleset())
 	}
 
-	for _, ex := range append(DefaultExceptions(), p.Exceptions...) {
-		opts = append(opts, gwaf.WithException(ex))
-	}
+	// Order is deliberate: gateon's own carve-outs, then the platform profiles,
+	// then whatever the operator wrote. Exceptions are matched rather than
+	// applied in sequence, so this does not change behaviour — it is the order a
+	// reader needs to see them in to understand where one came from.
+	exceptions := DefaultExceptions()
+	profileExceptions, _ := AppProfileExceptions(p.AppProfiles)
+	exceptions = append(exceptions, profileExceptions...)
+	exceptions = append(exceptions, p.Exceptions...)
+	opts = append(opts, gwaf.WithExceptions(exceptions...))
 	if p.OnDecision != nil {
 		opts = append(opts, gwaf.OnDecision(p.OnDecision))
 	}
 	return opts
+}
+
+// UnknownAppProfiles names the configured profiles this build cannot resolve.
+//
+// It is separate from Options so that building an engine never fails on a
+// misspelled profile — the ruleset is still correct without it — while the
+// caller is still able to say so. Silence here would let an operator believe
+// they had tuning they do not have.
+func (p Policy) UnknownAppProfiles() []string {
+	_, unknown := AppProfileExceptions(p.AppProfiles)
+	return unknown
 }
 
 // NewEngine builds the WAF this policy describes.

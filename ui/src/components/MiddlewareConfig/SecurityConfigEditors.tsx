@@ -12,11 +12,13 @@ import {
   ActionIcon,
   Divider,
   TagsInput,
+  MultiSelect,
 } from "@mantine/core";
 import { useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
+import { WAF_APP_PROFILES } from "../../types/gateon";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -214,6 +216,36 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
               min={1}
             />
           </Group>
+
+          <Divider label="Application Tuning" labelPosition="center" />
+          {/*
+            These two keys are written snake_case because that is what the
+            gateway reads (internal/middleware/waf.go parses cfg["app_profiles"]
+            and cfg["ssrf_protection"]), and it is what persisted route configs
+            already use. Several older controls in this editor write camelCase
+            for multi-word keys and therefore never reach the parser; do not copy
+            that pattern here.
+          */}
+          <MultiSelect
+            label="Platform Profiles"
+            description="Platforms behind this route. Each suppresses the false positives that platform
+              generates against itself, scoped to a named rule on a named path and field. Nothing is
+              disabled globally."
+            placeholder={config.app_profiles ? undefined : "None — the default ruleset, untuned"}
+            data={WAF_APP_PROFILES}
+            value={config.app_profiles ? config.app_profiles.split(",").filter(Boolean) : []}
+            onChange={(v) => updateConfig("app_profiles", v.join(","))}
+            clearable
+            searchable
+          />
+          <Switch
+            label="SSRF Parameter Protection"
+            description="Block an off-origin URL in a parameter the server fetches (url, webhook, feed).
+              Leave off if this route accepts user-supplied URLs by design — registering a webhook is the
+              same request shape as the attack. Off-origin user redirects are always blocked regardless."
+            checked={config.ssrf_protection === "true"}
+            onChange={(e) => updateConfig("ssrf_protection", e.currentTarget.checked ? "true" : "false")}
+          />
 
           <Divider label="Body Limits" labelPosition="center" />
           <Group grow>
