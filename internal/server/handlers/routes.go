@@ -15,6 +15,37 @@ import (
 )
 
 func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
+	// Every route's target stats in one response.
+	//
+	// The dashboard draws a sparkline per route, and each one used to fetch its
+	// own stats: one request per route, per refresh, forever. Seven routes cost
+	// 21 requests every 30 seconds from a tab nobody was touching, and it grew
+	// with the routing table rather than with what the operator was looking at.
+	// On the 2-core host this is sized for, that is the gateway competing with
+	// its own dashboard.
+	//
+	// Keyed by route ID so the client can fan it back out without another
+	// lookup. A route with no stats is present with an empty list rather than
+	// absent, so the caller can tell "no traffic" from "no such route".
+	mux.HandleFunc("GET /v1/routes/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		out := map[string][]proxy.TargetStats{}
+		if d.RouteStatsProvider == nil || d.RouteService == nil {
+			_ = json.NewEncoder(w).Encode(out)
+			return
+		}
+		// Page size 0 means "no limit" to ListPaginated; the dashboard needs
+		// every route, not the first page of them.
+		routes, _ := d.RouteService.ListPaginated(r.Context(), 0, 0, "", nil)
+		for _, rt := range routes {
+			stats := d.RouteStatsProvider(rt.GetId())
+			if stats == nil {
+				stats = []proxy.TargetStats{}
+			}
+			out[rt.GetId()] = stats
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	})
 	mux.HandleFunc("GET /v1/routes/{id}/stats", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
