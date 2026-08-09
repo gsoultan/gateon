@@ -165,7 +165,7 @@ func (r *RouteRegistry) saveLocked() error {
 		return fmt.Errorf("marshal routes: %w", err)
 	}
 
-	if err := os.WriteFile(r.path, data, 0644); err != nil {
+	if err := os.WriteFile(r.path, data, 0o600); err != nil {
 		return fmt.Errorf("write routes file: %w", err)
 	}
 	return nil

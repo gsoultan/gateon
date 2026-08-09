@@ -93,7 +93,7 @@ func (r *EntryPointRegistry) saveLocked() error {
 		return fmt.Errorf("marshal entrypoints: %w", err)
 	}
 
-	if err := os.WriteFile(r.path, data, 0644); err != nil {
+	if err := os.WriteFile(r.path, data, 0o600); err != nil {
 		return fmt.Errorf("write entrypoints file: %w", err)
 	}
 	return nil

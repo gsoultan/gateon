@@ -72,7 +72,9 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			return
 		}
 		certsDir := filepath.Join(config.DataDir(), "certs")
-		if err := os.MkdirAll(certsDir, 0755); err != nil {
+		// 0700: the directory holds private keys, so it is not listable by
+		// other users on the host either.
+		if err := os.MkdirAll(certsDir, 0o700); err != nil {
 			logger.L.LogError("failed to create certificates directory", "error", err, "dir", certsDir)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -128,14 +130,20 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 
 		filename := generateCertFilename(req.Content, req.Type)
 		certsDir := filepath.Join(config.DataDir(), "certs")
-		if err := os.MkdirAll(certsDir, 0755); err != nil {
+		// 0700: the directory holds private keys, so it is not listable by
+		// other users on the host either.
+		if err := os.MkdirAll(certsDir, 0o700); err != nil {
 			logger.L.LogError("failed to create certificates directory", "error", err, "dir", certsDir)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		destPath := filepath.Join(certsDir, filename)
-		if err := os.WriteFile(destPath, []byte(req.Content), 0644); err != nil {
+		// 0600, not 0644. req.Type is one of "cert", "key" or "ca", so this
+		// endpoint writes private keys, and 0644 made every one of them
+		// readable by every user on the host. That is the finding rather than
+		// a permissions preference.
+		if err := os.WriteFile(destPath, []byte(req.Content), 0o600); err != nil {
 			logger.L.LogError("failed to save pasted certificate", "error", err, "path", destPath)
 			w.WriteHeader(http.StatusInternalServerError)
 			return

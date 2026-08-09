@@ -64,7 +64,7 @@ func GenerateCert(domains []string) (tls.Certificate, error) {
 
 func SaveCertToPEM(cert tls.Certificate, certFile, keyFile string) error {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]})
-	if err := os.WriteFile(certFile, certPEM, 0644); err != nil {
+	if err := os.WriteFile(certFile, certPEM, 0o600); err != nil {
 		return err
 	}
 

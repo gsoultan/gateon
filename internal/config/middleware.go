@@ -85,7 +85,7 @@ func (r *MiddlewareRegistry) saveLocked() error {
 		return fmt.Errorf("marshal middlewares: %w", err)
 	}
 
-	if err := os.WriteFile(r.path, data, 0644); err != nil {
+	if err := os.WriteFile(r.path, data, 0o600); err != nil {
 		return fmt.Errorf("write middlewares file: %w", err)
 	}
 	return nil
