@@ -135,6 +135,7 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		TrustCloudflare:             w.GetTrustCloudflareHeaders(),
 		AppProfiles:                 w.GetAppProfiles(),
 		EnableSSRFProtection:        w.GetSsrfProtection(),
+		Origins:                     resolveOrigins(w.GetOrigins()),
 		RouteID:                     "gateon-global-waf",
 		EbpfManager:                 f.ebpfManager,
 		Reputation:                  f.reputation,

@@ -1619,6 +1619,19 @@ export default function SettingsPage() {
                   />
 
                   <Divider label="Application Tuning" labelPosition="center" />
+                  <TagsInput
+                    label="Gateway Origins"
+                    description="The hostnames this gateway answers on. Used to tell a redirect or fetch
+                      destination on this site from one somewhere else. Leave empty to use the Host()
+                      rules from your routes — set it when a route matches on a path alone, or when the
+                      gateway is reached by a name no route mentions. Without any origin, open-redirect
+                      and SSRF checks have nothing to compare against and stay silent."
+                    placeholder="app.example.com"
+                    value={config.waf.origins ?? []}
+                    onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, origins: v } })}
+                    disabled={formDisabled}
+                    clearable
+                  />
                   <MultiSelect
                     label="Platform Profiles"
                     description="Platforms running behind this gateway. Each one suppresses the specific

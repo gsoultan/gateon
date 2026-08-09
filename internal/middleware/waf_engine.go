@@ -96,7 +96,19 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 		DisabledTags:       tags,
 		AppProfiles:        cfg.AppProfiles,
 		SSRFProtection:     cfg.EnableSSRFProtection,
+		Origins:            cfg.Origins,
 		OnDecision:         onDecision,
+	}
+
+	// An install with no declared origins keeps every other rule and silently
+	// loses open-redirect and SSRF coverage, because there is nothing to call a
+	// destination foreign against. That is the safe behaviour and an easy one to
+	// not notice, so it is said out loud — once per engine build, not per
+	// request.
+	if len(policy.Origins) == 0 {
+		logger.L.LogWarn("WAF off-origin rules are inactive: no origins declared",
+			"route", cfg.RouteID,
+			"hint", "add Host() rules to routes, or set waf.origins, so redirect and SSRF destinations can be compared")
 	}
 
 	policy.ExtraRules = append(policy.ExtraRules, cfg.ExtraRules...)

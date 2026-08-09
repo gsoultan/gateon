@@ -407,6 +407,7 @@ export type WafConfig = {
   trustCloudflareHeaders?: boolean;
   appProfiles?: string[];
   ssrfProtection?: boolean;
+  origins?: string[];
 };
 
 /**
