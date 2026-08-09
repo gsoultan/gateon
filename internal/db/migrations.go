@@ -1765,6 +1765,38 @@ func init() {
 		_, err := db.Exec(idx)
 		return err
 	})
+
+	// security_threats.id was sized VARCHAR(36) — a UUID — but nothing writing
+	// to it produces a UUID. Every producer builds a composite correlation key:
+	// "waf-blocked-<route>-<nanos>", "anomaly-bruteforce-<ip>-<nanos>",
+	// "rep-block-<ip>-<fingerprint>". A route name or an IPv6 address takes
+	// those well past 36 characters.
+	//
+	// SQLite declares the column TEXT and ignores the length entirely, so this
+	// never showed up there. On Postgres and MySQL the insert fails — and
+	// because the flush writes the batch in one transaction, the first
+	// oversized row aborted it and took every other threat in the batch with it
+	// (Postgres 25P02). The Security Hub, threat explorer and everything derived
+	// from security_threats were empty on those engines while the WAF was
+	// blocking correctly and logging that it had.
+	//
+	// 255 matches what the newer tables here already use for an id.
+	Register(62, "widen_security_threats_id", func(db *sql.DB, dialect Dialect) error {
+		var query string
+		switch dialect.Driver {
+		case DriverPostgres:
+			query = `ALTER TABLE security_threats ALTER COLUMN id TYPE VARCHAR(255)`
+		case DriverMySQL:
+			query = `ALTER TABLE security_threats MODIFY COLUMN id VARCHAR(255) NOT NULL`
+		default:
+			// SQLite's column is TEXT and has no length to widen. Returning nil
+			// still records the migration as applied, which is what keeps the
+			// version numbers aligned across engines.
+			return nil
+		}
+		_, err := db.Exec(query)
+		return err
+	})
 }
 
 // seededWAFRuleIDs are the rules gateon used to seed into waf_rules and now
