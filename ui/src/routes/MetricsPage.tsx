@@ -1,4 +1,6 @@
+import { Link } from "@tanstack/react-router";
 import {
+  Anchor,
   Stack,
   Title,
   Text,
@@ -508,29 +510,39 @@ function LabeledCountList({ items }: { items: LabeledCount[] | null }) {
   );
 }
 
+/**
+ * Performance middleware only.
+ *
+ * This used to carry the security counters as well -- WAF blocks, rate limiting,
+ * auth failures, Turnstile, GeoIP -- which are five of the thirteen stages in
+ * the Security Hub's mitigation funnel, read from the same snapshot. Two places
+ * showing the same numbers is the smaller problem; the larger one is that a
+ * count of what was blocked, on its own, cannot answer the question an operator
+ * actually has, which is what got through. The funnel shows both, so the
+ * counters belong there and this section keeps what is genuinely about
+ * throughput.
+ */
 function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
   const cacheTotal = mw.cacheHits + mw.cacheMisses;
   const retriesTotal = mw.retriesSuccess + mw.retriesFailure;
-  const turnstileTotal = mw.turnstilePass + mw.turnstileFail;
 
   return (
     <Card shadow="sm" padding="lg" radius="lg" withBorder>
-      <Group gap="xs" mb="md">
-        <ThemeIcon variant="light" color="grape" size="md" radius="md">
-          <IconShield size={16} />
-        </ThemeIcon>
-        <Title order={5} fw={700}>
-          Middleware Metrics
-        </Title>
+      <Group gap="xs" mb="md" justify="space-between">
+        <Group gap="xs">
+          <ThemeIcon variant="light" color="grape" size="md" radius="md">
+            <IconShield size={16} />
+          </ThemeIcon>
+          <Title order={5} fw={700}>
+            Performance Middleware
+          </Title>
+        </Group>
+        <Anchor component={Link} to="/security-center" size="xs" fw={600}>
+          Security counters are in the Security Hub funnel
+        </Anchor>
       </Group>
       <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
-        <MiddlewareCard title="Rate Limiting" icon={IconShield} color="red">
-          <LabeledCountList items={mw.rateLimitRejected} />
-        </MiddlewareCard>
 
-        <MiddlewareCard title="WAF Blocks" icon={IconShieldCheck} color="orange">
-          <LabeledCountList items={mw.wafBlocked} />
-        </MiddlewareCard>
 
         <MiddlewareCard title="Cache" icon={IconDatabase} color="teal">
           {cacheTotal > 0 ? (
@@ -560,9 +572,6 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
           )}
         </MiddlewareCard>
 
-        <MiddlewareCard title="Auth Failures" icon={IconLock} color="red">
-          <LabeledCountList items={mw.authFailures} />
-        </MiddlewareCard>
 
         <MiddlewareCard title="Compression" icon={IconCloud} color="blue">
           {mw.compressBytesIn > 0 ? (
@@ -597,38 +606,7 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
           )}
         </MiddlewareCard>
 
-        <MiddlewareCard title="Turnstile" icon={IconShieldCheck} color="cyan">
-          {turnstileTotal > 0 ? (
-            <Stack gap="xs">
-              <Group justify="space-between">
-                <Text size="xs" c="green">
-                  Pass: {formatNumber(mw.turnstilePass)}
-                </Text>
-                <Text size="xs" c="red">
-                  Fail: {formatNumber(mw.turnstileFail)}
-                </Text>
-              </Group>
-              <Progress
-                value={
-                  turnstileTotal > 0
-                    ? (mw.turnstilePass / turnstileTotal) * 100
-                    : 0
-                }
-                color="green"
-                size="sm"
-                radius="md"
-              />
-            </Stack>
-          ) : (
-            <Text size="xs" c="dimmed">
-              No challenges recorded
-            </Text>
-          )}
-        </MiddlewareCard>
 
-        <MiddlewareCard title="GeoIP Blocks" icon={IconNetwork} color="orange">
-          <LabeledCountList items={mw.geoipBlocked} />
-        </MiddlewareCard>
 
         <MiddlewareCard title="Retries" icon={IconRefresh} color="violet">
           {retriesTotal > 0 ? (
