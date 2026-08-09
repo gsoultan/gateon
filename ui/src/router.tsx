@@ -37,6 +37,7 @@ const LoginPage = lazy(() => import("./routes/LoginPage"));
 const SetupPage = lazy(() => import("./routes/SetupPage"));
 const TopologyPage = lazy(() => import("./routes/TopologyPage"));
 const SecurityCommandCenter = lazy(() => import("./routes/SecurityCommandCenter"));
+const ClamAVPage = lazy(() => import("./routes/ClamAVPage"));
 const TracesPage = lazy(() => import("./routes/TracesPage"));
 const MetricsPage = lazy(() => import("./routes/MetricsPage"));
 const DiagnosticsPage = lazy(() => import("./routes/DiagnosticsPage"));
@@ -229,6 +230,15 @@ const securityCommandCenterRoute = createRoute({
   component: () => <SecurityCommandCenter />,
 });
 
+// The route exists whether or not ClamAV is installed. Only the nav entry is
+// conditional: a bookmark, or the link in a "malware protection degraded"
+// alert, has to land somewhere that explains itself and offers the install.
+const clamavRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/clamav",
+  component: () => <ClamAVPage />,
+});
+
 const tracesRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/traces",
@@ -281,6 +291,7 @@ const routeTree = rootRoute.addChildren([
     usersRoute,
     topologyRoute,
     securityCommandCenterRoute,
+    clamavRoute,
     tracesRoute,
     metricsRoute,
     diagnosticsRoute,

@@ -180,6 +180,30 @@ func (s *ApiService) UninstallClamav(ctx context.Context, req *gateonv1.Uninstal
 	return &gateonv1.UninstallClamavResponse{Success: true, Message: "Uninstallation started successfully"}, nil
 }
 
+// GetClamavScanStatus reports the current scan state and starts nothing.
+//
+// It exists because the dashboard needs to poll, and the only endpoint that
+// could answer "is a scan running?" was RunDeepScan — which answers by starting
+// one if the answer is no. A status read that mutates is a trap: the Security
+// Hub called it on mount, so opening the page launched a full filesystem scan
+// on any host with ClamAV installed, and wrote an audit entry saying so.
+func (s *ApiService) GetClamavScanStatus(_ context.Context, _ *gateonv1.GetClamavScanStatusRequest) (*gateonv1.GetClamavScanStatusResponse, error) {
+	if s.ClamAVManager == nil {
+		return &gateonv1.GetClamavScanStatusResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
+	}
+
+	status := s.ClamAVManager.GetScanStatus()
+	return &gateonv1.GetClamavScanStatusResponse{
+		Success: true,
+		Status: &gateonv1.DeepScanStatus{
+			IsRunning:  status.IsRunning,
+			LastScan:   status.LastScan.Format(time.RFC3339),
+			LastError:  status.LastError,
+			LastResult: status.LastResult,
+		},
+	}, nil
+}
+
 func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanRequest) (*gateonv1.RunDeepScanResponse, error) {
 	if s.ClamAVManager == nil {
 		return &gateonv1.RunDeepScanResponse{Success: false, Message: "ClamAV manager not initialized"}, nil

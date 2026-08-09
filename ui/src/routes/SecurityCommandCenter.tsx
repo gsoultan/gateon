@@ -79,9 +79,13 @@ export default function SecurityCommandCenter() {
   const [pendingMode, setPendingMode] = React.useState<number | null>(null);
   const [sudoPassword, setSudoPassword] = React.useState("");
 
+  // Reads scan state. Deliberately the GET endpoint, not the POST that starts a
+  // scan: this used to poll RunDeepScan, which answers "is a scan running?" by
+  // starting one when the answer is no. Opening this page launched a full
+  // filesystem scan on any host with ClamAV installed.
   const pollScanStatus = async () => {
     try {
-      const res = await apiFetch("/v1/security/clamav/scan", { method: "POST" });
+      const res = await apiFetch("/v1/security/clamav/scan-status");
       const data = await res.json();
       if (data.success) {
         setScanStatus(data.status);
