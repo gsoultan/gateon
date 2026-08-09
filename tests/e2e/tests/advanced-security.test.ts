@@ -1,19 +1,48 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 
+/**
+ * Open /settings and do not return until the gateway's config has arrived.
+ *
+ * Every switch on this page is rendered from `config`, which starts empty and is
+ * filled by /v1/global after first paint. A switch read before that response
+ * lands reports `false` regardless of what the gateway actually has — so a test
+ * that reads `isChecked()` on arrival and toggles when it sees `false` does not
+ * "enable" the feature, it *disables* the one that was already on, and then
+ * waits out its timeout for a section that will never render.
+ *
+ * The listener is registered before goto deliberately: attaching it afterwards
+ * races the response it is meant to observe, and would hang whenever the config
+ * arrived first.
+ */
+async function gotoSettingsLoaded(page: import('@playwright/test').Page) {
+  const configLoaded = page.waitForResponse(
+    (r) => r.url().includes('/v1/global') && r.status() === 200,
+    { timeout: 30000 },
+  );
+  await page.goto('/settings', { waitUntil: 'load' });
+  await configLoaded;
+  // The response has landed; give React the tick it needs to commit the state
+  // derived from it before anything reads a control.
+  await page.waitForTimeout(500);
+}
+
 test.describe('Advanced Security & Global WAF E2E', () => {
   test.setTimeout(120000);
 
   test.beforeEach(async ({ page }) => {
     // Wait for gateon to be ready
     execSync('go run wait_for_port/main.go localhost:8080');
-    await page.goto('/settings', { waitUntil: 'load' });
+    await gotoSettingsLoaded(page);
   });
 
   test.afterEach(async ({ page }) => {
     // Ensure all security settings are disabled after each test to avoid side effects
     try {
-        await page.goto('/settings', { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // Same reason as beforeEach: the cleanup reads every switch to decide
+        // whether to turn it off, and reading before the config lands makes it
+        // skip everything that was on — leaving the state it exists to reset.
+        await gotoSettingsLoaded(page);
         
         // 1. Reset Global WAF & Anomaly Threshold
         const wafSwitchInput = page.getByLabel('Protect all routes');
