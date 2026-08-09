@@ -5,8 +5,9 @@ package middleware
 import (
 	"bufio"
 	"bytes"
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"strings"
@@ -208,7 +209,7 @@ func (w *breadcrumbWriter) Write(b []byte) (int, error) {
 	}
 
 	// Generate a unique trap path
-	trapID := rand.Intn(1000000)
+	trapID := newTrapID()
 	trapLink := fmt.Sprintf("\n<!-- Gateon Breadcrumb -->\n<a href=\"/_gateon_trap_%d\" style=\"display:none\" aria-hidden=\"true\" tabIndex=\"-1\"></a>\n", trapID)
 
 	newBody := make([]byte, 0, len(b)+len(trapLink))
@@ -308,4 +309,24 @@ func parseHoneypotConfig(cfg map[string]string) HoneypotConfig {
 		}
 	}
 	return HoneypotConfig{Paths: paths}
+}
+
+// newTrapID returns an unpredictable identifier for a breadcrumb trap path.
+//
+// crypto/rand rather than math/rand, and that is the point of the whole
+// mechanism rather than a lint fix. A breadcrumb only works if an attacker
+// cannot tell a trap path from a real one; with a predictable generator the
+// sequence can be reproduced offline and every trap enumerated and avoided,
+// which turns the deception layer into an oracle for exactly the visitors it
+// exists to catch. The space is widened at the same time -- a million values is
+// small enough to sweep.
+func newTrapID() uint64 {
+	var b [8]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		// crypto/rand does not fail in practice, and a trap that silently
+		// became predictable would be worse than no trap. Fall back to a value
+		// derived from the clock, which is still not enumerable offline.
+		return uint64(time.Now().UnixNano())
+	}
+	return binary.BigEndian.Uint64(b[:])
 }
