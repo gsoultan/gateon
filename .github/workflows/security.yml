@@ -180,6 +180,24 @@ jobs:
           # ignore the scanner.
           skip-dirs: "ui/.bun-cache,**/node_modules"
 
+      # The scan above writes findings to a file, so a failing run prints
+      # progress lines and an exit code and nothing else -- which reads like an
+      # infrastructure failure rather than a finding, and cost a long
+      # investigation once. This repeats the scan as a table so the log says
+      # what was found. It cannot fail the job: the SARIF step above already
+      # decided that.
+      - name: Show Trivy findings in the log
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          format: table
+          skip-dirs: "ui/.bun-cache,**/node_modules"
+
       - name: Upload Trivy SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
