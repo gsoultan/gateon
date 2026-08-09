@@ -82,9 +82,12 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 
 	var wafRules *waf.Store
+	var wafExceptions *waf.ExceptionStore
 	if s.WafRules != nil {
 		wafRules = s.WafRules.(*waf.Store)
 		wafRules.SetInvalidator(&WafToProxyInvalidator{proxyInvalidator})
+		wafExceptions = wafRules.Exceptions(ctx)
+		wafExceptions.SetInvalidator(&WafToProxyInvalidator{proxyInvalidator})
 	}
 
 	var phantomCore phantom.PhantomCore
@@ -109,6 +112,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		IPReputation:       ipReputation,
 		ClamAVManager:      clamavManager,
 		WafRules:           wafRules,
+		WafExceptions:      wafExceptions,
 		PhantomCore:        phantomCore,
 		Governor:           gov,
 	})

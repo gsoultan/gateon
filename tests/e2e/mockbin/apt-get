@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "apt-get $*" >> /tmp/mock.log
+case "$1" in update) echo "Updating..." ;; install) touch /tmp/clamav_apt_installed; echo "Installed clamav" ;; remove|purge) rm -f /tmp/clamav_apt_installed; echo "Removed clamav" ;; *) exit 0 ;; esac; exit 0

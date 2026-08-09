@@ -73,9 +73,13 @@ func TestWAFTier_ProfileEnvDrivesTier(t *testing.T) {
 	}
 }
 
-// TestWAFFastPath_BlocksHeaderInjection proves the extended fast-path catches a
-// signature smuggled through the User-Agent header before the CRS engine runs.
-func TestWAFFastPath_BlocksHeaderInjection(t *testing.T) {
+// TestWAFEngine_BlocksHeaderInjection proves a signature smuggled through the
+// User-Agent header is caught. The Aho-Corasick fast path that used to do this
+// with a separate block message is retired; the gwaf engine now inspects
+// request headers directly and blocks with a rule, which is the point — one
+// accurate, grammar-based check instead of a substring prefilter that ran ahead
+// of it.
+func TestWAFEngine_BlocksHeaderInjection(t *testing.T) {
 	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true, Tier: "standard"})
 
 	req := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(""))
@@ -84,8 +88,5 @@ func TestWAFFastPath_BlocksHeaderInjection(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("header injection via User-Agent: expected 403, got %d", rr.Code)
-	}
-	if !strings.Contains(rr.Body.String(), "Fast-Path") {
-		t.Errorf("expected fast-path block message, got %q", rr.Body.String())
 	}
 }

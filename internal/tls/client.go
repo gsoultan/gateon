@@ -24,7 +24,12 @@ func CreateTLSClientConfig(cfg *gateonv1.TlsClientConfig) (*tls.Config, error) {
 	}
 
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: cfg.SkipVerify, // only when explicitly requested
+		// #nosec G402 -- not a default. This is false unless the operator set
+		// SkipVerify, the nil/disabled path above returns a verifying config,
+		// and the doc comment states the contract. gosec flags the variable
+		// rather than a decision, and silencing it here is honest only because
+		// the decision is the operator's and is made elsewhere.
+		InsecureSkipVerify: cfg.SkipVerify,
 		ServerName:         cfg.ServerName,
 		MinVersion:         tls.VersionTLS12,
 	}

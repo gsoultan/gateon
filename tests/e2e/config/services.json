@@ -1,0 +1,35 @@
+[
+  {
+    "id": "mock-service",
+    "name": "Mock Service",
+    "weighted_targets": [
+      {
+        "url": "http://127.0.0.1:8082"
+      }
+    ],
+    "load_balancer_policy": "round_robin",
+    "backend_type": "http"
+  },
+  {
+    "id": "grpc-service",
+    "name": "gRPC Service",
+    "weighted_targets": [
+      {
+        "url": "h2c://127.0.0.1:8083"
+      }
+    ],
+    "load_balancer_policy": "round_robin",
+    "backend_type": "grpc",
+    "health_check_type": 1
+  },
+  {
+    "id": "tcp-service",
+    "name": "TCP Service",
+    "weighted_targets": [
+      {
+        "url": "127.0.0.1:8084"
+      }
+    ],
+    "backend_type": "tcp"
+  }
+]

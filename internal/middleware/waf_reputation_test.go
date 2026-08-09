@@ -11,7 +11,6 @@ import (
 
 func TestWAF_FalsePositiveReproduction(t *testing.T) {
 	mw, err := WAF(WAFConfig{
-		UseCRS:        true,
 		ParanoiaLevel: 1,
 	})
 	if err != nil {

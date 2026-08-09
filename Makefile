@@ -35,7 +35,14 @@ ebpf-docker:
 
 ## build: build the gateon binary for the current host. The Go toolchain automatically
 ##        applies Profile-Guided Optimization when cmd/gateon/default.pgo exists.
-build: models
+## ui-assets: build the dashboard and sync it into the embed directory.
+##            Without this the binary embeds whatever internal/ui/dist held at
+##            checkout, so a local build silently ships a stale dashboard.
+ui-assets:
+	cd ui && bun run build
+	go run ./scripts/sync_assets.go
+
+build: models ui-assets
 	mkdir -p dist
 	$(GOBUILD) -o dist/gateon ./cmd/gateon
 
@@ -99,13 +106,37 @@ vuln:
 staticcheck:
 	go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 
-## gosec: run the gosec security scanner
+## gosec: run the gosec security scanner.
+##        G115 (integer conversion overflow) is excluded: it fires 81 times on
+##        int->int32/uint conversions that are bounded by construction, and a
+##        gate nobody can read is a gate nobody runs. Exclude-dirs cover
+##        generated protobuf, the e2e harness, and Go files vendored inside the
+##        bun cache under ui/.
 gosec:
-	go run github.com/securego/gosec/v2/cmd/gosec@latest -exclude-dir=proto -exclude-dir=tests ./...
+	go run github.com/securego/gosec/v2/cmd/gosec@latest \
+		-exclude=G115 \
+		-exclude-dir=proto -exclude-dir=tests -exclude-dir=ui \
+		-exclude-generated \
+		./...
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec)
 sec: vuln staticcheck gosec
 	go vet ./...
+
+## lint: run golangci-lint over the whole tree (reports pre-existing debt too)
+lint:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
+
+## lint-new: lint only code changed since LINT_BASE (default: origin/main).
+##           This is the gate for new work — it ignores pre-existing findings.
+LINT_BASE ?= origin/main
+lint-new:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run \
+		--new-from-rev=$(LINT_BASE) --whole-files=false ./...
+
+## lint-fix: apply the formatters (gofmt + goimports) via golangci-lint
+lint-fix:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest fmt ./...
 
 ## clean: clean build artifacts
 clean:

@@ -4,10 +4,12 @@ package security
 
 import (
 	"bytes"
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/audit"
 )
@@ -91,7 +93,7 @@ func (w *breadcrumbWriter) Write(b []byte) (int, error) {
 	}
 
 	// Generate a unique trap path for this session/request
-	trapID := rand.Intn(1000000)
+	trapID := newTrapID()
 	trapLink := fmt.Sprintf("\n<!-- Gateon Breadcrumb -->\n<a href=\"/_gateon_trap_%d\" style=\"display:none\" aria-hidden=\"true\" tabIndex=\"-1\"></a>\n", trapID)
 
 	newBody := make([]byte, 0, len(b)+len(trapLink))
@@ -117,4 +119,27 @@ func DefaultHoneytokens() map[string]string {
 		"/phpinfo.php":      "PHP info access attempt",
 		"/actuator/env":     "Spring Boot actuator access attempt",
 	}
+}
+
+// newTrapID returns an unpredictable identifier for a honeytoken trap path.
+//
+// crypto/rand rather than math/rand, and that is the mechanism rather than a
+// lint fix. A honeytoken only works if an attacker cannot tell a trap from a
+// real path; with a predictable generator the sequence is reproducible offline,
+// every trap can be enumerated and avoided, and the deception layer becomes an
+// oracle for exactly the visitors it exists to catch. The space widens at the
+// same time -- a million values is small enough to sweep.
+//
+// Deliberately duplicated from internal/middleware rather than shared: it is
+// eight lines, and a util package coupling security to middleware would cost
+// more than the duplication.
+func newTrapID() uint64 {
+	var b [8]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		// crypto/rand does not fail in practice, and a trap that silently
+		// became predictable would be worse than no trap. Fall back to the
+		// clock, which is still not enumerable offline.
+		return uint64(time.Now().UnixNano())
+	}
+	return binary.BigEndian.Uint64(b[:])
 }

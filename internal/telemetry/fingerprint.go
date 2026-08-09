@@ -82,6 +82,39 @@ func GetCachedJA4H(r *http.Request) string {
 	return GenerateJA4H(r)
 }
 
+// JA4FromTrustedHeader returns the JA4 fingerprint supplied by X-JA4-Fingerprint,
+// but only when the immediate peer is a trusted proxy. Otherwise it returns "".
+//
+// The header exists so a TLS terminator in front of the gateway can pass down a
+// fingerprint it computed from the handshake, which this process never sees.
+// Read unconditionally it is just a string the client chose, and a
+// security-relevant one: the JA4+ value keys reputation, so a caller could
+// rotate the header to shed a bad score as fast as it earns one, or send
+// another client's fingerprint to spoil theirs. It also reaches rendering and
+// storage paths, where an arbitrary string is a liability of its own.
+//
+// GetClientIP already refuses to read X-Forwarded-For from an untrusted peer
+// for the same reason; this header was simply skipping the rule. Gating it here
+// keeps the decision in one place rather than at each of the call sites that
+// used to read it raw.
+func JA4FromTrustedHeader(r *http.Request) string {
+	if !ja4HeaderTrusted(r.RemoteAddr) {
+		return ""
+	}
+	return r.Header.Get("X-JA4-Fingerprint")
+}
+
+// ja4HeaderTrusted is a variable purely so the test can exercise both sides of
+// the gate. request builds its trusted-proxy set in init() from the
+// environment, so a test cannot change it afterwards, and a test that could
+// only ever see the untrusted answer would still pass if someone "fixed" this
+// by returning "" unconditionally — which would quietly disable the feature for
+// the terminators that legitimately set the header. Never reassigned outside
+// tests, so the request path reads a constant.
+var ja4HeaderTrusted = func(remoteAddr string) bool {
+	return request.IsTrusted(remoteAddr, false)
+}
+
 // GetJA4Plus returns the composite JA4+ fingerprint (JA4_JA4H).
 func GetJA4Plus(r *http.Request) string {
 	if rs := request.GetRequestState(r); rs != nil {
@@ -90,7 +123,7 @@ func GetJA4Plus(r *http.Request) string {
 		}
 		ja4 := rs.JA4
 		if ja4 == "" {
-			ja4 = r.Header.Get("X-JA4-Fingerprint")
+			ja4 = JA4FromTrustedHeader(r)
 		}
 		ja4h := GetCachedJA4H(r)
 		ja4plus := ja4 + "_" + ja4h
@@ -101,7 +134,7 @@ func GetJA4Plus(r *http.Request) string {
 		return val
 	}
 	// Manual assembly if no state
-	ja4 := r.Header.Get("X-JA4-Fingerprint")
+	ja4 := JA4FromTrustedHeader(r)
 	ja4h := GenerateJA4H(r)
 	return ja4 + "_" + ja4h
 }
@@ -110,7 +143,7 @@ func GetJA4Plus(r *http.Request) string {
 func WithFingerprint(r *http.Request) *http.Request {
 	fp := GenerateFingerprint(r)
 	ja4h := GenerateJA4H(r)
-	ja4 := r.Header.Get("X-JA4-Fingerprint")
+	ja4 := JA4FromTrustedHeader(r)
 	ja4plus := ja4 + "_" + ja4h
 
 	if rs := request.GetRequestState(r); rs != nil {

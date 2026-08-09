@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+
+syntax = "proto3";
+
+package test;
+
+option go_package = "github.com/gsoultan/gateon/tests/e2e/testpb";
+
+service TestService {
+  rpc Echo (EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoResponse {
+  string message = 1;
+}

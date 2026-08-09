@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "docker $*" >> /tmp/mock.log
+case "$1" in ps) if [[ "$*" == *"gateon-clamav"* ]]; then if [[ -f /tmp/clamav_docker_running ]]; then echo "gateon-clamav"; fi; fi ;; run) touch /tmp/clamav_docker_running; echo "Started gateon-clamav" ;; rm) rm -f /tmp/clamav_docker_running; echo "Removed gateon-clamav" ;; start) touch /tmp/clamav_docker_running; echo "Started gateon-clamav" ;; stop) rm -f /tmp/clamav_docker_running; echo "Stopped gateon-clamav" ;; pull) echo "Pulled image" ;; *) exit 0 ;; esac; exit 0

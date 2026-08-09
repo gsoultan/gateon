@@ -4,7 +4,7 @@ package auth
 
 import (
 	"database/sql"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,8 +13,7 @@ import (
 )
 
 func TestAuthenticate(t *testing.T) {
-	dbPath := "test_auth_table.db"
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "test_auth_table.db")
 
 	_ = logger.Init(false)
 	m, err := NewManager(dbPath, "12345678901234567890123456789012", logger.Default())
@@ -55,8 +54,7 @@ func TestAuthenticate(t *testing.T) {
 }
 
 func TestAccountLockout(t *testing.T) {
-	dbPath := "test_auth.db"
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "test_auth.db")
 
 	_ = logger.Init(false)
 	m, err := NewManager(dbPath, "12345678901234567890123456789012", logger.Default())

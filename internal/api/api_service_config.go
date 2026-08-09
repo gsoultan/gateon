@@ -34,6 +34,7 @@ type ApiServiceConfig struct {
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 	WafRules           *waf.Store
+	WafExceptions      *waf.ExceptionStore
 	PhantomCore        phantom.PhantomCore
 	Governor           *resource.Governor
 }

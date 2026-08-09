@@ -1,0 +1,99 @@
+# golangci-lint configuration for gateon.
+#
+# This file makes the `arch` developer-profile limits in .junie/agents.md
+# machine-checkable instead of prose-only. Thresholds below are taken verbatim
+# from "Key Readability Rules for Go Functions" in that document:
+#   - a function should be at most 50 lines
+#   - a function takes at most 3 parameters
+#   - nesting / cognitive complexity is kept to a minimum
+#   - no magic strings; use constants
+#   - every Go file carries the copyright header
+#
+# The codebase predates this config, so `make lint` reports existing debt while
+# `make lint-new` gates only code you actually changed. See the Makefile.
+version: "2"
+
+run:
+  timeout: 10m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - funlen # function length limit
+    - cyclop # cyclomatic complexity
+    - gocognit # cognitive complexity ("minimize nesting")
+    - goconst # repeated strings that should be constants
+    - goheader # mandatory copyright header
+    - nestif # deeply nested if blocks
+    - bodyclose # unclosed HTTP response bodies (proxy-relevant)
+    - contextcheck # context propagation correctness
+    - errorlint # correct errors.Is/As usage
+
+  settings:
+    funlen:
+      lines: 50
+      statements: 40
+      ignore-comments: true
+    cyclop:
+      max-complexity: 15
+    gocognit:
+      min-complexity: 20
+    nestif:
+      min-complexity: 5
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+      ignore-tests: true
+    goheader:
+      values:
+        const:
+          AUTHOR: Gembit Soultan Shirazi <gembit.soultan@gmail.com>
+        regexp:
+          YEAR: 20\d\d
+      template: |-
+        Copyright (c) {{ YEAR }} {{ AUTHOR }}. All rights reserved.
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Table-driven tests are legitimately long and repeat literals; the
+      # complexity and magic-string limits target production code.
+      - path: _test\.go
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+          - nestif
+          - goconst
+          - errcheck
+      # Generated protobuf/connect stubs are not ours to reshape.
+      - path: (^|/)(proto|gen)/
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+          - goconst
+          - goheader
+          - errorlint
+    paths:
+      - ui
+      - third_party
+      - internal/ai/models
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - ui
+      - third_party
+      - internal/ai/models
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

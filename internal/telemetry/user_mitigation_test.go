@@ -4,16 +4,14 @@ package telemetry
 
 import (
 	"context"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestUserMitigation(t *testing.T) {
 	// Initialize store
-	dbPath := "gateon_user_mit_test.db"
-	_ = os.Remove(dbPath)
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "gateon_user_mit_test.db")
 
 	_ = InitPathStatsStore(dbPath, 1)
 	defer ClosePathStatsStore(context.Background())
@@ -65,9 +63,7 @@ func TestUserMitigation(t *testing.T) {
 
 func TestIPEscalation(t *testing.T) {
 	// Initialize store
-	dbPath := "gateon_ip_esc_test.db"
-	_ = os.Remove(dbPath)
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "gateon_ip_esc_test.db")
 
 	_ = InitPathStatsStore(dbPath, 1)
 	defer ClosePathStatsStore(context.Background())

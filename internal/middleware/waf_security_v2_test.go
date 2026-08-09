@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -25,7 +25,6 @@ func TestWAF_SecurityV2(t *testing.T) {
 	}
 
 	mw, err := WAF(WAFConfig{
-		UseCRS:           true,
 		WafRules:         store,
 		RequestBodyLimit: 1024 * 1024,
 	})
@@ -134,9 +133,7 @@ func TestWAF_SecurityV2(t *testing.T) {
 
 func TestRecognitionMiddlewares(t *testing.T) {
 	// Initialize telemetry store
-	dbPath := "gateon_recognition_test.db"
-	_ = os.Remove(dbPath)
-	defer os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "gateon_recognition_test.db")
 
 	_ = telemetry.InitPathStatsStore(dbPath, 1)
 	defer telemetry.ClosePathStatsStore(t.Context())

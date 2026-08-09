@@ -1926,6 +1926,29 @@ export class WafConfig extends Message<WafConfig> {
    */
   auditOnly = false;
 
+  /**
+   * Platform exception profiles: "wordpress" | "drupal" | "laravel" |
+   * "issue_tracker". Each loads the scoped carve-outs that platform needs so it
+   * does not block on its own ordinary traffic — a WordPress comment field
+   * really does contain PHP, and a Jira issue really does quote SQL. They
+   * compose, and they suppress named rules on named paths rather than turning
+   * any detection off.
+   *
+   * @generated from field: repeated string app_profiles = 40;
+   */
+  appProfiles: string[] = [];
+
+  /**
+   * Block an off-origin URL in a parameter the server itself fetches ("url",
+   * "webhook", "feed"). Off by default: registering a webhook or importing an
+   * avatar is the same request shape, so only a deployment that knows it never
+   * fetches user-supplied URLs can call this always an attack. The navigation
+   * half — "redirect_to", "next" — needs no flag and is always on.
+   *
+   * @generated from field: bool ssrf_protection = 41;
+   */
+  ssrfProtection = false;
+
   constructor(data?: PartialMessage<WafConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1973,6 +1996,8 @@ export class WafConfig extends Message<WafConfig> {
     { no: 37, name: "enable_fingerprint_validation", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 38, name: "enable_confidence_scoring", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 39, name: "audit_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 40, name: "app_profiles", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 41, name: "ssrf_protection", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WafConfig {

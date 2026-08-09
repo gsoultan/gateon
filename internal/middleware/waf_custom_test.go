@@ -12,6 +12,9 @@ import (
 
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gwaf/rules"
+	"github.com/gsoultan/gwaf/rules/op"
+	"github.com/gsoultan/gwaf/types"
 )
 
 type mockWafInvalidator struct {
@@ -30,7 +33,7 @@ func TestWAFCustomRulesDynamicReload(t *testing.T) {
 		t.Fatalf("failed to open db: %v", err)
 	}
 	// Create table
-	_, _ = d.Exec(`CREATE TABLE waf_rules (id TEXT PRIMARY KEY, name TEXT, directive TEXT, enabled INTEGER, paranoia_level INTEGER, category TEXT, created_at DATETIME, updated_at DATETIME)`)
+	_, _ = d.Exec(`CREATE TABLE waf_rules (id TEXT PRIMARY KEY, name TEXT, directive TEXT, definition TEXT, format TEXT, conversion_note TEXT, enabled INTEGER, paranoia_level INTEGER, category TEXT, created_at DATETIME, updated_at DATETIME)`)
 
 	store := waf.NewStoreWithDialect(d, dialect)
 	called := &atomic.Bool{}
@@ -38,7 +41,6 @@ func TestWAFCustomRulesDynamicReload(t *testing.T) {
 
 	// 2. Initial WAF config (no rules yet)
 	cfg := WAFConfig{
-		UseCRS:   true,
 		WafRules: store,
 	}
 
@@ -60,12 +62,20 @@ func TestWAFCustomRulesDynamicReload(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 
-	// 4. Add a rule that blocks "test=1"
+	// 4. Add a rule that blocks "test=1".
+	//
+	// The stored form is a typed definition rather than SecLang, and the ID is
+	// in the engine's embedder range: a stored rule below it is refused rather
+	// than silently renumbered into a range the engine reserves for itself.
 	err = store.AddRule(t.Context(), &waf.Rule{
-		ID:        "1000",
-		Name:      "Block Test 1",
-		Directive: `SecRule ARGS:test "@eq 1" "id:1000,phase:2,deny,status:403"`,
-		Enabled:   true,
+		ID:   "1000000",
+		Name: "Block Test 1",
+		Definition: `{"phase":"request_body","targets":["args:test"],
+			"operator":{"kind":"equals","pattern":"1"},
+			"severity":"critical","confidence":"certain",
+			"msg":"Block Test 1","status":403,"tags":["test"]}`,
+		Format:  waf.FormatGateon,
+		Enabled: true,
 	})
 	if err != nil {
 		t.Fatalf("AddRule: %v", err)
@@ -97,8 +107,15 @@ func TestWAFCustomRulesDynamicReload(t *testing.T) {
 
 func TestWAF_BodyRestoration(t *testing.T) {
 	cfg := WAFConfig{
-		UseCRS:     false,
-		Directives: `SecRule REQUEST_BODY "@contains Hello" "id:1001,phase:2,pass,log"`,
+		ExtraRules: rules.Set{{
+			ID:       1001001,
+			Phase:    types.PhaseRequestBody,
+			Targets:  []types.Target{{Kind: types.TargetRequestBody}},
+			Op:       op.Contains("Hello"),
+			Actions:  []rules.Action{rules.Log},
+			Severity: types.SeverityNotice, Confidence: types.Certain,
+			Msg: "body restoration probe",
+		}},
 	}
 
 	mw, err := WAF(cfg)

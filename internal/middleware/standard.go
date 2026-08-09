@@ -239,7 +239,7 @@ func populateFingerprints(r *http.Request, rs *request.RequestState) {
 		}
 		// Fallback to header if still empty
 		if ja4 == "" {
-			ja4 = r.Header.Get("X-JA4-Fingerprint")
+			ja4 = telemetry.JA4FromTrustedHeader(r)
 		}
 	}
 

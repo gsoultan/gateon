@@ -170,7 +170,7 @@ func (r *GlobalRegistry) saveLocked() error {
 	if err != nil {
 		return fmt.Errorf("marshal global config: %w", err)
 	}
-	if err := os.WriteFile(r.path, data, 0644); err != nil {
+	if err := os.WriteFile(r.path, data, 0o600); err != nil {
 		return fmt.Errorf("write global config file: %w", err)
 	}
 	return nil

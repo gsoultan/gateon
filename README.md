@@ -2,7 +2,7 @@
 
 A modern, high-performance, and security-focused API Gateway, Reverse Proxy, and Service Mesh entry point. 
 
-Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web support, kernel-level optimization via eBPF, and a sophisticated security suite including a multi-tier WAF and AI-powered anomaly detection.
+Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web support, kernel-level optimization via eBPF, and a sophisticated security suite including a semantic, multi-tier WAF and AI-powered anomaly detection.
 
 ## 🚀 Core Features
 
@@ -15,7 +15,7 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 - **Resilience**: Built-in **Circuit Breakers** (Closed/Open/Half-Open) and automatic retries.
 
 ### 🛡️ Enterprise-Grade Security & Shielding
-- **Advanced WAF**: Built-in **Coraza WAF** with OWASP Core Rule Set (CRS) and real-time rule updates.
+- **Advanced WAF**: Built-in **[gwaf](https://github.com/gsoultan/gwaf)**, an embeddable Go WAF that parses request *intent* rather than matching signatures — semantic detectors for SQLi, XSS, shell, path, template, NoSQL and PHP injection, plus prompt injection. OWASP CRS rules import through its SecLang adapter. Blocks by default with no tuning phase, and every decision carries a rule ID and the matched byte span.
 - **Kernel Offloading**: **eBPF-powered** XDP/TC for high-performance rate limiting and packet filtering at the NIC level.
 - **Bot Management**: JS Challenges, Browser Integrity checks, and Cloudflare Turnstile integration.
 - **Identity & Access**: Comprehensive AuthN/Z via **JWT (HMAC/JWKS), PASETO, API Keys**, and Forward Auth.
@@ -46,7 +46,7 @@ internal/        # Domain-driven internal packages
   - ha/          # High Availability (VRRP)
   - k8s/         # Kubernetes Gateway API Controller
   - middleware/  # Security and traffic manipulation layers
-  - waf/         # Coraza WAF integration and rules
+  - security/    # WAF (gwaf) engine, reputation, mitigation, SIEM, FIM
 proto/           # Protobuf definitions (managed via Buf)
 ui/              # React UI (Vite 8 + TS + Mantine 9 + Tailwind)
 ```
@@ -160,6 +160,7 @@ make proto
 - `GATEON_ENCRYPTION_KEY`: Optional. When set (min 16 chars), `database_url`, `paseto_secret`, and database password are encrypted in global.json.
 - `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server (default `127.0.0.1`). Use `0.0.0.0` for remote access (e.g. via Cloudflare Tunnel on another machine).
 - `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated list of allowed IPs for management access (default `127.0.0.1,::1`). Use `0.0.0.0/0` with caution for initial setup via tunnel.
+- `GATEON_TRACE_DIR`: Directory for the Pebble request-trace store. Defaults to `telemetry_pebble` next to a file-backed SQLite database, or relative to the working directory for Postgres/MySQL. Set this to place traces on a dedicated volume without changing the database URL.
 
 > **Note on Cloudflare Tunnels**: If you experience a `502 Bad Gateway` when accessing Gateon via a Cloudflare Tunnel, ensure `GATEON_TRUST_CLOUDFLARE_HEADERS=true` is set and `GATEON_MANAGEMENT_ALLOWED_IPS` includes your tunnel's IP (or use `0.0.0.0/0` to troubleshoot). See [doc/management-entrypoint.md](doc/management-entrypoint.md) for details.
 
@@ -218,7 +219,7 @@ Gateon is rapidly evolving. Below are our recent milestones and future plans.
 - **eBPF Offloading**: Kernel-level XDP/TC traffic filtering.
 - **AI Anomaly Detection**: Pattern-based threat identification.
 - **Kubernetes Gateway API**: Native K8s resource support.
-- **Advanced WAF**: Coraza integration with OWASP CRS.
+- **Advanced WAF**: replaced Coraza with **gwaf** (see [ADR 0004](doc/adr/0004-waf-engine-replacement.md)) — CGO-free, allocation-free on benign traffic, and measured against Coraza + CRS 4.25 on real CVE traffic rather than claimed.
 - **External Secrets**: Vault and AWS Secrets Manager integration.
 - **High Availability**: VRRP-based active-passive failover.
 

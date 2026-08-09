@@ -66,6 +66,7 @@ import { useGateonStatus } from "../hooks/useGateonStatus";
 import { useNetworkInterfaces } from "../hooks/useNetworkInterfaces";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 import type { GlobalConfig, DatabaseConfig } from "../types/gateon";
+import { WAF_APP_PROFILES } from "../types/gateon";
 import { generateRandomString } from "../utils/random";
 import { Link } from "@tanstack/react-router";
 import { apiFetch } from "../hooks/useGateon";
@@ -1614,6 +1615,35 @@ export default function SettingsPage() {
                     value={config.waf.anomalyThreshold || 5}
                     onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, anomalyThreshold: parseInt(v?.toString() || "5") } })}
                     min={1}
+                    disabled={formDisabled}
+                  />
+
+                  <Divider label="Application Tuning" labelPosition="center" />
+                  <MultiSelect
+                    label="Platform Profiles"
+                    description="Platforms running behind this gateway. Each one suppresses the specific
+                      false positives that platform generates against itself — a WordPress comment field
+                      really does contain PHP, and an issue tracker really does quote SQL. Exceptions are
+                      scoped to a named rule on a named path and field; nothing is turned off globally."
+                    placeholder={
+                      (config.waf.appProfiles?.length ?? 0) > 0 ? undefined : "None — the default ruleset, untuned"
+                    }
+                    data={WAF_APP_PROFILES}
+                    value={config.waf.appProfiles ?? []}
+                    onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, appProfiles: v } })}
+                    disabled={formDisabled}
+                    clearable
+                    searchable
+                  />
+                  <Switch
+                    label="SSRF Parameter Protection"
+                    description="Block an off-origin URL in a parameter the server itself fetches (url,
+                      webhook, feed, callback). Leave this off if the application accepts user-supplied
+                      URLs by design — registering a webhook or importing an avatar is the same request
+                      shape as the attack. Redirecting a user off-origin is always blocked and needs no
+                      setting."
+                    checked={config.waf.ssrfProtection}
+                    onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, ssrfProtection: e.currentTarget.checked } })}
                     disabled={formDisabled}
                   />
 
