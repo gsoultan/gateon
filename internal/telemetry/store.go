@@ -820,6 +820,47 @@ func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 	return tx.Prepare(q)
 }
 
+// execThreat inserts one threat inside its own savepoint and reports whether it
+// landed.
+//
+// The savepoint is what isolates a rejected row. Every engine gateon supports
+// implements SAVEPOINT / ROLLBACK TO, and this runs on the background flush
+// goroutine over batches of at most a few hundred, so the extra round trips are
+// not on any request's path.
+//
+// A savepoint that cannot be created is not fatal: the insert is still
+// attempted, because losing a threat to bookkeeping would be the same failure
+// this function exists to prevent.
+func (s *pathStatsStore) execThreat(tx *sql.Tx, stmt *sql.Stmt, th *SecurityThreat, sourceIPs string) bool {
+	const sp = "gateon_threat_sp"
+	savepointed := true
+	if _, err := tx.Exec("SAVEPOINT " + sp); err != nil {
+		savepointed = false
+	}
+
+	_, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time,
+		th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken,
+		th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody,
+		th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy,
+		th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs)
+	if err == nil {
+		if savepointed {
+			_, _ = tx.Exec("RELEASE SAVEPOINT " + sp)
+		}
+		return true
+	}
+
+	logger.Default().LogError("threats: insert failed", "error", err, "id", th.ID)
+	if savepointed {
+		// Back out only this row. The transaction is usable again afterwards,
+		// which is the whole point.
+		if _, rbErr := tx.Exec("ROLLBACK TO SAVEPOINT " + sp); rbErr != nil {
+			logger.Default().LogError("threats: savepoint rollback failed", "error", rbErr)
+		}
+	}
+	return false
+}
+
 func (s *pathStatsStore) loop() {
 	// Sync initially to ensure everything matches the tier
 	s.syncTierSettings()
@@ -935,12 +976,23 @@ func (s *pathStatsStore) loop() {
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
 						sourceIPs := strings.Join(th.SourceIPs, ",")
-						if _, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time, th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken, th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody, th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy, th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs); err != nil {
-							logger.Default().LogError("threats: insert failed", "error", err)
+						// Each row gets a savepoint so a single rejected threat
+						// costs that threat and nothing else. Without it the
+						// first failure aborts the surrounding transaction, and
+						// on Postgres every later Exec then fails with 25P02 —
+						// so one malformed record silently discarded the whole
+						// batch. Threats are what the Security Hub is made of;
+						// losing 127 good ones to a bad one is the difference
+						// between a gap and a blind spot.
+						if !s.execThreat(tx, stmt, th, sourceIPs) {
+							logger.Default().LogWarn("threats: record dropped",
+								"id", th.ID, "type", th.Type, "source_ip", th.SourceIP)
 						}
 					}
 					stmt.Close()
-					_ = tx.Commit()
+					if err := tx.Commit(); err != nil {
+						logger.Default().LogError("threats: commit failed", "error", err)
+					}
 				}
 				for _, th := range threatBatch {
 					th.Reset()

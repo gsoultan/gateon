@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
@@ -101,7 +102,18 @@ func (o wafObservation) threat(clientIP string) telemetry.SecurityThreat {
 		confidence = calculateConfidence(o.repScore, severity, o.decision.Score(), false)
 	}
 
-	id := fmt.Sprintf("waf-%s-%s-%d", action, o.routeID, time.Now().UnixNano())
+	// Two properties this key has to have, and the old form
+	// "waf-<action>-<route>-<nanos>" had neither.
+	//
+	// Bounded: the route is named by a human, and the dev gateway alone ships
+	// one 46 characters long. Interpolating it gave the primary key a length
+	// nobody controls. The route is not lost — route_id is its own column below.
+	//
+	// Unique: a timestamp is not an identity. time.Now() resolves to about a
+	// microsecond, so two threats recorded in the same tick produced the same
+	// key and the second lost a primary-key race — during an attack burst,
+	// which is precisely when the Security Hub has to be complete.
+	id := "waf-" + action + "-" + uuid.NewString()
 	telemetry.RegisterRecommendation(id, recommendation)
 
 	var ja4, ja4h, fingerprint string
