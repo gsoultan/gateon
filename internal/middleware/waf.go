@@ -102,6 +102,19 @@ type WAFConfig struct {
 	Reputation                  *reputation.IPReputationStore
 	AllowedAdminIps             []string // IPs allowed to access WP admin
 	WafRules                    *waf.Store
+
+	// AppProfiles names the platforms behind this route — "wordpress",
+	// "drupal", "laravel", "issue_tracker" — each loading the scoped exceptions
+	// that platform needs so it does not block on its own ordinary traffic.
+	// Configure with the "app_profiles" key (comma-separated) or the
+	// app_profiles field on the global WAF config.
+	AppProfiles []string
+
+	// EnableSSRFProtection blocks an off-origin URL in a parameter the server
+	// fetches. Off by default: registering a webhook or importing an avatar is
+	// the same request shape, so only a deployment that knows it never fetches
+	// user-supplied URLs can say this is always an attack.
+	EnableSSRFProtection bool
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -132,6 +145,11 @@ func (c WAFConfig) Fingerprint() string {
 	if len(c.AllowedAdminIps) > 0 {
 		fmt.Fprintf(h, "a:%s\n", strings.Join(c.AllowedAdminIps, ","))
 	}
+	// Platform profiles change which exceptions load and the SSRF opt-in changes
+	// which rules do, so two configs differing only in these describe different
+	// engines and must not share a cached one. Both are written unconditionally:
+	// an empty profile list is a meaningful value, not an absent one.
+	fmt.Fprintf(h, "p:%s|%t\n", waf.AppProfileFingerprint(c.AppProfiles), c.EnableSSRFProtection)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -710,7 +728,29 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		AuditLogRelevantOnly:        strings.TrimSpace(strings.ToLower(cfg["audit_log_relevant_only"])) != "false",
 		RouteID:                     routeID,
 		AllowedAdminIps:             allowedAdminIps,
+		AppProfiles:                 parseAppProfiles(cfg["app_profiles"]),
+		EnableSSRFProtection:        strings.TrimSpace(strings.ToLower(cfg["ssrf_protection"])) == "true",
 	}
+}
+
+// parseAppProfiles reads the comma-separated platform list.
+//
+// Validation is deliberately not done here. An unrecognised name has to survive
+// as far as the engine build, which is the one place that knows the profile set
+// of the linked engine and can log it against a route; dropping it here would
+// turn a typo into silence.
+func parseAppProfiles(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func intVal(v string) int {
