@@ -100,6 +100,9 @@ func installLinux(binPath string) error {
 	}
 
 	content := fmt.Sprintf(systemdUnitTemplate, binPath, stateDir, configDir, configDir, stateDir)
+	// #nosec G306 -- systemd requires unit files to be world-readable; 0600
+	// makes the unit unloadable. This is the documented mode, not a default
+	// nobody thought about.
 	if err := os.WriteFile(systemdUnitPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}

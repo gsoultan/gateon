@@ -530,7 +530,7 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	}
 
 	if modified {
-		err = os.WriteFile(targetPath, []byte(strings.Join(lines, "\n")), 0644)
+		err = os.WriteFile(targetPath, []byte(strings.Join(lines, "\n")), 0o600)
 		if err == nil {
 			// Try to restart clamd if it's running
 			if _, err := exec.LookPath("systemctl"); err == nil {
@@ -805,12 +805,18 @@ func (m *ClamAVManager) RunFullScan(ctx context.Context) {
 }
 
 func (m *ClamAVManager) commandWithSudo(ctx context.Context, password string, name string, args ...string) *exec.Cmd {
+	// #nosec G204 -- name and args are string literals at every call site
+	// ("systemctl", "apt-get", "yum", "apk" and their fixed arguments). No
+	// request-supplied value reaches either. gosec flags the parameter, not a
+	// path from input; if a caller ever passes one, this annotation is wrong
+	// and the call site is the bug.
 	if os.Geteuid() == 0 || password == "" {
 		return exec.CommandContext(ctx, name, args...)
 	}
 
 	// Use sudo -S to read password from stdin
 	sudoArgs := append([]string{"-S", name}, args...)
+	// #nosec G204 -- as above.
 	cmd := exec.CommandContext(ctx, "sudo", sudoArgs...)
 	cmd.Stdin = strings.NewReader(password + "\n")
 	return cmd
