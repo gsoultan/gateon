@@ -432,7 +432,7 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 		titanStats.PhantomEngine = engine
 		titanStats.ActivePhantomPorts = int32(ports)
 	}
-	if ai.GlobalPredictor != nil {
+	if ai.GlobalPredictor() != nil {
 		titanStats.AiPredictorEnabled = true
 		titanStats.AiModelStatus = "Running (WASM)"
 	} else {

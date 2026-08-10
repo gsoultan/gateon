@@ -28,6 +28,16 @@ func StripPort(host string) string {
 	if host == "" {
 		return host
 	}
+	// No colon means there is no port and no bracketed IPv6 — nothing to strip.
+	// This case has to be answered here rather than falling through to the
+	// net.SplitHostPort fallback below, because that call fails for a bare
+	// address and its failure path allocates an *AddrError that is then
+	// discarded. Bare addresses are the common input on the request path:
+	// X-Forwarded-For and X-Real-IP carry an address with no port, and this
+	// runs for every request.
+	if strings.IndexByte(host, ':') == -1 {
+		return host
+	}
 	// Fast path: "host:port" or "[ipv6]:port" -> bare host without brackets.
 	if last := strings.LastIndexByte(host, ':'); last != -1 {
 		// If it has brackets, it's an IPv6 address.

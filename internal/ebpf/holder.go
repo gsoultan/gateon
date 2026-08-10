@@ -116,6 +116,14 @@ func (h *Holder) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
 	return nil
 }
 
+// ClearAdaptiveRateLimit delegates to the active manager, if any.
+func (h *Holder) ClearAdaptiveRateLimit(ip string) error {
+	if m := h.Current(); m != nil {
+		return m.ClearAdaptiveRateLimit(ip)
+	}
+	return nil
+}
+
 // ApplyRLFeedback delegates to the active manager, if any.
 func (h *Holder) ApplyRLFeedback(ip string, score float64) error {
 	if m := h.Current(); m != nil {
