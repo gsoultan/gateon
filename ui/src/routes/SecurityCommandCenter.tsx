@@ -69,7 +69,7 @@ export default function SecurityCommandCenter() {
   const { canWrite, isViewer } = usePermissions();
   const [page] = React.useState(1);
   const { data: metrics } = useMetricsSnapshot(10, page);
-  const { data: status } = useGateonStatus();
+  const { data: status, refetch: refetchStatus } = useGateonStatus();
   const [globalConfig, setGlobalConfig] = React.useState<GlobalConfig | null>(null);
   const [installing, setInstalling] = React.useState(false);
   const [uninstalling, setUninstalling] = React.useState(false);
@@ -142,6 +142,36 @@ export default function SecurityCommandCenter() {
     }
   };
 
+  // Install and uninstall both return as soon as the work is queued, so the
+  // response says nothing about whether ClamAV ended up installed. Nothing then
+  // refetched /v1/status — the query has no interval — so the card kept offering
+  // "Install Now" after a successful install until the user happened to hit the
+  // shell's refresh. It read as a backend failure and it was a missing refetch.
+  //
+  // Poll until the status agrees with what was asked for, or until the deadline
+  // passes so a genuinely failed install does not leave a timer running.
+  const clamavPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopClamavPoll = React.useCallback(() => {
+    if (clamavPollRef.current) {
+      clearInterval(clamavPollRef.current);
+      clamavPollRef.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => stopClamavPoll, [stopClamavPoll]);
+
+  const pollClamavUntil = React.useCallback((installed: boolean) => {
+    stopClamavPoll();
+    const deadline = Date.now() + 60_000;
+    clamavPollRef.current = setInterval(async () => {
+      const { data } = await refetchStatus();
+      if (data?.clamavInstalled === installed || Date.now() > deadline) {
+        stopClamavPoll();
+      }
+    }, 2000);
+  }, [refetchStatus, stopClamavPoll]);
+
   const handleInstall = async (mode: number, password?: string) => {
     if (mode === 1 && !password) {
       setPendingMode(mode);
@@ -160,6 +190,7 @@ export default function SecurityCommandCenter() {
           color: 'blue',
           icon: <IconShieldCheck size={16} />
         });
+        pollClamavUntil(true);
       } else {
         throw new Error(data.message || 'Failed to start installation');
       }
@@ -194,6 +225,7 @@ export default function SecurityCommandCenter() {
           color: 'blue',
           icon: <IconShieldCheck size={16} />
         });
+        pollClamavUntil(false);
       } else {
         throw new Error(data.message || 'Failed to start uninstallation');
       }
