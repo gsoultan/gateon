@@ -8,8 +8,17 @@ test.describe('TraceRoute E2E', () => {
     const testIP = '1.2.3.9'; 
     console.log(`Triggering anomaly for IP: ${testIP}`);
     
-    // Trigger a WAF violation (SQLi) from this IP
-    const resp = await request.get('http://localhost:8081/test?id=1%20OR%201=1', {
+    // Trigger a WAF violation from this IP. Any attack class will do — this test
+    // only needs the address to show up in Diagnostics so the visualiser has a
+    // row to act on.
+    //
+    // Deliberately not SQLi. mitigation-flow.test.ts marks a SQLi detection on
+    // /test as a false positive and never removes the exception, and it runs
+    // earlier in the file order, so by the time this test runs the WAF correctly
+    // allows `id=1 OR 1=1` and the 403 below never arrives. That cost three
+    // full attempts and looked like a WAF regression; it was one test's leftover
+    // allowlist. XSS is not allowlisted by anything in the suite.
+    const resp = await request.get('http://localhost:8081/test?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E', {
       headers: {
         'X-Forwarded-For': testIP
       }

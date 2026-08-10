@@ -32,7 +32,6 @@
   },
   "transport": {},
   "waf": {
-    "enabled": true,
     "use_crs": true,
     "paranoia_level": 1,
     "sqli": true,
@@ -43,13 +42,12 @@
     "malware_detection": true,
     "anomaly_threshold": 1,
     "clamav": {
-      "installation_mode": 2,
+      "installation_mode": 1,
       "docker_image": "clamav/clamav:latest",
       "full_scan_schedule": "0 2 * * *",
       "low_resource_mode": true,
       "clamav_addr": "tcp://localhost:3310"
-    },
-    "audit_only": true
+    }
   },
   "ha": {},
   "anomaly_detection": {
@@ -77,18 +75,15 @@
   },
   "security_advanced": {
     "deception": {
-      "enabled": true,
       "honeypot_paths": [
         "/secret-admin"
       ]
     },
-    "tarpit": {
-      "enabled": true
-    },
+    "tarpit": {},
     "entropy": {},
     "behavioral": {},
     "pow": {
-      "secret": "changeme"
+      "secret": "65ba0afee8ef56392d77bb0a988934b8"
     },
     "ip_reputation": {}
   },
