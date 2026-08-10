@@ -188,9 +188,9 @@ at adoption on 2026-08-05**, paid down opportunistically — fix what you touch.
 leaves `noUnusedLocals`/`noUnusedParameters` off, so the frontend side is still partly
 manual.
 
-**`make check-invariants`** (folded into `make sec`, and a CI step) enforces the three
-vetoes above that no compiler or linter can see, each of which was violated in shipped
-code and failed silently:
+**`make check-invariants`** (folded into `make sec`, and a CI step) enforces the four
+vetoes above that no compiler or linter can see. The first three were each violated in
+shipped code and each failed silently:
 
 1. **An `auth.Service` is never compared to `nil`** — use `auth.Available(svc)`.
    `Server.AuthManager` and the `Auth` fields are `*auth.Holder`, which is never nil but
@@ -201,6 +201,12 @@ code and failed silently:
    token lives only in the HttpOnly `gateon_session` cookie.
 3. **No test builds into the checkout** — build into `t.TempDir()`. CI additionally
    fails if `go test ./...` leaves the working tree dirty.
+4. **Every source file carries the copyright header and `SPDX-License-Identifier: MIT`**
+   — `LICENSE` does not travel with a file that gets vendored, copied into an image
+   layer or pasted into an issue; the header does. `goheader` covers Go and gives the
+   better message, but **CI does not run golangci-lint**, so this check re-covers Go and
+   adds `.proto` and TypeScript, which no Go linter reaches. Generated protobuf output
+   is exempt — it inherits the header from the `.proto`, so `make proto` propagates it.
 
 Each check is negative-tested: introduce the violation and the gate must fail. If you
 add an invariant to the roster above that a tool can check, add it here rather than

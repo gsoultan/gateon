@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper, Progress, Box, ThemeIcon } from '@mantine/core'
 import { IconActivity, IconRoute, IconClock, IconVersions, IconCpu, IconDeviceDesktop, IconAdjustments } from '@tabler/icons-react'
 import { useGateonStatus } from '../hooks/useGateonStatus'

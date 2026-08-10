@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { useState, useEffect, useMemo } from 'react'
 import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Badge, List, ThemeIcon, Textarea, Code, SimpleGrid } from '@mantine/core'
 import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, IconKey, IconTrash, IconPencil, IconAlertTriangle, IconCheck, IconBulb, IconClipboard, IconDotsVertical } from '@tabler/icons-react'

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { useEffect, type ReactNode } from "react";
 import { usePreferencesStore } from "../store/usePreferencesStore";
 import { DEFAULT_LANGUAGE, normalizeLanguage } from "./locales";

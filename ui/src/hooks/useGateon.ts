@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 /** Barrel: re-exports api utilities and all gateon hooks. One hook per file; this file only re-exports. */
 export {
   apiFetch,

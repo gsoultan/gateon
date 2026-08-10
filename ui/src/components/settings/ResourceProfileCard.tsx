@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { Card, Title, Text, Stack, Group, Paper, Select, Badge, Alert } from "@mantine/core";
 import { IconCpu, IconInfoCircle, IconAlertTriangle } from "@tabler/icons-react";
 

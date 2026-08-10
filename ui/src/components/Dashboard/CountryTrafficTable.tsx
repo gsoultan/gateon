@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { memo, useState, useMemo, useEffect } from "react";
 import { Table, Text, Paper, Group, Box, Progress, Pagination } from "@mantine/core";
 import { getCountryFlag, formatBytes, safeToFixed, safeToLocaleString } from "../../utils/format";

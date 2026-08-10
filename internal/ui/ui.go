@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 //go:generate bun install --cwd ../../ui
 //go:generate bun run --cwd ../../ui build
 //go:generate go run ../../scripts/sync_assets.go

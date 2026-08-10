@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { useState } from "react";
 import { Stack, MultiSelect, Select, Divider } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";

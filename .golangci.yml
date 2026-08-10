@@ -7,7 +7,7 @@
 #   - a function takes at most 3 parameters
 #   - nesting / cognitive complexity is kept to a minimum
 #   - no magic strings; use constants
-#   - every Go file carries the copyright header
+#   - every Go file carries the copyright header and an SPDX license line
 #
 # The codebase predates this config, so `make lint` reports existing debt while
 # `make lint-new` gates only code you actually changed. See the Makefile.
@@ -45,14 +45,20 @@ linters:
       min-len: 3
       min-occurrences: 3
       ignore-tests: true
+    # The SPDX line is part of the mandatory header so the license of any single
+    # file is unambiguous once it leaves the repository — vendored into another
+    # module, copied into a container layer, or pasted into an issue. LICENSE at
+    # the repo root does not travel with the file; this line does.
     goheader:
       values:
         const:
           AUTHOR: Gembit Soultan Shirazi <gembit.soultan@gmail.com>
+          SPDX: MIT
         regexp:
           YEAR: 20\d\d
       template: |-
         Copyright (c) {{ YEAR }} {{ AUTHOR }}. All rights reserved.
+        SPDX-License-Identifier: {{ SPDX }}
 
   exclusions:
     generated: lax
