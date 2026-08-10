@@ -40,6 +40,7 @@
     "lfi": true,
     "rce": true,
     "protocol": true,
+    "malware_detection": true,
     "anomaly_threshold": 1,
     "clamav": {
       "installation_mode": 2,

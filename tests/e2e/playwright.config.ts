@@ -19,36 +19,34 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
+  // One browser project, not four.
+  //
+  // There were previously separate admin, operator, viewer and chromium
+  // projects, none with a testMatch, so every spec ran once per project: 26
+  // tests became 104. `chromium` was a byte-for-byte duplicate of `admin`, and
+  // the role projects did not buy the role coverage they looked like they did —
+  // rbac_admin, rbac_operator and rbac_viewer each declare their own identity
+  // with test.use({ storageState }), so they ignored the project's identity and
+  // ran three times as the same user.
+  //
+  // What the extra projects did produce was noise and cost. The seven
+  // functional specs save global configuration, which needs admin, so their
+  // operator and viewer runs failed by construction — that is why "Global WAF
+  // Management" showed up red only under [operator]. And at one worker with two
+  // retries, four times the tests could not finish inside globalTimeout: the
+  // last run gave up with 74 tests never started, so most of the suite reported
+  // nothing at all.
+  //
+  // Specs that need a specific role say so themselves. That is the mechanism;
+  // duplicating it at the project level is what broke it.
   projects: [
     { name: 'setup', testMatch: /.*\.setup\.ts/ },
     {
-      name: 'admin',
-      use: { 
+      name: 'e2e',
+      use: {
         ...devices['Desktop Chrome'],
-        storageState: 'tests/.auth/admin.json',
-      },
-      dependencies: ['setup'],
-    },
-    {
-      name: 'operator',
-      use: { 
-        ...devices['Desktop Chrome'],
-        storageState: 'tests/.auth/operator.json',
-      },
-      dependencies: ['setup'],
-    },
-    {
-      name: 'viewer',
-      use: { 
-        ...devices['Desktop Chrome'],
-        storageState: 'tests/.auth/viewer.json',
-      },
-      dependencies: ['setup'],
-    },
-    {
-      name: 'chromium',
-      use: { 
-        ...devices['Desktop Chrome'],
+        // The default identity for specs that do not pin one. The rbac specs
+        // override this per file.
         storageState: 'tests/.auth/admin.json',
       },
       dependencies: ['setup'],
