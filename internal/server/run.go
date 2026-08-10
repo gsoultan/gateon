@@ -74,6 +74,26 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	if s.EbpfManager != nil {
 		rlLimiter := ai.NewReinforcementLearningLimiter(s.EbpfManager)
 		s.EbpfManager.SetRLFeedbackHandler(rlLimiter.ProcessFeedback)
+
+		// Reclaim state for IPs that have gone quiet. The limiter's LRU already
+		// bounds memory, but an entry only evicts under pressure: without this
+		// an IP throttled once and never heard from again holds both a Go state
+		// and a slot in a fixed-size BPF map indefinitely. The sweep is what
+		// gives a client that backed off a way out.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					rlLimiter.Sweep()
+				}
+			}
+		}()
 	}
 
 	var ipReputation *reputation.IPReputationStore

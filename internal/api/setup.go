@@ -17,7 +17,7 @@ func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupReq
 	if s.Globals != nil && !s.Globals.ConfigFileExists() {
 		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
 	}
-	if s.Auth == nil {
+	if !auth.Available(s.Auth) {
 		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
 	}
 
@@ -54,7 +54,7 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		return &gateonv1.SetupResponse{Success: false, Error: "setup already completed"}, nil
 	}
 
-	if s.Auth == nil {
+	if !auth.Available(s.Auth) {
 		// Initialize Auth Manager if it doesn't exist
 		databaseURL := "gateon.db"
 		if s.Globals != nil {
@@ -68,7 +68,16 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		if err != nil {
 			return &gateonv1.SetupResponse{Success: false, Error: "failed to initialize auth manager: " + err.Error()}, nil
 		}
-		s.Auth = mgr
+		// Publish through the shared Holder when there is one. Assigning s.Auth
+		// directly would only fix this one struct: the HTTP base handler, the
+		// REST handler deps and the diagnostics log gate all hold the same
+		// Holder, and they are what actually enforce authentication. Swapping
+		// it in place is what makes them start enforcing without a restart.
+		if h, ok := s.Auth.(*auth.Holder); ok && h != nil {
+			h.Set(mgr)
+		} else {
+			s.Auth = mgr
+		}
 	}
 
 	// 1. Create/Update Admin User

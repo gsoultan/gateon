@@ -320,6 +320,13 @@ func bearerToken(r *http.Request) string {
 }
 
 // PasetoAuth returns a middleware that validates PASETO tokens from Authorization Bearer or session cookie.
+//
+// A nil verifier is tolerated and denies every request. Callers build this
+// middleware once at startup, when the verifier may not exist yet, so refusing
+// to construct it would force them to decide at construction time whether
+// authentication will ever be possible — and a caller that guesses wrong there
+// either serves unauthenticated or never recovers. Denying at request time
+// keeps that decision where the information is.
 func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -328,6 +335,13 @@ func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 				return
 			}
 			activeRouteID := GetRouteName(r)
+
+			if verifier == nil {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
+				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
+				cfg.HandleFailure(w, r, next, errors.New("no token verifier is configured"))
+				return
+			}
 
 			token := ExtractToken(r)
 			if token == "" {

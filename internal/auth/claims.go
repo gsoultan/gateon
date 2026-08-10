@@ -18,6 +18,12 @@ type Claims struct {
 	Expiration time.Time `json:"exp,omitzero"`
 	IssuedAt   time.Time `json:"iat,omitzero"`
 	NotBefore  time.Time `json:"nbf,omitzero"`
+
+	// SessionBinding ties the token to the account state it was issued
+	// against. It is deliberately absent from ToMap: it is an internal
+	// revocation check, not an identity claim, and middleware copies mapped
+	// claims into upstream request headers.
+	SessionBinding string `json:"-"`
 }
 
 func (c *Claims) Validate() error {

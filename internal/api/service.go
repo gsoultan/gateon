@@ -91,7 +91,7 @@ func (s *ApiService) GetClamAVStatus(ctx context.Context) bool {
 
 // Close closes the ApiService resources.
 func (s *ApiService) Close() error {
-	if s.Auth != nil {
+	if auth.Available(s.Auth) {
 		return s.Auth.Close()
 	}
 	return nil
