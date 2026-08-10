@@ -54,9 +54,12 @@ jobs:
 
       - name: Install proto plugins
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
+          # Versions come from the `tool` directive in go.mod, so the generators
+          # are locked in go.sum and reviewed like any other dependency.
+          # `@latest` made a release build pull whatever upstream had tagged at
+          # that moment: not reproducible, and a compromised upstream tag would
+          # have been compiled straight into a published artifact.
+          go install tool
 
       - name: Install Bun dependencies
         run: bun install --frozen-lockfile --cwd ui
@@ -69,8 +72,22 @@ jobs:
           (cd ui && bun run build)
           go run ./scripts/sync_assets.go
 
-      - name: Tidy modules
-        run: go mod tidy
+      - name: Verify modules are tidy
+        run: |
+          # `go mod tidy` used to run here, which let a build mutate its own
+          # dependency set — the artifact could then be built against a
+          # different graph than the one reviewed. Verify instead: fail if the
+          # committed go.mod/go.sum are not already tidy.
+          cp go.mod go.mod.bak && cp go.sum go.sum.bak
+          go mod tidy
+          if ! diff -q go.mod go.mod.bak >/dev/null || ! diff -q go.sum go.sum.bak >/dev/null; then
+            echo "::error::go.mod/go.sum are not tidy - run 'go mod tidy' and commit the result"
+            diff go.mod.bak go.mod || true
+            diff go.sum.bak go.sum || true
+            exit 1
+          fi
+          rm -f go.mod.bak go.sum.bak
+          go mod verify
 
       - name: Install Syft (SBOM generator)
         uses: anchore/sbom-action/download-syft@v0

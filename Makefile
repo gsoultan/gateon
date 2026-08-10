@@ -8,7 +8,7 @@ endif
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec ebpf ebpf-docker pgo-profile docker
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -121,8 +121,13 @@ gosec:
 		-exclude-generated \
 		./...
 
-## sec: run the full local security gate (vet + vuln + staticcheck + gosec)
-sec: vuln staticcheck gosec
+## check-invariants: assert the auth/storage/test-hygiene invariants that have
+##                    no compile-time protection (see scripts/ for why each exists)
+check-invariants:
+	./scripts/check-security-invariants.sh
+
+## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
+sec: vuln staticcheck gosec check-invariants
 	go vet ./...
 
 ## lint: run golangci-lint over the whole tree (reports pre-existing debt too)

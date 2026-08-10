@@ -50,10 +50,12 @@ jobs:
 
       - name: Install buf and proto plugins
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-          go install github.com/bufbuild/buf/cmd/buf@latest
+          # Versions come from the `tool` directive in go.mod, so the
+          # generators are locked in go.sum and reviewed like any other
+          # dependency. `@latest` made every build pull whatever upstream
+          # had tagged at that moment: not reproducible, and a compromised
+          # upstream tag would have landed straight in a release artifact.
+          go install tool
 
       - name: Lint UI (accessibility gate)
         run: |
@@ -64,15 +66,45 @@ jobs:
         run: |
           PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
           go generate ./...
+          # `go mod tidy` used to run here, which let a build mutate its own
+          # dependency set — the artifact could then be built against a
+          # different graph than the one reviewed. Verify instead: fail if the
+          # committed go.mod/go.sum are not already tidy.
+          cp go.mod go.mod.bak && cp go.sum go.sum.bak
           go mod tidy
+          if ! diff -q go.mod go.mod.bak >/dev/null || ! diff -q go.sum go.sum.bak >/dev/null; then
+            echo "::error::go.mod/go.sum are not tidy - run 'go mod tidy' and commit the result"
+            diff go.mod.bak go.mod || true
+            diff go.sum.bak go.sum || true
+            exit 1
+          fi
+          rm -f go.mod.bak go.sum.bak
+          go mod verify
 
       - name: Build
         run: go build ./...
+
+      - name: Security invariants
+        run: ./scripts/check-security-invariants.sh
 
       - name: Test
         env:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
         run: go test ./...
+
+      - name: Working tree clean after tests
+        run: |
+          # Four e2e tests used to build binaries into the checkout. Nothing
+          # noticed, because a dirty tree is invisible to every other gate --
+          # the artifacts only surfaced as mystery files in `git status`, and
+          # one of them made a test fail for an unrelated-looking reason.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::the test run modified the working tree"
+            git status --porcelain
+            echo "Tests must write to t.TempDir(), never the repository."
+            exit 1
+          fi
+          echo "working tree clean"
 
       - name: Benchmarks (allocs/perf regression check)
         run: go test -run '^$' -bench . -benchmem -benchtime 50000x ./pkg/proxy/ ./internal/telemetry/
@@ -118,10 +150,12 @@ jobs:
 
       - name: Install buf and proto plugins
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-          go install github.com/bufbuild/buf/cmd/buf@latest
+          # Versions come from the `tool` directive in go.mod, so the
+          # generators are locked in go.sum and reviewed like any other
+          # dependency. `@latest` made every build pull whatever upstream
+          # had tagged at that moment: not reproducible, and a compromised
+          # upstream tag would have landed straight in a release artifact.
+          go install tool
           bun install --frozen-lockfile --cwd ui
 
       - name: Generate all artifacts
