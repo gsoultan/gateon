@@ -1,6 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 
+// AnomalyAnalysisEngine.Analyze drops every loopback-sourced trace before any
+// detector sees it, on purpose: management and test traffic would otherwise
+// dominate the anomaly list. Playwright drives everything from 127.0.0.1, so a
+// request made without a forwarded-for header is recorded, analysed and then
+// discarded — the UNLISTED ROUTE row this test waits for could never appear, and
+// it waited out its 20s timeout on every run.
+//
+// The harness sets GATEON_TRUSTED_PROXIES=127.0.0.1,::1, so X-Forwarded-For from
+// the runner is honoured. The address is TEST-NET-3 (RFC 5737), reserved for
+// documentation, so it cannot collide with a real client. Every request in this
+// flow uses the same one, because anomalies are grouped per source.
+const ANOMALY_IP = '203.0.113.21';
+const asRemote = { headers: { 'X-Forwarded-For': ANOMALY_IP } };
+
 test.describe('Gateon Diagnostics E2E', () => {
   test.setTimeout(180000);
 
@@ -20,16 +34,16 @@ test.describe('Gateon Diagnostics E2E', () => {
     console.log('Triggering security threats...');
     
     // Trigger SQL Injection - Should be caught by WAF
-    const sqliResp = await request.get('http://localhost:8081/test?id=1%20OR%201=1');
+    const sqliResp = await request.get('http://localhost:8081/test?id=1%20OR%201=1', asRemote);
     expect(sqliResp.status()).toBe(403);
 
     // Trigger Directory Busting (multiple 404s)
     for (let i = 0; i < 5; i++) {
-        await request.get(`http://localhost:8081/non-existent-${i}`);
+        await request.get(`http://localhost:8081/non-existent-${i}`, asRemote);
     }
 
     // Trigger unlisted route
-    await request.get('http://localhost:8081/api/v1/unknown');
+    await request.get('http://localhost:8081/api/v1/unknown', asRemote);
 
     // Give it enough time for the traces to be flushed to store (2s)
     // AND for the background analysis loop to run (5s)
