@@ -46,6 +46,7 @@ import { useUrlFilters } from '../hooks/useUrlFilters';
 import { useIsMobile } from '../hooks/useMobile';
 import { format } from 'date-fns';
 import type { AuditLog, AuditArchive } from '../types/gateon';
+import { QueryError } from "../components/QueryError";
 
 const PAGE_SIZE = 50;
 
@@ -65,7 +66,7 @@ export default function AuditLogsPage() {
   const [isOpeningArchive, setIsOpeningArchive] = useState(false);
 
   // Active Logs Query
-  const { data, isLoading, refetch, isFetching } = useAuditLogs({
+  const { data, isLoading, isError, error, refetch, isFetching } = useAuditLogs({
     page: page - 1,
     pageSize: PAGE_SIZE,
     search: debouncedSearch,
@@ -172,7 +173,9 @@ export default function AuditLogsPage() {
               </Box>
 
               <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
-                {isLoading ? (
+                {isError ? (
+                  <QueryError error={error} what="audit logs" onRetry={() => refetch()} />
+                ) : isLoading ? (
                   <Stack gap="sm" p="md">
                     {[...Array(8)].map((_, i) => (
                       <Card key={i} withBorder radius="md" p="sm">

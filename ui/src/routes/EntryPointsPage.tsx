@@ -43,6 +43,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import { EntryPointForm } from "../components/EntryPointForm";
 import type { EntryPoint } from "../types/gateon";
+import { QueryError } from "../components/QueryError";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
@@ -53,7 +54,7 @@ export default function EntryPointsPage() {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  const { data, isLoading } = useEntryPoints({
+  const { data, isLoading, isError, error, refetch } = useEntryPoints({
     page: page - 1,
     pageSize: pageSize,
     search: search,
@@ -215,6 +216,9 @@ export default function EntryPointsPage() {
           <Box style={{ overflowX: isMobile ? undefined : "auto" }}>
             {isMobile ? (
               <Stack gap="md">
+                {isError && (
+                  <QueryError error={error} what="entrypoints" onRetry={() => refetch()} />
+                )}
                 {entryPoints.length === 0 && !isLoading && (
                   <Center py={40}>
                     <Text c="dimmed">No entryPoints found.</Text>

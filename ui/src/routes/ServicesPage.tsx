@@ -9,6 +9,7 @@ import { ServiceForm } from '../components/ServiceForm'
 import { CanaryWizard } from '../components/CanaryWizard'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
+import { QueryError } from "../components/QueryError";
 
 export default function ServicesPage() {
   const { canWrite } = usePermissions()
@@ -29,7 +30,7 @@ export default function ServicesPage() {
     })
   }
 
-  const { data, isLoading } = useServices({
+  const { data, isLoading, isError, error, refetch } = useServices({
     page: page - 1,
     pageSize: pageSize,
     search: search,
@@ -136,7 +137,9 @@ export default function ServicesPage() {
           />
 
           <Box style={{ overflowX: isMobile ? undefined : 'auto' }}>
-            {isLoading ? (
+            {isError ? (
+              <QueryError error={error} what="services" onRetry={() => refetch()} />
+            ) : isLoading ? (
               <Stack gap="md">
                 {[...Array(5)].map((_, i) => (
                   <Card key={i} withBorder radius="md" p="md">
