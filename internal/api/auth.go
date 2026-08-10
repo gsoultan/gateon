@@ -12,7 +12,7 @@ import (
 )
 
 func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error) {
-	if s.Auth == nil {
+	if !auth.Available(s.Auth) {
 		return &gateonv1.LoginResponse{}, nil
 	}
 	token, user, err := s.Auth.Authenticate(req.Username, req.Password)
@@ -39,7 +39,7 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 }
 
 func (s *ApiService) Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error) {
-	if s.Auth == nil {
+	if !auth.Available(s.Auth) {
 		return nil, errors.New("auth service not initialized")
 	}
 	secret, qr, recovery, err := s.Auth.Setup2FA(req.Id)
@@ -55,7 +55,7 @@ func (s *ApiService) Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest
 }
 
 func (s *ApiService) Verify2FA(ctx context.Context, req *gateonv1.Verify2FARequest) (*gateonv1.Verify2FAResponse, error) {
-	if s.Auth == nil {
+	if !auth.Available(s.Auth) {
 		return nil, errors.New("auth service not initialized")
 	}
 	success, token, user, err := s.Auth.Verify2FA(req.Id, req.Code)

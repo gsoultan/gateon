@@ -27,6 +27,7 @@ type Manager struct {
 	parser       paseto.Parser
 	encKey       []byte
 	logger       logger.Logger
+	bindings     *bindingCache
 }
 
 // NewManager creates an auth manager using the given database URL.
@@ -59,6 +60,7 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 		parser:       paseto.NewParser(),
 		encKey:       append([]byte(nil), keyBytes[:32]...),
 		logger:       l,
+		bindings:     newBindingCache(),
 	}
 
 	return m, nil
@@ -132,10 +134,29 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 	return m.issueToken(&user)
 }
 
+// TokenLifetime is how long an issued session token stays valid.
+//
+// It was 24 hours. A bearer token with no server-side state is only as
+// revocable as it is short-lived, and even with the session binding added in
+// revocation.go the window matters: the binding covers disable, delete, role
+// change and password change, but not "this laptop was stolen and nobody has
+// noticed yet". Eight hours bounds that to a working day without forcing a
+// re-login over a lunch break.
+const TokenLifetime = 8 * time.Hour
+
 func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error) {
+	// Bind the token to the account state it was issued against, so any later
+	// change to that state invalidates it. Read through the cache-backed helper
+	// rather than recomputing here: it is the same value VerifyToken will
+	// compare against, and deriving it in two places invites them to drift.
+	binding, err := m.currentBinding(user.Id)
+	if err != nil {
+		return "", nil, err
+	}
+
 	token := paseto.NewToken()
 	now := time.Now()
-	exp := now.Add(24 * time.Hour)
+	exp := now.Add(TokenLifetime)
 
 	token.SetExpiration(exp)
 	token.SetIssuedAt(now)
@@ -144,6 +165,7 @@ func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error
 	token.SetString("id", user.Id)
 	token.SetString("username", user.Username)
 	token.SetString("role", user.Role)
+	token.SetString(SessionBindingClaim, binding)
 
 	encrypted := token.V4Encrypt(m.symmetricKey, nil)
 
@@ -190,12 +212,33 @@ func (m *Manager) VerifyToken(token string) (any, error) {
 	if val, err := parsedToken.GetSubject(); err == nil {
 		claims.Subject = val
 	}
+	if val, err := parsedToken.GetString(SessionBindingClaim); err == nil {
+		claims.SessionBinding = val
+	}
 
 	if err := claims.Validate(); err != nil {
 		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
 
+	// Cryptographic validity is not authorization. Consult the account the
+	// token was issued for: disabled, deleted, demoted or re-passworded users
+	// must lose their live sessions here, not whenever the token happens to
+	// expire.
+	if err := m.checkSessionBinding(claims.ID, claims.SessionBinding); err != nil {
+		return nil, err
+	}
+
 	return claims, nil
+}
+
+// revokeSessions ends every live session for a user by dropping the cached
+// binding, so the next request re-reads the account and finds the mismatch.
+// Every mutation of a session-binding input must call this.
+func (m *Manager) revokeSessions(id string) {
+	if id == "" || m.bindings == nil {
+		return
+	}
+	m.bindings.invalidate(id)
 }
 
 func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.User, int32, error) {
@@ -254,11 +297,22 @@ func (m *Manager) UpsertUser(u *gateonv1.User) error {
 	return m.upsertUserWithPassword(u.Id, u.Username, "", u.Role)
 }
 
+// upsertUserWithPassword is the single funnel both dialects go through, which
+// makes it the one place that has to invalidate the session binding. A role
+// change here is a privilege change — demoting an administrator to viewer must
+// not leave them holding an administrator token.
 func (m *Manager) upsertUserWithPassword(id, username, password, role string) error {
+	var err error
 	if m.dialect.Driver == db.DriverMySQL {
-		return m.upsertMySQL(id, username, password, role)
+		err = m.upsertMySQL(id, username, password, role)
+	} else {
+		err = m.upsertSQLitePostgres(id, username, password, role)
 	}
-	return m.upsertSQLitePostgres(id, username, password, role)
+	if err != nil {
+		return err
+	}
+	m.revokeSessions(id)
+	return nil
 }
 
 func (m *Manager) upsertSQLitePostgres(id, username, password, role string) error {
@@ -297,6 +351,10 @@ func (m *Manager) ChangePassword(id, password string) error {
 	if err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
 	}
+	// A password rotation is usually a response to a suspected compromise.
+	// Leaving sessions minted under the old password alive would defeat the
+	// point of rotating it.
+	m.revokeSessions(id)
 	return nil
 }
 
@@ -306,6 +364,9 @@ func (m *Manager) DeleteUser(id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
+	// The row is gone, so the next binding lookup finds no rows and denies.
+	// Dropping the cached entry is what forces that lookup to happen.
+	m.revokeSessions(id)
 	return nil
 }
 
@@ -500,6 +561,11 @@ func (m *Manager) SetUserDisabled(id string, disabled bool) error {
 	if _, err := m.db.Exec(q, disabled, id); err != nil {
 		return fmt.Errorf("failed to update disabled state: %w", err)
 	}
+	// Disabling an account is the one action an operator takes expecting it to
+	// be immediate — it is what you do when someone leaves or an account is
+	// suspected compromised. Until this call existed it only set a column that
+	// nothing on the request path ever read.
+	m.revokeSessions(id)
 	return nil
 }
 

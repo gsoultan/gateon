@@ -70,10 +70,17 @@ func CreateBaseHandler(
 		middleware.MaxConnections(500),
 	)(internalHandler)
 
-	var authInternal http.Handler
-	if deps.Auth != nil {
-		authInternal = middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
-	}
+	// Built unconditionally, and deliberately not guarded on whether auth is
+	// available *right now*. deps.Auth is a stable reference (an auth.Holder)
+	// whose backing service arrives later, when Setup runs. Deciding here
+	// whether to build the authenticating handler would freeze that decision at
+	// construction time: on a first run there is no service yet, so the handler
+	// would never be built, and the gateway would answer "setup incomplete"
+	// forever — the same shape of bug as serving unauthenticated forever.
+	//
+	// PasetoAuth denies when its verifier cannot verify, so an unavailable
+	// service fails closed on its own.
+	authInternal := middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
 
 	// mgmtLogic defines the internal handler for management API, UI, and auth.
 	// It is separated so that MgmtCORS can be applied only to this path.
@@ -101,9 +108,19 @@ func CreateBaseHandler(
 				finalInternal.ServeHTTP(w, r)
 				return
 			}
-			if deps.Auth == nil || authInternal == nil {
-				// No auth service available yet (e.g. first run)
-				finalInternal.ServeHTTP(w, r)
+			// No auth service yet: fail closed. This is the first-run window,
+			// before Setup has created an administrator. Serving the API here
+			// (as this branch used to) meant a fresh gateway on a routable
+			// address handed its full management surface — routes, services,
+			// TLS material, config import — to whoever reached it first, with
+			// no credential at all. Setup and health are already handled above;
+			// everything else waits until there is something to authenticate
+			// against.
+			// Checked per request, not captured at construction: the Holder is
+			// empty on a first run and filled in by Setup mid-process, so this
+			// flips from 503 to real enforcement without a restart.
+			if !auth.Available(deps.Auth) {
+				writeAuthUnavailable(w, r)
 				return
 			}
 			// Require Authorization header; accepts auth token in URL for WebSockets/SSE.

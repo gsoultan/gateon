@@ -27,6 +27,12 @@ const (
 	QueryInsertUserMySQLNoPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE role=VALUES(role)`
 
+	// QuerySessionBindingByID reads only the columns that make up a session
+	// binding (see revocation.go). Kept narrow so the per-verify cache miss is
+	// as cheap as possible and so the password hash is never pulled into a
+	// wider struct that might get logged or serialized.
+	QuerySessionBindingByID = "SELECT password, role, disabled FROM users WHERE id = ?"
+
 	QueryDeleteUser     = "DELETE FROM users WHERE id = ?"
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"
 	QueryUpdate2FA      = "UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?"

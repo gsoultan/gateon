@@ -9,18 +9,41 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
-// TestWithAuthManager_NilDoesNotCreateNonNilInterface is a regression test for the bug where
-// WithAuthManager(nil) assigned a nil *auth.Manager to the auth.Service interface, producing a
-// non-nil interface with a nil underlying value. This caused ApiService.Setup to skip manager
-// initialization (s.Auth == nil was false), then panic on the first method call.
-func TestWithAuthManager_NilDoesNotCreateNonNilInterface(t *testing.T) {
-	t.Run("nil manager leaves AuthManager as true nil interface", func(t *testing.T) {
+// TestWithAuthManager_NilIsUnusableNotUnsafe covers the bug where
+// WithAuthManager(nil) assigned a nil *auth.Manager to the auth.Service
+// interface, producing a non-nil interface with a nil underlying value. That
+// made ApiService.Setup skip manager initialization (s.Auth == nil was false)
+// and then panic on the first method call.
+//
+// AuthManager is now always an *auth.Holder, so the invariant under test is no
+// longer "the interface is nil" — it is "no service is available, and calling
+// through anyway denies instead of panicking". Those are the two properties the
+// original bug violated.
+func TestWithAuthManager_NilIsUnusableNotUnsafe(t *testing.T) {
+	t.Run("nil manager yields an unavailable auth service", func(t *testing.T) {
 		s, err := NewServer(WithAuthManager(nil))
 		if err != nil {
 			t.Fatalf("NewServer: %v", err)
 		}
-		if s.AuthManager != nil {
-			t.Error("WithAuthManager(nil) must leave AuthManager as nil interface, got non-nil")
+		if auth.Available(s.AuthManager) {
+			t.Error("WithAuthManager(nil) must leave auth unavailable")
+		}
+	})
+
+	t.Run("calling an unavailable service denies rather than panicking", func(t *testing.T) {
+		s, err := NewServer(WithAuthManager(nil))
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		claims, err := s.AuthManager.VerifyToken("any-token")
+		if err == nil {
+			t.Fatal("VerifyToken on an unavailable service must return an error, not admit the request")
+		}
+		if claims != nil {
+			t.Errorf("VerifyToken must not return claims when unavailable, got %v", claims)
+		}
+		if s.AuthManager.IsSetupDone() {
+			t.Error("IsSetupDone must be false when no service is installed")
 		}
 	})
 
@@ -35,8 +58,8 @@ func TestWithAuthManager_NilDoesNotCreateNonNilInterface(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewServer: %v", err)
 		}
-		if s.AuthManager == nil {
-			t.Error("WithAuthManager(non-nil) must set AuthManager, got nil")
+		if !auth.Available(s.AuthManager) {
+			t.Error("WithAuthManager(non-nil) must make auth available")
 		}
 	})
 }
