@@ -190,6 +190,13 @@ export default function SecurityCommandCenter() {
           color: 'blue',
           icon: <IconShieldCheck size={16} />
         });
+        // Installing persists the chosen mode server-side (ApiService.InstallClamav
+        // writes waf.clamav.installation_mode), so the copy this component loaded
+        // at mount is now stale. handleUninstall branches on that value to decide
+        // whether to prompt for a sudo password, so a stale mode sent the uninstall
+        // down the no-password path and the preflight then rejected it. Refresh so
+        // the next action sees what was actually saved.
+        void loadGlobalConfig();
         pollClamavUntil(true);
       } else {
         throw new Error(data.message || 'Failed to start installation');
@@ -250,12 +257,19 @@ export default function SecurityCommandCenter() {
     setSudoPassword("");
   };
 
-  React.useEffect(() => {
-    apiFetch("/v1/global")
-      .then(r => r.ok ? r.json() : null)
-      .then(cfg => setGlobalConfig(cfg))
-      .catch(() => {});
+  const loadGlobalConfig = React.useCallback(async () => {
+    try {
+      const r = await apiFetch("/v1/global");
+      setGlobalConfig(r.ok ? await r.json() : null);
+    } catch {
+      // Leave the previous config in place; the card degrades to its
+      // unconfigured state rather than throwing out of an effect.
+    }
   }, []);
+
+  React.useEffect(() => {
+    void loadGlobalConfig();
+  }, [loadGlobalConfig]);
 
   const securityScore = React.useMemo(() => {
     if (!metrics) return 100;
