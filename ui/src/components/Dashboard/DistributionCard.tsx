@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { memo } from "react";
 import { Paper, Text, Group, Box, Badge, Center } from "@mantine/core";
 import { BarChart } from "@mantine/charts";

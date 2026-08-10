@@ -1,5 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+# SPDX-License-Identifier: MIT
 
 # This script runs 'buf generate' with the correct PATH to find all protoc plugins.
 # It ensures that both Go-based plugins and Node.js-based plugins are available.

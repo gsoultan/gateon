@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import React, { useEffect, useState } from "react";
 import { Modal, Text, Stack, Group, Box, Timeline, Badge, Loader, Alert, Paper } from "@mantine/core";
 import { IconMap2, IconMapPin, IconWorld, IconAlertCircle } from "@tabler/icons-react";

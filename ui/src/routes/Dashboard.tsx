@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,

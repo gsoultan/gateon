@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+# SPDX-License-Identifier: MIT
 #
-# Guards the two authentication invariants that carry no compile-time
-# protection. Both were violated in shipped code and both failed silently: the
-# gateway served the management API unauthenticated, and the dashboard stored an
-# administrator token where any script could read it. Neither the compiler, go
-# vet, golangci-lint nor tsc objects to either one.
+# Guards the invariants that carry no compile-time protection. The first two
+# were violated in shipped code and both failed silently: the gateway served the
+# management API unauthenticated, and the dashboard stored an administrator
+# token where any script could read it. Neither the compiler, go vet,
+# golangci-lint nor tsc objects to any of these.
 #
 # Run locally with `make check-invariants`; CI runs it on every push.
 
@@ -46,7 +47,7 @@ drop_comment_hits() { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true; 
 # needs to tolerate a not-yet-available service, make the callee deny on a nil
 # verifier (see middleware/auth.PasetoAuth) and build unconditionally.
 # ---------------------------------------------------------------------------
-note "1/3  auth.Service nil-comparisons"
+note "1/4  auth.Service nil-comparisons"
 auth_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '(\.AuthManager|deps\.Auth|s\.Auth|svc\.Auth)[[:space:]]*[!=]=[[:space:]]*nil' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -67,7 +68,7 @@ fi
 # stored-XSS bug plus a readable token equals administrator compromise. The
 # token lives only in the HttpOnly gateon_session cookie.
 # ---------------------------------------------------------------------------
-note "2/3  session token in web storage"
+note "2/4  session token in web storage"
 storage_hits=$( (grep -rnE '(localStorage|sessionStorage)\.(setItem|getItem)' ui/src \
 	--include='*.ts' --include='*.tsx' 2>/dev/null |
 	grep -viE 'token|jwt|paseto|bearer|credential|gateon-auth') || true)
@@ -104,7 +105,7 @@ fi
 # '/', which made the -o path invalid and produced a build that "succeeded"
 # and then failed at exec with a confusing error.
 # ---------------------------------------------------------------------------
-note "3/3  tests building into the repository root"
+note "3/4  tests building into the repository root"
 root_builds=$( (grep -rnE '"go",[[:space:]]*"build",[[:space:]]*"-o",[[:space:]]*[a-zA-Z]' tests/ --include='*.go' 2>/dev/null |
 	grep -vE 'filepath\.Join\((env\.Dir|tmpDir|t\.TempDir)') || true)
 # Re-check the argument actually resolves under a temp dir.
@@ -126,6 +127,50 @@ if [ -n "$suspicious" ]; then
 	printf '  Build into env.Dir (backed by t.TempDir()), which is cleaned up for you.\n'
 else
 	echo "  ok - all test builds target a temp dir"
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Every source file declares its license.
+#
+# LICENSE at the repository root does not travel with a file. The moment one is
+# vendored into another module, copied into a container layer, lifted into a
+# gist or pasted into an issue, the only license statement that survives is the
+# one in the file. Ambiguity there is resolved in the reader's favour, not ours.
+#
+# golangci-lint's goheader enforces this for Go and gives the better error, but
+# CI does not run golangci-lint — only this script — so Go is re-checked here
+# rather than relying on a gate that never fires. Nothing at all enforces it for
+# .proto or for TypeScript (the dashboard, the e2e suite, the build config), and
+# those are exactly the files someone adds without thinking about licensing.
+#
+# Generated output is exempt: protoc-gen-go, protoc-gen-connect-go and
+# protoc-gen-es all copy the leading comment out of the .proto, so fixing the
+# .proto fixes the generated file on the next `make proto`.
+# ---------------------------------------------------------------------------
+note "4/4  SPDX license header on every source file"
+SPDX_LINE='SPDX-License-Identifier: MIT'
+missing_spdx=""
+while IFS= read -r f; do
+	[ -f "$f" ] || continue
+	case "$f" in
+	# protoc-gen-es output; the header comes from the .proto.
+	ui/src/services/gen/*) continue ;;
+	# Agent/editor tooling checked into the repo, not Gateon source.
+	.agents/* | .claude/* | .cursor/* | .gemini/* | .kiro/* | .junie/*) continue ;;
+	esac
+	if ! head -6 "$f" | grep -qF "$SPDX_LINE"; then
+		missing_spdx+=$(printf '\n  %s' "$f")
+	fi
+done < <(git ls-files '*.go' '*.proto' '*.ts' '*.tsx' 2>/dev/null)
+
+if [ -n "$missing_spdx" ]; then
+	err "a source file is missing the SPDX license header"
+	printf '%s\n' "$missing_spdx"
+	printf '  Add these two lines at the very top of the file:\n'
+	printf '    // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.\n'
+	printf '    // %s\n' "$SPDX_LINE"
+else
+	echo "  ok - every Go, proto and TypeScript source carries the SPDX header"
 fi
 
 printf '\n'

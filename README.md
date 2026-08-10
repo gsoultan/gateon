@@ -229,3 +229,24 @@ Gateon is rapidly evolving. Below are our recent milestones and future plans.
 - **Advanced WAF Rule Builder**: Visual UI for creating custom rules.
 - **Global Load Balancing (GSLB)**: DNS-based traffic steering across geographical regions.
 - **Native WASM SDK**: Simplified development for custom Go/Rust middlewares.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the setup steps, the checks to run
+before opening a pull request, and the review bar. Security issues go through
+[`SECURITY.md`](SECURITY.md), never a public issue.
+
+## License
+
+Gateon is released under the **[MIT License](LICENSE)**. Every source file
+carries the SPDX marker:
+
+```
+SPDX-License-Identifier: MIT
+```
+
+Contributions are accepted under the same license; there is no CLA. Gateon's
+third-party dependencies keep their own licenses — a CycloneDX SBOM is attached
+to every release archive.
+
+Copyright (c) 2026 Gembit Soultan Shirazi.

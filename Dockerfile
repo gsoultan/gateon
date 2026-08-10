@@ -63,6 +63,17 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/gateon ./cmd/gateon
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
+# OCI metadata. The licenses label is the one that matters operationally:
+# distroless carries no package manager and no /usr/share/doc, so an image
+# scanner or SBOM consumer has nothing else to read a license from.
+LABEL org.opencontainers.image.title="Gateon" \
+      org.opencontainers.image.description="Ultra-Intelligent Defense Security Gateway" \
+      org.opencontainers.image.source="https://github.com/gsoultan/gateon" \
+      org.opencontainers.image.url="https://github.com/gsoultan/gateon" \
+      org.opencontainers.image.documentation="https://github.com/gsoultan/gateon/blob/main/README.md" \
+      org.opencontainers.image.vendor="Gembit Soultan Shirazi" \
+      org.opencontainers.image.authors="Gembit Soultan Shirazi <gembit.soultan@gmail.com>" \
+      org.opencontainers.image.licenses="MIT"
 # Go 1.25+ derives GOMAXPROCS from the cgroup CPU quota automatically, so the
 # gateway does not over-subscribe host cores under a CPU limit. Default to the
 # balanced resource profile; override GATEON_PROFILE / GOMEMLIMIT at deploy time.

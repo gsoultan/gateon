@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { useEffect, useState, useRef } from 'react';
 
 export function useAnimateValue(value: number, duration = 500) {
