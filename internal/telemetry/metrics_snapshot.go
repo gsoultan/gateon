@@ -1171,7 +1171,7 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 		}
 	}
 
-	sm.PredictiveAiEnabled = ai.GlobalPredictor != nil
+	sm.PredictiveAiEnabled = ai.GlobalPredictor() != nil
 	sm.NeuralSentinelEnabled = true // Isolation Forest is always active if initialized
 	sm.GraphIntelligenceEnabled = true
 	sm.PqcEnabled = true // ML-KEM/ML-DSA always available in binary

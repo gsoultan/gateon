@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	lru "github.com/hashicorp/golang-lru"
@@ -42,10 +43,14 @@ func GetIPFingerprint(r *http.Request) string {
 	} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
 		ip = xri
 	}
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		return host
-	}
-	return ip
+	// StripPort, not net.SplitHostPort. This runs on every request, and the
+	// value here usually comes from X-Forwarded-For or X-Real-IP, which carry a
+	// bare address with no port. SplitHostPort's "missing port" path allocates
+	// an *AddrError that is discarded immediately — a heap allocation per
+	// request for a value nobody reads. It was ~10% of allocation objects in
+	// the infra-chain benchmark profile. StripPort answers the same question
+	// without allocating.
+	return httputil.StripPort(ip)
 }
 
 type Reputation struct {

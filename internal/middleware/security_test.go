@@ -83,6 +83,7 @@ func (m *mockEbpfManager) SetPortKnockingSequence(seq []int32) error            
 func (m *mockEbpfManager) Start(ctx context.Context)                                    {}
 func (m *mockEbpfManager) UpdateLoadBalancerBackends(ips []string) error                { return nil }
 func (m *mockEbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) error { return nil }
+func (m *mockEbpfManager) ClearAdaptiveRateLimit(ip string) error                       { return nil }
 func (m *mockEbpfManager) ApplyRLFeedback(ip string, score float64) error               { return nil }
 func (m *mockEbpfManager) SetRLFeedbackHandler(f func(string, float64))                 {}
 func (m *mockEbpfManager) ShunJA4(ja4Fingerprint string) error                          { return nil }

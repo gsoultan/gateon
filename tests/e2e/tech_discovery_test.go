@@ -44,16 +44,16 @@ func TestTechDiscovery(t *testing.T) {
 		t.Fatalf("Failed to create admin: %v", err)
 	}
 
-	// 2. Build and Start Mock Backend
-	mockBinaryName := "mock_backend_" + t.Name()
-	mockBinaryPath := filepath.Join(projectRoot, mockBinaryName)
-	t.Logf("Building mock backend: %s...", mockBinaryName)
-	cmdMockBuild := exec.Command("go", "build", "-o", mockBinaryName, "tests/e2e/mock_backend/main.go")
+	// 2. Build and Start Mock Backend. Built into the test's temp dir, not the
+	// repository root: a test must not leave binaries in the checkout, and a
+	// subtest name contains a '/' that would make the -o path invalid.
+	mockBinaryPath := filepath.Join(env.Dir, "mock_backend"+exeSuffix())
+	t.Logf("Building mock backend into %s...", mockBinaryPath)
+	cmdMockBuild := exec.Command("go", "build", "-o", mockBinaryPath, "tests/e2e/mock_backend/main.go")
 	cmdMockBuild.Dir = projectRoot
 	if out, err := cmdMockBuild.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build mock backend: %v\n%s", err, out)
 	}
-	defer os.Remove(mockBinaryPath)
 
 	mockBackend := exec.Command(mockBinaryPath)
 	mockBackend.Dir = projectRoot

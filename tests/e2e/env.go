@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,23 +23,28 @@ type TestEnv struct {
 
 func SetupTestEnv(t *testing.T) *TestEnv {
 	projectRoot, _ := filepath.Abs("../..")
-	tmpDir, err := os.MkdirTemp("", "gateon_test_"+t.Name()+"_*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
 
-	binaryName := "gateon_" + t.Name()
-	binaryPath := filepath.Join(projectRoot, binaryName)
+	// t.TempDir(), not the repository root. Building test binaries into the
+	// checkout left gateon_<TestName> and mock_backend_<TestName> artifacts
+	// lying around after every run, and a subtest name contains a '/', which
+	// turns the -o argument into a path through a directory that does not
+	// exist — the build then fails and the test dies later at exec with a
+	// confusing "no such file or directory". t.TempDir is also removed for us,
+	// including when the test fails.
+	tmpDir := t.TempDir()
 
-	// Force a fresh build by removing existing binary
-	_ = os.Remove(binaryPath)
+	binaryPath := filepath.Join(tmpDir, "gateon"+exeSuffix())
 
-	t.Logf("Building gateon binary: %s...", binaryName)
+	t.Logf("Building gateon binary into %s...", tmpDir)
 	// We use 'go' directly here as it's a child process, but we ensure it's a fresh build.
-	cmdBuild := exec.Command("go", "build", "-o", binaryName, "./cmd/gateon")
+	cmdBuild := exec.Command("go", "build", "-o", binaryPath, "./cmd/gateon")
 	cmdBuild.Dir = projectRoot
 	if out, err := cmdBuild.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build gateon: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(binaryPath); err != nil {
+		// Fail here, where the cause is obvious, rather than at exec time.
+		t.Fatalf("build reported success but %s is missing: %v", binaryPath, err)
 	}
 
 	env := &TestEnv{
@@ -77,9 +83,18 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 	return env
 }
 
-func (env *TestEnv) Cleanup() {
-	os.RemoveAll(env.Dir)
-	os.Remove(env.BinaryPath)
+// Cleanup is retained for callers that defer it. Both the working directory
+// and the built binary now live under t.TempDir(), which the testing package
+// removes on its own, so there is nothing left for this to do.
+func (env *TestEnv) Cleanup() {}
+
+// exeSuffix returns the platform's executable extension so the built binary is
+// launchable on Windows as well as Unix.
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }
 
 func getFreePort(t *testing.T) int {
@@ -105,7 +120,7 @@ func copyAndPatchConfig(t *testing.T, srcDir, dstDir string, ports map[string]in
 		s := string(data)
 		// Patch ports
 		s = patchPorts(s, ports)
-		
+
 		// Patch paths
 		s = strings.ReplaceAll(s, "tests/e2e/cert.pem", certPath)
 		s = strings.ReplaceAll(s, "tests/e2e/key.pem", keyPath)
