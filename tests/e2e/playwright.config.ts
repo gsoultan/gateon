@@ -1,4 +1,29 @@
 import { defineConfig, devices } from '@playwright/test';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+// Run the gateway against a throwaway copy of config/, never the tracked files.
+//
+// gateon persists configuration back to whatever GLOBAL_CONFIG_FILE points at,
+// so pointing it straight at tests/e2e/config/ meant every run rewrote checked-in
+// files. A finished run had silently dropped waf.enabled, deception.enabled and
+// tarpit.enabled (protojson omits false), flipped clamav.installation_mode to
+// whatever the last test installed, and — worst — replaced the deliberate
+// pow.secret placeholder "changeme" with a freshly generated value. That is a
+// generated secret sitting in `git status`, one `git add` away from the history,
+// and it is how a config change nobody made gets committed by accident. CI also
+// fails a dirty working tree, so this could only ever be caught late.
+//
+// Copying makes the run reproducible as well: the suite always starts from the
+// committed baseline instead of from whatever the previous run left behind.
+const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-config-'));
+for (const f of fs.readdirSync('config')) {
+  fs.copyFileSync(path.join('config', f), path.join(configDir, f));
+}
+// Paths reach gateon as env vars and its working directory is the repo root, so
+// they have to be absolute.
+const cfg = (name: string) => path.join(configDir, name);
 
 export default defineConfig({
   testDir: './tests',
@@ -62,12 +87,12 @@ export default defineConfig({
       timeout: 300000,
       env: {
         PATH: `${process.cwd()}/mockbin:${process.env.PATH}`,
-        GLOBAL_CONFIG_FILE: 'tests/e2e/config/global.json',
-        ROUTES_FILE: 'tests/e2e/config/routes.json',
-        SERVICES_FILE: 'tests/e2e/config/services.json',
-        ENTRYPOINTS_FILE: 'tests/e2e/config/entrypoints.json',
-        MIDDLEWARES_FILE: 'tests/e2e/config/middlewares.json',
-        TLS_OPTIONS_FILE: 'tests/e2e/config/tls_options.json',
+        GLOBAL_CONFIG_FILE: cfg('global.json'),
+        ROUTES_FILE: cfg('routes.json'),
+        SERVICES_FILE: cfg('services.json'),
+        ENTRYPOINTS_FILE: cfg('entrypoints.json'),
+        MIDDLEWARES_FILE: cfg('middlewares.json'),
+        TLS_OPTIONS_FILE: cfg('tls_options.json'),
         GATEON_TRUSTED_PROXIES: '127.0.0.1,::1',
         GATEON_TEST: '1',
         GATEON_TRACE_SAMPLE_RATE: '1',
