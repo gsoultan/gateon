@@ -188,6 +188,24 @@ at adoption on 2026-08-05**, paid down opportunistically — fix what you touch.
 leaves `noUnusedLocals`/`noUnusedParameters` off, so the frontend side is still partly
 manual.
 
+**`make check-invariants`** (folded into `make sec`, and a CI step) enforces the three
+vetoes above that no compiler or linter can see, each of which was violated in shipped
+code and failed silently:
+
+1. **An `auth.Service` is never compared to `nil`** — use `auth.Available(svc)`.
+   `Server.AuthManager` and the `Auth` fields are `*auth.Holder`, which is never nil but
+   is unusable until Setup runs, so `== nil` reads "auth is present" at exactly the
+   moment it isn't. That is how the first-run bypass worked.
+2. **No session token in `localStorage`/`sessionStorage`** — the dashboard renders
+   hostile traffic, so a readable token turns any stored XSS into admin compromise. The
+   token lives only in the HttpOnly `gateon_session` cookie.
+3. **No test builds into the checkout** — build into `t.TempDir()`. CI additionally
+   fails if `go test ./...` leaves the working tree dirty.
+
+Each check is negative-tested: introduce the violation and the gate must fail. If you
+add an invariant to the roster above that a tool can check, add it here rather than
+trusting review to catch it — the rules were never the gap.
+
 | Profile | Owns | Vetoes (non-negotiable) | Proof |
 | :--- | :--- | :--- | :--- |
 | **`arch`** Systems & software architect | structure at every scale — **system**: `doc/adr/`, layer boundaries (transports→…→repositories), domain package layout, trust boundaries · **unit**: ≤10 files/folder, ≤15 methods, ≤50-line/≤3-param functions, Go type safety, frontend feature-folder + `Component/` conventions | a layer skip (transport reaching a repository); a `util`/`common` package or one duplicating an existing domain; a cyclic dependency; a structural change with no ADR; **a trust boundary moved without `sec` co-signing**; a bare `any` or a non-comma-ok assertion; a magic string; raw SQL in Go instead of `//go:embed`; a missing copyright header | an ADR in `doc/adr/NNNN-*.md` + a named home for every new type |
