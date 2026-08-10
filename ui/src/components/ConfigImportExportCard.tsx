@@ -15,21 +15,13 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
 
   const base = getApiBaseUrl();
 
-  const getAuthHeaders = () => {
-    const headers: Record<string, string> = {};
-    try {
-      const raw = localStorage.getItem("gateon-auth-storage");
-      if (!raw) return headers;
-      const parsed = JSON.parse(raw);
-      const token = parsed?.state?.token;
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-    } catch {
-      // ignore
-    }
-    return headers;
-  };
+  // Authentication rides on the HttpOnly gateon_session cookie, which the
+  // browser attaches to these same-origin requests on its own. This used to
+  // read a bearer token out of localStorage — from a key that never existed
+  // ("gateon-auth-storage" rather than the store's "gateon-auth"), so it had
+  // always been sending empty headers and succeeding purely because of the
+  // cookie. Nothing here should be able to read a session token.
+  const getAuthHeaders = (): Record<string, string> => ({});
 
   const handleExport = () => {
     const link = document.createElement("a");
