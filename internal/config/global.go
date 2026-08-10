@@ -77,11 +77,18 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 			MaxBodySize: 1024 * 64, // 64KB
 		},
 		SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
-			Deception:    &gateonv1.DeceptionConfig{},
-			Tarpit:       &gateonv1.TarpitConfig{},
-			Entropy:      &gateonv1.EntropyConfig{},
-			Behavioral:   &gateonv1.BehavioralConfig{},
-			Pow:          &gateonv1.PowConfig{Secret: "changeme"},
+			Deception:  &gateonv1.DeceptionConfig{},
+			Tarpit:     &gateonv1.TarpitConfig{},
+			Entropy:    &gateonv1.EntropyConfig{},
+			Behavioral: &gateonv1.BehavioralConfig{},
+			// Generated per install, never a literal. A shipped constant here
+			// is a published HMAC key: the proof-of-work challenge and its
+			// solution are both derived from this secret, so anyone reading
+			// the repository could mint valid solutions and walk straight
+			// through the bot challenge while the operator believed it was
+			// holding. See DefaultPowSecret for the guard that keeps the old
+			// value from being reintroduced through a config file.
+			Pow:          &gateonv1.PowConfig{Secret: GenerateRandomSecret(32)},
 			IpReputation: &gateonv1.IPReputationConfig{},
 		},
 		Alerting: &gateonv1.AlertingConfig{},
@@ -192,7 +199,31 @@ func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
 	}
 	if c.SecurityAdvanced != nil && c.SecurityAdvanced.Pow != nil {
 		c.SecurityAdvanced.Pow.Secret = ResolveSecret(c.SecurityAdvanced.Pow.Secret)
+		// Older installs persisted the shipped literal into global.json before
+		// the default became per-install. Re-key them on load rather than
+		// leaving a published HMAC key in service; an operator who never
+		// touched the field should not stay exploitable because of when they
+		// installed.
+		if IsPlaceholderPowSecret(c.SecurityAdvanced.Pow.Secret) {
+			c.SecurityAdvanced.Pow.Secret = GenerateRandomSecret(32)
+			logger.L.LogWarn("proof-of-work secret was the shipped placeholder; generated a new one",
+				"action", "rotated", "reason", "placeholder_secret")
+		}
 	}
+}
+
+// DefaultPowSecret is the literal that shipped as the proof-of-work secret
+// before it was generated per install. It is kept only so it can be recognised
+// and rejected.
+const DefaultPowSecret = "changeme"
+
+// IsPlaceholderPowSecret reports whether s is unusable as a proof-of-work HMAC
+// key: empty, or a known-published placeholder. A challenge keyed on either is
+// forgeable by anyone, which makes the bot challenge worse than absent — it
+// reports "protected" while admitting every attacker who bothered to look.
+func IsPlaceholderPowSecret(s string) bool {
+	t := strings.TrimSpace(s)
+	return t == "" || strings.EqualFold(t, DefaultPowSecret)
 }
 
 func encryptSensitiveFields(c *gateonv1.GlobalConfig) {
