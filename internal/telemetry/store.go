@@ -1415,67 +1415,108 @@ func RecordSecurityThreat(t SecurityThreat) {
 	}
 }
 
-func (s *pathStatsStore) processThreat(st *SecurityThreat) {
-	// Format headers lazily in the background
+const (
+	// actionDetected is recorded when a threat was observed but not stopped.
+	actionDetected = "detected"
+
+	// autoMitigateScore is the threat score at which the actor is mitigated
+	// even though the request itself was allowed through.
+	autoMitigateScore = 80
+
+	// labelUnknown is the metric label used when a more specific value — a WAF
+	// rule ID, a trap path — is not present on the threat. Prometheus labels
+	// cannot be empty without creating a separate series.
+	labelUnknown = "unknown"
+
+	// typeBruteForce is the threat type recorded for repeated auth failures.
+	typeBruteForce = "brute_force_attempt"
+
+	// ipShunUniqueUserThreshold is how many distinct malicious fingerprints must
+	// appear behind one address before the address itself is shunned. One IP can
+	// front a whole office, so this trades a little dwell time for not blocking
+	// everyone behind a NAT on the strength of a single bad client.
+	ipShunUniqueUserThreshold = 3
+)
+
+// normalizeThreatHeaders formats the captured headers and redacts them before
+// anything persists or broadcasts the threat. The raw maps are dropped so the
+// pooled record does not hold request memory alive.
+func normalizeThreatHeaders(st *SecurityThreat) {
 	if st.rawReqHeader != nil {
 		st.RequestHeaders = FormatHeaders(st.rawReqHeader)
-		st.rawReqHeader = nil // Release for GC
+		st.rawReqHeader = nil
 	}
 	if st.rawRespHeader != nil {
 		st.ResponseHeaders = FormatHeaders(st.rawRespHeader)
-		st.rawRespHeader = nil // Release for GC
+		st.rawRespHeader = nil
 	}
-
-	// Redact sensitive data before persistence and broadcasting
 	st.RequestHeaders = RedactHeaders(st.RequestHeaders)
 	st.ResponseHeaders = RedactHeaders(st.ResponseHeaders)
-	// We also redact the Details if it contains sensitive headers
+	// Details is redacted too: it frequently quotes the offending header back.
 	st.Details = RedactHeaders(st.Details)
+}
 
-	if st.ActionTaken == "" {
-		st.ActionTaken = "detected"
+// escalateMitigation blocks the actor behind a threat, not just the request.
+//
+// A fingerprint is mitigated immediately. An IP is only mitigated once
+// ipShunUniqueUserThreshold distinct malicious fingerprints have been seen
+// behind it, because one address can front an entire office; shunning on the
+// first bad fingerprint would take out everyone sharing the NAT.
+//
+// Mitigation threats are excluded, or acting on one would produce another.
+func escalateMitigation(st *SecurityThreat) {
+	if !st.Mitigated && st.Category != "reputation" && st.Score < autoMitigateScore {
+		return
 	}
-	st.Mitigated = isMitigatingAction(st.ActionTaken)
-	if (st.Mitigated || st.Category == "reputation" || st.Score >= 80) &&
-		st.Type != "user_mitigation" && st.Type != "ip_mitigation" && st.Type != "ip_shunning" {
-		// Automatically mitigate fingerprints to ensure immediate blocking of the same actor.
-		if st.Fingerprint != "" && !IsUserUnmitigated(st.Fingerprint) {
-			MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
-		}
-
-		// Escalation to IP Mitigation: 3-User Threshold
-		if st.SourceIP != "" && st.Fingerprint != "" {
-			ipMaliciousMu.Lock()
-			val, _ := ipMaliciousFingerprints.Get(st.SourceIP)
-			var fps map[string]struct{}
-			if val != nil {
-				fps = val.(map[string]struct{})
-			} else {
-				fps = make(map[string]struct{})
-			}
-			fps[st.Fingerprint] = struct{}{}
-			ipMaliciousFingerprints.Add(st.SourceIP, fps)
-			uniqueUsers := len(fps)
-			ipMaliciousMu.Unlock()
-
-			if uniqueUsers >= 3 && !IsIPUnmitigated(st.SourceIP) {
-				MarkIPMitigated(st.SourceIP, fmt.Sprintf("IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers))
-			}
-		}
+	switch st.Type {
+	case "user_mitigation", "ip_mitigation", "ip_shunning":
+		return
 	}
 
-	if st.CountryCode == "" && st.SourceIP != "" {
+	if st.Fingerprint != "" && !IsUserUnmitigated(st.Fingerprint) {
+		MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
+	}
+	if st.SourceIP == "" || st.Fingerprint == "" {
+		return
+	}
+
+	ipMaliciousMu.Lock()
+	val, _ := ipMaliciousFingerprints.Get(st.SourceIP)
+	fps, _ := val.(map[string]struct{})
+	if fps == nil {
+		fps = make(map[string]struct{})
+	}
+	fps[st.Fingerprint] = struct{}{}
+	ipMaliciousFingerprints.Add(st.SourceIP, fps)
+	uniqueUsers := len(fps)
+	ipMaliciousMu.Unlock()
+
+	if uniqueUsers >= ipShunUniqueUserThreshold && !IsIPUnmitigated(st.SourceIP) {
+		MarkIPMitigated(st.SourceIP, fmt.Sprintf(
+			"IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers))
+	}
+}
+
+// enrichThreatOrigin fills in geolocation and ASN when the caller did not.
+func enrichThreatOrigin(st *SecurityThreat) {
+	if st.SourceIP == "" {
+		return
+	}
+	if st.CountryCode == "" {
 		st.CountryCode, _, st.Latitude, st.Longitude = ResolveIPInfoFast(st.SourceIP)
 	}
-
-	if st.ASN == "" && st.SourceIP != "" {
+	if st.ASN == "" {
 		st.ASN = ResolveASN(st.SourceIP)
 	}
+}
 
-	// Log to audit trail
-	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
-
-	// Alerting and Broadcasting
+// recordMitigationFunnel attributes a stopped threat to the middleware that
+// stopped it, so the security funnel adds up. Called only for threats that were
+// actually mitigated; a detection with no action belongs in no funnel bucket.
+// notifyThreat runs the registered alert hook and pushes the threat to live
+// subscribers. The hook is read under the lock and called outside it, so a slow
+// alerter cannot block whoever is registering one.
+func notifyThreat(st *SecurityThreat) {
 	alertMu.RLock()
 	h := onThreatAlert
 	alertMu.RUnlock()
@@ -1483,47 +1524,119 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 		h(st)
 	}
 	ThreatBroadcaster.Broadcast(*st)
+}
 
-	// funnel increments: map category/type to specific funnel counters
-	isMitigated := st.Mitigated || isMitigatingAction(st.ActionTaken)
-	if isMitigated {
-		routeID := cmp.Or(st.RouteID, "global")
-		cat := strings.ToLower(st.Category)
-		typ := strings.ToLower(st.Type)
+// funnelRule attributes a mitigated threat to the middleware that stopped it.
+// Rules are evaluated in order and the first match wins, which preserves the
+// precedence the original switch had — a WAF block that is also categorised
+// "advanced" counts as WAF.
+type funnelRule struct {
+	matches func(cat, typ string) bool
+	record  func(routeID, typ string, st *SecurityThreat)
+}
 
-		switch {
-		case cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation":
-			ruleID := "unknown"
-			if st.TriggeredRules != "" {
-				ruleID = st.TriggeredRules
-			} else if typ != "" {
-				ruleID = typ
-			}
-			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, ruleID).Inc()
-		case strings.HasPrefix(typ, "fast_path_"):
-			checkType := strings.TrimPrefix(typ, "fast_path_")
-			MiddlewareFastPathBlockedTotal.WithLabelValues(routeID, checkType).Inc()
-		case typ == "rate_limit" || cat == "abuse":
+// mitigationFunnelRules is a table rather than a switch so that adding a
+// middleware means adding a row, and so the precedence above is something you
+// can read top to bottom instead of inferring from case order.
+var mitigationFunnelRules = []funnelRule{
+	{
+		matches: func(cat, typ string) bool {
+			return cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation"
+		},
+		record: func(routeID, typ string, st *SecurityThreat) {
+			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, cmp.Or(st.TriggeredRules, typ, labelUnknown)).Inc()
+		},
+	},
+	{
+		matches: func(_, typ string) bool { return strings.HasPrefix(typ, "fast_path_") },
+		record: func(routeID, typ string, _ *SecurityThreat) {
+			MiddlewareFastPathBlockedTotal.WithLabelValues(routeID, strings.TrimPrefix(typ, "fast_path_")).Inc()
+		},
+	},
+	{
+		matches: func(cat, typ string) bool { return typ == "rate_limit" || cat == "abuse" },
+		record: func(routeID, _ string, _ *SecurityThreat) {
 			MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "behavioral").Inc()
-		case cat == "deception" || typ == "honeypot_triggered" || typ == "honeypot_hit":
-			trap := "unknown"
-			if st.RequestURI != "" {
-				trap = st.RequestURI
-			}
-			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, trap).Inc()
-		case typ == "reputation_hit" || typ == "advanced_security" || cat == "advanced" || cat == "threat_intel" || typ == "ip_mitigation" || typ == "user_mitigation":
+		},
+	},
+	{
+		matches: func(cat, typ string) bool {
+			return cat == "deception" || typ == "honeypot_triggered" || typ == "honeypot_hit"
+		},
+		record: func(routeID, _ string, st *SecurityThreat) {
+			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, cmp.Or(st.RequestURI, labelUnknown)).Inc()
+		},
+	},
+	{
+		matches: func(cat, typ string) bool {
+			return typ == "reputation_hit" || typ == "advanced_security" ||
+				cat == "advanced" || cat == "threat_intel" ||
+				typ == "ip_mitigation" || typ == "user_mitigation"
+		},
+		record: func(routeID, typ string, _ *SecurityThreat) {
 			MiddlewareAdvancedSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
-		case cat == "geoip" || cat == "geofencing":
+		},
+	},
+	{
+		matches: func(cat, _ string) bool { return cat == "geoip" || cat == "geofencing" },
+		record: func(routeID, _ string, st *SecurityThreat) {
 			MiddlewareGeoIPBlockedTotal.WithLabelValues(routeID, st.CountryCode).Inc()
-		case cat == "auth" || typ == "brute_force_attempt":
+		},
+	},
+	{
+		matches: func(cat, typ string) bool { return cat == "auth" || typ == typeBruteForce },
+		record: func(routeID, typ string, _ *SecurityThreat) {
 			MiddlewareAuthFailuresTotal.WithLabelValues(routeID, typ).Inc()
-		case cat == "bot":
-			MiddlewareBotManagementTotal.WithLabelValues(routeID, "blocked").Inc()
-		case cat == "filesecurity" || cat == "malware":
+		},
+	},
+	{
+		matches: func(cat, _ string) bool { return cat == "bot" },
+		record: func(routeID, _ string, _ *SecurityThreat) {
+			MiddlewareBotManagementTotal.WithLabelValues(routeID, actionBlocked).Inc()
+		},
+	},
+	{
+		matches: func(cat, _ string) bool { return cat == "filesecurity" || cat == "malware" },
+		record: func(routeID, typ string, _ *SecurityThreat) {
 			MiddlewareFileSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
+		},
+	},
+}
+
+func recordMitigationFunnel(st *SecurityThreat) {
+	routeID := cmp.Or(st.RouteID, "global")
+	cat := strings.ToLower(st.Category)
+	typ := strings.ToLower(st.Type)
+
+	for _, rule := range mitigationFunnelRules {
+		if rule.matches(cat, typ) {
+			rule.record(routeID, typ, st)
+			return
 		}
 	}
+}
 
+func (s *pathStatsStore) processThreat(st *SecurityThreat) {
+	normalizeThreatHeaders(st)
+
+	if st.ActionTaken == "" {
+		st.ActionTaken = actionDetected
+	}
+	st.Mitigated = isMitigatingAction(st.ActionTaken)
+	escalateMitigation(st)
+	enrichThreatOrigin(st)
+
+	// Log to audit trail
+	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
+
+	// Alerting and Broadcasting
+	notifyThreat(st)
+
+	isMitigated := st.Mitigated || isMitigatingAction(st.ActionTaken)
+	// Funnel counters: which middleware actually stopped this.
+	if isMitigated {
+		recordMitigationFunnel(st)
+	}
 	if s.scoreCache != nil {
 		current, ok := s.scoreCache.Get(st.SourceIP)
 		score := st.Score
