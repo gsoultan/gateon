@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"time"
@@ -39,7 +40,7 @@ type cachedPayload struct {
 func (r *redisCacheBackend) Get(ctx context.Context, key string) (status int, headers http.Header, body []byte, ok bool) {
 	fullKey := cacheKeyPrefix + key
 	val, err := r.client.Get(ctx, fullKey).Bytes()
-	if err == redigo.Nil {
+	if errors.Is(err, redigo.Nil) {
 		return 0, nil, nil, false
 	}
 	if err != nil {

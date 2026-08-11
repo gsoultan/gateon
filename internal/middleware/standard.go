@@ -376,7 +376,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			var pooled bool
 			if !ok {
 				sw = GetStatusResponseWriter(w)
-				w = sw
 				pooled = true
 			}
 			if pooled {

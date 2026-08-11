@@ -85,7 +85,7 @@ func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 
 		resp, err := v.introspect(r.Context(), token)
 		if err != nil {
-			v.config.HandleFailure(w, r, next, fmt.Errorf("token introspection failed: %v", err))
+			v.config.HandleFailure(w, r, next, fmt.Errorf("token introspection failed: %w", err))
 			return
 		}
 		if !resp.Active {

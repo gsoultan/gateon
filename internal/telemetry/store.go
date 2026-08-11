@@ -32,6 +32,11 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
+// statusMitigated is the stored mitigation-status value meaning the threat was
+// acted on. It is compared against in several queries and denormalised onto
+// SecurityThreat.Mitigated, so it is spelled once here.
+const statusMitigated = "mitigated"
+
 // RedactHeaders masks sensitive headers like Authorization and X-Api-Key.
 // It is optimized to minimize allocations by using a pooled strings.Builder and avoiding strings.Split.
 func RedactHeaders(headers string) string {
@@ -882,7 +887,10 @@ func (s *pathStatsStore) loop() {
 			if err != nil {
 				logger.Default().LogError("telemetry: begin transaction failed", "error", err)
 			} else {
-				defer tx.Rollback()
+				// Rollback after a successful Commit returns sql.ErrTxDone by design, so
+				// this error is expected rather than ignored. The defer is the safety
+				// net for the paths that return before committing.
+				defer func() { _ = tx.Rollback() }()
 				pathStmt, _ := s.upsertStmt(tx)
 				domainStmt, _ := s.domainUpsertStmt(tx)
 
@@ -975,7 +983,10 @@ func (s *pathStatsStore) loop() {
 			if err != nil {
 				logger.Default().LogError("threats: begin transaction failed", "error", err)
 			} else {
-				defer tx.Rollback()
+				// Rollback after a successful Commit returns sql.ErrTxDone by design, so
+				// this error is expected rather than ignored. The defer is the safety
+				// net for the paths that return before committing.
+				defer func() { _ = tx.Rollback() }()
 				if stmt, err := s.threatInsertStmt(tx); err == nil {
 					for _, th := range threatBatch {
 						sourceIPs := strings.Join(th.SourceIPs, ",")
@@ -1537,7 +1548,7 @@ func IsIPMitigated(ip string) bool {
 	var status string
 	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
 	err := s.db.QueryRow(query, ip).Scan(&status)
-	mitigated := err == nil && status == "mitigated"
+	mitigated := err == nil && status == statusMitigated
 
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, !mitigated)
@@ -1694,7 +1705,7 @@ check_db:
 	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE (fingerprint = ? OR ja4h = ?) ORDER BY updated_at DESC LIMIT 1")
 	var status string
 	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
-	mitigated := err == nil && status == "mitigated"
+	mitigated := err == nil && status == statusMitigated
 
 	if s.userMitigationCache != nil {
 		s.userMitigationCache.Add(ja4plus, mitigated)
@@ -2315,7 +2326,7 @@ func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix 
 		args = append(args, filter.Category)
 	}
 	switch filter.Status {
-	case "mitigated":
+	case statusMitigated:
 		// Mitigated if:
 		// 1. Current status is 'mitigated' in IP or fingerprint table
 		// 2. OR it was blocked at the time AND not subsequently unmitigated in any table
@@ -2413,7 +2424,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
-		th.Mitigated = mitigationStatus == "mitigated" || fm4Status == "mitigated" ||
+		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
 			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
@@ -2471,7 +2482,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		if sourceIPs != "" {
 			th.SourceIPs = strings.Split(sourceIPs, ",")
 		}
-		th.Mitigated = mitigationStatus == "mitigated" || fm4Status == "mitigated" ||
+		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
 			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
