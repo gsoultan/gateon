@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -85,11 +84,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		// Fall back to the legacy `limit` query param as the page size so older
 		// clients keep working.
 		if pageSize <= 0 {
-			if lStr := r.URL.Query().Get("limit"); lStr != "" {
-				if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-					pageSize = int32(l)
-				}
-			}
+			// Same bounding as ParsePagination: the legacy param is no less
+			// attacker-controlled than the modern one, and Atoi + int32() here
+			// let "4294967297" truncate into a small positive page size while
+			// a value like 10_000_000 became one enormous query.
+			pageSize = boundedInt32(r.URL.Query().Get("limit"), maxPageSize)
 		}
 		if pageSize <= 0 {
 			pageSize = 100
@@ -163,6 +162,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// #nosec G705 -- Gateon's own audit archive, served as application/json.
+		// The management API applies SecurityHeaders(preset "recommended"), which
+		// sets X-Content-Type-Options: nosniff, so it cannot be sniffed to HTML.
 		_, _ = w.Write(data)
 	})
 	handleUpdateGlobal := func(w http.ResponseWriter, r *http.Request) {

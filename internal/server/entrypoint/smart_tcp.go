@@ -141,6 +141,6 @@ func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps
 	default:
 		// Connection queue full, drop to protect system
 		logger.L.LogWarn("shared http connection queue full, dropping", "ep", ep.Id)
-		conn.Close()
+		_ = conn.Close()
 	}
 }

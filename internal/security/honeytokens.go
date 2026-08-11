@@ -107,6 +107,8 @@ func (w *breadcrumbWriter) Write(b []byte) (int, error) {
 
 // DefaultHoneytokens provides a set of common traps.
 func DefaultHoneytokens() map[string]string {
+	// #nosec G101 -- decoy paths for the honeypot. They exist to be requested
+	// by scanners; none is a real secret or a real file.
 	return map[string]string{
 		"/.env":             "Environment file access attempt",
 		"/.git/config":      "Git configuration access attempt",

@@ -83,6 +83,8 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 				}
 				w.WriteHeader(status)
 				if r.Method == http.MethodGet && len(body) > 0 {
+					// #nosec G705 -- a previously cached origin response replayed
+					// verbatim, with the origin's stored Content-Type.
 					_, _ = w.Write(body)
 				}
 				return

@@ -84,13 +84,26 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 				if verifyChallengeToken(token, cfg.SecretKey, r.UserAgent(), clientIP) {
 					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_solved").Inc()
 					telemetry.ActiveUnverifiedClientsTotal.Dec()
+					// This cookie is the proof that the client solved the bot
+					// challenge, so it is a bypass credential and gets the same
+					// attributes as a session cookie. Secure comes from
+					// request.IsSecure rather than r.TLS: behind a TLS-terminating
+					// proxy r.TLS is nil, and the attribute would be dropped in
+					// exactly the deployments where the token is most exposed.
+					// #nosec G124 -- Secure is set from the resolved scheme just
+					// below; gosec cannot see through the variable.
 					http.SetCookie(w, &http.Cookie{
 						Name:     ChallengeCookieName,
 						Value:    token,
 						Path:     "/",
 						HttpOnly: true,
+						Secure:   request.IsSecure(r),
+						SameSite: http.SameSiteLaxMode,
 						MaxAge:   cfg.ChallengeTimeoutSeconds,
 					})
+					// #nosec G710 -- safeRedirectTarget rejects any scheme, host or opaque form
+					// and requires a leading "/" while rejecting "//" and "/\\", testing the
+					// decoded path so a percent-encoded backslash cannot slip past.
 					http.Redirect(w, r, safeRedirectTarget(r.FormValue("redirect")), http.StatusFound)
 					return
 				}

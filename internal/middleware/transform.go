@@ -57,7 +57,7 @@ func BodyTransform(cfg BodyTransformConfig) Middleware {
 
 			// Only transform if status is 200 OK or similar
 			if bw.status >= 400 {
-				w.Write(bw.body.Bytes())
+				_, _ = w.Write(bw.body.Bytes())
 				return
 			}
 
@@ -68,7 +68,7 @@ func BodyTransform(cfg BodyTransformConfig) Middleware {
 			// Remove ETag if present, as body has changed
 			w.Header().Del("ETag")
 
-			w.Write([]byte(newRespBody))
+			_, _ = w.Write([]byte(newRespBody))
 		})
 	}
 }

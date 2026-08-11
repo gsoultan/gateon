@@ -23,6 +23,11 @@ import (
 	"github.com/oschwald/geoip2-golang"
 )
 
+// maxMMDBBytes bounds a single file unpacked from the MaxMind archive. A
+// GeoLite2-City database is ~70 MiB; 256 MiB leaves generous headroom while
+// still refusing an archive that decompresses without end.
+const maxMMDBBytes int64 = 256 << 20
+
 type publicIPInfo struct {
 	Status      string  `json:"status"`
 	CountryCode string  `json:"countryCode"`
@@ -106,7 +111,7 @@ func GetPublicIP(ctx context.Context) string {
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			continue
 		}
@@ -497,7 +502,7 @@ func DownloadGeoIP(licenseKey string) error {
 		return fmt.Errorf("maxmind license key is required")
 	}
 
-	if err := os.MkdirAll(geoDir, 0o755); err != nil {
+	if err := os.MkdirAll(geoDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create geoip directory: %w", err)
 	}
 
@@ -519,6 +524,8 @@ func DownloadGeoIP(licenseKey string) error {
 func downloadGeoIPEdition(licenseKey string, edition geoIPEdition) error {
 	url := fmt.Sprintf("https://download.maxmind.com/app/geoip_download?edition_id=%s&license_key=%s&suffix=tar.gz", edition.id, licenseKey)
 
+	// #nosec G107 -- url is built from MaxMind's fixed download endpoint plus
+	// the operator's licence key; no request input reaches it.
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download %s database: %w", edition.id, err)
@@ -559,13 +566,28 @@ func extractMMDB(body io.Reader, destPath string) error {
 			continue
 		}
 
+		// #nosec G304 -- destPath is built from the fixed geoip directory and a
+		// name filtered to .mmdb entries from the MaxMind archive.
 		f, err := os.Create(destPath)
 		if err != nil {
 			return fmt.Errorf("failed to create destination file: %w", err)
 		}
-		if _, err := io.Copy(f, tr); err != nil {
+		// Bounded copy, not io.Copy. The tar stream is gzip-decompressed remote
+		// content, so its uncompressed size is chosen by whoever served it — a
+		// compromised mirror, a hijacked DNS answer or a proxy in the middle can
+		// answer a few KB of gzip that expands until the disk is full. Writing
+		// one byte past the ceiling is treated as hostile rather than truncated,
+		// because a silently truncated mmdb would load as a corrupt database.
+		written, err := io.Copy(f, io.LimitReader(tr, maxMMDBBytes+1))
+		if err != nil {
 			_ = f.Close()
 			return fmt.Errorf("failed to copy mmdb content: %w", err)
+		}
+		if written > maxMMDBBytes {
+			_ = f.Close()
+			_ = os.Remove(destPath)
+			return fmt.Errorf("mmdb entry %q exceeds the %d byte limit; refusing to unpack",
+				header.Name, int64(maxMMDBBytes))
 		}
 		_ = f.Close()
 		return nil

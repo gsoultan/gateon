@@ -985,6 +985,9 @@ func (w *wafResponseWriter) flush() error {
 	if w.buf.Len() == 0 {
 		return nil
 	}
+	// #nosec G705 -- these are the origin's own response bytes being forwarded
+	// by a reverse proxy, along with the origin's Content-Type. Gateon is not
+	// the author of this body and does not interpolate into it.
 	_, err := w.ResponseWriter.Write(w.buf.Bytes())
 	w.buf.Reset()
 	return err

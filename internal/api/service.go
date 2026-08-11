@@ -28,6 +28,7 @@ import (
 // ApiService implements gateonv1.ApiServiceServer.
 type ApiService struct {
 	gateonv1.UnimplementedApiServiceServer
+	Lifetime           context.Context
 	Version            string
 	Routes             config.RouteStore
 	Services           config.ServiceStore
@@ -145,7 +146,7 @@ func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallCla
 	// take several minutes — far longer than an HTTP request should block. Run it
 	// on a detached context so it is not cancelled when this request returns.
 	go func() {
-		if err := s.ClamAVManager.EnsureInstalled(context.Background(), req.SudoPassword); err != nil {
+		if err := s.ClamAVManager.EnsureInstalled(s.detached(), req.SudoPassword); err != nil {
 			logger.L.LogError("ClamAV background installation failed", "error", err)
 		}
 	}()
@@ -170,7 +171,7 @@ func (s *ApiService) UninstallClamav(ctx context.Context, req *gateonv1.Uninstal
 	// Removal (docker rm / apt remove) can take a while, so detach it from the
 	// request lifecycle on a background context just like installation.
 	go func() {
-		if err := s.ClamAVManager.Uninstall(context.Background(), req.SudoPassword); err != nil {
+		if err := s.ClamAVManager.Uninstall(s.detached(), req.SudoPassword); err != nil {
 			logger.L.LogError("ClamAV background uninstallation failed", "error", err)
 		}
 	}()
@@ -192,7 +193,7 @@ func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanReq
 	status := s.ClamAVManager.GetScanStatus()
 	if !status.IsRunning {
 		// Run scan in background as it can take a long time
-		go s.ClamAVManager.RunFullScan(context.Background())
+		go s.ClamAVManager.RunFullScan(s.detached())
 		s.logAudit(ctx, "run_scan", "clamav", "Deep scan initiated")
 		// Refresh status to show it's now running
 		status = s.ClamAVManager.GetScanStatus()
@@ -210,9 +211,25 @@ func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanReq
 	}, nil
 }
 
+// detached returns the context for work that must outlive the RPC that started
+// it. It is the process-lifetime context, so a multi-minute install is not
+// cancelled when the request returns but is still cancelled when the gateway
+// shuts down — context.Background() gave the first property and not the second,
+// which left these goroutines answerable to nothing.
+//
+// Falls back to Background when unset, because tests construct ApiService as a
+// bare struct literal.
+func (s *ApiService) detached() context.Context {
+	if s.Lifetime != nil {
+		return s.Lifetime
+	}
+	return context.Background()
+}
+
 // NewApiService creates an ApiService from config (Factory pattern).
 func NewApiService(cfg ApiServiceConfig) *ApiService {
 	s := &ApiService{
+		Lifetime:           cfg.Lifetime,
 		Version:            cfg.Version,
 		Routes:             cfg.Routes,
 		Services:           cfg.Services,
