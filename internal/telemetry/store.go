@@ -2382,14 +2382,43 @@ func FlushThreats() {
 }
 
 // GetSecurityThreats returns a paged list of security threats from the store.
-func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
-	s := getStore()
-	if limit > 1000 {
-		limit = 1000
+
+// Bounds for a threat query. The lower bound matters as much as the upper one:
+// the result slice is sized with min(limit, 100) as its capacity, and make()
+// panics on a negative capacity rather than treating it as zero.
+const (
+	defaultThreatQueryLimit = 100
+	maxThreatQueryLimit     = 1000
+)
+
+// clampThreatBounds normalises the paging bounds for a threat query.
+//
+// It exists because the two threat queries had drifted: the Lite variant
+// guarded a nil store, a non-positive limit and a negative offset, while
+// GetSecurityThreats guarded only the offset — so the one that could end a
+// goroutine was the one left open. Sharing the rule is what stops them
+// diverging again.
+func clampThreatBounds(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = defaultThreatQueryLimit
+	}
+	if limit > maxThreatQueryLimit {
+		limit = maxThreatQueryLimit
 	}
 	if offset < 0 {
 		offset = 0
 	}
+	return limit, offset
+}
+
+func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
+	s := getStore()
+	// Its Lite sibling has always had this; this one dereferences s.dialect on
+	// the next line without it.
+	if s == nil {
+		return nil
+	}
+	limit, offset = clampThreatBounds(limit, offset)
 
 	where, args := buildThreatFilterQuery(s.dialect, filter, true)
 	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.request_headers, ''), COALESCE(t.request_body, ''), COALESCE(t.response_headers, ''), COALESCE(t.response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), t.confidence, t.entropy, t.cluster_size, COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, '') " +
@@ -2438,15 +2467,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 	if s == nil {
 		return nil
 	}
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 1000 {
-		limit = 1000
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset = clampThreatBounds(limit, offset)
 
 	where, args := buildThreatFilterQuery(s.dialect, filter, true)
 	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, ''), t.source_ips FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
