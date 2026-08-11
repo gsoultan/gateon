@@ -6,6 +6,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -99,13 +101,46 @@ func hostResolvesToBlockedIP(ctx context.Context, host string) (bool, string) {
 	return false, ""
 }
 
-// ssrfSafeTransport returns an http.Transport whose dialer re-validates the
-// resolved IP at connect time, defeating DNS-rebinding attacks where the host
-// passed initial validation but later resolves to an internal address.
+// blockInternalAddress is the dialer's Control hook. Go calls it after the name
+// has been resolved and immediately before connect(2), with the literal address
+// the kernel is about to use, so what is checked here is exactly what is
+// connected to.
+//
+// That property is the whole point. The pre-flight check in ssrfSafeTransport
+// performs its own LookupIP, and the dialer then performs another one; those
+// are two separate resolutions, and a low-TTL answer is free to differ between
+// them. Validating the first and connecting on the second is the textbook
+// DNS-rebinding window — the previous version of this code claimed in its
+// comment to close it and did not.
+func blockInternalAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("ssrf blocked: unparseable address %q", address)
+	}
+	// Control is always handed a literal, never a name.
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("ssrf blocked: unparseable address %q", host)
+	}
+	if isBlockedIP(addr) {
+		return errors.New("ssrf blocked: access to internal addresses is forbidden")
+	}
+	return nil
+}
+
+// ssrfSafeTransport returns an http.Transport that refuses to connect to an
+// internal address, including after a redirect and including when DNS answers
+// differently on a second lookup.
 func ssrfSafeTransport() *http.Transport {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	dialer := &net.Dialer{
+		Timeout: 5 * time.Second,
+		Control: blockInternalAddress,
+	}
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// Pre-flight, for a clear error before any connection is attempted:
+			// localhost by name, or an internal literal. Control is what makes
+			// the guarantee; this only makes the failure legible.
 			host, _, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
