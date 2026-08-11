@@ -37,6 +37,33 @@ import (
 // SecurityThreat.Mitigated, so it is spelled once here.
 const statusMitigated = "mitigated"
 
+// ActionTaken values recorded on a SecurityThreat, and the mitigation statuses
+// derived from them. The dashboard filters on these exact strings.
+const (
+	actionBlocked    = "blocked"
+	actionChallenged = "challenged"
+	actionShunned    = "shunned"
+	actionFlagged    = "flagged"
+
+	statusUnmitigated = "unmitigated"
+)
+
+// isMitigatingAction reports whether an ActionTaken value means the threat was
+// actually stopped rather than merely observed.
+//
+// This predicate was written out inline in four places, which is three chances
+// for the list to drift: adding a new mitigating action meant finding every
+// copy, and missing one produced a threat that shows as unmitigated in one view
+// and mitigated in another.
+func isMitigatingAction(action string) bool {
+	switch action {
+	case actionBlocked, actionChallenged, actionShunned:
+		return true
+	default:
+		return false
+	}
+}
+
 // RedactHeaders masks sensitive headers like Authorization and X-Api-Key.
 // It is optimized to minimize allocations by using a pooled strings.Builder and avoiding strings.Split.
 func RedactHeaders(headers string) string {
@@ -1373,7 +1400,7 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	if st.ActionTaken == "" {
 		st.ActionTaken = "detected"
 	}
-	st.Mitigated = st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
+	st.Mitigated = isMitigatingAction(st.ActionTaken)
 	if (st.Mitigated || st.Category == "reputation" || st.Score >= 80) &&
 		st.Type != "user_mitigation" && st.Type != "ip_mitigation" && st.Type != "ip_shunning" {
 		// Automatically mitigate fingerprints to ensure immediate blocking of the same actor.
@@ -1423,7 +1450,7 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	ThreatBroadcaster.Broadcast(*st)
 
 	// funnel increments: map category/type to specific funnel counters
-	isMitigated := st.Mitigated || st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
+	isMitigated := st.Mitigated || isMitigatingAction(st.ActionTaken)
 	if isMitigated {
 		routeID := cmp.Or(st.RouteID, "global")
 		cat := strings.ToLower(st.Category)
@@ -1526,7 +1553,7 @@ func IsIPUnmitigated(ip string) bool {
 		return false
 	}
 
-	unmitigated := status == "unmitigated"
+	unmitigated := status == statusUnmitigated
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, unmitigated)
 	}
@@ -1723,7 +1750,7 @@ func IsUserUnmitigated(ja4plus string) bool {
 	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'unmitigated' AND (fingerprint = ? OR ja4h = ?) AND updated_at > datetime('now', '-1 day')")
 	var status string
 	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
-	return err == nil && status == "unmitigated"
+	return err == nil && status == statusUnmitigated
 }
 
 // GetUserMitigations returns a list of currently mitigated users/fingerprints.
@@ -2301,7 +2328,7 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 	if sourceIPs != "" {
 		th.SourceIPs = strings.Split(sourceIPs, ",")
 	}
-	th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
+	th.Mitigated = isMitigatingAction(th.ActionTaken)
 	return th, nil
 }
 
@@ -2425,7 +2452,7 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 			continue
 		}
 		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
-			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
+			((isMitigatingAction(th.ActionTaken)) &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}
@@ -2483,7 +2510,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 			th.SourceIPs = strings.Split(sourceIPs, ",")
 		}
 		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
-			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
+			((isMitigatingAction(th.ActionTaken)) &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}
