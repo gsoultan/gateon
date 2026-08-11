@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -319,7 +320,31 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		resp, err := svc.UninstallClamav(r.Context(), &gateonv1.UninstallClamavRequest{})
+
+		// Decode the body. This used to pass a zero-valued request and never
+		// read it, so SudoPassword was always empty: PreflightUninstall then
+		// refused every local uninstall on a non-root host with "requires root
+		// privileges; please provide sudo password" — the password the operator
+		// had just typed into the dialog and which was thrown away here. The
+		// install handler above has always decoded its body; only this one did
+		// not, which is why installing worked and removing never could.
+		//
+		// An absent or empty body stays valid: Docker mode needs no password,
+		// and a client with nothing to send should not have to send "{}".
+		var req gateonv1.UninstallClamavRequest
+		body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBodySize))
+		if err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, "failed to read body")
+			return
+		}
+		if len(bytes.TrimSpace(body)) > 0 {
+			if err := ProtojsonUnmarshalOptions().Unmarshal(body, &req); err != nil {
+				WriteHTTPError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+
+		resp, err := svc.UninstallClamav(r.Context(), &req)
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			return

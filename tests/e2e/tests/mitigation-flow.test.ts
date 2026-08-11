@@ -1,5 +1,17 @@
 import { test, expect } from '@playwright/test';
 
+/**
+ * Open the anomaly engine.
+ *
+ * It used to be the second half of the diagnostics page. Threats are acted on
+ * in the Security Hub now — one place, one code path — so these flows go
+ * through the hub's Anomaly Engine tab.
+ */
+async function gotoAnomalyEngine(page: any) {
+  await page.goto('/security-center', { waitUntil: 'load' });
+  await page.getByRole('tab', { name: /Anomaly Engine/i }).click();
+}
+
 // telemetry.RecordSecurityThreat drops anything whose source is loopback, on
 // purpose: management traffic and local probes would otherwise flood the
 // Security Hub. Playwright drives everything from 127.0.0.1, so a flow that
@@ -60,11 +72,11 @@ test.describe('Threat Mitigation E2E Flow', () => {
     await request.get(unlistedUrl, asAttacker);
     
     // 2. Go to Diagnostics
-    await page.goto('/diagnostics', { waitUntil: 'load' });
+    await gotoAnomalyEngine(page);
     
     // Wait for the anomaly to appear.
     await page.waitForTimeout(10000);
-    await page.reload({ waitUntil: 'load' });
+    await gotoAnomalyEngine(page);
 
     const scanThreat = page.locator('text=/UNLISTED ROUTE/i').first();
     await expect(scanThreat).toBeVisible({ timeout: 20000 });

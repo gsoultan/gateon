@@ -32,7 +32,8 @@ import {
   IconBrain,
   IconAlertTriangle,
   IconCode,
-  IconBolt
+  IconBolt,
+  IconRobot
 } from '@tabler/icons-react';
 import { useGateonStatus, apiFetch, useMetricsSnapshot, installClamav, uninstallClamav } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
@@ -46,6 +47,7 @@ import { safeFormatDate } from '../utils/format';
 import { OverviewTab } from '../components/SecurityCenter/OverviewTab';
 import { ThreatExplorerTab } from '../components/SecurityCenter/ThreatExplorerTab';
 import { IncidentsTab } from '../components/SecurityCenter/IncidentsTab';
+import { AnomalyEngineTab } from '../components/SecurityCenter/AnomalyEngineTab';
 import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { WAFRulesTab } from '../components/SecurityCenter/WAFRulesTab';
@@ -67,7 +69,7 @@ export default function SecurityCommandCenter() {
   const { canWrite, isViewer } = usePermissions();
   const [page] = React.useState(1);
   const { data: metrics } = useMetricsSnapshot(10, page);
-  const { data: status } = useGateonStatus();
+  const { data: status, refetch: refetchStatus } = useGateonStatus();
   const [globalConfig, setGlobalConfig] = React.useState<GlobalConfig | null>(null);
   const [installing, setInstalling] = React.useState(false);
   const [uninstalling, setUninstalling] = React.useState(false);
@@ -79,9 +81,13 @@ export default function SecurityCommandCenter() {
   const [pendingMode, setPendingMode] = React.useState<number | null>(null);
   const [sudoPassword, setSudoPassword] = React.useState("");
 
+  // Reads scan state. Deliberately the GET endpoint, not the POST that starts a
+  // scan: this used to poll RunDeepScan, which answers "is a scan running?" by
+  // starting one when the answer is no. Opening this page launched a full
+  // filesystem scan on any host with ClamAV installed.
   const pollScanStatus = async () => {
     try {
-      const res = await apiFetch("/v1/security/clamav/scan", { method: "POST" });
+      const res = await apiFetch("/v1/security/clamav/scan-status");
       const data = await res.json();
       if (data.success) {
         setScanStatus(data.status);
@@ -136,6 +142,36 @@ export default function SecurityCommandCenter() {
     }
   };
 
+  // Install and uninstall both return as soon as the work is queued, so the
+  // response says nothing about whether ClamAV ended up installed. Nothing then
+  // refetched /v1/status — the query has no interval — so the card kept offering
+  // "Install Now" after a successful install until the user happened to hit the
+  // shell's refresh. It read as a backend failure and it was a missing refetch.
+  //
+  // Poll until the status agrees with what was asked for, or until the deadline
+  // passes so a genuinely failed install does not leave a timer running.
+  const clamavPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopClamavPoll = React.useCallback(() => {
+    if (clamavPollRef.current) {
+      clearInterval(clamavPollRef.current);
+      clamavPollRef.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => stopClamavPoll, [stopClamavPoll]);
+
+  const pollClamavUntil = React.useCallback((installed: boolean) => {
+    stopClamavPoll();
+    const deadline = Date.now() + 60_000;
+    clamavPollRef.current = setInterval(async () => {
+      const { data } = await refetchStatus();
+      if (data?.clamavInstalled === installed || Date.now() > deadline) {
+        stopClamavPoll();
+      }
+    }, 2000);
+  }, [refetchStatus, stopClamavPoll]);
+
   const handleInstall = async (mode: number, password?: string) => {
     if (mode === 1 && !password) {
       setPendingMode(mode);
@@ -154,6 +190,14 @@ export default function SecurityCommandCenter() {
           color: 'blue',
           icon: <IconShieldCheck size={16} />
         });
+        // Installing persists the chosen mode server-side (ApiService.InstallClamav
+        // writes waf.clamav.installation_mode), so the copy this component loaded
+        // at mount is now stale. handleUninstall branches on that value to decide
+        // whether to prompt for a sudo password, so a stale mode sent the uninstall
+        // down the no-password path and the preflight then rejected it. Refresh so
+        // the next action sees what was actually saved.
+        void loadGlobalConfig();
+        pollClamavUntil(true);
       } else {
         throw new Error(data.message || 'Failed to start installation');
       }
@@ -188,6 +232,7 @@ export default function SecurityCommandCenter() {
           color: 'blue',
           icon: <IconShieldCheck size={16} />
         });
+        pollClamavUntil(false);
       } else {
         throw new Error(data.message || 'Failed to start uninstallation');
       }
@@ -212,12 +257,19 @@ export default function SecurityCommandCenter() {
     setSudoPassword("");
   };
 
-  React.useEffect(() => {
-    apiFetch("/v1/global")
-      .then(r => r.ok ? r.json() : null)
-      .then(cfg => setGlobalConfig(cfg))
-      .catch(() => {});
+  const loadGlobalConfig = React.useCallback(async () => {
+    try {
+      const r = await apiFetch("/v1/global");
+      setGlobalConfig(r.ok ? await r.json() : null);
+    } catch {
+      // Leave the previous config in place; the card degrades to its
+      // unconfigured state rather than throwing out of an effect.
+    }
   }, []);
+
+  React.useEffect(() => {
+    void loadGlobalConfig();
+  }, [loadGlobalConfig]);
 
   const securityScore = React.useMemo(() => {
     if (!metrics) return 100;
@@ -365,6 +417,7 @@ export default function SecurityCommandCenter() {
           <Tabs.List mb="lg" className="scrollable-tabs-list">
             <Tabs.Tab value="overview" leftSection={<IconDashboard size={16} />}>Overview</Tabs.Tab>
             <Tabs.Tab value="explorer" leftSection={<IconSearch size={16} />}>Threat Explorer</Tabs.Tab>
+            <Tabs.Tab value="anomalies" leftSection={<IconRobot size={16} />}>Anomaly Engine</Tabs.Tab>
             <Tabs.Tab value="incidents" leftSection={<IconAlertTriangle size={16} />}>Incidents</Tabs.Tab>
             <Tabs.Tab value="analytics" leftSection={<IconActivity size={16} />}>Analytics & Trends</Tabs.Tab>
             <Tabs.Tab value="advisory" leftSection={<IconBrain size={16} />}>AI Advisory</Tabs.Tab>
@@ -383,6 +436,10 @@ export default function SecurityCommandCenter() {
 
           <Tabs.Panel value="explorer">
             <ThreatExplorerTab />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="anomalies">
+            <AnomalyEngineTab />
           </Tabs.Panel>
 
           <Tabs.Panel value="incidents">

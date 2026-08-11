@@ -3,6 +3,7 @@
     "id": "api-route",
     "name": "API (own WAF override + rate limit, strips /api)",
     "type": "http",
+    "entrypoints": ["web"],
     "rule": "PathPrefix(`/api`)",
     "service_id": "api-service",
     "middlewares": [
@@ -16,6 +17,7 @@
     "id": "web-route",
     "name": "Web catch-all (protected by the global WAF, no per-route setup)",
     "type": "http",
+    "entrypoints": ["web"],
     "rule": "PathPrefix(`/`)",
     "service_id": "whoami-service",
     "middlewares": [

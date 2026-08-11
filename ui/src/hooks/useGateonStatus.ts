@@ -25,7 +25,10 @@ export function useGateonStatus() {
       const sys = metricsSnap.system;
       if (!sys) return;
 
-      const newStatus: StatusResponse = {
+      // Only the fields this snapshot actually carries. Everything else that
+      // /v1/status returns is merged from the previous value below rather than
+      // dropped — see the setQueryData call.
+      const fromMetrics = {
         status: sys.status || 'running',
         version: sys.version || '',
         uptimeSeconds: sys.uptimeSeconds ?? (sys as any).uptime_seconds ?? 0,
@@ -43,9 +46,29 @@ export function useGateonStatus() {
         pqcEnabled: sys.pqcEnabled ?? (sys as any).pqc_enabled ?? false,
         tpmEnabled: sys.tpmEnabled ?? (sys as any).tpm_enabled ?? false,
         resourceGovernorEnabled: sys.resourceGovernorEnabled ?? (sys as any).resource_governor_enabled ?? false,
-      } as any; // Cast as any because StatusResponse might missing some fields we added
-      
-      queryClient.setQueryData(queryKey, newStatus);
+      };
+
+      // Merge over the cached value instead of replacing it.
+      //
+      // This used to assign the object above wholesale. MetricsSnapshot.System
+      // carries a strict subset of what /v1/status returns, and the query has
+      // no refetchInterval, so the first metrics tick after mount permanently
+      // erased every field the snapshot does not mention: clamavInstalled,
+      // profile, profilePinned, cpuCores, memoryUsagePercent and the routes,
+      // services, entryPoints and middlewares counts. They became undefined
+      // and stayed that way, because nothing fetched /v1/status again.
+      //
+      // It read as unrelated dashboard flakiness. The ClamAV card was the
+      // clearest case: install succeeds, the backend reports installed, and the
+      // card still offers "Install Now" forever, because clamavInstalled had
+      // been wiped seconds after page load and only the "Refresh status" button
+      // could bring it back.
+      //
+      // The `as any` cast that used to sit here is what let it through — the
+      // object is not a StatusResponse, and saying so out loud would have been
+      // a type error. Typing the updater restores that check.
+      queryClient.setQueryData<StatusResponse>(queryKey, (prev) =>
+        ({ ...(prev ?? {}), ...fromMetrics }) as StatusResponse);
     });
   }, [queryClient, subscribe]);
 

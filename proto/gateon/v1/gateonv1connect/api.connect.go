@@ -157,6 +157,9 @@ const (
 	ApiServiceUninstallClamavProcedure = "/gateon.v1.ApiService/UninstallClamav"
 	// ApiServiceRunDeepScanProcedure is the fully-qualified name of the ApiService's RunDeepScan RPC.
 	ApiServiceRunDeepScanProcedure = "/gateon.v1.ApiService/RunDeepScan"
+	// ApiServiceGetClamavScanStatusProcedure is the fully-qualified name of the ApiService's
+	// GetClamavScanStatus RPC.
+	ApiServiceGetClamavScanStatusProcedure = "/gateon.v1.ApiService/GetClamavScanStatus"
 	// ApiServiceListWafRulesProcedure is the fully-qualified name of the ApiService's ListWafRules RPC.
 	ApiServiceListWafRulesProcedure = "/gateon.v1.ApiService/ListWafRules"
 	// ApiServiceCreateWafRuleProcedure is the fully-qualified name of the ApiService's CreateWafRule
@@ -218,6 +221,9 @@ type ApiServiceClient interface {
 	InstallClamav(context.Context, *connect.Request[v1.InstallClamavRequest]) (*connect.Response[v1.InstallClamavResponse], error)
 	UninstallClamav(context.Context, *connect.Request[v1.UninstallClamavRequest]) (*connect.Response[v1.UninstallClamavResponse], error)
 	RunDeepScan(context.Context, *connect.Request[v1.RunDeepScanRequest]) (*connect.Response[v1.RunDeepScanResponse], error)
+	// GetClamavScanStatus reports whether a scan is running. It exists because
+	// RunDeepScan starts one, so it can never be the thing a dashboard polls.
+	GetClamavScanStatus(context.Context, *connect.Request[v1.GetClamavScanStatusRequest]) (*connect.Response[v1.GetClamavScanStatusResponse], error)
 	ListWafRules(context.Context, *connect.Request[v1.ListWafRulesRequest]) (*connect.Response[v1.ListWafRulesResponse], error)
 	CreateWafRule(context.Context, *connect.Request[v1.CreateWafRuleRequest]) (*connect.Response[v1.CreateWafRuleResponse], error)
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
@@ -511,6 +517,12 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(apiServiceMethods.ByName("RunDeepScan")),
 			connect.WithClientOptions(opts...),
 		),
+		getClamavScanStatus: connect.NewClient[v1.GetClamavScanStatusRequest, v1.GetClamavScanStatusResponse](
+			httpClient,
+			baseURL+ApiServiceGetClamavScanStatusProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("GetClamavScanStatus")),
+			connect.WithClientOptions(opts...),
+		),
 		listWafRules: connect.NewClient[v1.ListWafRulesRequest, v1.ListWafRulesResponse](
 			httpClient,
 			baseURL+ApiServiceListWafRulesProcedure,
@@ -586,6 +598,7 @@ type apiServiceClient struct {
 	installClamav         *connect.Client[v1.InstallClamavRequest, v1.InstallClamavResponse]
 	uninstallClamav       *connect.Client[v1.UninstallClamavRequest, v1.UninstallClamavResponse]
 	runDeepScan           *connect.Client[v1.RunDeepScanRequest, v1.RunDeepScanResponse]
+	getClamavScanStatus   *connect.Client[v1.GetClamavScanStatusRequest, v1.GetClamavScanStatusResponse]
 	listWafRules          *connect.Client[v1.ListWafRulesRequest, v1.ListWafRulesResponse]
 	createWafRule         *connect.Client[v1.CreateWafRuleRequest, v1.CreateWafRuleResponse]
 	updateWafRule         *connect.Client[v1.UpdateWafRuleRequest, v1.UpdateWafRuleResponse]
@@ -822,6 +835,11 @@ func (c *apiServiceClient) RunDeepScan(ctx context.Context, req *connect.Request
 	return c.runDeepScan.CallUnary(ctx, req)
 }
 
+// GetClamavScanStatus calls gateon.v1.ApiService.GetClamavScanStatus.
+func (c *apiServiceClient) GetClamavScanStatus(ctx context.Context, req *connect.Request[v1.GetClamavScanStatusRequest]) (*connect.Response[v1.GetClamavScanStatusResponse], error) {
+	return c.getClamavScanStatus.CallUnary(ctx, req)
+}
+
 // ListWafRules calls gateon.v1.ApiService.ListWafRules.
 func (c *apiServiceClient) ListWafRules(ctx context.Context, req *connect.Request[v1.ListWafRulesRequest]) (*connect.Response[v1.ListWafRulesResponse], error) {
 	return c.listWafRules.CallUnary(ctx, req)
@@ -890,6 +908,9 @@ type ApiServiceHandler interface {
 	InstallClamav(context.Context, *connect.Request[v1.InstallClamavRequest]) (*connect.Response[v1.InstallClamavResponse], error)
 	UninstallClamav(context.Context, *connect.Request[v1.UninstallClamavRequest]) (*connect.Response[v1.UninstallClamavResponse], error)
 	RunDeepScan(context.Context, *connect.Request[v1.RunDeepScanRequest]) (*connect.Response[v1.RunDeepScanResponse], error)
+	// GetClamavScanStatus reports whether a scan is running. It exists because
+	// RunDeepScan starts one, so it can never be the thing a dashboard polls.
+	GetClamavScanStatus(context.Context, *connect.Request[v1.GetClamavScanStatusRequest]) (*connect.Response[v1.GetClamavScanStatusResponse], error)
 	ListWafRules(context.Context, *connect.Request[v1.ListWafRulesRequest]) (*connect.Response[v1.ListWafRulesResponse], error)
 	CreateWafRule(context.Context, *connect.Request[v1.CreateWafRuleRequest]) (*connect.Response[v1.CreateWafRuleResponse], error)
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
@@ -1179,6 +1200,12 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(apiServiceMethods.ByName("RunDeepScan")),
 		connect.WithHandlerOptions(opts...),
 	)
+	apiServiceGetClamavScanStatusHandler := connect.NewUnaryHandler(
+		ApiServiceGetClamavScanStatusProcedure,
+		svc.GetClamavScanStatus,
+		connect.WithSchema(apiServiceMethods.ByName("GetClamavScanStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
 	apiServiceListWafRulesHandler := connect.NewUnaryHandler(
 		ApiServiceListWafRulesProcedure,
 		svc.ListWafRules,
@@ -1297,6 +1324,8 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceUninstallClamavHandler.ServeHTTP(w, r)
 		case ApiServiceRunDeepScanProcedure:
 			apiServiceRunDeepScanHandler.ServeHTTP(w, r)
+		case ApiServiceGetClamavScanStatusProcedure:
+			apiServiceGetClamavScanStatusHandler.ServeHTTP(w, r)
 		case ApiServiceListWafRulesProcedure:
 			apiServiceListWafRulesHandler.ServeHTTP(w, r)
 		case ApiServiceCreateWafRuleProcedure:
@@ -1496,6 +1525,10 @@ func (UnimplementedApiServiceHandler) UninstallClamav(context.Context, *connect.
 
 func (UnimplementedApiServiceHandler) RunDeepScan(context.Context, *connect.Request[v1.RunDeepScanRequest]) (*connect.Response[v1.RunDeepScanResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.RunDeepScan is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) GetClamavScanStatus(context.Context, *connect.Request[v1.GetClamavScanStatusRequest]) (*connect.Response[v1.GetClamavScanStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.GetClamavScanStatus is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) ListWafRules(context.Context, *connect.Request[v1.ListWafRulesRequest]) (*connect.Response[v1.ListWafRulesResponse], error) {

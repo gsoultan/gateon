@@ -17,7 +17,7 @@ import { DeleteTLSOptionRequest, DeleteTLSOptionResponse, ListTLSOptionsRequest,
 import { ChangePasswordRequest, ChangePasswordResponse, DeleteUserRequest, DeleteUserResponse, IsSetupRequiredRequest, IsSetupRequiredResponse, ListUsersRequest, ListUsersResponse, LoginRequest, LoginResponse, SetupRequest, SetupResponse, UpdateUserRequest, UpdateUserResponse } from "./auth_pb.js";
 import { ApplyRecommendationRequest, ApplyRecommendationResponse, CreateWafRuleRequest, CreateWafRuleResponse, DeleteWafRuleRequest, DeleteWafRuleResponse, GetDiagnosticsRequest, GetDiagnosticsResponse, GetSecurityThreatRequest, GetSecurityThreatResponse, ListReputationsRequest, ListReputationsResponse, ListSecurityThreatsRequest, ListSecurityThreatsResponse, ListWafRulesRequest, ListWafRulesResponse, MitigateThreatRequest, MitigateThreatResponse, RemoveMitigatedThreatRequest, RemoveMitigatedThreatResponse, TraceRouteRequest, TraceRouteResponse, TriggerWafUpdateRequest, TriggerWafUpdateResponse, UpdateWafRuleRequest, UpdateWafRuleResponse, ValidateCORSRequest, ValidateCORSResponse } from "./diagnostics_pb.js";
 import { GetAuditArchiveRequest, GetAuditArchiveResponse, ListAuditArchivesRequest, ListAuditArchivesResponse, ListAuditLogsRequest, ListAuditLogsResponse } from "./audit_pb.js";
-import { InstallClamavRequest, InstallClamavResponse, RunDeepScanRequest, RunDeepScanResponse, UninstallClamavRequest, UninstallClamavResponse } from "./api_pb.js";
+import { GetClamavScanStatusRequest, GetClamavScanStatusResponse, InstallClamavRequest, InstallClamavResponse, RunDeepScanRequest, RunDeepScanResponse, UninstallClamavRequest, UninstallClamavResponse } from "./api_pb.js";
 
 /**
  * @generated from service gateon.v1.ApiService
@@ -437,6 +437,18 @@ export const ApiService = {
       name: "RunDeepScan",
       I: RunDeepScanRequest,
       O: RunDeepScanResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetClamavScanStatus reports whether a scan is running. It exists because
+     * RunDeepScan starts one, so it can never be the thing a dashboard polls.
+     *
+     * @generated from rpc gateon.v1.ApiService.GetClamavScanStatus
+     */
+    getClamavScanStatus: {
+      name: "GetClamavScanStatus",
+      I: GetClamavScanStatusRequest,
+      O: GetClamavScanStatusResponse,
       kind: MethodKind.Unary,
     },
     /**

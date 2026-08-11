@@ -1,5 +1,17 @@
 import { test, expect } from '@playwright/test';
 
+/**
+ * Open the anomaly engine.
+ *
+ * It used to be the second half of the diagnostics page. Threats are acted on
+ * in the Security Hub now — one place, one code path — so these flows go
+ * through the hub's Anomaly Engine tab.
+ */
+async function gotoAnomalyEngine(page: any) {
+  await page.goto('/security-center', { waitUntil: 'load' });
+  await page.getByRole('tab', { name: /Anomaly Engine/i }).click();
+}
+
 // See mitigation-flow.test.ts: threats from a loopback source are dropped by
 // design, so these flows must present themselves as a remote client or the
 // Security Hub stays empty and the test times out waiting on it.
@@ -78,13 +90,13 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     }
 
     // 2. Go to Diagnostics -> Active tab
-    await page.goto('/diagnostics', { waitUntil: 'load' });
+    await gotoAnomalyEngine(page);
     
     console.log('Waiting for anomaly to appear in Diagnostics (Analysis Engine needs time)...');
     // Analysis engine runs every 5-10 seconds.
     for (let i = 0; i < 6; i++) {
         await page.waitForTimeout(5000);
-        await page.reload({ waitUntil: 'load' });
+        await gotoAnomalyEngine(page);
         const text = await page.innerText('body');
         if (text.includes('UNLISTED')) break;
         console.log(`Still waiting for UNLISTED anomaly... (${(i+1)*5}s)`);

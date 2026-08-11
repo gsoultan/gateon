@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -115,6 +116,13 @@ type WAFConfig struct {
 	// the same request shape, so only a deployment that knows it never fetches
 	// user-supplied URLs can say this is always an attack.
 	EnableSSRFProtection bool
+
+	// Origins are the hostnames this gateway serves, used to tell a destination
+	// on this site from one somewhere else. They come from the routing table's
+	// Host() rules and the operator's explicit list — never from the request,
+	// which is the bug gwaf v0.4.1 fixed. Empty means the off-origin redirect
+	// and SSRF rules have nothing to compare against and stay quiet.
+	Origins []string
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -150,6 +158,15 @@ func (c WAFConfig) Fingerprint() string {
 	// engines and must not share a cached one. Both are written unconditionally:
 	// an empty profile list is a meaningful value, not an absent one.
 	fmt.Fprintf(h, "p:%s|%t\n", waf.AppProfileFingerprint(c.AppProfiles), c.EnableSSRFProtection)
+	// Origins decide what counts as off-origin, so two configs with different
+	// ones reach different verdicts on the same request and must not share an
+	// engine. Sorted, because the routing table's iteration order is not
+	// meaningful and reordering it should not rebuild every engine.
+	if len(c.Origins) > 0 {
+		origins := slices.Clone(c.Origins)
+		slices.Sort(origins)
+		fmt.Fprintf(h, "o:%s\n", strings.Join(origins, ","))
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -730,6 +747,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		AllowedAdminIps:             allowedAdminIps,
 		AppProfiles:                 parseAppProfiles(cfg["app_profiles"]),
 		EnableSSRFProtection:        strings.TrimSpace(strings.ToLower(cfg["ssrf_protection"])) == "true",
+		Origins:                     resolveOrigins(parseCSV(cfg["origins"])),
 	}
 }
 
@@ -739,7 +757,10 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 // as far as the engine build, which is the one place that knows the profile set
 // of the linked engine and can log it against a route; dropping it here would
 // turn a typo into silence.
-func parseAppProfiles(v string) []string {
+func parseAppProfiles(v string) []string { return parseCSV(v) }
+
+// parseCSV splits a comma-separated config value, dropping empty entries.
+func parseCSV(v string) []string {
 	if strings.TrimSpace(v) == "" {
 		return nil
 	}

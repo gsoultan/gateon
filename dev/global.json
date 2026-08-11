@@ -42,7 +42,10 @@
   "ha": {},
   "ebpf": {},
   "alerting": {},
-  "audit": {},
+  "audit": {
+    "enabled": true,
+    "sign_entries": true
+  },
   "debugger": {},
   "security_advanced": {}
 }

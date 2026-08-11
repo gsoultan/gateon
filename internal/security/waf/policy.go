@@ -152,6 +152,21 @@ type Policy struct {
 	// not a depth setting, which is why it is a flag and not a paranoia level.
 	SSRFProtection bool
 
+	// Origins are the hostnames this gateway answers on, and they are what the
+	// off-origin redirect and SSRF rules compare a destination against.
+	//
+	// They must come from configuration. gwaf v0.4.0 compared against the Host
+	// header and v0.4.1 fixed it as a security bug: an attacker supplies Host as
+	// freely as the destination, so "Host: evil.tld" with
+	// "redirect_to=https://evil.tld/" compared same-origin and passed. A verdict
+	// that depends on attacker-supplied data is not a verdict.
+	//
+	// Left empty, those rules report nothing rather than guess. That is gwaf's
+	// choice and the right one, but it means an install that declares no origins
+	// silently loses open-redirect coverage — so gateon fills this from the
+	// routing table, which is configuration, and says so when it cannot.
+	Origins []string
+
 	// Logger receives engine diagnostics.
 	Logger Logger
 
@@ -319,6 +334,10 @@ func (p Policy) Options() []gwaf.Option {
 		// thing. Setting both from one source keeps them from drifting.
 		gwaf.WithMinConfidence(types.ConfidenceFromParanoiaLevel(p.paranoiaLevel())),
 		gwaf.WithRuleset(p.Ruleset()),
+	}
+
+	if len(p.Origins) > 0 {
+		opts = append(opts, gwaf.WithOrigins(p.Origins...))
 	}
 
 	if p.CoreRulesetDisabled {
