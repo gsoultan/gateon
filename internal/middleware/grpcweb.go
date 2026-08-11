@@ -196,7 +196,7 @@ func (w *grpcWebResponseWriter) WriteHeader(code int) {
 	w.wroteHeader = true
 	w.status = code
 
-	h := w.ResponseWriter.Header()
+	h := w.Header()
 
 	// Only apply gRPC-Web transformations if this is a gRPC response.
 	ct := h.Get("Content-Type")
@@ -266,7 +266,7 @@ func (w *grpcWebResponseWriter) finalize() {
 	}
 
 	// Collect trailers from the underlying ResponseWriter
-	trailers := w.ResponseWriter.Header()
+	trailers := w.Header()
 
 	// Only append trailers if this is a gRPC response.
 	// For gRPC-Web, the response Content-Type will be application/grpc-web (+proto/json).

@@ -577,9 +577,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 			// Protocol metrics
 			protocol := "http1"
-			if r.ProtoMajor == 2 {
+			switch r.ProtoMajor {
+			case 2:
 				protocol = "http2"
-			} else if r.ProtoMajor == 3 {
+			case 3:
 				protocol = "http3"
 			}
 			if r.TLS != nil && protocol == "http1" {

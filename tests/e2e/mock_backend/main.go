@@ -4,12 +4,12 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
 	"encoding/json"
-	"strings"
-	"os"
+	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"strings"
 )
 
 func main() {
@@ -36,9 +36,9 @@ func main() {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("DEBUG: Method=%s Path=%q Upgrade=%q Conn=%q\n", r.Method, r.URL.Path, r.Header.Get("Upgrade"), r.Header.Get("Connection"))
-		
+
 		isUpgrade := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
-		
+
 		if r.URL.Path == "/ws" && isUpgrade {
 			log.Println("DEBUG: Handling WebSocket upgrade")
 			hj, ok := w.(http.Hijacker)
@@ -47,7 +47,7 @@ func main() {
 				http.Error(w, "hijacking not supported", http.StatusInternalServerError)
 				return
 			}
-			
+
 			conn, bufrw, err := hj.Hijack()
 			if err != nil {
 				log.Printf("DEBUG: Hijack failed: %v\n", err)
@@ -55,13 +55,13 @@ func main() {
 				return
 			}
 			defer conn.Close()
-			
+
 			bufrw.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
 			bufrw.WriteString("Upgrade: websocket\r\n")
 			bufrw.WriteString("Connection: Upgrade\r\n")
 			bufrw.WriteString("\r\n")
 			bufrw.Flush()
-			
+
 			log.Println("DEBUG: WebSocket connection established")
 			for {
 				line, err := bufrw.ReadString('\n')
@@ -81,18 +81,18 @@ func main() {
 		for k, v := range r.Header {
 			headers[k] = v[0]
 		}
-		
+
 		resp := map[string]interface{}{
 			"message": "Hello from mock backend",
 			"path":    r.URL.Path,
 			"method":  r.Method,
 			"headers": headers,
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	})
-	
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8082"

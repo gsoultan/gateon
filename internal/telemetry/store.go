@@ -1537,10 +1537,7 @@ func IsIPMitigated(ip string) bool {
 	var status string
 	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
 	err := s.db.QueryRow(query, ip).Scan(&status)
-	mitigated := false
-	if err == nil && status == "mitigated" {
-		mitigated = true
-	}
+	mitigated := err == nil && status == "mitigated"
 
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, !mitigated)
@@ -1697,10 +1694,7 @@ check_db:
 	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE (fingerprint = ? OR ja4h = ?) ORDER BY updated_at DESC LIMIT 1")
 	var status string
 	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
-	mitigated := false
-	if err == nil && status == "mitigated" {
-		mitigated = true
-	}
+	mitigated := err == nil && status == "mitigated"
 
 	if s.userMitigationCache != nil {
 		s.userMitigationCache.Add(ja4plus, mitigated)
@@ -2320,12 +2314,13 @@ func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix 
 		conditions = append(conditions, prefix+"category = ?")
 		args = append(args, filter.Category)
 	}
-	if filter.Status == "mitigated" {
+	switch filter.Status {
+	case "mitigated":
 		// Mitigated if:
 		// 1. Current status is 'mitigated' in IP or fingerprint table
 		// 2. OR it was blocked at the time AND not subsequently unmitigated in any table
 		conditions = append(conditions, fmt.Sprintf("(m.status = 'mitigated' OR fm4.status = 'mitigated' OR (%saction_taken IN ('blocked', 'challenged', 'shunned') AND (m.status IS NULL OR m.status != 'unmitigated') AND (fm4.status IS NULL OR fm4.status != 'unmitigated')))", prefix))
-	} else if filter.Status == "detected" {
+	case "detected":
 		// Detected (active threat) if:
 		// 1. Current status is 'unmitigated' in any table
 		// 2. OR it was NOT blocked at the time AND not currently mitigated in any table

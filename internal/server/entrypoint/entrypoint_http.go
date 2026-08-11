@@ -104,13 +104,13 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		return
 	}
 	hasTCP, hasUDP := protocols(ep)
-	var epHandler http.Handler = deps.BaseHandler
+	var epHandler = deps.BaseHandler
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	isMgmt := IsManagementAddress(ep.Address, deps)
 	chain := []middleware.Middleware{
 		middleware.GlobalCORS(),
 		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
-		middleware.Metrics("gateon-"+epLabel),
+		middleware.Metrics("gateon-" + epLabel),
 		middleware.IPMitigation(),
 		middleware.UserMitigation(),
 		middleware.Recovery(),
@@ -135,7 +135,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 
 	// Start HTTP/3 (QUIC) in parallel with TCP when configured — production-ready settings.
 	needH3 := ep.Type == gateonv1.EntryPoint_HTTP3 && hasUDP && epTLSConfig != nil
-	var tcpHandler http.Handler = finalEPHandler
+	var tcpHandler = finalEPHandler
 	if needH3 {
 		h3Server := newHTTP3Server(addr, finalEPHandler, epTLSConfig)
 		tcpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -267,9 +267,10 @@ func protocols(ep *gateonv1.EntryPoint) (hasTCP, hasUDP bool) {
 		}
 	}
 	for _, p := range ep.Protocols {
-		if p == gateonv1.EntryPoint_TCP_PROTO {
+		switch p {
+		case gateonv1.EntryPoint_TCP_PROTO:
 			hasTCP = true
-		} else if p == gateonv1.EntryPoint_UDP_PROTO {
+		case gateonv1.EntryPoint_UDP_PROTO:
 			hasUDP = true
 		}
 	}

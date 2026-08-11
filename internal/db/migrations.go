@@ -67,16 +67,17 @@ func init() {
 
 	Register(4, "alter_traces_duration_to_double", func(db *sql.DB, dialect Dialect) error {
 		var query string
-		if dialect.Driver == DriverSQLite {
+		switch dialect.Driver {
+		case DriverSQLite:
 			// SQLite handles type changes flexibly, but for clarity we can try to re-declare it.
 			// However, ALTER COLUMN is limited in SQLite.
 			// Since we want to support floats, and SQLite allows floats in BIGINT columns anyway,
 			// we don't strictly NEED to change the type, but it's good practice.
 			// Actually, SQLite doesn't support ALTER COLUMN TYPE.
 			return nil
-		} else if dialect.Driver == DriverPostgres {
+		case DriverPostgres:
 			query = `ALTER TABLE traces ALTER COLUMN duration_ms TYPE DOUBLE PRECISION;`
-		} else {
+		default:
 			// MySQL / MariaDB
 			query = `ALTER TABLE traces MODIFY COLUMN duration_ms DOUBLE PRECISION NOT NULL;`
 		}
@@ -1203,11 +1204,12 @@ func init() {
 
 	Register(44, "add_category_to_fingerprint_mitigations", func(db *sql.DB, dialect Dialect) error {
 		var query string
-		if dialect.Driver == DriverSQLite {
+		switch dialect.Driver {
+		case DriverSQLite:
 			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
-		} else if dialect.Driver == DriverPostgres {
+		case DriverPostgres:
 			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
-		} else { // MySQL
+		default: // MySQL
 			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
 		}
 		if _, err := db.Exec(query); err != nil {
@@ -1238,11 +1240,12 @@ func init() {
 
 	Register(46, "add_ja4h_to_user_mitigations", func(db *sql.DB, dialect Dialect) error {
 		var query string
-		if dialect.Driver == DriverSQLite {
+		switch dialect.Driver {
+		case DriverSQLite:
 			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
-		} else if dialect.Driver == DriverPostgres {
+		case DriverPostgres:
 			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
-		} else { // MySQL
+		default: // MySQL
 			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
 		}
 		if _, err := db.Exec(query); err != nil {
@@ -1253,7 +1256,8 @@ func init() {
 
 	Register(47, "update_user_mitigations_primary_key", func(db *sql.DB, dialect Dialect) error {
 		var queries []string
-		if dialect.Driver == DriverSQLite {
+		switch dialect.Driver {
+		case DriverSQLite:
 			// SQLite doesn't support ALTER TABLE DROP PRIMARY KEY
 			// We need to recreate the table
 			queries = []string{
@@ -1276,14 +1280,14 @@ func init() {
 				`CREATE INDEX IF NOT EXISTS idx_user_mitigations_status ON user_mitigations(status);`,
 				`CREATE INDEX IF NOT EXISTS idx_user_mitigations_type ON user_mitigations(fp_type);`,
 			}
-		} else if dialect.Driver == DriverPostgres {
+		case DriverPostgres:
 			queries = []string{
 				`ALTER TABLE user_mitigations DROP CONSTRAINT IF EXISTS user_mitigations_pkey;`,
 				`ALTER TABLE user_mitigations DROP CONSTRAINT IF EXISTS fingerprint_mitigations_pkey;`,
 				`ALTER TABLE user_mitigations ALTER COLUMN ja4h SET NOT NULL;`,
 				`ALTER TABLE user_mitigations ADD PRIMARY KEY (fingerprint, ja4h);`,
 			}
-		} else { // MySQL
+		default: // MySQL
 			queries = []string{
 				`ALTER TABLE user_mitigations MODIFY ja4h VARCHAR(255) NOT NULL DEFAULT '';`,
 				`ALTER TABLE user_mitigations DROP PRIMARY KEY, ADD PRIMARY KEY (fingerprint, ja4h);`,
@@ -1299,11 +1303,12 @@ func init() {
 
 	Register(48, "add_ja4h_to_security_threats", func(db *sql.DB, dialect Dialect) error {
 		var query string
-		if dialect.Driver == DriverSQLite {
+		switch dialect.Driver {
+		case DriverSQLite:
 			query = `ALTER TABLE security_threats ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		} else if dialect.Driver == DriverPostgres {
+		case DriverPostgres:
 			query = `ALTER TABLE security_threats ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		} else { // MySQL
+		default: // MySQL
 			query = `ALTER TABLE security_threats ADD COLUMN ja4h VARCHAR(255) NOT NULL DEFAULT '';`
 		}
 		if _, err := db.Exec(query); err != nil {
@@ -1314,11 +1319,12 @@ func init() {
 
 	Register(49, "add_ja4h_to_traces", func(db *sql.DB, dialect Dialect) error {
 		var query string
-		if dialect.Driver == DriverSQLite {
+		switch dialect.Driver {
+		case DriverSQLite:
 			query = `ALTER TABLE traces ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		} else if dialect.Driver == DriverPostgres {
+		case DriverPostgres:
 			query = `ALTER TABLE traces ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		} else { // MySQL
+		default: // MySQL
 			query = `ALTER TABLE traces ADD COLUMN ja4h VARCHAR(255) NOT NULL DEFAULT '';`
 		}
 		if _, err := db.Exec(query); err != nil {
@@ -1359,11 +1365,12 @@ func init() {
 		// Update all 6-digit default rules to 7-digit range by adding '1' prefix
 		// This matches the new Seed logic and avoids CRS collisions.
 		var query string
-		if dialect.Driver == DriverMySQL {
+		switch dialect.Driver {
+		case DriverMySQL:
 			query = "UPDATE waf_rules SET directive = REPLACE(directive, CONCAT('id:', id), CONCAT('id:1', id)), id = CONCAT('1', id) WHERE LENGTH(id) = 6 AND (id LIKE '9%' OR id LIKE '1%' OR id LIKE '2%')"
-		} else if dialect.Driver == DriverPostgres {
+		case DriverPostgres:
 			query = "UPDATE waf_rules SET directive = REPLACE(directive, 'id:' || id::text, 'id:1' || id::text), id = '1' || id::text WHERE LENGTH(id::text) = 6 AND (id::text LIKE '9%' OR id::text LIKE '1%' OR id::text LIKE '2%')"
-		} else {
+		default:
 			// SQLite uses ||
 			query = "UPDATE waf_rules SET directive = REPLACE(directive, 'id:' || id, 'id:1' || id), id = '1' || id WHERE LENGTH(id) = 6 AND (id LIKE '9%' OR id LIKE '1%' OR id LIKE '2%')"
 		}
@@ -1388,11 +1395,12 @@ func init() {
 	})
 	Register(54, "ensure_waf_rules_id_type", func(db *sql.DB, dialect Dialect) error {
 		var query string
-		if dialect.Driver == DriverPostgres {
+		switch dialect.Driver {
+		case DriverPostgres:
 			query = `ALTER TABLE waf_rules ALTER COLUMN id TYPE VARCHAR(255) USING id::text;`
-		} else if dialect.Driver == DriverMySQL {
+		case DriverMySQL:
 			query = `ALTER TABLE waf_rules MODIFY COLUMN id VARCHAR(255);`
-		} else {
+		default:
 			return nil
 		}
 		_, err := db.Exec(query)

@@ -34,7 +34,6 @@ func InvalidateTLSCache() {
 
 // CreateTLSManager builds the TLS manager from global config.
 func CreateTLSManager(s *Server) *gtls.Manager {
-	gc := s.GlobalStore.Get(context.Background())
 	cfg := BuildGtlsConfig(s)
 	m := gtls.NewManager(cfg)
 
@@ -60,13 +59,13 @@ func CreateTLSManager(s *Server) *gtls.Manager {
 		return fmt.Errorf("host %q not authorized for ACME", host)
 	})
 
-	// Set persistent cache
+	// Set persistent cache. Without Redis the manager falls back to its own
+	// DirCache; reusing the auth database for the ACME cache would need the
+	// *sql.DB threaded down to here, which it is not, so the fallback stands
+	// rather than being half-wired. The empty else-if that used to record that
+	// evaluated a condition and did nothing with it.
 	if s.RedisClient != nil {
 		m.SetCache(gtls.NewRedisCache(s.RedisClient, "gateon:acme:"))
-	} else if gc != nil && gc.Auth != nil {
-		// Try to use the same DB as auth for ACME cache if it's SQL
-		// This is a bit complex to get the *sql.DB here, but we can try.
-		// For now, default to DirCache (implemented in gtls.Manager)
 	}
 
 	return m

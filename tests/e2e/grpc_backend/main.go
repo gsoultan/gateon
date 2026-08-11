@@ -7,8 +7,9 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"google.golang.org/grpc"
+
 	"github.com/gsoultan/gateon/tests/e2e/testpb"
+	"google.golang.org/grpc"
 )
 
 type server struct {
