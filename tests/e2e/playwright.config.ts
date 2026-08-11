@@ -23,12 +23,15 @@ export default defineConfig({
   // will then be visible as a flake rather than as a timeout.
   retries: 0,
   workers: 1,
-  // Stop the whole run rather than let it grind on. With one worker, two
-  // retries and per-test timeouts up to 180s, a bad run is bounded only by
-  // 104 x 3 x 180s, and a broken gateway makes almost every test take its full
-  // timeout — the failure mode this suite hits most often. 30 minutes is well
-  // clear of a healthy run and still leaves room, inside the job's 45-minute
-  // ceiling, for Playwright to write its report instead of being killed.
+  // Stop the whole run rather than let it grind on. With one worker and
+  // per-test timeouts up to 180s, a bad run is bounded only by 106 x 180s, and
+  // a broken gateway makes almost every test take its full timeout — the
+  // failure mode this suite hits most often. 30 minutes is well clear of a
+  // healthy run and still leaves room, inside the job's 45-minute ceiling, for
+  // Playwright to write its report instead of being killed.
+  //
+  // Now that retries are 0 this ceiling should also be reachable: the whole
+  // suite gets one pass instead of a third of it getting three.
   globalTimeout: 30 * 60 * 1000,
   reporter: 'html',
   use: {
