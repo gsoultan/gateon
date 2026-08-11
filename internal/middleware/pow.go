@@ -86,6 +86,10 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	if r.Header.Get("X-Requested-With") == "XMLHttpRequest" || strings.Contains(r.Header.Get("Accept"), "application/json") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
+		// #nosec G705 -- every interpolated value is a constrained alphabet, not
+		// free text: salt is base36 of UnixNano ([0-9a-z]), challengeID is
+		// unix-hex-salt ([0-9a-z-]) precisely because it is hashed above, and
+		// difficulty is an int. None can carry a quote or an angle bracket.
 		fmt.Fprintf(w, `{"error":"proof_of_work_required","challenge_id":"%s","salt":"%s","difficulty":%d}`, challengeID, salt, difficulty)
 		return
 	}
@@ -94,6 +98,10 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", nonce))
 	w.WriteHeader(http.StatusTooManyRequests)
+	// #nosec G705 -- the three sinks in this page (CSP nonce attribute, JS
+	// string literal, body text) all receive constrained alphabets: nonce is
+	// standard base64, challengeID is [0-9a-z-] by construction, difficulty is
+	// an int. See the comment above challengeID for why it is hashed.
 	fmt.Fprintf(w, `
 <html>
 <head><title>Security Check - Gateon</title></head>

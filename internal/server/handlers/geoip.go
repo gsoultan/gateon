@@ -74,7 +74,7 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 			return
 		}
 
-		if err := os.MkdirAll("geoip", 0o755); err != nil {
+		if err := os.MkdirAll("geoip", 0o750); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
