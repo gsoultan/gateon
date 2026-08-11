@@ -13,6 +13,10 @@ import (
 // TraceRoute performs a traceroute-like operation to the target IP.
 // For production stability and to avoid requiring raw socket privileges,
 // it combines real GeoIP data for the endpoints with simulated intermediate network hops.
+// #nosec G404 -- every rand call in this function feeds the topology map's
+// visual path: jittered hop coordinates and displayed RTT values. None is a
+// token, key, nonce or identifier, so math/rand is the correct choice and
+// crypto/rand would spend entropy on a drawing.
 func TraceRoute(ctx context.Context, targetIP string, serverIP string) ([]*gateonv1.TraceHop, error) {
 	var sCountry, sCity string
 	var sLat, sLon float64
@@ -68,6 +72,10 @@ func TraceRoute(ctx context.Context, targetIP string, serverIP string) ([]*gateo
 		for i := 1; i <= numIntermediate; i++ {
 			ratio := float64(i) / float64(numIntermediate+1)
 
+			// #nosec G404 -- math/rand is correct here. These values are cosmetic
+			// jitter for the topology map's hop coordinates and displayed RTT;
+			// nothing is a token, a key or a nonce. crypto/rand would cost
+			// entropy for a drawing.
 			// Add some randomness to the path
 			lat := sLat + (dLat-sLat)*ratio + (rand.Float64()-0.5)*2.0
 			lon := sLon + (dLon-sLon)*ratio + (rand.Float64()-0.5)*2.0

@@ -116,6 +116,8 @@ func installLinux(binPath string) error {
 		return fmt.Errorf("create config dir %s: %w", configDir, err)
 	}
 	// Ensure root ownership and correct permissions if it was previously owned by another user
+	// #nosec G302 -- a directory, not a file: the execute bit is what makes it
+	// traversable, so 0750 is the tight mode here.
 	_ = os.Chmod(configDir, 0o750)
 	_ = exec.Command("chown", "-R", "root:root", configDir).Run()
 
