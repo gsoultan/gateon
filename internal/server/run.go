@@ -153,6 +153,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// destination against. Read through the store on every call rather than
 	// snapshotted here: routes are hot-reloaded, and an origin list fixed at
 	// startup would go stale the first time somebody added a vhost.
+	// Background inside, not Run's ctx: this provider is invoked per request for
+	// CORS origin checks, long after Run has returned. Binding it to the process
+	// context would make every origin lookup fail the moment shutdown began, so
+	// in-flight requests would lose their CORS answers mid-drain.
+	//nolint:contextcheck // no request context reaches this callback; see above.
 	middleware.SetRouteOriginProvider(func() []string {
 		return config.RouteOrigins(context.Background(), s.RouteStore)
 	})

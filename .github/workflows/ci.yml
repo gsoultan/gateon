@@ -117,6 +117,45 @@ jobs:
   # the suite is only just back under CI and blocking every PR on a suite whose
   # baseline nobody has seen yet would stall the queue. Remove
   # continue-on-error once a green run is the norm.
+  # Lints only what the pull request changed, against its merge base. The tree
+  # carries pre-existing debt that `make lint` still reports, so gating on the
+  # whole tree would fail every PR for things it did not touch and the job would
+  # be ignored within a week. --new-from-rev is what makes this a gate somebody
+  # will actually read.
+  #
+  # Until this existed, golangci-lint ran in no workflow at all: goheader,
+  # funlen, cyclop, gocognit, nestif, goconst, bodyclose, contextcheck and
+  # errorlint were configured, documented as the standard, and enforced only on
+  # whichever laptop remembered to run `make lint-new`.
+  lint-new:
+    name: lint (changed code)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # Full history: --new-from-rev needs the merge base to diff against, and
+        # the default shallow clone does not have it.
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Determine base revision
+        id: base
+        run: |
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            echo "rev=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "rev=origin/main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Lint changed code
+        run: make lint-new LINT_BASE=${{ steps.base.outputs.rev }}
+
   e2e-ui:
     name: e2e-ui (playwright)
     runs-on: ubuntu-latest
