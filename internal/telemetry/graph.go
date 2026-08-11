@@ -36,7 +36,7 @@ func AddGraphEdge(u, v string, weight float64) {
 		return
 	}
 	h := fnv.New32a()
-	h.Write([]byte(u))
+	_, _ = h.Write([]byte(u))
 	idx := h.Sum32() % graphShards
 
 	shards := getGlobalGraph()

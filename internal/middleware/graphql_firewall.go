@@ -76,7 +76,7 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) Middleware {
 				http.Error(w, "Error reading request body", http.StatusInternalServerError)
 				return
 			}
-			r.Body.Close()
+			_ = r.Body.Close()
 
 			var body struct {
 				Query string `json:"query"`

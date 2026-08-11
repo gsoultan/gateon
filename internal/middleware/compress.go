@@ -219,6 +219,8 @@ func (w *compressWriter) decide() {
 	} else {
 		w.ResponseWriter.WriteHeader(w.status)
 		if len(w.buf) > 0 {
+			// #nosec G705 -- origin response bytes forwarded verbatim by the proxy;
+			// no Gateon-authored content is interpolated into this body.
 			_, _ = w.ResponseWriter.Write(w.buf)
 		}
 	}

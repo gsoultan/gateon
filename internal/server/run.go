@@ -96,6 +96,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 
 	apiService := api.NewApiService(api.ApiServiceConfig{
+		Lifetime:           ctx,
 		Version:            s.Version,
 		Routes:             s.RouteStore,
 		Services:           s.ServiceStore,
@@ -136,7 +137,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	})
 	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger)
 	tlsOptService := dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger)
-	canaryService := canary.NewService(serviceService, s.Logger)
+	canaryService := canary.NewService(ctx, serviceService, s.Logger)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
@@ -268,7 +269,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 			_ = closer.Close()
 		}
 	}
-	s.Close()
+	_ = s.Close()
 	close(metricsStop)
 	wg.Wait()
 	logger.L.LogInfo("shutdown complete")

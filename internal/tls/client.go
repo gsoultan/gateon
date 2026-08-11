@@ -46,6 +46,8 @@ func CreateTLSClientConfig(cfg *gateonv1.TlsClientConfig) (*tls.Config, error) {
 
 	if cfg.CaFile != "" {
 		caFile := config.ResolvePath(cfg.CaFile)
+		// #nosec G304 -- an operator-configured CA bundle path, resolved through
+		// config.ResolvePath. Naming a trust anchor is the point of the setting.
 		caData, err := os.ReadFile(caFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA file: %w", err)
