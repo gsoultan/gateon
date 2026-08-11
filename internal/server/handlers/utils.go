@@ -60,26 +60,54 @@ func DecodeRequestBody(r *http.Request, dst any) error {
 	return nil
 }
 
+// Pagination bounds. Both values come straight off the query string, so both
+// need a ceiling: pageSize is what a caller can turn into one enormous result
+// set, and page is what they can turn into an enormous OFFSET.
+const (
+	maxPageNumber int32 = 1_000_000
+	maxPageSize   int32 = 1_000
+)
+
 // ParsePagination extracts page, pageSize, and search from query params.
+//
+// Zero means "unset" and leaves the default to the caller.
 func ParsePagination(r *http.Request) (page, pageSize int32, search string) {
 	q := r.URL.Query()
 	search = q.Get("search")
-	if pageStr := q.Get("page"); pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil {
-			page = int32(p)
-		}
-	}
+	page = boundedInt32(q.Get("page"), maxPageNumber)
 	// Support both snake_case and camelCase for frontend compatibility
 	pageSizeStr := q.Get("pageSize")
 	if pageSizeStr == "" {
 		pageSizeStr = q.Get("page_size")
 	}
-	if pageSizeStr != "" {
-		if ps, err := strconv.Atoi(pageSizeStr); err == nil {
-			pageSize = int32(ps)
-		}
-	}
+	pageSize = boundedInt32(pageSizeStr, maxPageSize)
 	return page, pageSize, search
+}
+
+// boundedInt32 parses s as a non-negative int32 no larger than max.
+//
+// strconv.Atoi followed by an int32 conversion was silently wrong on a 64-bit
+// build: Atoi returns an int, so "4294967297" parsed fine and the conversion
+// truncated it to 1 — a caller could pick a page by overflowing into it, and a
+// negative value sailed through as a negative page. ParseInt with a bitSize of
+// 32 rejects the overflow at parse time instead of wrapping.
+//
+// Anything unparseable, negative or overflowing returns 0, which callers read
+// as "unset" and replace with their own default. Values above max are clamped
+// rather than rejected, so an over-eager page size degrades to the ceiling
+// instead of failing the request.
+func boundedInt32(s string, max int32) int32 {
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseInt(s, 10, 32)
+	if err != nil || v < 0 {
+		return 0
+	}
+	if v > int64(max) {
+		return max
+	}
+	return int32(v)
 }
 
 // ParseRouteFilters extracts type, host, path, status from query params.

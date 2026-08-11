@@ -24,6 +24,11 @@ import (
 	"github.com/oschwald/geoip2-golang"
 )
 
+// maxMMDBBytes bounds a single file unpacked from the MaxMind archive. A
+// GeoLite2-City database is ~70 MiB; 256 MiB leaves generous headroom while
+// still refusing an archive that decompresses without end.
+const maxMMDBBytes int64 = 256 << 20
+
 type publicIPInfo struct {
 	Status      string  `json:"status"`
 	CountryCode string  `json:"countryCode"`
@@ -564,9 +569,22 @@ func extractMMDB(body io.Reader, destPath string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create destination file: %w", err)
 		}
-		if _, err := io.Copy(f, tr); err != nil {
+		// Bounded copy, not io.Copy. The tar stream is gzip-decompressed remote
+		// content, so its uncompressed size is chosen by whoever served it — a
+		// compromised mirror, a hijacked DNS answer or a proxy in the middle can
+		// answer a few KB of gzip that expands until the disk is full. Writing
+		// one byte past the ceiling is treated as hostile rather than truncated,
+		// because a silently truncated mmdb would load as a corrupt database.
+		written, err := io.Copy(f, io.LimitReader(tr, maxMMDBBytes+1))
+		if err != nil {
 			_ = f.Close()
 			return fmt.Errorf("failed to copy mmdb content: %w", err)
+		}
+		if written > maxMMDBBytes {
+			_ = f.Close()
+			_ = os.Remove(destPath)
+			return fmt.Errorf("mmdb entry %q exceeds the %d byte limit; refusing to unpack",
+				header.Name, int64(maxMMDBBytes))
 		}
 		_ = f.Close()
 		return nil
