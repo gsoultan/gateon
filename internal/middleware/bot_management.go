@@ -102,6 +102,9 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 						SameSite: http.SameSiteLaxMode,
 						MaxAge:   cfg.ChallengeTimeoutSeconds,
 					})
+					// #nosec G710 -- safeRedirectTarget rejects any scheme, host or opaque form
+					// and requires a leading "/" while rejecting "//" and "/\\", testing the
+					// decoded path so a percent-encoded backslash cannot slip past.
 					http.Redirect(w, r, safeRedirectTarget(r.FormValue("redirect")), http.StatusFound)
 					return
 				}

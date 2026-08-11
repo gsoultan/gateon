@@ -27,6 +27,8 @@ func main() {
 	flag.Parse()
 
 	if *db == "" || len(*secret) != 32 {
+		// #nosec G706 -- developer seeding tool; the values are flags this
+		// operator just typed and the sink is their own terminal.
 		log.Fatalf("seed: -db is required and -secret must be exactly 32 characters (got db=%q, secret len=%d)", *db, len(*secret))
 	}
 
@@ -56,6 +58,8 @@ func main() {
 	// The password is deliberately not logged. It is a known dev default and
 	// scripts/dev.sh prints it in its banner, so echoing it here buys nothing
 	// and writes a credential into whatever collects this output.
+	// #nosec G706 -- a developer seeding tool; *db is a flag this operator just
+	// typed, and the sink is their own terminal.
 	log.Printf("seed: admin/operator/viewer ready in %s", *db)
 }
 
