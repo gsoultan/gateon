@@ -221,7 +221,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// When global TLS is not explicitly enabled but at least one entrypoint
 	// has TLS turned on, create a minimal TLS config so that SNI can
 	// dynamically serve per-route certificates.
-	if tlsConfig == nil && anyEntrypointTLS(s.EpStore) {
+	if tlsConfig == nil && anyEntrypointTLS(ctx, s.EpStore) {
 		tlsConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 			NextProtos: []string{"h2", "http/1.1"},
@@ -286,6 +286,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 
 	<-ctx.Done()
 	logger.L.LogInfo("shutting down gracefully")
+	// Background, not ctx: ctx is the thing that just fired. Deriving the
+	// shutdown deadline from it would hand ShutdownAll an already-cancelled
+	// context and collapse the graceful drain into an immediate close.
+	//nolint:contextcheck // the drain deliberately outlives the signal that started it.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer cancel()
 	shutdownReg.ShutdownAll(shutdownCtx)
@@ -349,8 +353,12 @@ func collectCertInfos(ctx context.Context, s *Server, tlsManager gtls.TLSManager
 }
 
 // anyEntrypointTLS returns true if at least one entrypoint has TLS enabled.
-func anyEntrypointTLS(epStore config.EntryPointStore) bool {
-	for _, ep := range epStore.List(context.Background()) {
+//
+// Takes the caller's context rather than reaching for Background: this runs
+// during startup from Run, which already holds the process context, and a
+// SIGTERM arriving mid-boot should stop the store read like anything else.
+func anyEntrypointTLS(ctx context.Context, epStore config.EntryPointStore) bool {
+	for _, ep := range epStore.List(ctx) {
 		if ep.Tls != nil && ep.Tls.Enabled {
 			return true
 		}
