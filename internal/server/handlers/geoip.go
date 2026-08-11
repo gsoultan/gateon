@@ -16,6 +16,13 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
+// Upload bounds for the GeoIP database endpoint. The hard ceiling must clear a
+// real GeoLite2-City.mmdb (~70 MiB) or legitimate uploads start failing.
+const (
+	geoIPUploadMemoryBytes = 50 << 20  // 50 MiB
+	maxGeoIPUploadBytes    = 128 << 20 // 128 MiB
+)
+
 // reloadGeoIPByFilename reloads the GeoIP reader that matches the uploaded
 // edition. ASN and Country databases are detected by their MaxMind filename and
 // loaded into their dedicated readers; everything else reloads the City reader.
@@ -36,7 +43,15 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
 			return
 		}
-		if err := r.ParseMultipartForm(50 << 20); err != nil {
+		// ParseMultipartForm bounds memory only; the overflow goes to a temp file
+		// with no limit, so without MaxBytesReader an authenticated writer can
+		// fill the disk. The ceiling has to clear a real GeoLite2-City database
+		// (~70 MB at time of writing) with room to grow.
+		r.Body = http.MaxBytesReader(w, r.Body, maxGeoIPUploadBytes)
+		// #nosec G120 -- the body is bounded by the MaxBytesReader on the line
+		// above. G120 fires on any ParseMultipartForm call and does not look for
+		// the guard, so it reports the mitigated case identically.
+		if err := r.ParseMultipartForm(geoIPUploadMemoryBytes); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("failed to parse multipart form"))
 			return
