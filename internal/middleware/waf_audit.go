@@ -127,7 +127,10 @@ func newAuditLog(cfg WAFConfig) (*auditLog, error) {
 	if err := ensureAuditLogFile(path); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	// 0600, not 0640. This file is captured attack traffic — request paths,
+	// headers and matched payloads — so group-readable is a wider audience
+	// than it needs. The process writes and reads it as the same user.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open audit log %q: %w", path, err)
 	}
@@ -229,7 +232,10 @@ func ensureAuditLogFile(path string) error {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create audit log dir %q: %w", dir, err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	// 0600, not 0640. This file is captured attack traffic — request paths,
+	// headers and matched payloads — so group-readable is a wider audience
+	// than it needs. The process writes and reads it as the same user.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("create audit log file %q: %w", path, err)
 	}

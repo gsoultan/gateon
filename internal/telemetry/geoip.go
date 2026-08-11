@@ -503,7 +503,7 @@ func DownloadGeoIP(licenseKey string) error {
 		return fmt.Errorf("maxmind license key is required")
 	}
 
-	if err := os.MkdirAll(geoDir, 0o755); err != nil {
+	if err := os.MkdirAll(geoDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create geoip directory: %w", err)
 	}
 

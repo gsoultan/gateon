@@ -589,6 +589,9 @@ func (m *ClamAVManager) UpdateApplication(ctx context.Context) error {
 		if image == "" {
 			image = "clamav/clamav:latest"
 		}
+		// #nosec G204 -- no shell (exec.CommandContext, not sh -c), and image is
+		// the operator-configured DockerImage defaulting to clamav/clamav:latest.
+		// An operator who can set the ClamAV image can already run containers.
 		if out, err := exec.CommandContext(ctx, "docker", "pull", image).CombinedOutput(); err != nil {
 			return m.formatExecError("docker pull", err, out)
 		}
