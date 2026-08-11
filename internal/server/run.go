@@ -96,6 +96,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 
 	apiService := api.NewApiService(api.ApiServiceConfig{
+		Lifetime:           ctx,
 		Version:            s.Version,
 		Routes:             s.RouteStore,
 		Services:           s.ServiceStore,
@@ -127,7 +128,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ipReputation, ".")
 	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger)
 	tlsOptService := dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger)
-	canaryService := canary.NewService(serviceService, s.Logger)
+	canaryService := canary.NewService(ctx, serviceService, s.Logger)
 
 	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)

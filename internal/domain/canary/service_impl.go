@@ -17,19 +17,27 @@ import (
 type serviceImpl struct {
 	svcService service.Service
 	logger     logger.Logger
+	lifetime   context.Context
 }
 
-// NewService creates a new Canary Service.
-func NewService(svcService service.Service, l logger.Logger) Service {
-	return &serviceImpl{svcService: svcService, logger: l}
+// NewService creates a new Canary Service. lifetime is the process-lifetime
+// context; rollouts run detached from the RPC that starts them but must still
+// stop when the gateway does.
+func NewService(lifetime context.Context, svcService service.Service, l logger.Logger) Service {
+	if lifetime == nil {
+		lifetime = context.Background()
+	}
+	return &serviceImpl{svcService: svcService, logger: l, lifetime: lifetime}
 }
 
 // StartCanary starts a background task to gradually shift traffic to target weights.
 func (cs *serviceImpl) StartCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) (string, error) {
 	taskID := uuid.NewString()
 
-	// Use background context for the long-running task to survive the API request
-	go cs.runCanary(context.Background(), req)
+	// Detached from the request so a gradual rollout is not cancelled when this
+	// RPC returns, but hung off the process lifetime so it does stop at
+	// shutdown. context.Background() gave the first half only.
+	go cs.runCanary(cs.lifetime, req)
 
 	return taskID, nil
 }
