@@ -296,7 +296,7 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 
 	// Use a shorter deadline for the first byte, then a longer one for the rest
 	// to avoid blocking goroutines for slow/idle connections.
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 
 	peekPtr := peekPool.Get().(*[]byte)
 	peek := *peekPtr
@@ -308,11 +308,11 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			// No data received within 1s, handle as generic TCP
-			conn.SetReadDeadline(time.Time{})
+			_ = conn.SetReadDeadline(time.Time{})
 			goto fallback
 		}
 		logger.L.LogError("TCP inspection initial read error", "ep", ep.Id, "error", err)
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 
@@ -320,12 +320,12 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 	if n > 0 && n < PeekSize {
 		// If it looks like HTTP/2 preface start, try to read more
 		if peek[0] == 'P' || IsTCPAppHTTP(peek[:n]) {
-			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 			n2, _ := io.ReadAtLeast(conn, peek[n:], 0) // non-blocking best-effort
 			n += n2
 		}
 	}
-	conn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Time{})
 
 	if n > 0 {
 		peeked := make([]byte, n)
@@ -367,7 +367,7 @@ fallback:
 	logger.L.LogDebug("TCP inspection fallback to generic TCP", "ep", ep.Id, "bytes", n)
 	pc := newPeekedConn(conn, peeked)
 	handleTCPConn(pc)
-	pc.Close()
+	_ = pc.Close()
 }
 
 func handleTCPConn(conn net.Conn) {

@@ -79,6 +79,19 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 		}
 
 		destPath := filepath.Join("geoip", filename)
+		// filepath.Base above already strips path components, so this is
+		// defence in depth rather than the primary guard — but it is the same
+		// guard the certificate upload performs, and the two handlers should not
+		// differ in how carefully they treat a client-supplied filename.
+		if !strings.HasPrefix(filepath.Clean(destPath)+string(os.PathSeparator),
+			filepath.Clean("geoip")+string(os.PathSeparator)) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("invalid filename"))
+			return
+		}
+		// #nosec G304 -- filename is filepath.Base of the client value, checked
+		// for a .mmdb extension, and the resolved path is proved to sit inside
+		// the geoip directory just above.
 		dst, err := os.Create(destPath)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

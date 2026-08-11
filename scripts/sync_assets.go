@@ -81,6 +81,9 @@ func copyDir(src, dst string) error {
 	})
 }
 
+// #nosec G304 -- build-time asset sync between two paths this program computed
+// itself while walking the dashboard build output. Not a runtime path and not
+// reachable from a request.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -88,6 +91,7 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close()
 
+	// #nosec G304 -- see copyFile: build-time only.
 	out, err := os.Create(dst)
 	if err != nil {
 		return err

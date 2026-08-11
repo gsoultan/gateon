@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,7 +102,18 @@ func (m *GitOpsManager) Sync(ctx context.Context) error {
 	}
 	logger.L.LogInfo("gitops: synced to commit", "hash", ref.Hash().String())
 
-	configPath := filepath.Join(tempDir, m.config.Path)
+	// filepath.Join cleans as it joins, so a configured Path of "../../etc/shadow"
+	// does not produce a path inside tempDir — it produces /etc/shadow, and the
+	// read below would succeed and the contents would be reported back through
+	// the sync error. GitOps settings arrive over the management API, so this
+	// turns "can edit config" into "can read any file the gateway can", which is
+	// a different permission than the one that was granted.
+	configPath, err := containedPath(tempDir, m.config.Path)
+	if err != nil {
+		return fmt.Errorf("gitops: %w", err)
+	}
+	// #nosec G304 -- containedPath has just proved this resolves inside the
+	// freshly cloned tempDir.
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to read config file at %s: %w", m.config.Path, err)
@@ -127,4 +139,21 @@ func (m *GitOpsManager) isEqual(a, b *gateonv1.GlobalConfig) bool {
 	aj, _ := json.Marshal(a)
 	bj, _ := json.Marshal(b)
 	return string(aj) == string(bj)
+}
+
+// containedPath joins rel onto root and proves the result is still inside root.
+//
+// filepath.Join cleans the path it builds, which is exactly what makes it
+// unsafe with untrusted input: joining "../.." onto a root does not stay under
+// the root, it walks out of it. Comparing the cleaned result against the
+// cleaned root with a trailing separator is the check that actually holds —
+// without the separator, "/tmp/gitops-evil" would pass as being inside
+// "/tmp/gitops".
+func containedPath(root, rel string) (string, error) {
+	cleanRoot := filepath.Clean(root)
+	joined := filepath.Join(cleanRoot, rel)
+	if joined != cleanRoot && !strings.HasPrefix(joined, cleanRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path %q escapes %q", rel, cleanRoot)
+	}
+	return joined, nil
 }

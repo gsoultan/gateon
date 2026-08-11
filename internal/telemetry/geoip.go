@@ -111,7 +111,7 @@ func GetPublicIP(ctx context.Context) string {
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			continue
 		}
@@ -566,6 +566,8 @@ func extractMMDB(body io.Reader, destPath string) error {
 			continue
 		}
 
+		// #nosec G304 -- destPath is built from the fixed geoip directory and a
+		// name filtered to .mmdb entries from the MaxMind archive.
 		f, err := os.Create(destPath)
 		if err != nil {
 			return fmt.Errorf("failed to create destination file: %w", err)
