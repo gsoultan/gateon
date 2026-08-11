@@ -909,139 +909,9 @@ func (s *pathStatsStore) loop() {
 	threatBatch := make([]*SecurityThreat, 0, 128)
 
 	flush := func() {
-		if len(batch) > 0 {
-			tx, err := s.db.Begin()
-			if err != nil {
-				logger.Default().LogError("telemetry: begin transaction failed", "error", err)
-			} else {
-				// Rollback after a successful Commit returns sql.ErrTxDone by design, so
-				// this error is expected rather than ignored. The defer is the safety
-				// net for the paths that return before committing.
-				defer func() { _ = tx.Rollback() }()
-				pathStmt, _ := s.upsertStmt(tx)
-				domainStmt, _ := s.domainUpsertStmt(tx)
-
-				// Aggregate increments in the batch to reduce IOPS.
-				// This significantly reduces the number of Exec() calls for popular paths.
-				type aggKey struct {
-					day      string
-					host     string
-					path     string
-					isDomain bool
-					bucket   int // for domain stats
-				}
-				aggregated := make(map[aggKey]*struct {
-					count int
-					latS  float64
-					bytes uint64
-				})
-
-				for _, inc := range batch {
-					day := inc.atTime.UTC().Format("2006-01-02")
-					bucket := 0
-					if inc.isDomain {
-						// Use 30-minute buckets: hour*2 + (minute/30) -> 0-47
-						bucket = inc.atTime.UTC().Hour()*2 + inc.atTime.UTC().Minute()/30
-					}
-					key := aggKey{day, inc.host, inc.path, inc.isDomain, bucket}
-
-					if s, ok := aggregated[key]; ok {
-						s.count++
-						s.latS += inc.latS
-						s.bytes += inc.bytesTotal
-					} else {
-						aggregated[key] = &struct {
-							count int
-							latS  float64
-							bytes uint64
-						}{1, inc.latS, inc.bytesTotal}
-					}
-				}
-
-				for key, val := range aggregated {
-					if key.isDomain {
-						if domainStmt != nil {
-							if _, err := domainStmt.Exec(key.day, key.bucket, key.host, val.count, val.latS, val.bytes); err != nil {
-								logger.Default().LogError("domain stats: upsert failed", "error", err)
-							}
-						}
-					} else {
-						if pathStmt != nil {
-							if _, err := pathStmt.Exec(key.day, key.host, key.path, val.count, val.latS, val.bytes); err != nil {
-								logger.Default().LogError("path stats: upsert failed", "error", err)
-							}
-						}
-					}
-				}
-				if pathStmt != nil {
-					_ = pathStmt.Close()
-				}
-				if domainStmt != nil {
-					_ = domainStmt.Close()
-				}
-				_ = tx.Commit()
-			}
-			batch = batch[:0]
-		}
-
-		if len(traceBatch) > 0 {
-			batch := s.pebble.NewBatch()
-			for _, tr := range traceBatch {
-				key := makeTraceKey(tr.Timestamp, tr.ID)
-				// Check for duplicates in a simple way for recent records if needed,
-				// but for Pebble, Set just overwrites.
-				// However, if we want strict ID uniqueness across all time, we'd need to check existence.
-				// For access logs, the combination of timestamp (nano) and ID is extremely likely to be unique.
-				val, _ := json.Marshal(tr)
-				_ = batch.Set(key, val, pebble.NoSync)
-			}
-			if err := batch.Commit(pebble.Sync); err != nil {
-				logger.Default().LogError("pebble: trace batch commit failed", "error", err)
-			}
-			for _, tr := range traceBatch {
-				tr.Reset()
-				tracePool.Put(tr)
-			}
-			traceBatch = traceBatch[:0]
-		}
-
-		if len(threatBatch) > 0 {
-			tx, err := s.db.Begin()
-			if err != nil {
-				logger.Default().LogError("threats: begin transaction failed", "error", err)
-			} else {
-				// Rollback after a successful Commit returns sql.ErrTxDone by design, so
-				// this error is expected rather than ignored. The defer is the safety
-				// net for the paths that return before committing.
-				defer func() { _ = tx.Rollback() }()
-				if stmt, err := s.threatInsertStmt(tx); err == nil {
-					for _, th := range threatBatch {
-						sourceIPs := strings.Join(th.SourceIPs, ",")
-						// Each row gets a savepoint so a single rejected threat
-						// costs that threat and nothing else. Without it the
-						// first failure aborts the surrounding transaction, and
-						// on Postgres every later Exec then fails with 25P02 —
-						// so one malformed record silently discarded the whole
-						// batch. Threats are what the Security Hub is made of;
-						// losing 127 good ones to a bad one is the difference
-						// between a gap and a blind spot.
-						if !s.execThreat(tx, stmt, th, sourceIPs) {
-							logger.Default().LogWarn("threats: record dropped",
-								"id", th.ID, "type", th.Type, "source_ip", th.SourceIP)
-						}
-					}
-					_ = stmt.Close()
-					if err := tx.Commit(); err != nil {
-						logger.Default().LogError("threats: commit failed", "error", err)
-					}
-				}
-				for _, th := range threatBatch {
-					th.Reset()
-					threatPool.Put(th)
-				}
-			}
-			threatBatch = threatBatch[:0]
-		}
+		batch = s.flushIncrements(batch)
+		traceBatch = s.flushTraces(traceBatch)
+		threatBatch = s.flushThreats(threatBatch)
 	}
 
 	for {
@@ -1068,12 +938,7 @@ func (s *pathStatsStore) loop() {
 		case <-timer.C:
 			s.syncTierSettings()
 			flush()
-			td := config.CurrentTierDefaults()
-			interval := time.Duration(td.FlushIntervalSeconds) * time.Second
-			if interval <= 0 {
-				interval = 1 * time.Second
-			}
-			timer.Reset(interval)
+			timer.Reset(flushInterval())
 		case ack := <-s.flushCh:
 			flush()
 			close(ack)
@@ -1084,6 +949,176 @@ func (s *pathStatsStore) loop() {
 			return
 		}
 	}
+}
+
+// flushInterval is how long the writer waits between timed flushes, taken from
+// the active tier. A zero or negative configured value falls back to one second
+// rather than to a hot loop.
+func flushInterval() time.Duration {
+	interval := time.Duration(config.CurrentTierDefaults().FlushIntervalSeconds) * time.Second
+	if interval <= 0 {
+		return 1 * time.Second
+	}
+	return interval
+}
+
+// statCounters accumulates one aggregation bucket's totals between the channel
+// and the database.
+type statCounters struct {
+	count int
+	latS  float64
+	bytes uint64
+}
+
+// statKey identifies an aggregation bucket. Domain rows carry a 30-minute
+// bucket; path rows do not and leave it zero.
+type statKey struct {
+	day      string
+	host     string
+	path     string
+	isDomain bool
+	bucket   int
+}
+
+// aggregateIncrements collapses a batch into one row per bucket. Popular paths
+// arrive many times per flush, and without this each arrival is its own Exec.
+func aggregateIncrements(batch []increment) map[statKey]*statCounters {
+	aggregated := make(map[statKey]*statCounters, len(batch))
+	for _, inc := range batch {
+		at := inc.atTime.UTC()
+		bucket := 0
+		if inc.isDomain {
+			// 30-minute buckets: hour*2 + minute/30, giving 0-47 across a day.
+			bucket = at.Hour()*2 + at.Minute()/30
+		}
+		key := statKey{at.Format("2006-01-02"), inc.host, inc.path, inc.isDomain, bucket}
+
+		if c, ok := aggregated[key]; ok {
+			c.count++
+			c.latS += inc.latS
+			c.bytes += inc.bytesTotal
+			continue
+		}
+		aggregated[key] = &statCounters{count: 1, latS: inc.latS, bytes: inc.bytesTotal}
+	}
+	return aggregated
+}
+
+// flushIncrements writes the aggregated path and domain counters and returns
+// the batch truncated for reuse. The batch is always cleared, including when
+// the transaction could not be opened: these are counters, and holding a failed
+// batch across flushes would grow it without bound.
+func (s *pathStatsStore) flushIncrements(batch []increment) []increment {
+	if len(batch) == 0 {
+		return batch
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		logger.Default().LogError("telemetry: begin transaction failed", "error", err)
+		return batch[:0]
+	}
+	// Rollback after a successful Commit returns sql.ErrTxDone by design, so
+	// this error is expected rather than ignored. The defer is the safety net
+	// for the paths that return before committing.
+	defer func() { _ = tx.Rollback() }()
+
+	pathStmt, _ := s.upsertStmt(tx)
+	domainStmt, _ := s.domainUpsertStmt(tx)
+
+	for key, val := range aggregateIncrements(batch) {
+		switch {
+		case key.isDomain && domainStmt != nil:
+			if _, err := domainStmt.Exec(key.day, key.bucket, key.host, val.count, val.latS, val.bytes); err != nil {
+				logger.Default().LogError("domain stats: upsert failed", "error", err)
+			}
+		case !key.isDomain && pathStmt != nil:
+			if _, err := pathStmt.Exec(key.day, key.host, key.path, val.count, val.latS, val.bytes); err != nil {
+				logger.Default().LogError("path stats: upsert failed", "error", err)
+			}
+		}
+	}
+
+	if pathStmt != nil {
+		_ = pathStmt.Close()
+	}
+	if domainStmt != nil {
+		_ = domainStmt.Close()
+	}
+	_ = tx.Commit()
+	return batch[:0]
+}
+
+// flushTraces writes buffered traces to Pebble and returns the batch truncated
+// for reuse. Records go back to the pool either way.
+func (s *pathStatsStore) flushTraces(traceBatch []*TraceRecord) []*TraceRecord {
+	if len(traceBatch) == 0 {
+		return traceBatch
+	}
+	pb := s.pebble.NewBatch()
+	for _, tr := range traceBatch {
+		// Timestamp is nanosecond-resolution and the ID is per-record, so the
+		// key is unique in practice; Pebble Set overwrites on the off chance it
+		// is not.
+		val, _ := json.Marshal(tr)
+		_ = pb.Set(makeTraceKey(tr.Timestamp, tr.ID), val, pebble.NoSync)
+	}
+	if err := pb.Commit(pebble.Sync); err != nil {
+		logger.Default().LogError("pebble: trace batch commit failed", "error", err)
+	}
+	for _, tr := range traceBatch {
+		tr.Reset()
+		tracePool.Put(tr)
+	}
+	return traceBatch[:0]
+}
+
+// flushThreats writes buffered security threats and returns the batch truncated
+// for reuse.
+//
+// Records are returned to the pool on every path, including when the
+// transaction could not be opened. Previously that early exit skipped the
+// recycle, so a database blip quietly drained the pool.
+func (s *pathStatsStore) flushThreats(threatBatch []*SecurityThreat) []*SecurityThreat {
+	if len(threatBatch) == 0 {
+		return threatBatch
+	}
+	defer func() {
+		for _, th := range threatBatch {
+			th.Reset()
+			threatPool.Put(th)
+		}
+	}()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		logger.Default().LogError("threats: begin transaction failed", "error", err)
+		return threatBatch[:0]
+	}
+	// Expected to fail with sql.ErrTxDone after a successful Commit; see
+	// flushIncrements.
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := s.threatInsertStmt(tx)
+	if err != nil {
+		return threatBatch[:0]
+	}
+	for _, th := range threatBatch {
+		// Each row gets a savepoint so a single rejected threat costs that
+		// threat and nothing else. Without it the first failure aborts the
+		// surrounding transaction, and on Postgres every later Exec then fails
+		// with 25P02 — so one malformed record silently discarded the whole
+		// batch. Threats are what the Security Hub is made of; losing 127 good
+		// ones to a bad one is the difference between a gap and a blind spot.
+		if !s.execThreat(tx, stmt, th, strings.Join(th.SourceIPs, ",")) {
+			logger.Default().LogWarn("threats: record dropped",
+				"id", th.ID, "type", th.Type, "source_ip", th.SourceIP)
+		}
+	}
+	_ = stmt.Close()
+	if err := tx.Commit(); err != nil {
+		logger.Default().LogError("threats: commit failed", "error", err)
+	}
+	return threatBatch[:0]
 }
 
 func (s *pathStatsStore) prune() {

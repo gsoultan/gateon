@@ -66,65 +66,79 @@ func (c *HHHCounter) GetHeavyHitters(threshold int) []HeavyHitter {
 		return nil
 	}
 
-	// Copy counts to work with conditioned frequencies
+	// Work on a copy: the conditioning below subtracts each hitter's frequency
+	// from its parent prefixes, so a /24 that is heavy only because of one busy
+	// /32 inside it does not also get reported.
 	condFreq := make(map[netip.Prefix]int, len(c.counts))
 	for k, v := range c.counts {
 		condFreq[k] = v
 	}
 
 	var hitters []HeavyHitter
-	ipv4Levels := []int{32, 24, 16, 8}
-	ipv6Levels := []int{128, 64, 48, 32}
+	hitters = append(hitters, c.hittersAtLevels(condFreq, ipv4PrefixLevels, false, threshold)...)
+	hitters = append(hitters, c.hittersAtLevels(condFreq, ipv6PrefixLevels, true, threshold)...)
 
-	processLevels := func(levels []int, isV6 bool) {
-		for _, l := range levels {
-			for p, freq := range condFreq {
-				if p.Bits() != l || p.Addr().Is6() != isV6 {
-					continue
-				}
-
-				if freq >= threshold {
-					hitters = append(hitters, HeavyHitter{
-						Network:    p.String(),
-						Count:      freq,
-						Percentage: float64(freq) / float64(c.total) * 100,
-					})
-
-					// Subtract this frequency from all parent prefixes
-					parent := p
-					for parent.Bits() > 0 {
-						// Find the next level up
-						nextLen := -1
-						for _, lvl := range levels {
-							if lvl < parent.Bits() {
-								if nextLen == -1 || lvl > nextLen {
-									nextLen = lvl
-								}
-							}
-						}
-						if nextLen == -1 {
-							break
-						}
-
-						parent = netip.PrefixFrom(parent.Addr(), nextLen).Masked()
-						if _, ok := condFreq[parent]; ok {
-							condFreq[parent] -= freq
-						}
-					}
-				}
-			}
-		}
-	}
-
-	processLevels(ipv4Levels, false)
-	processLevels(ipv6Levels, true)
-
-	// Sort by count descending
 	slices.SortFunc(hitters, func(a, b HeavyHitter) int {
 		return b.Count - a.Count
 	})
-
 	return hitters
+}
+
+// Prefix lengths examined for heavy hitters, most specific first. Walking them
+// in this order is what makes the conditioning work: a child is credited before
+// its frequency is removed from the parent.
+var (
+	ipv4PrefixLevels = []int{32, 24, 16, 8}
+	ipv6PrefixLevels = []int{128, 64, 48, 32}
+)
+
+// hittersAtLevels collects the prefixes at the given levels whose conditioned
+// frequency still clears threshold, subtracting each one it reports from its
+// parents so the same traffic is not counted twice up the hierarchy.
+func (c *HHHCounter) hittersAtLevels(condFreq map[netip.Prefix]int, levels []int, isV6 bool, threshold int) []HeavyHitter {
+	var hitters []HeavyHitter
+	for _, level := range levels {
+		for p, freq := range condFreq {
+			if p.Bits() != level || p.Addr().Is6() != isV6 || freq < threshold {
+				continue
+			}
+			hitters = append(hitters, HeavyHitter{
+				Network:    p.String(),
+				Count:      freq,
+				Percentage: float64(freq) / float64(c.total) * 100,
+			})
+			subtractFromParents(condFreq, p, freq, levels)
+		}
+	}
+	return hitters
+}
+
+// subtractFromParents removes freq from every ancestor of p present in
+// condFreq, walking one configured level at a time toward the root.
+func subtractFromParents(condFreq map[netip.Prefix]int, p netip.Prefix, freq int, levels []int) {
+	parent := p
+	for parent.Bits() > 0 {
+		next := nextLevelUp(levels, parent.Bits())
+		if next < 0 {
+			return
+		}
+		parent = netip.PrefixFrom(parent.Addr(), next).Masked()
+		if _, ok := condFreq[parent]; ok {
+			condFreq[parent] -= freq
+		}
+	}
+}
+
+// nextLevelUp returns the largest configured prefix length shorter than bits,
+// or -1 when bits is already the least specific level.
+func nextLevelUp(levels []int, bits int) int {
+	next := -1
+	for _, l := range levels {
+		if l < bits && l > next {
+			next = l
+		}
+	}
+	return next
 }
 
 // Clear resets the counter.
