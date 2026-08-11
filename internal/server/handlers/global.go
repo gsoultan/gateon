@@ -162,6 +162,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// #nosec G705 -- Gateon's own audit archive, served as application/json.
+		// The management API applies SecurityHeaders(preset "recommended"), which
+		// sets X-Content-Type-Options: nosniff, so it cannot be sniffed to HTML.
 		_, _ = w.Write(data)
 	})
 	handleUpdateGlobal := func(w http.ResponseWriter, r *http.Request) {
