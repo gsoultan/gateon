@@ -67,7 +67,12 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 	if authURL.Scheme == "https" && cfg.TLSInsecureSkipVerify {
 		client.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, //nosec G402
+				// #nosec G402 -- verification is skipped only when the operator
+				// sets TLSInsecureSkipVerify on this specific forward-auth
+				// middleware, for an auth service presenting an internal or
+				// self-signed certificate. The zero value is false, so the
+				// default stays verifying; this is an opt-in, not a fallback.
+				InsecureSkipVerify: true,
 			},
 		}
 	}
@@ -142,7 +147,13 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 				}
 			}
 
-			resp, err := client.Do(authReq) //nosec G107
+			// #nosec G704 -- not SSRF. The destination is cfg.Address, a static
+			// operator-configured URL parsed once at construction; nothing from
+			// the request reaches the URL. Taint analysis flags it because
+			// client headers are copied onto authReq, but headers do not choose
+			// where it is sent. (Was annotated G107, which stopped matching when
+			// gosec moved this to the taint rule.)
+			resp, err := client.Do(authReq)
 			if err != nil {
 				http.Error(w, "auth service unavailable", http.StatusBadGateway)
 				return

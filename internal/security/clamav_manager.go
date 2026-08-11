@@ -530,7 +530,11 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	}
 
 	if modified {
-		// #nosec G306 -- targetPath is clamd's own configuration file
+		// #nosec G306,G703 -- G703 (path traversal) is a false positive:
+		// targetPath is not derived from input at all, it is whichever of three
+		// hardcoded literals in confPaths exists on disk.
+		//
+		// G306 -- targetPath is clamd's own configuration file
 		// (/etc/clamav/clamd.conf and friends), and clamd runs as the clamav
 		// user, not as gateon. 0600 makes the daemon unable to read its own
 		// config and it fails to start. This was tightened to 0600 once and
