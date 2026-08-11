@@ -10,11 +10,18 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	"golang.org/x/oauth2"
 )
+
+// oidcTempCookieTTL bounds the state and origin cookies. They exist only for
+// the round trip to the provider; anything longer widens the window in which a
+// stolen state value is still accepted.
+const oidcTempCookieTTL = 300
 
 type OIDCProxyConfig struct {
 	Issuer       string
@@ -92,27 +99,16 @@ func OIDCProxy(cfg OIDCProxyConfig) (Middleware, error) {
 				http.Error(w, "Authentication failed", http.StatusInternalServerError)
 				return
 			}
-			// Store state in cookie for verification on callback
-			http.SetCookie(w, &http.Cookie{
-				Name:     "gateon_state_" + cfg.RouteID,
-				Value:    state,
-				Path:     "/",
-				HttpOnly: true,
-				Secure:   r.TLS != nil,
-				MaxAge:   300,
-			})
+			// State cookie for CSRF verification on callback, and the origin to
+			// return the user to. Both are short-lived and both are cleared by
+			// the callback once used.
+			http.SetCookie(w, newOIDCCookie(r, "gateon_state_"+cfg.RouteID, state, oidcTempCookieTTL))
+			http.SetCookie(w, newOIDCCookie(r, "gateon_origin_"+cfg.RouteID, r.URL.String(), oidcTempCookieTTL))
 
-			// Store original URL to redirect back after login
-			http.SetCookie(w, &http.Cookie{
-				Name:     "gateon_origin_" + cfg.RouteID,
-				Value:    r.URL.String(),
-				Path:     "/",
-				HttpOnly: true,
-				Secure:   r.TLS != nil,
-				MaxAge:   300,
-			})
-
-			http.Redirect(w, r, oauth2Config.AuthCodeURL(state), http.StatusFound) //nosec G307
+			// #nosec G710 -- the destination is the provider authorize URL built by
+			// oauth2Config from the operator-configured issuer, not from request
+			// input. (Was annotated G307, a rule that never applied here.)
+			http.Redirect(w, r, oauth2Config.AuthCodeURL(state), http.StatusFound)
 		})
 	}, nil
 }
@@ -149,15 +145,15 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request, oauth2Config oau
 		return
 	}
 
-	// Set session cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "gateon_session_" + routeID,
-		Value:    rawIDToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		Expires:  idToken.Expiry,
-	})
+	// Session cookie. It carries the raw ID token, so it gets the same treatment
+	// as the management-plane session cookie (SetSessionCookie in auth.go).
+	// MaxAge is derived from the token's own expiry so the cookie cannot outlive
+	// the credential inside it.
+	maxAge := int(time.Until(idToken.Expiry).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	http.SetCookie(w, newOIDCCookie(r, "gateon_session_"+routeID, rawIDToken, maxAge))
 
 	// Get origin URL. Only accept a same-origin relative path to prevent an
 	// open redirect (reject absolute URLs and scheme-relative "//host" values).
@@ -168,11 +164,60 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request, oauth2Config oau
 		}
 	}
 
-	// Cleanup temp cookies
-	http.SetCookie(w, &http.Cookie{Name: "gateon_state_" + routeID, MaxAge: -1, Path: "/"})
-	http.SetCookie(w, &http.Cookie{Name: "gateon_origin_" + routeID, MaxAge: -1, Path: "/"})
+	// Cleanup temp cookies. The attributes have to match the ones they were set
+	// with — a browser matches an expiring cookie on name, path and domain, and
+	// a Secure cookie cannot be cleared by a non-Secure Set-Cookie on an HTTPS
+	// origin. Sending a bare deletion would leave the state cookie live for its
+	// full 300s instead of ending it at first use.
+	expireOIDCCookie(w, r, "gateon_state_"+routeID)
+	expireOIDCCookie(w, r, "gateon_origin_"+routeID)
 
-	http.Redirect(w, r, origin, http.StatusFound) //nosec G307
+	// #nosec G710 -- not an open redirect: origin is either the "/" default or a
+	// cookie value that passed the same-origin check above, which requires a
+	// leading "/" and rejects scheme-relative "//host". An absolute URL never
+	// reaches here.
+	http.Redirect(w, r, origin, http.StatusFound)
+}
+
+// newOIDCCookie builds every cookie this middleware issues, so the security
+// attributes are decided in one place instead of being retyped at each call
+// site — which is how three of the four came to differ from the hardened
+// management-plane cookie in SetSessionCookie.
+//
+// Secure comes from request.IsSecure, not r.TLS. r.TLS answers "did this
+// process terminate the TLS", which is the wrong question: behind a load
+// balancer, ingress or CDN it is nil on a request the user made over HTTPS, and
+// keying Secure off it drops the attribute in exactly those deployments, so the
+// session cookie then rides the next plaintext request to the same host.
+//
+// SameSite is Lax, not Strict: the provider returns the user through a
+// top-level cross-site redirect and Strict withholds the cookie on that
+// navigation, so the callback would never see the state it must compare
+// against. Lax is the strongest mode this flow tolerates. Unset is not a
+// synonym — the attribute is then omitted and the posture becomes whatever the
+// browser defaults to.
+func newOIDCCookie(r *http.Request, name, value string, maxAge int) *http.Cookie {
+	// #nosec G124 -- Secure is set from the resolved request scheme two lines
+	// down. gosec requires a literal true and cannot follow the variable, so it
+	// reports the attribute as absent when it is conditional by design.
+	return &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   request.IsSecure(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	}
+}
+
+// expireOIDCCookie clears a temporary OIDC cookie. The attributes must mirror
+// the ones it was set with: a browser matches on name, path and domain, and a
+// Secure cookie cannot be cleared by a non-Secure Set-Cookie on an HTTPS
+// origin, so a bare deletion would leave the state cookie live for its full TTL
+// instead of ending it at first use.
+func expireOIDCCookie(w http.ResponseWriter, r *http.Request, name string) {
+	http.SetCookie(w, newOIDCCookie(r, name, "", -1))
 }
 
 func generateState() (string, error) {
