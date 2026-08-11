@@ -19,6 +19,17 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
+// Threat severity levels, as stored on a SecurityThreat and rendered by the
+// dashboard. A closed vocabulary: the dashboard filters and the SIEM mapping
+// both switch on these exact strings, so a typo in one of them is a threat that
+// silently stops matching rather than a compile error.
+const (
+	severityCritical = "critical"
+	severityHigh     = "high"
+	severityMedium   = "medium"
+	severityLow      = "low"
+)
+
 var (
 // External intelligence clients can be added here
 )
@@ -343,7 +354,7 @@ func (d *SecurityThreatDetector) detectSharedBehavioralClusters(ctx context.Cont
 			pathCount := strings.Count(sig, "|") + 1
 			anomaly := &gateonv1.Anomaly{
 				Type:           "coordinated_attack",
-				Severity:       "high",
+				Severity:       severityHigh,
 				Description:    fmt.Sprintf("Behavioral cluster detected: %d IPs shared identical set of %d paths. High confidence of distributed automated scanning.", len(ips), pathCount),
 				Timestamp:      time.Now().Format(time.RFC3339),
 				Source:         strings.Join(ips, ", "),
@@ -402,7 +413,7 @@ func (d *SecurityThreatDetector) detectImpossibleTravel(ctx context.Context, dat
 					if speed > 1200 {
 						anomaly := &gateonv1.Anomaly{
 							Type:           "security_threat",
-							Severity:       "critical",
+							Severity:       severityCritical,
 							Description:    fmt.Sprintf("Impossible travel detected for fingerprint %s: traveled %d km from %s to %s at %d km/h (within %s)", fp, int(dist), c1.code, c2.code, int(speed), diff.Round(time.Minute)),
 							Timestamp:      c2.last.Format(time.RFC3339),
 							Source:         fp,
@@ -414,7 +425,7 @@ func (d *SecurityThreatDetector) detectImpossibleTravel(ctx context.Context, dat
 					// Fallback for missing coordinates: any country change in < 1 hour is suspicious
 					anomaly := &gateonv1.Anomaly{
 						Type:           "security_threat",
-						Severity:       "high",
+						Severity:       severityHigh,
 						Description:    fmt.Sprintf("Impossible travel detected for fingerprint %s: seen in %s and then %s within %s", fp, c1.code, c2.code, diff.Round(time.Minute)),
 						Timestamp:      c2.last.Format(time.RFC3339),
 						Source:         fp,
@@ -737,13 +748,13 @@ func (d *SecurityThreatDetector) getAdaptiveThreshold(base float64, data *Diagno
 
 func (d *SecurityThreatDetector) calculateSeverity(score int, threshold float64) string {
 	if score >= int(threshold*4) {
-		return "critical"
+		return severityCritical
 	} else if score >= int(threshold*2.5) {
-		return "high"
+		return severityHigh
 	} else if score >= int(threshold*1.5) {
-		return "medium"
+		return severityMedium
 	}
-	return "low"
+	return severityLow
 }
 
 func (d *SecurityThreatDetector) getAdaptiveRecommendation(score int, primaryType string) string {
@@ -781,7 +792,7 @@ func (d *SecurityThreatDetector) detectMultiIPAttacks(ctx context.Context, data 
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           "security_threat",
-				Severity:       "high",
+				Severity:       severityHigh,
 				Description:    fmt.Sprintf("Multi-IP attack detected via fingerprinting: actor rotated %d IPs for the same client profile", len(stats.IPs)),
 				Timestamp:      stats.LastSeen.Format(time.RFC3339),
 				Source:         fp,

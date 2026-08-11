@@ -50,7 +50,7 @@ func (d *IntegrityDetector) Detect(ctx context.Context, data *DiagnosticData) []
 		return []*gateonv1.Anomaly{
 			{
 				Type:           "system_integrity_violation",
-				Severity:       "critical",
+				Severity:       severityCritical,
 				Description:    "Gateon binary checksum mismatch! Potential unauthorized modification detected.",
 				Timestamp:      time.Now().Format(time.RFC3339),
 				Source:         "local_system",

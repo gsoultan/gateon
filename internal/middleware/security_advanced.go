@@ -123,7 +123,7 @@ func Entropy(threshold float64, routeID string) Middleware {
 
 					e := entropy.Calculate(peeked)
 					if e > threshold {
-						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced", "HIGH", "detected")
+						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced", "HIGH", actionDetected)
 					}
 				}
 				if rs != nil {
@@ -250,7 +250,7 @@ func XSSRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss", "CRITICAL", "detected")
+				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss", "CRITICAL", actionDetected)
 			}
 
 			if rs != nil {
@@ -307,7 +307,7 @@ func SQLiRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli", "CRITICAL", "detected")
+				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli", "CRITICAL", actionDetected)
 			}
 
 			if rs != nil {
@@ -399,7 +399,7 @@ func ThreatRecognition(routeID string) Middleware {
 			}
 
 			if found {
-				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced", severity, "detected")
+				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced", severity, actionDetected)
 			}
 
 			next.ServeHTTP(w, r)

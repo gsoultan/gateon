@@ -35,7 +35,7 @@ func (d *GeofenceDetector) Detect(ctx context.Context, data *DiagnosticData) []*
 
 			anomaly := &gateonv1.Anomaly{
 				Type:           "geofence_violation",
-				Severity:       "high",
+				Severity:       severityHigh,
 				Description:    fmt.Sprintf("Request from blocked country: %s", country),
 				Timestamp:      tr.Timestamp.Format(time.RFC3339),
 				Source:         country, // Use country code as source for geofence

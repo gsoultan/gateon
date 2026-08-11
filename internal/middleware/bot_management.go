@@ -61,8 +61,8 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 						RouteID:     cfg.RouteID,
 						RequestURI:  r.URL.RequestURI(),
 						Category:    "bot",
-						Severity:    "medium",
-						ActionTaken: "blocked",
+						Severity:    severityMedium,
+						ActionTaken: actionBlocked,
 					}))
 
 					http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
@@ -120,8 +120,8 @@ func BotManagement(cfg BotManagementConfig) Middleware {
 					RouteID:     cfg.RouteID,
 					RequestURI:  r.URL.RequestURI(),
 					Category:    "bot",
-					Severity:    "high",
-					ActionTaken: "blocked",
+					Severity:    severityHigh,
+					ActionTaken: actionBlocked,
 				}))
 			}
 

@@ -146,7 +146,7 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
 				Description:    m.Reason,
 				Category:       m.Category,
-				Severity:       "high",
+				Severity:       severityHigh,
 				ActionTaken:    "blocked",
 				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
 			})
@@ -1029,7 +1029,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
 				Description:    m.Reason,
 				Category:       m.Category,
-				Severity:       "high",
+				Severity:       severityHigh,
 				ActionTaken:    "blocked",
 				Recommendation: "Source is mitigated based on threat intelligence.",
 				Ja4:            m.Source,
