@@ -22,7 +22,7 @@ func (c *fallbackCore) ProxyL4(ctx context.Context, client net.Conn, targetAddr 
 	dialer := net.Dialer{}
 	backend, err := dialer.DialContext(ctx, "tcp", targetAddr)
 	if err != nil {
-		client.Close()
+		_ = client.Close()
 		return err
 	}
 	defer backend.Close()

@@ -130,6 +130,8 @@ func newAuditLog(cfg WAFConfig) (*auditLog, error) {
 	// 0600, not 0640. This file is captured attack traffic — request paths,
 	// headers and matched payloads — so group-readable is a wider audience
 	// than it needs. The process writes and reads it as the same user.
+	// #nosec G304 -- the audit log path is operator configuration, not request
+	// input; ensureAuditLogFile creates it under that configured directory.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open audit log %q: %w", path, err)
@@ -235,6 +237,8 @@ func ensureAuditLogFile(path string) error {
 	// 0600, not 0640. This file is captured attack traffic — request paths,
 	// headers and matched payloads — so group-readable is a wider audience
 	// than it needs. The process writes and reads it as the same user.
+	// #nosec G304 -- the audit log path is operator configuration, not request
+	// input; ensureAuditLogFile creates it under that configured directory.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("create audit log file %q: %w", path, err)

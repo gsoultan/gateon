@@ -141,7 +141,7 @@ func Stop() {
 		close(manager.stop)
 		manager.stmtMu.Lock()
 		if manager.stmtInsert != nil {
-			manager.stmtInsert.Close()
+			_ = manager.stmtInsert.Close()
 			manager.stmtInsert = nil
 		}
 		manager.stmtMu.Unlock()

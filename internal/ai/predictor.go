@@ -48,14 +48,14 @@ func NewWasmTransformerPredictor(ctx context.Context, wasmBytes []byte) (*WasmTr
 
 	m, err := r.CompileModule(ctx, wasmBytes)
 	if err != nil {
-		r.Close(ctx)
+		_ = r.Close(ctx)
 		return nil, fmt.Errorf("failed to compile wasm module: %w", err)
 	}
 
 	// Instantiate the module.
 	mod, err := r.InstantiateModule(ctx, m, wazero.NewModuleConfig())
 	if err != nil {
-		r.Close(ctx)
+		_ = r.Close(ctx)
 		return nil, fmt.Errorf("failed to instantiate module: %w", err)
 	}
 
