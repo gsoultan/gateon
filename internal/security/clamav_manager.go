@@ -521,6 +521,8 @@ func (m *ClamAVManager) tuneLocalClamav() {
 		return
 	}
 
+	// #nosec G304 -- targetPath is whichever of three hardcoded clamd config
+	// literals exists on disk; see confPaths above.
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
 		return

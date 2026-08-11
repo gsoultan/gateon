@@ -103,6 +103,9 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			_, _ = w.Write([]byte("invalid filename"))
 			return
 		}
+		// #nosec G304 -- filename is filepath.Base of the client value with an
+		// extension allow-list, and the containment check above proves destPath
+		// resolves inside certsDir.
 		dst, err := os.Create(destPath)
 		if err != nil {
 			logger.L.LogError("failed to create certificate file", "error", err, "path", destPath)

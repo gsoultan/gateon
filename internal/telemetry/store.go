@@ -897,10 +897,10 @@ func (s *pathStatsStore) loop() {
 					}
 				}
 				if pathStmt != nil {
-					pathStmt.Close()
+					_ = pathStmt.Close()
 				}
 				if domainStmt != nil {
-					domainStmt.Close()
+					_ = domainStmt.Close()
 				}
 				_ = tx.Commit()
 			}
@@ -941,8 +941,10 @@ func (s *pathStatsStore) loop() {
 							logger.Default().LogError("threats: insert failed", "error", err)
 						}
 					}
-					stmt.Close()
-					_ = tx.Commit()
+					_ = stmt.Close()
+					if err := tx.Commit(); err != nil {
+						logger.Default().LogError("threats: commit failed", "error", err)
+					}
 				}
 				for _, th := range threatBatch {
 					th.Reset()

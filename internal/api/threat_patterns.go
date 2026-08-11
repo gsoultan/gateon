@@ -89,6 +89,8 @@ func init() {
 func LoadPatterns(path string) {
 	patterns := defaultPatterns
 	if path != "" {
+		// #nosec G304 -- an operator-configured threat-pattern file; the default
+		// call passes "" and uses the built-in set.
 		if data, err := os.ReadFile(path); err == nil {
 			var p ThreatPatterns
 			if err := json.Unmarshal(data, &p); err == nil {

@@ -62,6 +62,8 @@ func (d *IntegrityDetector) Detect(ctx context.Context, data *DiagnosticData) []
 }
 
 func calculateChecksum(path string) (string, error) {
+	// #nosec G304 -- reading operator-nominated paths is what file integrity
+	// monitoring is. The watch list comes from configuration, not from a request.
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

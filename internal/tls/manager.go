@@ -97,6 +97,7 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 
 	var clientCAs *x509.CertPool
 	if caFile != "" {
+		// #nosec G304 -- operator-configured client CA bundle for mTLS.
 		caData, err := os.ReadFile(caFile)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to read CA file: %w", err)
@@ -250,6 +251,7 @@ func (m *Manager) LoadCAData(caFile string) ([]byte, error) {
 	}
 	m.mu.RUnlock()
 
+	// #nosec G304 -- operator-configured CA bundle, cached above by path.
 	caData, err := os.ReadFile(caFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA file: %w", err)

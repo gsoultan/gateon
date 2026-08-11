@@ -98,7 +98,7 @@ func (m *HAManager) Start(ctx context.Context) {
 func (m *HAManager) listenLoop(ctx context.Context) {
 	buf := make([]byte, 64)
 	for {
-		m.udpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		_ = m.udpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		n, addr, err := m.udpConn.ReadFromUDP(buf)
 		if err != nil {
 			if ctx.Err() != nil {
