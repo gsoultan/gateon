@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { useAuthStore } from "../store/useAuthStore";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
 import type {

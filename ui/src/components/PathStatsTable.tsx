@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { useState, useMemo, useTransition, useEffect } from "react";
 import { safeToFixed, safeToLocaleString } from "../utils/format";
 import { usePathStats } from "../hooks/useGateon";

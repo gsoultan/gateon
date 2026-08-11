@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 // Package fim implements File Integrity Monitoring (FIM): it records a
 // cryptographic baseline of a set of watched files (served static assets,

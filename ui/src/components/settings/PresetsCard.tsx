@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { Card, Title, Text, Stack, Button, Group, Paper } from "@mantine/core";
 import { IconRocket } from "@tabler/icons-react";
 

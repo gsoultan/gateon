@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { UnstyledButton, Group, Text, Kbd, Tooltip, ActionIcon } from "@mantine/core";
 import { useOs } from "@mantine/hooks";
 import { IconSearch } from "@tabler/icons-react";

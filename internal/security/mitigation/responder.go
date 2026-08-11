@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 // Package mitigation turns correlated security incidents into graduated,
 // confidence-aware mitigation actions. It is the missing link between detection
