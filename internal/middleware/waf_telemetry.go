@@ -21,6 +21,17 @@ import (
 	"github.com/gsoultan/gwaf/types"
 )
 
+// Threat severity levels, as stored on a SecurityThreat and rendered by the
+// dashboard. A closed vocabulary: the dashboard filters and the SIEM mapping
+// both switch on these exact strings, so a typo in one of them is a threat that
+// silently stops matching rather than a compile error.
+const (
+	severityCritical = "critical"
+	severityHigh     = "high"
+	severityMedium   = "medium"
+	severityLow      = "low"
+)
+
 // Threat recording used to live in Coraza's ProcessLogging hook, where it read
 // the anomaly score out of a transaction variable collection through an
 // unchecked type assertion and looked up human-readable text in a map keyed by

@@ -186,7 +186,7 @@ func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
 		ID:             uuid.New().String(),
 		Type:           "cors_violation",
 		Category:       "security",
-		Severity:       "medium",
+		Severity:       severityMedium,
 		SourceIP:       request.GetClientIP(r, false),
 		RequestURI:     r.RequestURI,
 		RouteID:        routeID,

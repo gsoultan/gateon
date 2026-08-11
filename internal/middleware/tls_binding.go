@@ -51,7 +51,7 @@ func TlsBinding(cookieName string) Middleware {
 
 			if bindingCookie.Value != expectedBinding {
 				// Potential session hijacking or cookie replay from a different TLS connection.
-				recordAdvancedThreat(r, "tls_binding_mismatch", 80, "Session cookie presented from a different TLS connection (binding mismatch)", "", "auth", "HIGH", "blocked")
+				recordAdvancedThreat(r, "tls_binding_mismatch", 80, "Session cookie presented from a different TLS connection (binding mismatch)", "", "auth", "HIGH", actionBlocked)
 				http.Error(w, "Security Check Failed: Session binding mismatch", http.StatusForbidden)
 				return
 			}

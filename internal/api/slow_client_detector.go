@@ -24,7 +24,7 @@ func (d *SlowClientDetector) Detect(ctx context.Context, data *DiagnosticData) [
 
 				anomaly := &gateonv1.Anomaly{
 					Type:           "slow_client_anomaly",
-					Severity:       "low",
+					Severity:       severityLow,
 					Description:    fmt.Sprintf("Abnormally high average latency (%.2fms) from IP %s", avgLatency, ip),
 					Timestamp:      stats.LastSeen.Format(time.RFC3339),
 					Source:         ip,
