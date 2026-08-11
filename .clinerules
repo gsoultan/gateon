@@ -1,0 +1,60 @@
+# sqz — Token-Optimized CLI Output
+
+Pipe verbose shell command output through `sqz compress` to save tokens.
+`sqz` reads from stdin and writes the compressed output to stdout — it is
+NOT a command wrapper, so `/Users/gsoultan/.cargo/bin/sqz git status` is not valid.
+
+```bash
+# Instead of:     Use:
+git status        git status 2>&1 | /Users/gsoultan/.cargo/bin/sqz compress
+cargo test        cargo test 2>&1 | /Users/gsoultan/.cargo/bin/sqz compress
+git log -10       git log -10 2>&1 | /Users/gsoultan/.cargo/bin/sqz compress
+docker ps         docker ps 2>&1 | /Users/gsoultan/.cargo/bin/sqz compress
+```
+
+sqz filters and compresses command outputs while preserving filenames,
+paths, and identifiers (typically 60-90% token reduction on verbose
+commands). Skip short commands, interactive commands (vim, ssh, python),
+and commands with shell operators (`&&`, `||`, `;`, `>`, `<`). If sqz is
+not on PATH, run commands normally.
+
+## Escape hatch — when sqz output confuses the agent
+
+If you see a `§ref:HASH§` token in tool output and can't parse it, or if
+compressed output is making it harder to work (loops, repeated tiny
+requests), you have three ways out:
+
+- **`/Users/gsoultan/.cargo/bin/sqz expand <prefix>`** — resolve a ref back to the
+  original bytes. Accepts the bare hex prefix (`sqz expand a1b2c3d4`)
+  or the full token pasted verbatim (`sqz expand §ref:a1b2c3d4§`).
+- **`SQZ_NO_DEDUP=1`** — set this env var (e.g. `SQZ_NO_DEDUP=1 git
+  status 2>&1 | sqz compress`) to disable dedup for that one command.
+  Strictly more tokens, strictly less ambiguous.
+- **`--no-cache`** — the same opt-out as a CLI flag:
+  `git status 2>&1 | sqz compress --no-cache`.
+
+Use these when you genuinely need raw data. The default compressed
+path is still what you want for most output.
+
+# ♻️ Always-Optimize Loop (Non-Negotiable)
+
+Every task in this repo — regardless of size — runs through four phases, and
+token reduction is part of "done":
+
+1. **Discover** — `rtk graphify query "<term>"` to locate code, `mem:core` in
+   `.serena/memories`, the Obsidian vault
+   (`~/Documents/ObsidianVault/Gateon`), and the skills in `.junie/skills`
+   (`rtk npx skills add <skill>` when one is missing). Never open a file you
+   have not located through Graphify first.
+2. **Work** — prefix every supported shell command with `rtk`; follow the read
+   ladder: `rtk graphify query` → `rtk smart` → `rtk read -l aggr` →
+   `sqz compress` → `rtk read` (last resort, budget-checked with
+   `tkn -c -m gpt-4`, target < ~2,000 tokens). No raw `cat`/`ls`/`grep`/`find`.
+3. **Verify** — `rtk go build -o gateon ./cmd/gateon` and
+   `cd ui && rtk bun run build` (both mandatory), plus
+   `rtk go test -race ./...` / `rtk go vet ./...` for what you touched.
+4. **Persist** — `rtk graphify update .`,
+   `rtk graphify export obsidian --dir ~/Documents/ObsidianVault/Gateon`, and a
+   Serena memory for every durable decision.
+
+Full rule: `.junie/agents.md`. Token strategies: `.junie/rtk.md`.

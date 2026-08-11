@@ -4,7 +4,24 @@ export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // Retries are off in CI until this suite can finish a run.
+  //
+  // The arithmetic, from run 31497227611: 11 tests fail consistently, one
+  // worker, up to 180s each, three attempts apiece. That is roughly 47 minutes
+  // spent re-running known failures against a 30-minute globalTimeout — so the
+  // run dies with 21 tests passed, 11 failed and 74 never started, and has done
+  // on every branch including main for at least two days.
+  //
+  // Nobody can say which of the 106 tests actually fail, because two thirds of
+  // them have never run. Retries exist to absorb flakiness, and absorbing
+  // flakiness is a reasonable thing to want — but it cannot be the first thing
+  // you buy, because it is also what is preventing anyone from finding out what
+  // is flaky. One pass over the whole suite is worth more right now than three
+  // passes over a third of it.
+  //
+  // Put this back to 2 once the suite completes green; the flake it was hiding
+  // will then be visible as a flake rather than as a timeout.
+  retries: 0,
   workers: 1,
   // Stop the whole run rather than let it grind on. With one worker, two
   // retries and per-test timeouts up to 180s, a bad run is bounded only by
