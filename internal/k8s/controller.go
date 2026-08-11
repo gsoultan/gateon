@@ -53,7 +53,7 @@ func NewController(client kubernetes.Interface, gatewayClient gatewayclient.Inte
 		gwFactory:     gwFactory,
 	}
 
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			c.syncIngress(obj.(*networkingv1.Ingress))
 		},
@@ -65,7 +65,7 @@ func NewController(client kubernetes.Interface, gatewayClient gatewayclient.Inte
 		},
 	})
 
-	gwInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = gwInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			c.syncHTTPRoute(obj.(*gatewayv1.HTTPRoute))
 		},

@@ -90,7 +90,7 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 		}
 		tlsConn := tls.Client(rawConn, tlsCfg)
 		if err = tlsConn.HandshakeContext(ctx); err != nil {
-			rawConn.Close()
+			_ = rawConn.Close()
 		} else {
 			backendConn = tlsConn
 		}

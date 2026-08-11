@@ -86,7 +86,7 @@ func (p *TCPBackendPool) healthCheck() {
 			p.alive[i].Store(false)
 			continue
 		}
-		conn.Close()
+		_ = conn.Close()
 		p.alive[i].Store(true)
 	}
 }

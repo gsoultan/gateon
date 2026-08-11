@@ -90,31 +90,31 @@ func NewHardwareSigner() (*HardwareSigner, error) {
 
 	rsp, err := srk.Execute(rwc)
 	if err != nil {
-		rwc.Close()
+		_ = rwc.Close()
 		return nil, fmt.Errorf("failed to create TPM primary key: %w", err)
 	}
 
 	pub, err := rsp.OutPublic.Contents()
 	if err != nil {
-		rwc.Close()
+		_ = rwc.Close()
 		return nil, fmt.Errorf("failed to parse TPM public key contents: %w", err)
 	}
 
 	eccPub, err := pub.Unique.ECC()
 	if err != nil {
-		rwc.Close()
+		_ = rwc.Close()
 		return nil, fmt.Errorf("TPM key is not ECC: %w", err)
 	}
 
 	details, err := pub.Parameters.ECCDetail()
 	if err != nil {
-		rwc.Close()
+		_ = rwc.Close()
 		return nil, fmt.Errorf("failed to get ECC details from TPM key: %w", err)
 	}
 
 	goPub, err := tpm2.ECDSAPub(details, eccPub)
 	if err != nil {
-		rwc.Close()
+		_ = rwc.Close()
 		return nil, fmt.Errorf("failed to convert to ecdsa.PublicKey: %w", err)
 	}
 

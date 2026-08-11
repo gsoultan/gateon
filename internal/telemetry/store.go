@@ -939,10 +939,10 @@ func (s *pathStatsStore) loop() {
 					}
 				}
 				if pathStmt != nil {
-					pathStmt.Close()
+					_ = pathStmt.Close()
 				}
 				if domainStmt != nil {
-					domainStmt.Close()
+					_ = domainStmt.Close()
 				}
 				_ = tx.Commit()
 			}
@@ -992,7 +992,7 @@ func (s *pathStatsStore) loop() {
 								"id", th.ID, "type", th.Type, "source_ip", th.SourceIP)
 						}
 					}
-					stmt.Close()
+					_ = stmt.Close()
 					if err := tx.Commit(); err != nil {
 						logger.Default().LogError("threats: commit failed", "error", err)
 					}
