@@ -50,6 +50,14 @@ func startPprofServer(ctx context.Context) {
 		}
 	}()
 
+	// This goroutine is the shutdown linkage, not a leak of one: it exists to
+	// wait on ctx and stop the server.
+	//
+	// #nosec G118 -- the context.Background() below is the parent of the
+	// shutdown *deadline*, which deliberately must not be ctx. ctx has just been
+	// cancelled at that point, so deriving the deadline from it would give
+	// Shutdown an already-expired context and turn a graceful drain into an
+	// immediate close.
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

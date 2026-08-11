@@ -526,7 +526,9 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 
 	pebbleDir := resolveTraceDir(databaseURL, dialect.Driver == db.DriverSQLite)
-	_ = os.MkdirAll(pebbleDir, 0755)
+	// 0750: the trace store holds captured request data, so it is not for
+	// every local account to read.
+	_ = os.MkdirAll(pebbleDir, 0o750)
 	// Size Pebble's in-memory structures by resource profile (default Pebble uses
 	// an 8 MiB cache + generous memtables) and compress trace blobs with Zstd
 	// (Pebble defaults to Snappy) for a smaller on-disk trace footprint. The cache
@@ -936,10 +938,10 @@ func (s *pathStatsStore) loop() {
 					}
 				}
 				if pathStmt != nil {
-					pathStmt.Close()
+					_ = pathStmt.Close()
 				}
 				if domainStmt != nil {
-					domainStmt.Close()
+					_ = domainStmt.Close()
 				}
 				_ = tx.Commit()
 			}
@@ -989,7 +991,7 @@ func (s *pathStatsStore) loop() {
 								"id", th.ID, "type", th.Type, "source_ip", th.SourceIP)
 						}
 					}
-					stmt.Close()
+					_ = stmt.Close()
 					if err := tx.Commit(); err != nil {
 						logger.Default().LogError("threats: commit failed", "error", err)
 					}

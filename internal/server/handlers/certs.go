@@ -20,6 +20,14 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
+// Upload bounds for the certificate endpoint. certUploadMemoryBytes is what
+// ParseMultipartForm keeps in RAM; maxCertUploadBytes is the hard ceiling on the
+// whole request, which is the one that stops a large body spilling to disk.
+const (
+	certUploadMemoryBytes = 10 << 20 // 10 MiB
+	maxCertUploadBytes    = 12 << 20 // 12 MiB
+)
+
 func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 	mux.HandleFunc("GET /v1/certs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -49,7 +57,16 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceCerts) {
 			return
 		}
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		// ParseMultipartForm's argument caps only what is held in memory; every
+		// byte past it spills to a temp file with no ceiling, so on its own it
+		// bounds RAM and not disk. MaxBytesReader is what actually bounds the
+		// request. A certificate bundle that does not fit in maxCertUploadBytes
+		// is not a certificate bundle.
+		r.Body = http.MaxBytesReader(w, r.Body, maxCertUploadBytes)
+		// #nosec G120 -- the body is bounded by the MaxBytesReader on the line
+		// above. G120 fires on any ParseMultipartForm call and does not look for
+		// the guard, so it reports the mitigated case identically.
+		if err := r.ParseMultipartForm(certUploadMemoryBytes); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("failed to parse multipart form"))
 			return
@@ -86,6 +103,9 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			_, _ = w.Write([]byte("invalid filename"))
 			return
 		}
+		// #nosec G304 -- filename is filepath.Base of the client value with an
+		// extension allow-list, and the containment check above proves destPath
+		// resolves inside certsDir.
 		dst, err := os.Create(destPath)
 		if err != nil {
 			logger.L.LogError("failed to create certificate file", "error", err, "path", destPath)

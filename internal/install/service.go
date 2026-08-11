@@ -107,17 +107,25 @@ func installLinux(binPath string) error {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
 
-	if err := os.MkdirAll(configDir, 0o755); err != nil && !os.IsExist(err) {
+	// 0750: the directory holds global.json, which carries database
+	// credentials, the MaxMind licence key and SIEM tokens. The unit runs
+	// User=root and the chown below makes it root:root, so nothing needs the
+	// world bit that 0755 was granting every local account.
+	if err := os.MkdirAll(configDir, 0o750); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create config dir %s: %w", configDir, err)
 	}
 	// Ensure root ownership and correct permissions if it was previously owned by another user
-	_ = os.Chmod(configDir, 0o755)
+	// #nosec G302 -- a directory, not a file: the execute bit is what makes it
+	// traversable, so 0750 is the tight mode here.
+	_ = os.Chmod(configDir, 0o750)
 	_ = exec.Command("chown", "-R", "root:root", configDir).Run()
 
 	if err := os.MkdirAll(stateDir, 0o700); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create state dir %s: %w", stateDir, err)
 	}
 	// Ensure root ownership and correct permissions if it was previously owned by another user
+	// #nosec G302 -- 0700 on a directory is already the tightest useful mode;
+	// the execute bit is what makes it traversable by its owner.
 	_ = os.Chmod(stateDir, 0o700)
 	_ = exec.Command("chown", "-R", "root:root", stateDir).Run()
 
@@ -157,6 +165,9 @@ func uninstallLinux() error {
 }
 
 func installWindows(binPath string) error {
+	// #nosec G204 -- binPath is os.Executable() resolved through EvalSymlinks,
+	// i.e. this process's own path, not input. `gateon install` is an explicit
+	// administrator action.
 	cmd := exec.Command("sc", "create", serviceName, `binPath= "`+binPath+`"`, "start=", "auto")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
