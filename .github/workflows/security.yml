@@ -165,8 +165,11 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Trivy filesystem scan
-        # Pinned: see the gosec note above.
-        uses: aquasecurity/trivy-action@v0.33.1
+        # Pinned: see the gosec note above. v0.33.1 resolved but its bundled
+        # installer exited 1 before downloading the Trivy binary, so the scan
+        # never ran; v0.36.0 is the current release and is what @master — which
+        # passes on main — resolves to.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -196,8 +199,11 @@ jobs:
       # decided that.
       - name: Show Trivy findings in the log
         if: always()
-        # Pinned: see the gosec note above.
-        uses: aquasecurity/trivy-action@v0.33.1
+        # Pinned: see the gosec note above. v0.33.1 resolved but its bundled
+        # installer exited 1 before downloading the Trivy binary, so the scan
+        # never ran; v0.36.0 is the current release and is what @master — which
+        # passes on main — resolves to.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
