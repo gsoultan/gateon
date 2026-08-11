@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { Stack, Text, Badge, Group, Tooltip } from "@mantine/core";
 import { useNetwork } from "@mantine/hooks";
 import { useGateonStatus } from "../hooks/useGateon";

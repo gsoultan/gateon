@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { describe, expect, test } from "bun:test";
 import type { RequestDeltaSample } from "../hooks/useGateon";
 import type { PathStats, Route, Service } from "../types/gateon";
