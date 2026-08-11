@@ -56,6 +56,8 @@ nfpms:
     vendor: Gateon
     maintainer: Gembit Soultan Shirazi <gembit.soultan@gmail.com>
     homepage: https://github.com/gsoultan/gateon
+    # Mirrors nfpm.yaml; without it the .deb/.rpm ship no license field at all.
+    license: MIT
     contents:
       - src: packaging/gateon.service
         dst: /lib/systemd/system/gateon.service

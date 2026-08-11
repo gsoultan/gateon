@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { Stack, Select, TextInput, Group, Switch, Divider, Title, Text } from "@mantine/core";
 import { KeyValueList } from "./KeyValueList";
 

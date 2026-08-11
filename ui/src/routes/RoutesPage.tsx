@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { Suspense, lazy, useState } from "react";
 import { Card, Title, Text, Stack, Group, Button, Drawer, Skeleton, Box } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";

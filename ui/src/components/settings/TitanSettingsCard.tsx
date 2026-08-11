@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 import React from 'react';
 import { Card, Title, Text, Stack, Group, Switch, TextInput, Badge, ThemeIcon, Box, SimpleGrid } from '@mantine/core';

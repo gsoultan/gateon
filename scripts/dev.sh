@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+# SPDX-License-Identifier: MIT
 #
 # dev.sh — run gateon locally against the sample config in dev/.
 #

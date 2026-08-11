@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 /**
  * RuleBuilder: visual rule builder for HTTP/gRPC routes.
  * Serializes to/from the rule format: Host(`x`), PathPrefix(`y`), Methods(`GET`), etc.

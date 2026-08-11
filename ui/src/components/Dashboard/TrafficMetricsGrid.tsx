@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import React, { memo } from "react";
 import { SimpleGrid, Paper, Group, Text, ThemeIcon, Stack, Badge } from "@mantine/core";
 import { IconArrowUpRight, IconArrowDownRight } from "@tabler/icons-react";

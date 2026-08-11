@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import type { MantineSpacing, MantineFontSize } from "@mantine/core";
 import { usePreferencesStore } from "../store/usePreferencesStore";
 
