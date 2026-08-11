@@ -40,6 +40,8 @@ const gitKeep = ".gitkeep"
 // cleanDir removes stale build artifacts from dst while preserving the tracked
 // .gitkeep file. The destination directory itself is (re)created if missing.
 func cleanDir(dst string) error {
+	// #nosec G301 -- build-time asset sync, not a runtime path. The output is
+	// static dashboard files that get embedded into the binary.
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
@@ -79,6 +81,9 @@ func copyDir(src, dst string) error {
 	})
 }
 
+// #nosec G304 -- build-time asset sync between two paths this program computed
+// itself while walking the dashboard build output. Not a runtime path and not
+// reachable from a request.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -86,6 +91,7 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close()
 
+	// #nosec G304 -- see copyFile: build-time only.
 	out, err := os.Create(dst)
 	if err != nil {
 		return err

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"time"
 )
 
 func main() {
@@ -55,11 +56,19 @@ func main() {
 			"headers":  headers,
 			"received": true,
 		})
+		// #nosec G706 -- dev mock backend, never shipped in the gateon binary.
 		log.Printf("[%s] %s %s", *name, r.Method, r.URL.RequestURI())
 	})
 
 	log.Printf("dev backend %q listening on http://%s", *name, *addr)
-	srv := &http.Server{Addr: *addr, Handler: mux}
+	// ReadHeaderTimeout is not optional even in a dev helper: without it a
+	// client can hold the connection open sending headers one byte at a time
+	// and the server will wait forever.
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	if err := srv.ListenAndServe(); err != nil {
 		fmt.Fprintf(os.Stderr, "backend %q: %v\n", *name, err)
 		os.Exit(1)

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,7 +98,7 @@ func (m *HAManager) Start(ctx context.Context) {
 func (m *HAManager) listenLoop(ctx context.Context) {
 	buf := make([]byte, 64)
 	for {
-		m.udpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		_ = m.udpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		n, addr, err := m.udpConn.ReadFromUDP(buf)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -191,8 +192,21 @@ func (m *HAManager) acquireVIPs() {
 		return
 	}
 
+	if !validInterfaceName(m.config.Interface) {
+		logger.L.LogError("Refusing to configure VIPs: invalid interface name",
+			"interface", m.config.Interface)
+		return
+	}
+
 	for _, vip := range m.config.VirtualIps {
+		if !validVIP(vip) {
+			logger.L.LogError("Refusing to add VIP: not an IP address or CIDR", "vip", vip)
+			continue
+		}
 		// Example: ip addr add 192.168.1.100/24 dev eth0
+		// #nosec G204 -- no shell is involved (exec.Command, not sh -c) and both
+		// arguments are validated just above, so `ip` receives an address and an
+		// interface name or nothing at all.
 		cmd := exec.Command("ip", "addr", "add", vip, "dev", m.config.Interface)
 		if err := cmd.Run(); err != nil {
 			logger.L.LogError("Failed to add VIP to interface", "error", err, "vip", vip)
@@ -207,7 +221,15 @@ func (m *HAManager) releaseVIPs() {
 		return
 	}
 
+	if !validInterfaceName(m.config.Interface) {
+		return
+	}
+
 	for _, vip := range m.config.VirtualIps {
+		if !validVIP(vip) {
+			continue
+		}
+		// #nosec G204 -- see acquireVIPs: no shell, both arguments validated.
 		cmd := exec.Command("ip", "addr", "del", vip, "dev", m.config.Interface)
 		if err := cmd.Run(); err != nil {
 			logger.L.LogError("Failed to release VIP", "error", err, "vip", vip)
@@ -216,4 +238,38 @@ func (m *HAManager) releaseVIPs() {
 		}
 	}
 	m.active = false
+}
+
+// HA configuration reaches this package from the management API, so the values
+// handed to `ip` as root are settable by an authenticated administrator rather
+// than baked into a file. exec.Command runs no shell, so this is not command
+// injection — but validating means a typo fails loudly here instead of becoming
+// an opaque `ip` error, and the surface handed to a privileged binary stays a
+// shape we chose.
+
+// validVIP reports whether s is a bare IP address or an IP in CIDR notation.
+func validVIP(s string) bool {
+	if net.ParseIP(s) != nil {
+		return true
+	}
+	_, _, err := net.ParseCIDR(s)
+	return err == nil
+}
+
+// validInterfaceName reports whether s is plausibly a network interface name:
+// non-empty, within the kernel's IFNAMSIZ limit, and free of separators or
+// anything that could be read as an option.
+func validInterfaceName(s string) bool {
+	if s == "" || len(s) > 15 || strings.HasPrefix(s, "-") {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '-' || r == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }

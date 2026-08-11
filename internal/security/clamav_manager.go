@@ -28,6 +28,11 @@ type ScanStatus struct {
 }
 
 type ClamAVManager struct {
+	// lifetime is the process-lifetime context captured by Start/Reconfigure.
+	// Auto-install runs detached from whichever call triggered it but must still
+	// end when the gateway does; context.Background() met neither requirement
+	// well, since it tied the work to nothing at all.
+	lifetime     atomic.Pointer[context.Context]
 	config       atomic.Pointer[gateonv1.ClamavConfig]
 	cron         *cron.Cron
 	status       ScanStatus
@@ -51,7 +56,24 @@ func (m *ClamAVManager) cfg() *gateonv1.ClamavConfig {
 	return m.config.Load()
 }
 
+// detached returns the captured process-lifetime context, or Background when
+// the manager was built directly (tests) and never started.
+func (m *ClamAVManager) detached() context.Context {
+	if p := m.lifetime.Load(); p != nil {
+		return *p
+	}
+	return context.Background()
+}
+
+// rememberLifetime records ctx as the parent for detached work.
+func (m *ClamAVManager) rememberLifetime(ctx context.Context) {
+	if ctx != nil {
+		m.lifetime.Store(&ctx)
+	}
+}
+
 func (m *ClamAVManager) Start(ctx context.Context) error {
+	m.rememberLifetime(ctx)
 	c := m.cfg()
 	if c == nil {
 		return nil
@@ -59,7 +81,7 @@ func (m *ClamAVManager) Start(ctx context.Context) error {
 
 	if c.AutoInstall {
 		go func() {
-			if err := m.EnsureInstalled(context.Background(), ""); err != nil {
+			if err := m.EnsureInstalled(m.detached(), ""); err != nil {
 				logger.L.LogError("failed to auto-install ClamAV", "error", err)
 			}
 		}()
@@ -119,6 +141,7 @@ func (m *ClamAVManager) addSchedulesLocked(c *gateonv1.ClamavConfig) {
 // manager or restarting the process. A nil cfg disables all scheduled jobs.
 // It is safe for concurrent use.
 func (m *ClamAVManager) Reconfigure(ctx context.Context, cfg *gateonv1.ClamavConfig) {
+	m.rememberLifetime(ctx)
 	m.config.Store(cfg)
 
 	m.mu.Lock()
@@ -132,7 +155,7 @@ func (m *ClamAVManager) Reconfigure(ctx context.Context, cfg *gateonv1.ClamavCon
 
 	if cfg != nil && cfg.AutoInstall {
 		go func() {
-			if err := m.EnsureInstalled(context.Background(), ""); err != nil {
+			if err := m.EnsureInstalled(m.detached(), ""); err != nil {
 				logger.L.LogError("failed to auto-install ClamAV", "error", err)
 			}
 		}()
@@ -498,6 +521,8 @@ func (m *ClamAVManager) tuneLocalClamav() {
 		return
 	}
 
+	// #nosec G304 -- targetPath is whichever of three hardcoded clamd config
+	// literals exists on disk; see confPaths above.
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
 		return
@@ -530,7 +555,11 @@ func (m *ClamAVManager) tuneLocalClamav() {
 	}
 
 	if modified {
-		// #nosec G306 -- targetPath is clamd's own configuration file
+		// #nosec G306,G703 -- G703 (path traversal) is a false positive:
+		// targetPath is not derived from input at all, it is whichever of three
+		// hardcoded literals in confPaths exists on disk.
+		//
+		// G306 -- targetPath is clamd's own configuration file
 		// (/etc/clamav/clamd.conf and friends), and clamd runs as the clamav
 		// user, not as gateon. 0600 makes the daemon unable to read its own
 		// config and it fails to start. This was tightened to 0600 once and
@@ -584,6 +613,9 @@ func (m *ClamAVManager) UpdateApplication(ctx context.Context) error {
 		if image == "" {
 			image = "clamav/clamav:latest"
 		}
+		// #nosec G204 -- no shell (exec.CommandContext, not sh -c), and image is
+		// the operator-configured DockerImage defaulting to clamav/clamav:latest.
+		// An operator who can set the ClamAV image can already run containers.
 		if out, err := exec.CommandContext(ctx, "docker", "pull", image).CombinedOutput(); err != nil {
 			return m.formatExecError("docker pull", err, out)
 		}
