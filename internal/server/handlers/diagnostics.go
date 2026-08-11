@@ -681,25 +681,23 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
-		limit := 50
-		if lStr := r.URL.Query().Get("limit"); lStr != "" {
-			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-				limit = l
-			}
+		// Bounded, not Atoi + int32(). Atoi returns an int, so on a 64-bit build
+		// "4294967297" parses cleanly and the conversion truncates it to 1,
+		// while "2147483648" lands on -2147483648. The `l > 0` and `o >= 0`
+		// guards rejected a negative *input*; they could not see a negative the
+		// conversion itself produced, and that value reached the query layer.
+		limit := boundedInt32(r.URL.Query().Get("limit"), maxPageSize)
+		if limit <= 0 {
+			limit = 50
 		}
-		offset := 0
-		if oStr := r.URL.Query().Get("offset"); oStr != "" {
-			if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
-				offset = o
-			}
-		}
+		offset := boundedInt32(r.URL.Query().Get("offset"), maxPageNumber)
 		search := r.URL.Query().Get("search")
 		category := r.URL.Query().Get("category")
 		status := r.URL.Query().Get("status")
 
 		res, err := svc.ListSecurityThreats(r.Context(), &gateonv1.ListSecurityThreatsRequest{
-			Limit:    int32(limit),
-			Offset:   int32(offset),
+			Limit:    limit,
+			Offset:   offset,
 			Search:   search,
 			Category: category,
 			Status:   status,
@@ -761,13 +759,12 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
-		limit := 20
-		if lStr := r.URL.Query().Get("limit"); lStr != "" {
-			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-				limit = l
-			}
+		// Bounded; see the security-threats handler above.
+		limit := boundedInt32(r.URL.Query().Get("limit"), maxPageSize)
+		if limit <= 0 {
+			limit = 20
 		}
-		res, err := svc.ListReputations(r.Context(), &gateonv1.ListReputationsRequest{Limit: int32(limit)})
+		res, err := svc.ListReputations(r.Context(), &gateonv1.ListReputationsRequest{Limit: limit})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
