@@ -55,7 +55,7 @@ linters:
       # Kept on one line deliberately: a YAML folded scalar joins the
       # continuations with spaces, which silently turns each alternation branch
       # into " http" and stops it matching anything.
-      ignore-strings: '^(true|false|http|https|h2c|tcp|udp|unix|gzip|br|deflate|linux|darwin|windows|GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|[A-Z][a-zA-Z0-9]*(-[A-Z][a-zA-Z0-9]*)+)$'
+      ignore-string-values: '^(true|false|http|https|h2c|tcp|udp|unix|gzip|br|deflate|linux|darwin|windows|GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|[A-Z][a-zA-Z0-9]*(-[A-Z][a-zA-Z0-9]*)+)$'
       # true/false      — string forms of booleans in headers, env vars and
       #                   config values. `const strTrue = "true"` is worse.
       # schemes/protos  — http, https, h2c, tcp, udp, unix: comparing a scheme
