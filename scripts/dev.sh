@@ -12,10 +12,18 @@
 #   Proxy     : http://localhost:8000   (the sample routes)
 #
 # Usage:
-#   scripts/dev.sh            # build (using embedded UI) and run
-#   scripts/dev.sh --ui       # rebuild the dashboard UI first, then run
-#   scripts/dev.sh --clean    # wipe dev/.data (fresh DB) before running
-#   scripts/dev.sh -h         # help
+#   scripts/dev.sh              # build (using embedded UI) and run, on SQLite
+#   scripts/dev.sh --postgres   # run against Postgres in an Apple container
+#   scripts/dev.sh --ui         # rebuild the dashboard UI first, then run
+#   scripts/dev.sh --clean      # wipe dev/.data (fresh DB) before running
+#   scripts/dev.sh -h           # help
+#
+# --postgres starts (or reuses) the database managed by scripts/dev-postgres.sh
+# and points every store at it. The container is left running on exit so the next
+# run is instant; stop it with 'scripts/dev-postgres.sh down' or throw the data
+# away with 'destroy'. With --clean it is destroyed and recreated, which is the
+# only way to get a genuinely empty schema — dropping dev/.data does nothing to a
+# database that does not live there.
 set -euo pipefail
 
 # ---- locate the repo and toolchain -----------------------------------------
@@ -32,12 +40,14 @@ fi
 
 BUILD_UI=false
 CLEAN=false
+POSTGRES=false
 for arg in "$@"; do
   case "${arg}" in
     --ui) BUILD_UI=true ;;
     --clean) CLEAN=true ;;
+    --postgres|--pg) POSTGRES=true ;;
     -h|--help)
-      sed -n '3,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '3,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "error: unknown flag '${arg}' (try -h)" >&2; exit 1 ;;
   esac
@@ -51,6 +61,17 @@ TRACE_DIR="${DATA_DIR}/trace"
 PASETO_SECRET="dev-secret-please-change-me-0123" # must match dev/global.json
 GATEON_BIN="${DATA_DIR}/gateon"
 BACKEND_BIN="${DATA_DIR}/devbackend"
+PG_SCRIPT="${SCRIPT_DIR}/dev-postgres.sh"
+
+# The database everything points at, and the config file that names it. On
+# SQLite these are the checked-in defaults; --postgres replaces both. One
+# variable rather than a branch at each use site: gateon derives the WAF rule
+# store, the audit log, path stats and auth from this single URL
+# (db.AuthDatabaseURL), so a second copy that drifted would split the gateway
+# across two databases without failing.
+DB_URL="${DB_PATH}"
+GLOBAL_CONFIG="${CONFIG_DIR}/global.json"
+DB_LABEL="SQLite  ${DB_PATH}"
 
 # Backend upstreams the sample services in dev/services.json point at.
 WHOAMI_ADDR="127.0.0.1:9001"
@@ -69,8 +90,33 @@ trap cleanup EXIT INT TERM
 if ${CLEAN}; then
   echo "==> --clean: removing ${DATA_DIR}"
   rm -rf "${DATA_DIR}"
+  # A Postgres database does not live in dev/.data, so --clean has to say so to
+  # the thing that owns it. Without this, --clean on --postgres would look like
+  # it reset the world and leave every row in place.
+  if ${POSTGRES}; then
+    "${PG_SCRIPT}" destroy
+  fi
 fi
 mkdir -p "${DATA_DIR}" "${TRACE_DIR}"
+
+# ---- database --------------------------------------------------------------
+if ${POSTGRES}; then
+  command -v jq >/dev/null 2>&1 || {
+    echo "error: --postgres needs 'jq' to write the dev config (brew install jq)" >&2
+    exit 1
+  }
+  "${PG_SCRIPT}" up
+  DB_URL="$("${PG_SCRIPT}" dsn)"
+
+  # dev/global.json is checked in and points at SQLite. Rather than edit it in
+  # place — which would show up in every developer's git status and eventually
+  # get committed — the Postgres run gets a generated copy under dev/.data. Only
+  # auth.database_url differs, so the two modes stay honestly comparable.
+  GLOBAL_CONFIG="${DATA_DIR}/global.postgres.json"
+  jq --arg dsn "${DB_URL}" '.auth.database_url = $dsn' \
+    "${CONFIG_DIR}/global.json" > "${GLOBAL_CONFIG}"
+  DB_LABEL="Postgres  $("${PG_SCRIPT}" status | awk '/^address/ {print $2}')  (container: ${GATEON_PG_NAME:-gateon-dev-pg})"
+fi
 
 # ---- build -----------------------------------------------------------------
 # The dashboard is embedded from internal/ui/dist. Rebuild it on --ui, or when
@@ -106,10 +152,23 @@ wait_for "${API_ADDR}"
 
 # ---- seed the dev admin ----------------------------------------------------
 echo "==> seeding dev accounts (admin/operator/viewer)"
-GATEON_DEV_DB="${DB_PATH}" GATEON_DEV_PASETO="${PASETO_SECRET}" \
-  "${GO}" run ./dev/seed -db "${DB_PATH}" -secret "${PASETO_SECRET}"
+GATEON_DEV_DB="${DB_URL}" GATEON_DEV_PASETO="${PASETO_SECRET}" \
+  "${GO}" run ./dev/seed -db "${DB_URL}" -secret "${PASETO_SECRET}"
 
 # ---- run gateon ------------------------------------------------------------
+# Ctrl-C stops gateon but deliberately leaves Postgres running, so say what that
+# means and how to undo it. A container still running after the script exited is
+# only a surprise if nothing mentioned it.
+PG_HINT=""
+if ${POSTGRES}; then
+  PG_HINT="
+  Postgres keeps running after Ctrl-C (next start is instant):
+    scripts/dev-postgres.sh psql        # a shell on the dev database
+    scripts/dev-postgres.sh down        # stop it, keep the data
+    scripts/dev-postgres.sh destroy     # throw the data away
+"
+fi
+
 cat <<BANNER
 
 ────────────────────────────────────────────────────────────────────
@@ -117,6 +176,7 @@ cat <<BANNER
 
   Dashboard   http://localhost:8080     (login: admin / password123)
   Proxy       http://localhost:8000
+  Database    ${DB_LABEL}
 
   Sample routes (dev/routes.json):
     web-route   PathPrefix(/)      -> whoami-service   [dev-headers, cors]
@@ -131,13 +191,13 @@ cat <<BANNER
    loopback is trusted; drive traffic from another host to populate it.)
 
   Ctrl-C to stop. State is under dev/.data/ (use --clean to reset).
-────────────────────────────────────────────────────────────────────
+${PG_HINT}────────────────────────────────────────────────────────────────────
 
 BANNER
 
 export GATEON_PROFILE=standard
 export GATEON_CONFIG_DIR="${CONFIG_DIR}"
-export GLOBAL_CONFIG_FILE="${CONFIG_DIR}/global.json"
+export GLOBAL_CONFIG_FILE="${GLOBAL_CONFIG}"
 export ROUTES_FILE="${CONFIG_DIR}/routes.json"
 export SERVICES_FILE="${CONFIG_DIR}/services.json"
 export ENTRYPOINTS_FILE="${CONFIG_DIR}/entrypoints.json"

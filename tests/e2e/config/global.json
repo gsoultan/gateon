@@ -40,6 +40,7 @@
     "lfi": true,
     "rce": true,
     "protocol": true,
+    "malware_detection": true,
     "anomaly_threshold": 1,
     "clamav": {
       "installation_mode": 2,
@@ -48,7 +49,7 @@
       "low_resource_mode": true,
       "clamav_addr": "tcp://localhost:3310"
     },
-    "audit_only": true
+    "audit_only": false
   },
   "ha": {},
   "anomaly_detection": {

@@ -71,6 +71,9 @@ service ApiService {
   rpc InstallClamav(InstallClamavRequest) returns (InstallClamavResponse);
   rpc UninstallClamav(UninstallClamavRequest) returns (UninstallClamavResponse);
   rpc RunDeepScan(RunDeepScanRequest) returns (RunDeepScanResponse);
+  // GetClamavScanStatus reports whether a scan is running. It exists because
+  // RunDeepScan starts one, so it can never be the thing a dashboard polls.
+  rpc GetClamavScanStatus(GetClamavScanStatusRequest) returns (GetClamavScanStatusResponse);
 
   rpc ListWafRules(ListWafRulesRequest) returns (ListWafRulesResponse);
   rpc CreateWafRule(CreateWafRuleRequest) returns (CreateWafRuleResponse);
@@ -81,6 +84,14 @@ service ApiService {
 message RunDeepScanRequest {}
 
 message RunDeepScanResponse {
+  bool success = 1;
+  string message = 2;
+  DeepScanStatus status = 3;
+}
+
+message GetClamavScanStatusRequest {}
+
+message GetClamavScanStatusResponse {
   bool success = 1;
   string message = 2;
   DeepScanStatus status = 3;

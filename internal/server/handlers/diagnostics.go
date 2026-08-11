@@ -426,12 +426,13 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
+		// One shared sample rather than this endpoint's own ReadMemStats: three
+		// endpoints report these numbers and used to disagree about them.
+		sys := telemetry.GetSystemStats()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"os": runtime.GOOS, "arch": runtime.GOARCH, "cpus": runtime.NumCPU(),
-			"goroutines": runtime.NumGoroutine(), "version": runtime.Version(),
-			"uptime_seconds": time.Since(d.StartTime).Seconds(), "memory_alloc": m.Alloc,
+			"goroutines": sys.Goroutines, "version": runtime.Version(),
+			"uptime_seconds": sys.UptimeSeconds, "memory_alloc": sys.MemoryAllocBytes,
 		})
 	})
 	mux.HandleFunc("GET /v1/diag/limit-stats", func(w http.ResponseWriter, r *http.Request) {

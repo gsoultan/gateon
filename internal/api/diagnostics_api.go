@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -398,10 +397,11 @@ func (s *ApiService) getManagementHosts(ctx context.Context) []string {
 }
 
 func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	// One shared runtime sample. This used to take its own, so the diagnostics
+	// page could report a different memory figure and goroutine count than
+	// /v1/status did a moment earlier, for the same process.
 	sysStats := telemetry.GetSystemStats()
-	uptime := time.Since(telemetry.GetStartTime()).Round(time.Second).String()
+	uptime := time.Duration(sysStats.UptimeSeconds * float64(time.Second)).Round(time.Second).String()
 
 	cfReachable := s.cfReachableCache.Load()
 
@@ -461,8 +461,8 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 		PublicIp:            publicIP,
 		CloudflareReachable: cfReachable,
 		Uptime:              uptime,
-		Goroutines:          int64(runtime.NumGoroutine()),
-		MemoryUsage:         fmt.Sprintf("%.2f MB", float64(m.Alloc)/1024/1024),
+		Goroutines:          int64(sysStats.Goroutines),
+		MemoryUsage:         fmt.Sprintf("%.2f MB", float64(sysStats.MemoryAllocBytes)/1024/1024),
 		CpuUsage:            fmt.Sprintf("%.1f%%", sysStats.CPUUsage),
 		Version:             s.Version,
 		Gossip:              telemetry.GetGossipStatus(),

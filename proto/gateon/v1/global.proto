@@ -316,6 +316,16 @@ message WafConfig {
   // fetches user-supplied URLs can call this always an attack. The navigation
   // half — "redirect_to", "next" — needs no flag and is always on.
   bool ssrf_protection = 41;
+  // The hostnames this gateway answers on, used to tell a redirect or fetch
+  // destination on this site from one somewhere else.
+  //
+  // This has to be configuration. The engine previously compared against the
+  // request's Host header, which an attacker supplies as freely as the
+  // destination — "Host: evil.tld" with "redirect_to=https://evil.tld/" compared
+  // same-origin and passed. Left empty, gateon derives these from the Host()
+  // rules in the routing table; set it when a route matches on something other
+  // than a host, or when the gateway is reached by a name no route names.
+  repeated string origins = 42;
 }
 
 message ClamavConfig {
