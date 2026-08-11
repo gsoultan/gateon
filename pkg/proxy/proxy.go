@@ -91,10 +91,7 @@ func (h *ProxyHandler) DrainAndClose(timeout time.Duration) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
-	for {
-		if h.activeConnCount() == 0 {
-			break
-		}
+	for h.activeConnCount() != 0 {
 		select {
 		case <-ticker.C:
 			continue

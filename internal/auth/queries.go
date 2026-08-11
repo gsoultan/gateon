@@ -34,7 +34,7 @@ const (
 	// wider struct that might get logged or serialized.
 	QuerySessionBindingByID = "SELECT password, role, disabled FROM users WHERE id = ?"
 
-	QueryDeleteUser     = "DELETE FROM users WHERE id = ?"
+	QueryDeleteUser = "DELETE FROM users WHERE id = ?"
 	// #nosec G101 -- a parameterised statement, not a credential. Both values
 	// are bound.
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"

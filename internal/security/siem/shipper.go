@@ -22,7 +22,7 @@ const (
 	envTransport = "GATEON_SIEM_TRANSPORT" // http | udp | tcp (default http)
 	envEndpoint  = "GATEON_SIEM_ENDPOINT"  // URL (http) or host:port (udp/tcp)
 	// #nosec G101 -- the name of an environment variable, not its value.
-	envToken     = "GATEON_SIEM_TOKEN"     // optional bearer token (http)
+	envToken     = "GATEON_SIEM_TOKEN" // optional bearer token (http)
 	envQueueSize = "GATEON_SIEM_QUEUE_SIZE"
 	envTimeout   = "GATEON_SIEM_TIMEOUT" // per-send timeout, e.g. "5s"
 )

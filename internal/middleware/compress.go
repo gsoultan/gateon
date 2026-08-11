@@ -182,7 +182,7 @@ func (w *compressWriter) decide() {
 	}
 	w.decided = true
 
-	h := w.ResponseWriter.Header()
+	h := w.Header()
 	// Skip if already encoded, or error, or small, or excluded type
 	if h.Get("Content-Encoding") != "" || w.status >= 300 || w.status == http.StatusNoContent || w.status == http.StatusNotModified {
 		w.should = false

@@ -129,7 +129,7 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 			initialWeight := initialWeights[target.Url]
 
 			// Find target weight in request
-			var targetWeight int32 = initialWeight
+			var targetWeight = initialWeight
 			found := false
 			for _, tw := range req.TargetWeights {
 				if tw.Url == target.Url {

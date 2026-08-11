@@ -144,10 +144,10 @@ func (w *deceptionResponseWriter) Write(b []byte) (int, error) {
 		if idx := bytes.LastIndex(b, []byte("</body>")); idx != -1 {
 			var sb strings.Builder
 			for _, link := range w.cfg.InvisibleLinkPaths {
-				sb.WriteString(fmt.Sprintf(`<a href="%s" style="display:none" aria-hidden="true" tabIndex="-1"></a>`, link))
+				fmt.Fprintf(&sb, `<a href="%s" style="display:none" aria-hidden="true" tabIndex="-1"></a>`, link)
 			}
 			for _, form := range w.cfg.HoneyForms {
-				sb.WriteString(fmt.Sprintf(`<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form))
+				fmt.Fprintf(&sb, `<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form)
 			}
 
 			newContent := make([]byte, 0, len(b)+sb.Len())

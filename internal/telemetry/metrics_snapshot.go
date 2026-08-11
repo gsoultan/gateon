@@ -782,9 +782,10 @@ func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 			rm := getOrCreateRoute(routeMap, route)
 			dir := labelValue(m, "direction")
 			val := m.GetCounter().GetValue()
-			if dir == "in" {
+			switch dir {
+			case "in":
 				rm.BytesIn += val
-			} else if dir == "out" {
+			case "out":
 				rm.BytesOut += val
 			}
 		}
