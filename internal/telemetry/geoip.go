@@ -524,6 +524,8 @@ func DownloadGeoIP(licenseKey string) error {
 func downloadGeoIPEdition(licenseKey string, edition geoIPEdition) error {
 	url := fmt.Sprintf("https://download.maxmind.com/app/geoip_download?edition_id=%s&license_key=%s&suffix=tar.gz", edition.id, licenseKey)
 
+	// #nosec G107 -- url is built from MaxMind's fixed download endpoint plus
+	// the operator's licence key; no request input reaches it.
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download %s database: %w", edition.id, err)

@@ -28,6 +28,8 @@ const (
 		ON DUPLICATE KEY UPDATE role=VALUES(role)`
 
 	QueryDeleteUser     = "DELETE FROM users WHERE id = ?"
+	// #nosec G101 -- a parameterised statement, not a credential. Both values
+	// are bound.
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"
 	QueryUpdate2FA      = "UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?"
 )
