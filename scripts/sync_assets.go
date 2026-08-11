@@ -40,6 +40,8 @@ const gitKeep = ".gitkeep"
 // cleanDir removes stale build artifacts from dst while preserving the tracked
 // .gitkeep file. The destination directory itself is (re)created if missing.
 func cleanDir(dst string) error {
+	// #nosec G301 -- build-time asset sync, not a runtime path. The output is
+	// static dashboard files that get embedded into the binary.
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
