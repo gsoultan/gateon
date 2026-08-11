@@ -218,6 +218,9 @@ func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanReq
 	status := s.ClamAVManager.GetScanStatus()
 	if !status.IsRunning {
 		// Run scan in background as it can take a long time
+		// A full scan runs for minutes and must not die with this RPC, so the
+		// parent is deliberately the process lifetime rather than the request.
+		//nolint:contextcheck // detaching from the request is the intent; see detached().
 		go s.ClamAVManager.RunFullScan(s.detached())
 		s.logAudit(ctx, "run_scan", "clamav", "Deep scan initiated")
 		// Refresh status to show it's now running
