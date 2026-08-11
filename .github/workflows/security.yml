@@ -166,7 +166,7 @@ jobs:
 
       - name: Trivy filesystem scan
         # Pinned: see the gosec note above.
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
           scan-ref: .
@@ -197,7 +197,7 @@ jobs:
       - name: Show Trivy findings in the log
         if: always()
         # Pinned: see the gosec note above.
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
           scan-ref: .
