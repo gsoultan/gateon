@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 // Package siem exports Gateon's structured security events (raw threats and
 // correlated incidents) to external SIEM/log collectors such as the Wazuh

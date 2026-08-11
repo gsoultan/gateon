@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 // Command seed provisions the dev admin/operator/viewer accounts so the
 // dashboard is usable the moment gateon starts, skipping the first-run wizard.

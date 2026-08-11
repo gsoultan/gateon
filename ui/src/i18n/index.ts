@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 export { I18nProvider } from "./I18nProvider";
 export { useTranslation } from "./useTranslation";
 export type { TranslateFn, TranslationParams } from "./useTranslation";

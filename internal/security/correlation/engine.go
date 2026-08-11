@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 // Package correlation provides a lightweight, dependency-free rules engine that
 // aggregates individual security signals (the threats Gateon already records:

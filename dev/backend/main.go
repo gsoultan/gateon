@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 // Command backend is a tiny echo server for the dev environment. It stands in
 // for a real upstream so `scripts/dev.sh` has something to proxy to: it reports

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
 import { create } from 'zustand';
 import { getApiUrl } from '../hooks/api';
 import type { Anomaly, AuditLog, MetricsSnapshot } from '../types/gateon';
