@@ -6,6 +6,7 @@ package entrypoint
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -33,7 +34,7 @@ func TestPeekedConnReplaysFirst(t *testing.T) {
 	// Wrap srvConn (now empty) with peeked - replay so HTTP server sees full request
 	pc := newPeekedConn(srvConn, peeked)
 	all, err := io.ReadAll(pc)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("ReadAll: %v", err)
 	}
 	if !bytes.HasPrefix(all, peeked) {

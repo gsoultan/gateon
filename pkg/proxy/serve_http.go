@@ -46,7 +46,6 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var pooled bool
 	if !ok {
 		sw = httputil.GetStatusResponseWriter(w)
-		w = sw
 		pooled = true
 	}
 	if pooled {

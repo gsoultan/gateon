@@ -147,7 +147,7 @@ func (v *JWTValidator) formatJWTError(err error) error {
 	if errors.Is(err, jwt.ErrTokenExpired) {
 		return errors.New("token expired")
 	}
-	return fmt.Errorf("invalid token: %v", err)
+	return fmt.Errorf("invalid token: %w", err)
 }
 
 func (v *JWTValidator) validateToken(ctx context.Context, claims jwt.MapClaims) error {

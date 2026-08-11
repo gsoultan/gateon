@@ -20,12 +20,12 @@ func main() {
 
 	http.HandleFunc("/pgadmin4/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-pgadmin-version", "8.9")
-		w.Write([]byte("<html><body>pgAdmin 4</body></html>"))
+		_, _ = w.Write([]byte("<html><body>pgAdmin 4</body></html>"))
 	})
 
 	http.HandleFunc("/synology/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Set-Cookie", "id=SYNO; Path=/")
-		w.Write([]byte("<html><body>Synology DSM</body></html>"))
+		_, _ = w.Write([]byte("<html><body>Synology DSM</body></html>"))
 	})
 
 	http.HandleFunc("/grpc", func(w http.ResponseWriter, r *http.Request) {
@@ -56,10 +56,10 @@ func main() {
 			}
 			defer conn.Close()
 
-			bufrw.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
-			bufrw.WriteString("Upgrade: websocket\r\n")
-			bufrw.WriteString("Connection: Upgrade\r\n")
-			bufrw.WriteString("\r\n")
+			_, _ = bufrw.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
+			_, _ = bufrw.WriteString("Upgrade: websocket\r\n")
+			_, _ = bufrw.WriteString("Connection: Upgrade\r\n")
+			_, _ = bufrw.WriteString("\r\n")
 			bufrw.Flush()
 
 			log.Println("DEBUG: WebSocket connection established")
@@ -69,7 +69,7 @@ func main() {
 					log.Printf("DEBUG: WebSocket read error: %v\n", err)
 					break
 				}
-				bufrw.WriteString("ECHO: " + line)
+				_, _ = bufrw.WriteString("ECHO: " + line)
 				bufrw.Flush()
 			}
 			return
@@ -90,7 +90,7 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	port := os.Getenv("PORT")
@@ -98,5 +98,6 @@ func main() {
 		port = "8082"
 	}
 	fmt.Printf("Mock backend listening on :%s\n", port)
-	http.ListenAndServe(":"+port, nil)
+	// #nosec G114 -- dev mock backend; not the shipped server.
+	_ = http.ListenAndServe(":"+port, nil)
 }

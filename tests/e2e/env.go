@@ -64,7 +64,7 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 
 	// Create config dir
 	configDir := filepath.Join(tmpDir, "config")
-	os.MkdirAll(configDir, 0755)
+	_ = os.MkdirAll(configDir, 0o750)
 
 	// Generate certificates in temp dir
 	t.Log("Generating TLS certificates...")
