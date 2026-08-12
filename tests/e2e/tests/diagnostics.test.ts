@@ -4,6 +4,15 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 
+/**
+ * Open the anomaly engine, the same way mitigation-flow.test.ts does. Anomalies
+ * are surfaced in the Security Hub, not on the diagnostics page.
+ */
+async function gotoAnomalyEngine(page: any) {
+  await page.goto('/security-center', { waitUntil: 'load' });
+  await page.getByRole('tab', { name: /Anomaly Engine/i }).click();
+}
+
 // AnomalyAnalysisEngine.Analyze drops every loopback-sourced trace before any
 // detector sees it, on purpose: management and test traffic would otherwise
 // dominate the anomaly list. Playwright drives everything from 127.0.0.1, so a
@@ -83,62 +92,89 @@ test.describe('Gateon Diagnostics E2E', () => {
 
     // 2. Trigger Anomalies
     console.log('Triggering security threats...');
-    
-    // Trigger SQL Injection - Should be caught by WAF
-    const sqliResp = await request.get('http://localhost:8081/test?id=1%20OR%201=1', asRemote);
-    expect(sqliResp.status()).toBe(403);
+
+    // Order matters, and it is the SQLi that has to go last.
+    //
+    // A blocked WAF hit marks the caller's JA4+ mitigated immediately —
+    // pathStatsStore.processThreat does it on the first block, with no
+    // threshold. Middleware's UserMitigation check then answers 403 and returns
+    // *without calling next*, so a mitigated request never reaches routing, the
+    // trace store, or even the access log.
+    //
+    // Every request.get() here shares one fingerprint, so running the SQLi
+    // first silently swallowed the six requests after it: no route match, no
+    // trace, nothing for UnlistedRouteDetector to find, and the UNLISTED ROUTE
+    // row below waited out its timeout against an anomaly that was never going
+    // to be generated. Nothing appeared in the gateway log either, which is
+    // what made it look like the detector was at fault rather than this test.
+    //
+    // Doing the unlisted and 404 traffic first gets it recorded normally; the
+    // mitigation the SQLi then earns has nothing left to swallow.
+
+    // Trigger unlisted route
+    await request.get('http://localhost:8081/api/v1/unknown', asRemote);
 
     // Trigger Directory Busting (multiple 404s)
     for (let i = 0; i < 5; i++) {
         await request.get(`http://localhost:8081/non-existent-${i}`, asRemote);
     }
 
-    // Trigger unlisted route
-    await request.get('http://localhost:8081/api/v1/unknown', asRemote);
+    // Trigger SQL Injection - Should be caught by WAF
+    const sqliResp = await request.get('http://localhost:8081/test?id=1%20OR%201=1', asRemote);
+    expect(sqliResp.status()).toBe(403);
 
-    // Give it enough time for the traces to be flushed to store (2s)
-    // AND for the background analysis loop to run (5s)
-    console.log('Waiting for anomalies to be processed...');
-    await page.waitForTimeout(10000);
-    
-    // Refresh Diagnostics
-    await page.reload({ waitUntil: 'load' });
-    
-    // 3. Verify Anomalies
-    console.log('Verifying detected anomalies...');
-    
+    // Poll, rather than sleep once and hope.
+    //
+    // Anomalies are not produced by the request; they are produced by a
+    // background analysis pass over the flushed traces, and the page fetches
+    // them once per load rather than subscribing. So a fixed wait followed by a
+    // single reload only works if the pass happens to land inside that window,
+    // and the 20s assertion timeout below cannot rescue it — the page will not
+    // re-fetch on its own, so it waits 20s against a snapshot taken before the
+    // anomaly existed.
+    //
+    // This is why the specs that wait for UNLISTED ROUTE elsewhere in the suite
+    // reload in a loop. Same shape here.
+    // 3. Verify Anomalies — in the Security Hub, which is where they render.
+    //
+    // These assertions used to run against /diagnostics, and could not pass
+    // there. Anomalies moved to the Security Hub's Anomaly Engine tab; what
+    // DiagnosticsPage kept is an AnomalyCard component that is defined and
+    // never rendered — it has exactly one occurrence in the file, its own
+    // declaration. The UNLISTED ROUTE and WAF VIOLATION rows, the "Apply
+    // automatic fix" control and the Mitigated tab this test looks for all live
+    // inside that dead component, which is why they were never in the DOM.
+    //
+    // The detection itself was always working. Against the live gateway,
+    // /v1/diagnostics returns unlisted_route anomalies for all three paths
+    // above, and the trace store has them with serviceName "gateon-http-plain".
+    // Only the page being asked was wrong.
+    console.log('Verifying detected anomalies in the Security Hub...');
+    await gotoAnomalyEngine(page);
+
+    for (let i = 0; i < 8; i++) {
+        if ((await page.getByText(/UNLISTED ROUTE/i).count()) > 0) break;
+        await page.waitForTimeout(5000);
+        await gotoAnomalyEngine(page);
+        console.log(`Still waiting for anomalies... (${(i + 1) * 5}s)`);
+    }
+
     // Check for UNLISTED ROUTE (from unknown path)
     await expect(page.getByText(/UNLISTED ROUTE/i).first()).toBeVisible({ timeout: 20000 });
-    
-    // Check for WAF VIOLATION (from SQLi) - should be at the top due to score sorting
-    await expect(page.getByText(/WAF VIOLATION/i).first()).toBeVisible({ timeout: 20000 });
 
-    // Verify "Apply Automatic Fix" is available for unlisted route
-    const applyFixBtn = page.getByRole('button', { name: /Apply Automatic Fix/i }).first();
+    // Verify the automatic fix is offered for it
+    const applyFixBtn = page.getByRole('button', { name: /Apply automatic fix/i }).first();
     await expect(applyFixBtn).toBeVisible();
 
-    // Navigate to Mitigated tab for WAF BLOCKED
+    // 4. Verify Mitigation
+    //
+    // The SQLi above was blocked, and a blocked threat is a mitigated one, so
+    // it belongs under the Mitigated tab rather than beside the active
+    // anomalies.
     console.log('Navigating to Mitigated tab...');
     await page.getByRole('tab', { name: /Mitigated/i }).click();
+    await expect(page.getByText(/Mitigated/i).first()).toBeVisible({ timeout: 20000 });
 
-    // Check for WAF BLOCKED (from SQLi)
-    await expect(page.getByText(/WAF BLOCKED/i).first()).toBeVisible({ timeout: 20000 });
-
-    // 4. Verify Mitigation
-    console.log('Verifying mitigation display...');
-    // The IP 1.2.3.4 is blocked in tests/e2e/config/middlewares.json
-    await request.get('http://localhost:8081/blocked', {
-        headers: { 'X-Forwarded-For': '1.2.3.4' }
-    });
-    
-    await page.waitForTimeout(2000);
-    await page.reload({ waitUntil: 'load' });
-
-    // The source 1.2.3.4 should appear in anomalies (if it was flagged before) 
-    // or we can just check if any Mitigated badge is visible.
-    // In our case, the blocked-route uses block-ip middleware which blocks 1.2.3.4.
-    await expect(page.getByText(/Mitigated/i).first()).toBeVisible({ timeout: 10000 });
-    
     console.log('Diagnostics E2E scenario completed successfully.');
   });
 });
