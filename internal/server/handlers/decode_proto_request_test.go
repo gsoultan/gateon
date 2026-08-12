@@ -113,3 +113,41 @@ func TestDecodeProtoRequestRejectsMalformedBody(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
+
+// PUT /v1/users decoded gateonv1.User with encoding/json. User carries four
+// underscore-tagged fields, and the dashboard sends the protojson spelling, so
+// two_factor_enabled and two_factor_pending both arrived as false regardless of
+// what was sent.
+//
+// UpdateUser reads exactly those two:
+//
+//	if !req.User.TwoFactorEnabled {
+//	    s.Auth.SetTwoFactorPending(req.User.Id, req.User.TwoFactorPending)
+//	}
+//
+// With both forced to false the guard is always taken and the call always
+// clears the flag, so editing a user for any reason — a role change — silently
+// dropped an admin-mandated 2FA enrollment. The comment above it says "only
+// (re)assert a pending-2FA requirement"; the decode made it do the opposite.
+//
+// Against the pre-fix code both assertions below fail with false.
+func TestDecodeProtoRequestKeepsTwoFactorFlags(t *testing.T) {
+	var req gateonv1.User
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/v1/users", strings.NewReader(
+		`{"id":"u-1","username":"ops","role":"operator",`+
+			`"twoFactorEnabled":true,"twoFactorPending":true}`))
+
+	if !DecodeProtoRequest(w, r, &req) {
+		t.Fatalf("decode refused the dashboard's user payload: %d %s", w.Code, w.Body)
+	}
+	if !req.GetTwoFactorEnabled() {
+		t.Error("TwoFactorEnabled decoded false; UpdateUser guards on this, so a " +
+			"user with 2FA active would be treated as not enrolled")
+	}
+	if !req.GetTwoFactorPending() {
+		t.Error("TwoFactorPending decoded false; an admin-mandated enrollment would " +
+			"be cleared by an unrelated edit")
+	}
+}
