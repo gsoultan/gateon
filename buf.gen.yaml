@@ -1,21 +1,25 @@
-version: v1
+# buf v2 configuration.
+#
+# protoc-gen-connect-es is gone. Connect-ES v2 generates its service stubs from
+# protoc-gen-es output, so the separate plugin is retired upstream (frozen at
+# 1.7.0) and the *_connect.ts files it produced no longer exist — service
+# descriptors live in the *_pb.ts files alongside the messages.
+version: v2
 managed:
   enabled: true
-  go_package_prefix:
-    default: github.com/gsoultan/gateon/proto
+  override:
+    - file_option: go_package_prefix
+      value: github.com/gsoultan/gateon/proto
 plugins:
-  - name: go
+  - local: protoc-gen-go
     out: proto
     opt: paths=source_relative
-  - name: go-grpc
+  - local: protoc-gen-go-grpc
     out: proto
     opt: paths=source_relative
-  - name: connect-go
+  - local: protoc-gen-connect-go
     out: proto
     opt: paths=source_relative
-  - name: es
-    out: ui/src/services/gen
-    opt: target=ts
-  - name: connect-es
+  - local: ./ui/node_modules/.bin/protoc-gen-es
     out: ui/src/services/gen
     opt: target=ts
