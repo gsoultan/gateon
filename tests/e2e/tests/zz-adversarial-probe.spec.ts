@@ -175,20 +175,26 @@ test.describe('Adversarial probe', () => {
   // against a live gateway before restoring this.
   test('rotating the claimed source IP does not shed an earned mitigation', async ({ request }) => {
     const attacker = '203.0.113.91';
-    const sqli = `${PROXY}/test?id=1%20OR%201=1`;
+    // XSS, not SQLi. mitigation-flow.test.ts marks a SQLi detection on /test as
+    // a false positive and never removes the exception, so by the time this
+    // file runs the WAF correctly allows `id=1 OR 1=1` and the probe would be
+    // measuring that leftover allowlist instead of anything about mitigation.
+    // traceroute.test.ts hit the same trap and left a note; this is that note
+    // being read.
+    const attack = `${PROXY}/test?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E`;
 
     // Earn it. The gate needs repeated evidence now, not a single hit.
     for (let i = 0; i < 4; i++) {
-      const res = await request.get(sqli, as(attacker));
+      const res = await request.get(attack, as(attacker));
       expect(res.status(), 'the WAF stopped blocking a textbook injection').toBe(403);
     }
 
     // Same client, new address every time. The WAF verdict must not move.
     for (const ip of ['203.0.113.92', '198.51.100.7', '192.0.2.44']) {
-      const res = await request.get(sqli, as(ip));
+      const res = await request.get(attack, as(ip));
       expect(
         res.status(),
-        `SQLi from rotated address ${ip} was served; a client that can pick its own ` +
+        `the attack from rotated address ${ip} was served; a client that can pick its own ` +
         'source address could otherwise walk away from any address-based defence',
       ).toBe(403);
     }
