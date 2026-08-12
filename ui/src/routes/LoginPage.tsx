@@ -29,7 +29,7 @@ import {
   IconRocket,
   IconServer,
 } from "@tabler/icons-react";
-import { useAuthStore } from "../store/useAuthStore";
+import { COOKIE_SESSION, useAuthStore } from "../store/useAuthStore";
 import { useIsMobile } from "../hooks/useMobile";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
 
@@ -118,7 +118,11 @@ export default function LoginPage() {
           // first-time enrollment (re-uses the just-entered password).
           await startEnrollment(values.username, values.password);
         } else {
-          setAuth(data.token, data.user);
+          // The server has already set the HttpOnly gateon_session cookie.
+          // Deliberately not storing data.token: keeping the bearer token in
+          // reachable client state is what made a single XSS bug in this
+          // dashboard equivalent to full administrator compromise.
+          setAuth(COOKIE_SESSION, data.user);
           navigate({ to: "/" });
         }
       } else if (res.status === 401) {
@@ -150,7 +154,11 @@ export default function LoginPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          setAuth(data.token, data.user);
+          // The server has already set the HttpOnly gateon_session cookie.
+          // Deliberately not storing data.token: keeping the bearer token in
+          // reachable client state is what made a single XSS bug in this
+          // dashboard equivalent to full administrator compromise.
+          setAuth(COOKIE_SESSION, data.user);
           navigate({ to: "/" });
         } else {
           setError("Invalid 2FA code");

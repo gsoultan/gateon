@@ -121,7 +121,7 @@ func (p *TCPBackendPool) Pick() string {
 
 	switch policy {
 	case "least_conn":
-		var bestIdx int = -1
+		var bestIdx = -1
 		var bestActive int32 = -1
 		for i := range addrs {
 			if !alive[i].Load() {

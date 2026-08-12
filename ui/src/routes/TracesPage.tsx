@@ -51,6 +51,7 @@ import { useTableDensity } from "../hooks/useTableDensity";
 import { useUrlFilters } from "../hooks/useUrlFilters";
 import type { Trace } from "../hooks/useGateon";
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
+import { QueryError } from "../components/QueryError";
 
 const PAGE_SIZE = 20;
 
@@ -74,7 +75,7 @@ const getDurationColor = (duration: number) => {
 };
 
 export default function TracesPage() {
-  const { data: traces = [], isLoading, refetch } = useTraces();
+  const { data: traces = [], isLoading, isError, error, refetch } = useTraces();
   const density = useTableDensity();
   // URL-synced filters make a filtered trace view bookmarkable/shareable; local
   // state (seeded from the URL) keeps typing responsive while we mirror to the URL.
@@ -259,7 +260,9 @@ export default function TracesPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {isLoading ? (
+                {isError ? (
+                  <QueryError error={error} what="traces" onRetry={() => refetch()} />
+                ) : isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <Table.Tr key={i}>
                       <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>

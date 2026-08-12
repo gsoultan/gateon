@@ -49,15 +49,16 @@ func TestFingerprintBlocking(t *testing.T) {
 	defer cmd.Process.Kill()
 
 	// 3. Start the mock backend at allocated port
-	mockBinaryName := "mock_backend_" + t.Name()
-	mockBinaryPath := filepath.Join(projectRoot, mockBinaryName)
-	t.Logf("Building mock backend: %s...", mockBinaryName)
-	cmdMockBuild := exec.Command("go", "build", "-o", mockBinaryName, "tests/e2e/mock_backend/main.go")
+	// Built into the test's temp dir, not the repository root: a test must not
+	// leave binaries in the checkout, and a subtest name contains a '/' that
+	// would make the -o path invalid.
+	mockBinaryPath := filepath.Join(env.Dir, "mock_backend"+exeSuffix())
+	t.Logf("Building mock backend into %s...", mockBinaryPath)
+	cmdMockBuild := exec.Command("go", "build", "-o", mockBinaryPath, "tests/e2e/mock_backend/main.go")
 	cmdMockBuild.Dir = projectRoot
 	if out, err := cmdMockBuild.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build mock backend: %v\n%s", err, out)
 	}
-	defer os.Remove(mockBinaryPath)
 
 	mockBackend := exec.Command(mockBinaryPath)
 	mockBackend.Dir = projectRoot
@@ -101,7 +102,7 @@ func TestFingerprintBlocking(t *testing.T) {
 			req, _ := http.NewRequest("GET", targetURL+"?file=/etc/passwd&exec=/bin/ls", nil)
 			req.Header.Set("User-Agent", attackerUA)
 			req.Header.Set("X-Forwarded-For", sharedIP)
-			
+
 			resp, err := attackerClient.Do(req)
 			if err != nil {
 				t.Logf("Attempt %d: %v", i, err)
@@ -119,13 +120,13 @@ func TestFingerprintBlocking(t *testing.T) {
 		req, _ := http.NewRequest("GET", targetURL, nil)
 		req.Header.Set("User-Agent", attackerUA)
 		req.Header.Set("X-Forwarded-For", sharedIP)
-		
+
 		resp, err := attackerClient.Do(req)
 		if err != nil {
 			t.Fatalf("Failed to send request: %v", err)
 		}
 		defer resp.Body.Close()
-		
+
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("Expected attacker to be blocked (403), got %d", resp.StatusCode)
 		} else {
@@ -138,13 +139,13 @@ func TestFingerprintBlocking(t *testing.T) {
 		req, _ := http.NewRequest("GET", targetURL, nil)
 		req.Header.Set("User-Agent", normalUA)
 		req.Header.Set("X-Forwarded-For", sharedIP)
-		
+
 		resp, err := normalClient.Do(req)
 		if err != nil {
 			t.Fatalf("Failed to send request: %v", err)
 		}
 		defer resp.Body.Close()
-		
+
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("Expected normal user to be allowed (200), got %d", resp.StatusCode)
 			body, _ := io.ReadAll(resp.Body)

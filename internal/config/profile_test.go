@@ -48,13 +48,13 @@ func TestDefaultsFor_ConservativeMinimal(t *testing.T) {
 		t.Error("standard/enterprise should enable the trace store")
 	}
 	// Footprint must be monotonic across tiers for the key bounds.
-	if !(min.CorrelationMaxSources <= std.CorrelationMaxSources && std.CorrelationMaxSources <= ent.CorrelationMaxSources) {
+	if min.CorrelationMaxSources > std.CorrelationMaxSources || std.CorrelationMaxSources > ent.CorrelationMaxSources {
 		t.Error("CorrelationMaxSources must be non-decreasing minimal<=standard<=enterprise")
 	}
-	if !(min.PebbleCacheBytes <= std.PebbleCacheBytes && std.PebbleCacheBytes <= ent.PebbleCacheBytes) {
+	if min.PebbleCacheBytes > std.PebbleCacheBytes || std.PebbleCacheBytes > ent.PebbleCacheBytes {
 		t.Error("PebbleCacheBytes must be non-decreasing minimal<=standard<=enterprise")
 	}
-	if !(min.RetentionDays <= std.RetentionDays && std.RetentionDays <= ent.RetentionDays) {
+	if min.RetentionDays > std.RetentionDays || std.RetentionDays > ent.RetentionDays {
 		t.Error("RetentionDays must be non-decreasing minimal<=standard<=enterprise")
 	}
 }

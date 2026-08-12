@@ -146,7 +146,7 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
 				Description:    m.Reason,
 				Category:       m.Category,
-				Severity:       "high",
+				Severity:       severityHigh,
 				ActionTaken:    "blocked",
 				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
 			})
@@ -433,7 +433,7 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 		titanStats.PhantomEngine = engine
 		titanStats.ActivePhantomPorts = int32(ports)
 	}
-	if ai.GlobalPredictor != nil {
+	if ai.GlobalPredictor() != nil {
 		titanStats.AiPredictorEnabled = true
 		titanStats.AiModelStatus = "Running (WASM)"
 	} else {
@@ -977,7 +977,8 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 		var mitigations []telemetry.CombinedMitigation
 		var total int
 
-		if status == "user_mitigated" || status == "userMitigated" {
+		switch status {
+		case "user_mitigated", "userMitigated":
 			// Fetch only user mitigations
 			userMitigations, t := telemetry.GetUserMitigations(ctx, limit, offset)
 			total = t
@@ -996,7 +997,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 					UpdatedAt:     m.UpdatedAt,
 				}
 			}
-		} else if status == "ip_mitigated" || status == "ipMitigated" {
+		case "ip_mitigated", "ipMitigated":
 			// Fetch only IP mitigations
 			ipMitigations, t := telemetry.GetIPMitigations(ctx, limit, offset)
 			total = t
@@ -1014,7 +1015,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 					UpdatedAt:     m.UpdatedAt,
 				}
 			}
-		} else {
+		default:
 			// Combined "mitigated" status
 			mitigations, total = telemetry.GetCombinedMitigations(ctx, limit, offset)
 		}
@@ -1028,7 +1029,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
 				Description:    m.Reason,
 				Category:       m.Category,
-				Severity:       "high",
+				Severity:       severityHigh,
 				ActionTaken:    "blocked",
 				Recommendation: "Source is mitigated based on threat intelligence.",
 				Ja4:            m.Source,

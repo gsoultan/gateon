@@ -22,6 +22,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// internalRoutePrefix marks Gateon's own management routes. They are excluded
+// from route metrics so the dashboard reports customer traffic, not the
+// gateway talking to itself.
+const internalRoutePrefix = "gateon-"
+
 type EbpfProvider interface {
 	GetTopIPs(limit int) ([]ebpf.IPStat, error)
 	ShunIP(ip string) error
@@ -739,84 +744,75 @@ func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
 	return f
 }
 
+// forEachRouteMetric walks one metric family and hands each sample to fn along
+// with the RouteMetric it belongs to.
+//
+// The guard it centralises matters more than the boilerplate it removes: every
+// caller has to skip Gateon's own "gateon-" management routes, or the dashboard
+// starts reporting the gateway's own control plane as customer traffic. That
+// check was written out once per family, so adding a sixth family meant
+// remembering it again.
+func forEachRouteMetric(
+	idx map[string]*dto.MetricFamily,
+	family string,
+	routeMap map[string]*RouteMetric,
+	fn func(rm *RouteMetric, m *dto.Metric),
+) {
+	fam, ok := idx[family]
+	if !ok {
+		return
+	}
+	for _, m := range fam.GetMetric() {
+		route := labelValue(m, "route")
+		if route == "" || strings.HasPrefix(route, internalRoutePrefix) {
+			continue
+		}
+		fn(getOrCreateRoute(routeMap, route), m)
+	}
+}
+
 func buildRouteMetrics(idx map[string]*dto.MetricFamily) []RouteMetric {
 	routeMap := make(map[string]*RouteMetric)
 
-	if fam, ok := idx["gateon_requests_total"]; ok {
-		for _, m := range fam.GetMetric() {
-			route := labelValue(m, "route")
-			if route == "" || strings.HasPrefix(route, "gateon-") {
-				continue
-			}
-			rm := getOrCreateRoute(routeMap, route)
-			if svc := labelValue(m, "service"); svc != "" {
-				rm.Service = svc
-			}
-			sc := labelValue(m, "status_code")
-			val := m.GetCounter().GetValue()
-			rm.Requests += val
-			rm.StatusCodes[sc] += val
-			if strings.HasPrefix(sc, "5") {
-				rm.Errors += val
-			}
+	forEachRouteMetric(idx, "gateon_requests_total", routeMap, func(rm *RouteMetric, m *dto.Metric) {
+		if svc := labelValue(m, "service"); svc != "" {
+			rm.Service = svc
 		}
-	}
+		sc := labelValue(m, "status_code")
+		val := m.GetCounter().GetValue()
+		rm.Requests += val
+		rm.StatusCodes[sc] += val
+		if strings.HasPrefix(sc, "5") {
+			rm.Errors += val
+		}
+	})
 
-	if fam, ok := idx["gateon_requests_in_flight"]; ok {
-		for _, m := range fam.GetMetric() {
-			route := labelValue(m, "route")
-			if route == "" || strings.HasPrefix(route, "gateon-") {
-				continue
-			}
-			rm := getOrCreateRoute(routeMap, route)
-			rm.InFlight = m.GetGauge().GetValue()
-		}
-	}
+	forEachRouteMetric(idx, "gateon_requests_in_flight", routeMap, func(rm *RouteMetric, m *dto.Metric) {
+		rm.InFlight = m.GetGauge().GetValue()
+	})
 
-	if fam, ok := idx["gateon_request_bytes_total"]; ok {
-		for _, m := range fam.GetMetric() {
-			route := labelValue(m, "route")
-			if route == "" || strings.HasPrefix(route, "gateon-") {
-				continue
-			}
-			rm := getOrCreateRoute(routeMap, route)
-			dir := labelValue(m, "direction")
-			val := m.GetCounter().GetValue()
-			if dir == "in" {
-				rm.BytesIn += val
-			} else if dir == "out" {
-				rm.BytesOut += val
-			}
+	forEachRouteMetric(idx, "gateon_request_bytes_total", routeMap, func(rm *RouteMetric, m *dto.Metric) {
+		val := m.GetCounter().GetValue()
+		switch labelValue(m, "direction") {
+		case "in":
+			rm.BytesIn += val
+		case "out":
+			rm.BytesOut += val
 		}
-	}
+	})
 
-	if fam, ok := idx["gateon_request_duration_seconds"]; ok {
-		for _, m := range fam.GetMetric() {
-			route := labelValue(m, "route")
-			if route == "" || strings.HasPrefix(route, "gateon-") {
-				continue
-			}
-			rm := getOrCreateRoute(routeMap, route)
-			h := m.GetHistogram()
-			if h.GetSampleCount() > 0 {
-				rm.AvgLatency = SafeFloat((h.GetSampleSum() / float64(h.GetSampleCount())) * 1000)
-			}
+	forEachRouteMetric(idx, "gateon_request_duration_seconds", routeMap, func(rm *RouteMetric, m *dto.Metric) {
+		h := m.GetHistogram()
+		if h.GetSampleCount() > 0 {
+			rm.AvgLatency = SafeFloat((h.GetSampleSum() / float64(h.GetSampleCount())) * 1000)
 		}
-	}
-	if fam, ok := idx["gateon_request_failures_total"]; ok {
-		for _, m := range fam.GetMetric() {
-			route := labelValue(m, "route")
-			if route == "" || strings.HasPrefix(route, "gateon-") {
-				continue
-			}
-			rm := getOrCreateRoute(routeMap, route)
-			reason := labelValue(m, "reason")
-			val := m.GetCounter().GetValue()
-			if val > 0 {
-				rm.Failures = append(rm.Failures, LabeledCount{Label: reason, Value: val})
-			}
+	})
+
+	forEachRouteMetric(idx, "gateon_request_failures_total", routeMap, func(rm *RouteMetric, m *dto.Metric) {
+		if val := m.GetCounter().GetValue(); val > 0 {
+			rm.Failures = append(rm.Failures, LabeledCount{Label: labelValue(m, "reason"), Value: val})
 		}
-	}
+	})
 
 	result := make([]RouteMetric, 0, len(routeMap))
 	for _, rm := range routeMap {
@@ -1172,7 +1168,7 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 		}
 	}
 
-	sm.PredictiveAiEnabled = ai.GlobalPredictor != nil
+	sm.PredictiveAiEnabled = ai.GlobalPredictor() != nil
 	sm.NeuralSentinelEnabled = true // Isolation Forest is always active if initialized
 	sm.GraphIntelligenceEnabled = true
 	sm.PqcEnabled = true // ML-KEM/ML-DSA always available in binary

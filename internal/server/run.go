@@ -75,6 +75,26 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	if s.EbpfManager != nil {
 		rlLimiter := ai.NewReinforcementLearningLimiter(s.EbpfManager)
 		s.EbpfManager.SetRLFeedbackHandler(rlLimiter.ProcessFeedback)
+
+		// Reclaim state for IPs that have gone quiet. The limiter's LRU already
+		// bounds memory, but an entry only evicts under pressure: without this
+		// an IP throttled once and never heard from again holds both a Go state
+		// and a slot in a fixed-size BPF map indefinitely. The sweep is what
+		// gives a client that backed off a way out.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					rlLimiter.Sweep()
+				}
+			}
+		}()
 	}
 
 	var ipReputation *reputation.IPReputationStore
@@ -133,6 +153,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// destination against. Read through the store on every call rather than
 	// snapshotted here: routes are hot-reloaded, and an origin list fixed at
 	// startup would go stale the first time somebody added a vhost.
+	// Background inside, not Run's ctx: this provider is invoked per request for
+	// CORS origin checks, long after Run has returned. Binding it to the process
+	// context would make every origin lookup fail the moment shutdown began, so
+	// in-flight requests would lose their CORS answers mid-drain.
+	//nolint:contextcheck // no request context reaches this callback; see above.
 	middleware.SetRouteOriginProvider(func() []string {
 		return config.RouteOrigins(context.Background(), s.RouteStore)
 	})
@@ -196,7 +221,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// When global TLS is not explicitly enabled but at least one entrypoint
 	// has TLS turned on, create a minimal TLS config so that SNI can
 	// dynamically serve per-route certificates.
-	if tlsConfig == nil && anyEntrypointTLS(s.EpStore) {
+	if tlsConfig == nil && anyEntrypointTLS(ctx, s.EpStore) {
 		tlsConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 			NextProtos: []string{"h2", "http/1.1"},
@@ -261,6 +286,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 
 	<-ctx.Done()
 	logger.L.LogInfo("shutting down gracefully")
+	// Background, not ctx: ctx is the thing that just fired. Deriving the
+	// shutdown deadline from it would hand ShutdownAll an already-cancelled
+	// context and collapse the graceful drain into an immediate close.
+	//nolint:contextcheck // the drain deliberately outlives the signal that started it.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer cancel()
 	shutdownReg.ShutdownAll(shutdownCtx)
@@ -324,8 +353,12 @@ func collectCertInfos(ctx context.Context, s *Server, tlsManager gtls.TLSManager
 }
 
 // anyEntrypointTLS returns true if at least one entrypoint has TLS enabled.
-func anyEntrypointTLS(epStore config.EntryPointStore) bool {
-	for _, ep := range epStore.List(context.Background()) {
+//
+// Takes the caller's context rather than reaching for Background: this runs
+// during startup from Run, which already holds the process context, and a
+// SIGTERM arriving mid-boot should stop the store read like anything else.
+func anyEntrypointTLS(ctx context.Context, epStore config.EntryPointStore) bool {
+	for _, ep := range epStore.List(ctx) {
 		if ep.Tls != nil && ep.Tls.Enabled {
 			return true
 		}

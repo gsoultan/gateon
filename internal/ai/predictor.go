@@ -5,12 +5,14 @@ package ai
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -154,21 +156,58 @@ func (p *WasmTransformerPredictor) Close(ctx context.Context) error {
 	return p.runtime.Close(ctx)
 }
 
-// GlobalPredictor is a shared instance of the traffic predictor.
-var GlobalPredictor TrafficPredictor
+// globalPredictor is the shared traffic predictor.
+//
+// It is behind an atomic rather than a bare package variable because it is
+// written by InitGlobalPredictor at startup and read from the proxy's
+// load-balancer path, the diagnostics API and the metrics snapshot. A plain
+// variable was safe only for as long as nobody ever replaced the model after
+// serving began — an invariant that nothing enforced and that any future
+// model hot-reload would break into a data race.
+var globalPredictor atomic.Pointer[TrafficPredictor]
 
+// GlobalPredictor returns the active traffic predictor, or nil if none is
+// installed.
+func GlobalPredictor() TrafficPredictor {
+	p := globalPredictor.Load()
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// isDefaultModel reports whether wasmBytes is the embedded default model.
+//
+// This used to compare lengths. Any custom model that happened to compile to
+// the same byte count as the default was silently discarded and replaced by
+// the native Holt-Winters path — the operator would see "predictive AI
+// enabled" and get a different model than the one they shipped, with no
+// diagnostic anywhere. Comparing content digests makes the check mean what it
+// says.
+func isDefaultModel(wasmBytes []byte) bool {
+	if len(wasmBytes) != len(DefaultModelWasm) {
+		return false
+	}
+	return sha256.Sum256(wasmBytes) == sha256.Sum256(DefaultModelWasm)
+}
+
+// InitGlobalPredictor installs the traffic predictor.
+//
+// The default model runs through NativePredictor: it is the same Holt-Winters
+// forecast the WASM module implements, without the runtime and the
+// cross-boundary copy on every call.
 func InitGlobalPredictor(ctx context.Context, wasmBytes []byte) error {
-	// If it's the default model, use the native implementation for "super fast" performance.
-	// We compare lengths as a simple heuristic.
-	if len(wasmBytes) == len(DefaultModelWasm) {
-		GlobalPredictor = &NativePredictor{}
+	if isDefaultModel(wasmBytes) {
+		var p TrafficPredictor = &NativePredictor{}
+		globalPredictor.Store(&p)
 		return nil
 	}
 
-	p, err := NewWasmTransformerPredictor(ctx, wasmBytes)
+	wp, err := NewWasmTransformerPredictor(ctx, wasmBytes)
 	if err != nil {
 		return err
 	}
-	GlobalPredictor = p
+	var p TrafficPredictor = wp
+	globalPredictor.Store(&p)
 	return nil
 }

@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	lru "github.com/hashicorp/golang-lru"
@@ -43,10 +44,14 @@ func GetIPFingerprint(r *http.Request) string {
 	} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
 		ip = xri
 	}
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		return host
-	}
-	return ip
+	// StripPort, not net.SplitHostPort. This runs on every request, and the
+	// value here usually comes from X-Forwarded-For or X-Real-IP, which carry a
+	// bare address with no port. SplitHostPort's "missing port" path allocates
+	// an *AddrError that is discarded immediately — a heap allocation per
+	// request for a value nobody reads. It was ~10% of allocation objects in
+	// the infra-chain benchmark profile. StripPort answers the same question
+	// without allocating.
+	return httputil.StripPort(ip)
 }
 
 type Reputation struct {
@@ -220,14 +225,12 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	if r.Score < 20.0 {
 		if val := globalEbpfManager.Load(); val != nil {
 			if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
-				// Only shun if it's an IP. If it's a fingerprint, it's already
-				// handled by ReputationBlocker at L7.
+				// Only IPs are shunned in the kernel. A JA4+ fingerprint is left
+				// to ReputationBlocker at L7: XDP has no ShunJA4, and L7 is the
+				// more precise place to act on a fingerprint anyway, since one
+				// shared IP can carry many clients.
 				if net.ParseIP(fingerprint) != nil {
 					_ = container.p.ShunIP(fingerprint)
-				} else {
-					// It's a JA4+ fingerprint.
-					// We could call ShunJA4 here, but it's not yet implemented in XDP.
-					// For now, L7 blocking is sufficient and more precise for shared IPs.
 				}
 			}
 		}

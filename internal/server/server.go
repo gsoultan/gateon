@@ -81,7 +81,7 @@ func (s *Server) PurgeCache() {
 
 // Close closes all server resources.
 func (s *Server) Close() error {
-	if s.AuthManager != nil {
+	if auth.Available(s.AuthManager) {
 		_ = s.AuthManager.Close()
 	}
 	if s.Phantom != nil {

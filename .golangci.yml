@@ -41,10 +41,33 @@ linters:
       min-complexity: 20
     nestif:
       min-complexity: 5
+    # goconst enforces the "no magic strings" rule, but the rule is about
+    # *vocabulary* — a value the code compares against, where a typo is a silent
+    # behaviour change rather than a compile error. Severity levels and
+    # ActionTaken values are that; the strings below are not, and naming them
+    # makes the code harder to read while protecting nothing.
+    #
+    # Anything added here needs a reason in this comment, not just an entry.
     goconst:
       min-len: 3
       min-occurrences: 3
       ignore-tests: true
+      # Kept on one line deliberately: a YAML folded scalar joins the
+      # continuations with spaces, which silently turns each alternation branch
+      # into " http" and stops it matching anything.
+      ignore-string-values: '^(true|false|http|https|h2c|tcp|udp|unix|gzip|br|deflate|linux|darwin|windows|GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|[A-Z][a-zA-Z0-9]*(-[A-Z][a-zA-Z0-9]*)+)$'
+      # true/false      — string forms of booleans in headers, env vars and
+      #                   config values. `const strTrue = "true"` is worse.
+      # schemes/protos  — http, https, h2c, tcp, udp, unix: comparing a scheme
+      #                   to its own spelling is clearer than to an alias.
+      # GOOS values     — compared against runtime.GOOS, which is itself the
+      #                   literal. The stdlib does not name these either.
+      # HTTP methods    — net/http already exports http.MethodGet and friends;
+      #                   where a literal is used it is inside a method *list*,
+      #                   and the fix there is to share the list, not the words.
+      # Header-Case     — Content-Type, X-Grpc-Web and similar. The canonical
+      #                   spelling is the identity of the header; a constant
+      #                   adds a lookup without removing a failure mode.
     # The SPDX line is part of the mandatory header so the license of any single
     # file is unambiguous once it leaves the repository — vendored into another
     # module, copied into a container layer, or pasted into an issue. LICENSE at

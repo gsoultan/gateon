@@ -89,11 +89,21 @@ test.describe('Threat Mitigation E2E Flow', () => {
     await page.waitForTimeout(10000);
     await gotoAnomalyEngine(page);
 
-    const scanThreat = page.locator('text=/UNLISTED ROUTE/i').first();
-    await expect(scanThreat).toBeVisible({ timeout: 20000 });
-    
+    // Scope to the unlisted-route card, not just the first Apply button on the
+    // page. Every non-mitigated anomaly renders its own "Apply Automatic Fix",
+    // the list is ordered by score, and an unlisted route scores 0.5 against a
+    // WAF block's 0.9 — so `.first()` reliably clicked the WAF anomaly instead.
+    // ApplyRecommendation has no case for that type, so it answered
+    // success=false, the UI showed "Fix Failed", and this test waited out its
+    // timeout looking for "Recommendation Applied" on a fix it never asked for.
+    const unlistedCard = page
+      .locator('[data-testid="anomaly-card"]')
+      .filter({ hasText: /UNLISTED ROUTE/i })
+      .first();
+    await expect(unlistedCard).toBeVisible({ timeout: 20000 });
+
     // 3. Apply Automatic Fix
-    const blockBtn = page.getByRole('button', { name: /Apply Automatic Fix/i }).first();
+    const blockBtn = unlistedCard.getByRole('button', { name: /Apply Automatic Fix/i });
     await blockBtn.click();
     
     await expect(page.getByText(/Recommendation Applied/i)).toBeVisible({ timeout: 10000 });

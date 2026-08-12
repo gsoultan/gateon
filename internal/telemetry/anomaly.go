@@ -190,17 +190,13 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 		return
 	}
 
-	// Baseline: last 1 hour
-	baselineErrors := ad.aggregator.GetRate("errors", 1*time.Hour)
+	// Baseline: last 1 hour. Only the request rate is needed — it gates whether
+	// there is enough traffic for a deviation to mean anything. The error ratio
+	// that used to be computed here, floor and all, was never read: detection is
+	// the Z-score below, not a ratio threshold.
 	baselineRequests := ad.aggregator.GetRate("requests", 1*time.Hour)
 
 	if baselineRequests > 5 {
-		baselineRate := baselineErrors / baselineRequests
-		// Avoid division by zero and handle very low baseline
-		if baselineRate < 0.01 {
-			baselineRate = 0.01
-		}
-
 		z := ad.aggregator.StatsErrors.ZScore(currentErrors)
 		// If Z-Score is > 3.0 (standard statistical anomaly threshold)
 		if z > 3.0/ad.config.Sensitivity && currentErrors > 5 {

@@ -5,6 +5,7 @@ package ai
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
@@ -13,7 +14,7 @@ func TestPredictor_Accuracy(t *testing.T) {
 	if err := InitGlobalPredictor(ctx, DefaultModelWasm); err != nil {
 		t.Fatalf("failed to init global predictor: %v", err)
 	}
-	defer GlobalPredictor.Close(ctx)
+	defer func() { _ = GlobalPredictor().Close(ctx) }()
 
 	tests := []struct {
 		name     string
@@ -49,7 +50,7 @@ func TestPredictor_Accuracy(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			score, err := GlobalPredictor.Predict(ctx, tc.input)
+			score, err := GlobalPredictor().Predict(ctx, tc.input)
 			if err != nil {
 				t.Fatalf("prediction failed: %v", err)
 			}
@@ -65,11 +66,61 @@ func BenchmarkPredictor(b *testing.B) {
 	if err := InitGlobalPredictor(ctx, DefaultModelWasm); err != nil {
 		b.Fatalf("failed to init global predictor: %v", err)
 	}
-	defer GlobalPredictor.Close(ctx)
+	defer func() { _ = GlobalPredictor().Close(ctx) }()
 
 	input := []float64{100, 100, 100, 100, 500}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = GlobalPredictor.Predict(ctx, input)
+		_, _ = GlobalPredictor().Predict(ctx, input)
 	}
+}
+
+// TestModelSelectionUsesContentNotLength covers the silent-fallback bug: model
+// selection compared byte lengths, so a custom model that happened to be the
+// same size as the embedded default was discarded and replaced by the native
+// Holt-Winters path. The operator saw "predictive AI enabled" while running a
+// different model than the one they shipped, with no diagnostic anywhere.
+func TestModelSelectionUsesContentNotLength(t *testing.T) {
+	if !isDefaultModel(DefaultModelWasm) {
+		t.Fatal("the embedded default model must be recognised as the default")
+	}
+
+	// Same length, different content — the exact case the length check missed.
+	impostor := make([]byte, len(DefaultModelWasm))
+	copy(impostor, DefaultModelWasm)
+	impostor[len(impostor)-1] ^= 0xFF
+
+	if isDefaultModel(impostor) {
+		t.Error("a same-length but different model was mistaken for the default; " +
+			"a custom model would be silently discarded")
+	}
+	if isDefaultModel([]byte("short")) {
+		t.Error("a differently-sized model was mistaken for the default")
+	}
+}
+
+// TestGlobalPredictorIsSafeForConcurrentReads exercises the accessor under the
+// race detector: it is read from the proxy load-balancer path, the diagnostics
+// API and the metrics snapshot while startup installs it.
+func TestGlobalPredictorIsSafeForConcurrentReads(t *testing.T) {
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	wg.Add(8)
+	for range 4 {
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				_ = InitGlobalPredictor(ctx, DefaultModelWasm)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				if p := GlobalPredictor(); p != nil {
+					_, _ = p.Predict(ctx, []float64{1, 2, 3})
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

@@ -19,7 +19,7 @@ func (s *ApiService) ListUsers(ctx context.Context, req *gateonv1.ListUsersReque
 	if req == nil {
 		return &gateonv1.ListUsersResponse{}, nil
 	}
-	if s.Auth == nil {
+	if !auth.Available(s.Auth) {
 		return &gateonv1.ListUsersResponse{}, nil
 	}
 	if err := s.requireAdmin(ctx); err != nil {
@@ -38,7 +38,7 @@ func (s *ApiService) ListUsers(ctx context.Context, req *gateonv1.ListUsersReque
 }
 
 func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserRequest) (*gateonv1.UpdateUserResponse, error) {
-	if s.Auth == nil || req == nil || req.User == nil {
+	if !auth.Available(s.Auth) || req == nil || req.User == nil {
 		return &gateonv1.UpdateUserResponse{Success: false}, nil
 	}
 	if err := s.requireAdmin(ctx); err != nil {
@@ -66,7 +66,7 @@ func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserReq
 }
 
 func (s *ApiService) DeleteUser(ctx context.Context, req *gateonv1.DeleteUserRequest) (*gateonv1.DeleteUserResponse, error) {
-	if s.Auth == nil || req == nil || req.Id == "" {
+	if !auth.Available(s.Auth) || req == nil || req.Id == "" {
 		return &gateonv1.DeleteUserResponse{Success: false}, nil
 	}
 	if err := s.requireAdmin(ctx); err != nil {
@@ -80,7 +80,7 @@ func (s *ApiService) DeleteUser(ctx context.Context, req *gateonv1.DeleteUserReq
 }
 
 func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {
-	if s.Auth == nil || req == nil || req.Id == "" || req.Password == "" {
+	if !auth.Available(s.Auth) || req == nil || req.Id == "" || req.Password == "" {
 		return &gateonv1.ChangePasswordResponse{Success: false}, nil
 	}
 

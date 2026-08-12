@@ -160,6 +160,11 @@ func Recovery() Middleware {
 					// http.ErrAbortHandler is a sentinel panic value to abort a handler.
 					// We must re-panic it to let the net/http server handle it gracefully
 					// (stop processing without logging an error).
+					//
+					//nolint:errorlint // err is the interface{} from recover(), not an
+					// error, and net/http panics with this exact sentinel value rather
+					// than something wrapping it. errors.Is does not compile here and
+					// would be answering a different question if it did.
 					if err == http.ErrAbortHandler {
 						panic(err)
 					}

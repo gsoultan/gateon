@@ -85,7 +85,7 @@ func (d *NeuralAnomalyDetector) Detect(ctx context.Context, data *DiagnosticData
 
 			anomaly := &gateonv1.Anomaly{
 				Type:        "neural_sentinel",
-				Severity:    "high",
+				Severity:    severityHigh,
 				Description: fmt.Sprintf("Neural Sentinel detected anomalous behavior (IForest score: %.2f)", score),
 				Source:      ip,
 				Score:       score * 100,

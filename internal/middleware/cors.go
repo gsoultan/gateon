@@ -86,7 +86,7 @@ func CORS(cfg CORSConfig) Middleware {
 func BypassCORS() Middleware {
 	c := cors.New(cors.Options{
 		AllowOriginFunc:  func(origin string) bool { return true },
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"},
+		AllowedMethods:   defaultCORSMethods(),
 		AllowedHeaders:   []string{"*"},
 		AllowCredentials: false,
 		MaxAge:           86400,
@@ -128,7 +128,7 @@ func BypassCORS() Middleware {
 func GlobalCORS() Middleware {
 	c := cors.New(cors.Options{
 		AllowOriginFunc: func(origin string) bool { return true },
-		AllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"},
+		AllowedMethods:  defaultCORSMethods(),
 		AllowedHeaders:  []string{"*"},
 		ExposedHeaders: []string{
 			"Grpc-Status", "Grpc-Message", "Grpc-Encoding",
@@ -186,7 +186,7 @@ func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
 		ID:             uuid.New().String(),
 		Type:           "cors_violation",
 		Category:       "security",
-		Severity:       "medium",
+		Severity:       severityMedium,
 		SourceIP:       request.GetClientIP(r, false),
 		RequestURI:     r.RequestURI,
 		RouteID:        routeID,
@@ -200,4 +200,12 @@ func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
 	threat = telemetry.RecordSecurityThreatWithJA4(r, threat)
 	telemetry.RecordSecurityThreat(threat)
 	alerting.HandleThreat(&threat)
+}
+
+// defaultCORSMethods returns the method list used by every built-in CORS
+// preset. A function rather than a package-level slice: the value is handed to
+// per-route configs that may append to it, and a shared backing array would let
+// one route's edit surface on another.
+func defaultCORSMethods() []string {
+	return []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"}
 }

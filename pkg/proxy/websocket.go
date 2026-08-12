@@ -248,7 +248,7 @@ func closeWrite(c net.Conn) {
 	type writeCloser interface {
 		CloseWrite() error
 	}
-	var under net.Conn = c
+	var under = c
 	if tc, ok := c.(*tls.Conn); ok {
 		under = tc.NetConn()
 	}

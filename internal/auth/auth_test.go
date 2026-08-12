@@ -5,6 +5,7 @@ package auth
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestAuthenticate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, err := m.Authenticate(tt.username, tt.password)
-			if err != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Authenticate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

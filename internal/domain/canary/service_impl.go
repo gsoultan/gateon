@@ -24,6 +24,9 @@ type serviceImpl struct {
 // NewService creates a new Canary Service. lifetime is the process-lifetime
 // context; rollouts run detached from the RPC that starts them but must still
 // stop when the gateway does.
+// rollouts outlive the RPC that starts them and end with the process.
+//
+//nolint:contextcheck // lifetime is stored, not derived from a caller's context:
 func NewService(lifetime context.Context, svcService service.Service, l logger.Logger) Service {
 	if lifetime == nil {
 		lifetime = context.Background()
@@ -38,6 +41,8 @@ func (cs *serviceImpl) StartCanary(ctx context.Context, req *gateonv1.StartCanar
 	// Detached from the request so a gradual rollout is not cancelled when this
 	// RPC returns, but hung off the process lifetime so it does stop at
 	// shutdown. context.Background() gave the first half only.
+	//nolint:contextcheck // deliberately the process lifetime, not ctx: a rollout
+	// shifts weights over minutes and must survive this call returning.
 	go cs.runCanary(cs.lifetime, req)
 
 	return taskID, nil
@@ -124,7 +129,7 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 			initialWeight := initialWeights[target.Url]
 
 			// Find target weight in request
-			var targetWeight int32 = initialWeight
+			var targetWeight = initialWeight
 			found := false
 			for _, tw := range req.TargetWeights {
 				if tw.Url == target.Url {
