@@ -6,6 +6,7 @@ package telemetry
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -88,5 +89,66 @@ func TestIPEscalation(t *testing.T) {
 	// 2. Check if IP is now mitigated
 	if !IsIPMitigated(ip) {
 		t.Error("Expected IP to be escalated to mitigation after 3 unique malicious users")
+	}
+}
+
+// A release applied in the same second as the block it undoes must win.
+//
+// user_mitigations rows are timestamped with CURRENT_TIMESTAMP, which is
+// second-granular on SQLite, so a mitigate immediately followed by an
+// unmitigate produces two rows the ORDER BY cannot separate. With updated_at as
+// the only sort key the winner was whatever the storage engine happened to
+// return, and when the stale row won, remove-mitigation reported success while
+// the client stayed blocked — the failure an operator can neither diagnose nor
+// work around.
+//
+// This is the ordinary case, not a corner: an operator clears a threat that has
+// just fired, and the e2e suite releases what it has just earned.
+//
+// Against the pre-fix query this fails whenever the tie resolves to the
+// mitigated row.
+func TestUnmitigationWinsSameSecondTie(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "gateon_tie_test.db")
+	_ = InitPathStatsStore(dbPath, 1)
+	defer ClosePathStatsStore(context.Background())
+
+	// A fresh fingerprint each pass: MarkUserUnmitigated deliberately suppresses
+	// re-mitigation of the same fingerprint for 24h, so reusing one would test
+	// that suppression rather than the tie-break.
+	for i := range 10 {
+		fp := "tie-ja4plus-" + strconv.Itoa(i)
+		MarkUserMitigated(fp, "JA4+", "blocked", "waf")
+		if !IsUserMitigated(fp) {
+			t.Fatalf("iteration %d: fingerprint not mitigated after MarkUserMitigated", i)
+		}
+
+		// No sleep: the point is that both rows land in the same second.
+		MarkUserUnmitigated(fp)
+		if IsUserMitigated(fp) {
+			t.Fatalf("iteration %d: still mitigated after release applied in the same "+
+				"second; the operator was told it worked", i)
+		}
+	}
+}
+
+// And the release must keep holding once the second rolls over, so the fix is a
+// tie-break rather than an ordering accident.
+func TestUnmitigationHoldsAcrossSecondBoundary(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "gateon_hold_test.db")
+	_ = InitPathStatsStore(dbPath, 1)
+	defer ClosePathStatsStore(context.Background())
+
+	const fp = "hold-ja4plus"
+
+	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
+	MarkUserUnmitigated(fp)
+	time.Sleep(1100 * time.Millisecond)
+
+	if IsUserMitigated(fp) {
+		t.Error("mitigation returned after the release, once timestamps differed")
+	}
+	if !IsUserUnmitigated(fp) {
+		t.Error("release marker not visible to processThreat; the next blocked " +
+			"request would re-apply the mitigation immediately")
 	}
 }

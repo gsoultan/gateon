@@ -1877,7 +1877,23 @@ func IsUserMitigated(ja4plus string) bool {
 
 check_db:
 	// 3. Check DB for status 'mitigated'
-	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE (fingerprint = ? OR ja4h = ?) ORDER BY updated_at DESC LIMIT 1")
+	// Ties break towards "unmitigated", and that is the whole point of the
+	// second ORDER BY term.
+	//
+	// CURRENT_TIMESTAMP is second-granular on SQLite, and a release is normally
+	// applied within the same second as the block it undoes — an operator
+	// clicking Remove Mitigation on a threat that just fired, or a test
+	// releasing what it just earned. With only updated_at to sort by, those two
+	// rows tie and the winner is whatever the storage engine returns first, so
+	// the release lands, reports success, and the client stays blocked.
+	//
+	// Breaking the tie the other way would mean a stale block outliving an
+	// explicit unblock, which is the failure an operator cannot diagnose and
+	// cannot work around.
+	query := s.dialect.Rebind(`SELECT status FROM user_mitigations
+		WHERE (fingerprint = ? OR ja4h = ?)
+		ORDER BY updated_at DESC, CASE status WHEN 'unmitigated' THEN 0 ELSE 1 END
+		LIMIT 1`)
 	var status string
 	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
 	mitigated := err == nil && status == statusMitigated
