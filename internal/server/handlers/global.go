@@ -565,8 +565,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("POST /v1/auth/2fa/setup", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.Setup2FARequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 
@@ -605,8 +604,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("POST /v1/auth/2fa/verify", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.Verify2FARequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 
@@ -687,8 +685,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("POST /v1/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.LoginRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		resp, err := svc.Login(r.Context(), &req)
@@ -733,8 +730,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.User
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		if !auth.ValidRole(req.Role) {
@@ -761,8 +757,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("POST /v1/users/password", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req gateonv1.ChangePasswordRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		if req.Id == "" || req.Password == "" {
