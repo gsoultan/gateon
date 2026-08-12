@@ -161,19 +161,42 @@ test.describe('Adversarial probe', () => {
     }
     expect(status, 'the gateway accepted ~200KB of request headers').not.toBe(200);
   });
-  // The WAF-evasion probe is written and deliberately not landed here.
+  // Fingerprint mitigation has to survive the attacker changing address.
   //
-  // It fires re-encoded SQLi and XSS (mixed case, inline comment, double
-  // url-encoding, fullwidth unicode, null byte, svg vector) and asserts none
-  // reach the backend with a 200. The trouble is that it needs a client the
-  // gateway has not already mitigated, and by the time it runs the traversal
-  // probe above has tripped the WAF — one block is enough, and the fingerprint
-  // is shared by every request.get() in the suite. remove-mitigation answers
-  // 200 but the control request after it still comes back 403, so the release
-  // does not hold.
+  // This is the property that makes JA4+ worth computing at all: when a trusted
+  // proxy sits in front, X-Forwarded-For is attacker-controlled, so an IP-only
+  // defence is one header away from useless.
   //
-  // Landed as-is it went green, and green meant nothing: a blanket-403 client
-  // satisfies every "not 200" assertion in this file. That is the failure mode
-  // the beforeEach above exists to catch, and it caught this. The probe belongs
-  // here the moment a fingerprint can be reset on demand.
+  // It was pulled from this file once, because releasing a fingerprint between
+  // tests did not work and the control guard above failed before the probe
+  // could assert anything. That was a real defect — IsUserMitigated resolved
+  // ties on a second-granular timestamp and a release applied in the same
+  // second could lose to the block it undid. Fixed, and verified by hand
+  // against a live gateway before restoring this.
+  test('rotating the claimed source IP does not shed an earned mitigation', async ({ request }) => {
+    const attacker = '203.0.113.91';
+    const sqli = `${PROXY}/test?id=1%20OR%201=1`;
+
+    // Earn it. The gate needs repeated evidence now, not a single hit.
+    for (let i = 0; i < 4; i++) {
+      const res = await request.get(sqli, as(attacker));
+      expect(res.status(), 'the WAF stopped blocking a textbook injection').toBe(403);
+    }
+
+    // Same client, new address every time. The WAF verdict must not move.
+    for (const ip of ['203.0.113.92', '198.51.100.7', '192.0.2.44']) {
+      const res = await request.get(sqli, as(ip));
+      expect(
+        res.status(),
+        `SQLi from rotated address ${ip} was served; a client that can pick its own ` +
+        'source address could otherwise walk away from any address-based defence',
+      ).toBe(403);
+    }
+  });
+
+  // The WAF-evasion battery lives in internal/security/waf/evasion_test.go
+  // rather than here. Encoding coverage belongs against the engine: no
+  // fingerprint state, no ordering, no HTTP stack, and it runs in milliseconds.
+  // This file's job is proving the engine is wired in and the boundary holds,
+  // which is the part only an end-to-end probe can answer.
 });
