@@ -291,9 +291,9 @@ const DiagnosticsPage: React.FC = () => {
   }, [data?.dependencies]);
 
   const sortedEntrypoints = useMemo(() => {
-    if (!data?.entryPoints) return [];
-    return [...data.entryPoints].sort((a, b) => a.name.localeCompare(b.name) || a.address.localeCompare(b.address));
-  }, [data?.entryPoints]);
+    if (!data?.entrypoints) return [];
+    return [...data.entrypoints].sort((a, b) => a.name.localeCompare(b.name) || a.address.localeCompare(b.address));
+  }, [data?.entrypoints]);
 
   const sortedTlsErrors = useMemo(() => {
     if (!data?.recentTlsErrors) return [];
@@ -600,9 +600,9 @@ const DiagnosticsPage: React.FC = () => {
                   </Accordion.Item>
                 ))}
               </Accordion>
-              {(!data?.entryPoints || data.entryPoints?.length === 0) && (
+              {(!data?.entrypoints || data.entrypoints?.length === 0) && (
                 <Stack align="center" py="xl">
-                  <Text c="dimmed" size="sm">No entryPoints configured.</Text>
+                  <Text c="dimmed" size="sm">No entrypoints configured.</Text>
                 </Stack>
               )}
             </ScrollArea>
