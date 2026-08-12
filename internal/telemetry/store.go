@@ -228,6 +228,12 @@ var (
 	ipMaliciousFingerprints, _ = lru.NewARC(10000)
 	ipMaliciousMu              sync.Mutex
 
+	// fingerprintSightings tracks, per JA4+, how many qualifying threats it has
+	// produced and how many distinct source addresses it has been seen from.
+	// map[Fingerprint]*fingerprintSighting, ARC-bounded like the map above.
+	fingerprintSightings, _ = lru.NewARC(10000)
+	fingerprintMu           sync.Mutex
+
 	tracePool = sync.Pool{
 		New: func() any { return &TraceRecord{} },
 	}
@@ -1474,7 +1480,12 @@ func escalateMitigation(st *SecurityThreat) {
 	}
 
 	if st.Fingerprint != "" && !IsUserUnmitigated(st.Fingerprint) {
-		MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
+		if ok, reason := shouldMitigateFingerprint(st.Fingerprint, st.SourceIP); ok {
+			MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
+		} else {
+			logger.Default().LogInfo("declined to mitigate fingerprint",
+				"fingerprint", st.Fingerprint, "reason", reason, "threat", st.Type)
+		}
 	}
 	if st.SourceIP == "" || st.Fingerprint == "" {
 		return
