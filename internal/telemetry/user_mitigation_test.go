@@ -152,3 +152,52 @@ func TestUnmitigationHoldsAcrossSecondBoundary(t *testing.T) {
 			"request would re-apply the mitigation immediately")
 	}
 }
+
+// A fingerprint block used to have no expiry: it sat in the table until removed
+// by hand. For a key that identifies a client class rather than a client, a
+// permanent block taken automatically on one moment's evidence is the wrong
+// default — the attacker changes a header and comes back, the bystanders who
+// share the class do not.
+//
+// Against the pre-fix query, which had no time bound, this fails: the
+// mitigation is still in force long after its TTL.
+func TestUserMitigationExpiresAfterTTL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "gateon_ttl_test.db")
+	_ = InitPathStatsStore(dbPath, 1)
+	defer ClosePathStatsStore(context.Background())
+
+	orig := mitigationTTL
+	mitigationTTL = 1 * time.Second
+	defer func() { mitigationTTL = orig }()
+
+	const fp = "ttl-ja4plus"
+	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
+	if !IsUserMitigated(fp) {
+		t.Fatal("not mitigated immediately after being marked")
+	}
+
+	// CURRENT_TIMESTAMP is second-granular, so step well clear of the boundary.
+	time.Sleep(2500 * time.Millisecond)
+
+	if IsUserMitigated(fp) {
+		t.Errorf("still blocked %v after a %v TTL; a coarse fingerprint block that "+
+			"never expires keeps bystanders out with nobody aware of it",
+			2500*time.Millisecond, mitigationTTL)
+	}
+}
+
+// The TTL must not resurrect an explicit release, and must not be so eager that
+// a fresh block is useless.
+func TestUserMitigationHoldsWithinTTL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "gateon_ttl_hold_test.db")
+	_ = InitPathStatsStore(dbPath, 1)
+	defer ClosePathStatsStore(context.Background())
+
+	const fp = "ttl-hold-ja4plus"
+	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
+	time.Sleep(1100 * time.Millisecond)
+
+	if !IsUserMitigated(fp) {
+		t.Errorf("block expired inside its %v TTL", mitigationTTL)
+	}
+}
