@@ -4,6 +4,54 @@ Gateon exposes a consolidated **security posture** endpoint and an opt-in
 **File Integrity Monitor** (FIM) that together form the foundation of its
 host-detection (Wazuh-like) capabilities.
 
+## Session lifecycle
+
+Dashboard and management-API sessions are PASETO v4 local tokens.
+
+**Lifetime is 8 hours.** A token is a bearer credential, so the window is the
+part you cannot revoke by other means — it bounds the damage from a token that
+leaks without anyone noticing (a stolen laptop, a copied `curl` command).
+
+**Sessions are bound to the account they were issued for.** Each token carries a
+digest of the user's password hash, role and disabled flag. Every authenticated
+request recomputes it. Four operations therefore end a user's live sessions on
+their *next request*, not whenever the token would have expired:
+
+| Operation | Effect on live sessions |
+|-----------|-------------------------|
+| Disable a user | Revoked immediately |
+| Delete a user | Revoked immediately |
+| Change a user's role | Revoked immediately — a demoted admin cannot keep admin claims |
+| Change a user's password | Revoked immediately |
+
+Enabling or disabling 2FA does **not** revoke existing sessions; those factors
+are checked at login, and a session that already cleared them stays valid. If
+you need a user's sessions gone, disable the account or rotate the password.
+
+**Where the token lives.** In the browser it exists only in the HttpOnly,
+`SameSite=Lax` `gateon_session` cookie (`Secure` when served over TLS). It is
+never written to `localStorage` or `sessionStorage`, and no script on the page
+can read it. API and CLI clients send `Authorization: Bearer <token>`; query
+parameters are accepted only for WebSocket and SSE, which cannot set headers.
+
+**Known limitation — multi-instance deployments.** Binding state is cached per
+process. Instances sharing one database do not currently see each other's
+revocations, so a disable is immediate on the instance that performed it and
+takes effect elsewhere only after that instance's cache entry is evicted or it
+restarts. Single-instance and active-passive HA deployments are unaffected in
+practice; see `doc/adr/0005-session-lifecycle-and-first-run-trust.md`.
+
+**On upgrade, everyone is logged out once.** Tokens minted before this
+mechanism carry no binding and are refused rather than grandfathered in.
+
+## Before setup completes
+
+Until an administrator account exists, the management API serves only the setup
+and health endpoints and answers `503` for everything else. This closes the
+window in which a freshly installed gateway on a reachable address could be
+claimed — or read — by whoever found it first. Completing setup enables
+enforcement immediately; no restart is needed.
+
 ## File Integrity Monitoring (FIM)
 
 FIM records a cryptographic (SHA-256) baseline of a fixed set of files and/or

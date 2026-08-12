@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/gsoultan/gateon/tests/e2e/testpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"github.com/gsoultan/gateon/tests/e2e/testpb"
 )
 
 func main() {

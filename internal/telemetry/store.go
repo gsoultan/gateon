@@ -32,6 +32,38 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
+// statusMitigated is the stored mitigation-status value meaning the threat was
+// acted on. It is compared against in several queries and denormalised onto
+// SecurityThreat.Mitigated, so it is spelled once here.
+const statusMitigated = "mitigated"
+
+// ActionTaken values recorded on a SecurityThreat, and the mitigation statuses
+// derived from them. The dashboard filters on these exact strings.
+const (
+	actionBlocked    = "blocked"
+	actionChallenged = "challenged"
+	actionShunned    = "shunned"
+	actionFlagged    = "flagged"
+
+	statusUnmitigated = "unmitigated"
+)
+
+// isMitigatingAction reports whether an ActionTaken value means the threat was
+// actually stopped rather than merely observed.
+//
+// This predicate was written out inline in four places, which is three chances
+// for the list to drift: adding a new mitigating action meant finding every
+// copy, and missing one produced a threat that shows as unmitigated in one view
+// and mitigated in another.
+func isMitigatingAction(action string) bool {
+	switch action {
+	case actionBlocked, actionChallenged, actionShunned:
+		return true
+	default:
+		return false
+	}
+}
+
 // RedactHeaders masks sensitive headers like Authorization and X-Api-Key.
 // It is optimized to minimize allocations by using a pooled strings.Builder and avoiding strings.Split.
 func RedactHeaders(headers string) string {
@@ -877,133 +909,9 @@ func (s *pathStatsStore) loop() {
 	threatBatch := make([]*SecurityThreat, 0, 128)
 
 	flush := func() {
-		if len(batch) > 0 {
-			tx, err := s.db.Begin()
-			if err != nil {
-				logger.Default().LogError("telemetry: begin transaction failed", "error", err)
-			} else {
-				defer tx.Rollback()
-				pathStmt, _ := s.upsertStmt(tx)
-				domainStmt, _ := s.domainUpsertStmt(tx)
-
-				// Aggregate increments in the batch to reduce IOPS.
-				// This significantly reduces the number of Exec() calls for popular paths.
-				type aggKey struct {
-					day      string
-					host     string
-					path     string
-					isDomain bool
-					bucket   int // for domain stats
-				}
-				aggregated := make(map[aggKey]*struct {
-					count int
-					latS  float64
-					bytes uint64
-				})
-
-				for _, inc := range batch {
-					day := inc.atTime.UTC().Format("2006-01-02")
-					bucket := 0
-					if inc.isDomain {
-						// Use 30-minute buckets: hour*2 + (minute/30) -> 0-47
-						bucket = inc.atTime.UTC().Hour()*2 + inc.atTime.UTC().Minute()/30
-					}
-					key := aggKey{day, inc.host, inc.path, inc.isDomain, bucket}
-
-					if s, ok := aggregated[key]; ok {
-						s.count++
-						s.latS += inc.latS
-						s.bytes += inc.bytesTotal
-					} else {
-						aggregated[key] = &struct {
-							count int
-							latS  float64
-							bytes uint64
-						}{1, inc.latS, inc.bytesTotal}
-					}
-				}
-
-				for key, val := range aggregated {
-					if key.isDomain {
-						if domainStmt != nil {
-							if _, err := domainStmt.Exec(key.day, key.bucket, key.host, val.count, val.latS, val.bytes); err != nil {
-								logger.Default().LogError("domain stats: upsert failed", "error", err)
-							}
-						}
-					} else {
-						if pathStmt != nil {
-							if _, err := pathStmt.Exec(key.day, key.host, key.path, val.count, val.latS, val.bytes); err != nil {
-								logger.Default().LogError("path stats: upsert failed", "error", err)
-							}
-						}
-					}
-				}
-				if pathStmt != nil {
-					_ = pathStmt.Close()
-				}
-				if domainStmt != nil {
-					_ = domainStmt.Close()
-				}
-				_ = tx.Commit()
-			}
-			batch = batch[:0]
-		}
-
-		if len(traceBatch) > 0 {
-			batch := s.pebble.NewBatch()
-			for _, tr := range traceBatch {
-				key := makeTraceKey(tr.Timestamp, tr.ID)
-				// Check for duplicates in a simple way for recent records if needed,
-				// but for Pebble, Set just overwrites.
-				// However, if we want strict ID uniqueness across all time, we'd need to check existence.
-				// For access logs, the combination of timestamp (nano) and ID is extremely likely to be unique.
-				val, _ := json.Marshal(tr)
-				_ = batch.Set(key, val, pebble.NoSync)
-			}
-			if err := batch.Commit(pebble.Sync); err != nil {
-				logger.Default().LogError("pebble: trace batch commit failed", "error", err)
-			}
-			for _, tr := range traceBatch {
-				tr.Reset()
-				tracePool.Put(tr)
-			}
-			traceBatch = traceBatch[:0]
-		}
-
-		if len(threatBatch) > 0 {
-			tx, err := s.db.Begin()
-			if err != nil {
-				logger.Default().LogError("threats: begin transaction failed", "error", err)
-			} else {
-				defer tx.Rollback()
-				if stmt, err := s.threatInsertStmt(tx); err == nil {
-					for _, th := range threatBatch {
-						sourceIPs := strings.Join(th.SourceIPs, ",")
-						// Each row gets a savepoint so a single rejected threat
-						// costs that threat and nothing else. Without it the
-						// first failure aborts the surrounding transaction, and
-						// on Postgres every later Exec then fails with 25P02 —
-						// so one malformed record silently discarded the whole
-						// batch. Threats are what the Security Hub is made of;
-						// losing 127 good ones to a bad one is the difference
-						// between a gap and a blind spot.
-						if !s.execThreat(tx, stmt, th, sourceIPs) {
-							logger.Default().LogWarn("threats: record dropped",
-								"id", th.ID, "type", th.Type, "source_ip", th.SourceIP)
-						}
-					}
-					_ = stmt.Close()
-					if err := tx.Commit(); err != nil {
-						logger.Default().LogError("threats: commit failed", "error", err)
-					}
-				}
-				for _, th := range threatBatch {
-					th.Reset()
-					threatPool.Put(th)
-				}
-			}
-			threatBatch = threatBatch[:0]
-		}
+		batch = s.flushIncrements(batch)
+		traceBatch = s.flushTraces(traceBatch)
+		threatBatch = s.flushThreats(threatBatch)
 	}
 
 	for {
@@ -1030,12 +938,7 @@ func (s *pathStatsStore) loop() {
 		case <-timer.C:
 			s.syncTierSettings()
 			flush()
-			td := config.CurrentTierDefaults()
-			interval := time.Duration(td.FlushIntervalSeconds) * time.Second
-			if interval <= 0 {
-				interval = 1 * time.Second
-			}
-			timer.Reset(interval)
+			timer.Reset(flushInterval())
 		case ack := <-s.flushCh:
 			flush()
 			close(ack)
@@ -1046,6 +949,176 @@ func (s *pathStatsStore) loop() {
 			return
 		}
 	}
+}
+
+// flushInterval is how long the writer waits between timed flushes, taken from
+// the active tier. A zero or negative configured value falls back to one second
+// rather than to a hot loop.
+func flushInterval() time.Duration {
+	interval := time.Duration(config.CurrentTierDefaults().FlushIntervalSeconds) * time.Second
+	if interval <= 0 {
+		return 1 * time.Second
+	}
+	return interval
+}
+
+// statCounters accumulates one aggregation bucket's totals between the channel
+// and the database.
+type statCounters struct {
+	count int
+	latS  float64
+	bytes uint64
+}
+
+// statKey identifies an aggregation bucket. Domain rows carry a 30-minute
+// bucket; path rows do not and leave it zero.
+type statKey struct {
+	day      string
+	host     string
+	path     string
+	isDomain bool
+	bucket   int
+}
+
+// aggregateIncrements collapses a batch into one row per bucket. Popular paths
+// arrive many times per flush, and without this each arrival is its own Exec.
+func aggregateIncrements(batch []increment) map[statKey]*statCounters {
+	aggregated := make(map[statKey]*statCounters, len(batch))
+	for _, inc := range batch {
+		at := inc.atTime.UTC()
+		bucket := 0
+		if inc.isDomain {
+			// 30-minute buckets: hour*2 + minute/30, giving 0-47 across a day.
+			bucket = at.Hour()*2 + at.Minute()/30
+		}
+		key := statKey{at.Format("2006-01-02"), inc.host, inc.path, inc.isDomain, bucket}
+
+		if c, ok := aggregated[key]; ok {
+			c.count++
+			c.latS += inc.latS
+			c.bytes += inc.bytesTotal
+			continue
+		}
+		aggregated[key] = &statCounters{count: 1, latS: inc.latS, bytes: inc.bytesTotal}
+	}
+	return aggregated
+}
+
+// flushIncrements writes the aggregated path and domain counters and returns
+// the batch truncated for reuse. The batch is always cleared, including when
+// the transaction could not be opened: these are counters, and holding a failed
+// batch across flushes would grow it without bound.
+func (s *pathStatsStore) flushIncrements(batch []increment) []increment {
+	if len(batch) == 0 {
+		return batch
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		logger.Default().LogError("telemetry: begin transaction failed", "error", err)
+		return batch[:0]
+	}
+	// Rollback after a successful Commit returns sql.ErrTxDone by design, so
+	// this error is expected rather than ignored. The defer is the safety net
+	// for the paths that return before committing.
+	defer func() { _ = tx.Rollback() }()
+
+	pathStmt, _ := s.upsertStmt(tx)
+	domainStmt, _ := s.domainUpsertStmt(tx)
+
+	for key, val := range aggregateIncrements(batch) {
+		switch {
+		case key.isDomain && domainStmt != nil:
+			if _, err := domainStmt.Exec(key.day, key.bucket, key.host, val.count, val.latS, val.bytes); err != nil {
+				logger.Default().LogError("domain stats: upsert failed", "error", err)
+			}
+		case !key.isDomain && pathStmt != nil:
+			if _, err := pathStmt.Exec(key.day, key.host, key.path, val.count, val.latS, val.bytes); err != nil {
+				logger.Default().LogError("path stats: upsert failed", "error", err)
+			}
+		}
+	}
+
+	if pathStmt != nil {
+		_ = pathStmt.Close()
+	}
+	if domainStmt != nil {
+		_ = domainStmt.Close()
+	}
+	_ = tx.Commit()
+	return batch[:0]
+}
+
+// flushTraces writes buffered traces to Pebble and returns the batch truncated
+// for reuse. Records go back to the pool either way.
+func (s *pathStatsStore) flushTraces(traceBatch []*TraceRecord) []*TraceRecord {
+	if len(traceBatch) == 0 {
+		return traceBatch
+	}
+	pb := s.pebble.NewBatch()
+	for _, tr := range traceBatch {
+		// Timestamp is nanosecond-resolution and the ID is per-record, so the
+		// key is unique in practice; Pebble Set overwrites on the off chance it
+		// is not.
+		val, _ := json.Marshal(tr)
+		_ = pb.Set(makeTraceKey(tr.Timestamp, tr.ID), val, pebble.NoSync)
+	}
+	if err := pb.Commit(pebble.Sync); err != nil {
+		logger.Default().LogError("pebble: trace batch commit failed", "error", err)
+	}
+	for _, tr := range traceBatch {
+		tr.Reset()
+		tracePool.Put(tr)
+	}
+	return traceBatch[:0]
+}
+
+// flushThreats writes buffered security threats and returns the batch truncated
+// for reuse.
+//
+// Records are returned to the pool on every path, including when the
+// transaction could not be opened. Previously that early exit skipped the
+// recycle, so a database blip quietly drained the pool.
+func (s *pathStatsStore) flushThreats(threatBatch []*SecurityThreat) []*SecurityThreat {
+	if len(threatBatch) == 0 {
+		return threatBatch
+	}
+	defer func() {
+		for _, th := range threatBatch {
+			th.Reset()
+			threatPool.Put(th)
+		}
+	}()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		logger.Default().LogError("threats: begin transaction failed", "error", err)
+		return threatBatch[:0]
+	}
+	// Expected to fail with sql.ErrTxDone after a successful Commit; see
+	// flushIncrements.
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := s.threatInsertStmt(tx)
+	if err != nil {
+		return threatBatch[:0]
+	}
+	for _, th := range threatBatch {
+		// Each row gets a savepoint so a single rejected threat costs that
+		// threat and nothing else. Without it the first failure aborts the
+		// surrounding transaction, and on Postgres every later Exec then fails
+		// with 25P02 — so one malformed record silently discarded the whole
+		// batch. Threats are what the Security Hub is made of; losing 127 good
+		// ones to a bad one is the difference between a gap and a blind spot.
+		if !s.execThreat(tx, stmt, th, strings.Join(th.SourceIPs, ",")) {
+			logger.Default().LogWarn("threats: record dropped",
+				"id", th.ID, "type", th.Type, "source_ip", th.SourceIP)
+		}
+	}
+	_ = stmt.Close()
+	if err := tx.Commit(); err != nil {
+		logger.Default().LogError("threats: commit failed", "error", err)
+	}
+	return threatBatch[:0]
 }
 
 func (s *pathStatsStore) prune() {
@@ -1342,67 +1415,108 @@ func RecordSecurityThreat(t SecurityThreat) {
 	}
 }
 
-func (s *pathStatsStore) processThreat(st *SecurityThreat) {
-	// Format headers lazily in the background
+const (
+	// actionDetected is recorded when a threat was observed but not stopped.
+	actionDetected = "detected"
+
+	// autoMitigateScore is the threat score at which the actor is mitigated
+	// even though the request itself was allowed through.
+	autoMitigateScore = 80
+
+	// labelUnknown is the metric label used when a more specific value — a WAF
+	// rule ID, a trap path — is not present on the threat. Prometheus labels
+	// cannot be empty without creating a separate series.
+	labelUnknown = "unknown"
+
+	// typeBruteForce is the threat type recorded for repeated auth failures.
+	typeBruteForce = "brute_force_attempt"
+
+	// ipShunUniqueUserThreshold is how many distinct malicious fingerprints must
+	// appear behind one address before the address itself is shunned. One IP can
+	// front a whole office, so this trades a little dwell time for not blocking
+	// everyone behind a NAT on the strength of a single bad client.
+	ipShunUniqueUserThreshold = 3
+)
+
+// normalizeThreatHeaders formats the captured headers and redacts them before
+// anything persists or broadcasts the threat. The raw maps are dropped so the
+// pooled record does not hold request memory alive.
+func normalizeThreatHeaders(st *SecurityThreat) {
 	if st.rawReqHeader != nil {
 		st.RequestHeaders = FormatHeaders(st.rawReqHeader)
-		st.rawReqHeader = nil // Release for GC
+		st.rawReqHeader = nil
 	}
 	if st.rawRespHeader != nil {
 		st.ResponseHeaders = FormatHeaders(st.rawRespHeader)
-		st.rawRespHeader = nil // Release for GC
+		st.rawRespHeader = nil
 	}
-
-	// Redact sensitive data before persistence and broadcasting
 	st.RequestHeaders = RedactHeaders(st.RequestHeaders)
 	st.ResponseHeaders = RedactHeaders(st.ResponseHeaders)
-	// We also redact the Details if it contains sensitive headers
+	// Details is redacted too: it frequently quotes the offending header back.
 	st.Details = RedactHeaders(st.Details)
+}
 
-	if st.ActionTaken == "" {
-		st.ActionTaken = "detected"
+// escalateMitigation blocks the actor behind a threat, not just the request.
+//
+// A fingerprint is mitigated immediately. An IP is only mitigated once
+// ipShunUniqueUserThreshold distinct malicious fingerprints have been seen
+// behind it, because one address can front an entire office; shunning on the
+// first bad fingerprint would take out everyone sharing the NAT.
+//
+// Mitigation threats are excluded, or acting on one would produce another.
+func escalateMitigation(st *SecurityThreat) {
+	if !st.Mitigated && st.Category != "reputation" && st.Score < autoMitigateScore {
+		return
 	}
-	st.Mitigated = st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
-	if (st.Mitigated || st.Category == "reputation" || st.Score >= 80) &&
-		st.Type != "user_mitigation" && st.Type != "ip_mitigation" && st.Type != "ip_shunning" {
-		// Automatically mitigate fingerprints to ensure immediate blocking of the same actor.
-		if st.Fingerprint != "" && !IsUserUnmitigated(st.Fingerprint) {
-			MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
-		}
-
-		// Escalation to IP Mitigation: 3-User Threshold
-		if st.SourceIP != "" && st.Fingerprint != "" {
-			ipMaliciousMu.Lock()
-			val, _ := ipMaliciousFingerprints.Get(st.SourceIP)
-			var fps map[string]struct{}
-			if val != nil {
-				fps = val.(map[string]struct{})
-			} else {
-				fps = make(map[string]struct{})
-			}
-			fps[st.Fingerprint] = struct{}{}
-			ipMaliciousFingerprints.Add(st.SourceIP, fps)
-			uniqueUsers := len(fps)
-			ipMaliciousMu.Unlock()
-
-			if uniqueUsers >= 3 && !IsIPUnmitigated(st.SourceIP) {
-				MarkIPMitigated(st.SourceIP, fmt.Sprintf("IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers))
-			}
-		}
+	switch st.Type {
+	case "user_mitigation", "ip_mitigation", "ip_shunning":
+		return
 	}
 
-	if st.CountryCode == "" && st.SourceIP != "" {
+	if st.Fingerprint != "" && !IsUserUnmitigated(st.Fingerprint) {
+		MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
+	}
+	if st.SourceIP == "" || st.Fingerprint == "" {
+		return
+	}
+
+	ipMaliciousMu.Lock()
+	val, _ := ipMaliciousFingerprints.Get(st.SourceIP)
+	fps, _ := val.(map[string]struct{})
+	if fps == nil {
+		fps = make(map[string]struct{})
+	}
+	fps[st.Fingerprint] = struct{}{}
+	ipMaliciousFingerprints.Add(st.SourceIP, fps)
+	uniqueUsers := len(fps)
+	ipMaliciousMu.Unlock()
+
+	if uniqueUsers >= ipShunUniqueUserThreshold && !IsIPUnmitigated(st.SourceIP) {
+		MarkIPMitigated(st.SourceIP, fmt.Sprintf(
+			"IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers))
+	}
+}
+
+// enrichThreatOrigin fills in geolocation and ASN when the caller did not.
+func enrichThreatOrigin(st *SecurityThreat) {
+	if st.SourceIP == "" {
+		return
+	}
+	if st.CountryCode == "" {
 		st.CountryCode, _, st.Latitude, st.Longitude = ResolveIPInfoFast(st.SourceIP)
 	}
-
-	if st.ASN == "" && st.SourceIP != "" {
+	if st.ASN == "" {
 		st.ASN = ResolveASN(st.SourceIP)
 	}
+}
 
-	// Log to audit trail
-	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
-
-	// Alerting and Broadcasting
+// recordMitigationFunnel attributes a stopped threat to the middleware that
+// stopped it, so the security funnel adds up. Called only for threats that were
+// actually mitigated; a detection with no action belongs in no funnel bucket.
+// notifyThreat runs the registered alert hook and pushes the threat to live
+// subscribers. The hook is read under the lock and called outside it, so a slow
+// alerter cannot block whoever is registering one.
+func notifyThreat(st *SecurityThreat) {
 	alertMu.RLock()
 	h := onThreatAlert
 	alertMu.RUnlock()
@@ -1410,47 +1524,119 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 		h(st)
 	}
 	ThreatBroadcaster.Broadcast(*st)
+}
 
-	// funnel increments: map category/type to specific funnel counters
-	isMitigated := st.Mitigated || st.ActionTaken == "blocked" || st.ActionTaken == "challenged" || st.ActionTaken == "shunned"
-	if isMitigated {
-		routeID := cmp.Or(st.RouteID, "global")
-		cat := strings.ToLower(st.Category)
-		typ := strings.ToLower(st.Type)
+// funnelRule attributes a mitigated threat to the middleware that stopped it.
+// Rules are evaluated in order and the first match wins, which preserves the
+// precedence the original switch had — a WAF block that is also categorised
+// "advanced" counts as WAF.
+type funnelRule struct {
+	matches func(cat, typ string) bool
+	record  func(routeID, typ string, st *SecurityThreat)
+}
 
-		switch {
-		case cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation":
-			ruleID := "unknown"
-			if st.TriggeredRules != "" {
-				ruleID = st.TriggeredRules
-			} else if typ != "" {
-				ruleID = typ
-			}
-			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, ruleID).Inc()
-		case strings.HasPrefix(typ, "fast_path_"):
-			checkType := strings.TrimPrefix(typ, "fast_path_")
-			MiddlewareFastPathBlockedTotal.WithLabelValues(routeID, checkType).Inc()
-		case typ == "rate_limit" || cat == "abuse":
+// mitigationFunnelRules is a table rather than a switch so that adding a
+// middleware means adding a row, and so the precedence above is something you
+// can read top to bottom instead of inferring from case order.
+var mitigationFunnelRules = []funnelRule{
+	{
+		matches: func(cat, typ string) bool {
+			return cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation"
+		},
+		record: func(routeID, typ string, st *SecurityThreat) {
+			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, cmp.Or(st.TriggeredRules, typ, labelUnknown)).Inc()
+		},
+	},
+	{
+		matches: func(_, typ string) bool { return strings.HasPrefix(typ, "fast_path_") },
+		record: func(routeID, typ string, _ *SecurityThreat) {
+			MiddlewareFastPathBlockedTotal.WithLabelValues(routeID, strings.TrimPrefix(typ, "fast_path_")).Inc()
+		},
+	},
+	{
+		matches: func(cat, typ string) bool { return typ == "rate_limit" || cat == "abuse" },
+		record: func(routeID, _ string, _ *SecurityThreat) {
 			MiddlewareRateLimitRejectedTotal.WithLabelValues(routeID, "behavioral").Inc()
-		case cat == "deception" || typ == "honeypot_triggered" || typ == "honeypot_hit":
-			trap := "unknown"
-			if st.RequestURI != "" {
-				trap = st.RequestURI
-			}
-			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, trap).Inc()
-		case typ == "reputation_hit" || typ == "advanced_security" || cat == "advanced" || cat == "threat_intel" || typ == "ip_mitigation" || typ == "user_mitigation":
+		},
+	},
+	{
+		matches: func(cat, typ string) bool {
+			return cat == "deception" || typ == "honeypot_triggered" || typ == "honeypot_hit"
+		},
+		record: func(routeID, _ string, st *SecurityThreat) {
+			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, cmp.Or(st.RequestURI, labelUnknown)).Inc()
+		},
+	},
+	{
+		matches: func(cat, typ string) bool {
+			return typ == "reputation_hit" || typ == "advanced_security" ||
+				cat == "advanced" || cat == "threat_intel" ||
+				typ == "ip_mitigation" || typ == "user_mitigation"
+		},
+		record: func(routeID, typ string, _ *SecurityThreat) {
 			MiddlewareAdvancedSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
-		case cat == "geoip" || cat == "geofencing":
+		},
+	},
+	{
+		matches: func(cat, _ string) bool { return cat == "geoip" || cat == "geofencing" },
+		record: func(routeID, _ string, st *SecurityThreat) {
 			MiddlewareGeoIPBlockedTotal.WithLabelValues(routeID, st.CountryCode).Inc()
-		case cat == "auth" || typ == "brute_force_attempt":
+		},
+	},
+	{
+		matches: func(cat, typ string) bool { return cat == "auth" || typ == typeBruteForce },
+		record: func(routeID, typ string, _ *SecurityThreat) {
 			MiddlewareAuthFailuresTotal.WithLabelValues(routeID, typ).Inc()
-		case cat == "bot":
-			MiddlewareBotManagementTotal.WithLabelValues(routeID, "blocked").Inc()
-		case cat == "filesecurity" || cat == "malware":
+		},
+	},
+	{
+		matches: func(cat, _ string) bool { return cat == "bot" },
+		record: func(routeID, _ string, _ *SecurityThreat) {
+			MiddlewareBotManagementTotal.WithLabelValues(routeID, actionBlocked).Inc()
+		},
+	},
+	{
+		matches: func(cat, _ string) bool { return cat == "filesecurity" || cat == "malware" },
+		record: func(routeID, typ string, _ *SecurityThreat) {
 			MiddlewareFileSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
+		},
+	},
+}
+
+func recordMitigationFunnel(st *SecurityThreat) {
+	routeID := cmp.Or(st.RouteID, "global")
+	cat := strings.ToLower(st.Category)
+	typ := strings.ToLower(st.Type)
+
+	for _, rule := range mitigationFunnelRules {
+		if rule.matches(cat, typ) {
+			rule.record(routeID, typ, st)
+			return
 		}
 	}
+}
 
+func (s *pathStatsStore) processThreat(st *SecurityThreat) {
+	normalizeThreatHeaders(st)
+
+	if st.ActionTaken == "" {
+		st.ActionTaken = actionDetected
+	}
+	st.Mitigated = isMitigatingAction(st.ActionTaken)
+	escalateMitigation(st)
+	enrichThreatOrigin(st)
+
+	// Log to audit trail
+	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
+
+	// Alerting and Broadcasting
+	notifyThreat(st)
+
+	isMitigated := st.Mitigated || isMitigatingAction(st.ActionTaken)
+	// Funnel counters: which middleware actually stopped this.
+	if isMitigated {
+		recordMitigationFunnel(st)
+	}
 	if s.scoreCache != nil {
 		current, ok := s.scoreCache.Get(st.SourceIP)
 		score := st.Score
@@ -1515,7 +1701,7 @@ func IsIPUnmitigated(ip string) bool {
 		return false
 	}
 
-	unmitigated := status == "unmitigated"
+	unmitigated := status == statusUnmitigated
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, unmitigated)
 	}
@@ -1537,10 +1723,7 @@ func IsIPMitigated(ip string) bool {
 	var status string
 	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
 	err := s.db.QueryRow(query, ip).Scan(&status)
-	mitigated := false
-	if err == nil && status == "mitigated" {
-		mitigated = true
-	}
+	mitigated := err == nil && status == statusMitigated
 
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, !mitigated)
@@ -1697,10 +1880,7 @@ check_db:
 	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE (fingerprint = ? OR ja4h = ?) ORDER BY updated_at DESC LIMIT 1")
 	var status string
 	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
-	mitigated := false
-	if err == nil && status == "mitigated" {
-		mitigated = true
-	}
+	mitigated := err == nil && status == statusMitigated
 
 	if s.userMitigationCache != nil {
 		s.userMitigationCache.Add(ja4plus, mitigated)
@@ -1718,7 +1898,7 @@ func IsUserUnmitigated(ja4plus string) bool {
 	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'unmitigated' AND (fingerprint = ? OR ja4h = ?) AND updated_at > datetime('now', '-1 day')")
 	var status string
 	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
-	return err == nil && status == "unmitigated"
+	return err == nil && status == statusUnmitigated
 }
 
 // GetUserMitigations returns a list of currently mitigated users/fingerprints.
@@ -2296,7 +2476,7 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 	if sourceIPs != "" {
 		th.SourceIPs = strings.Split(sourceIPs, ",")
 	}
-	th.Mitigated = th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned"
+	th.Mitigated = isMitigatingAction(th.ActionTaken)
 	return th, nil
 }
 
@@ -2320,12 +2500,13 @@ func buildThreatFilterQuery(dialect db.Dialect, filter *ThreatFilter, usePrefix 
 		conditions = append(conditions, prefix+"category = ?")
 		args = append(args, filter.Category)
 	}
-	if filter.Status == "mitigated" {
+	switch filter.Status {
+	case statusMitigated:
 		// Mitigated if:
 		// 1. Current status is 'mitigated' in IP or fingerprint table
 		// 2. OR it was blocked at the time AND not subsequently unmitigated in any table
 		conditions = append(conditions, fmt.Sprintf("(m.status = 'mitigated' OR fm4.status = 'mitigated' OR (%saction_taken IN ('blocked', 'challenged', 'shunned') AND (m.status IS NULL OR m.status != 'unmitigated') AND (fm4.status IS NULL OR fm4.status != 'unmitigated')))", prefix))
-	} else if filter.Status == "detected" {
+	case "detected":
 		// Detected (active threat) if:
 		// 1. Current status is 'unmitigated' in any table
 		// 2. OR it was NOT blocked at the time AND not currently mitigated in any table
@@ -2447,8 +2628,8 @@ func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFi
 			logQueryErr(ctx, "threats: scan failed", err)
 			continue
 		}
-		th.Mitigated = mitigationStatus == "mitigated" || fm4Status == "mitigated" ||
-			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
+		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
+			((isMitigatingAction(th.ActionTaken)) &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}
@@ -2497,8 +2678,8 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		if sourceIPs != "" {
 			th.SourceIPs = strings.Split(sourceIPs, ",")
 		}
-		th.Mitigated = mitigationStatus == "mitigated" || fm4Status == "mitigated" ||
-			((th.ActionTaken == "blocked" || th.ActionTaken == "challenged" || th.ActionTaken == "shunned") &&
+		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
+			((isMitigatingAction(th.ActionTaken)) &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}

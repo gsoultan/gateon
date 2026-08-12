@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -84,6 +85,7 @@ type Manager interface {
 	SetPortKnockingSequence(seq []int32) error
 	UpdateLoadBalancerBackends(ips []string) error
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
+	ClearAdaptiveRateLimit(ip string) error
 	ApplyRLFeedback(ip string, score float64) error
 	SetRLFeedbackHandler(h func(ip string, score float64))
 	ShunJA4(ja4Fingerprint string) error
@@ -349,6 +351,42 @@ func (m *EbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) er
 
 	ns := uint64(interval.Nanoseconds())
 	return limitMap.Update(ipUint, ns, ebpf.UpdateAny)
+}
+
+// ClearAdaptiveRateLimit removes a per-IP adaptive rate limit.
+//
+// SetAdaptiveRateLimit had no inverse. Once an IP was throttled the entry
+// stayed in the BPF map for the life of the process, so a false positive —
+// a NAT gateway, a CI runner, a customer behind a corporate egress — was
+// throttled to one packet per 10ms permanently, with no path back. Deleting
+// the key is what lets a decayed threat score actually release the client, and
+// it frees the map slot, which is a fixed resource: max_entries is set at load
+// time and a full map starts rejecting new limits.
+//
+// A missing key is success, not an error: the caller wants the limit gone, and
+// it already is.
+func (m *EbpfManager) ClearAdaptiveRateLimit(ip string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	limitMap, ok := m.maps["adaptive_limits"]
+	if !ok {
+		return fmt.Errorf("adaptive_limits map not loaded")
+	}
+
+	ipUint, err := ipToUint32(ip)
+	if err != nil {
+		return err
+	}
+
+	if err := limitMap.Delete(ipUint); err != nil {
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			return nil
+		}
+		return err
+	}
+	logger.L.LogInfo("Cleared adaptive rate limit in eBPF", "ip", ip)
+	return nil
 }
 
 // ShunJA4 adds a JA4 fingerprint to the XDP blocklist.

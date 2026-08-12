@@ -6,6 +6,7 @@ package tls
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -31,7 +32,7 @@ func NewRedisCache(client redis.Client, prefix string) *RedisCache {
 // Get reads a certificate data from Redis.
 func (c *RedisCache) Get(ctx context.Context, key string) ([]byte, error) {
 	val, err := c.client.Get(ctx, c.prefix+key).Bytes()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, autocert.ErrCacheMiss
 	}
 	if err != nil {

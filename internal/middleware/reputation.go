@@ -63,7 +63,7 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				RequestURI:  r.URL.Path,
 				Category:    "bot",
 				Severity:    "HIGH",
-				ActionTaken: "blocked",
+				ActionTaken: actionBlocked,
 			}))
 
 			w.WriteHeader(http.StatusForbidden)

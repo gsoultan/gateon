@@ -331,8 +331,8 @@ func recordFileSecurityThreat(r *http.Request, routeID, ttype, details string) {
 		RouteID:     routeID,
 		RequestURI:  r.URL.Path,
 		Category:    "malware",
-		Severity:    "high",
-		ActionTaken: "blocked",
+		Severity:    severityHigh,
+		ActionTaken: actionBlocked,
 	}))
 }
 

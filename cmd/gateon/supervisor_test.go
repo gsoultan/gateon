@@ -18,7 +18,7 @@ import (
 // on this host, mirroring the supervisor's privilege/OS gate. On Linux without
 // root the gate keeps eBPF disabled, so tests adjust their expectations.
 func ebpfCanStart() bool {
-	return !(runtime.GOOS == "linux" && os.Geteuid() != 0)
+	return runtime.GOOS != "linux" || os.Geteuid() == 0
 }
 
 // fakeWAFUpdater records how many times Start was invoked and captures the

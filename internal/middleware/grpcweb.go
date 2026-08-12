@@ -86,7 +86,7 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 			if len(cfg) > 0 && len(cfg[0].AllowedOrigins) > 0 {
 				options = cors.Options{
 					AllowedOrigins:   cfg[0].AllowedOrigins,
-					AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"},
+					AllowedMethods:   defaultCORSMethods(),
 					AllowedHeaders:   []string{"*"},
 					ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
 					AllowCredentials: cfg[0].AllowCredentials,
@@ -107,7 +107,7 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 				// Default permissive CORS for gRPC-Web and fallback (restores v1.5.0 behavior)
 				options = cors.Options{
 					AllowOriginFunc:  func(origin string) bool { return true },
-					AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"},
+					AllowedMethods:   defaultCORSMethods(),
 					AllowedHeaders:   []string{"*"},
 					ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
 					AllowCredentials: true,
@@ -196,7 +196,7 @@ func (w *grpcWebResponseWriter) WriteHeader(code int) {
 	w.wroteHeader = true
 	w.status = code
 
-	h := w.ResponseWriter.Header()
+	h := w.Header()
 
 	// Only apply gRPC-Web transformations if this is a gRPC response.
 	ct := h.Get("Content-Type")
@@ -266,7 +266,7 @@ func (w *grpcWebResponseWriter) finalize() {
 	}
 
 	// Collect trailers from the underlying ResponseWriter
-	trailers := w.ResponseWriter.Header()
+	trailers := w.Header()
 
 	// Only append trailers if this is a gRPC response.
 	// For gRPC-Web, the response Content-Type will be application/grpc-web (+proto/json).

@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
