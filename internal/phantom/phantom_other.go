@@ -7,9 +7,10 @@ package phantom
 
 import (
 	"context"
-	"github.com/gsoultan/gateon/pkg/l4"
 	"io"
 	"net"
+
+	"github.com/gsoultan/gateon/pkg/l4"
 )
 
 type fallbackCore struct{}

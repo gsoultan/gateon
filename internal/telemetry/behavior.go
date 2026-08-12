@@ -146,7 +146,7 @@ func TrackBehaviorInternal(b *behaviorInc) {
 					Score:       30 / highTrafficFactor,
 					Details:     "Robotic timing pattern detected (highly regular intervals)",
 					RequestURI:  path,
-					ActionTaken: "flagged",
+					ActionTaken: actionFlagged,
 					Severity:    "low",
 				})
 			}
@@ -161,7 +161,7 @@ func TrackBehaviorInternal(b *behaviorInc) {
 					Score:       40 / highTrafficFactor,
 					Details:     "Heartbeat pattern detected (regular long-interval polling)",
 					RequestURI:  path,
-					ActionTaken: "flagged",
+					ActionTaken: actionFlagged,
 					Severity:    "medium",
 				})
 			}
@@ -190,7 +190,7 @@ func TrackBehaviorInternal(b *behaviorInc) {
 			Score:       60 / highTrafficFactor,
 			Details:     "High rate of 404/403 responses detected (potential fuzzing/scanning)",
 			RequestURI:  path,
-			ActionTaken: "flagged",
+			ActionTaken: actionFlagged,
 			Severity:    "high",
 		})
 	}
@@ -207,7 +207,7 @@ func TrackBehaviorInternal(b *behaviorInc) {
 			Score:       50,
 			Details:     "Suspicious path sequence detected (jump to sensitive area)",
 			RequestURI:  path,
-			ActionTaken: "flagged",
+			ActionTaken: actionFlagged,
 			Severity:    "medium",
 		})
 	}
@@ -224,7 +224,7 @@ func TrackBehaviorInternal(b *behaviorInc) {
 			Score:       70,
 			Details:     "Known exploit probe or directory traversal attempt: " + path,
 			RequestURI:  path,
-			ActionTaken: "flagged",
+			ActionTaken: actionFlagged,
 			Severity:    "high",
 		})
 	}
@@ -249,7 +249,7 @@ func TrackBehaviorInternal(b *behaviorInc) {
 			Score:       40,
 			Details:     "Potential DGA hostname detected: " + hostname,
 			RequestURI:  path,
-			ActionTaken: "flagged",
+			ActionTaken: actionFlagged,
 		})
 	}
 }

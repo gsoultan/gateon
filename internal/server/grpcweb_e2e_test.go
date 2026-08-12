@@ -162,7 +162,8 @@ func TestGRPCWeb_E2E(t *testing.T) {
 		data := body[offset : offset+int(length)]
 		offset += int(length)
 
-		if flag == 0 {
+		switch flag {
+		case 0:
 			// Data frame
 			foundData = true
 			respMsg := &gateonv1.GetStatusResponse{}
@@ -171,7 +172,7 @@ func TestGRPCWeb_E2E(t *testing.T) {
 			} else if respMsg.Status != "OK" {
 				t.Errorf("expected status 'OK', got %q", respMsg.Status)
 			}
-		} else if flag == 0x80 {
+		case 0x80:
 			// Trailer frame
 			foundTrailers = true
 			trailers := string(data)
@@ -307,7 +308,8 @@ func TestGRPCWebText_E2E(t *testing.T) {
 		data := body[offset : offset+int(length)]
 		offset += int(length)
 
-		if flag == 0 {
+		switch flag {
+		case 0:
 			foundData = true
 			respMsg := &gateonv1.GetStatusResponse{}
 			if err := proto.Unmarshal(data, respMsg); err == nil && respMsg.Status == "OK" {
@@ -315,7 +317,7 @@ func TestGRPCWebText_E2E(t *testing.T) {
 			} else {
 				t.Errorf("unexpected data frame content")
 			}
-		} else if flag == 0x80 {
+		case 0x80:
 			foundTrailers = true
 			if !strings.Contains(strings.ToLower(string(data)), "grpc-status: 0") {
 				t.Errorf("expected grpc-status: 0 in trailers")

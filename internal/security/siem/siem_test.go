@@ -6,6 +6,7 @@ package siem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -108,7 +109,7 @@ func TestSeverityMaps(t *testing.T) {
 }
 
 func TestNewDisabled(t *testing.T) {
-	if _, err := New(Config{Enabled: false}); err != ErrDisabled {
+	if _, err := New(Config{Enabled: false}); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("expected ErrDisabled, got %v", err)
 	}
 	if _, err := New(Config{Enabled: true, Endpoint: ""}); err == nil {

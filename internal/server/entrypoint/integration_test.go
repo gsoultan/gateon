@@ -6,6 +6,7 @@ package entrypoint
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -119,7 +120,7 @@ func TestIntegration_TCPInspection(t *testing.T) {
 
 		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		got, err := io.ReadAll(conn)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			t.Fatalf("Read: %v", err)
 		}
 		if !strings.Contains(string(got), "Gateon TCP Entrypoint") {

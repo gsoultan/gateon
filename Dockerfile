@@ -33,11 +33,14 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-# proto + grpc + buf code generators.
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
-    go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest && \
-    go install github.com/bufbuild/buf/cmd/buf@latest
+# proto + grpc + buf code generators. Versions come from the `tool` directive in
+# go.mod, so they are locked in go.sum and reviewed like any other dependency.
+# `@latest` meant the image pulled whatever upstream had tagged at build time:
+# the image was not reproducible, and a compromised upstream tag would have been
+# compiled straight into the shipped binary — in a process that terminates TLS
+# and sees every request.
+COPY go.mod go.sum ./
+RUN go install tool
 ENV PATH="/go/bin:${PATH}"
 
 COPY . .
@@ -45,10 +48,13 @@ COPY . .
 # internal/ui/dist, which ui.go embeds via //go:embed all:dist).
 COPY --from=ui /ui/dist ./ui/dist
 COPY --from=ui /ui/node_modules ./ui/node_modules
+# No `go mod tidy` here: it let the image build mutate its own dependency set,
+# so the shipped binary could be built against a graph nobody reviewed. The
+# committed go.mod/go.sum are authoritative; CI enforces that they are tidy.
 RUN PATH="${PATH}:/src/ui/node_modules/.bin" buf generate && \
     go run ./scripts/sync_assets.go && \
     go generate ./internal/ebpf/... && \
-    go mod tidy
+    go mod verify
 
 # Static, CGO-free binary. The Go toolchain auto-applies cmd/gateon/default.pgo
 # when present (see `make pgo-profile`). -trimpath + -s -w shrink the binary.

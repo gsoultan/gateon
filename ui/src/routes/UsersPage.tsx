@@ -42,6 +42,7 @@ import { useIsMobile } from "../hooks/useMobile";
 import type { User } from "../types/gateon";
 import { useAuthStore } from "../store/useAuthStore";
 import { TwoFactorModal } from "../components/TwoFactorModal";
+import { QueryError } from "../components/QueryError";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -49,7 +50,7 @@ export default function UsersPage() {
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const density = useTableDensity();
-  const { data, refetch, isLoading } = useUsers({
+  const { data, refetch, isLoading, isError, error } = useUsers({
     page: page - 1,
     pageSize: pageSize,
     search: search,
@@ -396,7 +397,9 @@ export default function UsersPage() {
       <Card withBorder padding={isMobile ? "sm" : "xl"} radius="lg" shadow="xs">
         {isMobile ? (
           <Stack gap="md">
-            {isLoading ? (
+            {isError ? (
+              <QueryError error={error} what="users" onRetry={() => refetch()} />
+            ) : isLoading ? (
                <Text ta="center" py="xl" c="dimmed">Loading users...</Text>
             ) : users.length === 0 ? (
                <Text ta="center" py="xl" c="dimmed">No users found</Text>

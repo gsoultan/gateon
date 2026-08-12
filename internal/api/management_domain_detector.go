@@ -37,7 +37,7 @@ func (d *ManagementDomainDetector) Detect(ctx context.Context, data *DiagnosticD
 			if !isInternalIP(tr.SourceIP) && tr.SourceIP != "127.0.0.1" && tr.SourceIP != "::1" && tr.SourceIP != "" {
 				anomaly := &gateonv1.Anomaly{
 					Type:           "management_access_violation",
-					Severity:       "critical",
+					Severity:       severityCritical,
 					Description:    fmt.Sprintf("External IP %s accessed management domain %s", tr.SourceIP, tr.Path),
 					Timestamp:      tr.Timestamp.Format(time.RFC3339),
 					Source:         tr.SourceIP,

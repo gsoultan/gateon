@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/gsoultan/gateon/internal/redis"
@@ -73,7 +74,7 @@ func (s *RedisAPIKeyStore) GetTenantID(ctx context.Context, key string) (string,
 	}
 
 	val, err := s.client.Get(ctx, s.prefix+searchKey).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return "", false, nil
 	}
 	if err != nil {

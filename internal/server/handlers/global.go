@@ -366,6 +366,22 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
+	// Read-only counterpart to the POST above. It is a GET and needs only read
+	// permission, because polling scan state must not require the authority to
+	// start a scan — nor accidentally exercise it.
+	mux.HandleFunc("GET /v1/security/clamav/scan-status", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp, err := svc.GetClamavScanStatus(r.Context(), &gateonv1.GetClamavScanStatusRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("POST /v1/waf/update", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
 			return
@@ -621,7 +637,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		if resp.Success && isLoginStep {
 			// Set HttpOnly secure cookie for session (24h)
-			middleware.SetSessionCookie(w, resp.Token, 24*3600, r.TLS != nil)
+			middleware.SetSessionCookie(w, resp.Token, int(auth.TokenLifetime.Seconds()), r.TLS != nil)
 		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -634,7 +650,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	// enrollment via POST /v1/auth/2fa/verify with the user id and the TOTP code.
 	mux.HandleFunc("POST /v1/auth/2fa/enroll", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if d.AuthManager == nil {
+		if !auth.Available(d.AuthManager) {
 			WriteHTTPError(w, http.StatusServiceUnavailable, "auth not initialized")
 			return
 		}
@@ -689,7 +705,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		if !resp.TwoFactorRequired && !resp.TwoFactorSetupRequired {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
-			middleware.SetSessionCookie(w, resp.Token, 24*3600, r.TLS != nil)
+			middleware.SetSessionCookie(w, resp.Token, int(auth.TokenLifetime.Seconds()), r.TLS != nil)
 		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)

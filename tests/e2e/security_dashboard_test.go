@@ -51,15 +51,16 @@ func TestSecurityDashboard(t *testing.T) {
 	}
 
 	// 2. Build and Start Mock Backend
-	mockBinaryName := "mock_backend_" + t.Name()
-	mockBinaryPath := filepath.Join(projectRoot, mockBinaryName)
-	t.Logf("Building mock backend: %s...", mockBinaryName)
-	cmdMockBuild := exec.Command("go", "build", "-o", mockBinaryName, "tests/e2e/mock_backend/main.go")
+	// Built into the test's temp dir, not the repository root: a test must not
+	// leave binaries in the checkout, and a subtest name contains a '/' that
+	// would make the -o path invalid.
+	mockBinaryPath := filepath.Join(env.Dir, "mock_backend"+exeSuffix())
+	t.Logf("Building mock backend into %s...", mockBinaryPath)
+	cmdMockBuild := exec.Command("go", "build", "-o", mockBinaryPath, "tests/e2e/mock_backend/main.go")
 	cmdMockBuild.Dir = projectRoot
 	if out, err := cmdMockBuild.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build mock backend: %v\n%s", err, out)
 	}
-	defer os.Remove(mockBinaryPath)
 
 	mockBackend := exec.Command(mockBinaryPath)
 	mockBackend.Dir = projectRoot
@@ -135,7 +136,7 @@ func TestSecurityDashboard(t *testing.T) {
 		// if the underlying OS/Go version allows it, or at least fresh state.
 		client := &http.Client{
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
 				DisableKeepAlives: true, // Force fresh handshake
 			},
 			Timeout: 5 * time.Second,
@@ -187,7 +188,7 @@ func TestSecurityDashboard(t *testing.T) {
 			t.Fatalf("Failed to create metrics request: %v", err)
 		}
 		metricsReq.Header.Set("Authorization", "Bearer "+token)
-		
+
 		resp, err := httpClient.Do(metricsReq)
 		if err != nil {
 			t.Fatalf("Failed to get metrics: %v", err)
@@ -296,18 +297,18 @@ func TestSecurityDashboard(t *testing.T) {
 			t.Fatalf("Failed to trigger WAF: %v", err)
 		}
 		resp.Body.Close()
-		
+
 		time.Sleep(10 * time.Second) // Wait for threat to be recorded in DB
 
 		// Look specifically for WAF violations with rule IDs
 		threatsResp, err := apiClient.ListSecurityThreats(ctx, &gateonv1.ListSecurityThreatsRequest{
-			Limit: 100,
+			Limit:  100,
 			Status: "all",
 		})
 		if err != nil {
 			t.Fatalf("Failed to list threats: %v", err)
 		}
-		
+
 		var threat *gateonv1.Anomaly
 		for _, th := range threatsResp.Threats {
 			if th.Source == spoofedIP && th.TriggeredRules != "" && th.TriggeredRules != "[]" {

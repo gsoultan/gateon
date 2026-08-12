@@ -216,12 +216,13 @@ func (s *Store) ListRules(ctx context.Context, limit, offset int, search, catego
 
 	// Sort by numeric ID if it looks like a number, else lexicographically.
 	// This ensures that rule 900 comes before 1000.
-	if s.dialect.Driver == db.DriverSQLite {
+	switch s.dialect.Driver {
+	case db.DriverSQLite:
 		query += " ORDER BY (id+0) ASC, id ASC"
-	} else if s.dialect.Driver == db.DriverPostgres {
+	case db.DriverPostgres:
 		// Postgres: try to cast to integer for sorting if numeric, otherwise sort as text
 		query += " ORDER BY CASE WHEN id ~ '^[0-9]+$' THEN CAST(id AS INTEGER) ELSE 999999999 END ASC, id ASC"
-	} else {
+	default:
 		query += " ORDER BY id ASC"
 	}
 	if limit > 0 {

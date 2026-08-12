@@ -60,8 +60,8 @@ func IPMitigation() Middleware {
 					Type:        "ip_mitigation",
 					SourceIP:    ip,
 					Category:    "threat_intel",
-					Severity:    "high",
-					ActionTaken: "blocked",
+					Severity:    severityHigh,
+					ActionTaken: actionBlocked,
 					Details:     "Request blocked due to mitigated IP (IP Shunning)",
 					RequestURI:  r.URL.RequestURI(),
 					Method:      r.Method,
@@ -113,8 +113,8 @@ func UserMitigation() Middleware {
 						Type:        "user_mitigation",
 						SourceIP:    clientIP,
 						Category:    "threat_intel",
-						Severity:    "high",
-						ActionTaken: "blocked",
+						Severity:    severityHigh,
+						ActionTaken: actionBlocked,
 						Details:     "Request blocked due to mitigated user fingerprint (JA4+)",
 						Fingerprint: ja4plus,
 						RequestURI:  r.URL.RequestURI(),
@@ -376,7 +376,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			var pooled bool
 			if !ok {
 				sw = GetStatusResponseWriter(w)
-				w = sw
 				pooled = true
 			}
 			if pooled {
@@ -577,9 +576,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 			// Protocol metrics
 			protocol := "http1"
-			if r.ProtoMajor == 2 {
+			switch r.ProtoMajor {
+			case 2:
 				protocol = "http2"
-			} else if r.ProtoMajor == 3 {
+			case 3:
 				protocol = "http3"
 			}
 			if r.TLS != nil && protocol == "http1" {

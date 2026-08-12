@@ -194,6 +194,9 @@ func TestRecovery(t *testing.T) {
 
 		defer func() {
 			err := recover()
+			//nolint:errorlint // recover() yields interface{}, not error, and the
+			// assertion is that this exact sentinel came back out. errors.Is does
+			// not compile against interface{}.
 			if err != http.ErrAbortHandler {
 				t.Errorf("expected http.ErrAbortHandler to be re-panicked, got %v", err)
 			}

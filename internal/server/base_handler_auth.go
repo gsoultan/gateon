@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -18,7 +19,19 @@ import (
 
 // needsAuth returns true when global config has auth enabled and auth service is available.
 func needsAuth(gc *gateonv1.GlobalConfig, deps BaseHandlerDeps) bool {
-	return gc != nil && gc.Auth != nil && gc.Auth.Enabled && deps.Auth != nil
+	return gc != nil && gc.Auth != nil && gc.Auth.Enabled && auth.Available(deps.Auth)
+}
+
+// writeAuthUnavailable rejects a management request made before an auth service
+// exists. 503 (not 401) is deliberate: there is no credential the caller could
+// present that would work, and the correct operator action is to finish setup,
+// so this is a server-state problem rather than a rejected identity.
+func writeAuthUnavailable(w http.ResponseWriter, r *http.Request) {
+	logger.SecurityEvent("management_api_before_setup", r, "auth_unavailable")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write([]byte(`{"error":"setup incomplete: the management API is unavailable until an administrator account has been created"}`))
 }
 
 // isPublicManagementAllowed returns true if management access is allowed for this entrypoint/request.

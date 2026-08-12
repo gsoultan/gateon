@@ -63,7 +63,7 @@ func (d *HybridGraphAnomalyDetector) Detect(ctx context.Context, data *Diagnosti
 			if len(ips) >= 5 {
 				anomaly := &gateonv1.Anomaly{
 					Type:           "graph_coordinated_fp",
-					Severity:       "high",
+					Severity:       severityHigh,
 					Description:    fmt.Sprintf("Graph Intelligence detected cluster around fingerprint %s: %d distinct IPs sharing behavior across cluster.", nodeID[3:], len(ips)),
 					Source:         strings.Join(ips, ", "),
 					Score:          85.0,

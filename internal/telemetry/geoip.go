@@ -556,7 +556,7 @@ func extractMMDB(body io.Reader, destPath string) error {
 	tr := tar.NewReader(gzr)
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

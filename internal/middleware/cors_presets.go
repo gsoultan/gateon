@@ -20,7 +20,7 @@ type CORSPreset struct {
 var corsPresets = map[string]CORSPreset{
 	"permissive": {
 		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"},
+		AllowedMethods:   defaultCORSMethods(),
 		AllowedHeaders:   []string{"*"},
 		ExposedHeaders:   []string{"*"},
 		AllowCredentials: true,

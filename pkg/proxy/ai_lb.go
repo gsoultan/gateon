@@ -22,8 +22,8 @@ type AIPredictiveLB struct {
 // NewAIPredictiveLB creates a new AI-driven load balancer.
 func NewAIPredictiveLB(targets []*gateonv1.Target) *AIPredictiveLB {
 	strategy := ai.NewPredictorStrategy()
-	if ai.GlobalPredictor != nil {
-		strategy.SetPredictor(ai.GlobalPredictor)
+	if p := ai.GlobalPredictor(); p != nil {
+		strategy.SetPredictor(p)
 	}
 	lb := &AIPredictiveLB{
 		strategy: strategy,

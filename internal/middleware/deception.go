@@ -35,7 +35,7 @@ func Deception(cfg DeceptionConfig) Middleware {
 			// 1. Check for Canary Token reuse
 			if cfg.CanaryHeader != "" && cfg.CanaryToken != "" {
 				if r.Header.Get(cfg.CanaryHeader) == cfg.CanaryToken {
-					recordAdvancedThreat(r, "canary_token_reused", 100, "Attacker reused injected canary header: "+cfg.CanaryHeader, cfg.RouteID, "deception", "CRITICAL", "blocked")
+					recordAdvancedThreat(r, "canary_token_reused", 100, "Attacker reused injected canary header: "+cfg.CanaryHeader, cfg.RouteID, "deception", "CRITICAL", actionBlocked)
 					if cfg.EnableTrollResponse {
 						// Only troll if reputation is significantly degraded.
 						// High-reputation clients (e.g. mistaken browser reuse) should get a standard error.
@@ -54,7 +54,7 @@ func Deception(cfg DeceptionConfig) Middleware {
 			// 2. Check for honeypot path access
 			for _, trap := range cfg.HoneypotPaths {
 				if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
-					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID, "deception", "CRITICAL", "blocked")
+					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID, "deception", "CRITICAL", actionBlocked)
 					if cfg.EnableTrollResponse {
 						fingerprint := telemetry.GetIPFingerprint(r)
 						reputation := telemetry.GetReputationScore(fingerprint)
@@ -71,7 +71,7 @@ func Deception(cfg DeceptionConfig) Middleware {
 			// 3. Check for invisible link access
 			for _, link := range cfg.InvisibleLinkPaths {
 				if link != "" && path == link {
-					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID, "deception", "CRITICAL", "blocked")
+					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID, "deception", "CRITICAL", actionBlocked)
 					if cfg.EnableTrollResponse {
 						fingerprint := telemetry.GetIPFingerprint(r)
 						reputation := telemetry.GetReputationScore(fingerprint)
@@ -144,10 +144,10 @@ func (w *deceptionResponseWriter) Write(b []byte) (int, error) {
 		if idx := bytes.LastIndex(b, []byte("</body>")); idx != -1 {
 			var sb strings.Builder
 			for _, link := range w.cfg.InvisibleLinkPaths {
-				sb.WriteString(fmt.Sprintf(`<a href="%s" style="display:none" aria-hidden="true" tabIndex="-1"></a>`, link))
+				fmt.Fprintf(&sb, `<a href="%s" style="display:none" aria-hidden="true" tabIndex="-1"></a>`, link)
 			}
 			for _, form := range w.cfg.HoneyForms {
-				sb.WriteString(fmt.Sprintf(`<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form))
+				fmt.Fprintf(&sb, `<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form)
 			}
 
 			newContent := make([]byte, 0, len(b)+sb.Len())
