@@ -13,6 +13,7 @@ Setup guides and configuration references.
 | [websockets-sse.md](./websockets-sse.md) | Native support for WebSockets and Server-Sent Events (SSE) |
 | [storage-retention.md](./storage-retention.md) | Persistent stores, retention/disk-reclamation behavior, and tunable cache-size/disk-usage settings |
 | [security-posture.md](./security-posture.md) | File Integrity Monitoring (FIM) configuration and the `GET /v1/security/posture` endpoint (WAF/ClamAV/FIM freshness) |
+| [waf-origins.md](./waf-origins.md) | Declaring `waf.origins` so off-origin redirect and SSRF detection stay active — and why a path-routed gateway derives none |
 | [siem-correlation.md](./siem-correlation.md) | Threat correlation engine (MITRE ATT&CK-annotated incidents) and SIEM export (JSON/CEF/syslog over HTTP/UDP/TCP) via `GATEON_SIEM_*` |
 | [architecture.md](./architecture.md) | Layered architecture overview, request-path and dependency diagrams (Mermaid), and the target `internal/middleware` package layout |
 | [adr/README.md](./adr/README.md) | Architecture Decision Records (ADRs): layered architecture, middleware package refactor, config store interfaces |

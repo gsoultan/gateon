@@ -53,7 +53,15 @@ test.describe('Threat Mitigation E2E Flow', () => {
     await expect(threatRow).toBeVisible({ timeout: 20000 });
     
     // 3. Open Modal and Mark as False Positive
-    await threatRow.click();
+    //
+    // Click the first cell, not the row. Playwright clicks an element's centre,
+    // and the centre of this row lands in the Source IP cell — which carries its
+    // own onClick that opens the trace visualiser and stops propagation. The row
+    // click therefore opened "Visual Trace: <ip>" instead of the incident modal,
+    // and which cell the centre falls in depends on how wide the rendered values
+    // are, so it passed or failed with the data. The first cell is Event / Type
+    // and has no nested handler.
+    await threatRow.locator('td').first().click();
     await expect(page.getByText(/Security Incident Details/i)).toBeVisible({ timeout: 10000 });
     
     const fpBtn = page.getByRole('button', { name: /Mark as False Positive/i });
