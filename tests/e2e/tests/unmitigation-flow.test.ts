@@ -51,11 +51,19 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     await expect(threatRow).toBeVisible({ timeout: 20000 });
     
     // 3. Open Modal and Remove Mitigation
-    await threatRow.click();
+    //
+    // The first cell, not the row: the row's centre is the Source IP cell, whose
+    // own onClick opens the trace visualiser instead. See mitigation-flow.test.ts.
+    await threatRow.locator('td').first().click();
     await expect(page.getByText(/Security Incident Details/i)).toBeVisible({ timeout: 10000 });
     
-    // It should show as Mitigated
-    await expect(page.locator('span').filter({ hasText: /^Mitigated$/ })).toBeVisible();
+    // "Blocked", not "Mitigated". The modal's status badge reports what was
+    // *done*: actionTaken "blocked"/"shunned"/"challenged" all render "Blocked",
+    // and only a threat that is mitigated without having been stopped shows
+    // "Mitigated". A WAF block is always the former, so this assertion could
+    // never hold for the XSS above. The mitigation itself is still real — the
+    // Remove Mitigation button below only renders when anomaly.mitigated is set.
+    await expect(page.locator('span').filter({ hasText: /^Blocked$/ }).first()).toBeVisible();
 
     console.log('Clicking Remove Mitigation...');
     const removeBtn = page.getByRole('button', { name: /Remove Mitigation/i });
@@ -113,7 +121,10 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     console.log('Applying Block IP...');
     // We click the card to open the modal
     await anomaly.click({ force: true });
-    await expect(page.getByTestId('security-anomaly-modal')).toBeVisible({ timeout: 10000 });
+    // The modal's content, not its root. data-testid lands on Mantine's Modal
+    // root wrapper, which has no layout box of its own, so Playwright reports it
+    // hidden even while the dialog is plainly on screen. The title is inside it.
+    await expect(page.getByText(/Security Incident Details/i)).toBeVisible({ timeout: 10000 });
     
     const blockBtn = page.getByRole('button', { name: /Block IP/i });
     await expect(blockBtn).toBeVisible();
@@ -146,7 +157,10 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     
     // 5. Open details and Remove Mitigation
     await mitigatedAnomaly.click({ force: true });
-    await expect(page.getByTestId('security-anomaly-modal')).toBeVisible({ timeout: 10000 });
+    // The modal's content, not its root. data-testid lands on Mantine's Modal
+    // root wrapper, which has no layout box of its own, so Playwright reports it
+    // hidden even while the dialog is plainly on screen. The title is inside it.
+    await expect(page.getByText(/Security Incident Details/i)).toBeVisible({ timeout: 10000 });
     
     console.log('Clicking Remove Mitigation...');
     const removeBtn = page.getByRole('button', { name: /Remove Mitigation/i });
