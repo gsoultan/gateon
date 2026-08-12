@@ -141,8 +141,12 @@ export async function testDbConnection(payload: {
   return !!data?.success;
 }
 
-// Still REST: the generated GetDiagnosticsResponse omits entryPoints, which the
-// hand-written type requires. Reconciling the two is type work, not plumbing.
+// Still REST. The entrypoints key mismatch is fixed, but the generated
+// response types every message field as `| undefined` — proto semantics —
+// while the hand-written type requires them. Reconciling that is a pass
+// over the type and its readers, not a swap of the transport, and doing it
+// halfway would mean a cast that hides exactly the mismatch this migration
+// exists to remove.
 export async function getDiagnostics(): Promise<GetDiagnosticsResponse> {
   const res = await apiFetch("/v1/diagnostics");
   if (!res.ok) throw new Error(await res.text());
@@ -167,17 +171,8 @@ export async function getCloudflareIPs(): Promise<GetCloudflareIPsResponse> {
   return res.json();
 }
 
-// Still REST: proto int64 becomes bigint in protobuf-es v2, and TraceHop.rttMs
-// is typed number here. Switching it is a real change for every consumer doing
-// arithmetic on a hop latency, so it wants its own pass.
 export async function traceRoute(ip: string): Promise<TraceRouteResponse> {
-  const res = await apiFetch("/v1/diagnostics/traceroute", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ip }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.traceRoute({ ip });
 }
 
 export async function validateCORS(req: ValidateCORSRequest): Promise<ValidateCORSResponse> {
