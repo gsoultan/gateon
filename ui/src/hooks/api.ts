@@ -1,6 +1,10 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
+// These six call RPCs that already exist on ApiService. Going through the
+// Connect client instead of hand-rolled fetch drops the duplicate wire format
+// that both of today's API bugs lived in.
+import { api } from "../services/client";
 import { useAuthStore } from "../store/useAuthStore";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
 import type {
@@ -137,6 +141,8 @@ export async function testDbConnection(payload: {
   return !!data?.success;
 }
 
+// Still REST: the generated GetDiagnosticsResponse omits entryPoints, which the
+// hand-written type requires. Reconciling the two is type work, not plumbing.
 export async function getDiagnostics(): Promise<GetDiagnosticsResponse> {
   const res = await apiFetch("/v1/diagnostics");
   if (!res.ok) throw new Error(await res.text());
@@ -144,33 +150,15 @@ export async function getDiagnostics(): Promise<GetDiagnosticsResponse> {
 }
 
 export async function applyRecommendation(anomalyType: string, source: string, threatId?: string): Promise<{ success: boolean; message: string }> {
-  const res = await apiFetch("/v1/diagnostics/recommendation", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ anomalyType: anomalyType, source: source, threatId: threatId }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.applyRecommendation({ anomalyType, source, threatId });
 }
 
 export async function mitigateThreat(req: MitigateThreatRequest): Promise<MitigateThreatResponse> {
-  const res = await apiFetch("/v1/diagnostics/mitigate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.mitigateThreat(req);
 }
 
 export async function removeMitigatedThreat(req: RemoveMitigatedThreatRequest): Promise<RemoveMitigatedThreatResponse> {
-  const res = await apiFetch("/v1/diagnostics/remove-mitigation", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.removeMitigatedThreat(req);
 }
 
 export async function getCloudflareIPs(): Promise<GetCloudflareIPsResponse> {
@@ -179,6 +167,9 @@ export async function getCloudflareIPs(): Promise<GetCloudflareIPsResponse> {
   return res.json();
 }
 
+// Still REST: proto int64 becomes bigint in protobuf-es v2, and TraceHop.rttMs
+// is typed number here. Switching it is a real change for every consumer doing
+// arithmetic on a hop latency, so it wants its own pass.
 export async function traceRoute(ip: string): Promise<TraceRouteResponse> {
   const res = await apiFetch("/v1/diagnostics/traceroute", {
     method: "POST",
@@ -190,13 +181,7 @@ export async function traceRoute(ip: string): Promise<TraceRouteResponse> {
 }
 
 export async function validateCORS(req: ValidateCORSRequest): Promise<ValidateCORSResponse> {
-  const res = await apiFetch("/v1/diagnostics/cors-validator", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.validateCORS(req);
 }
 
 export async function installClamav(req: InstallClamavRequest): Promise<InstallClamavResponse> {
