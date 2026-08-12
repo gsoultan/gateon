@@ -25,9 +25,9 @@ const maxProtoRequestBody = 1 << 20 // 1 MiB
 // dashboard sends protojson's lowerCamel spelling, "anomalyType", which does
 // not match — not even case-insensitively, because an underscore is not a
 // capital T. The field silently stayed empty rather than erroring, which is the
-// whole problem: ApplyRecommendation then switched on "" and answered
-// "Automatic resolution for '' is not implemented yet" for every anomaly type,
-// so the dashboard's "Apply automatic fix" never once did anything.
+// whole problem: ApplyRecommendation then switched on the empty string and fell
+// to its not-implemented default for every anomaly type, so the dashboard's
+// "Apply automatic fix" never once did anything.
 //
 // protojson accepts both spellings, and it is what the rest of the API already
 // uses. An empty body stays a zero-value request rather than an error, matching
