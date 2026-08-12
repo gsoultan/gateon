@@ -4,11 +4,49 @@
 package handlers
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
+
+// maxProtoRequestBody bounds a management-API request body. These are small
+// control messages; without a cap, ReadAll would size the buffer from whatever
+// the client chose to send.
+const maxProtoRequestBody = 1 << 20 // 1 MiB
+
+// DecodeProtoRequest fills msg from the request body, and reports whether the
+// caller should continue. It writes the error response itself when it does not.
+//
+// protojson, not encoding/json. These are protobuf messages, and encoding/json
+// matches incoming keys against the generated `json:"anomaly_type"` tag. The
+// dashboard sends protojson's lowerCamel spelling, "anomalyType", which does
+// not match — not even case-insensitively, because an underscore is not a
+// capital T. The field silently stayed empty rather than erroring, which is the
+// whole problem: ApplyRecommendation then switched on the empty string and fell
+// to its not-implemented default for every anomaly type, so the dashboard's
+// "Apply automatic fix" never once did anything.
+//
+// protojson accepts both spellings, and it is what the rest of the API already
+// uses. An empty body stays a zero-value request rather than an error, matching
+// the previous behaviour for callers that send no payload.
+func DecodeProtoRequest(w http.ResponseWriter, r *http.Request, msg proto.Message) bool {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxProtoRequestBody))
+	if err != nil {
+		WriteHTTPError(w, http.StatusBadRequest, "could not read request body")
+		return false
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return true
+	}
+	if err := protojsonUnmarshalOptions.Unmarshal(body, msg); err != nil {
+		WriteHTTPError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
+}
 
 var (
 	protojsonOptions = protojson.MarshalOptions{

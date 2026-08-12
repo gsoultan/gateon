@@ -331,8 +331,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			return
 		}
 		var req gateonv1.ApplyRecommendationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		res, err := svc.ApplyRecommendation(r.Context(), &req)
@@ -350,8 +349,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			return
 		}
 		var req gateonv1.RemoveMitigatedThreatRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		res, err := svc.RemoveMitigatedThreat(r.Context(), &req)
@@ -369,8 +367,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			return
 		}
 		var req gateonv1.MitigateThreatRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		res, err := svc.MitigateThreat(r.Context(), &req)
@@ -388,8 +385,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			return
 		}
 		var req gateonv1.TraceRouteRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		res, err := svc.TraceRoute(r.Context(), &req)
@@ -407,8 +403,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			return
 		}
 		var req gateonv1.ValidateCORSRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
 		res, err := svc.ValidateCORS(r.Context(), &req)
