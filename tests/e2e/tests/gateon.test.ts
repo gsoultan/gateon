@@ -51,10 +51,10 @@ test.describe('Gateon Comprehensive E2E', () => {
     console.log('Navigating to Traces...');
     try {
         await page.getByRole('link', { name: /Traces/i }).click();
-        await expect(page.getByText(/Live Traces/i).first()).toBeVisible({ timeout: 30000 });
+        await expect(page.getByText(/Distributed Tracing/i).first()).toBeVisible({ timeout: 30000 });
     } catch (e) {
         await navigate('/traces');
-        await expect(page.getByText(/Live Traces/i).first()).toBeVisible({ timeout: 20000 });
+        await expect(page.getByText(/Distributed Tracing/i).first()).toBeVisible({ timeout: 20000 });
     }
   });
 
