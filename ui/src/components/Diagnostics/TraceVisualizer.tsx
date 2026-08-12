@@ -147,7 +147,7 @@ const TraceVisualizer: React.FC<TraceVisualizerProps> = ({ opened, onClose, targ
                     title={
                       <Group justify="space-between">
                         <Text size="sm" fw={700}>{h.ip}</Text>
-                        <Badge size="xs" variant="light">{h.rttMs}ms</Badge>
+                        <Badge size="xs" variant="light">{String(h.rttMs)}ms</Badge>
                       </Group>
                     }
                   >

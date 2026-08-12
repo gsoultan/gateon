@@ -745,13 +745,16 @@ export type RouteDiagnostic = {
   error: string;
 };
 
+// The connection and message counters are int64 in the proto, so
+// protobuf-es v2 hands them back as bigint. React will not render one;
+// call sites use String().
 export type EntryPointDiagnostic = {
   id: string;
   address: string;
   type: string;
   listening: boolean;
-  totalConnections: number;
-  activeConnections: number;
+  totalConnections: bigint;
+  activeConnections: bigint;
   lastError: string;
   name: string;
   certificates?: CertificateStatus[];
@@ -889,7 +892,9 @@ export type TraceHop = {
   longitude: number;
   countryCode: string;
   city: string;
-  rttMs: number;
+  // int64 in the proto, so protobuf-es v2 surfaces it as bigint. React will
+  // not render one, hence String() at the call site.
+  rttMs: bigint;
 };
 
 export type TraceRouteResponse = {
