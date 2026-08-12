@@ -864,7 +864,12 @@ export type DependencyHealth = {
 };
 
 export type GetDiagnosticsResponse = {
-  entryPoints: EntryPointDiagnostic[];
+  // "entrypoints", one word, because that is the proto field name and
+  // protojson emits it verbatim — it has no underscore to camel-case. The type
+  // said entryPoints, so every read of it was undefined and the Diagnostics
+  // page rendered "No entryPoints configured" while the gateway was returning
+  // four. Verified against the wire, not inferred.
+  entrypoints: EntryPointDiagnostic[];
   recentTlsErrors: HandshakeError[];
   system: SystemInfo;
   anomalies: Anomaly[];
