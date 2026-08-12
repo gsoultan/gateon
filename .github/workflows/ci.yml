@@ -147,7 +147,11 @@ jobs:
   e2e-ui:
     name: e2e-ui (playwright)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # No continue-on-error. It was added when the suite could not pass, and it
+    # is what let seven failures accumulate without anyone noticing: a job that
+    # cannot fail the build reports into a void. The suite is green now — 36
+    # passed, 0 failed — so a red e2e means something broke, and the build
+    # should say so.
     # A hard ceiling, because the suite has already demonstrated it can run
     # away: workers is 1, retries is 2, and the slowest tests allow 180s, so a
     # run where most tests time out is 104 x 3 x 180s — the better part of a

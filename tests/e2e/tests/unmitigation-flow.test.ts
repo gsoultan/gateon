@@ -86,95 +86,76 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     console.log('Verified: Bad request still blocked by WAF.');
   });
 
-  test('Remove Mitigation from Diagnostics Tab', async ({ page, request }) => {
-    console.log('--- Starting Diagnostics Unmitigation Test ---');
-    
-    const testId = 'unmitigate-diag-' + Date.now();
-    const unlistedUrl = `http://localhost:8081/unlisted-path-${testId}`;
-    const normalUrl = `http://localhost:8081/test?tid=${testId}`;
+  test('Manual IP mitigation from Threat Explorer, and releasing it', async ({ page, request }) => {
+    // This used to drive the anomaly modal and click "Block IP". No such
+    // control exists: the anomaly modal offers "Apply automatic fix", which for
+    // an unlisted route flags the path rather than blocking anyone. Manual
+    // blocking lives in Threat Explorer behind "Add Mitigation", which opens
+    // ManualMitigationModal — so the capability was never retired, it moved,
+    // and the spec kept asking the old place. That is the seventh instance of
+    // the same pattern in this suite.
+    //
+    // The flow it always meant to cover is unchanged: block a source, prove the
+    // block bites, release it, prove the release lands.
+    const blockedIP = '203.0.113.77';
+    const probeUrl = `http://localhost:8081/test?tid=manual-${Date.now()}`;
+    const asBlocked = { headers: { 'X-Forwarded-For': blockedIP } };
 
-    // 1. Trigger Unlisted Route (multiple times to ensure detection)
-    console.log(`Triggering Unlisted Route with tid=${testId}...`);
-    for (let i = 0; i < 5; i++) {
-        await request.get(unlistedUrl, asAttacker);
-        await page.waitForTimeout(500); // Small delay
-    }
+    // Control first. If this address is already blocked the assertions below
+    // prove nothing, and a blanket 403 would satisfy every one of them.
+    const before = await request.get(probeUrl, asBlocked);
+    expect(before.status(), 'control request was refused before anything was mitigated')
+      .toBe(200);
 
-    // 2. Go to Diagnostics -> Active tab
-    await gotoAnomalyEngine(page);
-    
-    console.log('Waiting for anomaly to appear in Diagnostics (Analysis Engine needs time)...');
-    // Analysis engine runs every 5-10 seconds.
-    for (let i = 0; i < 6; i++) {
-        await page.waitForTimeout(5000);
-        await gotoAnomalyEngine(page);
-        const text = await page.innerText('body');
-        if (text.includes('UNLISTED')) break;
-        console.log(`Still waiting for UNLISTED anomaly... (${(i+1)*5}s)`);
-    }
+    const gotoExplorer = async () => {
+      await page.goto('/security-center', { waitUntil: 'load' });
+      await page.getByRole('tab', { name: /Threat Explorer/i }).click();
+      await page.waitForTimeout(1500);
+    };
 
-    console.log('Checking Diagnostics for anomaly...');
-    const anomaly = page.getByTestId('anomaly-card').filter({ hasText: /UNLISTED/i }).last();
-    await expect(anomaly).toBeVisible({ timeout: 20000 });
-    
-    // 3. Apply Block IP (Manual mitigation)
-    console.log('Applying Block IP...');
-    // We click the card to open the modal
-    await anomaly.click({ force: true });
-    // The modal's content, not its root. data-testid lands on Mantine's Modal
-    // root wrapper, which has no layout box of its own, so Playwright reports it
-    // hidden even while the dialog is plainly on screen. The title is inside it.
-    await expect(page.getByText(/Security Incident Details/i)).toBeVisible({ timeout: 10000 });
-    
-    const blockBtn = page.getByRole('button', { name: /Block IP/i });
-    await expect(blockBtn).toBeVisible();
-    await blockBtn.click();
-    
-    await expect(page.getByText(/Applied|Blocked/i)).toBeVisible({ timeout: 15000 });
-    
-    // Verify IP is blocked now even for normal requests
+    // 1. Block the address.
+    await gotoExplorer();
+    await page.getByRole('button', { name: /Add Mitigation/i }).click();
+    await expect(page.getByText(/Add Manual Mitigation/i)).toBeVisible({ timeout: 10000 });
+    await page.getByLabel(/Source \(IP or Fingerprint\)/i).fill(blockedIP);
+    await page.getByRole('button', { name: /Block Source/i }).click();
+
+    // 2. It has to actually bite.
     await page.waitForTimeout(3000);
-    const blockedResp = await request.get(normalUrl, asAttacker);
-    expect(blockedResp.status()).toBe(403);
-    console.log('Verified: IP is blocked.');
+    const blocked = await request.get(probeUrl, asBlocked);
+    expect(blocked.status(), `${blockedIP} was mitigated but its traffic is still served`)
+      .toBe(403);
 
-    // 4. Go to Mitigated tab
-    console.log('Navigating to Mitigated tab...');
-    // Close modal if still open
-    await page.keyboard.press('Escape');
-    await page.getByRole('tab', { name: /Mitigated/i }).click();
-    
-    console.log('Waiting for anomaly to appear in Mitigated tab...');
-    for (let i = 0; i < 6; i++) {
-        await page.waitForTimeout(3000);
-        const text = await page.innerText('body');
-        if (text.includes('UNLISTED')) break;
-        console.log(`Still waiting for UNLISTED in Mitigated tab... (${(i+1)*3}s)`);
-    }
+    // 3. Release it from the Mitigated tab.
+    await gotoExplorer();
+    // "IP Mitigations", because the Mitigated tab opens on User Mitigations and
+    // this is an IP block — the sub-tab selects userMitigated vs ipMitigated in
+    // the query, so the default view genuinely does not contain it.
+    await page.getByRole('tab', { name: /^Mitigated/ }).click();
+    await page.getByRole('tab', { name: /IP Mitigations/i }).click();
+    await page.waitForTimeout(2000);
 
-    const mitigatedAnomaly = page.getByTestId('anomaly-card').filter({ hasText: /UNLISTED/i }).last();
-    await expect(mitigatedAnomaly).toBeVisible({ timeout: 10000 });
-    
-    // 5. Open details and Remove Mitigation
-    await mitigatedAnomaly.click({ force: true });
-    // The modal's content, not its root. data-testid lands on Mantine's Modal
-    // root wrapper, which has no layout box of its own, so Playwright reports it
-    // hidden even while the dialog is plainly on screen. The title is inside it.
-    await expect(page.getByText(/Security Incident Details/i)).toBeVisible({ timeout: 10000 });
-    
-    console.log('Clicking Remove Mitigation...');
-    const removeBtn = page.getByRole('button', { name: /Remove Mitigation/i });
-    await expect(removeBtn).toBeVisible();
-    await removeBtn.click();
-    
-    const confirmBtn = page.getByRole('button', { name: /Confirm Removal/i });
-    await expect(confirmBtn).toBeVisible();
-    await confirmBtn.click();
-    
-    // 6. Verify Effect
+    const row = page.locator('tr').filter({ hasText: blockedIP }).first();
+    await expect(row, 'the address does not appear under Mitigated after being blocked')
+      .toBeVisible({ timeout: 20000 });
+    await row.getByRole('button', { name: /^Allow$/ }).click();
+
+    // 4. And the release has to land. Asserted against the control plane rather
+    // than by replaying the request: every request.get() in this suite shares
+    // one JA4+, and the spec above earns a fingerprint mitigation on it, so a
+    // 403 here would not tell us whether the IP release worked.
     await page.waitForTimeout(3000);
-    const allowedResp = await request.get(normalUrl, asAttacker);
-    expect(allowedResp.status()).toBe(200);
-    console.log('Verified: IP unblocked after unmitigation from Diagnostics.');
+    await gotoExplorer();
+    // "IP Mitigations", because the Mitigated tab opens on User Mitigations and
+    // this is an IP block — the sub-tab selects userMitigated vs ipMitigated in
+    // the query, so the default view genuinely does not contain it.
+    await page.getByRole('tab', { name: /^Mitigated/ }).click();
+    await page.getByRole('tab', { name: /IP Mitigations/i }).click();
+    await page.waitForTimeout(2000);
+
+    await expect(
+      page.locator('tr').filter({ hasText: blockedIP }),
+      'the address is still listed as mitigated after Allow was clicked',
+    ).toHaveCount(0);
   });
 });
