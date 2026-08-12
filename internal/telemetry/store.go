@@ -1902,11 +1902,11 @@ check_db:
 	// explicit unblock, which is the failure an operator cannot diagnose and
 	// cannot work around.
 	query := s.dialect.Rebind(`SELECT status FROM user_mitigations
-		WHERE (fingerprint = ? OR ja4h = ?)
+		WHERE (fingerprint = ? OR ja4h = ?) AND updated_at > ?
 		ORDER BY updated_at DESC, CASE status WHEN 'unmitigated' THEN 0 ELSE 1 END
 		LIMIT 1`)
 	var status string
-	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
+	err := s.db.QueryRow(query, ja4plus, ja4plus, mitigationCutoff()).Scan(&status)
 	mitigated := err == nil && status == statusMitigated
 
 	if s.userMitigationCache != nil {
