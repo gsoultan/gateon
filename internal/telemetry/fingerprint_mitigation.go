@@ -6,6 +6,7 @@ package telemetry
 import (
 	"os"
 	"strconv"
+	"time"
 )
 
 // Deciding when a JA4+ fingerprint is safe to block.
@@ -150,4 +151,42 @@ func ResetFingerprintSightings() {
 	fingerprintMu.Lock()
 	defer fingerprintMu.Unlock()
 	fingerprintSightings.Purge()
+}
+
+// How long a fingerprint block lasts.
+//
+// A JA4+ block had no expiry. It sat in the table until somebody removed it by
+// hand, which made every block a permanent decision taken automatically on
+// evidence from a single moment. For a key this coarse — a client class, not a
+// client — that is the wrong default in both directions: a real attacker
+// changes one header and returns under a new class, while the bystanders who
+// share the old one stay blocked with nobody aware they were caught.
+//
+// An hour is short enough that a mistake ages out before it becomes a support
+// case, and long enough to be worth applying. Repeat offenders re-earn it
+// almost immediately — the threshold counter is separate and does not expire
+// with the block — so the cost of being wrong about an attacker is one more
+// pass through the WAF, which was going to run anyway.
+const defaultMitigationTTL = time.Hour
+
+var mitigationTTL = envDuration("GATEON_JA4_MITIGATION_TTL", defaultMitigationTTL)
+
+// envDuration reads a Go duration from the environment. A non-positive or
+// unparseable value falls back to def: "0" would mean blocks never take effect,
+// which is a way to disable the defence by typo.
+func envDuration(key string, def time.Duration) time.Duration {
+	d, err := time.ParseDuration(os.Getenv(key))
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
+}
+
+// mitigationCutoff is the oldest updated_at a mitigation row may carry and
+// still count. Computed here rather than with the database's own clock
+// arithmetic, because datetime('now', ...) is SQLite-only and this store also
+// runs on Postgres. The format matches what CURRENT_TIMESTAMP writes, so the
+// comparison is a plain lexicographic one on both.
+func mitigationCutoff() string {
+	return time.Now().UTC().Add(-mitigationTTL).Format("2006-01-02 15:04:05")
 }
