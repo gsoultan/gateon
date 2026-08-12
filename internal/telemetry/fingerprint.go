@@ -8,9 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"hash"
+	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 
@@ -26,11 +25,6 @@ const (
 )
 
 var (
-	hashPool = sync.Pool{
-		New: func() any {
-			return sha256.New()
-		},
-	}
 	builderPool = sync.Pool{
 		New: func() any {
 			return &strings.Builder{}
@@ -194,90 +188,126 @@ func GenerateFingerprint(r *http.Request) *ClientFingerprint {
 // Format: [ja4h_a]_[ja4h_b]
 // ja4h_a: [method(2)][version(2)][cookie(1)][referer(1)][header_count(2)][alpn(2)]
 // ja4h_b: [header_hash(12)]
-func GenerateJA4H(r *http.Request) string {
-	method := "o0"
-	if len(r.Method) >= 2 {
-		method = strings.ToLower(r.Method[:2])
-	} else if len(r.Method) == 1 {
-		method = strings.ToLower(r.Method) + "0"
-	}
+// ja4hHeaderNames are the only header names JA4H's header component considers.
+// The JA4H specification hashes header *names*, not their values, and gateon
+// narrows that further to the two that identify a client rather than a request.
+var ja4hHeaderNames = [...]string{"Accept-Language", "User-Agent"}
 
-	version := "11"
-	if r.ProtoMajor == 2 {
-		version = "20"
-	} else if r.ProtoMajor == 3 {
-		version = "30"
-	} else if r.ProtoMajor == 1 && r.ProtoMinor == 0 {
-		version = "10"
+// ja4hHeaderHash is every value the header component can take, indexed by a
+// two-bit presence mask: bit 0 is Accept-Language, bit 1 is User-Agent.
+//
+// There are four. That is not an artefact of precomputing them — it is the
+// honest size of this component's value space, and it matters because JA4+ is
+// used as a mitigation key. A hash over two fixed names carries two bits, so
+// JA4H identifies a client *class*, not a client: every browser that sends both
+// headers lands on the same value. See TestJA4HHeaderHashSpace.
+//
+// Precomputing turns a per-request SHA-256 and four allocations into a mask and
+// an index.
+var ja4hHeaderHash [4]string
+
+func init() {
+	for mask := range ja4hHeaderHash {
+		h := sha256.New()
+		// Sorted order, which is what the previous implementation emitted:
+		// Accept-Language before User-Agent.
+		for i, name := range ja4hHeaderNames {
+			if mask&(1<<i) == 0 {
+				continue
+			}
+			_, _ = io.WriteString(h, name)
+			_, _ = h.Write([]byte{','})
+		}
+		var sum [sha256.Size]byte
+		var hexbuf [12]byte
+		hex.Encode(hexbuf[:], h.Sum(sum[:0])[:6])
+		ja4hHeaderHash[mask] = string(hexbuf[:])
+	}
+}
+
+// ja4hHeaderMask reports which tracked headers are present and how many.
+// Canonical-key lookups, so there is no iteration over the header map and no
+// per-header lowercasing on the request path.
+func ja4hHeaderMask(h http.Header) (mask, count int) {
+	for i, name := range ja4hHeaderNames {
+		if _, ok := h[name]; ok {
+			mask |= 1 << i
+			count++
+		}
+	}
+	return mask, count
+}
+
+// lowerASCII2 folds the first two bytes of s to lower case without allocating.
+// HTTP methods are ASCII tokens by RFC 9110, so a byte-wise fold is exact.
+func lowerASCII2(s string) (byte, byte) {
+	lo := func(b byte) byte {
+		if b >= 'A' && b <= 'Z' {
+			return b + ('a' - 'A')
+		}
+		return b
+	}
+	switch len(s) {
+	case 0:
+		return 'o', '0'
+	case 1:
+		return lo(s[0]), '0'
+	default:
+		return lo(s[0]), lo(s[1])
+	}
+}
+
+// GenerateJA4H builds the JA4H fingerprint. Allocation-free apart from the
+// returned string, which is assembled in one pass rather than concatenated.
+func GenerateJA4H(r *http.Request) string {
+	m0, m1 := lowerASCII2(r.Method)
+
+	var v0, v1 byte = '1', '1'
+	switch {
+	case r.ProtoMajor == 2:
+		v0, v1 = '2', '0'
+	case r.ProtoMajor == 3:
+		v0, v1 = '3', '0'
+	case r.ProtoMajor == 1 && r.ProtoMinor == 0:
+		v0, v1 = '1', '0'
 	}
 
 	cookieChar := byte('n')
-	if r.Header.Get("Cookie") != "" {
+	if len(r.Header["Cookie"]) > 0 {
 		cookieChar = 'c'
 	}
-
 	refererChar := byte('n')
-	if r.Header.Get("Referer") != "" {
+	if len(r.Header["Referer"]) > 0 {
 		refererChar = 'r'
 	}
 
-	alpn := "00"
-	if r.TLS != nil && len(r.TLS.NegotiatedProtocol) > 0 {
-		p := r.TLS.NegotiatedProtocol
-		if len(p) >= 2 {
-			alpn = string([]byte{p[0], p[len(p)-1]})
+	var a0, a1 byte = '0', '0'
+	if r.TLS != nil {
+		if p := r.TLS.NegotiatedProtocol; len(p) >= 2 {
+			a0, a1 = p[0], p[len(p)-1]
 		} else if len(p) == 1 {
-			alpn = string([]byte{p[0], '0'})
+			a0, a1 = p[0], '0'
 		}
 	}
 
-	// Optimized header stable hashing
-	h := hashPool.Get().(hash.Hash)
-	h.Reset()
+	mask, count := ja4hHeaderMask(r.Header)
 
-	var localKeys [64]string
-	keys := localKeys[:0]
-	headerCount := 0
-
-	for k := range r.Header {
-		// Ultra-Stable Fingerprint Strategy:
-		// We only include headers that are the most stable and representative
-		// of a unique browser/client identity to avoid identity drift
-		// in complex middleware chains.
-		kl := strings.ToLower(k)
-		if kl == "user-agent" || kl == "accept-language" {
-			keys = append(keys, k)
-			headerCount++
-		}
+	// 10 prefix bytes, '_', then 12 hex bytes.
+	var out [23]byte
+	out[0], out[1] = m0, m1
+	out[2], out[3] = v0, v1
+	out[4], out[5] = cookieChar, refererChar
+	switch {
+	case count < 10:
+		out[6], out[7] = '0', byte('0'+count)
+	case count < 100:
+		out[6], out[7] = byte('0'+count/10), byte('0'+count%10)
+	default:
+		out[6], out[7] = '9', '9'
 	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		_, _ = h.Write([]byte(k))
-		_, _ = h.Write([]byte{','})
-	}
-	headerHashBytes := h.Sum(nil)
-	headerHash := hex.EncodeToString(headerHashBytes)[:12]
-	hashPool.Put(h)
+	out[8], out[9] = a0, a1
+	out[10] = '_'
+	copy(out[11:], ja4hHeaderHash[mask])
 
-	var ja4ha [10]byte
-	ja4ha[0] = method[0]
-	ja4ha[1] = method[1]
-	ja4ha[2] = version[0]
-	ja4ha[3] = version[1]
-	ja4ha[4] = cookieChar
-	ja4ha[5] = refererChar
-	if headerCount < 10 {
-		ja4ha[6] = '0'
-		ja4ha[7] = byte('0' + headerCount)
-	} else if headerCount < 100 {
-		ja4ha[6] = byte('0' + headerCount/10)
-		ja4ha[7] = byte('0' + headerCount%10)
-	} else {
-		ja4ha[6] = '9'
-		ja4ha[7] = '9'
-	}
-	ja4ha[8] = alpn[0]
-	ja4ha[9] = alpn[1]
-
-	return string(ja4ha[:]) + "_" + headerHash
+	return string(out[:])
 }
