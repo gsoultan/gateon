@@ -6,6 +6,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -99,13 +101,46 @@ func hostResolvesToBlockedIP(ctx context.Context, host string) (bool, string) {
 	return false, ""
 }
 
-// ssrfSafeTransport returns an http.Transport whose dialer re-validates the
-// resolved IP at connect time, defeating DNS-rebinding attacks where the host
-// passed initial validation but later resolves to an internal address.
+// blockInternalAddress is the dialer's Control hook. Go calls it after the name
+// has been resolved and immediately before connect(2), with the literal address
+// the kernel is about to use, so what is checked here is exactly what is
+// connected to.
+//
+// That property is the whole point. The pre-flight check in ssrfSafeTransport
+// performs its own LookupIP, and the dialer then performs another one; those
+// are two separate resolutions, and a low-TTL answer is free to differ between
+// them. Validating the first and connecting on the second is the textbook
+// DNS-rebinding window — the previous version of this code claimed in its
+// comment to close it and did not.
+func blockInternalAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("ssrf blocked: unparseable address %q", address)
+	}
+	// Control is always handed a literal, never a name.
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("ssrf blocked: unparseable address %q", host)
+	}
+	if isBlockedIP(addr) {
+		return errors.New("ssrf blocked: access to internal addresses is forbidden")
+	}
+	return nil
+}
+
+// ssrfSafeTransport returns an http.Transport that refuses to connect to an
+// internal address, including after a redirect and including when DNS answers
+// differently on a second lookup.
 func ssrfSafeTransport() *http.Transport {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	dialer := &net.Dialer{
+		Timeout: 5 * time.Second,
+		Control: blockInternalAddress,
+	}
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// Pre-flight, for a clear error before any connection is attempted:
+			// localhost by name, or an internal literal. Control is what makes
+			// the guarantee; this only makes the failure legible.
 			host, _, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
@@ -681,25 +716,23 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
-		limit := 50
-		if lStr := r.URL.Query().Get("limit"); lStr != "" {
-			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-				limit = l
-			}
+		// Bounded, not Atoi + int32(). Atoi returns an int, so on a 64-bit build
+		// "4294967297" parses cleanly and the conversion truncates it to 1,
+		// while "2147483648" lands on -2147483648. The `l > 0` and `o >= 0`
+		// guards rejected a negative *input*; they could not see a negative the
+		// conversion itself produced, and that value reached the query layer.
+		limit := boundedInt32(r.URL.Query().Get("limit"), maxPageSize)
+		if limit <= 0 {
+			limit = 50
 		}
-		offset := 0
-		if oStr := r.URL.Query().Get("offset"); oStr != "" {
-			if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
-				offset = o
-			}
-		}
+		offset := boundedInt32(r.URL.Query().Get("offset"), maxPageNumber)
 		search := r.URL.Query().Get("search")
 		category := r.URL.Query().Get("category")
 		status := r.URL.Query().Get("status")
 
 		res, err := svc.ListSecurityThreats(r.Context(), &gateonv1.ListSecurityThreatsRequest{
-			Limit:    int32(limit),
-			Offset:   int32(offset),
+			Limit:    limit,
+			Offset:   offset,
 			Search:   search,
 			Category: category,
 			Status:   status,
@@ -761,13 +794,12 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
-		limit := 20
-		if lStr := r.URL.Query().Get("limit"); lStr != "" {
-			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-				limit = l
-			}
+		// Bounded; see the security-threats handler above.
+		limit := boundedInt32(r.URL.Query().Get("limit"), maxPageSize)
+		if limit <= 0 {
+			limit = 20
 		}
-		res, err := svc.ListReputations(r.Context(), &gateonv1.ListReputationsRequest{Limit: int32(limit)})
+		res, err := svc.ListReputations(r.Context(), &gateonv1.ListReputationsRequest{Limit: limit})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})

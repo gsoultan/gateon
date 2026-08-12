@@ -5,7 +5,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gsoultan/gateon/internal/api"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -13,16 +12,16 @@ import (
 
 func registerTracesHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 	mux.HandleFunc("GET /v1/traces", func(w http.ResponseWriter, r *http.Request) {
-		limit := 100
-		if lStr := r.URL.Query().Get("limit"); lStr != "" {
-			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-				limit = l
-			}
+		// Bounded; see the diagnostics handlers for why the conversion, not the
+		// input, is what produced a negative.
+		limit := boundedInt32(r.URL.Query().Get("limit"), maxPageSize)
+		if limit <= 0 {
+			limit = 100
 		}
 		summary := r.URL.Query().Get("summary") == "true"
 
 		resp, err := apiService.ListTraces(r.Context(), &gateonv1.ListTracesRequest{
-			Limit:   int32(limit),
+			Limit:   limit,
 			Summary: summary,
 		})
 		if err != nil {
