@@ -21,6 +21,54 @@ const asRemote = { headers: { 'X-Forwarded-For': ANOMALY_IP } };
 test.describe('Gateon Diagnostics E2E', () => {
   test.setTimeout(180000);
 
+  // Release the JA4+ mitigation this spec earns, or every later spec gets a 403.
+  //
+  // Sending the SQLi from a routable address is what makes the WAF violation
+  // above real: the threat is now recorded instead of dropped, which is the
+  // whole point of the header. But a recorded block is not inert.
+  // pathStatsStore.processThreat marks the *fingerprint* mitigated the moment a
+  // threat comes back blocked — no threshold, no decay — and middleware's
+  // UserMitigation check then rejects everything carrying it.
+  //
+  // Playwright's APIRequestContext is one Node HTTP client, so every
+  // request.get() in the entire suite presents the same JA4+. One earned
+  // mitigation therefore 403s every subsequent spec, and the failures surface
+  // far from here, looking like unrelated breakage in whatever ran next.
+  //
+  // There is no way to both leave the mitigation in place and keep using the
+  // runner: the fingerprint is shared, so it is all-or-nothing. The spec that
+  // earns it has to hand it back. MarkUserUnmitigated also records a 24h
+  // marker that processThreat honours, so this holds for the rest of the run
+  // rather than being re-applied by the next blocked request.
+  test.afterAll(async ({ playwright }) => {
+    const api = await playwright.request.newContext({
+      baseURL: 'http://localhost:8080',
+      storageState: 'tests/.auth/admin.json',
+    });
+    try {
+      const res = await api.get('/v1/diag/security-threats?limit=200');
+      if (!res.ok()) {
+        console.warn(`Mitigation teardown: threat list returned ${res.status()}; skipping.`);
+        return;
+      }
+      const body = await res.json();
+      // protojson omits empty strings, so read defensively and fall back to
+      // composing JA4+ the way the store does when only the parts are present.
+      const prints = new Set<string>();
+      for (const t of body.threats ?? []) {
+        const fp = t.ja4plus || (t.ja4 && t.ja4h ? `${t.ja4}_${t.ja4h}` : '');
+        if (fp) prints.add(fp);
+      }
+      for (const fp of prints) {
+        const removed = await api.post('/v1/diagnostics/remove-mitigation', { data: { source: fp } });
+        console.log(`Mitigation teardown: released ${fp} -> ${removed.status()}`);
+      }
+      if (prints.size === 0) console.warn('Mitigation teardown: no fingerprints found on any threat.');
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test('Diagnostics Performance and Accuracy', async ({ page, request }) => {
     // 1. Initial navigation
     console.log('Navigating to Diagnostics...');
