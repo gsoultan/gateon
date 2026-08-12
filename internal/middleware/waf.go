@@ -589,8 +589,8 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 		UserAgent:      r.UserAgent(),
 		Method:         r.Method,
 		Category:       category,
-		Severity:       "critical",
-		ActionTaken:    "blocked",
+		Severity:       severityCritical,
+		ActionTaken:    actionBlocked,
 		Mitigated:      true,
 	}))
 }

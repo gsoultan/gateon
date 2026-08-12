@@ -5,6 +5,7 @@ package main
 
 import (
 	"log"
+
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -13,19 +14,19 @@ import (
 func main() {
 	pasetoSecret := "12345678901234567890123456789012"
 	databaseURL := "gateon_test.db"
-	
+
 	mgr, err := auth.NewManager(databaseURL, pasetoSecret, logger.Default())
 	if err != nil {
 		log.Fatalf("failed to init auth manager: %v", err)
 	}
 	defer mgr.Close()
-	
+
 	admin := &gateonv1.User{
 		Username: "admin",
 		Password: "password123",
 		Role:     "admin",
 	}
-	
+
 	if err := mgr.UpsertUser(admin); err != nil {
 		log.Fatalf("failed to create admin: %v", err)
 	}

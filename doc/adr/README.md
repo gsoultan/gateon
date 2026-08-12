@@ -14,6 +14,8 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0001](./0001-layered-architecture.md) | Layered, domain-oriented architecture | Accepted |
 | [0002](./0002-middleware-package-refactor.md) | Staged refactor of `internal/middleware` into cohesive subpackages | Accepted (staged) |
 | [0003](./0003-config-store-interfaces.md) | Per-domain `Store` interfaces over a single mega-store | Accepted |
+| [0004](./0004-waf-engine-replacement.md) | Replace the Coraza WAF engine with gwaf | Accepted |
+| [0005](./0005-session-lifecycle-and-first-run-trust.md) | Session lifecycle and first-run trust | Accepted |
 
 ## Conventions
 

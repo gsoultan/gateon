@@ -6,14 +6,15 @@ package api
 import (
 	"context"
 	"errors"
+	"os"
+	"runtime"
+	"time"
+
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"os"
-	"runtime"
-	"time"
 )
 
 func (s *ApiService) GetStatus(ctx context.Context, _ *gateonv1.GetStatusRequest) (*gateonv1.GetStatusResponse, error) {

@@ -124,6 +124,8 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		allowedIPs = strings.Split(allowedIPsStr, ",")
 	}
 
+	warnIfManagementWorldOpen(bind, mgmtPort, allowedIPs)
+
 	mgmtHost := ""
 	if bind != "0.0.0.0" && bind != "::" && net.ParseIP(bind) == nil {
 		mgmtHost = bind
@@ -438,4 +440,53 @@ func normalizeAddr(addr string) string {
 		host = "*"
 	}
 	return net.JoinHostPort(host, port)
+}
+
+// warnIfManagementWorldOpen logs a prominent warning when the management
+// entrypoint is reachable from any address.
+//
+// The shipped default is bind 0.0.0.0 with an allowlist of 0.0.0.0/0 and ::/0,
+// which is correct inside a container — a process bound to loopback there is
+// unreachable through a published port, so tightening the default would break
+// every Docker and Kubernetes deployment. It is the wrong posture on a host
+// with a public address, where it puts the dashboard and the whole management
+// API on the internet behind nothing but a login form.
+//
+// Since the safe value depends on how the operator deployed it, and neither
+// choice is safe everywhere, this states the exposure plainly at startup rather
+// than guessing. It is not a failure: an operator who meant it has already
+// decided, and refusing to start would be worse than saying so.
+func warnIfManagementWorldOpen(bind, port string, allowedIPs []string) {
+	if !isWildcardBind(bind) {
+		return
+	}
+	if !allowsEveryAddress(allowedIPs) {
+		return
+	}
+	logger.L.LogWarn("management entrypoint is reachable from any address",
+		"bind", bind,
+		"port", port,
+		"allowed_ips", strings.Join(allowedIPs, ","),
+		"impact", "the dashboard and management API are exposed to every network this host is on",
+		"action", "restrict management.allowed_ips to your admin network, or set GATEON_MANAGEMENT_ALLOWED_IPS",
+		"note", "expected inside a container, where the container network is the boundary")
+}
+
+func isWildcardBind(bind string) bool {
+	return bind == "" || bind == "0.0.0.0" || bind == "::" || bind == "[::]"
+}
+
+// allowsEveryAddress reports whether the allowlist covers the entire address
+// space, i.e. constrains nothing.
+func allowsEveryAddress(allowedIPs []string) bool {
+	if len(allowedIPs) == 0 {
+		return true
+	}
+	for _, cidr := range allowedIPs {
+		switch strings.TrimSpace(cidr) {
+		case "0.0.0.0/0", "::/0", "*":
+			return true
+		}
+	}
+	return false
 }

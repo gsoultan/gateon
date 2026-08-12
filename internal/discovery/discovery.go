@@ -15,7 +15,7 @@ import (
 	"github.com/go-zookeeper/zk"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/hashicorp/consul/api"
-	"go.etcd.io/etcd/client/v3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Provider resolves targets from a discovery URL.

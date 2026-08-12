@@ -47,6 +47,7 @@ import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } fro
 import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
+import { QueryError } from "../components/QueryError";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
@@ -63,7 +64,7 @@ export default function MiddlewaresPage() {
   const { data: routesData } = useMiddlewareRoutes(deleteTarget?.id ?? null);
   const affectedRoutes = routesData?.routes ?? [];
 
-  const { data, isLoading } = useMiddlewares({
+  const { data, isLoading, isError, error, refetch } = useMiddlewares({
     page: page - 1,
     pageSize: pageSize,
     search: search,
@@ -186,7 +187,9 @@ export default function MiddlewaresPage() {
       <Card withBorder padding={isMobile ? "sm" : 0} radius="lg" shadow="xs">
         {isMobile ? (
           <Stack gap="md">
-            {isLoading ? (
+            {isError ? (
+              <QueryError error={error} what="middlewares" onRetry={() => refetch()} />
+            ) : isLoading ? (
                <Text ta="center" py="xl" c="dimmed">Loading...</Text>
             ) : middlewares.length === 0 ? (
                <Center py="xl">

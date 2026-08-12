@@ -34,7 +34,6 @@ func InvalidateTLSCache() {
 
 // CreateTLSManager builds the TLS manager from global config.
 func CreateTLSManager(s *Server) *gtls.Manager {
-	gc := s.GlobalStore.Get(context.Background())
 	cfg := BuildGtlsConfig(s)
 	m := gtls.NewManager(cfg)
 
@@ -60,13 +59,13 @@ func CreateTLSManager(s *Server) *gtls.Manager {
 		return fmt.Errorf("host %q not authorized for ACME", host)
 	})
 
-	// Set persistent cache
+	// Set persistent cache. Without Redis the manager falls back to its own
+	// DirCache; reusing the auth database for the ACME cache would need the
+	// *sql.DB threaded down to here, which it is not, so the fallback stands
+	// rather than being half-wired. The empty else-if that used to record that
+	// evaluated a condition and did nothing with it.
 	if s.RedisClient != nil {
 		m.SetCache(gtls.NewRedisCache(s.RedisClient, "gateon:acme:"))
-	} else if gc != nil && gc.Auth != nil {
-		// Try to use the same DB as auth for ACME cache if it's SQL
-		// This is a bit complex to get the *sql.DB here, but we can try.
-		// For now, default to DirCache (implemented in gtls.Manager)
 	}
 
 	return m
@@ -142,8 +141,13 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	if tlsConfig == nil {
 		return
 	}
-	ctx := context.Background()
 	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		// Per-handshake, not a Background hoisted out of the closure. These
+		// store reads happen while a client is waiting on a TLS handshake; if
+		// that client goes away, the lookups should stop with it rather than
+		// run on behalf of a connection that no longer exists. hello.Context()
+		// is cancelled when the handshake concludes either way.
+		ctx := hello.Context()
 		sniHost := strings.TrimSpace(hello.ServerName)
 		var fingerprints *middleware.Fingerprints // lazy-calc fingerprints
 
@@ -205,7 +209,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 		}
 
 		// Fallback: use global TLS config
-		gc := deps.GlobalStore.Get(context.Background())
+		gc := deps.GlobalStore.Get(ctx)
 		if gc != nil && gc.Tls != nil {
 			if cached, ok := tlsConfigCache.Load("fallback"); ok {
 				middleware.SetFingerprints(hello.Conn, getFp())
@@ -222,7 +226,9 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 }
 
 func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base *tls.Config, manager gtls.TLSManager, deps SNIDeps, getFp func() middleware.Fingerprints) *tls.Config {
-	ctx := context.Background()
+	// Same reasoning as SetupSNI: this runs inside the handshake, so the TLS
+	// option lookup below belongs to the connection being negotiated.
+	ctx := hello.Context()
 	var certs []tls.Certificate
 
 	// Handle ACME if enabled for this route

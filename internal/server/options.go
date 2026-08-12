@@ -64,12 +64,21 @@ func WithGlobalRegistry(r *config.GlobalRegistry) ServerOption {
 	}
 }
 
-// WithAuthManager sets the auth manager (may be nil if auth disabled).
+// WithAuthManager sets the auth manager. a may be nil: on a first run there is
+// no global.json, so no Manager can be built until Setup has run.
+//
+// The manager is always wrapped in an auth.Holder so the value handed to the
+// HTTP handlers is a stable reference rather than a snapshot. Setup swaps the
+// real Manager in through Server.PublishAuthService; without the indirection
+// the handlers would keep the startup nil for the life of the process and go
+// on serving the management API unauthenticated after setup completed.
 func WithAuthManager(a *auth.Manager) ServerOption {
 	return func(s *Server) error {
-		if a != nil {
-			s.AuthManager = a
+		if a == nil {
+			s.AuthManager = auth.NewHolder(nil)
+			return nil
 		}
+		s.AuthManager = auth.NewHolder(a)
 		return nil
 	}
 }

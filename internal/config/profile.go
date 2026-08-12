@@ -54,6 +54,14 @@ type TierDefaults struct {
 
 	// WAF default tier when WafConfig.Tier is empty.
 	WAFTier Tier
+
+	// RLLimiterStates caps how many per-IP reinforcement-learning states the
+	// adaptive rate limiter keeps (internal/ai). The keys are remote addresses
+	// chosen by whoever is sending traffic, so this is an adversary-controlled
+	// structure and needs an explicit ceiling, not a natural one. Each entry is
+	// a few dozen bytes; the ceiling is about bounding worst-case growth, not
+	// steady-state cost.
+	RLLimiterStates int
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -106,6 +114,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TelemetryIntervalSeconds: 30,
 			FlushIntervalSeconds:     10,
 			WAFTier:                  TierMinimal,
+			RLLimiterStates:          2000,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -126,6 +135,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TelemetryIntervalSeconds: 2,
 			FlushIntervalSeconds:     1,
 			WAFTier:                  TierEnterprise,
+			RLLimiterStates:          100000,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -146,6 +156,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TelemetryIntervalSeconds: 5,
 			FlushIntervalSeconds:     2,
 			WAFTier:                  TierStandard,
+			RLLimiterStates:          20000,
 		}
 	}
 }

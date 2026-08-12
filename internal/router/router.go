@@ -568,9 +568,18 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 					adv.Tarpit.ScoreThreshold,
 				))
 			}
-			// PoW challenge
+			// PoW challenge. Refuse to install a forgeable one: a challenge keyed
+			// on an empty or published secret can be solved offline, so running it
+			// would leave the operator believing the route was defended when it was
+			// not. Declining loudly is the honest failure mode.
 			if adv.Pow != nil && adv.Pow.Enabled {
-				chain = append(chain, middleware.Pow(int(adv.Pow.Difficulty), adv.Pow.ScoreThreshold, adv.Pow.Secret, routeLabel))
+				if config.IsPlaceholderPowSecret(adv.Pow.Secret) {
+					logger.L.LogError("proof-of-work enabled with an empty or placeholder secret; "+
+						"refusing to install a forgeable challenge - set a unique secret to enable it",
+						"route", routeLabel)
+				} else {
+					chain = append(chain, middleware.Pow(int(adv.Pow.Difficulty), adv.Pow.ScoreThreshold, adv.Pow.Secret, routeLabel))
+				}
 			}
 			// Deception
 			if adv.Deception != nil && adv.Deception.Enabled {
