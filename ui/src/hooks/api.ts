@@ -118,13 +118,7 @@ export async function restoreSessionFromCookie(): Promise<boolean> {
 }
 
 export async function setupGateon(req: SetupRequest): Promise<SetupResponse> {
-  const res = await apiFetch("/v1/setup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.setup(req);
 }
 
 export async function testDbConnection(payload: {
@@ -166,9 +160,7 @@ export async function removeMitigatedThreat(req: RemoveMitigatedThreatRequest): 
 }
 
 export async function getCloudflareIPs(): Promise<GetCloudflareIPsResponse> {
-  const res = await apiFetch("/v1/cloudflare-ips");
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.getCloudflareIPs({});
 }
 
 export async function traceRoute(ip: string): Promise<TraceRouteResponse> {
@@ -179,6 +171,11 @@ export async function validateCORS(req: ValidateCORSRequest): Promise<ValidateCO
   return api.validateCORS(req);
 }
 
+// Still REST: the request carries an enum, and the hand-written
+// ClamavInstallationMode is a different type from the generated
+// ClamavConfig_InstallationMode. They are almost certainly the same numbers,
+// which is exactly why a cast would be the wrong fix — it would assert that
+// without checking, on the one field that decides how ClamAV gets installed.
 export async function installClamav(req: InstallClamavRequest): Promise<InstallClamavResponse> {
   const res = await apiFetch("/v1/security/clamav/install", {
     method: "POST",
@@ -190,19 +187,9 @@ export async function installClamav(req: InstallClamavRequest): Promise<InstallC
 }
 
 export async function uninstallClamav(req: { sudoPassword?: string }): Promise<UninstallClamavResponse> {
-  const res = await apiFetch("/v1/security/clamav/uninstall", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.uninstallClamav(req);
 }
 
 export async function runDeepScan(): Promise<RunDeepScanResponse> {
-  const res = await apiFetch("/v1/security/clamav/scan", {
-    method: "POST",
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return api.runDeepScan({});
 }
