@@ -186,8 +186,25 @@ export async function installClamav(req: InstallClamavRequest): Promise<InstallC
   return res.json();
 }
 
+// Reverted to REST after moving it to Connect in #30 broke ClamAV uninstall in
+// CI, and only in CI: "Install Now" never reappeared, so the uninstall did not
+// complete. Local runs on macOS passed every time, which is how it got merged.
+// The CI difference is the install path — apt-get there, brew locally — so the
+// two exercise different mock branches, and something about this call over
+// Connect does not survive the Linux one.
+//
+// Reverting rather than debugging further: this is the control that removes
+// antivirus from a host, the failure is reproducible in CI and not locally,
+// and the four other conversions in #30 are unaffected. It can move again
+// once someone can watch it fail.
 export async function uninstallClamav(req: { sudoPassword?: string }): Promise<UninstallClamavResponse> {
-  return api.uninstallClamav(req);
+  const res = await apiFetch("/v1/security/clamav/uninstall", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 export async function runDeepScan(): Promise<RunDeepScanResponse> {
