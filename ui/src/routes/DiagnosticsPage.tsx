@@ -574,7 +574,7 @@ const DiagnosticsPage: React.FC = () => {
                           </Stack>
                         </Group>
                         <Group gap="xs" visibleFrom="xs">
-                           <Badge variant="outline" size="xs" color="blue">{ep.activeConnections} active</Badge>
+                           <Badge variant="outline" size="xs" color="blue">{String(ep.activeConnections)} active</Badge>
                            {!ep.listening && <Badge color="red" size="xs">Stopped</Badge>}
                         </Group>
                       </Group>
