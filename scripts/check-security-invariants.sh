@@ -47,7 +47,7 @@ drop_comment_hits() { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true; 
 # needs to tolerate a not-yet-available service, make the callee deny on a nil
 # verifier (see middleware/auth.PasetoAuth) and build unconditionally.
 # ---------------------------------------------------------------------------
-note "1/4  auth.Service nil-comparisons"
+note "1/5  auth.Service nil-comparisons"
 auth_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '(\.AuthManager|deps\.Auth|s\.Auth|svc\.Auth)[[:space:]]*[!=]=[[:space:]]*nil' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -68,7 +68,7 @@ fi
 # stored-XSS bug plus a readable token equals administrator compromise. The
 # token lives only in the HttpOnly gateon_session cookie.
 # ---------------------------------------------------------------------------
-note "2/4  session token in web storage"
+note "2/5  session token in web storage"
 storage_hits=$( (grep -rnE '(localStorage|sessionStorage)\.(setItem|getItem)' ui/src \
 	--include='*.ts' --include='*.tsx' 2>/dev/null |
 	grep -viE 'token|jwt|paseto|bearer|credential|gateon-auth') || true)
@@ -105,7 +105,7 @@ fi
 # '/', which made the -o path invalid and produced a build that "succeeded"
 # and then failed at exec with a confusing error.
 # ---------------------------------------------------------------------------
-note "3/4  tests building into the repository root"
+note "3/5  tests building into the repository root"
 root_builds=$( (grep -rnE '"go",[[:space:]]*"build",[[:space:]]*"-o",[[:space:]]*[a-zA-Z]' tests/ --include='*.go' 2>/dev/null |
 	grep -vE 'filepath\.Join\((env\.Dir|tmpDir|t\.TempDir)') || true)
 # Re-check the argument actually resolves under a temp dir.
@@ -147,7 +147,7 @@ fi
 # protoc-gen-es all copy the leading comment out of the .proto, so fixing the
 # .proto fixes the generated file on the next `make proto`.
 # ---------------------------------------------------------------------------
-note "4/4  SPDX license header on every source file"
+note "4/5  SPDX license header on every source file"
 SPDX_LINE='SPDX-License-Identifier: MIT'
 missing_spdx=""
 while IFS= read -r f; do
@@ -171,6 +171,43 @@ if [ -n "$missing_spdx" ]; then
 	printf '    // %s\n' "$SPDX_LINE"
 else
 	echo "  ok - every Go, proto and TypeScript source carries the SPDX header"
+fi
+
+# ---------------------------------------------------------------------------
+# 5. The management auth chain must never enable DryRun.
+#
+# AuthBaseConfig.HandleFailure with DryRun set calls next.ServeHTTP on an
+# authentication *failure*, without claims on the context. Downstream
+# authorization — handlers.RequirePermission and server.authorizeProcedure —
+# both read "no claims" as "PasetoAuth never ran, auth is disabled for this
+# deployment" and allow the call. So on the management plane DryRun does not
+# mean "log the failure and continue unauthenticated"; it means "log the
+# failure and continue with full permissions", on all three transports at once.
+#
+# That overload is deliberate everywhere else: DryRun exists so an operator can
+# roll auth out across proxied routes without breaking traffic, and it is set
+# only from route middleware config (auth_factory.go, cfg["dry_run"]). Nothing
+# reachable by configuration can turn it on for the management API — it would
+# take an edit to base_handler.go, which is exactly the kind of one-line change
+# that reads as harmless and is not.
+#
+# The durable fix is to stop overloading nil claims, so an attempted-and-failed
+# authentication is distinguishable from no authentication at all. Until then
+# this check holds the line. See doc/adr/0006-transport-neutral-authorization.md.
+# ---------------------------------------------------------------------------
+note "5/5  DryRun on the management auth chain"
+dryrun_hits=$( (find internal/server -name '*.go' -not -name '*_test.go' -print0 |
+	xargs -0 grep -nE 'DryRun' 2>/dev/null |
+	drop_comment_hits) || true)
+
+if [ -n "$dryrun_hits" ]; then
+	err "the management auth chain references DryRun"
+	printf '%s\n' "$dryrun_hits"
+	printf '  DryRun continues past an auth failure with no claims, and both\n'
+	printf '  RequirePermission and authorizeProcedure read absent claims as\n'
+	printf '  "auth disabled" and allow. On this chain it grants full access.\n'
+else
+	echo "  ok - the management auth chain does not enable DryRun"
 fi
 
 printf '\n'
