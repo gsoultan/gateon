@@ -167,4 +167,22 @@ func waitForPort(t *testing.T, port int) {
 	t.Fatalf("Timed out waiting for port %d", port)
 }
 
+// waitForPortRelease waits for a port to stop accepting connections. Needed when
+// two gateon processes run back to back on the same configured ports: Kill
+// returns before the listener is actually torn down, so the next process would
+// otherwise fail to bind and the failure would look like a config problem.
+func waitForPortRelease(t *testing.T, port int) {
+	t.Helper()
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	for range 40 {
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("Timed out waiting for port %d to be released", port)
+}
+
 // We need to import strings for replacePort
