@@ -203,7 +203,7 @@ func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy {
 	}
 	r.mu.RUnlock()
 
-	proxy := NewUDPSessionProxy(cfg.Backends, cfg.LoadBalancer, cfg.UDPSessionTimeout)
+	proxy := NewUDPSessionProxy(cfg.Backends, cfg.LoadBalancer, cfg.UDPSessionTimeout, cfg.UDPMaxSessions)
 	r.mu.Lock()
 	old := r.udpProxies[key]
 	if old != nil && old.proxy != nil {
