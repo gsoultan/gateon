@@ -120,35 +120,74 @@ func getRepShard(fingerprint string) *reputationShard {
 
 // GetReputation returns the current reputation score for a fingerprint.
 // Score starts at 100 (perfect). Decreases as threats are recorded.
+//
+// This runs per request on the metrics path (middleware.MetricsWithService), so
+// it is read-mostly by a very wide margin: the only write is the hourly recovery
+// below, which fires when a fingerprint has been idle for more than an hour and
+// is therefore rare precisely for the clients sending enough traffic to matter.
+// Taking the shard's write lock unconditionally — and calling cache.Get, which
+// reorders the LRU and so is itself a write — made every request on every shard
+// serialise. A CPU profile of the traced infra chain put 34% of all samples in
+// this function.
+//
+// GetReputationScore already solved this for the WAF check with RLock + Peek.
+// The difference here is the recovery mutation, so the fast path mirrors it and
+// only upgrades to the write lock when there is actually something to write.
+// Re-reading the entry after the upgrade is deliberate: the lock is released
+// between the two, so another goroutine may have evicted it or applied the same
+// recovery already.
 func GetReputation(fingerprint string) float64 {
 	if fingerprint == "" {
 		return 100 // Unknown
 	}
 	shard := getRepShard(fingerprint)
+
+	shard.mu.RLock()
+	val, ok := shard.cache.Peek(fingerprint)
+	if !ok {
+		shard.mu.RUnlock()
+		return 100 // Unknown/New client gets neutral score
+	}
+	r := val.(*Reputation)
+	score := r.Score
+	needsRecovery := time.Since(r.LastEvent).Hours() > 1
+	shard.mu.RUnlock()
+
+	if !needsRecovery {
+		return score
+	}
+	return recoverReputation(shard, fingerprint)
+}
+
+// recoverReputation applies the idle-time score recovery under the write lock.
+// Split out so the hot path above stays a single read-locked lookup.
+func recoverReputation(shard *reputationShard, fingerprint string) float64 {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	if val, ok := shard.cache.Get(fingerprint); ok {
-		r := val.(*Reputation)
-		// Gradually recover reputation over time.
-		// Base rate is 1.0, but decreases as violations increase (adaptive recovery).
-		rate := r.RecoveryRate
-		if rate <= 0 {
-			rate = 1.0
-		}
-
-		elapsed := time.Since(r.LastEvent).Hours()
-		if elapsed > 1 {
-			r.Score = math.Min(100, r.Score+(elapsed*rate))
-			// Reset violation count if no events for a long time
-			if elapsed > 24 {
-				r.ViolationCount = 0
-			}
-			r.LastEvent = time.Now()
-		}
-		return r.Score
+	val, ok := shard.cache.Get(fingerprint)
+	if !ok {
+		return 100
 	}
-	return 100 // Unknown/New client gets neutral score
+	r := val.(*Reputation)
+
+	// Gradually recover reputation over time.
+	// Base rate is 1.0, but decreases as violations increase (adaptive recovery).
+	rate := r.RecoveryRate
+	if rate <= 0 {
+		rate = 1.0
+	}
+
+	elapsed := time.Since(r.LastEvent).Hours()
+	if elapsed > 1 {
+		r.Score = math.Min(100, r.Score+(elapsed*rate))
+		// Reset violation count if no events for a long time
+		if elapsed > 24 {
+			r.ViolationCount = 0
+		}
+		r.LastEvent = time.Now()
+	}
+	return r.Score
 }
 
 // GetReputationScore returns the current score for a fingerprint.
