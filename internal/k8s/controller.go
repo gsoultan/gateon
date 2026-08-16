@@ -93,6 +93,21 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	<-stopCh
 }
 
+// safeForRule reports whether s can be interpolated into a route matcher.
+//
+// Rules are assembled as Host(`x`) && PathPrefix(`y`), so a backtick in x or y
+// closes the literal early and the rest of the value becomes expression. An
+// Ingress carrying "a`) || Host(`bank.example.com" would not be a malformed
+// rule, it would be a working one that captures somebody else's traffic — and
+// Ingress objects come from whoever holds that permission in the cluster, which
+// is rarely only the gateway's administrator.
+//
+// Backslash and newline are refused for the same reason: neither appears in a
+// DNS name or a URL path, so nothing legitimate is lost by declining them.
+func safeForRule(s string) bool {
+	return !strings.ContainsAny(s, "`\\\n\r")
+}
+
 func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 	ctx := context.Background()
 	ingressID := fmt.Sprintf("k8s-%s-%s", ing.Namespace, ing.Name)
@@ -102,7 +117,29 @@ func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 		if rule.HTTP == nil {
 			continue
 		}
+		if !safeForRule(host) {
+			logger.L.LogError("skipping ingress rule: host contains a character that would escape the route expression",
+				"namespace", ing.Namespace, "ingress", ing.Name, "host", host)
+			continue
+		}
+
 		for j, path := range rule.HTTP.Paths {
+			// An IngressBackend carries either a Service or a Resource, and the
+			// Resource form is valid Kubernetes that this gateway cannot proxy.
+			// Reading Service.Name without checking dereferenced nil and panicked
+			// inside the informer callback, so any cluster user able to create an
+			// Ingress could stop the gateway.
+			if path.Backend.Service == nil {
+				logger.L.LogWarn("skipping ingress path: backend is not a Service",
+					"namespace", ing.Namespace, "ingress", ing.Name, "path", path.Path)
+				continue
+			}
+			if !safeForRule(path.Path) {
+				logger.L.LogError("skipping ingress path: path contains a character that would escape the route expression",
+					"namespace", ing.Namespace, "ingress", ing.Name, "path", path.Path)
+				continue
+			}
+
 			routeID := fmt.Sprintf("%s-r%d-p%d", ingressID, i, j)
 			serviceID := fmt.Sprintf("%s-svc-%s-%d", ingressID, path.Backend.Service.Name, path.Backend.Service.Port.Number)
 
@@ -160,9 +197,20 @@ func (c *Controller) deleteIngress(ing *networkingv1.Ingress) {
 
 	// Since we don't know how many rules/paths it had, we'd need to list and filter.
 	// For simplicity, we can use a naming convention.
+	// The "-r" is what keeps this from deleting a different Ingress's routes.
+	// Route IDs are "<ingressID>-r<i>-p<j>", and matching on ingressID alone
+	// made "web" a prefix of "web-staging", so removing one Ingress silently
+	// tore down another's routing — in the direction that drops traffic.
+	//
+	// Note this does not resolve the underlying ambiguity: namespace "prod-web"
+	// with name "staging" and namespace "prod" with name "web-staging" both
+	// produce "k8s-prod-web-staging". Separating those needs a different ID
+	// format, which would orphan the routes of every already-running deployment,
+	// so it is left alone here.
+	prefix := ingressID + "-r"
 	routes := c.routeStore.List(ctx)
 	for _, r := range routes {
-		if strings.HasPrefix(r.Id, ingressID) {
+		if strings.HasPrefix(r.Id, prefix) {
 			if err := c.routeStore.Delete(ctx, r.Id); err != nil {
 				logger.L.LogError("failed to delete k8s ingress route", "error", err, "route", r.Id)
 			}
