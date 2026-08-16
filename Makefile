@@ -69,12 +69,17 @@ deb: release
 ##              production, replace it with a profile captured live from the
 ##              pprof endpoint: set GATEON_PPROF_ADDR and fetch
 ##              /debug/pprof/profile?seconds=60 under real load.
+##              -o is not optional: `go test` KEEPS the compiled test binary in
+##              the current directory whenever a profiling flag is passed, so
+##              without it this target drops ~150MB of untracked middleware.test
+##              and proxy.test into the repository root, where neither is
+##              gitignored and both are one `git add -A` away from a commit.
 pgo-profile:
 	mkdir -p dist
 	go test -run '^$$' -bench 'ServeHTTP|GetOrCreateProxy' -benchtime 3s \
-		-cpuprofile dist/pgo-proxy.prof ./pkg/proxy/
+		-o dist/pgo-proxy.test -cpuprofile dist/pgo-proxy.prof ./pkg/proxy/
 	go test -run '^$$' -bench 'InfraChain' -benchtime 3s \
-		-cpuprofile dist/pgo-mw.prof ./internal/middleware/
+		-o dist/pgo-mw.test -cpuprofile dist/pgo-mw.prof ./internal/middleware/
 	go tool pprof -proto dist/pgo-proxy.prof dist/pgo-mw.prof > cmd/gateon/default.pgo
 	@echo "Wrote cmd/gateon/default.pgo — 'make build' now applies PGO."
 
@@ -94,11 +99,25 @@ test:
 test-race:
 	go test -race ./...
 
-## bench: run benchmarks with allocation tracking.
+## bench: run benchmarks with allocation tracking, sampled for benchstat.
+##        Writes dist/bench.txt; compare two runs with
+##          go run golang.org/x/perf/cmd/benchstat@latest old.txt new.txt
+##        Only ever compare runs from the same machine, otherwise the delta is
+##        measuring the hardware.
+##
+##        internal/middleware is included because it is the full infrastructure
+##        chain every proxied request passes through — the proof AGENTS.md asks
+##        for on hot-path changes — and it was missing here.
+##
+##        -benchtime 1s -count 8, not the previous 100x: 100 iterations is far
+##        too few to settle, and it reported BenchmarkBufferPoolGetPut at 62ns
+##        against 4.6ns when actually given time to run. A benchmark that
+##        reports a number an order of magnitude out is worse than none, because
+##        it gets quoted.
 bench:
 	mkdir -p dist
-	go test -run '^$$' -bench . -benchmem -benchtime 100x ./pkg/proxy/
-	go test -run '^$$' -bench . -benchmem -benchtime 100x ./internal/telemetry/
+	go test -run '^$$' -bench . -benchmem -benchtime 1s -count 8 \
+		./internal/middleware/ ./pkg/proxy/ ./internal/telemetry/ | tee dist/bench.txt
 
 ## vuln: scan for known vulnerabilities in dependencies and code (govulncheck)
 vuln:
