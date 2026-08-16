@@ -105,6 +105,24 @@ instance that performed the mutation. Closing that requires propagating
 invalidations over the existing Redis channel, which is deliberately not in this
 change.
 
+> **Amended 2026-08-14.** As written above, "until its own cache entry is
+> evicted" was doing more work than it could support: entries had no expiry, so
+> on a sibling instance a revoked session stayed valid indefinitely, not merely
+> for a while. Cached bindings now carry a TTL (`DefaultBindingTTL`, 30s,
+> overridable with `GATEON_SESSION_BINDING_TTL`), and an expired entry is
+> reported as absent so the next verify reloads from the database.
+>
+> This bounds the window rather than removing it, and it is deliberately the
+> floor rather than the finished design. Redis propagation would cut the delay to
+> a round trip, but pub/sub is at-most-once: a dropped message or a broker outage
+> puts the unbounded staleness straight back. An expiry needs no broker and
+> cannot silently stop working, so it is the guarantee, and propagation — when it
+> lands — is a latency optimisation on top of it, not a replacement for it.
+>
+> Wiring Redis into `auth.Manager` also adds a dependency to a constructor on the
+> trust boundary, which needs its own ADR and an `arch`/`sec` co-sign rather than
+> being folded into a cache fix.
+
 A first run now refuses the management API until setup completes. An operator
 automating a fresh install against `/v1/routes` before creating an administrator
 will get 503 instead of success; the fix is to call `/v1/setup` first, which was
