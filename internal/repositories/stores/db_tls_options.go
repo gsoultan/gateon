@@ -64,9 +64,20 @@ func (r *DBTLSOptionRegistry) Update(ctx context.Context, opt *gateonv1.TLSOptio
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
-	ciphers := strings.Join(opt.CipherSuites, ",")
-	alpn := strings.Join(opt.AlpnProtocols, ",")
-	caIds := strings.Join(opt.ClientAuthorityIds, ",")
+	// All three are API-supplied and stored comma-joined in one column, so a
+	// member containing a comma would be split back into two. See list_column.go.
+	ciphers, err := joinListColumn("cipher suite", opt.CipherSuites)
+	if err != nil {
+		return err
+	}
+	alpn, err := joinListColumn("ALPN protocol", opt.AlpnProtocols)
+	if err != nil {
+		return err
+	}
+	caIds, err := joinListColumn("client authority ID", opt.ClientAuthorityIds)
+	if err != nil {
+		return err
+	}
 
 	var query string
 	if r.dialect.Driver == db.DriverPostgres {
@@ -88,8 +99,7 @@ func (r *DBTLSOptionRegistry) Update(ctx context.Context, opt *gateonv1.TLSOptio
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 	}
 
-	_, err := r.db.Exec(r.dialect.Rebind(query), opt.Id, opt.Name, opt.MinTlsVersion, opt.MaxTlsVersion, ciphers, alpn, opt.ClientAuthType, opt.PreferServerCipherSuites, opt.SniStrict, caIds)
-	if err != nil {
+	if _, err := r.db.Exec(r.dialect.Rebind(query), opt.Id, opt.Name, opt.MinTlsVersion, opt.MaxTlsVersion, ciphers, alpn, opt.ClientAuthType, opt.PreferServerCipherSuites, opt.SniStrict, caIds); err != nil {
 		return err
 	}
 

@@ -68,8 +68,16 @@ func (r *DBRouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error 
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
-	entrypoints := strings.Join(rt.Entrypoints, ",")
-	middlewares := strings.Join(rt.Middlewares, ",")
+	// Validated before anything is written: a comma in one of these names would
+	// be split back into two on load. See list_column.go.
+	entrypoints, err := joinListColumn("entrypoint name", rt.Entrypoints)
+	if err != nil {
+		return err
+	}
+	middlewares, err := joinListColumn("middleware name", rt.Middlewares)
+	if err != nil {
+		return err
+	}
 	tlsConfig := ""
 	if rt.Tls != nil {
 		if b, err := json.Marshal(rt.Tls); err == nil {
@@ -98,8 +106,7 @@ func (r *DBRouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error 
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 	}
 
-	_, err := r.db.Exec(r.dialect.Rebind(query), rt.Id, rt.Name, rt.Type, entrypoints, rt.Rule, rt.Priority, middlewares, rt.ServiceId, tlsConfig, rt.Disabled)
-	if err != nil {
+	if _, err := r.db.Exec(r.dialect.Rebind(query), rt.Id, rt.Name, rt.Type, entrypoints, rt.Rule, rt.Priority, middlewares, rt.ServiceId, tlsConfig, rt.Disabled); err != nil {
 		return err
 	}
 
