@@ -261,10 +261,88 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 }
 
 func (m *AuditManager) sign(entry AuditEntry, key string) string {
+	return signEntry(entry, key)
+}
+
+// signEntry computes an entry's HMAC. It is a free function, not a method,
+// because verification must be possible without an AuditManager — and therefore
+// without a database, a config or a running gateway. A verifier that can only
+// run inside the process that wrote the log is not much of a verifier.
+func signEntry(entry AuditEntry, key string) string {
 	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%s|%s", entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp.Unix(), entry.IPAddress, entry.PreviousHash)
 	h := hmac.New(sha256.New, []byte(key))
 	h.Write([]byte(payload))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ChainError reports the first break found in an audit chain, identifying the
+// entry so an operator can see what was touched rather than only that something
+// was.
+type ChainError struct {
+	Index  int    // position in the slice passed to VerifyChain, oldest-first
+	ID     string // the entry's ID, or "" if the break is a missing predecessor
+	Reason string
+}
+
+func (e *ChainError) Error() string {
+	if e.ID == "" {
+		return fmt.Sprintf("audit chain broken at index %d: %s", e.Index, e.Reason)
+	}
+	return fmt.Sprintf("audit chain broken at index %d (entry %s): %s", e.Index, e.ID, e.Reason)
+}
+
+// VerifyChain recomputes an audit chain and reports the first break.
+//
+// This is the half of tamper-evidence that was missing. log() has always signed
+// each entry with the configured key and chained it to its predecessor via
+// PreviousHash, and the code comment there describes exactly this check — but
+// nothing performed it, in Go or in the dashboard, so the signatures were
+// written and never read. A log that records evidence nobody checks is not
+// tamper-evident; it is a log with two extra columns.
+//
+// Entries must be ordered oldest-first. Note that GetLogs returns newest-first
+// (ORDER BY timestamp DESC), so its result has to be reversed before it is
+// passed here.
+//
+// genesis is the PreviousHash the first entry is expected to carry. Pass "" when
+// verifying from the very beginning of the log; pass the signature of the entry
+// immediately preceding the slice when verifying a window, which is what makes
+// it possible to check a page of history without replaying all of it.
+//
+// Detects, in one pass: an edited field (the recomputed HMAC stops matching), a
+// forged or truncated signature, a deleted entry (its successor's PreviousHash
+// no longer resolves), a reordered pair, and an inserted entry (it has no valid
+// predecessor). What it cannot detect is an attacker who holds the signing key
+// and rewrites the whole chain — the key is the trust anchor, which is why
+// SignatureKey belongs somewhere the gateway's own database does not reach.
+func VerifyChain(entries []AuditEntry, key string, genesis string) error {
+	if key == "" {
+		return &ChainError{Index: -1, Reason: "no signature key supplied; the chain cannot be verified"}
+	}
+
+	prev := genesis
+	for i, entry := range entries {
+		if entry.Signature == "" {
+			return &ChainError{Index: i, ID: entry.ID, Reason: "entry is unsigned"}
+		}
+		if entry.PreviousHash != prev {
+			return &ChainError{
+				Index: i, ID: entry.ID,
+				Reason: "previous_hash does not match the preceding entry's signature; an entry was inserted, removed or reordered",
+			}
+		}
+		want := signEntry(entry, key)
+		// Constant-time: a verifier is reachable by whoever can submit a log to
+		// be checked, and a byte-at-a-time comparison leaks the expected MAC.
+		if !hmac.Equal([]byte(entry.Signature), []byte(want)) {
+			return &ChainError{
+				Index: i, ID: entry.ID,
+				Reason: "signature does not match the entry contents; the entry was modified or signed with a different key",
+			}
+		}
+		prev = entry.Signature
+	}
+	return nil
 }
 
 func GetLogs(ctx context.Context, limit int) ([]AuditEntry, error) {
@@ -282,9 +360,17 @@ func GetLogs(ctx context.Context, limit int) ([]AuditEntry, error) {
 	for rows.Next() {
 		var e AuditEntry
 		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.Details, &e.Timestamp, &e.IPAddress, &e.Signature, &e.PreviousHash); err != nil {
+			// Still skipped rather than aborted, so one bad row does not take
+			// the whole audit view down — but no longer in silence. An audit
+			// trail that quietly returns 9 of 10 entries is worse than one that
+			// errors, because nothing distinguishes it from a complete answer.
+			logger.L.LogError("audit: skipping an unreadable row while reading logs", "error", err)
 			continue
 		}
 		logs = append(logs, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit: reading logs failed: %w", err)
 	}
 	return logs, nil
 }
@@ -310,10 +396,25 @@ func (m *AuditManager) runRetentionTask() {
 }
 
 func (m *AuditManager) checkRetention() {
+	// Generated getters, not field access: m.config is nil whenever a global
+	// config is saved with no audit block, because UpdateConfig assigns
+	// conf.Audit straight through and that field is simply absent. log() has
+	// always guarded for it; this did not, so the next tick dereferenced nil —
+	// on runRetentionTask's goroutine, which has no recover, taking the whole
+	// process with it. The getters return zero values on a nil receiver, and
+	// retentionDays <= 0 below then means "keep everything", which is the right
+	// reading of "no audit configuration".
+	//
+	// RUnlock is deferred rather than called inline for the same reason: the
+	// panic happened between RLock and RUnlock and left the mutex read-locked
+	// forever, so anything that later took the write lock would have hung even
+	// if the process had survived.
 	m.mu.RLock()
-	retentionDays := m.config.RetentionDays
-	archiveOnRetention := m.config.ArchiveOnRetention
+	cfg := m.config
 	m.mu.RUnlock()
+
+	retentionDays := cfg.GetRetentionDays()
+	archiveOnRetention := cfg.GetArchiveOnRetention()
 
 	if retentionDays <= 0 {
 		return
@@ -354,9 +455,16 @@ func (m *AuditManager) archiveLogs(cutoff time.Time) error {
 	for rows.Next() {
 		var e AuditEntry
 		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.Details, &e.Timestamp, &e.IPAddress, &e.Signature, &e.PreviousHash); err != nil {
-			continue
+			// Abort, do not skip. Every row read here is a row checkRetention is
+			// about to DELETE. Skipping archived everything except the
+			// unreadable entry and then destroyed the original, losing exactly
+			// the record something had already gone wrong with.
+			return fmt.Errorf("audit: archive aborted, a row could not be read: %w", err)
 		}
 		logs = append(logs, e)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("audit: archive aborted, reading rows failed: %w", err)
 	}
 
 	if len(logs) == 0 {
@@ -382,19 +490,41 @@ func (m *AuditManager) archiveLogs(cutoff time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	// Use Brotli for best smallest algorithm as requested
-	bw := brotli.NewWriterLevel(f, brotli.BestCompression)
-	defer bw.Close()
-
-	enc := json.NewEncoder(bw)
-	if err := enc.Encode(logs); err != nil {
-		return err
+	// No deferred Close on either the file or the compressor. Both flush on
+	// Close, and a deferred Close runs after this function has already returned
+	// nil — so a failure at flush time (a full disk is the ordinary case) was
+	// reported nowhere, checkRetention read success, and it deleted the rows the
+	// archive was supposed to be preserving. The archive is the only reason the
+	// deletion is safe, so its write has to be checked before saying it worked.
+	if writeErr := writeArchive(f, logs); writeErr != nil {
+		_ = f.Close()
+		// A truncated archive on disk is worse than none: it looks like a
+		// backup until someone needs it.
+		_ = os.Remove(path)
+		return writeErr
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("audit: archive incomplete, closing %s failed: %w", filename, err)
 	}
 
 	logger.L.LogInfo("audit: logs archived", "filename", filename, "count", len(logs))
 	return nil
+}
+
+// writeArchive encodes logs as brotli-compressed JSON into w and flushes.
+// Returning the compressor's Close error is the point: it is what emits the
+// final block, so it is where a failed write surfaces.
+func writeArchive(w io.Writer, logs []AuditEntry) error {
+	// Use Brotli for best smallest algorithm as requested
+	bw := brotli.NewWriterLevel(w, brotli.BestCompression)
+
+	if err := json.NewEncoder(bw).Encode(logs); err != nil {
+		_ = bw.Close()
+		return err
+	}
+	return bw.Close()
 }
 
 func ListArchives() ([]*gateonv1.AuditArchive, error) {
@@ -495,9 +625,16 @@ func GetLogsPaginated(ctx context.Context, page, pageSize int, search string) ([
 	for rows.Next() {
 		var e AuditEntry
 		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.Resource, &e.Details, &e.Timestamp, &e.IPAddress, &e.Signature, &e.PreviousHash); err != nil {
+			// See GetLogs: skipped so one bad row cannot break the view, but
+			// logged, because the count returned to the caller comes from a
+			// separate COUNT(*) and will not match the rows actually returned.
+			logger.L.LogError("audit: skipping an unreadable row while paginating logs", "error", err)
 			continue
 		}
 		logs = append(logs, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("audit: reading logs failed: %w", err)
 	}
 	return logs, total, nil
 }
