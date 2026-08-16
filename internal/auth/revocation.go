@@ -9,7 +9,11 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 // SessionBindingClaim is the token claim carrying the session binding. Short
@@ -66,6 +70,28 @@ func writeField(h interface{ Write([]byte) (int, error) }, s string) {
 	_, _ = h.Write([]byte(s))
 }
 
+// DefaultBindingTTL bounds how long a cached session binding may be trusted.
+//
+// The cache is per process, and invalidation is a local map delete. In a
+// single-instance deployment that is exact. Across several instances sharing one
+// database it is not: the instance that processes the revocation drops its own
+// entry, and every other instance keeps serving the old binding — with no expiry,
+// forever. Disabling an account or changing a role therefore took effect on one
+// instance and nowhere else, which is the shape of the bug ADR 0005 set out to
+// fix, reappearing one layer up.
+//
+// A TTL is the floor guarantee rather than the whole answer. Publishing
+// invalidations over Redis would cut the window to a round trip, but pub/sub is
+// at-most-once: a dropped message or a Redis outage restores the unbounded
+// staleness, so it can make revocation *faster* but cannot make it *certain*.
+// The expiry does that on its own, with no broker to depend on. Thirty seconds
+// keeps the database read rare while bounding how long a revoked session can
+// outlive its revocation on a sibling instance.
+const DefaultBindingTTL = 30 * time.Second
+
+// BindingTTLEnv overrides DefaultBindingTTL, in seconds.
+const BindingTTLEnv = "GATEON_SESSION_BINDING_TTL"
+
 // bindingCache holds the current session binding per user id.
 //
 // Without it every authenticated request would cost a database round trip,
@@ -79,28 +105,68 @@ func writeField(h interface{ Write([]byte) (int, error) }, s string) {
 // fails toward a database read rather than toward a stale allow.
 type bindingCache struct {
 	mu      sync.RWMutex
-	entries map[string]string
+	ttl     time.Duration
+	entries map[string]cachedBinding
+
+	// now is injectable so the expiry tests do not sleep.
+	now func() time.Time
+}
+
+type cachedBinding struct {
+	binding string
+	expires time.Time
 }
 
 func newBindingCache() *bindingCache {
-	return &bindingCache{entries: make(map[string]string)}
+	return newBindingCacheWithTTL(bindingTTLFromEnv())
 }
 
+func newBindingCacheWithTTL(ttl time.Duration) *bindingCache {
+	if ttl <= 0 {
+		ttl = DefaultBindingTTL
+	}
+	return &bindingCache{
+		ttl:     ttl,
+		entries: make(map[string]cachedBinding),
+		now:     time.Now,
+	}
+}
+
+func bindingTTLFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(BindingTTLEnv))
+	if raw == "" {
+		return DefaultBindingTTL
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil || secs <= 0 {
+		return DefaultBindingTTL
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// get returns a cached binding only while it is still inside its TTL. An expired
+// entry is reported as absent, so the caller reloads from the database — the
+// same path a local invalidation takes.
 func (c *bindingCache) get(id string) (string, bool) {
 	c.mu.RLock()
-	v, ok := c.entries[id]
+	e, ok := c.entries[id]
+	expired := ok && !c.now().Before(e.expires)
 	c.mu.RUnlock()
-	return v, ok
+	if !ok || expired {
+		return "", false
+	}
+	return e.binding, true
 }
 
 func (c *bindingCache) put(id, binding string) {
 	c.mu.Lock()
-	c.entries[id] = binding
+	c.entries[id] = cachedBinding{binding: binding, expires: c.now().Add(c.ttl)}
 	c.mu.Unlock()
 }
 
 // invalidate drops one user's cached binding. Called on every mutation that
-// changes a session-binding input.
+// changes a session-binding input. This is the immediate path on the instance
+// that handled the mutation; siblings converge when their entry expires.
 func (c *bindingCache) invalidate(id string) {
 	c.mu.Lock()
 	delete(c.entries, id)
