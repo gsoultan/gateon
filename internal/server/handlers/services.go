@@ -16,6 +16,9 @@ import (
 
 func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *Deps) {
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceServices) {
+			return
+		}
 		page, pageSize, search := ParsePagination(r)
 		svcs, total := d.ServiceService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListServicesResponse{

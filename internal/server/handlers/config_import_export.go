@@ -116,6 +116,12 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 	})
 
 	mux.HandleFunc("POST /v1/config/validate", func(w http.ResponseWriter, r *http.Request) {
+		// Validate is the preflight for import, so it carries import's
+		// permission rather than export's: a caller who cannot apply a config
+		// has no reason to have the gateway parse 5MB of one.
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceConfig) {
+			return
+		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, MaxConfigImportBodySize+1))
 		if err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "failed to read body")

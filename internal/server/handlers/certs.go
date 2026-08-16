@@ -31,6 +31,9 @@ const (
 
 func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 	mux.HandleFunc("GET /v1/certs", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceCerts) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		gc := svc.GetGlobals().Get(r.Context())
 		if gc == nil || gc.Tls == nil {

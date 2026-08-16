@@ -7,11 +7,15 @@ import (
 	"net/http"
 
 	"github.com/gsoultan/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/auth"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 func registerTracesHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 	mux.HandleFunc("GET /v1/traces", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
+			return
+		}
 		// Bounded; see the diagnostics handlers for why the conversion, not the
 		// input, is what produced a negative.
 		limit := boundedInt32(r.URL.Query().Get("limit"), maxPageSize)
@@ -33,6 +37,9 @@ func registerTracesHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 	})
 
 	mux.HandleFunc("GET /v1/traces/detail", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
+			return
+		}
 		id := r.URL.Query().Get("id")
 		ts := r.URL.Query().Get("timestamp")
 

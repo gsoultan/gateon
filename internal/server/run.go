@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/config"
@@ -165,7 +166,15 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	tlsOptService := dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger)
 	canaryService := canary.NewService(ctx, serviceService, s.Logger)
 
-	grpcServer := grpc.NewServer(grpc.MaxConcurrentStreams(10000))
+	// The interceptor is not optional. This server carries the whole ApiService,
+	// and HandleProxyOrLocal reaches it on Content-Type without consulting the
+	// mux, so it bypasses both the REST permission checks and the Connect
+	// interceptor below. Without it, any authenticated role reached all 51 RPCs
+	// by sending application/grpc-web. See api_rbac.go.
+	grpcServer := grpc.NewServer(
+		grpc.MaxConcurrentStreams(10000),
+		grpc.UnaryInterceptor(NewGRPCRBACInterceptor()),
+	)
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	// Internal API only: gRPC-Web for the dashboard.
 	// We use our modern DefaultGRPCWebDetector which supports Connect and gRPC-Web.
@@ -174,7 +183,15 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 
 	// Register ConnectRPC handler for the internal API.
 	// This provides high-performance binary communication for the dashboard.
-	mux.Handle(gateonv1connect.NewApiServiceHandler(api.NewConnectHandler(apiService)))
+	//
+	// The interceptor is not optional. RBAC for the management API is enforced
+	// per-endpoint inside the REST handlers, so mounting this handler bare gave
+	// every migrated RPC an unauthorized path to the same service method. See
+	// api_rbac.go.
+	mux.Handle(gateonv1connect.NewApiServiceHandler(
+		api.NewConnectHandler(apiService),
+		connect.WithInterceptors(NewConnectRBACInterceptor()),
+	))
 
 	handlers.RegisterRESTHandlers(mux, apiService, &handlers.Deps{
 		RouteService:       routeService,
