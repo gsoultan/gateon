@@ -15,6 +15,9 @@ import (
 
 func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 	listEPs := func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceEntryPoints) {
+			return
+		}
 		page, pageSize, search := ParsePagination(r)
 		eps, total := d.EpService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListEntryPointsResponse{

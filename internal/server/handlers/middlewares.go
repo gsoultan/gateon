@@ -80,6 +80,9 @@ var middlewarePresets = []MiddlewarePreset{
 
 func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/cloudflare-ips", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceMiddlewares) {
+			return
+		}
 		res, err := svc.GetCloudflareIPs(r.Context(), &gateonv1.GetCloudflareIPsRequest{})
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
@@ -88,10 +91,16 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		WriteProtoResponse(w, http.StatusOK, res)
 	})
 	mux.HandleFunc("GET /v1/middlewares/presets", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceMiddlewares) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(middlewarePresets)
 	})
 	mux.HandleFunc("GET /v1/middlewares", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceMiddlewares) {
+			return
+		}
 		page, pageSize, search := ParsePagination(r)
 		mws, total := d.MwService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListMiddlewaresResponse{
@@ -99,6 +108,9 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		})
 	})
 	mux.HandleFunc("GET /v1/middlewares/{id}/routes", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceMiddlewares) {
+			return
+		}
 		id := r.PathValue("id")
 		if id == "" {
 			WriteHTTPError(w, http.StatusBadRequest, "missing middleware id")

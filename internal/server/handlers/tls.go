@@ -12,6 +12,9 @@ import (
 
 func registerTLSOptionHandlers(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /v1/tls-options", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceTLSOptions) {
+			return
+		}
 		page, pageSize, search := ParsePagination(r)
 		opts, total := d.TLSOptService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListTLSOptionsResponse{

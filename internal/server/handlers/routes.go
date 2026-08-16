@@ -29,6 +29,9 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 	// lookup. A route with no stats is present with an empty list rather than
 	// absent, so the caller can tell "no traffic" from "no such route".
 	mux.HandleFunc("GET /v1/routes/stats", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceRoutes) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		out := map[string][]proxy.TargetStats{}
 		if d.RouteStatsProvider == nil || d.RouteService == nil {
@@ -48,6 +51,9 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	mux.HandleFunc("GET /v1/routes/{id}/stats", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceRoutes) {
+			return
+		}
 		id := r.PathValue("id")
 		if id == "" {
 			WriteHTTPError(w, http.StatusBadRequest, "missing route id")
@@ -66,6 +72,9 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 		_ = json.NewEncoder(w).Encode(stats)
 	})
 	mux.HandleFunc("GET /v1/routes", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceRoutes) {
+			return
+		}
 		page, pageSize, search := ParsePagination(r)
 		filter := ParseRouteFilters(r)
 		routes, total := d.RouteService.ListPaginated(r.Context(), page, pageSize, search, filter)
