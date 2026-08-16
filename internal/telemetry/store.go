@@ -535,12 +535,22 @@ func InitPathStatsStore(databaseURL string, retentionDays int) error {
 // such a DB is ephemeral by definition, so persisting traces beside the CWD both
 // outlives its own data and litters whichever directory the process (or a
 // `go test` run) happens to start from.
+//
+// A non-SQLite DSN has no directory to sit beside, and this used to return a
+// bare relative "telemetry_pebble" — so a Postgres-backed gateway put its trace
+// store in whatever directory it happened to be started from, which is the
+// working directory of a systemd unit, a container image, or a developer's
+// shell, and differs between them. config.DataDir is the answer the rest of the
+// project already uses for exactly this question: it honours GATEON_DATA_DIR
+// and GATEON_STATE_DIR and falls back to /var/lib/gateon. Where DataDir has no
+// better answer it returns ".", which reproduces the old path rather than
+// moving anyone's data.
 func resolveTraceDir(databaseURL string, isSQLite bool) string {
 	if dir := strings.TrimSpace(os.Getenv("GATEON_TRACE_DIR")); dir != "" {
 		return dir
 	}
 	if !isSQLite {
-		return "telemetry_pebble"
+		return filepath.Join(config.DataDir(), "telemetry_pebble")
 	}
 	// Same path extraction logic as db.Open, to find the DB's directory.
 	dsn := strings.TrimPrefix(databaseURL, "sqlite:")
