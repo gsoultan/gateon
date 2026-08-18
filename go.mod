@@ -26,7 +26,7 @@ require (
 	github.com/google/go-tpm v0.9.8
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/gsoultan/gwaf v0.5.2
+	github.com/gsoultan/gwaf v0.6.0
 	github.com/h2non/filetype v1.1.3
 	github.com/hashicorp/consul/api v1.33.7
 	github.com/hashicorp/golang-lru v0.5.4
