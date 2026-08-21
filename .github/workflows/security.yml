@@ -137,10 +137,43 @@ jobs:
       - name: Run gosec
         run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
 
+      # gosec v2.22.9 emits SARIF that the uploader rejects outright:
+      #
+      #   instance.runs[0].results[7].fixes[0].artifactChanges
+      #     is not of a type(s) array
+      #
+      # It writes `"artifactChanges": null` where the schema requires an array,
+      # and a `description` carrying only `markdown` where `text` is required.
+      # One result in 177 was malformed, and it cost all 177 -- the upload is
+      # all-or-nothing, so a single bad advisory field discards the entire scan.
+      #
+      # Only the offending `fixes` entries are dropped, not the findings and not
+      # the well-formed fixes, so a gosec release that fixes this needs no change
+      # here. jq rather than a script because macOS ships it at /usr/bin/jq.
+      - name: Repair the SARIF gosec emits
+        run: |
+          jq '
+            .runs[].results |= map(
+              if has("fixes")
+              then .fixes |= map(select((.artifactChanges | type) == "array"))
+              else . end
+            )
+            | .runs[].results |= map(
+                if has("fixes") and (.fixes | length) == 0 then del(.fixes) else . end
+              )
+          ' gosec.sarif > gosec.upload.sarif
+          before="$(jq '.runs[0].results | length' gosec.sarif)"
+          after="$(jq '.runs[0].results | length' gosec.upload.sarif)"
+          echo "findings: $before before, $after after"
+          if [ "$before" != "$after" ]; then
+            echo "::error::the SARIF repair dropped findings, which it must never do"
+            exit 1
+          fi
+
       - name: Upload gosec SARIF
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: gosec.sarif
+          sarif_file: gosec.upload.sarif
           category: gosec
 
   trivy-fs:
