@@ -1,0 +1,70 @@
+# The Linux environment the ci and security workflows run their jobs inside.
+#
+# The runner is a self-hosted Apple-silicon Mac, and several of these jobs are
+# Linux-only: they apt-get an eBPF toolchain, run bpf2go over bpf/*.c, and
+# compile internal/ebpf/manager_linux.go, which is `//go:build linux && !noebpf`.
+# None of that exists on macOS. Rather than drop XDP rate limiting from CI --
+# which is what building with `noebpf` would quietly do -- the jobs run in here,
+# via Apple's `container`, which boots a real Linux VM.
+#
+# This deliberately mirrors internal/ebpf/Dockerfile.gen rather than extending
+# it: that file is the documented, standalone path for `make ebpf-docker` on a
+# developer's machine, and coupling the two would mean a CI change could break
+# the local workflow. The eBPF half is kept identical on purpose.
+FROM golang:1.26.6-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang \
+        llvm \
+        libbpf-dev \
+        libelf-dev \
+        linux-libc-dev \
+        make \
+        git \
+        curl \
+        unzip \
+        openssl \
+        xz-utils \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# See Dockerfile.gen: <asm/*.h> sits under the multiarch triplet, and the
+# gcc-multilib package that used to put it on the default path is amd64-only.
+ENV CPATH=/usr/include/aarch64-linux-gnu:/usr/include/x86_64-linux-gnu
+ENV BPF2GO_CC=clang
+ENV BPF2GO_STRIP=llvm-strip
+
+# bun builds the dashboard and owns the protobuf plugins that `buf generate`
+# picks up from ui/node_modules/.bin.
+#
+# Pinned. The install script takes a version and defaults to whatever is current
+# otherwise, which would make the dashboard in a release artifact depend on
+# which day it was built -- the same objection go.mod's `tool` directive exists
+# to answer for the Go generators.
+ARG BUN_VERSION=1.3.14
+RUN curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
+ENV PATH=/root/.bun/bin:$PATH
+
+# Node, even though bun is here. The protobuf plugins in ui/node_modules/.bin
+# -- protoc-gen-es and friends -- are scripts with a `#!/usr/bin/env node`
+# shebang, so they need that exact interpreter on PATH; bun does not answer to
+# the name. The hosted ubuntu image had node preinstalled and hid this, and buf
+# reports the absence as "plugin protoc-gen-es: exit status 127", which reads
+# like a broken plugin rather than a missing runtime.
+ARG NODE_VERSION=24.11.0
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+        arm64) narch=arm64 ;; \
+        amd64) narch=x64 ;; \
+        *) echo "unsupported architecture for the Node tarball" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${narch}.tar.xz" \
+        | tar -xJ -C /usr/local --strip-components=1; \
+    node --version
+
+# The image tracks go.mod's minimum rather than whatever the base tag happens to
+# ship; golang:1.26-bookworm was 1.26.5 against a go.mod asking for 1.26.6, and
+# the base image pins GOTOOLCHAIN=local, which turns that into a hard error.
+ENV GOTOOLCHAIN=auto
+
+WORKDIR /src
