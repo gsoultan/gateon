@@ -31,8 +31,17 @@ fi
 CACHE_ROOT="${RUNNER_TEMP:-/tmp}/gateon-ci"
 mkdir -p "$CACHE_ROOT/go" "$CACHE_ROOT/build"
 
+# Apple `container` defaults to 1 GB and 4 CPUs, which is not enough to build
+# this module: `make lint-new` builds golangci-lint from source and was killed
+# by the OOM reaper after fifteen minutes, reported only as `signal: killed`.
+# The host has 24 GB and 15 CPUs; these leave room for the Postgres container
+# and for the machine to stay usable while CI runs on it.
+CI_MEMORY="${CI_MEMORY:-10g}"
+CI_CPUS="${CI_CPUS:-8}"
+
 args=(
     run --rm
+    --memory "$CI_MEMORY" --cpus "$CI_CPUS"
     -v "$PWD:/src" -w /src
     -v "$CACHE_ROOT/go:/go"
     -v "$CACHE_ROOT/build:/root/.cache"

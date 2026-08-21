@@ -273,8 +273,17 @@ jobs:
           go install tool
           bun install --frozen-lockfile --cwd ui
 
+      # Scoped to ./internal/ui/... rather than ./... on purpose. internal/ui/ui.go
+      # embeds `all:dist`, so the dashboard has to be built before the binary
+      # will link -- without it this job failed with
+      # "pattern all:dist: no matching files found". The unscoped `go generate`
+      # the hosted runner used would also fire internal/ebpf's bpf2go
+      # directive, which needs a BPF-target clang this machine does not have;
+      # that codegen belongs to the build job's Linux container.
       - name: Generate all artifacts
-        run: PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+        run: |
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./internal/ui/...
 
       # playwright.config.ts starts gateon itself from the repo root, with the
       # e2e config and mockbin on PATH, so the binary has to exist there.
