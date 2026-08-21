@@ -176,11 +176,36 @@ jobs:
             exit 1
           fi
 
+      # Best-effort, and only this step. The upload ends in
+      #
+      #   Code scanning is not enabled for this repository.
+      #
+      # which is not a workflow problem and cannot be fixed by one: this
+      # repository is private, and code scanning on a private repository needs
+      # GitHub Advanced Security. Until that is enabled the report has nowhere
+      # to go, and failing the job for it means gosec reports as broken every
+      # run while actually working perfectly -- the state this job has been in.
+      #
+      # The scan itself still gates: `Run gosec` and the repair step below it
+      # fail loudly, so a gosec that crashes or emits a report that lost
+      # findings is still a red job. Only the delivery is tolerated.
       - name: Upload gosec SARIF
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: gosec.upload.sarif
           category: gosec
+
+      # So the findings survive whether or not code scanning accepted them.
+      # Without this, a repository that cannot ingest SARIF runs gosec 177
+      # findings' worth of work and keeps none of it.
+      - name: Upload gosec report as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosec-sarif
+          path: gosec.upload.sarif
+          retention-days: 7
 
   trivy-fs:
     name: trivy-fs
