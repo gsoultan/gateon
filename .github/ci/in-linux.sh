@@ -39,9 +39,17 @@ mkdir -p "$CACHE_ROOT/go" "$CACHE_ROOT/build"
 CI_MEMORY="${CI_MEMORY:-10g}"
 CI_CPUS="${CI_CPUS:-8}"
 
+# The container resolves DNS through the gateway at 192.168.64.1, which has
+# been seen to answer "server misbehaving" mid-run and fail a whole job on
+# `lookup proxy.golang.org`. A public resolver is used instead: nothing here
+# resolves a name that is only meaningful on this LAN -- the one such name,
+# the Postgres container's address, is passed in already resolved.
+CI_DNS="${CI_DNS:-1.1.1.1}"
+
 args=(
     run --rm
     --memory "$CI_MEMORY" --cpus "$CI_CPUS"
+    --dns "$CI_DNS"
     -v "$PWD:/src" -w /src
     -v "$CACHE_ROOT/go:/go"
     -v "$CACHE_ROOT/build:/root/.cache"

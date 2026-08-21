@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
   security-events: write
+  # github/codeql-action/upload-sarif calls GET /repos/{o}/{r}/actions/runs/{id}
+  # while post-processing, and without this the upload fails at the very end
+  # with "Resource not accessible by integration" -- after the SARIF has been
+  # validated and fingerprinted, which makes it read like a malformed report
+  # rather than a missing scope.
+  actions: read
 
 # Every job here runs on the self-hosted Apple-silicon Mac. The two scanners
 # that type-check the tree do it inside the Linux container built by
