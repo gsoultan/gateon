@@ -8,8 +8,10 @@
 # producing gateon_ebpf_bpfel.go / gateon_ebpf_bpfeb.go and the embedded *.o
 # objects in internal/ebpf/. Commit those generated files.
 #
-# Pin the Go version to match go.mod (go 1.26.x).
-FROM golang:1.26-bookworm
+# Pinned to the exact go.mod minimum: the floating 1.26 tag shipped 1.26.5
+# against a go.mod asking for 1.26.6, which the base image turns into a hard
+# error because it sets GOTOOLCHAIN=local.
+FROM golang:1.26.6-bookworm
 
 # clang/llvm provide the BPF-target compiler + llvm-strip; libbpf-dev provides
 # <bpf/bpf_helpers.h>; linux-headers + libc headers provide <linux/*.h>.
@@ -19,9 +21,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libbpf-dev \
         libelf-dev \
         linux-libc-dev \
-        gcc-multilib \
         make \
     && rm -rf /var/lib/apt/lists/*
+
+# <asm/*.h>, which <linux/types.h> includes, lives under the multiarch triplet
+# rather than on clang's default search path. gcc-multilib used to supply it and
+# was listed above, but that package exists only on amd64 — on an arm64 host
+# (any Apple silicon Mac, which is the case this file was written for) the build
+# failed outright with "Package 'gcc-multilib' has no installation candidate".
+#
+# Naming both triplets is portable in a way that package could not be: clang
+# ignores the entry that is not present, so the same image builds on either.
+ENV CPATH=/usr/include/aarch64-linux-gnu:/usr/include/x86_64-linux-gnu
 
 # bpf2go shells out to `clang` and `llvm-strip` by default.
 ENV BPF2GO_CC=clang

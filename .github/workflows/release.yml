@@ -10,93 +10,125 @@ permissions:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+
+    # This job runs entirely inside the Linux container built by
+    # .github/ci/Dockerfile.ci, and that is a deliberate choice about release
+    # artifacts rather than a convenience.
+    #
+    # It has to be Linux somewhere: .goreleaser.yaml's `before` hook is
+    # `go generate ./internal/ebpf/...`, which compiles the XDP program with a
+    # BPF-target clang against Linux kernel headers. Running the hook on macOS
+    # fails outright.
+    #
+    # It could have been only that step, since builds set CGO_ENABLED=0 and the
+    # bpf2go output is pure Go with the object embedded -- GoReleaser would
+    # cross-compile the rest from macOS quite happily. Keeping the whole job in
+    # the container instead means the published binaries are produced in the
+    # same kind of environment that produced every release before this runner
+    # move, so the move is not also a change to what ships.
+    env:
+      CI_IMAGE: gateon-ci
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # Required so GoReleaser's `before` hook (go generate ./internal/ebpf/...)
-      # can compile the XDP/eBPF C program and embed the object into the binary.
-      - name: Install eBPF build toolchain
+      - name: Locate the container CLI
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
-          # Ensure llvm-strip is in the path (some Ubuntu versions use versioned binaries)
-          STRIP_BIN=$(command -v llvm-strip || command -v llvm-strip-14 || command -v llvm-strip-15 || command -v llvm-strip-16 || command -v llvm-strip-17 || command -v llvm-strip-18)
-          if [ -n "$STRIP_BIN" ] && [ ! -f /usr/bin/llvm-strip ]; then
-            sudo ln -s "$STRIP_BIN" /usr/bin/llvm-strip
+          if ! command -v container >/dev/null 2>&1; then
+            echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+            export PATH="/opt/homebrew/bin:$PATH"
           fi
+          command -v container >/dev/null 2>&1 || {
+            echo "::error::Apple container CLI not found on the runner (brew install container)"
+            exit 1
+          }
+          container system start >/dev/null 2>&1 || true
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Build the Linux CI image
+        run: container build -f .github/ci/Dockerfile.ci -t "$CI_IMAGE" .
 
-      - name: Cache Bun dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('ui/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Setup Buf
-        uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install proto plugins
+      - name: Install buf, proto plugins and UI dependencies
+        # Versions come from the `tool` directive in go.mod, so the generators
+        # are locked in go.sum and reviewed like any other dependency.
+        # `@latest` made a release build pull whatever upstream had tagged at
+        # that moment: not reproducible, and a compromised upstream tag would
+        # have been compiled straight into a published artifact.
         run: |
-          # Versions come from the `tool` directive in go.mod, so the generators
-          # are locked in go.sum and reviewed like any other dependency.
-          # `@latest` made a release build pull whatever upstream had tagged at
-          # that moment: not reproducible, and a compromised upstream tag would
-          # have been compiled straight into a published artifact.
-          go install tool
+          .github/ci/in-linux.sh '
+            go install tool
+            bun install --frozen-lockfile --cwd ui
+          '
 
-      - name: Install Bun dependencies
-        run: bun install --frozen-lockfile --cwd ui
-
-      - name: Generate proto
-        run: PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
-
-      - name: Build UI
+      - name: Generate proto and build the UI
         run: |
-          (cd ui && bun run build)
-          go run ./scripts/sync_assets.go
+          .github/ci/in-linux.sh '
+            PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+            cd ui && bun run build
+            cd .. && go run ./scripts/sync_assets.go
+          '
 
       - name: Verify modules are tidy
         run: |
-          # `go mod tidy` used to run here, which let a build mutate its own
-          # dependency set — the artifact could then be built against a
-          # different graph than the one reviewed. Verify instead: fail if the
-          # committed go.mod/go.sum are not already tidy.
-          cp go.mod go.mod.bak && cp go.sum go.sum.bak
-          go mod tidy
-          if ! diff -q go.mod go.mod.bak >/dev/null || ! diff -q go.sum go.sum.bak >/dev/null; then
-            echo "::error::go.mod/go.sum are not tidy - run 'go mod tidy' and commit the result"
-            diff go.mod.bak go.mod || true
-            diff go.sum.bak go.sum || true
-            exit 1
-          fi
-          rm -f go.mod.bak go.sum.bak
-          go mod verify
+          .github/ci/in-linux.sh '
+            # `go mod tidy` used to run here, which let a build mutate its own
+            # dependency set -- the artifact could then be built against a
+            # different graph than the one reviewed. Verify instead: fail if the
+            # committed go.mod/go.sum are not already tidy.
+            cp go.mod go.mod.bak && cp go.sum go.sum.bak
+            go mod tidy
+            if ! diff -q go.mod go.mod.bak >/dev/null || ! diff -q go.sum go.sum.bak >/dev/null; then
+              echo "::error::go.mod/go.sum are not tidy - run '"'"'go mod tidy'"'"' and commit the result"
+              diff go.mod.bak go.mod || true
+              diff go.sum.bak go.sum || true
+              exit 1
+            fi
+            rm -f go.mod.bak go.sum.bak
+            go mod verify
+          '
 
-      - name: Install Syft (SBOM generator)
-        uses: anchore/sbom-action/download-syft@v0
+      # Syft and GoReleaser were JS actions that download a binary onto the
+      # runner. They are installed inside the container instead, because that is
+      # where the release is built -- a Syft on the macOS host cannot inspect a
+      # tree that only exists, generated, inside the container.
+      #
+      # Both are pinned for the same reason every other tool in this repository
+      # is: a release build must not depend on whatever upstream tagged most
+      # recently.
+      # Both as pinned upstream release binaries rather than `go install`.
+      # Syft's module graph pulls containerd and most of its dependencies, and
+      # building it here took minutes before dying on `connection reset by peer`
+      # from the module proxy -- a release that fails on a transient network
+      # error while compiling a tool it only shells out to. The tarballs take
+      # seconds and are the same artifacts anchore/sbom-action was fetching.
+      #
+      # They land in GOPATH/bin because that is the mount that survives: each
+      # step is its own `container run --rm`, so anything written to
+      # /usr/local/bin would be gone before GoReleaser ran.
+      - name: Install Syft (SBOM generator) and GoReleaser
+        run: |
+          .github/ci/in-linux.sh '
+            SYFT_VERSION=1.51.0
+            GORELEASER_VERSION=2.17.1
+            case "$(dpkg --print-architecture)" in
+              arm64) syftarch=arm64; grarch=arm64 ;;
+              amd64) syftarch=amd64; grarch=x86_64 ;;
+              *) echo "::error::unsupported architecture for Syft/GoReleaser"; exit 1 ;;
+            esac
+            mkdir -p "$(go env GOPATH)/bin"
+            curl -sSfL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_${syftarch}.tar.gz" \
+              | tar -xz -C "$(go env GOPATH)/bin" syft
+            curl -sSfL "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/goreleaser_Linux_${grarch}.tar.gz" \
+              | tar -xz -C "$(go env GOPATH)/bin" goreleaser
+            syft --version
+            goreleaser --version | head -3
+          '
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+        run: .github/ci/in-linux.sh 'goreleaser release --clean'

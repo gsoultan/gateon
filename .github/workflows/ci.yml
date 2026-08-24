@@ -8,24 +8,23 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    # Migrations run at startup and gateon advertises Postgres support, but the
-    # suite only ever exercised SQLite — the permissive one. A service container
-    # costs nothing here and turns "should work on Postgres" into a checked fact.
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: gateon
-          POSTGRES_PASSWORD: gateon
-          POSTGRES_DB: gateon_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    runs-on: self-hosted
+
+    # Every step below runs inside a Linux container, via .github/ci/in-linux.sh.
+    #
+    # The runner is a self-hosted Apple-silicon Mac, and this job is Linux-only
+    # in ways that are not cosmetic: it apt-gets an eBPF toolchain, runs bpf2go
+    # over bpf/*.c, and compiles internal/ebpf/manager_linux.go, which is
+    # `//go:build linux && !noebpf`. Running it natively on macOS would fall
+    # through to manager_other.go and drop XDP rate limiting out of CI without
+    # failing anything -- the same shape of silent hole the Postgres service
+    # below was added to close.
+    #
+    # Apple's `container` boots a real Linux VM, so the coverage is kept intact
+    # rather than traded away for the runner move.
+    env:
+      CI_IMAGE: gateon-ci
+
     steps:
       - name: Checkout
         # Full history: the lint step below uses --new-from-rev, which needs a
@@ -34,56 +33,119 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          check-latest: true
-
-      # The Linux build compiles internal/ebpf/manager_linux.go, which depends on
-      # the bpf2go-generated loader; this toolchain lets `go generate` compile the
-      # XDP C program and emit those bindings below.
-      - name: Install eBPF build toolchain
+      # The runner inherits whatever environment it was launched with, which
+      # need not include Homebrew's bin. Resolving `container` once here, and
+      # failing loudly if it is genuinely absent, keeps the later steps from
+      # failing as an unreadable "command not found" halfway through the job.
+      - name: Locate the container CLI
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+          if ! command -v container >/dev/null 2>&1; then
+            echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+            export PATH="/opt/homebrew/bin:$PATH"
+          fi
+          command -v container >/dev/null 2>&1 || {
+            echo "::error::Apple container CLI not found on the runner (brew install container)"
+            exit 1
+          }
+          container system start >/dev/null 2>&1 || true
+          container --version
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      # Cheap after the first run: the layers are content-addressed, so an
+      # unchanged Dockerfile.ci rebuilds from cache in a couple of seconds.
+      - name: Build the Linux CI image
+        run: container build -f .github/ci/Dockerfile.ci -t "$CI_IMAGE" .
 
-      - name: Install buf and proto plugins
+      # Migrations run at startup and gateon advertises Postgres support, but the
+      # suite only ever exercised SQLite -- the permissive one. This turns
+      # "should work on Postgres" into a checked fact.
+      #
+      # It was a `services:` block until the runner moved. Service containers
+      # need a Linux runner with a Docker daemon and cannot run on macOS at all,
+      # so it is an ordinary container now. Forcing the name away first makes the
+      # step idempotent: a cancelled run leaves its database behind, and the next
+      # run would otherwise fail on the name rather than on anything real.
+      - name: Start Postgres
         run: |
-          # Versions come from the `tool` directive in go.mod, so the
-          # generators are locked in go.sum and reviewed like any other
-          # dependency. `@latest` made every build pull whatever upstream
-          # had tagged at that moment: not reproducible, and a compromised
-          # upstream tag would have landed straight in a release artifact.
-          go install tool
+          container rm -f gateon-ci-pg >/dev/null 2>&1 || true
+          container run -d --name gateon-ci-pg \
+            -e POSTGRES_USER=gateon \
+            -e POSTGRES_PASSWORD=gateon \
+            -e POSTGRES_DB=gateon_test \
+            postgres:17-alpine
+
+      # `container run -d` returns once the VM is up, which is well before the
+      # server inside it answers a query. The address is discovered rather than
+      # assumed: containers here get their own 192.168.64.x address, and the
+      # build container reaches Postgres directly on it -- there is no host
+      # port to publish to, because both sides are containers.
+      - name: Wait for Postgres
+        run: |
+          for _ in $(seq 1 30); do
+            if container exec gateon-ci-pg pg_isready -U gateon -d gateon_test >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "${ready:-}" ]; then
+            echo "::error::Postgres never became ready; last 40 lines of its log:"
+            container logs gateon-ci-pg 2>&1 | tail -40
+            exit 1
+          fi
+
+          # From `container ls`, not `container inspect`: inspect reports the
+          # network the container was *asked* for -- {"network":"default"} --
+          # and never the address it was given. Only the listing has that, and
+          # the address is the one IPv4 in the row, so it is matched by shape
+          # rather than by column position.
+          #
+          # Retried because the address is assigned after the container is
+          # already running: the first run of this job found Postgres ready and
+          # its address still absent, and failed a second later.
+          for _ in $(seq 1 12); do
+            ip="$(container ls 2>/dev/null | awk '$1 == "gateon-ci-pg"' | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' | head -1)"
+            [ -n "$ip" ] && break
+            sleep 5
+          done
+          if [ -z "${ip:-}" ]; then
+            echo "::error::Postgres is running but has no address yet:"
+            container ls 2>&1 | grep gateon-ci-pg || true
+            exit 1
+          fi
+          echo "Postgres ready at $ip:5432"
+          echo "GATEON_TEST_POSTGRES_DSN=postgres://gateon:gateon@$ip:5432/gateon_test?sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Lint UI (accessibility gate)
-        run: |
-          bun install --frozen-lockfile --cwd ui
-          (cd ui && bun run lint)
+        run: .github/ci/in-linux.sh 'bun install --frozen-lockfile --cwd ui && cd ui && bun run lint'
+
+      - name: Install buf and proto plugins
+        # Versions come from the `tool` directive in go.mod, so the generators
+        # are locked in go.sum and reviewed like any other dependency.
+        # `@latest` made every build pull whatever upstream had tagged at that
+        # moment: not reproducible, and a compromised upstream tag would have
+        # landed straight in a release artifact.
+        run: .github/ci/in-linux.sh 'go install tool'
 
       - name: Generate all artifacts
         run: |
-          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
-          go generate ./...
-          # `go mod tidy` used to run here, which let a build mutate its own
-          # dependency set — the artifact could then be built against a
-          # different graph than the one reviewed. Verify instead: fail if the
-          # committed go.mod/go.sum are not already tidy.
-          cp go.mod go.mod.bak && cp go.sum go.sum.bak
-          go mod tidy
-          if ! diff -q go.mod go.mod.bak >/dev/null || ! diff -q go.sum go.sum.bak >/dev/null; then
-            echo "::error::go.mod/go.sum are not tidy - run 'go mod tidy' and commit the result"
-            diff go.mod.bak go.mod || true
-            diff go.sum.bak go.sum || true
-            exit 1
-          fi
-          rm -f go.mod.bak go.sum.bak
-          go mod verify
+          .github/ci/in-linux.sh '
+            PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+            go generate ./...
+            # `go mod tidy` used to run here, which let a build mutate its own
+            # dependency set -- the artifact could then be built against a
+            # different graph than the one reviewed. Verify instead: fail if the
+            # committed go.mod/go.sum are not already tidy.
+            cp go.mod go.mod.bak && cp go.sum go.sum.bak
+            go mod tidy
+            if ! diff -q go.mod go.mod.bak >/dev/null || ! diff -q go.sum go.sum.bak >/dev/null; then
+              echo "::error::go.mod/go.sum are not tidy - run '"'"'go mod tidy'"'"' and commit the result"
+              diff go.mod.bak go.mod || true
+              diff go.sum.bak go.sum || true
+              exit 1
+            fi
+            rm -f go.mod.bak go.sum.bak
+            go mod verify
+          '
 
       # Lints only what this pull request changed, against its merge base.
       # Gating on the whole tree is not an option while the pre-existing debt
@@ -92,7 +154,7 @@ jobs:
       #
       # This lives inside `build` rather than in a job of its own because
       # golangci-lint has to typecheck, and typechecking needs the generated
-      # protobuf and eBPF bindings that the step above produces — they are
+      # protobuf and eBPF bindings that the step above produces -- they are
       # gitignored, so a standalone lint job cannot compile the project at all.
       # A separate job would mean duplicating five setup steps and would drift
       # the first time one of them changed.
@@ -106,18 +168,23 @@ jobs:
           fi
 
       - name: Lint changed code
-        run: make lint-new LINT_BASE=${{ steps.lintbase.outputs.rev }}
+        run: .github/ci/in-linux.sh 'make lint-new LINT_BASE=${{ steps.lintbase.outputs.rev }}'
 
       - name: Build
-        run: go build ./...
+        run: .github/ci/in-linux.sh 'go build ./...'
 
       - name: Security invariants
-        run: ./scripts/check-security-invariants.sh
+        run: .github/ci/in-linux.sh './scripts/check-security-invariants.sh'
 
+      # -count=1 because the container's GOCACHE is mounted from the runner's
+      # disk and therefore survives between steps, jobs and runs. Go's test cache
+      # is content-addressed over the code and models nothing about which
+      # database answered, so without this an unchanged tree reports
+      # "ok (cached)" for the whole suite -- including the Postgres tests, having
+      # opened no connection. A hosted runner started cold every time and could
+      # never show this; this one would report it as a pass.
       - name: Test
-        env:
-          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
-        run: go test ./...
+        run: .github/ci/in-linux.sh 'go test -count=1 ./...'
 
       - name: Working tree clean after tests
         run: |
@@ -125,6 +192,10 @@ jobs:
           # noticed, because a dirty tree is invisible to every other gate --
           # the artifacts only surfaced as mystery files in `git status`, and
           # one of them made a test fail for an unrelated-looking reason.
+          #
+          # Run on the host rather than in the container: it is a plain git
+          # command, and git inside a bind mount owned by another uid needs a
+          # safe.directory exemption that would weaken the check.
           if [ -n "$(git status --porcelain)" ]; then
             echo "::error::the test run modified the working tree"
             git status --porcelain
@@ -134,28 +205,31 @@ jobs:
           echo "working tree clean"
 
       - name: Benchmarks (allocs/perf regression check)
-        run: go test -run '^$' -bench . -benchmem -benchtime 50000x ./pkg/proxy/ ./internal/telemetry/
+        run: .github/ci/in-linux.sh "go test -run '^\$' -bench . -benchmem -benchtime 50000x ./pkg/proxy/ ./internal/telemetry/"
 
+      # The runner is someone's own Mac. A database VM left running after every
+      # CI run is not an acceptable thing to leave on it, and `--rm` does not
+      # fire when a job is cancelled.
+      - name: Stop Postgres
+        if: always()
+        run: container rm -f gateon-ci-pg >/dev/null 2>&1 || true
 
   # The Playwright suite was untracked and therefore never ran anywhere. It
-  # covers the dashboard — RBAC, the Security Hub, mitigation flows, diagnostics
-  # — which nothing else exercises. It is a separate job because it needs
-  # browsers and boots the whole gateway, and it is allowed to fail for now:
-  # the suite is only just back under CI and blocking every PR on a suite whose
-  # baseline nobody has seen yet would stall the queue. Remove
-  # continue-on-error once a green run is the norm.
+  # covers the dashboard -- RBAC, the Security Hub, mitigation flows, diagnostics
+  # -- which nothing else exercises. It is a separate job because it needs
+  # browsers and boots the whole gateway.
   e2e-ui:
     name: e2e-ui (playwright)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # No continue-on-error. It was added when the suite could not pass, and it
     # is what let seven failures accumulate without anyone noticing: a job that
-    # cannot fail the build reports into a void. The suite is green now — 36
-    # passed, 0 failed — so a red e2e means something broke, and the build
+    # cannot fail the build reports into a void. The suite is green now -- 36
+    # passed, 0 failed -- so a red e2e means something broke, and the build
     # should say so.
     # A hard ceiling, because the suite has already demonstrated it can run
     # away: workers is 1, retries is 2, and the slowest tests allow 180s, so a
-    # run where most tests time out is 104 x 3 x 180s — the better part of a
-    # day — and one such run sat at 1h37m before this was added. The Playwright
+    # run where most tests time out is 104 x 3 x 180s -- the better part of a
+    # day -- and one such run sat at 1h37m before this was added. The Playwright
     # globalTimeout below is set lower so the usual outcome is a graceful exit
     # with a report; this is the backstop for when the runner is wedged and
     # Playwright itself never gets to decide.
@@ -164,43 +238,65 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # This job runs natively on macOS rather than in the Linux container the
+      # build job uses. It drives a browser against a running gateway and never
+      # touches the eBPF path -- the XDP manager is Linux-only and the dashboard
+      # does not exercise it -- so the container would buy nothing and cost real
+      # time against the 45-minute ceiling above.
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           check-latest: true
-
-      - name: Install eBPF build toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+          # The runner keeps its Go caches on disk between jobs, so there is
+          # nothing to restore and re-uploading them is pure cost.
+          cache: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      # buf generate shells out to ui/node_modules/.bin/protoc-gen-es, which is
+      # a script with a `#!/usr/bin/env node` shebang -- bun does not answer to
+      # that name. The hosted ubuntu image had node preinstalled; this runner
+      # has none, and the first run of this job failed with
+      # "env: node: No such file or directory" reported as
+      # "plugin protoc-gen-es: exit status 127".
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Install buf and proto plugins
+        # Versions come from the `tool` directive in go.mod, so the generators
+        # are locked in go.sum and reviewed like any other dependency.
         run: |
-          # Versions come from the `tool` directive in go.mod, so the
-          # generators are locked in go.sum and reviewed like any other
-          # dependency. `@latest` made every build pull whatever upstream
-          # had tagged at that moment: not reproducible, and a compromised
-          # upstream tag would have landed straight in a release artifact.
           go install tool
           bun install --frozen-lockfile --cwd ui
 
+      # Scoped to ./internal/ui/... rather than ./... on purpose. internal/ui/ui.go
+      # embeds `all:dist`, so the dashboard has to be built before the binary
+      # will link -- without it this job failed with
+      # "pattern all:dist: no matching files found". The unscoped `go generate`
+      # the hosted runner used would also fire internal/ebpf's bpf2go
+      # directive, which needs a BPF-target clang this machine does not have;
+      # that codegen belongs to the build job's Linux container.
       - name: Generate all artifacts
         run: |
           PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
-          go generate ./...
+          go generate ./internal/ui/...
 
       # playwright.config.ts starts gateon itself from the repo root, with the
       # e2e config and mockbin on PATH, so the binary has to exist there.
+      #
+      # Built with noebpf: the bpf2go bindings are generated in the build job's
+      # Linux container and are not present here, and manager_linux.go would not
+      # be selected on darwin regardless. The dashboard suite does not reach the
+      # XDP path, so this loses no coverage that this job ever had.
       - name: Build gateon
-        run: go build -o gateon ./cmd/gateon
+        run: go build -tags=noebpf -o gateon ./cmd/gateon
 
       # The e2e config points TLS at tests/e2e/cert.pem, which is generated
-      # rather than committed — a checked-in private key is a liability even
+      # rather than committed -- a checked-in private key is a liability even
       # when it is only for a test listener. env.go makes its own for the Go
       # suite; the Playwright harness reads these paths straight from the
       # config, so they have to exist before the gateway starts.
@@ -212,10 +308,13 @@ jobs:
             -subj "/CN=localhost" \
             -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
+      # --with-deps is dropped: it shells out to apt-get to install shared
+      # libraries Chromium needs on Debian, and there is no apt here. macOS
+      # needs no equivalent -- the browser download is self-contained.
       - name: Install Playwright and Chromium
         run: |
           bun install --frozen-lockfile --cwd tests/e2e
-          cd tests/e2e && bunx playwright install --with-deps chromium
+          cd tests/e2e && bunx playwright install chromium
 
       - name: Run Playwright suite
         working-directory: tests/e2e
