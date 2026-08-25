@@ -88,13 +88,6 @@ struct {
 } phantom_ports SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u32);   // Country Code (Simplified)
-    __type(value, __u32);
-} country_block_map SEC(".maps");
-
-struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 10240);
     __type(key, __u32);   // IPv4 address
@@ -441,8 +434,8 @@ int xdp_gateon_main(struct xdp_md *ctx) {
 // rather than being half-ported into a hook that cannot express them.
 //
 // These read the SAME maps as the XDP program, so ShunIP, BlocklistCuckoo,
-// BlockCountry, SetAdaptiveRateLimit and UpdateManagementWhitelist all keep
-// working with no Go-side change regardless of which hook is attached.
+// SetAdaptiveRateLimit and UpdateManagementWhitelist all keep working with no
+// Go-side change regardless of which hook is attached.
 
 #ifndef TC_ACT_OK
 #define TC_ACT_OK 0
@@ -485,12 +478,6 @@ static __always_inline int tc_filter_ipv4(struct iphdr *iph) {
         count_drop(DROP_REASON_SHUNNED_IP);
         return TC_ACT_SHOT;
     }
-
-    // NOTE: country_block_map is deliberately NOT consulted here. It is keyed by
-    // a hashed country code, not by an address, so a lookup with src_ip would
-    // drop whichever sources collided with a country ID. The XDP program does
-    // not consult it either; wiring BlockCountry up needs an LPM trie of geo
-    // ranges, which is its own change.
 
     __u64 now = bpf_ktime_get_ns();
     __u64 min_interval = 1000000; // 1ms default (1000 pps), as in the XDP path

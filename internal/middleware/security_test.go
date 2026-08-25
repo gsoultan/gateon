@@ -78,7 +78,6 @@ func (m *mockEbpfManager) getShunnedIP() string {
 	return m.shunnedIP
 }
 func (m *mockEbpfManager) UnshunIP(ip string) error                                     { return nil }
-func (m *mockEbpfManager) BlockCountry(countryCode string) error                        { return nil }
 func (m *mockEbpfManager) UpdateManagementWhitelist(ips []string) error                 { return nil }
 func (m *mockEbpfManager) SetPortKnockingSequence(seq []int32) error                    { return nil }
 func (m *mockEbpfManager) Start(ctx context.Context)                                    {}

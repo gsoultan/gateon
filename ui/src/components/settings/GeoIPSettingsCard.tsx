@@ -359,14 +359,6 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             hidePickedOptions
           />
 
-          <Switch
-            label="Enable XDP Geofencing"
-            description="Perform geofencing at the kernel level using eBPF/XDP for higher performance"
-            checked={config.xdpGeofencing}
-            onChange={(e) => onChange({ ...config, xdpGeofencing: e.currentTarget.checked })}
-            disabled={!config.enabled || disabled}
-          />
-
           {onSave && (
             <Group justify="flex-end" mt="md">
               <Button onClick={onSave} loading={saving} size="sm" disabled={disabled}>

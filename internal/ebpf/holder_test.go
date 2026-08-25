@@ -23,7 +23,6 @@ type stubManager struct {
 func (s *stubManager) Start(context.Context)                     { s.started = true }
 func (s *stubManager) ShunIP(ip string) error                    { s.callCount++; s.lastShun = ip; return s.err }
 func (s *stubManager) UnshunIP(string) error                     { s.callCount++; return s.err }
-func (s *stubManager) BlockCountry(string) error                 { s.callCount++; return s.err }
 func (s *stubManager) UpdateManagementWhitelist([]string) error  { s.callCount++; return s.err }
 func (s *stubManager) SetPortKnockingSequence([]int32) error     { s.callCount++; return s.err }
 func (s *stubManager) UpdateLoadBalancerBackends([]string) error { s.callCount++; return s.err }
@@ -60,7 +59,6 @@ func TestHolderNoOpWhenEmpty(t *testing.T) {
 	}{
 		{"ShunIP", func() error { return h.ShunIP("1.2.3.4") }},
 		{"UnshunIP", func() error { return h.UnshunIP("1.2.3.4") }},
-		{"BlockCountry", func() error { return h.BlockCountry("US") }},
 		{"UpdateManagementWhitelist", func() error { return h.UpdateManagementWhitelist(nil) }},
 		{"SetPortKnockingSequence", func() error { return h.SetPortKnockingSequence(nil) }},
 		{"UpdateLoadBalancerBackends", func() error { return h.UpdateLoadBalancerBackends(nil) }},

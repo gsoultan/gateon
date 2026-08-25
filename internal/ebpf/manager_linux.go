@@ -31,7 +31,6 @@ var mapNames = []string{
 	"shunned_ips",
 	"drop_stats",
 	"adaptive_limits",
-	"country_block_map",
 	"mgmt_whitelist",
 	"knocking_config",
 	"lb_backends",
