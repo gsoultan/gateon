@@ -1,10 +1,13 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-HAS_EBPF := $(wildcard internal/ebpf/gateon_ebpf_bpfel.go)
+HAS_EBPF := $(wildcard internal/ebpf/gateon_ebpf_bpf*.go)
 ifeq ($(HAS_EBPF),)
 	BUILD_TAGS ?= noebpf
 else
 	BUILD_TAGS ?=
 endif
+# Container runtime for ebpf-docker. podman is a drop-in replacement and is the
+# likely one to have on a Mac without Docker Desktop: `make ebpf-docker CONTAINER=podman`.
+CONTAINER ?= docker
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
@@ -31,8 +34,8 @@ ebpf:
 ##              it is reproducible from macOS/Windows (no local BPF toolchain
 ##              needed). Generated artifacts land in the working tree, ignored.
 ebpf-docker:
-	docker build -f internal/ebpf/Dockerfile.gen -t gateon-ebpf-gen .
-	docker run --rm -v "$(CURDIR)":/src -w /src gateon-ebpf-gen \
+	$(CONTAINER) build -f internal/ebpf/Dockerfile.gen -t gateon-ebpf-gen .
+	$(CONTAINER) run --rm -v "$(CURDIR)":/src:Z -w /src gateon-ebpf-gen \
 		sh -c 'go generate ./internal/ebpf/...'
 
 ## build: build the gateon binary for the current host. The Go toolchain automatically

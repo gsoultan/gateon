@@ -8,16 +8,19 @@ package ebpf
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
-// xdpProgName is the entry-point program section name in bpf/xdp_rate_limit.c.
-const xdpProgName = "xdp_gateon_main"
+// Entry-point program names in bpf/xdp_rate_limit.c.
+const (
+	xdpProgName = "xdp_gateon_main"
+	tcProgName  = "tc_gateon_ingress"
+)
 
 // mapNames are the BPF maps the Go side mutates or reads, keyed by their C
 // names in bpf/xdp_rate_limit.c. They MUST match the string keys used by the
@@ -57,6 +60,12 @@ type closerFunc func() error
 func (f closerFunc) Close() error { return f() }
 
 // Start initiates the eBPF subsystem loading on Linux.
+//
+// XDP and TC are alternatives, not layers. Both hooks read the same maps and
+// make the same drop decisions, and XDP sits strictly earlier in the stack, so
+// running both would mean TC re-checking only the packets XDP already passed.
+// TC is therefore loaded when XDP is not wanted, or when XDP was wanted and
+// could not attach — which is exactly the EC2 case the diagnosis points at.
 func (m *EbpfManager) Start(ctx context.Context) {
 	if m.config == nil || !m.config.Enabled {
 		return
@@ -70,20 +79,88 @@ func (m *EbpfManager) Start(ctx context.Context) {
 
 	if m.config.XdpRateLimit || m.config.XdpIpShunning || m.config.XdpLoadBalancing {
 		m.loadXDP(ctx)
+		if m.isAttached() {
+			if m.config.TcFiltering {
+				logger.L.LogInfo("tc_filtering ignored: XDP is attached and filters strictly earlier",
+					"interface", m.ifaceName())
+			}
+			return
+		}
+		if m.config.TcFiltering {
+			logger.L.LogInfo("XDP did not attach; falling back to the TC ingress hook as configured",
+				"interface", m.ifaceName())
+		}
 	}
+
 	if m.config.TcFiltering {
 		m.loadTC(ctx)
+		if gaps := tcUnsupported(m.config); m.isAttached() && len(gaps) > 0 {
+			logger.L.LogWarn("TC ingress cannot enforce every configured eBPF feature; "+
+				"these are NOT in force on this hook and need native XDP",
+				"interface", m.ifaceName(), "unenforced", gaps)
+		}
 	}
 }
 
-// loadXDP loads the compiled XDP program, registers its maps so the mutation
-// methods can update them, attaches it to the configured interface, pushes the
-// runtime config into the kernel, and arms teardown on context cancellation.
-func (m *EbpfManager) loadXDP(ctx context.Context) {
-	ifaceName := "eth0"
-	if m.config.Interface != "" {
-		ifaceName = m.config.Interface
+// isAttached reports whether a hook is currently attached.
+func (m *EbpfManager) isAttached() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.attached
+}
+
+// ifaceName is the configured interface, defaulting to eth0. Note that modern
+// EC2 AMIs name the primary interface ens5 or enX0, so the default is only
+// right inside a container netns.
+func (m *EbpfManager) ifaceName() string {
+	if m.config != nil && m.config.Interface != "" {
+		return m.config.Interface
 	}
+	return "eth0"
+}
+
+// hookSpec describes one attachable program. XDP and TC differ only in which
+// program they pull from the collection and how they attach it, so they share
+// the load path rather than duplicating the collection lifecycle — two
+// collections would mean two independent sets of maps, and the Go-side mutators
+// would silently only reach one of them.
+type hookSpec struct {
+	progName string
+	label    string
+	attach   func(prog *ebpf.Program, iface *net.Interface) (io.Closer, string, error)
+}
+
+// loadXDP loads and attaches the XDP program.
+func (m *EbpfManager) loadXDP(ctx context.Context) {
+	m.loadHook(ctx, hookSpec{
+		progName: xdpProgName,
+		label:    "XDP",
+		attach: func(prog *ebpf.Program, iface *net.Interface) (io.Closer, string, error) {
+			l, mode, err := attachXDP(prog, iface, allowGenericXDP(m.config))
+			if err != nil {
+				return nil, "", err
+			}
+			return l, mode, nil
+		},
+	})
+}
+
+// loadTC loads and attaches the TC (clsact ingress) program.
+func (m *EbpfManager) loadTC(ctx context.Context) {
+	m.loadHook(ctx, hookSpec{
+		progName: tcProgName,
+		label:    "TC",
+		attach: func(prog *ebpf.Program, iface *net.Interface) (io.Closer, string, error) {
+			return attachTC(prog, iface)
+		},
+	})
+}
+
+// loadHook loads the compiled object, resolves the hook's program, attaches it
+// to the configured interface, and hands off to commit for map registration and
+// teardown wiring.
+func (m *EbpfManager) loadHook(ctx context.Context, h hookSpec) {
+	ifaceName := m.ifaceName()
 
 	// setErr records why the load failed so GetMapStats can surface it (the
 	// real answer to "why are the metrics zero?").
@@ -94,7 +171,7 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 		m.iface = ifaceName
 		m.attachMode = ""
 		m.mu.Unlock()
-		logger.L.LogError("eBPF XDP load failed", "interface", ifaceName, "error", err)
+		logger.L.LogError("eBPF load failed", "hook", h.label, "interface", ifaceName, "error", err)
 	}
 
 	iface, err := net.InterfaceByName(ifaceName)
@@ -103,7 +180,7 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 		return
 	}
 
-	// XDP map/program creation needs the memlock rlimit lifted on older kernels.
+	// Map/program creation needs the memlock rlimit lifted on older kernels.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		setErr(fmt.Errorf("remove memlock rlimit: %w", err))
 		return
@@ -121,20 +198,26 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 		return
 	}
 
-	prog := coll.Programs[xdpProgName]
+	prog := coll.Programs[h.progName]
 	if prog == nil {
 		coll.Close()
-		setErr(fmt.Errorf("program %q not found in collection", xdpProgName))
+		setErr(fmt.Errorf("program %q not found in collection", h.progName))
 		return
 	}
 
-	l, mode, err := attachXDPWithFallback(prog, iface.Index)
+	l, mode, err := h.attach(prog, iface)
 	if err != nil {
 		coll.Close()
-		setErr(fmt.Errorf("attach XDP to %s: %w", ifaceName, err))
+		setErr(fmt.Errorf("attach %s to %s: %w", h.label, ifaceName, err))
 		return
 	}
 
+	m.commit(ctx, coll, l, ifaceName, mode, h.label)
+}
+
+// commit registers the collection's maps, records attach state, pushes runtime
+// config into the kernel, and arms teardown on context cancellation.
+func (m *EbpfManager) commit(ctx context.Context, coll *ebpf.Collection, l io.Closer, ifaceName, mode, label string) {
 	m.mu.Lock()
 	for _, name := range mapNames {
 		if mp := coll.Maps[name]; mp != nil {
@@ -143,9 +226,9 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 			logger.L.LogError("expected eBPF map missing from collection", "map", name)
 		}
 	}
-	// Close order at teardown is reverse: link first (detaches XDP), then the
-	// collection (frees programs and maps). *ebpf.Collection.Close() returns no
-	// error, so wrap it to satisfy io.Closer.
+	// Close order at teardown is reverse: link first (detaches the program),
+	// then the collection (frees programs and maps). *ebpf.Collection.Close()
+	// returns no error, so wrap it to satisfy io.Closer.
 	m.closers = append(m.closers, l, closerFunc(func() error {
 		coll.Close()
 		return nil
@@ -159,55 +242,20 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 	// Push runtime config into the kernel now that the maps exist.
 	m.applyRuntimeConfig()
 
-	if mode == "generic" {
-		logger.L.LogWarn("XDP attached in generic (SKB) mode; native driver mode unavailable on this NIC, performance will be reduced",
+	if mode == attachModeGeneric {
+		logger.L.LogWarn("XDP attached in generic (SKB) mode by explicit opt-in; every packet now pays the "+
+			"program cost without being dropped any earlier — prefer tc_filtering on this NIC",
 			"interface", ifaceName)
 	} else {
-		logger.L.LogInfo("XDP performance offloading attached", "interface", ifaceName, "mode", mode)
+		logger.L.LogInfo("eBPF offloading attached", "hook", label, "interface", ifaceName, "mode", mode)
 	}
 
 	// Detach and free on context cancellation (supervisor reconfigure / shutdown).
 	go func() {
 		<-ctx.Done()
-		logger.L.LogInfo("Detaching XDP program", "interface", ifaceName)
+		logger.L.LogInfo("Detaching eBPF program", "hook", label, "interface", ifaceName)
 		m.close()
 	}()
-}
-
-// attachXDPWithFallback attaches the XDP program preferring native driver mode
-// (fastest — runs in the NIC driver before skb allocation) and falling back to
-// generic/SKB mode when the driver or kernel rejects the native attach.
-//
-// Virtualized NICs frequently reject native XDP: AWS ENA (ens5) enforces queue
-// count and MTU constraints and otherwise returns EINVAL ("create link: invalid
-// argument"), and some kernels/drivers don't implement the ndo_bpf hook at all.
-// Generic mode hooks higher in the network stack so it works almost everywhere,
-// trading throughput for compatibility. Returning the mode lets callers surface
-// the trade-off instead of silently running slow or, previously, not attaching
-// at all.
-func attachXDPWithFallback(prog *ebpf.Program, ifaceIndex int) (link.Link, string, error) {
-	// First try native/driver mode. Default flags (0) ask the kernel for the
-	// best available native attach; it does NOT fall back to generic on its own.
-	l, err := link.AttachXDP(link.XDPOptions{
-		Program:   prog,
-		Interface: ifaceIndex,
-	})
-	if err == nil {
-		return l, "native", nil
-	}
-	nativeErr := err
-
-	// Fall back to generic (SKB) mode, which is supported on virtually any NIC.
-	l, err = link.AttachXDP(link.XDPOptions{
-		Program:   prog,
-		Interface: ifaceIndex,
-		Flags:     link.XDPGenericMode,
-	})
-	if err == nil {
-		return l, "generic", nil
-	}
-
-	return nil, "", fmt.Errorf("native mode failed (%v); generic mode failed: %w", nativeErr, err)
 }
 
 // applyRuntimeConfig writes the manager's configuration into the kernel maps
@@ -232,10 +280,4 @@ func (m *EbpfManager) applyRuntimeConfig() {
 			logger.L.LogError("failed to seed port-knocking sequence", "error", err)
 		}
 	}
-}
-
-// loadTC is reserved for Traffic Control offloading, which is not yet implemented.
-func (m *EbpfManager) loadTC(ctx context.Context) {
-	_ = ctx
-	logger.L.LogInfo("eBPF TC filtering requested but not yet implemented; skipping")
 }

@@ -52,9 +52,9 @@ type EbpfManager struct {
 	loadErr  string
 	// RL feedback handler (injected from internal/ai to avoid circular deps)
 	rlFeedbackHandler func(ip string, score float64)
-	// attachMode records how XDP attached: "native" (driver-level, fastest) or
-	// "generic" (SKB/stack-level, a slower fallback used when the driver rejects
-	// native attach — common on virtualized NICs such as AWS ENA/ens5).
+	// attachMode records how the program attached: "native" (driver-level, the
+	// only mode that pays for itself), "generic" (SKB-level, opt-in only — see
+	// allow_generic_xdp), or "tcx"/"clsact" for the TC ingress path.
 	attachMode string
 }
 
@@ -69,9 +69,10 @@ type MapStats struct {
 	Interface string
 	// LoadError holds the last load/attach failure, if any.
 	LoadError string
-	// AttachMode is "native" or "generic" when attached, empty otherwise. Generic
-	// mode is a slower SKB-level fallback; surfacing it lets operators understand
-	// the performance trade-off when native XDP isn't available on the NIC.
+	// AttachMode is "native", "generic", "tcx" or "clsact" when attached, empty
+	// otherwise. Anything other than "native" runs after the skb is allocated and
+	// so drops no earlier than a firewall rule; surfacing the mode lets operators
+	// see which trade-off they are actually running.
 	AttachMode string
 }
 

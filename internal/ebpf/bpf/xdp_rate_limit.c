@@ -423,4 +423,111 @@ int xdp_gateon_main(struct xdp_md *ctx) {
     return XDP_PASS;
 }
 
+// ---------------------------------------------------------------------------
+// TC (clsact) ingress path
+// ---------------------------------------------------------------------------
+//
+// Same filtering decisions as the XDP program, at the hook that actually works
+// on a virtualized NIC. Native XDP is unavailable on most EC2 instances (the
+// ENA driver rejects it above a page-sized MTU and when the driver is using
+// every queue), and generic/SKB XDP is a trap: it runs at roughly this point in
+// the stack anyway, but additionally demands 256 bytes of XDP_PACKET_HEADROOM
+// — calling pskb_expand_head() when the skb lacks it — and linearizes non-linear
+// skbs. The clsact ingress hook has neither requirement, so for a pure drop
+// decision it is strictly cheaper than generic XDP and works at MTU 9001.
+//
+// It deliberately implements only the drop decisions. Port knocking mutates
+// per-IP state and load balancing needs XDP_TX/redirect; both stay XDP-only
+// rather than being half-ported into a hook that cannot express them.
+//
+// These read the SAME maps as the XDP program, so ShunIP, BlocklistCuckoo,
+// BlockCountry, SetAdaptiveRateLimit and UpdateManagementWhitelist all keep
+// working with no Go-side change regardless of which hook is attached.
+
+#ifndef TC_ACT_OK
+#define TC_ACT_OK 0
+#endif
+#ifndef TC_ACT_SHOT
+#define TC_ACT_SHOT 2
+#endif
+
+// tc_filter_ipv4 returns TC_ACT_SHOT when the source address must be dropped.
+// Split out of the entry point to keep each function within the verifier's
+// comfort zone and to mirror handle_ip_packet's ordering exactly: whitelist
+// first, then the blocklists, then the rate limiter.
+static __always_inline int tc_filter_ipv4(struct iphdr *iph) {
+    __u32 src_ip = iph->saddr;
+
+    // The management whitelist short-circuits before any drop check so an
+    // operator can never lock themselves out with a bad rule.
+    __u32 config_key = 0;
+    struct ebpf_config *cfg = bpf_map_lookup_elem(&global_ebpf_config, &config_key);
+    if (cfg && cfg->enable_mgmt_whitelist) {
+        if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return TC_ACT_OK;
+    }
+
+    // Telemetry, LRU-backed so a spoofed-source flood cannot grow it without
+    // bound. Same map the XDP path feeds, so GetTopIPs is hook-agnostic.
+    __u64 *p_count = bpf_map_lookup_elem(&ip_telemetry, &src_ip);
+    if (p_count) {
+        __sync_fetch_and_add(p_count, 1);
+    } else {
+        __u64 init_count = 1;
+        bpf_map_update_elem(&ip_telemetry, &src_ip, &init_count, BPF_ANY);
+    }
+
+    if (bpf_map_lookup_elem(&shunned_ips, &src_ip)) {
+        count_drop(DROP_REASON_SHUNNED_IP);
+        return TC_ACT_SHOT;
+    }
+
+    if (bpf_map_lookup_elem(&cuckoo_filter, &src_ip)) {
+        count_drop(DROP_REASON_SHUNNED_IP);
+        return TC_ACT_SHOT;
+    }
+
+    // NOTE: country_block_map is deliberately NOT consulted here. It is keyed by
+    // a hashed country code, not by an address, so a lookup with src_ip would
+    // drop whichever sources collided with a country ID. The XDP program does
+    // not consult it either; wiring BlockCountry up needs an LPM trie of geo
+    // ranges, which is its own change.
+
+    __u64 now = bpf_ktime_get_ns();
+    __u64 min_interval = 1000000; // 1ms default (1000 pps), as in the XDP path
+    __u64 *custom_limit = bpf_map_lookup_elem(&adaptive_limits, &src_ip);
+    if (custom_limit) {
+        min_interval = *custom_limit;
+    }
+
+    __u64 *last_seen = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
+    if (last_seen) {
+        if (now - *last_seen < min_interval) {
+            count_drop(DROP_REASON_RATE_LIMITED);
+            return TC_ACT_SHOT;
+        }
+    }
+    bpf_map_update_elem(&rate_limit_map, &src_ip, &now, BPF_ANY);
+
+    return TC_ACT_OK;
+}
+
+SEC("tc")
+int tc_gateon_ingress(struct __sk_buff *ctx) {
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+
+    struct ethhdr *eth = data;
+    if ((void *)(eth + 1) > data_end)
+        return TC_ACT_OK;
+
+    if (eth->h_proto != __constant_htons(ETH_P_IP))
+        return TC_ACT_OK;
+
+    struct iphdr *iph = (void *)(eth + 1);
+    if ((void *)(iph + 1) > data_end)
+        return TC_ACT_OK;
+
+    return tc_filter_ipv4(iph);
+}
+
 char _license[] SEC("license") = "GPL";
