@@ -1,0 +1,31 @@
+# Accepted trivy misconfiguration findings, scoped by exact path and recorded
+# here rather than by widening --skip-dirs, so each acceptance is auditable and
+# a *new* offending file of the same shape is still caught.
+#
+# Nothing deployable is ignored: the production Dockerfile scans clean, and the
+# two entries below are build-only tooling and agent-framework scaffolding that
+# Gateon never ships. The agent directories already carry the same status in
+# scripts/check-security-invariants.sh, which exempts .agents/ and friends as
+# "tooling checked into the repo, not Gateon source".
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - ".github/ci/Dockerfile.ci"
+      - "internal/ebpf/Dockerfile.gen"
+    statement: >-
+      Build-only images. Neither is deployed or run as a service; both are
+      ephemeral build environments that must install packages and compile as
+      root. The shipped Dockerfile runs nonroot and scans clean.
+  - id: KSV-0014
+    paths:
+      - ".agents/skills/k8s-manifest-generator/assets/deployment-template.yaml"
+      - "agent/skills/k8s-manifest-generator/assets/deployment-template.yaml"
+    statement: >-
+      Agent-framework skill scaffolding, not a Gateon-deployed manifest. Same
+      not-Gateon-source status as the .agents/ SPDX exemption.
+  - id: KSV-0108
+    paths:
+      - ".agents/skills/k8s-manifest-generator/assets/service-template.yaml"
+      - "agent/skills/k8s-manifest-generator/assets/service-template.yaml"
+    statement: >-
+      Agent-framework skill scaffolding, not a Gateon-deployed manifest.

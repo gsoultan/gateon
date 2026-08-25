@@ -248,6 +248,7 @@ jobs:
             --exit-code 1 \
             --format sarif \
             --output trivy.sarif \
+            --ignorefile .trivyignore.yaml \
             --skip-dirs "ui/.bun-cache" \
             --skip-dirs "**/node_modules"
 
@@ -266,5 +267,6 @@ jobs:
             --ignore-unfixed \
             --exit-code 0 \
             --format table \
+            --ignorefile .trivyignore.yaml \
             --skip-dirs "ui/.bun-cache" \
             --skip-dirs "**/node_modules"
