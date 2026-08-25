@@ -507,7 +507,6 @@ export interface GeoIPConfig {
   updateIntervalDays?: number;
   blockedCountries?: string[];
   allowedCountries?: string[];
-  xdpGeofencing?: boolean;
 }
 
 export type GlobalConfig = {

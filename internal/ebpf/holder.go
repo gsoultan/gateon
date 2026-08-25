@@ -77,14 +77,6 @@ func (h *Holder) UnshunIP(ip string) error {
 	return nil
 }
 
-// BlockCountry delegates to the active manager, if any.
-func (h *Holder) BlockCountry(countryCode string) error {
-	if m := h.Current(); m != nil {
-		return m.BlockCountry(countryCode)
-	}
-	return nil
-}
-
 // UpdateManagementWhitelist delegates to the active manager, if any.
 func (h *Holder) UpdateManagementWhitelist(ips []string) error {
 	if m := h.Current(); m != nil {

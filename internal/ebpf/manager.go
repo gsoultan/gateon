@@ -81,7 +81,6 @@ type Manager interface {
 	Start(ctx context.Context)
 	ShunIP(ip string) error
 	UnshunIP(ip string) error
-	BlockCountry(countryCode string) error
 	UpdateManagementWhitelist(ips []string) error
 	SetPortKnockingSequence(seq []int32) error
 	UpdateLoadBalancerBackends(ips []string) error
@@ -215,27 +214,6 @@ func (m *EbpfManager) UnshunIP(ip string) error {
 		m.shunnedCount.Add(-1)
 	}
 	return err
-}
-
-// BlockCountry adds a country code (converted to a numeric ID) to the XDP blocklist.
-func (m *EbpfManager) BlockCountry(countryCode string) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	blockMap, ok := m.maps["country_block_map"]
-	if !ok {
-		return fmt.Errorf("country_block_map not loaded")
-	}
-
-	// Simple hash for country code to 32-bit ID
-	var id uint32
-	if len(countryCode) >= 2 {
-		id = uint32(countryCode[0])<<8 | uint32(countryCode[1])
-	}
-
-	logger.L.LogInfo("Blocking country at XDP level", "country", countryCode, "id", id)
-	val := uint32(1)
-	return blockMap.Update(id, val, ebpf.UpdateAny)
 }
 
 // UpdateManagementWhitelist updates the list of IPs allowed to access management port.

@@ -96,7 +96,12 @@ XDP was wanted and could not attach.
 - Teardown removes only the filter it installed, and removes the clsact qdisc
   only if it created it: deleting a borrowed clsact takes every filter on it,
   including egress filters belonging to a CNI.
-- `BlockCountry` remains a no-op. `country_block_map` is keyed by a hashed
-  country code, not an address, and neither program consults it; wiring it up
-  needs an LPM trie of geo ranges and is out of scope here. This was found
-  while porting the checks and is called out rather than papered over.
+- **XDP geofencing is removed rather than left dead.** Porting the checks to TC
+  revealed that `country_block_map` is keyed by a hashed country code, not an
+  address, and that no BPF program reads it — so `BlockCountry`, and the
+  `geoip.xdp_geofencing` toggle that drove it, did nothing. Geofencing is
+  enforced by `internal/middleware/geoip.go` against MaxMind and never depended
+  on the flag, so removal costs no capability; leaving a dashboard switch
+  labelled "Perform geofencing at the kernel level" attached to nothing would.
+  Proto tag 7 is `reserved`. A real kernel-level path needs an LPM trie of geo
+  ranges and would be a new field.

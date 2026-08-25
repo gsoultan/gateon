@@ -1136,22 +1136,14 @@ func (s *ApiService) applyBlockCountryRecommendation(ctx context.Context, countr
 		}
 	}
 	globalCfg.Geoip.BlockedCountries = append(globalCfg.Geoip.BlockedCountries, countryCode)
-	globalCfg.Geoip.XdpGeofencing = true
 
 	if err := s.Globals.Update(ctx, globalCfg); err != nil {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update config: %v", err)}, nil
 	}
 
-	// Update eBPF if available
-	if s.EbpfManager != nil {
-		if err := s.EbpfManager.BlockCountry(countryCode); err != nil {
-			logger.L.Warn().Err(err).Str("country", countryCode).Msg("Failed to update eBPF geofence blocklist")
-		}
-	}
-
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
-		Message: fmt.Sprintf("Country %s has been added to the blocklist and eBPF/XDP geofencing is enabled.", countryCode),
+		Message: fmt.Sprintf("Country %s has been added to the blocklist.", countryCode),
 	}, nil
 }
 

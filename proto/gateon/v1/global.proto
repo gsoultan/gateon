@@ -181,8 +181,12 @@ message GeoIPConfig {
   repeated string blocked_countries = 6;
   // AllowedCountries is a list of ISO country codes to allow.
   repeated string allowed_countries = 8;
-  // XdpGeofencing, if true, uses eBPF/XDP to block countries at the kernel level.
-  bool xdp_geofencing = 7;
+  // 7 was xdp_geofencing, removed 2026-08-25. It drove EbpfManager.BlockCountry,
+  // which wrote to country_block_map -- a map keyed by a hashed country code that
+  // no BPF program ever read. Geofencing is enforced by internal/middleware/geoip.go
+  // against MaxMind and was never affected by this flag. Reinstating a kernel-level
+  // path needs an LPM trie of geo ranges, which would be a new field.
+  reserved 7;
   // AsnDbPath is the path to the GeoLite2-ASN.mmdb database used to resolve the
   // autonomous system (ASN) of attacking IPs. Optional; defaults to
   // geoip/GeoLite2-ASN.mmdb when present.
