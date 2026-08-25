@@ -1,0 +1,129 @@
+name: extended
+
+# Heavier checks than the per-PR gates: they build and run the shipped container
+# and drive minutes of load through the real binary. Running them on every push
+# would tax the queue for little gain, so they run on merges to main, nightly to
+# catch environmental drift, and on demand.
+on:
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Builds the production image exactly as release does and proves the shipped
+  # artifact actually runs: as a non-root user (the ops invariant that a scan of
+  # the Dockerfile cannot confirm on its own), without crash-looping on startup,
+  # and draining cleanly on SIGTERM the way `docker stop` sends it.
+  docker-smoke:
+    name: docker-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build the production image
+        run: docker build -t gateon:ci .
+
+      # distroless nonroot has no shell, so this reads the image config rather
+      # than exec-ing `id`. A root image here is a release blocker.
+      - name: Image runs as non-root
+        run: |
+          user="$(docker inspect --format '{{.Config.User}}' gateon:ci)"
+          echo "image user: '${user}'"
+          case "$user" in
+            nonroot* | 65532*) echo "ok: non-root" ;;
+            *) echo "::error::image runs as '${user}', expected nonroot"; exit 1 ;;
+          esac
+
+      - name: Container starts, serves health, and does not crash-loop
+        run: |
+          docker run -d --name gateon-ci -p 8080:8080 gateon:ci
+          # First run has no config mounted, so the gateway fails closed on the
+          # management API but must still start and serve the public health
+          # endpoint. Give it room, then require both "still running" and a
+          # health response.
+          ok=""
+          for i in $(seq 1 30); do
+            if ! docker ps --filter name=gateon-ci --filter status=running -q | grep -q .; then
+              echo "::error::container exited during startup"
+              docker logs gateon-ci || true
+              exit 1
+            fi
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/healthz" || true)"
+            if [ "$code" = "200" ] || [ "$code" = "204" ]; then ok=1; echo "healthz -> $code after ${i}s"; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::/healthz never became ready"
+            docker logs gateon-ci || true
+            exit 1
+          fi
+
+      - name: Drains cleanly on SIGTERM (docker stop)
+        run: |
+          # docker stop sends SIGTERM then SIGKILL after the timeout; a clean
+          # drain exits before the kill. 143 is 128+SIGTERM, the graceful code.
+          start=$(date +%s)
+          docker stop -t 30 gateon-ci
+          elapsed=$(( $(date +%s) - start ))
+          code="$(docker inspect --format '{{.State.ExitCode}}' gateon-ci)"
+          echo "exited ${code} in ${elapsed}s"
+          if [ "$elapsed" -ge 30 ]; then
+            echo "::error::container did not drain before the kill timeout"
+            exit 1
+          fi
+          case "$code" in
+            0 | 143) echo "ok: clean shutdown" ;;
+            *) echo "::error::non-graceful exit code ${code}"; docker logs gateon-ci || true; exit 1 ;;
+          esac
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f gateon-ci || true
+
+  # Runs the leak and drain tests against the real binary in a Linux environment,
+  # automatically, so a goroutine leak or a broken drain is caught on merge
+  # rather than on day three. This is not the 2c/2GB target -- CI runners are
+  # larger -- so it does not measure throughput; it measures that the counts
+  # come back down and that in-flight requests survive a shutdown.
+  soak:
+    name: soak
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      # The soak test builds ./cmd/gateon, which needs the bpf2go loader and the
+      # UI embed to exist first.
+      - name: Generate all artifacts
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          go install tool
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
+      - name: Soak and drain
+        env:
+          GATEON_SOAK_TEST: "1"
+          GATEON_SOAK_SECONDS: "45"
+        run: go test -run 'TestSoakStability|TestGracefulDrain' -v -timeout 20m ./tests/e2e/
