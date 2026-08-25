@@ -9,7 +9,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -36,6 +38,15 @@ func main() {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("DEBUG: Method=%s Path=%q Upgrade=%q Conn=%q\n", r.Method, r.URL.Path, r.Header.Get("Upgrade"), r.Header.Get("Connection"))
+
+		// ?delay=<ms> holds the response open, so a test can keep a request
+		// genuinely in-flight across a gateway shutdown and check it still
+		// completes (graceful drain) rather than being reset.
+		if d := r.URL.Query().Get("delay"); d != "" {
+			if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+			}
+		}
 
 		isUpgrade := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 
