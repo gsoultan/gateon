@@ -23,8 +23,15 @@ RUN bun run build
 # bookworm + clang/llvm/libbpf lets `go generate` compile the XDP program so the
 # Linux build (manager_linux.go) links the bpf2go loader. Pin to go.mod's Go.
 FROM golang:1.26-bookworm AS builder
+# nodejs is here for `buf generate` below: the TypeScript stubs are produced by
+# protoc-gen-es / protoc-gen-connect-es, which are node scripts under
+# ui/node_modules/.bin (`#!/usr/bin/env node`). Without node on PATH `buf
+# generate` fails with "env: 'node': No such file or directory", which is what
+# broke a plain `docker build .` / `make docker` -- release builds through
+# .github/ci/Dockerfile.ci and so never exercised this path. It lands only in
+# the throwaway builder stage; the distroless runtime image is unchanged.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib make \
+        clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib make nodejs \
     && rm -rf /var/lib/apt/lists/*
 ENV BPF2GO_CC=clang BPF2GO_STRIP=llvm-strip
 
