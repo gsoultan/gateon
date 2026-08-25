@@ -19,97 +19,15 @@ permissions:
   # rather than a missing scope.
   actions: read
 
-# Every job here runs on the self-hosted Apple-silicon Mac. The two scanners
-# that type-check the tree do it inside the Linux container built by
-# .github/ci/Dockerfile.ci, because they need bpf2go's output to compile at all;
-# see the comment at the top of ci.yml's build job. The two that only read files
-# run natively.
+# Runs on GitHub-hosted ubuntu-latest. The two scanners that type-check the tree
+# (govulncheck, staticcheck) generate the bpf2go and UI artifacts first, because
+# without them the generated sources do not compile and every scanner fails to
+# build rather than reporting findings. The two that only read files (gosec,
+# trivy) skip that setup.
 jobs:
   govulncheck:
     name: govulncheck
-    runs-on: self-hosted
-    env:
-      CI_IMAGE: gateon-ci
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Locate the container CLI
-        run: |
-          if ! command -v container >/dev/null 2>&1; then
-            echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-            export PATH="/opt/homebrew/bin:$PATH"
-          fi
-          command -v container >/dev/null 2>&1 || {
-            echo "::error::Apple container CLI not found on the runner (brew install container)"
-            exit 1
-          }
-          container system start >/dev/null 2>&1 || true
-
-      - name: Build the Linux CI image
-        run: container build -f .github/ci/Dockerfile.ci -t "$CI_IMAGE" .
-
-      # The scanners type-check the tree, so the generated sources have to
-      # exist first: bpf2go emits loadGateon_ebpf for internal/ebpf, and the UI
-      # build produces internal/ui/dist for the go:embed. Without this step
-      # every scanner fails to compile rather than reporting findings, which is
-      # how this workflow was red while telling us nothing. ci.yml already does
-      # the same thing.
-      #
-      # The eBPF toolchain used to be apt-get'd into the runner here. It lives
-      # in the image now -- there is no apt on macOS, and installing a compiler
-      # into a machine somebody uses is not something CI should do.
-      - name: Generate all artifacts
-        run: |
-          .github/ci/in-linux.sh '
-            bun install --frozen-lockfile --cwd ui
-            go install tool
-            PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
-            go generate ./...
-          '
-
-      - name: Run govulncheck
-        run: .github/ci/in-linux.sh 'go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...'
-
-  staticcheck:
-    name: staticcheck
-    runs-on: self-hosted
-    env:
-      CI_IMAGE: gateon-ci
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Locate the container CLI
-        run: |
-          if ! command -v container >/dev/null 2>&1; then
-            echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-            export PATH="/opt/homebrew/bin:$PATH"
-          fi
-          command -v container >/dev/null 2>&1 || {
-            echo "::error::Apple container CLI not found on the runner (brew install container)"
-            exit 1
-          }
-          container system start >/dev/null 2>&1 || true
-
-      - name: Build the Linux CI image
-        run: container build -f .github/ci/Dockerfile.ci -t "$CI_IMAGE" .
-
-      - name: Generate all artifacts
-        run: |
-          .github/ci/in-linux.sh '
-            bun install --frozen-lockfile --cwd ui
-            go install tool
-            PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
-            go generate ./...
-          '
-
-      - name: Run staticcheck
-        run: .github/ci/in-linux.sh 'go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...'
-
-  gosec:
-    name: gosec
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -119,27 +37,89 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
-          # The runner keeps its Go caches on disk between jobs, so there is
-          # nothing to restore and re-uploading them is pure cost.
-          cache: false
 
-      # securego/gosec@v2.22.9 was a Docker container action. Those require a
-      # Linux runner -- the runner itself has to be the container host -- so it
-      # cannot execute on a macOS runner in any form, with or without Apple's
-      # `container` available.
-      #
-      # The binary is installed from source at the same pinned version instead.
-      # The pin is the point, and the original comment still applies: an action
-      # or a tool that tracks a moving reference runs arbitrary code in a
-      # workflow with repository access, so an upstream force-push or compromise
-      # would execute here.
+      # go generate compiles the bpf2go-generated loader, which needs the eBPF
+      # toolchain; the go:embed of internal/ui/dist needs the UI build.
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      # The scanners type-check the tree, so the generated sources have to exist
+      # first: bpf2go emits loadGateon_ebpf for internal/ebpf, and the UI build
+      # produces internal/ui/dist for the go:embed. Without this every scanner
+      # fails to compile rather than reporting findings, which is how this
+      # workflow was once red while telling us nothing.
+      - name: Generate all artifacts
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          go install tool
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
+      - name: Run govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+
+  staticcheck:
+    name: staticcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Generate all artifacts
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          go install tool
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
+      - name: Run staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...
+
+  gosec:
+    name: gosec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # Pinned rather than tracking a moving reference: an action or a tool that
+      # tracks a moving reference runs arbitrary code in a workflow with
+      # repository access, so an upstream force-push or compromise would execute
+      # here.
       - name: Install gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.9
 
       # gosec parses rather than type-checks, so unlike govulncheck and
-      # staticcheck it does not need the generated sources and does not need the
-      # Linux container. Emit SARIF for GitHub code scanning; never fail the
-      # build on findings here (govulncheck/staticcheck are the hard gates).
+      # staticcheck it does not need the generated sources. Emit SARIF for GitHub
+      # code scanning; never fail the build on findings here
+      # (govulncheck/staticcheck are the hard gates).
       - name: Run gosec
         run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
 
@@ -155,7 +135,7 @@ jobs:
       #
       # Only the offending `fixes` entries are dropped, not the findings and not
       # the well-formed fixes, so a gosec release that fixes this needs no change
-      # here. jq rather than a script because macOS ships it at /usr/bin/jq.
+      # here.
       - name: Repair the SARIF gosec emits
         run: |
           jq '
@@ -182,13 +162,13 @@ jobs:
       #
       # which is not a workflow problem and cannot be fixed by one: this
       # repository is private, and code scanning on a private repository needs
-      # GitHub Advanced Security. Until that is enabled the report has nowhere
-      # to go, and failing the job for it means gosec reports as broken every
-      # run while actually working perfectly -- the state this job has been in.
+      # GitHub Advanced Security. Until that is enabled the report has nowhere to
+      # go, and failing the job for it means gosec reports as broken every run
+      # while actually working perfectly.
       #
-      # The scan itself still gates: `Run gosec` and the repair step below it
-      # fail loudly, so a gosec that crashes or emits a report that lost
-      # findings is still a red job. Only the delivery is tolerated.
+      # The scan itself still gates: `Run gosec` and the repair step fail loudly,
+      # so a gosec that crashes or emits a report that lost findings is still a
+      # red job. Only the delivery is tolerated.
       - name: Upload gosec SARIF
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
@@ -197,8 +177,6 @@ jobs:
           category: gosec
 
       # So the findings survive whether or not code scanning accepted them.
-      # Without this, a repository that cannot ingest SARIF runs gosec 177
-      # findings' worth of work and keeps none of it.
       - name: Upload gosec report as an artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -209,36 +187,27 @@ jobs:
 
   trivy-fs:
     name: trivy-fs
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # aquasecurity/trivy-action was a Docker container action; see the gosec
-      # note above for why that cannot run here. Installed from source at a
-      # pinned version instead, which also removes the failure mode the original
-      # comment describes -- v0.33.1 resolved but its bundled installer exited 1
-      # before downloading the Trivy binary, so the scan silently never ran.
-      # There is no bundled installer in this path.
-      #
-      # GOEXPERIMENT=jsonv2 is required, not optional: from v0.74.0 Trivy
-      # imports encoding/json/v2, and without the experiment the build fails
-      # with "build constraints exclude all Go files in .../encoding/json/v2"
-      # and installs nothing. The failure is at install time and loud, which is
-      # the one thing to check if a Go upgrade ever retires the flag.
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # Installed from source at a pinned version. GOEXPERIMENT=jsonv2 is
+      # required, not optional: from v0.74.0 Trivy imports encoding/json/v2, and
+      # without the experiment the build fails with "build constraints exclude
+      # all Go files in .../encoding/json/v2" and installs nothing.
       - name: Install Trivy
         run: GOEXPERIMENT=jsonv2 go install github.com/aquasecurity/trivy/cmd/trivy@v0.74.0
 
-      # Skip package-manager caches. ui/bunfig.toml deliberately keeps bun's
-      # cache inside the project (dir = ".bun-cache"), so a CI `bun install`
-      # materialises it and Trivy -- which walks the working tree, not the
-      # index, and so does not care that it is gitignored -- finds lockfiles
-      # vendored *inside* cached tarballs. Those describe some other project's
-      # dependency tree, not ours: the three HIGH findings this produced were
-      # `braces` and friends inside ui/.bun-cache/uri-js@4.4.1/yarn.lock, which
-      # nothing here installs or ships. Scanning them reports vulnerabilities no
-      # change to this repository can fix, which is the fastest way to teach
-      # people to ignore the scanner.
+      # Accepted findings are scoped per-path in .trivyignore.yaml; ui/.bun-cache
+      # holds some other project's lockfiles vendored inside cached tarballs and
+      # is skipped.
       - name: Trivy filesystem scan
         run: |
           trivy fs . \
@@ -253,11 +222,9 @@ jobs:
             --skip-dirs "**/node_modules"
 
       # The scan above writes findings to a file, so a failing run prints
-      # progress lines and an exit code and nothing else -- which reads like an
-      # infrastructure failure rather than a finding, and cost a long
-      # investigation once. This repeats the scan as a table so the log says
-      # what was found. It cannot fail the job: the SARIF step above already
-      # decided that.
+      # progress lines and an exit code and nothing else. This repeats the scan
+      # as a table so the log says what was found. It cannot fail the job: the
+      # step above already decided that.
       - name: Show Trivy findings in the log
         if: always()
         run: |
