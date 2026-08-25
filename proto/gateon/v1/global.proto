@@ -393,6 +393,15 @@ message EbpfConfig {
   bool xdp_cuckoo_filter = 10;
   bool af_xdp_phantom = 11;
   bool xdp_ja4_blocklist = 12;
+  // Permit attaching XDP in generic/SKB mode when the driver rejects the native
+  // attach. Off by default and it should stay off: generic XDP runs in
+  // netif_receive_generic_xdp() *after* the skb is allocated, so it drops no
+  // earlier than an nftables rule while still charging every packet the full
+  // program cost, plus a pskb_expand_head() when the skb lacks the 256-byte
+  // XDP_PACKET_HEADROOM and an skb_linearize() when it is non-linear. On a
+  // jumbo-MTU AWS ENA interface that is two extra allocations and two memcpys
+  // per packet for no earlier drop. Prefer tc_filtering on such NICs.
+  bool allow_generic_xdp = 13;
 }
 
 message AuthConfig {
