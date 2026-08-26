@@ -29,14 +29,6 @@ AuthConfig.oidc
 OidcConfig.client_id
 OidcConfig.redirect_url
 
-# --- Management plane: duplicates of the EbpfConfig knobs that do work -------
-# EbpfConfig.enable_knocking / knocking_sequence / the whitelist path are read;
-# these ManagementConfig twins are not, so setting them here silently does
-# nothing while the identically-named eBPF settings are what actually apply.
-ManagementConfig.enable_port_knocking
-ManagementConfig.port_knocking_sequence
-ManagementConfig.xdp_management_whitelisting
-
 # --- TLS ---------------------------------------------------------------------
 # The HTTP-to-HTTPS redirect toggle. Security-adjacent: an operator who turns it
 # on has reason to believe plaintext requests are being redirected.

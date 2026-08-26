@@ -215,18 +215,21 @@ message ManagementConfig {
   // AllowedHosts is a whitelist of hostnames (e.g., ["admin.example.com"]) 
   // allowed to access the management API on public entrypoints.
   repeated string allowed_hosts = 7;
-  // XdpManagementWhitelisting, if true, uses eBPF/XDP to drop management traffic 
-  // from non-whitelisted IPs at the kernel level.
-  bool xdp_management_whitelisting = 8;
-  // EnablePortKnocking, if true, enables a stealth mode for the management port.
-  bool enable_port_knocking = 9;
-  // PortKnockingSequence is the sequence of ports to "knock" on to open management.
-  repeated int32 port_knocking_sequence = 10;
   // GitOps config for configuration synchronization
   GitOpsConfig gitops = 11;
 
   reserved 5;
   reserved "host";
+  // 8, 9 and 10 were xdp_management_whitelisting, enable_port_knocking and
+  // port_knocking_sequence, removed 2026-08-26. Nothing ever read them, while
+  // the identically-purposed ebpf.enable_knocking, ebpf.knocking_sequence and
+  // the eBPF management whitelist do work. Two spellings of one setting in two
+  // config sections is how that drift happened, and the one in the section
+  // named "management" was the dead one -- an operator who enabled port
+  // knocking where they would naturally look for it got no stealth and no
+  // warning. Configure these under `ebpf`.
+  reserved 8, 9, 10;
+  reserved "xdp_management_whitelisting", "enable_port_knocking", "port_knocking_sequence";
 }
 
 message CorsConfig {
