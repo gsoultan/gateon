@@ -2,7 +2,7 @@
 
 A modern, high-performance, and security-focused API Gateway, Reverse Proxy, and Service Mesh entry point. 
 
-Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web support, kernel-level optimization via eBPF, and a sophisticated security suite including a semantic, multi-tier WAF and AI-powered anomaly detection.
+Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web support, kernel-level packet filtering via eBPF (see the caveats below), and a sophisticated security suite including a semantic, multi-tier WAF and AI-powered anomaly detection.
 
 ## 🚀 Core Features
 
@@ -16,7 +16,15 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 
 ### 🛡️ Enterprise-Grade Security & Shielding
 - **Advanced WAF**: Built-in **[gwaf](https://github.com/gsoultan/gwaf)**, an embeddable Go WAF that parses request *intent* rather than matching signatures — semantic detectors for SQLi, XSS, shell, path, template, NoSQL and PHP injection, plus prompt injection. OWASP CRS rules import through its SecLang adapter. Blocks by default with no tuning phase, and every decision carries a rule ID and the matched byte span.
-- **Kernel Offloading**: **eBPF-powered** XDP/TC for high-performance rate limiting and packet filtering at the NIC level.
+- **Kernel Offloading**: eBPF rate limiting, IP shunning and packet filtering, at the earliest hook the NIC actually supports.
+  **Native XDP runs in the driver before the packet ever becomes an `skb`** — but most virtualized NICs cannot offer it.
+  The AWS ENA driver, for one, refuses a native attach above a page-sized MTU (the EC2 VPC default is 9001) and unless
+  the driver is using at most half its queues. Where native XDP is unavailable, Gateon attaches at the **TC (clsact)
+  ingress** hook instead, which runs after `skb` allocation and so drops no earlier than a firewall rule, but carries
+  none of generic XDP's per-packet cost. **Generic/SKB XDP is refused by default** (`ebpf.allow_generic_xdp`): it drops
+  no earlier than TC while charging every packet the full program cost plus a possible re-allocation and copy, which
+  makes it slower than running no eBPF at all. See
+  [ADR 0007](doc/adr/0007-xdp-attach-mode-and-the-tc-ingress-hook.md).
 - **Bot Management**: JS Challenges, Browser Integrity checks, and Cloudflare Turnstile integration.
 - **Identity & Access**: Comprehensive AuthN/Z via **JWT (HMAC/JWKS), PASETO, API Keys**, and Forward Auth.
 - **Traffic Deception**: Honeypots and deception layers to trap and identify malicious actors.
@@ -198,7 +206,7 @@ Gateon is designed as a **modern, lightweight reverse proxy and load balancer**,
 | **Language** | Go | Go | C | Lua (on OpenResty) |
 | **gRPC/gRPC-Web** | **Native** (First-class) | Native | Via Module/Config | Native |
 | **Hot Reload** | Native (Dynamic Routes) | Native | Requires Reload | Native (via etcd) |
-| **eBPF Offloading** | **Native (XDP/TC)** | No | No (via module) | Via Plugin |
+| **eBPF Offloading** | **XDP (native, where the NIC allows) + TC** | No | No (via module) | Via Plugin |
 | **AI Diagnostics** | **Native (Anomaly)** | No | No | No |
 | **Observability** | **Prometheus + OpenTelemetry** | Prometheus + Logs | Basic / Commercial | Prometheus + Plugins |
 | **Load Balancing** | **RR + LeastConn + WRR** | RR + Wrr + ... | RR + LC + IP Hash | RR + LC + ... |
