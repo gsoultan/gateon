@@ -108,50 +108,100 @@ type GossipManager struct {
 }
 
 func InitGossip(conf *gateonv1.HaConfig) error {
-	if conf == nil || !conf.Enabled {
+	if !gossipEnabled(conf) {
 		return nil
 	}
 
-	var err error
+	settings, err := resolveGossipSettings(conf, interfaceIPv4(conf.GetInterface()))
+	if err != nil {
+		// Fail closed. Arriving gossip is applied straight to IP reputation, and
+		// a score below the shun threshold blocks the client, so an
+		// unauthenticated cluster hands anyone who can reach the port the ability
+		// to choose which addresses this gateway refuses.
+		return fmt.Errorf("refusing to start gossip: %w", err)
+	}
+
 	gossipOnce.Do(func() {
-		delegate := &ReputationDelegate{}
-		mconf := memberlist.DefaultLANConfig()
-		mconf.Delegate = delegate
-		mconf.BindPort = 7946 // Default memberlist port
-		mconf.Name = fmt.Sprintf("gateon-%d", time.Now().UnixNano())
-
-		// If we have a specific interface from HA config, use its IP.
-		if conf.Interface != "" {
-			if iface, err := net.InterfaceByName(conf.Interface); err == nil {
-				if addrs, err := iface.Addrs(); err == nil {
-					for _, addr := range addrs {
-						if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-							if ipnet.IP.To4() != nil {
-								mconf.BindAddr = ipnet.IP.String()
-								break
-							}
-						}
-					}
-				}
-			}
-		}
-
-		list, lerr := memberlist.Create(mconf)
-		if lerr != nil {
-			err = lerr
-			return
-		}
-
-		gossipManager = &GossipManager{
-			list:     list,
-			delegate: delegate,
-			conf:     conf,
-		}
-
-		logger.L.LogInfo("Gossip reputation sync initialized", "node", mconf.Name, "bind", mconf.BindAddr)
+		err = startGossip(conf, settings)
 	})
-
 	return err
+}
+
+// interfaceIPv4 returns the first non-loopback IPv4 address on the named
+// interface, or "" when the interface is unnamed, missing or has none.
+func interfaceIPv4(name string) string {
+	if name == "" {
+		return ""
+	}
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return ""
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			return ipnet.IP.String()
+		}
+	}
+	return ""
+}
+
+// startGossip creates the memberlist and joins the configured peers.
+func startGossip(conf *gateonv1.HaConfig, settings gossipSettings) error {
+	delegate := &ReputationDelegate{}
+	mconf := memberlist.DefaultLANConfig()
+	mconf.Delegate = delegate
+	mconf.BindPort = settings.BindPort
+	mconf.AdvertisePort = settings.BindPort
+	mconf.Name = fmt.Sprintf("gateon-%d", time.Now().UnixNano())
+	if settings.BindAddr != "" {
+		mconf.BindAddr = settings.BindAddr
+	}
+	// Authenticates and encrypts every message. Without it memberlist accepts
+	// anything that reaches the port, and NotifyMsg applies it to reputation.
+	mconf.SecretKey = settings.SecretKey
+
+	list, err := memberlist.Create(mconf)
+	if err != nil {
+		return err
+	}
+
+	gossipManager = &GossipManager{
+		list:     list,
+		delegate: delegate,
+		conf:     conf,
+	}
+
+	logger.L.LogInfo("Gossip reputation sync initialized",
+		"node", mconf.Name, "bind", mconf.BindAddr, "port", mconf.BindPort, "encrypted", true)
+
+	joinGossipPeers(list, settings.Peers)
+	return nil
+}
+
+// joinGossipPeers contacts the configured peers once.
+//
+// One attempt is enough and is the ordinary memberlist pattern: the cluster
+// converges as soon as any single node reaches any other, so a node that boots
+// before its peers is picked up when one of them starts and joins inward. A
+// retry loop would need a lifecycle this function does not have — InitGossip is
+// boot-only with no stop hook — and an unsupervised goroutine is worse than the
+// gap it would close.
+func joinGossipPeers(list *memberlist.Memberlist, peers []string) {
+	if len(peers) == 0 {
+		logger.L.LogInfo("No gossip peers configured; waiting to be joined")
+		return
+	}
+	reached, err := list.Join(peers)
+	if err != nil && reached == 0 {
+		logger.L.LogError("Could not reach any gossip peer; reputation will not sync until one joins",
+			"peers", peers, "error", err)
+		return
+	}
+	logger.L.LogInfo("Joined gossip cluster", "reached", reached, "configured", len(peers))
 }
 
 func BroadcastReputation(fingerprint string, score float64, violations int, history []string) {

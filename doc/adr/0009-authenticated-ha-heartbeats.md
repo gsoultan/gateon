@@ -1,4 +1,4 @@
-# 9. Authenticated HA heartbeats
+# 9. Authenticated HA heartbeats and gossip
 
 Date: 2026-08-26
 
@@ -96,6 +96,48 @@ log-flood amplifier. `DroppedAdverts()` is the signal to alert on.
   deployment"`). It does not interoperate with keepalived, and this change moves
   it further from the standard. The README's "Active-Passive failover (VRRP)"
   claim should say "VRRP-style"; that is a separate docs change.
+
+## The same defect in the gossip transport
+
+`InitGossip` created memberlist with **no `SecretKey`** — no encryption, no
+authentication. `ReputationDelegate.NotifyMsg` JSON-decodes whatever arrives and
+calls `ApplyRemoteReputation(fingerprint, score, ...)`, and
+`internal/middleware/reputation.go` shuns any client scoring below 2.0. So any
+host that could reach port 7946 could pick which addresses this gateway refuses
+— a customer, a CDN egress range, a partner — or raise its own score to bypass
+reputation shunning, proof-of-work and the deception layer, which all read it.
+
+Two further fields were inert:
+
+- **`enable_gossip` was never read.** Gossip keyed off `HaConfig.Enabled`, so
+  enabling VIP failover silently opened a port that has nothing to do with
+  failover.
+- **`gossip_bind_addr`, `gossip_bind_port` and `gossip_peers` were never read.**
+  The port was hardcoded to 7946 and **`Join` was never called**, so configured
+  peers were never contacted. Since nothing joined outward, the only members were
+  hosts that connected inward. The advertised peer sync had never worked; the
+  port reliably did nothing but accept strangers.
+
+Now: `SecretKey` is SHA-256 of `auth_pass` (memberlist wants exactly 16/24/32
+bytes, and hashing avoids both truncating a long passphrase and padding a short
+one into looking stronger than it is); `enable_gossip` gates the transport;
+the bind address, port and peers are honoured; and gossip refuses to start
+without a secret, for the same fail-closed reason as the heartbeat.
+
+Peers are joined once rather than on a retry loop. That is the ordinary
+memberlist pattern — the cluster converges as soon as any node reaches any
+other, so a node that boots early is picked up when a peer starts and joins
+inward — and a retry loop would need a lifecycle `InitGossip` does not have, it
+being boot-only with no stop hook. An unsupervised goroutine is worse than the
+gap it closes.
+
+### Additional consequences
+
+- **Gossip stops for anyone who had HA on but never set `enable_gossip`.**
+  Given it had never actually clustered, this removes an open port rather than a
+  working feature.
+- `auth_pass` now protects both the heartbeat and the gossip cluster, so it must
+  match across every node, and mismatched nodes will simply not see each other.
 
 ## Not addressed
 
