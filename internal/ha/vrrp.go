@@ -5,12 +5,12 @@ package ha
 
 import (
 	"context"
-	"encoding/binary"
 	"net"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -26,7 +26,15 @@ type HAManager struct {
 	mu         sync.RWMutex
 	udpConn    *net.UDPConn
 	masterSeen bool
+	// droppedAdverts counts datagrams rejected before they could influence the
+	// election — wrong length, bad MAC or outside the replay window. A rising
+	// count means either a misconfigured peer or someone probing the port.
+	droppedAdverts atomic.Int64
 }
+
+// DroppedAdverts reports how many heartbeats were rejected before they could
+// affect VIP ownership.
+func (m *HAManager) DroppedAdverts() int64 { return m.droppedAdverts.Load() }
 
 // NewHAManager creates a new HA manager.
 func NewHAManager(conf *gateonv1.HaConfig) *HAManager {
@@ -38,6 +46,21 @@ func NewHAManager(conf *gateonv1.HaConfig) *HAManager {
 // Start initiates the HA election loop.
 func (m *HAManager) Start(ctx context.Context) {
 	if m.config == nil || !m.config.Enabled {
+		return
+	}
+
+	// Refuse to run unauthenticated. An advert is acted on by releasing a virtual
+	// IP, so without a shared secret any host that can reach the port can take
+	// the VIP away from the master with one datagram. Starting anyway would mean
+	// the feature whose entire purpose is availability shipping its own remote
+	// off switch. Failing closed costs HA until auth_pass is set; failing open
+	// costs the VIP to whoever asks first.
+	key := []byte(m.config.AuthPass)
+	if len(key) == 0 {
+		logger.L.LogError("Refusing to start High Availability: ha.auth_pass is empty. "+
+			"Heartbeats would be unauthenticated, letting any host on the network force this "+
+			"node to release its virtual IPs. Set ha.auth_pass to the same value on every node.",
+			"vrid", m.config.VirtualRouterId)
 		return
 	}
 
@@ -79,7 +102,7 @@ func (m *HAManager) Start(ctx context.Context) {
 	m.mu.Unlock()
 
 	// Go routine to listen for advertisements
-	go m.listenLoop(ctx)
+	go m.listenLoop(ctx, key, replayWindow(interval))
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -96,8 +119,8 @@ func (m *HAManager) Start(ctx context.Context) {
 	}
 }
 
-func (m *HAManager) listenLoop(ctx context.Context) {
-	buf := make([]byte, 64)
+func (m *HAManager) listenLoop(ctx context.Context, key []byte, window time.Duration) {
+	buf := make([]byte, advertLen)
 	for {
 		_ = m.udpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		n, addr, err := m.udpConn.ReadFromUDP(buf)
@@ -108,16 +131,19 @@ func (m *HAManager) listenLoop(ctx context.Context) {
 			continue
 		}
 
-		if n < 8 {
-			continue // Invalid packet
-		}
-
-		vrid := int32(binary.BigEndian.Uint32(buf[0:4]))
-		priority := int32(binary.BigEndian.Uint32(buf[4:8]))
-
-		if vrid != m.config.VirtualRouterId {
+		adv, err := parseAdvert(buf[:n], key, time.Now(), window)
+		if err != nil {
+			// Not logged per packet: an attacker controls the arrival rate, so
+			// logging here would be a log-flood amplifier. The dropped-advert
+			// counter is the signal an operator should watch.
+			m.droppedAdverts.Add(1)
 			continue
 		}
+
+		if adv.VRID != m.config.VirtualRouterId {
+			continue
+		}
+		priority := adv.Priority
 
 		m.mu.Lock()
 		// If we see a higher priority node, or same priority with higher IP, it's the master
@@ -168,9 +194,16 @@ func (m *HAManager) sendAdvert() {
 		return
 	}
 
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint32(buf[0:4], uint32(m.config.VirtualRouterId))
-	binary.BigEndian.PutUint32(buf[4:8], uint32(m.config.Priority))
+	buf, err := encodeAdvert(advert{
+		VRID:     m.config.VirtualRouterId,
+		Priority: m.config.Priority,
+		Sent:     time.Now(),
+	}, []byte(m.config.AuthPass))
+	if err != nil {
+		// Start refuses to run without a key, so reaching here means the config
+		// was swapped underneath us. Sending nothing is the safe response.
+		return
+	}
 
 	// Send to multicast
 	_, _ = m.udpConn.WriteToUDP(buf, addr)
