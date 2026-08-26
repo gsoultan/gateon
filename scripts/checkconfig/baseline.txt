@@ -1,0 +1,74 @@
+# Config fields that no Go code reads, accepted as debt at adoption on
+# 2026-08-26. The check fails only on fields added to this list's *absence* —
+# that is, on newly-dead config — the same way `make lint-new` gates new work
+# while `make lint`'s backlog is paid down opportunistically.
+#
+# Every line here is a control that a user can set and that changes nothing.
+# Shrinking this file is the point of it existing; when a field starts being
+# read, the check says so and the line should be deleted.
+#
+# Format: Message.field_name
+
+# --- TITAN: the entire feature set is config-only ---------------------------
+# `enabled` is read; nothing else is. The dashboard offers phantom ports, an AI
+# predictor, post-quantum crypto and a governor, none of which consult these.
+TitanConfig.enable_phantom
+TitanConfig.enable_ai_predictor
+TitanConfig.enable_pqc
+TitanConfig.enable_governor
+TitanConfig.ai_model_path
+
+# --- OIDC: global block is scaffolding; route-level OIDC works --------------
+# Per-route OIDC auth is implemented and used (auth_factory.go dispatches on
+# "oidc" into internal/middleware/auth/oidc_validator.go, configured from the
+# middleware's own string map). This *global* AuthConfig.oidc block is a second,
+# unimplemented path for dashboard SSO login: nothing reads it, and LoginPage.tsx
+# has no SSO control, so no operator can currently be misled by it. Schema
+# scaffolding to either implement or reserve -- not a broken security control.
+AuthConfig.oidc
+OidcConfig.client_id
+OidcConfig.redirect_url
+
+# --- Management plane: duplicates of the EbpfConfig knobs that do work -------
+# EbpfConfig.enable_knocking / knocking_sequence / the whitelist path are read;
+# these ManagementConfig twins are not, so setting them here silently does
+# nothing while the identically-named eBPF settings are what actually apply.
+ManagementConfig.enable_port_knocking
+ManagementConfig.port_knocking_sequence
+ManagementConfig.xdp_management_whitelisting
+
+# --- TLS ---------------------------------------------------------------------
+# The HTTP-to-HTTPS redirect toggle. Security-adjacent: an operator who turns it
+# on has reason to believe plaintext requests are being redirected.
+TlsConfig.auto_redirect
+
+# --- WAF ---------------------------------------------------------------------
+# auto_update_rules and update_interval_hours are read; the URL they would fetch
+# from is not, so the updater cannot be pointed at a mirror or a private ruleset.
+WafConfig.rules_url
+
+# --- eBPF --------------------------------------------------------------------
+# The cuckoo filter's map and mutator exist and are used; this toggle that is
+# meant to gate them is not read, so the feature does not follow its own switch.
+EbpfConfig.xdp_cuckoo_filter
+
+# --- Bot management ----------------------------------------------------------
+# enable_browser_integrity is read; the JS challenge toggle is not.
+BotManagementConfig.enable_js_challenge
+
+# --- Anomaly detection -------------------------------------------------------
+AnomalyDetectionConfig.prometheus_url
+AnomalyDetectionConfig.anomaly_retention_days
+
+# --- GitOps ------------------------------------------------------------------
+# auth_token is read; the SSH key is not, so SSH-authenticated repositories
+# cannot actually be used.
+GitOpsConfig.ssh_private_key
+
+# --- ACME --------------------------------------------------------------------
+AcmeConfig.dns_provider
+AcmeConfig.dns_config
+
+# --- Redis -------------------------------------------------------------------
+# The database index is ignored, so every deployment shares db 0.
+RedisConfig.db

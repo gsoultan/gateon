@@ -114,6 +114,9 @@ jobs:
       - name: Security invariants
         run: ./scripts/check-security-invariants.sh
 
+      - name: Config fields are read by something
+        run: go run ./scripts/checkconfig
+
       - name: Test
         env:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable

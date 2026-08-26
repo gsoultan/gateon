@@ -11,7 +11,7 @@ CONTAINER ?= docker
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants ebpf ebpf-docker pgo-profile docker
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -148,8 +148,16 @@ gosec:
 check-invariants:
 	./scripts/check-security-invariants.sh
 
+## check-config: assert every *Config proto field is read by some Go code.
+##               Catches controls that render in the dashboard and do nothing --
+##               twice now those were security controls reporting success while
+##               enforcing nothing. Known debt lives in
+##               scripts/checkconfig/baseline.txt; only new offenders fail.
+check-config:
+	go run ./scripts/checkconfig
+
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
-sec: vuln staticcheck gosec check-invariants
+sec: vuln staticcheck gosec check-invariants check-config
 	go vet ./...
 
 ## lint: run golangci-lint over the whole tree (reports pre-existing debt too)
