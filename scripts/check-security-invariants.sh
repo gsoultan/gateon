@@ -47,7 +47,7 @@ drop_comment_hits() { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true; 
 # needs to tolerate a not-yet-available service, make the callee deny on a nil
 # verifier (see middleware/auth.PasetoAuth) and build unconditionally.
 # ---------------------------------------------------------------------------
-note "1/5  auth.Service nil-comparisons"
+note "1/6  auth.Service nil-comparisons"
 auth_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '(\.AuthManager|deps\.Auth|s\.Auth|svc\.Auth)[[:space:]]*[!=]=[[:space:]]*nil' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -68,7 +68,7 @@ fi
 # stored-XSS bug plus a readable token equals administrator compromise. The
 # token lives only in the HttpOnly gateon_session cookie.
 # ---------------------------------------------------------------------------
-note "2/5  session token in web storage"
+note "2/6  session token in web storage"
 storage_hits=$( (grep -rnE '(localStorage|sessionStorage)\.(setItem|getItem)' ui/src \
 	--include='*.ts' --include='*.tsx' 2>/dev/null |
 	grep -viE 'token|jwt|paseto|bearer|credential|gateon-auth') || true)
@@ -105,7 +105,7 @@ fi
 # '/', which made the -o path invalid and produced a build that "succeeded"
 # and then failed at exec with a confusing error.
 # ---------------------------------------------------------------------------
-note "3/5  tests building into the repository root"
+note "3/6  tests building into the repository root"
 root_builds=$( (grep -rnE '"go",[[:space:]]*"build",[[:space:]]*"-o",[[:space:]]*[a-zA-Z]' tests/ --include='*.go' 2>/dev/null |
 	grep -vE 'filepath\.Join\((env\.Dir|tmpDir|t\.TempDir)') || true)
 # Re-check the argument actually resolves under a temp dir.
@@ -147,7 +147,7 @@ fi
 # protoc-gen-es all copy the leading comment out of the .proto, so fixing the
 # .proto fixes the generated file on the next `make proto`.
 # ---------------------------------------------------------------------------
-note "4/5  SPDX license header on every source file"
+note "4/6  SPDX license header on every source file"
 SPDX_LINE='SPDX-License-Identifier: MIT'
 missing_spdx=""
 while IFS= read -r f; do
@@ -195,7 +195,7 @@ fi
 # authentication is distinguishable from no authentication at all. Until then
 # this check holds the line. See doc/adr/0006-transport-neutral-authorization.md.
 # ---------------------------------------------------------------------------
-note "5/5  DryRun on the management auth chain"
+note "5/6  DryRun on the management auth chain"
 dryrun_hits=$( (find internal/server -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE 'DryRun' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -208,6 +208,59 @@ if [ -n "$dryrun_hits" ]; then
 	printf '  "auth disabled" and allow. On this chain it grants full access.\n'
 else
 	echo "  ok - the management auth chain does not enable DryRun"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Middleware config keys the dashboard writes must be keys Go reads.
+#
+# A route's middleware config is a map<string,string> passed through verbatim:
+# the dashboard writes a key, Go looks one up, and nothing anywhere checks that
+# they are the same string. They were not. The editors wrote camelCase
+# ("stsSeconds", "allowedOrigins", "clientSecret") while every reader looked up
+# snake_case, so 73 settings silently did nothing — and worse than nothing,
+# because the editor also *read* the wrong key, so a value already set by a
+# server-side template rendered as blank and saving the form left the real value
+# in force while the UI showed the new one.
+#
+# That is the failure mode this check exists for: a rate limit, a CORS origin
+# list or an auth secret that the dashboard displays and the gateway does not
+# enforce. No compiler sees it, because both sides are string literals in
+# different languages.
+# ---------------------------------------------------------------------------
+note "6/6  Dashboard middleware config keys match the Go readers"
+mw_editors="ui/src/components/MiddlewareConfig"
+if [ -d "$mw_editors" ]; then
+	go_keys=$(grep -rhoE '\["[A-Za-z0-9_]+"\]' internal/middleware/ 2>/dev/null |
+		tr -d '["]' | sort -u)
+	ui_keys=$(grep -rhoE 'updateConfig\(\s*"[A-Za-z0-9_]+"' "$mw_editors" 2>/dev/null |
+		sed -E 's/.*"([A-Za-z0-9_]+)"/\1/' | sort -u)
+
+	# Only camelCase keys are reported: a key with no Go reader at all may
+	# legitimately belong to a middleware whose parser this grep cannot see,
+	# but a camelCase key whose snake_case form *is* read is unambiguously the
+	# bug above.
+	orphans=""
+	for k in $ui_keys; do
+		case "$k" in
+		*[A-Z]*)
+			snake=$(printf '%s' "$k" | sed -E 's/([a-z0-9])([A-Z])/\1_\2/g' | tr 'A-Z' 'a-z')
+			if printf '%s\n' "$go_keys" | grep -qx "$snake"; then
+				orphans="$orphans  $k -> Go reads $snake\n"
+			fi
+			;;
+		esac
+	done
+
+	if [ -n "$orphans" ]; then
+		err "the dashboard writes middleware config keys nothing reads"
+		printf "$orphans"
+		printf '  The gateway will keep using whatever was there before, while the\n'
+		printf '  dashboard shows the new value. Use the snake_case key.\n'
+	else
+		echo "  ok - every dashboard middleware key has a matching Go reader"
+	fi
+else
+	echo "  ok - no middleware editors present"
 fi
 
 printf '\n'

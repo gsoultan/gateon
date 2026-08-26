@@ -18,8 +18,8 @@ export function RatelimitConfigEditor({ config, onChange }: RatelimitConfigEdito
       <Group grow>
         <NumberInput
           label="Requests Per Minute"
-          value={parseInt(config.requestsPerMinute) || 0}
-          onChange={(val) => updateConfig("requestsPerMinute", val.toString())}
+          value={parseInt(config.requests_per_minute) || 0}
+          onChange={(val) => updateConfig("requests_per_minute", val.toString())}
           min={1}
         />
         <NumberInput
@@ -48,17 +48,17 @@ export function RatelimitConfigEditor({ config, onChange }: RatelimitConfigEdito
             { label: "JA4H Fingerprint (Recommended)", value: "ja4h" },
             { label: "Detailed Fingerprint (Strict)", value: "fingerprint" },
           ]}
-          value={config.strategy || (config.perTenant === "true" ? "tenant" : "ip")}
+          value={config.strategy || (config.per_tenant === "true" ? "tenant" : "ip")}
           onChange={(val) => updateConfig("strategy", val || "ip")}
         />
         <Stack gap="xs">
           <Switch
             label="Trust Cloudflare Headers"
             description="Use CF-Connecting-IP when behind Cloudflare."
-            checked={config.trustCloudflareHeaders === "true"}
+            checked={config.trust_cloudflare_headers === "true"}
             onChange={(e) =>
               updateConfig(
-                "trustCloudflareHeaders",
+                "trust_cloudflare_headers",
                 e.currentTarget.checked ? "true" : "false"
               )
             }

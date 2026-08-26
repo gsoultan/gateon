@@ -30,20 +30,20 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         <NumberInput
           label="STS Seconds (max-age)"
           description="Set > 0 to add Strict-Transport-Security. 0 = disabled."
-          value={parseInt(config.stsSeconds) || 0}
+          value={parseInt(config.sts_seconds) || 0}
           onChange={(val) =>
-            updateConfig("stsSeconds", (val ?? 0).toString())
+            updateConfig("sts_seconds", (val ?? 0).toString())
           }
           min={0}
           placeholder="31536000"
         />
         <Switch
           label="Include Subdomains"
-          description="stsIncludeSubdomains"
-          checked={config.stsIncludeSubdomains === "true"}
+          description="Apply HSTS to every subdomain as well as this host"
+          checked={config.sts_include_subdomains === "true"}
           onChange={(e) =>
             updateConfig(
-              "stsIncludeSubdomains",
+              "sts_include_subdomains",
               e.currentTarget.checked ? "true" : "false"
             )
           }
@@ -54,10 +54,10 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         <Switch
           label="Preload"
           description="Allow HSTS preload list submission"
-          checked={config.stsPreload === "true"}
+          checked={config.sts_preload === "true"}
           onChange={(e) =>
             updateConfig(
-              "stsPreload",
+              "sts_preload",
               e.currentTarget.checked ? "true" : "false"
             )
           }
@@ -65,10 +65,10 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         <Switch
           label="Force STS (HTTP dev)"
           description="Add header over HTTP (for development)"
-          checked={config.forceStsHeader === "true"}
+          checked={config.force_sts_header === "true"}
           onChange={(e) =>
             updateConfig(
-              "forceStsHeader",
+              "force_sts_header",
               e.currentTarget.checked ? "true" : "false"
             )
           }

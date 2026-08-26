@@ -21,8 +21,8 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
         <Switch
           label="Dry Run Mode"
           description="Validate but do not block request if auth fails"
-          checked={config.dryRun === "true"}
-          onChange={(e) => updateConfig("dryRun", e.currentTarget.checked ? "true" : "false")}
+          checked={config.dry_run === "true"}
+          onChange={(e) => updateConfig("dry_run", e.currentTarget.checked ? "true" : "false")}
         />
         {(config.type === "jwt" || config.type === "paseto" || config.type === "oidc") && (
           <Switch
@@ -39,15 +39,15 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
           label="Required Scopes"
           description="Comma-separated scopes (e.g. read, write)"
           placeholder="read, write"
-          value={config.requiredScopes || ""}
-          onChange={(e) => updateConfig("requiredScopes", e.currentTarget.value)}
+          value={config.required_scopes || ""}
+          onChange={(e) => updateConfig("required_scopes", e.currentTarget.value)}
         />
         <TextInput
           label="Required Roles"
           description="Comma-separated roles (e.g. admin, editor)"
           placeholder="admin, editor"
-          value={config.requiredRoles || ""}
-          onChange={(e) => updateConfig("requiredRoles", e.currentTarget.value)}
+          value={config.required_roles || ""}
+          onChange={(e) => updateConfig("required_roles", e.currentTarget.value)}
         />
       </Group>
 
@@ -55,8 +55,8 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
         label="Custom Error Template"
         description="JSON response if auth fails (e.g. { 'error': 'unauthorized' })"
         placeholder='{ "error": "Unauthorized access", "code": 401 }'
-        value={config.errorTemplate || ""}
-        onChange={(e) => updateConfig("errorTemplate", e.currentTarget.value)}
+        value={config.error_template || ""}
+        onChange={(e) => updateConfig("error_template", e.currentTarget.value)}
       />
 
       <KeyValueList
@@ -168,8 +168,8 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             label="JWKS URL"
             description="For RS256/ES256. If set, secret is optional."
             placeholder="https://auth.example.com/.well-known/jwks.json"
-            value={config.jwksUrl || ""}
-            onChange={(e) => updateConfig("jwksUrl", e.currentTarget.value)}
+            value={config.jwks_url || ""}
+            onChange={(e) => updateConfig("jwks_url", e.currentTarget.value)}
           />
           <TextInput
             label="Secret (required if not using JWKS)"
@@ -204,34 +204,34 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             label="Introspection URL"
             description="RFC 7662 token introspection (required)"
             placeholder="https://auth.example.com/oauth/introspect"
-            value={config.introspectionUrl || ""}
+            value={config.introspection_url || ""}
             onChange={(e) =>
-              updateConfig("introspectionUrl", e.currentTarget.value)
+              updateConfig("introspection_url", e.currentTarget.value)
             }
           />
           <TextInput
             label="Client ID"
             placeholder="client-id"
-            value={config.clientId || ""}
-            onChange={(e) => updateConfig("clientId", e.currentTarget.value)}
+            value={config.client_id || ""}
+            onChange={(e) => updateConfig("client_id", e.currentTarget.value)}
           />
           <TextInput
             label="Client Secret"
             description="Or GATEON_OAUTH2_CLIENT_SECRET env"
             type="password"
             placeholder="••••••••"
-            value={config.clientSecret || ""}
+            value={config.client_secret || ""}
             onChange={(e) =>
-              updateConfig("clientSecret", e.currentTarget.value)
+              updateConfig("client_secret", e.currentTarget.value)
             }
           />
           <TextInput
             label="Token Type Hint (optional)"
             description="accessToken or refreshToken"
             placeholder="accessToken"
-            value={config.tokenTypeHint || ""}
+            value={config.token_type_hint || ""}
             onChange={(e) =>
-              updateConfig("tokenTypeHint", e.currentTarget.value)
+              updateConfig("token_type_hint", e.currentTarget.value)
             }
           />
         </>

@@ -119,8 +119,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
       <TagsInput
         label="Allowed Origins"
         placeholder="*, https://example.com"
-        value={splitTags(config.allowedOrigins)}
-        onChange={(val) => updateConfig("allowedOrigins", joinTags(val))}
+        value={splitTags(config.allowed_origins)}
+        onChange={(val) => updateConfig("allowed_origins", joinTags(val))}
         description="List of origins (e.g. *, https://example.com). Press Enter to add."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -129,8 +129,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
         label="Allowed Methods"
         placeholder="GET, POST, PUT, DELETE, OPTIONS"
         data={["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]}
-        value={splitTags(config.allowedMethods)}
-        onChange={(val) => updateConfig("allowedMethods", joinTags(val))}
+        value={splitTags(config.allowed_methods)}
+        onChange={(val) => updateConfig("allowed_methods", joinTags(val))}
         description="List of HTTP methods. Select from dropdown or type and press Enter."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -139,8 +139,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
         label="Allowed Headers"
         placeholder="Content-Type, Authorization, X-Request-ID"
         data={["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "X-Request-ID"]}
-        value={splitTags(config.allowedHeaders)}
-        onChange={(val) => updateConfig("allowedHeaders", joinTags(val))}
+        value={splitTags(config.allowed_headers)}
+        onChange={(val) => updateConfig("allowed_headers", joinTags(val))}
         description="List of headers. Select from dropdown or type and press Enter."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -149,8 +149,8 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
         label="Exposed Headers"
         placeholder="X-Custom-Header, Content-Length"
         data={["Content-Length", "Content-Range", "X-Custom-Header"]}
-        value={splitTags(config.exposedHeaders)}
-        onChange={(val) => updateConfig("exposedHeaders", joinTags(val))}
+        value={splitTags(config.exposed_headers)}
+        onChange={(val) => updateConfig("exposed_headers", joinTags(val))}
         description="Headers that can be accessed from the client."
         styles={{ input: { minHeight: 60 } }}
         clearable
@@ -158,16 +158,16 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
       <Group grow>
         <NumberInput
           label="Max Age (seconds)"
-          value={parseInt(config.maxAge) || 86400}
-          onChange={(val) => updateConfig("maxAge", (val ?? 86400).toString())}
+          value={parseInt(config.max_age) || 86400}
+          onChange={(val) => updateConfig("max_age", (val ?? 86400).toString())}
           min={0}
         />
         <Switch
           label="Allow Credentials"
-          checked={config.allowCredentials === "true"}
+          checked={config.allow_credentials === "true"}
           onChange={(e) =>
             updateConfig(
-              "allowCredentials",
+              "allow_credentials",
               e.currentTarget.checked ? "true" : "false"
             )
           }
