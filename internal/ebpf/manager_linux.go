@@ -179,11 +179,7 @@ func (m *EbpfManager) loadHook(ctx context.Context, h hookSpec) {
 		return
 	}
 
-	// Map/program creation needs the memlock rlimit lifted on older kernels.
-	if err := rlimit.RemoveMemlock(); err != nil {
-		setErr(fmt.Errorf("remove memlock rlimit: %w", err))
-		return
-	}
+	tryRemoveMemlock(ifaceName)
 
 	spec, err := loadGateon_ebpf()
 	if err != nil {
@@ -212,6 +208,24 @@ func (m *EbpfManager) loadHook(ctx context.Context, h hookSpec) {
 	}
 
 	m.commit(ctx, coll, l, ifaceName, mode, h.label)
+}
+
+// tryRemoveMemlock lifts the memlock rlimit, and does not care if it fails.
+//
+// Since kernel 5.11 BPF memory is charged to the cgroup and RLIMIT_MEMLOCK is
+// not consulted, so this is a no-op there. Where it is not a no-op, raising the
+// limit needs CAP_SYS_RESOURCE — which a container granted only CAP_BPF and
+// CAP_NET_ADMIN does not have, and which the post-5.11 guidance says not to
+// bother adding. Treating the failure as fatal, as this used to, rejects a
+// configuration that works perfectly well. If the limit really is binding, the
+// collection load fails on its own with a far clearer error than this one.
+func tryRemoveMemlock(ifaceName string) {
+	if err := rlimit.RemoveMemlock(); err != nil {
+		logger.L.LogWarn("could not raise the memlock rlimit; continuing, because kernels 5.11+ "+
+			"charge BPF memory to the cgroup instead. If the map load fails immediately after "+
+			"this, grant CAP_SYS_RESOURCE or raise LimitMEMLOCK",
+			"interface", ifaceName, "error", err)
+	}
 }
 
 // commit registers the collection's maps, records attach state, pushes runtime

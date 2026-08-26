@@ -119,6 +119,19 @@ jobs:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
         run: go test ./...
 
+      - name: eBPF attach tests (need root)
+        run: |
+          # `go test ./...` above runs unprivileged, so every test that attaches
+          # a real program to a real interface skips there. Attaching is the
+          # only part of this subsystem that compiling cannot prove: the
+          # verifier, the clsact qdisc and the filter install either work on a
+          # live kernel or they do not.
+          #
+          # Built into RUNNER_TEMP, never the checkout, so the working-tree
+          # check below stays meaningful.
+          go test -c -o "$RUNNER_TEMP/ebpf.test" ./internal/ebpf/
+          sudo "$RUNNER_TEMP/ebpf.test" -test.run 'TestAttachTC|TestAttachClsact' -test.v
+
       - name: Working tree clean after tests
         run: |
           # Four e2e tests used to build binaries into the checkout. Nothing
