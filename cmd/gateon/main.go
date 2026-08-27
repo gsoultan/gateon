@@ -282,9 +282,19 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to create server", "error", err)
 	}
-	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
-		s.RedisClient = redis.NewClient(redisAddr)
-		logger.L.LogInfo("redis client initialized", "addr", redisAddr)
+	var redisCfg *gateonv1.RedisConfig
+	if gc := globalReg.Get(ctx); gc != nil {
+		redisCfg = gc.Redis
+	}
+	if opts, ok := redis.ResolveOptions(redisCfg, os.Getenv); ok {
+		if opts.ClusterIgnoresDB() {
+			logger.L.LogWarn("redis.db ignored: Redis Cluster has no SELECT, so every key lives in db 0",
+				"configured_db", opts.DB)
+		}
+		s.RedisClient = redis.NewClient(opts)
+		// The password is reported as set or not, never echoed.
+		logger.L.LogInfo("redis client initialized",
+			"addrs", opts.Addrs, "db", opts.DB, "password_set", opts.Password != "")
 	}
 
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
