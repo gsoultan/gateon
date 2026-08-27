@@ -1,0 +1,111 @@
+# CodeQL as a committed workflow rather than the settings-managed "default
+# setup", because default setup gives no way to choose a Go toolchain.
+#
+# It pins its own Go -- 1.26.6 with GOTOOLCHAIN=local -- so once go.mod declared
+# `go 1.27.0` the extractor died on "go.mod requires go >= 1.27.0 (running go
+# 1.26.6)" before analysing a single file, and there is no knob in default setup
+# to fix it. `ci` and `security` stayed green through the same bump for one
+# reason: they run actions/setup-go first, which installs the version the go
+# directive names. This workflow does the same, so the analysis tracks the
+# toolchain the project actually declares instead of whichever one the scanner
+# happened to ship with.
+#
+# Replacing default setup requires turning it off, or the two upload SARIF under
+# the same category and collide:
+#   gh api -X PATCH repos/gsoultan/gateon/code-scanning/default-setup \
+#     -f state=not-configured
+name: CodeQL
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    # Matches the weekly cadence default setup was configured with.
+    - cron: "0 6 * * 1"
+  # Kept so the workflow can be re-proven on a branch without waiting for a
+  # push to main -- add the branch to the push trigger and set `upload: never`
+  # on analyze, or default setup's category collides with this one.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  # upload-sarif calls GET /repos/{o}/{r}/actions/runs/{id} while
+  # post-processing; without this it fails after the SARIF is already valid.
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    # One language's extractor failing should not hide the other three.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Go is the one language here that needs a toolchain before extraction.
+          - language: go
+            build-mode: manual
+          # none, matching what default setup chose for it. Autobuild fails --
+          # the eBPF C is compiled by bpf2go behind a go:generate directive, so
+          # there is no configure/make/cmake shape to find -- and a manual
+          # `go generate` does not help either, because bpf2go drives clang with
+          # -target bpf and CodeQL's tracer records no C compilation from it
+          # ("didn't build any of it"). Build-less extraction is what works.
+          - language: c-cpp
+            build-mode: none
+          # These are read, not built.
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # The whole point of the file: give CodeQL the toolchain go.mod names.
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Setup Bun
+        if: matrix.language == 'go'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install eBPF build toolchain
+        if: matrix.language == 'go'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Mirrors the generate step in security.yml, and for the same reason: the
+      # tree does not type-check until bpf2go has emitted loadGateon_ebpf for
+      # internal/ebpf and the UI build has produced internal/ui/dist for the
+      # go:embed. Without it CodeQL reports a broken build rather than findings,
+      # which is how a scanner ends up green and blind.
+      - name: Build Go
+        if: matrix.language == 'go'
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          go install tool
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+          go build ./...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
