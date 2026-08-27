@@ -101,13 +101,17 @@ func (m *AlertingManager) process(threat *telemetry.SecurityThreat) {
 		return
 	}
 
-	// Smart autonomous mitigation: check aggregate IP risk score
-	if threat.SourceIP != "" && m.ebpfManager != nil {
-		// Never shun localhost or internal management traffic
-		if httputil.IsLoopback(threat.SourceIP) {
-			return
-		}
-
+	// Smart autonomous mitigation: check aggregate IP risk score.
+	//
+	// Loopback is never shunned -- doing so would cut off the gateway's own
+	// management traffic -- but it is deliberately only the *mitigation* that is
+	// skipped. This used to `return` outright, which is upstream of the playbook
+	// loop, so a threat from 127.0.0.1 was silently never reported either. That
+	// is not a corner case: a gateway behind nginx, a Cloudflare tunnel or any
+	// sidecar sees loopback as the source for every request until client-IP
+	// extraction is configured, and in that deployment alerting reads as enabled
+	// and configured while sending nothing at all.
+	if threat.SourceIP != "" && m.ebpfManager != nil && !httputil.IsLoopback(threat.SourceIP) {
 		score := telemetry.GetIPThreatScore(threat.SourceIP)
 		// If score is high (e.g. > 150) or very high severity threat
 		if score > 150 || threat.Severity == "critical" {
