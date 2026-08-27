@@ -198,12 +198,19 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      # Installed from source at a pinned version. GOEXPERIMENT=jsonv2 is
-      # required, not optional: from v0.74.0 Trivy imports encoding/json/v2, and
-      # without the experiment the build fails with "build constraints exclude
-      # all Go files in .../encoding/json/v2" and installs nothing.
+      # Installed from the release page, not built from source. Building it here
+      # tied the scanner to whatever Go this project declares, and the 1.27 bump
+      # duly broke it: v0.74.0 reaches encoding/json/v2 for json.SkipFunc, which
+      # 1.27 no longer provides under GOEXPERIMENT=jsonv2, so the install failed
+      # and every later step ran "trivy: command not found". A scanner that
+      # cannot install is a scan that did not run, and because v0.74.0 is the
+      # latest release there was no version to bump to. The two have no reason
+      # to be coupled -- take the binary Aqua already ships.
       - name: Install Trivy
-        run: GOEXPERIMENT=jsonv2 go install github.com/aquasecurity/trivy/cmd/trivy@v0.74.0
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: v0.74.0
+          cache: true
 
       # Accepted findings are scoped per-path in .trivyignore.yaml; ui/.bun-cache
       # holds some other project's lockfiles vendored inside cached tarballs and
