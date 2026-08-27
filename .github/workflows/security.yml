@@ -114,7 +114,7 @@ jobs:
       # repository access, so an upstream force-push or compromise would execute
       # here.
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.9
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
 
       # gosec parses rather than type-checks, so unlike govulncheck and
       # staticcheck it does not need the generated sources. Emit SARIF for GitHub
@@ -123,7 +123,8 @@ jobs:
       - name: Run gosec
         run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
 
-      # gosec v2.22.9 emits SARIF that the uploader rejects outright:
+      # Kept as a guard, not a workaround for the version we run. gosec v2.22.9
+      # emitted SARIF that the uploader rejected outright:
       #
       #   instance.runs[0].results[7].fixes[0].artifactChanges
       #     is not of a type(s) array
