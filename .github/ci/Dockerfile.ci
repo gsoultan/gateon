@@ -11,7 +11,7 @@
 # it: that file is the documented, standalone path for `make ebpf-docker` on a
 # developer's machine, and coupling the two would mean a CI change could break
 # the local workflow. The eBPF half is kept identical on purpose.
-FROM golang:1.26.6-bookworm
+FROM golang:1.27.0-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         clang \

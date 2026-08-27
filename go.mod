@@ -1,6 +1,6 @@
 module github.com/gsoultan/gateon
 
-go 1.26.6
+go 1.27.0
 
 require (
 	aidanwoods.dev/go-paseto v1.6.0

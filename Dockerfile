@@ -22,7 +22,7 @@ RUN bun run build
 # ---- Stage 2: builder -------------------------------------------------------
 # bookworm + clang/llvm/libbpf lets `go generate` compile the XDP program so the
 # Linux build (manager_linux.go) links the bpf2go loader. Pin to go.mod's Go.
-FROM golang:1.26-bookworm AS builder
+FROM golang:1.27-bookworm AS builder
 # nodejs is here for `buf generate` below: the TypeScript stubs are produced by
 # protoc-gen-es / protoc-gen-connect-es, which are node scripts under
 # ui/node_modules/.bin (`#!/usr/bin/env node`). Without node on PATH `buf
