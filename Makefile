@@ -11,7 +11,7 @@ CONTAINER ?= docker
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config ebpf ebpf-docker pgo-profile docker
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-coverage ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -155,6 +155,18 @@ check-invariants:
 ##               scripts/checkconfig/baseline.txt; only new offenders fail.
 check-config:
 	go run ./scripts/checkconfig
+
+## check-coverage: assert no package loses its tests or drops below its recorded
+##                 floor. A ratchet, not a target -- see scripts/checkcoverage.
+##
+##                 cmd/gateon is excluded: `go test -cover` over the whole tree
+##                 fails to link it against the proto package on Go 1.27 with
+##                 "fingerprint mismatch", while the same package builds, tests
+##                 and covers cleanly on its own. That is a toolchain problem,
+##                 not a coverage one, and gating on it would make this target
+##                 red for a reason it cannot describe.
+check-coverage:
+	@go test -cover $$(go list ./... | grep -v 'cmd/gateon') | go run ./scripts/checkcoverage
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
 sec: vuln staticcheck gosec check-invariants check-config

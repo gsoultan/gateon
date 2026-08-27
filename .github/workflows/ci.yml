@@ -122,6 +122,16 @@ jobs:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
         run: go test ./...
 
+      # A ratchet on the tested surface, not a coverage target. Every serious
+      # defect found in this codebase in 2026 came out of a package with no
+      # tests, so the gate refuses to let that surface shrink: a package may not
+      # lose its tests, and may not fall more than a point below its recorded
+      # figure. Baseline in scripts/checkcoverage/baseline.txt.
+      - name: Coverage ratchet
+        env:
+          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
+        run: make check-coverage
+
       - name: eBPF attach tests (need root)
         run: |
           # `go test ./...` above runs unprivileged, so every test that attaches

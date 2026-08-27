@@ -1,0 +1,84 @@
+# Per-package coverage floors, enforced by scripts/checkcoverage.
+# A package may not lose its tests, and may not fall more than
+# 1.0 percentage point below the figure recorded here.
+#
+# "-" means the package has no tests. That is a debt, not a
+# licence: it is recorded so the count cannot quietly grow.
+# Regenerate with:
+#   go test -cover ./... | go run ./scripts/checkcoverage -update
+
+github.com/gsoultan/gateon/dev/backend -
+github.com/gsoultan/gateon/dev/seed -
+github.com/gsoultan/gateon/internal/ai 69.0%
+github.com/gsoultan/gateon/internal/ai/models/default -
+github.com/gsoultan/gateon/internal/alerting 25.8%
+github.com/gsoultan/gateon/internal/api 48.6%
+github.com/gsoultan/gateon/internal/audit 42.7%
+github.com/gsoultan/gateon/internal/auth 71.9%
+github.com/gsoultan/gateon/internal/config 17.2%
+github.com/gsoultan/gateon/internal/db 60.5%
+github.com/gsoultan/gateon/internal/discovery 9.5%
+github.com/gsoultan/gateon/internal/domain/canary -
+github.com/gsoultan/gateon/internal/domain/entrypoint -
+github.com/gsoultan/gateon/internal/domain/middleware -
+github.com/gsoultan/gateon/internal/domain/proxy -
+github.com/gsoultan/gateon/internal/domain/route -
+github.com/gsoultan/gateon/internal/domain/service -
+github.com/gsoultan/gateon/internal/domain/tls -
+github.com/gsoultan/gateon/internal/ebpf 18.3%
+github.com/gsoultan/gateon/internal/ha 19.3%
+github.com/gsoultan/gateon/internal/httputil 45.0%
+github.com/gsoultan/gateon/internal/inits -
+github.com/gsoultan/gateon/internal/install -
+github.com/gsoultan/gateon/internal/k8s 35.4%
+github.com/gsoultan/gateon/internal/logger -
+github.com/gsoultan/gateon/internal/middleware 59.1%
+github.com/gsoultan/gateon/internal/middleware/auth 5.2%
+github.com/gsoultan/gateon/internal/middleware/kind 54.5%
+github.com/gsoultan/gateon/internal/phantom 20.0%
+github.com/gsoultan/gateon/internal/redis 84.0%
+github.com/gsoultan/gateon/internal/repositories/entities -
+github.com/gsoultan/gateon/internal/repositories/stores 19.9%
+github.com/gsoultan/gateon/internal/request 47.1%
+github.com/gsoultan/gateon/internal/resource 65.8%
+github.com/gsoultan/gateon/internal/router 78.6%
+github.com/gsoultan/gateon/internal/security 30.2%
+github.com/gsoultan/gateon/internal/security/art -
+github.com/gsoultan/gateon/internal/security/correlation 84.7%
+github.com/gsoultan/gateon/internal/security/entropy 45.1%
+github.com/gsoultan/gateon/internal/security/fim 84.3%
+github.com/gsoultan/gateon/internal/security/mitigation 87.2%
+github.com/gsoultan/gateon/internal/security/pqc 82.8%
+github.com/gsoultan/gateon/internal/security/reputation 64.5%
+github.com/gsoultan/gateon/internal/security/scanner -
+github.com/gsoultan/gateon/internal/security/siem 63.1%
+github.com/gsoultan/gateon/internal/security/tpm 28.1%
+github.com/gsoultan/gateon/internal/security/waf 62.1%
+github.com/gsoultan/gateon/internal/security/yara 93.8%
+github.com/gsoultan/gateon/internal/server 43.1%
+github.com/gsoultan/gateon/internal/server/entrypoint 29.9%
+github.com/gsoultan/gateon/internal/server/handlers 14.7%
+github.com/gsoultan/gateon/internal/syncutil -
+github.com/gsoultan/gateon/internal/telemetry 56.3%
+github.com/gsoultan/gateon/internal/testutil -
+github.com/gsoultan/gateon/internal/tls 48.6%
+github.com/gsoultan/gateon/internal/tui -
+github.com/gsoultan/gateon/internal/ui -
+github.com/gsoultan/gateon/pkg/httputil 100.0%
+github.com/gsoultan/gateon/pkg/l4 20.0%
+github.com/gsoultan/gateon/pkg/proxy 47.5%
+github.com/gsoultan/gateon/proto/gateon/v1 -
+github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect -
+github.com/gsoultan/gateon/scripts -
+github.com/gsoultan/gateon/scripts/checkconfig -
+github.com/gsoultan/gateon/scripts/checkcoverage -
+github.com/gsoultan/gateon/tests/e2e 90.9%
+github.com/gsoultan/gateon/tests/e2e/create_user -
+github.com/gsoultan/gateon/tests/e2e/grpc_backend -
+github.com/gsoultan/gateon/tests/e2e/grpc_test_client -
+github.com/gsoultan/gateon/tests/e2e/mock_backend -
+github.com/gsoultan/gateon/tests/e2e/tcp_backend -
+github.com/gsoultan/gateon/tests/e2e/tcp_test_client -
+github.com/gsoultan/gateon/tests/e2e/testpb -
+github.com/gsoultan/gateon/tests/e2e/wait_for_port -
+github.com/gsoultan/gateon/ui/node_modules/flatted/golang/pkg/flatted -
