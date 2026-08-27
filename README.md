@@ -6,6 +6,19 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 
 ## 🚀 Core Features
 
+> **A note on maturity.** Features marked **`[experimental]`** are shipped and
+> work, but have materially less production exposure than the rest — and each
+> one had a silent-failure defect found in it during a single month of focused
+> review in August 2026: eBPF was attaching in generic mode where it cost more
+> than it saved and drove a geofencing map no program read; VRRP accepted any
+> forged 8-byte datagram as an advert because the field authenticating them was
+> read by no line of Go; the Kubernetes controller panicked on a valid Ingress
+> shape and let a backtick in a hostname capture another tenant's traffic. All
+> are fixed. The label is here because "we found three of these in four weeks"
+> is a statement about test exposure, not about those three bugs, and you should
+> price it before putting one of these on a critical path. Everything unmarked
+> is covered by the gates in `make sec` and the coverage ratchet in CI.
+
 ### 🌐 High-Performance Traffic Management
 - **Multiprotocol Proxy**: Native support for **HTTP/1.1, HTTP/2, gRPC, and gRPC-Web** on a single port.
 - **Real-time Streaming**: Full-duplex **WebSocket and SSE** proxying (see [doc/websockets-sse.md](doc/websockets-sse.md)).
@@ -17,7 +30,7 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 ### 🛡️ Enterprise-Grade Security & Shielding
 - **Advanced WAF**: Built-in **[gwaf](https://github.com/gsoultan/gwaf)**, an embeddable Go WAF that parses request *intent* rather than matching signatures — semantic detectors for SQLi, XSS, shell, path, template, NoSQL and PHP injection, plus prompt injection. OWASP CRS rules import through its SecLang adapter. Blocks by default with no tuning phase, and every decision carries a rule ID and the matched byte span.
 - **Data Loss Prevention**: Response- and request-phase inspection for card numbers (issuer range + Luhn, not a regex guess), cloud and SaaS credentials, private keys, database URIs with embedded passwords, and stack traces or database errors leaking from the origin. Choose **block, redact or audit** per route, so a programme can start by watching and tighten later. Outbound and inbound are separate rule sets on purpose — a card number in a response is a leak, the same number in a request is a customer paying for something. See [ADR 0008](doc/adr/0008-response-inspection-must-control-its-own-encoding.md).
-- **Kernel Offloading**: eBPF rate limiting, IP shunning and packet filtering, at the earliest hook the NIC actually supports.
+- **Kernel Offloading** `[experimental]`: eBPF rate limiting, IP shunning and packet filtering, at the earliest hook the NIC actually supports.
   **Native XDP runs in the driver before the packet ever becomes an `skb`** — but most virtualized NICs cannot offer it.
   The AWS ENA driver, for one, refuses a native attach above a page-sized MTU (the EC2 VPC default is 9001) and unless
   the driver is using at most half its queues. Where native XDP is unavailable, Gateon attaches at the **TC (clsact)
@@ -38,8 +51,8 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 - **Management TUI**: A terminal-based dashboard (`gateon top`) for real-time monitoring.
 
 ### ⚙️ Automation & Scalability
-- **Kubernetes Native**: Full support for the **Kubernetes Gateway API** (`Gateway`, `HTTPRoute`).
-- **High Availability**: Active-Passive failover (VRRP) and multi-cluster configuration sync via Redis.
+- **Kubernetes Native** `[experimental]`: Full support for the **Kubernetes Gateway API** (`Gateway`, `HTTPRoute`).
+- **High Availability** `[experimental]`: Active-Passive failover (VRRP) and multi-cluster configuration sync via Redis.
 - **Secrets Management**: Securely resolve secrets from **HashiCorp Vault, AWS Secrets Manager**, and environment variables at runtime.
 - **WASM Extensibility**: Custom traffic manipulation using WebAssembly-based middlewares.
 
