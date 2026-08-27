@@ -80,6 +80,15 @@ func (w *StatusResponseWriter) Write(b []byte) (int, error) {
 		w.firstByte = time.Now()
 		w.ttfbRecorded = true
 	}
+	// net/http sends 200 on the first Write when the handler never called
+	// WriteHeader, so record what the client actually received. Leaving this at
+	// zero made every such response read as status 0 downstream -- otel.go puts
+	// Status straight into a span attribute, and standard.go carries two
+	// `if statusCode == 0 { statusCode = 200 }` patches for the same reason.
+	// Guarded on zero so a later Write cannot overwrite a real status.
+	if w.Status == 0 {
+		w.Status = http.StatusOK
+	}
 	n, err := w.ResponseWriter.Write(b)
 	w.BytesWritten += int64(n)
 	return n, err
