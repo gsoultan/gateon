@@ -1,66 +1,104 @@
-# Config fields that no Go code reads, accepted as debt at adoption on
-# 2026-08-26. The check fails only on fields added to this list's *absence* —
-# that is, on newly-dead config — the same way `make lint-new` gates new work
-# while `make lint`'s backlog is paid down opportunistically.
+# Config fields that no Go code reads. Accepted as debt at adoption, 2026-08-26.
 #
-# Every line here is a control that a user can set and that changes nothing.
-# Shrinking this file is the point of it existing; when a field starts being
-# read, the check says so and the line should be deleted.
+# Each line is a control a user can set that changes nothing. Shrinking this file
+# is the point of it existing; when a field starts being read the check says so
+# and the line should be deleted.
+#
+# These are CANDIDATES, not verdicts. An unread field is not automatically a
+# broken feature -- OidcConfig below is unread but per-route OIDC works fine
+# through a different path. Each entry deserves ten minutes before you act on it.
 #
 # Format: Message.field_name
 
-# --- TITAN: the entire feature set is config-only ---------------------------
-# `enabled` is read; nothing else is. The dashboard offers phantom ports, an AI
-# predictor, post-quantum crypto and a governor, none of which consult these.
-TitanConfig.enable_phantom
-TitanConfig.enable_ai_predictor
-TitanConfig.enable_pqc
-TitanConfig.enable_governor
-TitanConfig.ai_model_path
 
-# --- OIDC: global block is scaffolding; route-level OIDC works --------------
-# Per-route OIDC auth is implemented and used (auth_factory.go dispatches on
-# "oidc" into internal/middleware/auth/oidc_validator.go, configured from the
-# middleware's own string map). This *global* AuthConfig.oidc block is a second,
-# unimplemented path for dashboard SSO login: nothing reads it, and LoginPage.tsx
-# has no SSO control, so no operator can currently be misled by it. Schema
-# scaffolding to either implement or reserve -- not a broken security control.
+# --- AcmeConfig ---
+AcmeConfig.challenge_type
+AcmeConfig.dns_config
+AcmeConfig.dns_provider
+
+# --- AnomalyDetectionConfig ---
+AnomalyDetectionConfig.anomaly_retention_days
+AnomalyDetectionConfig.prometheus_url
+
+# --- AuthConfig ---
 AuthConfig.oidc
-OidcConfig.client_id
-OidcConfig.redirect_url
 
-# --- TLS ---------------------------------------------------------------------
-# The HTTP-to-HTTPS redirect toggle. Security-adjacent: an operator who turns it
-# on has reason to believe plaintext requests are being redirected.
-TlsConfig.auto_redirect
-
-# --- WAF ---------------------------------------------------------------------
-# auto_update_rules and update_interval_hours are read; the URL they would fetch
-# from is not, so the updater cannot be pointed at a mirror or a private ruleset.
-WafConfig.rules_url
-
-# --- eBPF --------------------------------------------------------------------
-# The cuckoo filter's map and mutator exist and are used; this toggle that is
-# meant to gate them is not read, so the feature does not follow its own switch.
-EbpfConfig.xdp_cuckoo_filter
-
-# --- Bot management ----------------------------------------------------------
-# enable_browser_integrity is read; the JS challenge toggle is not.
+# --- BotManagementConfig ---
+# Global duplicates of the per-route bot middleware, which
+# is configured from its own string map and works. Same shape as the
+# ManagementConfig duplicates removed in this branch.
+BotManagementConfig.challenge_timeout_seconds
+BotManagementConfig.enable_browser_integrity
 BotManagementConfig.enable_js_challenge
 
-# --- Anomaly detection -------------------------------------------------------
-AnomalyDetectionConfig.prometheus_url
-AnomalyDetectionConfig.anomaly_retention_days
+# --- CorsConfig ---
+CorsConfig.exposed_headers
+CorsConfig.max_age
 
-# --- GitOps ------------------------------------------------------------------
-# auth_token is read; the SSH key is not, so SSH-authenticated repositories
-# cannot actually be used.
+# --- DebuggerConfig ---
+DebuggerConfig.max_captures
+
+# --- EbpfConfig ---
+# xdp_cuckoo_filter: the filter's map and mutators are used, but this
+# toggle meant to gate them is not read, so the feature ignores its own switch.
+EbpfConfig.xdp_cuckoo_filter
+
+# --- GitOpsConfig ---
+# ssh_private_key: auth_token is read, so token auth works and
+# SSH-authenticated repositories cannot actually be used.
 GitOpsConfig.ssh_private_key
 
-# --- ACME --------------------------------------------------------------------
-AcmeConfig.dns_provider
-AcmeConfig.dns_config
+# --- GlobalConfig ---
+# titan: the whole TitanConfig block is unreachable (see below).
+GlobalConfig.titan
 
-# --- Redis -------------------------------------------------------------------
-# The database index is ignored, so every deployment shares db 0.
+# --- LogConfig ---
+LogConfig.development
+LogConfig.format
+
+# --- OidcConfig ---
+# Dashboard-SSO scaffolding. Per-route OIDC *works* -- auth_factory.go
+# dispatches "oidc" into internal/middleware/auth/oidc_validator.go from the
+# middleware's own string map. LoginPage.tsx has no SSO control, so nobody is
+# currently misled. Implement or reserve; not a broken security control.
+OidcConfig.client_id
+OidcConfig.client_secret
+OidcConfig.enabled
+OidcConfig.issuer
+OidcConfig.redirect_url
+OidcConfig.scopes
+
+# --- OtelConfig ---
+OtelConfig.enabled
+OtelConfig.service_name
+
+# --- RedisConfig ---
+# The client is built from the REDIS_ADDR env var alone
+# (cmd/gateon/main.go), so the whole message is bypassed: a password-protected
+# Redis cannot be configured here and every deployment shares db 0.
 RedisConfig.db
+RedisConfig.enabled
+RedisConfig.password
+
+# --- TitanConfig ---
+# The entire TITAN feature set, `enabled` included. GlobalConfig.titan
+# is itself unread, so nothing below it can be reached: phantom ports, the AI
+# predictor, post-quantum crypto and the governor are switches attached to nothing.
+TitanConfig.ai_model_path
+TitanConfig.enable_ai_predictor
+TitanConfig.enable_governor
+TitanConfig.enable_phantom
+TitanConfig.enable_pqc
+TitanConfig.enabled
+
+# --- TlsConfig ---
+# auto_redirect: an operator who asked for HTTP-to-HTTPS redirection
+# did not get it. Security-adjacent.
+TlsConfig.auto_redirect
+
+# --- WafConfig ---
+# rules_url: the updater cannot be pointed at a mirror or private
+# ruleset. update_interval_hours: the WafConfig one is dead; the identically
+# named IPReputationConfig field is what is actually read.
+WafConfig.rules_url
+WafConfig.update_interval_hours

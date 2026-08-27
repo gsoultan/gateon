@@ -33,11 +33,15 @@ package main
 
 import (
 	"fmt"
+	"go/ast"
+	"go/types"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 const (
@@ -101,46 +105,88 @@ func collectFields() ([]protoField, error) {
 	return out, nil
 }
 
-// skipDir keeps the scan to hand-written Go.
-func skipDir(name string) bool {
-	switch name {
-	case ".git", "node_modules", "dist", "vendor", "ui", "graphify-out", ".serena":
-		return true
+// protoPkgPath is the generated package whose types the config lives on.
+const protoPkgPath = "github.com/gsoultan/gateon/proto/gateon/v1"
+
+// readSelections returns, per proto message type, the set of names selected on a
+// value of that type — both direct field access (cfg.Redis.Password) and the
+// generated getter (cfg.GetRedis().GetPassword()).
+//
+// This is type-resolved rather than grepped, because a textual search matches an
+// accessor name anywhere it appears on any type. "Enabled" occurs on nearly every
+// config message and is read somewhere for a hundred others, so a grep can never
+// flag a dead Enabled; "Password" is read for auth while RedisConfig.password is
+// dropped on the floor. A check that reports "ok" for config nothing reads is the
+// very failure it exists to catch, one level up.
+func readSelections() (map[string]map[string]bool, error) {
+	out := map[string]map[string]bool{}
+	// Build constraints hide readers: internal/ebpf/manager_linux.go is
+	// //go:build linux, so loading only the host platform on a Mac reports every
+	// field it reads as dead. Each GOOS is loaded and the results unioned, so a
+	// field read on any supported platform counts as read.
+	for _, goos := range []string{"linux", "darwin"} {
+		cfg := &packages.Config{
+			Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo,
+			// Tests excluded: a field exercised only by a test is still wired to
+			// no behaviour, which is the condition being detected.
+			Tests: false,
+			Env:   append(os.Environ(), "GOOS="+goos),
+		}
+		pkgs, err := packages.Load(cfg, "./...")
+		if err != nil {
+			return nil, fmt.Errorf("loading for GOOS=%s: %w", goos, err)
+		}
+		for _, pkg := range pkgs {
+			// The generated code obviously mentions every field; only
+			// hand-written callers count as somebody reading the config.
+			if pkg.PkgPath == protoPkgPath || pkg.TypesInfo == nil {
+				continue
+			}
+			for _, file := range pkg.Syntax {
+				recordSelections(file, pkg.TypesInfo, out)
+			}
+		}
 	}
-	return false
+	return out, nil
 }
 
-// readGoSources concatenates every non-generated, non-test Go file.
-//
-// Tests are excluded on purpose: a field exercised only by a test is still not
-// wired to any behaviour, which is exactly the condition being detected.
-func readGoSources() (string, error) {
-	var sb strings.Builder
-	err := filepath.WalkDir(".", func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil // unreadable paths are not the check's business
+// recordSelections walks one file, noting every selection made on a proto type.
+func recordSelections(file *ast.File, info *types.Info, out map[string]map[string]bool) {
+	ast.Inspect(file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
 		}
-		if d.IsDir() {
-			if skipDir(d.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
+		tv, ok := info.Types[sel.X]
+		if !ok || tv.Type == nil {
+			return true
 		}
-		name := d.Name()
-		if !strings.HasSuffix(name, ".go") ||
-			strings.HasSuffix(name, ".pb.go") ||
-			strings.HasSuffix(name, "_test.go") ||
-			strings.Contains(path, "/gen/") {
-			return nil
+		name := protoTypeName(tv.Type)
+		if name == "" {
+			return true
 		}
-		b, rerr := os.ReadFile(path)
-		if rerr == nil {
-			sb.Write(b)
-			sb.WriteByte('\n')
+		if out[name] == nil {
+			out[name] = map[string]bool{}
 		}
-		return nil
+		out[name][sel.Sel.Name] = true
+		return true
 	})
-	return sb.String(), err
+}
+
+// protoTypeName returns the bare type name when t is (a pointer to) a named type
+// declared in the generated proto package, and "" otherwise.
+func protoTypeName(t types.Type) string {
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = ptr.Elem()
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return ""
+	}
+	if named.Obj().Pkg().Path() != protoPkgPath {
+		return ""
+	}
+	return named.Obj().Name()
 }
 
 // loadBaseline reads the accepted-debt list.
@@ -167,9 +213,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "checkconfig: reading schema: %v\n", err)
 		os.Exit(2)
 	}
-	sources, err := readGoSources()
+	selections, err := readSelections()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "checkconfig: reading sources: %v\n", err)
+		fmt.Fprintf(os.Stderr, "checkconfig: loading packages: %v\n", err)
 		os.Exit(2)
 	}
 	baseline, err := loadBaseline()
@@ -180,9 +226,9 @@ func main() {
 
 	var unread, fixed []string
 	for _, f := range fields {
-		// Matches both direct field access and the generated getter.
-		re := regexp.MustCompile(`\b(?:Get)?` + regexp.QuoteMeta(f.Accessor) + `\b`)
-		referenced := re.MatchString(sources)
+		// Read only if selected on its own message type, by field or by getter.
+		onType := selections[f.Message]
+		referenced := onType[f.Accessor] || onType["Get"+f.Accessor]
 		switch {
 		case !referenced && !baseline[f.key()]:
 			unread = append(unread, fmt.Sprintf("%s (no Go reads %s)", f.key(), f.Accessor))
