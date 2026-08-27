@@ -48,8 +48,12 @@ jobs:
           # present before extraction.
           - language: go
             build-mode: manual
+          # Manual, not autobuild: the eBPF C is compiled by bpf2go behind a
+          # go:generate directive, which the C autobuilder cannot infer -- it
+          # looks for a configure/make/cmake shape, finds none, and fails the
+          # job outright.
           - language: c-cpp
-            build-mode: autobuild
+            build-mode: manual
           # These are read, not built.
           - language: javascript-typescript
             build-mode: none
@@ -62,7 +66,7 @@ jobs:
 
       # The whole point of the file: give CodeQL the toolchain go.mod names.
       - name: Setup Go
-        if: matrix.language == 'go'
+        if: matrix.language == 'go' || matrix.language == 'c-cpp'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -98,6 +102,13 @@ jobs:
           PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
           go generate ./...
           go build ./...
+
+      # bpf2go shells out to clang, so running the generator under CodeQL's
+      # tracer is what puts the eBPF C into the database. security.yml already
+      # proves this step compiles here.
+      - name: Build eBPF C
+        if: matrix.language == 'c-cpp'
+        run: go generate ./internal/ebpf/...
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
