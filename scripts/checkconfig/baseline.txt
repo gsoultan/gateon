@@ -73,12 +73,10 @@ OtelConfig.enabled
 OtelConfig.service_name
 
 # --- RedisConfig ---
-# The client is built from the REDIS_ADDR env var alone
-# (cmd/gateon/main.go), so the whole message is bypassed: a password-protected
-# Redis cannot be configured here and every deployment shares db 0.
-RedisConfig.db
+# addr/password/db now reach the client through redis.ResolveOptions. `enabled`
+# still is not consulted: Redis is switched on by an address resolving at all,
+# so setting enabled=false leaves it on.
 RedisConfig.enabled
-RedisConfig.password
 
 # --- TitanConfig ---
 # The entire TITAN feature set, `enabled` included. GlobalConfig.titan
