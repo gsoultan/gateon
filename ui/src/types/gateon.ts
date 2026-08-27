@@ -393,6 +393,13 @@ export type WafConfig = {
   malwareDetection?: boolean;
   ransomwareDetection?: boolean;
   dlp?: boolean;
+  /**
+   * What to do when a data-leak rule fires: "block" (the default) refuses the
+   * response, "redact" removes the finding and forwards the rest, "audit"
+   * records it and forwards untouched. Anything else, including empty, blocks.
+   * Mirrors WafConfig.dlp_action in proto/gateon/v1/global.proto.
+   */
+  dlpAction?: string;
   anomalyThreshold?: number;
   botManagement?: BotManagementConfig;
   requestBodyLimit?: number;

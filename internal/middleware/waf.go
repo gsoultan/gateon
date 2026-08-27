@@ -84,6 +84,13 @@ type WAFConfig struct {
 	EnableMalwareDetection    bool
 	EnableRansomwareDetection bool
 	EnableDLP                 bool
+
+	// DLPAction decides what happens when a data-leak rule fires: refuse the
+	// response (the default), redact the finding and forward the rest, or record
+	// it and forward untouched. It applies to the data-leak corpus only — an
+	// injection is not made safe by redacting it.
+	// Configure with the "dlp_action" key or GATEON_WAF_DLP_ACTION.
+	DLPAction dlpAction
 	// EnableResponseInspection turns on the CRS RESPONSE-phase (data-leakage /
 	// DLP) rules. These require buffering response bodies, which is the most
 	// expensive part of the WAF in CPU, latency and memory, so it is off outside
@@ -142,8 +149,11 @@ func (c WAFConfig) Fingerprint() string {
 	fmt.Fprintf(h, "i:%d%d%d%d%d%t\n",
 		c.ParanoiaLevel, c.AnomalyThreshold, c.RequestBodyLimit,
 		c.ResponseBodyLimit, int(c.EntropyThreshold*100), c.FailOpen)
-	// String fields
-	fmt.Fprintf(h, "s:%s\n", c.AuditLogPath)
+	// String fields. The data-leak action belongs here rather than with the
+	// booleans: it changes what the middleware does with a decision, so two
+	// configs differing only in it describe different behaviour and must not
+	// share a cached engine.
+	fmt.Fprintf(h, "s:%s|%s\n", c.AuditLogPath, c.DLPAction)
 	// Programmatic rules are part of the policy, so two configs differing only
 	// in them must not share a cached engine.
 	for i := range c.ExtraRules {
@@ -255,6 +265,16 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 	engine, err := newWAFEngine(cfg, nil)
 	if err != nil {
 		return nil, err
+	}
+
+	// Built once with the engine rather than per response: the operators are
+	// stateless, and compiling the data-leak corpus on every request that hits a
+	// leak would put an allocation on the path that is already the expensive
+	// one. Nil unless redaction is actually configured, so the ordinary blocking
+	// deployment carries none of it.
+	var redactor *dlpRedactor
+	if cfg.EnableResponseInspection && cfg.DLPAction == dlpRedact {
+		redactor = newDLPRedactor(cfg.ParanoiaLevel)
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -511,15 +531,28 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			// trade: the leaked bytes stop either way, and a client that received
 			// a 200 with a truncated body is strictly better off than one that
 			// waited for the whole thing to be buffered.
+			// Narrow what the origin may answer in before the request goes
+			// upstream: an encoding this build cannot undo would hand the
+			// response phase an opaque stream and every data-leak rule would
+			// match nothing. The client's own value goes back afterwards, so
+			// access logs and fingerprinting still see the real request.
+			prevAE, hadAE := forceInspectableEncoding(r.Header)
+
 			ww := &wafResponseWriter{
 				ResponseWriter: w,
 				tx:             tx,
 				auditOnly:      cfg.AuditOnly,
 				onDecision:     observe,
 				bufLimit:       responseBufferLimit(cfg),
+				encDecodable:   true,
+				routeID:        cfg.RouteID,
+				dlpAction:      cfg.DLPAction,
+				redactor:       redactor,
 			}
 			next.ServeHTTP(ww, r)
 			ww.finish()
+			ww.release()
+			restoreAcceptEncoding(r.Header, prevAE, hadAE)
 		})
 		return h
 	}, nil
@@ -742,6 +775,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		DisableProtocolChecks:       isFalse("protocol"),
 		RequestBodyLimit:            intVal(cfg["request_body_limit"]),
 		ResponseBodyLimit:           intVal(cfg["response_body_limit"]),
+		DLPAction:                   parseDLPAction(cfg["dlp_action"]),
 		AuditLogPath:                strings.TrimSpace(cfg["audit_log_path"]),
 		AuditLogRelevantOnly:        strings.TrimSpace(strings.ToLower(cfg["audit_log_relevant_only"])) != "false",
 		RouteID:                     routeID,
@@ -919,8 +953,103 @@ type wafResponseWriter struct {
 	auditOnly     bool
 	onDecision    func(gwaf.Decision)
 
-	buf      bytes.Buffer
+	// buf holds the response while it is inspectable. It comes from a pool: at
+	// enterprise tier this grows to the ceiling on every response, and
+	// allocating a megabyte per request is the regression the hot-path budget
+	// exists to prevent. nil means this response is being streamed through
+	// without inspection.
+	buf      *bytes.Buffer
 	bufLimit int
+
+	// respEnc is the response's Content-Encoding reduced to something
+	// inflateForInspection understands; encDecodable is false when the origin
+	// answered in an encoding that cannot be undone here. A compressed body is
+	// not streamed into the engine chunk by chunk — it is held, inflated once,
+	// and inspected as the client will read it.
+	respEnc      string
+	encDecodable bool
+	inspected    bool
+	// skipBody marks a response whose Content-Type no data-leak rule could
+	// match, so neither the buffer nor the engine ever sees its bytes.
+	skipBody bool
+	routeID  string
+
+	// Data-leak handling. plain holds the inflated body when the response was
+	// compressed, because a redaction has to rewrite what the client will read
+	// and buf holds the encoded form. redactPending says a finding was accepted
+	// for redaction rather than blocked, and is resolved in flush.
+	dlpAction       dlpAction
+	redactor        *dlpRedactor
+	plain           []byte
+	plainComplete   bool
+	redactPending   bool
+	pendingDecision gwaf.Decision
+	redacted        []byte
+}
+
+// applyDecision routes a blocking decision through the configured data-leak
+// action. Everything that is not a data-leak finding, and every finding when the
+// action is block, refuses the response exactly as before.
+func (w *wafResponseWriter) applyDecision(d gwaf.Decision) {
+	if !d.Blocked() || w.auditOnly {
+		return
+	}
+	if w.dlpAction != dlpBlock && isDLPDecision(d.RuleID()) && w.canRewriteBody() {
+		if w.dlpAction == dlpAudit {
+			// Recorded and forwarded untouched. This is the stage of a rollout
+			// where the false-positive rate is still being learned.
+			if w.onDecision != nil {
+				w.onDecision(d)
+			}
+			return
+		}
+		// Redaction is not settled here: whether it can actually remove the
+		// finding is only known once the whole body is held, so the decision is
+		// kept and resolved in resolveRedaction, which observes it exactly once
+		// either way.
+		w.redactPending = true
+		w.pendingDecision = d
+		return
+	}
+	w.block(d)
+}
+
+// canRewriteBody reports whether the response can still be changed.
+//
+// Redacting and auditing both depend on it: once bytes are on the wire they
+// cannot be recalled, and a truncated inflate means the plaintext held here is
+// not the whole body, so splicing it back would corrupt the response. In either
+// case the honest fallback is the block the operator was trying to avoid, which
+// is worth saying out loud rather than silently forwarding the leak.
+func (w *wafResponseWriter) canRewriteBody() bool {
+	if w.flushed || w.buf == nil {
+		return false
+	}
+	return w.respEnc == encodingIdentity || w.plainComplete
+}
+
+// responseBufPool reuses the hold-back buffers. Without it, a route with
+// response inspection on allocates and discards up to the ceiling on every
+// single response.
+var responseBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
+// bufReturnCeiling caps what goes back into the pool. A buffer that grew to
+// hold a large response would otherwise be retained for the life of the
+// process, turning one big response into permanent resident memory.
+const bufReturnCeiling = 256 << 10
+
+// release returns the hold-back buffer to the pool. It runs once, after the
+// response is complete, and clears the field so any later use fails loudly on a
+// nil map access rather than quietly writing into a buffer someone else owns.
+func (w *wafResponseWriter) release() {
+	if w.buf == nil {
+		return
+	}
+	if w.buf.Cap() <= bufReturnCeiling {
+		w.buf.Reset()
+		responseBufPool.Put(w.buf)
+	}
+	w.buf = nil
 }
 
 // WriteHeader runs the response-headers phase and holds the status back while
@@ -932,6 +1061,23 @@ func (w *wafResponseWriter) WriteHeader(status int) {
 	w.headerWritten = true
 	w.status = status
 
+	// The encoding has to be read before any body arrives, because it decides
+	// whether those bytes can be inspected as they stream or have to be held and
+	// inflated first.
+	w.respEnc, w.encDecodable = decodableEncoding(w.Header().Get("Content-Encoding"))
+
+	// A body no rule could match is not worth a buffer or a pass over its bytes.
+	// Dropping the limit to zero here is what turns the rest of this writer into
+	// a pass-through for images, fonts and archives.
+	if !responseBodyInspectable(w.Header().Get("Content-Type")) {
+		w.skipBody = true
+		w.bufLimit = 0
+		w.inspected = true
+	}
+	if w.bufLimit > 0 {
+		w.buf, _ = responseBufPool.Get().(*bytes.Buffer)
+	}
+
 	w.tx.SetResponseStatus(status)
 	for name, values := range w.Header() {
 		for _, v := range values {
@@ -939,11 +1085,19 @@ func (w *wafResponseWriter) WriteHeader(status int) {
 		}
 	}
 	if d := w.tx.ProcessResponseHeaders(); d.Blocked() && !w.auditOnly {
+		// Header-phase findings cannot be redacted — there is no body held yet —
+		// so this stays a block regardless of the action.
 		w.block(d)
 		return
 	}
 	if w.bufLimit <= 0 {
+		// Nothing is being held back, so the response is already committed and
+		// there is no later flush to wait for. Saying so is what lets Flush pass
+		// through to the client — a large download or a video segment has to
+		// keep streaming — and what stops finish's flush from writing the header
+		// a second time.
 		w.commitHeader()
+		w.flushed = true
 	}
 }
 
@@ -961,23 +1115,117 @@ func (w *wafResponseWriter) Write(b []byte) (int, error) {
 		}
 	}
 
-	if d := w.tx.WriteResponseBody(b); d.Blocked() && !w.auditOnly {
-		w.block(d)
-		return len(b), nil
+	if w.skipBody {
+		return w.ResponseWriter.Write(b)
 	}
 
-	if w.bufLimit > 0 && !w.flushed {
+	// Plaintext streams into the engine as it arrives. A compressed body cannot:
+	// no chunk of a DEFLATE stream means anything on its own, so it is held and
+	// inflated once, in inspectHeld.
+	if w.respEnc == encodingIdentity && w.encDecodable {
+		if d := w.tx.WriteResponseBody(b); d.Blocked() && !w.auditOnly {
+			w.applyDecision(d)
+			if w.blocked {
+				return len(b), nil
+			}
+		}
+	}
+
+	if w.buf != nil && w.bufLimit > 0 && !w.flushed {
 		if w.buf.Len()+len(b) <= w.bufLimit {
 			w.buf.Write(b)
 			return len(b), nil
 		}
 		// The ceiling is reached: everything from here on is uninspectable, so
-		// commit what is held and stop buffering.
+		// inspect what is held while the bytes are still here — flush releases
+		// them — then commit and stop buffering.
+		w.inspectHeld()
+		if w.blocked {
+			return len(b), nil
+		}
+		if w.redactPending {
+			// The ceiling arrived with a finding still to remove. The body is no
+			// longer whole, so there is nothing safe to splice — refusing it is
+			// the fallback the operator was trying to avoid, and taking it
+			// anyway is better than forwarding a leak that was reported handled.
+			w.block(w.pendingDecision)
+			return len(b), nil
+		}
 		if err := w.flush(); err != nil {
 			return 0, err
 		}
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+// inspectHeld inflates the held body and hands it to the engine, for the case
+// Write could not stream. It runs once: the engine accumulates what it is given,
+// so feeding the same bytes twice would double every score.
+func (w *wafResponseWriter) inspectHeld() {
+	if w.inspected || w.buf == nil || (w.respEnc == encodingIdentity && w.encDecodable) {
+		return
+	}
+	w.inspected = true
+
+	if !w.encDecodable {
+		w.noteUninspectable(reasonUndecodableEncoding)
+		return
+	}
+	plain, truncated, err := inflateForInspection(w.respEnc, w.buf.Bytes(), w.bufLimit)
+	if err != nil && len(plain) == 0 {
+		w.noteUninspectable(reasonInflateFailed)
+		return
+	}
+	if len(plain) > 0 {
+		// Retained so a redaction has the bytes the client will actually read;
+		// buf still holds the encoded form, which cannot be spliced.
+		w.plain, w.plainComplete = plain, !truncated && err == nil
+		if d := w.tx.WriteResponseBody(plain); d.Blocked() && !w.auditOnly {
+			w.applyDecision(d)
+			if w.blocked {
+				return
+			}
+		}
+	}
+	if truncated || err != nil {
+		w.noteUninspectable(reasonCeilingReached)
+	}
+}
+
+// Reasons a response body went past the WAF unread. A closed vocabulary,
+// because it is a metric label: an open one keyed off an origin's headers is an
+// unbounded cardinality bug waiting for the first misconfigured upstream.
+const (
+	reasonUndecodableEncoding = "undecodable_encoding"
+	reasonInflateFailed       = "inflate_failed"
+	reasonCeilingReached      = "ceiling_reached"
+)
+
+// uninspectedWarned tracks which (route, reason) pairs have already been
+// logged. Bounded by routes times the three reasons above, so it cannot grow
+// with traffic — which a per-response log line would, and did: the previous
+// version used a single process-wide sync.Once, so whichever route hit the
+// blind spot first was the only one an operator ever heard about.
+var uninspectedWarned sync.Map
+
+// noteUninspectable records that part of a response went past the WAF unread.
+//
+// A body nobody could read has not been shown to be clean, and the difference
+// between that and a clean verdict is the only thing standing between an
+// operator and a false sense of coverage. It is counted every time so the rate
+// is visible, and logged once per route and reason so the log stays readable
+// when an origin is misconfigured for every request it serves.
+func (w *wafResponseWriter) noteUninspectable(reason string) {
+	telemetry.MiddlewareWAFUninspectedResponsesTotal.
+		WithLabelValues(w.routeID, reason).Inc()
+
+	if _, seen := uninspectedWarned.LoadOrStore(w.routeID+"\x00"+reason, struct{}{}); seen {
+		return
+	}
+	logger.L.LogWarn("WAF could not inspect a response body; data-leak rules did not run on it",
+		"reason", reason, "route", w.routeID,
+		"content_encoding", w.Header().Get("Content-Encoding"),
+		"metric", "gateon_middleware_waf_uninspected_responses_total")
 }
 
 // finish runs the response-body phase and releases whatever is still buffered.
@@ -986,8 +1234,18 @@ func (w *wafResponseWriter) finish() {
 	if w.blocked {
 		return
 	}
+	w.inspectHeld()
+	if w.blocked {
+		return
+	}
 	if d := w.tx.ProcessResponseBody(); d.Blocked() && !w.auditOnly {
-		w.block(d)
+		w.applyDecision(d)
+		if w.blocked {
+			return
+		}
+	}
+	w.resolveRedaction()
+	if w.blocked {
 		return
 	}
 	_ = w.flush()
@@ -1002,9 +1260,23 @@ func (w *wafResponseWriter) flush() error {
 	if w.flushed {
 		return nil
 	}
+	if body := w.redacted; body != nil {
+		// Headers first: the length changed, and the body is being sent decoded
+		// whatever the origin encoded it as. Both have to be settled before the
+		// status line goes out.
+		w.Header().Del("Content-Encoding")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.flushed = true
+		w.commitHeader()
+		// #nosec G705 -- the origin's own bytes with the findings removed, sent
+		// under the origin's Content-Type. Gateon does not interpolate into it.
+		_, err := w.ResponseWriter.Write(body)
+		w.buf.Reset()
+		return err
+	}
 	w.flushed = true
 	w.commitHeader()
-	if w.buf.Len() == 0 {
+	if w.buf == nil || w.buf.Len() == 0 {
 		return nil
 	}
 	// #nosec G705 -- these are the origin's own response bytes being forwarded
@@ -1013,6 +1285,50 @@ func (w *wafResponseWriter) flush() error {
 	_, err := w.ResponseWriter.Write(w.buf.Bytes())
 	w.buf.Reset()
 	return err
+}
+
+// resolveRedaction turns an accepted finding into a rewritten body, or refuses
+// the response when it cannot.
+//
+// It runs before anything is committed, which is the whole point: a redaction
+// that fails has to still be able to block, and once the status line is out
+// that option is gone.
+//
+// A finding the redactor cannot locate is the case worth refusing loudly. The
+// engine saw something these operators now do not — a rule with a transform, a
+// target other than the body, a corpus that has drifted — and forwarding the
+// body would ship the leak while reporting it handled.
+func (w *wafResponseWriter) resolveRedaction() {
+	if !w.redactPending || w.buf == nil {
+		return
+	}
+	w.redactPending = false
+
+	source := w.buf.Bytes()
+	if w.respEnc != encodingIdentity {
+		source = w.plain
+	}
+
+	var (
+		body  []byte
+		count int
+	)
+	if w.redactor != nil {
+		body, count = w.redactor.Redact(source)
+	}
+	if count == 0 {
+		logger.L.LogWarn("WAF found a data leak it could not locate for redaction; refusing the response",
+			"route", w.routeID, "rule", w.pendingDecision.RuleID())
+		w.block(w.pendingDecision)
+		return
+	}
+
+	w.redacted = body
+	if w.onDecision != nil {
+		w.onDecision(w.pendingDecision)
+	}
+	logger.L.LogDebug("WAF redacted a response body",
+		"route", w.routeID, "findings", count, "rule", w.pendingDecision.RuleID())
 }
 
 func (w *wafResponseWriter) commitHeader() {
@@ -1025,7 +1341,9 @@ func (w *wafResponseWriter) commitHeader() {
 // block refuses the response.
 func (w *wafResponseWriter) block(d gwaf.Decision) {
 	w.blocked = true
-	w.buf.Reset()
+	if w.buf != nil {
+		w.buf.Reset()
+	}
 	if w.onDecision != nil {
 		w.onDecision(d)
 	}

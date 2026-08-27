@@ -16,6 +16,7 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 
 ### 🛡️ Enterprise-Grade Security & Shielding
 - **Advanced WAF**: Built-in **[gwaf](https://github.com/gsoultan/gwaf)**, an embeddable Go WAF that parses request *intent* rather than matching signatures — semantic detectors for SQLi, XSS, shell, path, template, NoSQL and PHP injection, plus prompt injection. OWASP CRS rules import through its SecLang adapter. Blocks by default with no tuning phase, and every decision carries a rule ID and the matched byte span.
+- **Data Loss Prevention**: Response- and request-phase inspection for card numbers (issuer range + Luhn, not a regex guess), cloud and SaaS credentials, private keys, database URIs with embedded passwords, and stack traces or database errors leaking from the origin. Choose **block, redact or audit** per route, so a programme can start by watching and tighten later. Outbound and inbound are separate rule sets on purpose — a card number in a response is a leak, the same number in a request is a customer paying for something. See [ADR 0008](doc/adr/0008-response-inspection-must-control-its-own-encoding.md).
 - **Kernel Offloading**: eBPF rate limiting, IP shunning and packet filtering, at the earliest hook the NIC actually supports.
   **Native XDP runs in the driver before the packet ever becomes an `skb`** — but most virtualized NICs cannot offer it.
   The AWS ENA driver, for one, refuses a native attach above a page-sized MTU (the EC2 VPC default is 9001) and unless
@@ -168,6 +169,7 @@ make proto
 - `GATEON_ENCRYPTION_KEY`: Optional. When set (min 16 chars), `database_url`, `paseto_secret`, and database password are encrypted in global.json.
 - `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server (default `127.0.0.1`). Use `0.0.0.0` for remote access (e.g. via Cloudflare Tunnel on another machine).
 - `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated list of allowed IPs for management access (default `127.0.0.1,::1`). Use `0.0.0.0/0` with caution for initial setup via tunnel.
+- `GATEON_WAF_DLP_ACTION`: What to do when a data-leak rule fires — `block` (default), `redact` (remove the finding, forward the rest) or `audit` (record it, forward untouched). Applies to data-leak rules only; an injection is still refused. Any unrecognised value means `block`. Overridden per route by the `dlp_action` middleware key, and globally by `waf.dlp_action` in the config file.
 - `GATEON_TRACE_DIR`: Directory for the Pebble request-trace store. Defaults to `telemetry_pebble` next to a file-backed SQLite database, or relative to the working directory for Postgres/MySQL. Set this to place traces on a dedicated volume without changing the database URL.
 
 > **Note on Cloudflare Tunnels**: If you experience a `502 Bad Gateway` when accessing Gateon via a Cloudflare Tunnel, ensure `GATEON_TRUST_CLOUDFLARE_HEADERS=true` is set and `GATEON_MANAGEMENT_ALLOWED_IPS` includes your tunnel's IP (or use `0.0.0.0/0` to troubleshoot). See [doc/management-entrypoint.md](doc/management-entrypoint.md) for details.
@@ -228,6 +230,7 @@ Gateon is rapidly evolving. Below are our recent milestones and future plans.
 - **AI Anomaly Detection**: Pattern-based threat identification.
 - **Kubernetes Gateway API**: Native K8s resource support.
 - **Advanced WAF**: replaced Coraza with **gwaf** (see [ADR 0004](doc/adr/0004-waf-engine-replacement.md)) — CGO-free, allocation-free on benign traffic, and measured against Coraza + CRS 4.25 on real CVE traffic rather than claimed.
+- **Data Loss Prevention that actually runs** (see [ADR 0008](doc/adr/0008-response-inspection-must-control-its-own-encoding.md)): response inspection now negotiates a content encoding it can read, because a gzipped response had been reducing every data-leak rule to a no-op. 29 outbound and 19 inbound detectors, block/redact/audit, and a coverage metric so a body nobody could read is never reported as clean.
 - **External Secrets**: Vault and AWS Secrets Manager integration.
 - **High Availability**: VRRP-based active-passive failover.
 

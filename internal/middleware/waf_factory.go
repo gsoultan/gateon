@@ -116,11 +116,14 @@ func (f *Factory) CreateGlobalWAF() (Middleware, error) {
 		// Opt-in, false-positive-prone groups honour the explicit proto flag:
 		DisableWordPress: !w.GetWordpress(), // WP admin lockdown breaks legit /wp-admin
 		// Robust extras — malware & ransomware on by default for the global WAF:
-		EnableMalwareDetection:      true,
-		EnableRansomwareDetection:   true,
-		EnableIPReputation:          w.GetIpReputation(),
-		EnableDOSProtection:         w.GetDosProtection(),
-		EnableDLP:                   w.GetDlp(),
+		EnableMalwareDetection:    true,
+		EnableRansomwareDetection: true,
+		EnableIPReputation:        w.GetIpReputation(),
+		EnableDOSProtection:       w.GetDosProtection(),
+		EnableDLP:                 w.GetDlp(),
+		// Unset falls through to GATEON_WAF_DLP_ACTION and then to block, so an
+		// install that has never heard of this keeps refusing leaks.
+		DLPAction:                   parseDLPAction(w.GetDlpAction()),
 		AnomalyThreshold:            int(w.GetAnomalyThreshold()),
 		RequestBodyLimit:            int(w.GetRequestBodyLimit()),
 		ResponseBodyLimit:           int(w.GetResponseBodyLimit()),
@@ -204,6 +207,9 @@ func (f *Factory) createWAF(cfg map[string]string) (Middleware, error) {
 				setIfMissing("malware_detection", global.Waf.MalwareDetection)
 				setIfMissing("ransomware_detection", global.Waf.RansomwareDetection)
 				setIfMissing("dlp", global.Waf.Dlp)
+				if _, ok := cfg["dlp_action"]; !ok && global.Waf.DlpAction != "" {
+					cfg["dlp_action"] = global.Waf.DlpAction
+				}
 				if _, ok := cfg["anomaly_threshold"]; !ok && global.Waf.AnomalyThreshold > 0 {
 					cfg["anomaly_threshold"] = strconv.Itoa(int(global.Waf.AnomalyThreshold))
 				}

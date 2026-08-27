@@ -71,6 +71,51 @@ const (
 	TagJava          = "java"
 	TagProtocol      = "protocol"
 	TagRce           = "rce"
+
+	// TagDlpInbound marks the request-phase half of data-leak detection. It is
+	// its own tag because the two directions answer different questions and an
+	// operator may well want one without the other: a card number in a response
+	// is a leak, the same card number in a request is a customer paying for
+	// something.
+	TagDlpInbound = "dlp-inbound"
+
+	// TagLeakage marks structural disclosure — a stack trace, a framework error
+	// page, a database error — as opposed to a credential. The distinction is a
+	// selection unit: the two groups sit at different paranoia levels because a
+	// site may legitimately serve the former and never the latter.
+	TagLeakage = "leakage"
+)
+
+// Credential detectors, named because both directions use them.
+//
+// A response leaking an AWS key and a request carrying one are the same string
+// found in two places, and writing the pattern twice is how the two copies come
+// to disagree — one gets a new prefix, the other does not, and the gap is
+// invisible until something walks out through it. One operator, two rules.
+//
+// Operators are stateless and already shared across every transaction
+// evaluating a rule; sharing one across two rules is the same property.
+var (
+	opPrivateKeyPEM   = rx.MustNew(`-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----`)
+	opAWSAccessKey    = rx.MustNew(`\bAKIA[0-9A-Z]{16}\b`)
+	opGoogleAPIKey    = rx.MustNew(`AIza[0-9A-Za-z\-_]{35}`)
+	opSlackWebhook    = op.Contains("https://hooks.slack.com/services/")
+	opGitHubPAT       = rx.MustNew(`ghp_[a-zA-Z0-9]{36}`)
+	opGoogleOAuth     = rx.MustNew(`GOCSPX-[a-zA-Z0-9\-_]{28}`)
+	opStripeLiveKey   = rx.MustNew(`\b[sr]k_live_[0-9a-zA-Z]{24,}`)
+	opGitHubToken     = rx.MustNew(`\bgh[ousr]_[A-Za-z0-9]{36}\b`)
+	opGitHubFinePAT   = rx.MustNew(`\bgithub_pat_[A-Za-z0-9_]{82}\b`)
+	opOpenAIKey       = rx.MustNew(`\bsk-[A-Za-z0-9_-]{10,}T3BlbkFJ[A-Za-z0-9_-]{10,}`)
+	opAnthropicKey    = rx.MustNew(`\bsk-ant-[a-z0-9]{3,}-[A-Za-z0-9_-]{80,}`)
+	opSlackToken      = rx.MustNew(`\bxox[baprse]-[0-9A-Za-z-]{10,}`)
+	opSendGridKey     = rx.MustNew(`\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b`)
+	opNPMToken        = rx.MustNew(`\bnpm_[A-Za-z0-9]{36}\b`)
+	opPyPIToken       = rx.MustNew(`\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}`)
+	opGCPServiceAcct  = rx.MustNew(`"type"\s*:\s*"service_account"`)
+	opAzureStorageKey = rx.MustNew(`\bAccountKey=[A-Za-z0-9+/]{86}==`)
+	opPuTTYKey        = op.Contains("PuTTY-User-Key-File-")
+	opDBURICreds      = rx.MustNew(`\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|clickhouse)` +
+		`://[^\s:@/]{1,64}:[^\s:@/]{1,128}@`)
 )
 
 // spec is the compact form of a gateon rule. It exists because a rules.Rule
@@ -89,6 +134,14 @@ type spec struct {
 	msg      string
 	category string
 	tags     []string
+
+	// action overrides the default of blocking. Nil keeps every existing rule
+	// exactly as it was: the corpus is a security control, and a refactor that
+	// quietly turned a block into a log would be the worst kind of silent
+	// change. Set it only where not blocking is the deliberate design — inbound
+	// secret detection, where refusing the request would throw away what a user
+	// typed and teach them to route around the gateway.
+	action rules.Action
 }
 
 // rule renders the spec as a gwaf rule.
@@ -96,6 +149,9 @@ func (s spec) rule() rules.Rule {
 	action := rules.Block
 	if s.status != 0 {
 		action = rules.BlockWithStatus(s.status)
+	}
+	if s.action != nil {
+		action = s.action
 	}
 	return rules.Rule{
 		ID:         types.RuleID(s.id),
@@ -809,13 +865,20 @@ var defaultSpecs = []spec{
 	// enabled, which is an enterprise-tier setting: see policy.go.
 	{
 		id: 1130000, phase: types.PhaseResponseBody, targets: tRespBody,
-		op:     rx.MustNew(`\b4[0-9]{12}(?:[0-9]{3})?\b`),
+		// Issuer prefix, permitted length and Luhn together, rather than the
+		// Visa-shaped regex this replaces: that one missed every other brand and
+		// blocked on any sixteen digits starting with a 4. See CardNumber.
+		op:     NewCardNumber(),
 		status: 403,
 		// High rather than Medium, and PL1 rather than PL2: response inspection
 		// is already opt-in and enterprise-tier, so gating these behind the
 		// paranoia level as well means an operator turns DLP on and nothing
 		// happens. The opt-in is the gate.
-		severity: types.SeverityCritical, conf: types.High, pl: 1,
+		//
+		// Certain rather than High now that the check digit has to agree: a
+		// sixteen-digit string that carries an assigned prefix and validates
+		// under Luhn is a card number, not a number that resembles one.
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
 		msg: "Card number in response", category: CategoryDLP,
 		tags: []string{TagDlp, "compliance"},
 	},
@@ -829,7 +892,7 @@ var defaultSpecs = []spec{
 	},
 	{
 		id: 1130002, phase: types.PhaseResponseBody, targets: tRespBody,
-		op:       rx.MustNew(`-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----`),
+		op:       opPrivateKeyPEM,
 		status:   403,
 		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
 		msg: "Private key in response", category: CategoryDLP,
@@ -837,7 +900,7 @@ var defaultSpecs = []spec{
 	},
 	{
 		id: 1130003, phase: types.PhaseResponseBody, targets: tRespBody,
-		op:       rx.MustNew(`\bAKIA[0-9A-Z]{16}\b`),
+		op:       opAWSAccessKey,
 		status:   403,
 		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
 		msg: "AWS access key in response", category: CategoryDLP,
@@ -845,7 +908,7 @@ var defaultSpecs = []spec{
 	},
 	{
 		id: 1130004, phase: types.PhaseResponseBody, targets: tRespBody,
-		op:       rx.MustNew(`AIza[0-9A-Za-z\-_]{35}`),
+		op:       opGoogleAPIKey,
 		status:   403,
 		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
 		msg: "Google API key in response", category: CategoryDLP,
@@ -853,7 +916,7 @@ var defaultSpecs = []spec{
 	},
 	{
 		id: 1130005, phase: types.PhaseResponseBody, targets: tRespBody,
-		op:       op.Contains("https://hooks.slack.com/services/"),
+		op:       opSlackWebhook,
 		status:   403,
 		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
 		msg: "Slack webhook URL in response", category: CategoryDLP,
@@ -861,7 +924,7 @@ var defaultSpecs = []spec{
 	},
 	{
 		id: 1130006, phase: types.PhaseResponseBody, targets: tRespBody,
-		op:       rx.MustNew(`ghp_[a-zA-Z0-9]{36}`),
+		op:       opGitHubPAT,
 		status:   403,
 		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
 		msg: "GitHub personal access token in response", category: CategoryDLP,
@@ -869,11 +932,418 @@ var defaultSpecs = []spec{
 	},
 	{
 		id: 1130007, phase: types.PhaseResponseBody, targets: tRespBody,
-		op:       rx.MustNew(`GOCSPX-[a-zA-Z0-9\-_]{28}`),
+		op:       opGoogleOAuth,
 		status:   403,
 		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
 		msg: "Google OAuth client secret in response", category: CategoryDLP,
 		tags: []string{TagDlp},
+	},
+
+	// The detectors above cover six credential shapes. The ones below are the
+	// rest of what actually ends up in a response body: a payment processor's
+	// live key, a git forge token, a model provider's key, a mail or telephony
+	// key, a package registry token, a cloud service account, and a database URI
+	// with the password still in it. Each is recognised by an issuer-assigned
+	// prefix rather than by entropy, so a match is the credential and not a
+	// string that resembles one — which is why they sit at PL1 alongside the
+	// originals.
+	{
+		id: 1130008, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opStripeLiveKey,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "Stripe live API key in response", category: CategoryDLP,
+		tags: []string{TagDlp, "compliance"},
+	},
+	{
+		// ghp_ has its own rule above; this covers the OAuth, user-to-server,
+		// server-to-server and refresh prefixes, which leak from the same places
+		// and were simply never listed.
+		id: 1130009, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opGitHubToken,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "GitHub token in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		id: 1130010, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opGitHubFinePAT,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "GitHub fine-grained personal access token in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		// T3BlbkFJ is "OpenAI" in base64 and sits in the middle of every key the
+		// provider issues, which is what makes this specific rather than a match
+		// on any sk- prefixed string.
+		id: 1130011, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opOpenAIKey,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "OpenAI API key in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		id: 1130012, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opAnthropicKey,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "Anthropic API key in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		id: 1130013, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opSlackToken,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "Slack token in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		id: 1130014, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opSendGridKey,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "SendGrid API key in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		// Account SID and API key SID share a shape: two fixed letters and 32
+		// hex. That is the weakest signal of any credential rule here — a hex
+		// digest preceded by those letters matches, and the alternation leaves
+		// the prefilter no literal to skip on, so the rule runs over every
+		// inspected response body. PL2 and Medium for both reasons: it is the
+		// one detector in this group whose false positive is plausible, and PL1
+		// has a standing budget for rules the prefilter cannot skip
+		// (TestUnconditionalRulesAreBudgeted) that this would spend.
+		id: 1130015, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       rx.MustNew(`\b(?:AC|SK)[0-9a-f]{32}\b`),
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Medium, pl: 2,
+		msg: "Twilio account or API key SID in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		id: 1130016, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opNPMToken,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "npm access token in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		id: 1130017, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opPyPIToken,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "PyPI upload token in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		// The private key inside a service-account file is caught by 1130002;
+		// this catches the file itself, including the copies that have had the
+		// key stripped but still carry the client id and project.
+		id: 1130018, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opGCPServiceAcct,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.High, pl: 1,
+		msg: "Google Cloud service account key in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		id: 1130019, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opAzureStorageKey,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "Azure storage account key in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		// A connection string with the password still in it is the leak that
+		// costs the most and looks the most ordinary — it arrives in a config
+		// dump, a health endpoint or an error page, and reads as a URL.
+		id: 1130020, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opDBURICreds,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.High, pl: 1,
+		msg: "Database connection string with credentials in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+	{
+		// The PEM rule above covers OPENSSH and every other "BEGIN ... PRIVATE
+		// KEY" banner. PuTTY's format does not use one.
+		id: 1130021, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       opPuTTYKey,
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 1,
+		msg: "PuTTY private key in response", category: CategoryDLP,
+		tags: []string{TagDlp},
+	},
+
+	// Structural disclosure: a stack trace or a database error page. These leak
+	// far more often than a card number does and are what the CRS RESPONSE-950
+	// family covers — file paths, framework versions, query fragments and the
+	// shape of the schema, all of which are reconnaissance for the next request.
+	//
+	// PL2 and Medium, unlike the credential rules above, because the false
+	// positive is real and specific: a site whose job is to display stack traces
+	// — an error tracker, a CI dashboard, a paste service, documentation — is
+	// serving them legitimately. Enterprise tier raises the paranoia level to 2
+	// and gets these; a standard-tier install that opts into DLP alone stays at
+	// PL1 and gets the credential rules only.
+	{
+		id: 1130022, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       rx.MustNew(`goroutine \d+ \[[a-z ]+\]:`),
+		status:   403,
+		severity: types.SeverityError, conf: types.Medium, pl: 2,
+		msg: "Go panic stack trace in response", category: CategoryDLP,
+		tags: []string{TagDlp, TagLeakage},
+	},
+	{
+		id: 1130023, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       op.Contains("Traceback (most recent call last):"),
+		status:   403,
+		severity: types.SeverityError, conf: types.Medium, pl: 2,
+		msg: "Python traceback in response", category: CategoryDLP,
+		tags: []string{TagDlp, TagLeakage},
+	},
+	{
+		id: 1130024, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       rx.MustNew(`\bat [a-zA-Z_$][\w$]*(?:\.[\w$]+)+\([\w$]+\.java:\d+\)`),
+		status:   403,
+		severity: types.SeverityError, conf: types.Medium, pl: 2,
+		msg: "Java stack trace in response", category: CategoryDLP,
+		tags: []string{TagDlp, TagLeakage},
+	},
+	{
+		id: 1130025, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       rx.MustNew(`(?:Fatal error|Parse error|Warning|Notice):[^\n]{0,200}? in [^\n]{0,200}? on line \d+`),
+		status:   403,
+		severity: types.SeverityError, conf: types.Medium, pl: 2,
+		msg: "PHP error with source path in response", category: CategoryDLP,
+		tags: []string{TagDlp, TagLeakage, TagPhp},
+	},
+	{
+		id: 1130026, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       rx.MustNew(`\bSystem\.[A-Za-z0-9.]+Exception\b[^\n]{0,200}?\bat [A-Za-z0-9_.<>]+\(`),
+		status:   403,
+		severity: types.SeverityError, conf: types.Medium, pl: 2,
+		msg: ".NET exception trace in response", category: CategoryDLP,
+		tags: []string{TagDlp, TagLeakage},
+	},
+	{
+		id: 1130027, phase: types.PhaseResponseBody, targets: tRespBody,
+		op:       rx.MustNew(`\.rb:\d+:in `),
+		status:   403,
+		severity: types.SeverityError, conf: types.Medium, pl: 2,
+		msg: "Ruby backtrace in response", category: CategoryDLP,
+		tags: []string{TagDlp, TagLeakage},
+	},
+	{
+		// Literals rather than a pattern: each of these is a database engine
+		// naming itself in an error it should never have shown a client, and a
+		// literal set gives the compiler something to prefilter on.
+		id: 1130028, phase: types.PhaseResponseBody, targets: tRespBody,
+		op: op.ContainsAny(
+			"You have an error in your SQL syntax",
+			"Unclosed quotation mark after the character string",
+			"SQLSTATE[",
+			"SQLiteException",
+			"psycopg2.",
+			"Npgsql.",
+			"org.postgresql.util.PSQLException",
+			"com.mysql.jdbc.exceptions",
+			"Microsoft OLE DB Provider for SQL Server",
+			"Warning: mysql_",
+			"supplied argument is not a valid MySQL",
+		),
+		status:   403,
+		severity: types.SeverityError, conf: types.Medium, pl: 2,
+		msg: "Database engine error text in response", category: CategoryDLP,
+		tags: []string{TagDlp, TagLeakage},
+	},
+
+	// ------------------------------------------------------------ dlp-inbound
+	// The same credential detectors, pointed the other way.
+	//
+	// Data-leak control has so far meant "do not let the origin leak outward",
+	// which is half of it. The other half is a secret arriving: an engineer
+	// pasting an AWS key into a support ticket, a private key attached to an
+	// issue, a connection string typed into a chat app — all of them behind this
+	// gateway, all of them landing in a database and a backup and a search
+	// index, and none of them visible to anything gateon previously ran.
+	//
+	// Two deliberate differences from the response-phase rules above.
+	//
+	// They log rather than block. Refusing a POST because it contains a secret
+	// throws away what the user typed and teaches them to route around the
+	// gateway, which is a worse outcome than the leak: now nobody can see it at
+	// all. Redaction is worse still — silently altering what someone wrote is
+	// not a security control, it is data loss. So these record, and the finding
+	// reaches the Security Hub through the same path every other match does.
+	//
+	// And they carry no card or SSN detector. Outbound, a card number is a leak;
+	// inbound, it is a customer paying for something, and a checkout form is the
+	// single most expensive place a WAF can be wrong. The asymmetry is the whole
+	// reason these are separate rules rather than the same rules with two
+	// phases.
+	//
+	// PL2, which is where enterprise tier sits: the detectors are Certain, but
+	// scanning every request body is a cost a minimal deployment should not pay
+	// silently.
+	{
+		id: 1131000, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opPrivateKeyPEM,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Private key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131001, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opAWSAccessKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "AWS access key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131002, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opStripeLiveKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Stripe live API key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131003, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opGitHubPAT,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "GitHub personal access token sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131004, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opGitHubToken,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "GitHub token sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131005, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opGitHubFinePAT,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "GitHub fine-grained personal access token sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131006, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opOpenAIKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "OpenAI API key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131007, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opAnthropicKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Anthropic API key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131008, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opSlackToken,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Slack token sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131009, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opSlackWebhook,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Slack webhook URL sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131010, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opGoogleAPIKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Google API key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131011, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opGoogleOAuth,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Google OAuth client secret sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131012, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opGCPServiceAcct,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Google Cloud service account key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131013, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opAzureStorageKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Azure storage account key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131014, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opSendGridKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "SendGrid API key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131015, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opNPMToken,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "npm access token sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131016, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opPyPIToken,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "PyPI upload token sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131017, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opPuTTYKey,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "PuTTY private key sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
+	},
+	{
+		id: 1131018, phase: types.PhaseRequestBody, targets: tArgsBody,
+		op:       opDBURICreds,
+		action:   rules.Log,
+		severity: types.SeverityWarning, conf: types.Certain, pl: 2,
+		msg: "Database connection string with credentials sent in a request", category: CategoryDLP,
+		tags: []string{TagDlp, TagDlpInbound},
 	},
 }
 

@@ -126,6 +126,23 @@ var MiddlewareWAFBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total requests blocked by WAF.",
 }, []string{"route", "rule_id"})
 
+// MiddlewareWAFUninspectedResponsesTotal counts responses whose body the WAF
+// could not read, so the data-leak rules did not run on them.
+//
+// This is a coverage metric, not a threat metric, and the distinction is the
+// point of having it. A response that was inspected and found clean and a
+// response nobody could read look identical in every other signal gateon emits
+// — the same 200, no threat record, no block — so without this an operator
+// reads silence as coverage. It is the one number that says how much of the
+// traffic the control actually saw.
+//
+// Both labels are closed: the route is operator-named and finite, and the
+// reason comes from a fixed vocabulary in the middleware.
+var MiddlewareWAFUninspectedResponsesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_waf_uninspected_responses_total",
+	Help: "Responses whose body the WAF could not inspect, by route and reason.",
+}, []string{"route", "reason"})
+
 // MiddlewareFastPathBlockedTotal counts requests blocked by fast-path security checks.
 var MiddlewareFastPathBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_fast_path_blocked_total",

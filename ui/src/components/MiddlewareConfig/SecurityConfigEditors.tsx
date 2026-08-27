@@ -144,10 +144,24 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
             <Stack gap="xs">
               <Switch
                 label="Data Loss Prevention (DLP)"
-                description="Detect sensitive data leakage (CC, SSN) in responses"
+                description="Detect card numbers, credentials and stack traces leaking in responses"
                 checked={config.dlp === "true"}
                 onChange={(e) => updateConfig("dlp", e.currentTarget.checked ? "true" : "false")}
               />
+              {config.dlp === "true" && (
+                <Select
+                  label="When a leak is found"
+                  description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known."
+                  data={[
+                    { value: "block", label: "Block — refuse the whole response (default)" },
+                    { value: "redact", label: "Redact — remove the finding, send the rest" },
+                    { value: "audit", label: "Audit — record it, send the response untouched" },
+                  ]}
+                  value={config.dlp_action || "block"}
+                  onChange={(value) => updateConfig("dlp_action", value || "block")}
+                  allowDeselect={false}
+                />
+              )}
               <Switch
                 label="Behavioral Profiling"
                 description="Detect robotic patterns and path jumping"

@@ -334,6 +334,19 @@ message WafConfig {
   // rules in the routing table; set it when a route matches on something other
   // than a host, or when the gateway is reached by a name no route names.
   repeated string origins = 42;
+  // What to do when a data-leak rule fires: "block" (the default) refuses the
+  // response, "redact" replaces each finding with a marker and forwards the
+  // rest, "audit" records it and forwards untouched.
+  //
+  // It applies to the data-leak corpus only — an injection is not made safe by
+  // redacting it. Empty, and any value not listed above, mean block: a typo in
+  // a security control must not quietly widen it.
+  //
+  // The reason this is not a bool is that a data-leak programme is rolled out
+  // in stages — watch, then redact, then block once the false-positive rate is
+  // known. An organisation that cannot risk a 403 on a customer-facing page
+  // will not enable a control whose only setting is 403.
+  string dlp_action = 43;
 }
 
 message ClamavConfig {

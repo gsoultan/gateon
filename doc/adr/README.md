@@ -16,6 +16,9 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0003](./0003-config-store-interfaces.md) | Per-domain `Store` interfaces over a single mega-store | Accepted |
 | [0004](./0004-waf-engine-replacement.md) | Replace the Coraza WAF engine with gwaf | Accepted |
 | [0005](./0005-session-lifecycle-and-first-run-trust.md) | Session lifecycle and first-run trust | Accepted |
+| [0006](./0006-transport-neutral-authorization.md) | Transport-neutral authorization for the management API | Accepted |
+| [0007](./0007-xdp-attach-mode-and-the-tc-ingress-hook.md) | XDP attach mode and the TC ingress hook | Accepted |
+| [0008](./0008-response-inspection-must-control-its-own-encoding.md) | Response inspection must control its own content encoding | Accepted |
 
 ## Conventions
 

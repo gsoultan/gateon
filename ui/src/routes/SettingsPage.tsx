@@ -1612,6 +1612,22 @@ export default function SettingsPage() {
                     </Stack>
                   </Group>
 
+                  {config.waf.dlp && (
+                    <Select
+                      label="When a leak is found"
+                      description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known. Applies to data-leak rules only."
+                      data={[
+                        { value: "block", label: "Block — refuse the whole response (default)" },
+                        { value: "redact", label: "Redact — remove the finding, send the rest" },
+                        { value: "audit", label: "Audit — record it, send the response untouched" },
+                      ]}
+                      value={config.waf.dlpAction || "block"}
+                      onChange={(value) => setConfig({ ...config, waf: { ...config.waf!, dlpAction: value || "block" } })}
+                      allowDeselect={false}
+                      disabled={formDisabled}
+                    />
+                  )}
+
                   <NumberInput
                     label="Global Anomaly Threshold"
                     description="Default score required to block if not specified on route. Default: 5"
