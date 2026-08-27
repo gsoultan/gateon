@@ -84,7 +84,7 @@ func (p *DNSProvider) Resolve(ctx context.Context, target string) ([]*gateonv1.T
 		targets := make([]*gateonv1.Target, len(ips))
 		for i, ip := range ips {
 			targets[i] = &gateonv1.Target{
-				Url:      fmt.Sprintf("http://%s", ip.String()), // Default to http
+				Url:      targetURL(ip.String(), 0), // Default to http
 				Weight:   1,
 				Protocol: "http",
 			}
@@ -96,8 +96,8 @@ func (p *DNSProvider) Resolve(ctx context.Context, target string) ([]*gateonv1.T
 	for i, addr := range addrs {
 		targetName := strings.TrimSuffix(addr.Target, ".")
 		targets[i] = &gateonv1.Target{
-			Url:      fmt.Sprintf("http://%s:%d", targetName, addr.Port),
-			Weight:   int32(addr.Priority*10 + addr.Weight), // Simple weight calculation
+			Url:      targetURL(targetName, int(addr.Port)),
+			Weight:   srvWeight(addr.Priority, addr.Weight),
 			Protocol: "http",
 		}
 	}
@@ -127,7 +127,7 @@ func (p *ConsulProvider) Resolve(ctx context.Context, target string) ([]*gateonv
 			addr = entry.Node.Address
 		}
 		targets[i] = &gateonv1.Target{
-			Url:      fmt.Sprintf("http://%s:%d", addr, entry.Service.Port),
+			Url:      targetURL(addr, entry.Service.Port),
 			Weight:   1,
 			Protocol: "http",
 		}
@@ -180,7 +180,7 @@ func (p *MDNSProvider) Resolve(ctx context.Context, target string) ([]*gateonv1.
 	targets := make([]*gateonv1.Target, len(ips))
 	for i, ip := range ips {
 		targets[i] = &gateonv1.Target{
-			Url:      fmt.Sprintf("http://%s", ip.String()),
+			Url:      targetURL(ip.String(), 0),
 			Weight:   1,
 			Protocol: "http",
 		}
