@@ -18,14 +18,15 @@ name: CodeQL
 
 on:
   push:
-    branches: ["main", "fix/ci-go127-scanners"]
+    branches: ["main"]
   pull_request:
     branches: ["main"]
   schedule:
     # Matches the weekly cadence default setup was configured with.
     - cron: "0 6 * * 1"
-  # So the workflow can be proven on a branch before default setup is turned
-  # off, which is the only window where the repository has no CodeQL at all.
+  # Kept so the workflow can be re-proven on a branch without waiting for a
+  # push to main -- add the branch to the push trigger and set `upload: never`
+  # on analyze, or default setup's category collides with this one.
   workflow_dispatch:
 
 permissions:
@@ -108,4 +109,3 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
-          upload: never
