@@ -544,6 +544,33 @@ var defaultSpecs = []spec{
 		msg: "Advanced shell injection attempt", category: CategoryRCE,
 		tags: []string{TagAttackRce},
 	},
+	// The body half of 1100014. That rule declares TargetArgs but runs at the
+	// header phase, where gwaf never reads a body, so it only ever saw the query
+	// string -- gwaf's own Diagnostics reported it as a rule that cannot detect
+	// what it looks like it detects. A CGI host behind the gateway was
+	// exploitable by POST while Shellshock read as covered.
+	//
+	// PL2, not PL1, and that is the whole cost of the fix. The pattern is all
+	// metacharacters, so rx extracts no literal to prefilter on -- `\(\)` yields
+	// "()", below rx's three-character floor -- which makes this rule
+	// unconditional: it runs on every body in its phase. PL1 budgets four such
+	// rules and already spends them, so putting this there would either break
+	// TestUnconditionalRulesAreBudgeted or buy it off by raising the ceiling,
+	// and a per-request regex is exactly what that ceiling exists to price.
+	// Narrowing the pattern to earn a literal is worse than the gap: "(){" and
+	// "() {" are extractable but "()  {" and "()\t{" are equally valid
+	// Shellshock, so the rule would stop firing with nothing to say it had.
+	// Query-string Shellshock is still caught at PL1 by 1100014; it is only the
+	// body-borne form that now needs PL2.
+	{
+		id: 1151009, phase: types.PhaseRequestBody, targets: tArgsBody,
+		xform:    decoded,
+		op:       rx.MustNew(`\(\)\s*\{\s*[:;\s]*\}`),
+		status:   403,
+		severity: types.SeverityCritical, conf: types.Certain, pl: 2,
+		msg: "Shellshock attempt (CVE-2014-6271) (body)", category: CategoryRCE,
+		tags: []string{TagAttackRce, "cve-2014-6271"},
+	},
 
 	// -------------------------------------------------------------------- sqli
 	{
@@ -643,6 +670,12 @@ var defaultSpecs = []spec{
 		msg: "Advanced prototype pollution attempt", category: CategoryExploit,
 		tags: []string{TagAttackGeneric},
 	},
+	// Header phase only, and deliberately so. gwaf's Diagnostics flags this as a
+	// rule that inspects arguments where the body is never read, and the obvious
+	// "fix" -- a body-phase twin, as 1151009 is for Shellshock -- would match
+	// every binary upload, because a PNG carries NULs in its first eight bytes.
+	// A gateway that 403s image uploads is a worse outcome than a narrow rule.
+	// TestNullByteStaysOutOfTheBodyPhase pins this decision.
 	{
 		id: 1150001, phase: types.PhaseRequestHeaders, targets: tArgsHeadersURI,
 		xform:    decoded,

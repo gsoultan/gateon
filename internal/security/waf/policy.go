@@ -4,6 +4,7 @@
 package waf
 
 import (
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/rules"
 	"github.com/gsoultan/gwaf/ruleset/core"
@@ -373,5 +374,31 @@ func (p Policy) UnknownAppProfiles() []string {
 
 // NewEngine builds the WAF this policy describes.
 func (p Policy) NewEngine() (*gwaf.WAF, error) {
-	return gwaf.New(p.Options()...)
+	w, err := gwaf.New(p.Options()...)
+	if err != nil {
+		return nil, err
+	}
+	logDiagnostics(w, p.ParanoiaLevel)
+	return w, nil
+}
+
+// logDiagnostics reports every rule gwaf says cannot detect what its name
+// implies. gwaf itself logs one of them at INFO with a total, which is how a
+// real gap -- Shellshock matching the query string but never a body -- sat
+// unnoticed in a line nobody read. An operator cannot act on a count, so this
+// names each rule and what closes it, at warn.
+//
+// Engines are cached per policy (see the WAF middleware's instance cache), so
+// this runs on construction and not per request.
+func logDiagnostics(w *gwaf.WAF, pl int) {
+	ds := w.Diagnostics()
+	if len(ds) == 0 {
+		return
+	}
+	logger.L.LogWarn("WAF rules that cannot detect what their names imply",
+		"count", len(ds), "paranoia_level", pl)
+	for _, d := range ds {
+		logger.L.LogWarn("  WAF rule is narrower than it looks",
+			"rule", uint32(d.ID), "msg", d.Msg, "reason", d.Reason, "fix", d.Fix)
+	}
 }
