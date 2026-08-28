@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,6 +67,7 @@ type result struct {
 
 func main() {
 	update := flag.Bool("update", false, "rewrite the baseline from this run")
+	force := flag.Bool("force", false, "allow -update on a non-linux host")
 	flag.Parse()
 
 	got, err := parse(os.Stdin)
@@ -77,6 +79,18 @@ func main() {
 	}
 
 	if *update {
+		// The baseline describes the platform that enforces it. Packages with
+		// build-tagged files -- internal/ebpf, internal/phantom, internal/logger,
+		// internal/resource -- compile different code on Linux and macOS, and the
+		// smaller denominator elsewhere reads as higher coverage. A baseline
+		// written on a laptop therefore describes a build CI never makes, and
+		// fails it on the next push. This was learned the expensive way, twice.
+		if runtime.GOOS != "linux" && !*force {
+			fail("refusing to write a baseline on %s: CI enforces this on linux, "+
+				"and a baseline from here fails there. Take the \"Coverage ratchet\" "+
+				"output from a green ci run and pipe it in, or pass -force if you "+
+				"genuinely mean to.", runtime.GOOS)
+		}
 		if err := writeBaseline(got); err != nil {
 			fail("writing baseline: %v", err)
 		}
