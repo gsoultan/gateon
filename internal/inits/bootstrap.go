@@ -61,27 +61,60 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 				logger.Fatal("failed to initialize auth manager", "error", err)
 			}
 		}
-		if gc.Otel != nil && gc.Otel.Endpoint != "" {
-			setEnv("OTEL_EXPORTER_OTLP_ENDPOINT", gc.Otel.Endpoint)
-		}
-		if gc.Redis != nil && gc.Redis.Addr != "" {
-			setEnv("REDIS_ADDR", gc.Redis.Addr)
-		}
-		if gc.Tls != nil {
-			setEnv("GATEON_TLS_ENABLED", strconv.FormatBool(gc.Tls.Enabled))
-			setEnv("GATEON_TLS_EMAIL", gc.Tls.Email)
-			if len(gc.Tls.Domains) > 0 {
-				setEnv("GATEON_TLS_DOMAINS", strings.Join(gc.Tls.Domains, ","))
-			}
-			setEnv("GATEON_TLS_MIN_VERSION", gc.Tls.MinTlsVersion)
-			setEnv("GATEON_TLS_MAX_VERSION", gc.Tls.MaxTlsVersion)
-			setEnv("GATEON_TLS_CLIENT_AUTH_TYPE", gc.Tls.ClientAuthType)
-			if len(gc.Tls.CipherSuites) > 0 {
-				setEnv("GATEON_TLS_CIPHER_SUITES", strings.Join(gc.Tls.CipherSuites, ","))
-			}
-		}
+		applyGlobalEnv(gc)
 	}
 	return authManager
+}
+
+// applyGlobalEnv publishes the parts of the global config that downstream
+// packages read through the environment.
+//
+// Every value here is written only when the config actually carries one. That
+// is not a micro-optimisation: setEnv on an empty string does not clear the
+// variable, it sets it to "", which destroys whatever the operator exported
+// before starting the process. Four of these -- enabled, email, the two TLS
+// versions and the client auth type -- used to be written unconditionally while
+// the six around them were guarded, so a global.json with an empty tls block
+// silently wiped GATEON_TLS_EMAIL and friends out of a deployment that had set
+// them deliberately.
+//
+// Enabled is the exception and stays unconditional: false is a real value for a
+// bool, and omitting it would make "TLS off in config" indistinguishable from
+// "config says nothing", which is the ambiguity the rest of this function
+// exists to avoid.
+func applyGlobalEnv(gc *gateonv1.GlobalConfig) {
+	if gc == nil {
+		return
+	}
+	if gc.Otel != nil && gc.Otel.Endpoint != "" {
+		setEnv("OTEL_EXPORTER_OTLP_ENDPOINT", gc.Otel.Endpoint)
+	}
+	if gc.Redis != nil && gc.Redis.Addr != "" {
+		setEnv("REDIS_ADDR", gc.Redis.Addr)
+	}
+	if gc.Tls == nil {
+		return
+	}
+	setEnv("GATEON_TLS_ENABLED", strconv.FormatBool(gc.Tls.Enabled))
+	setEnvIfSet("GATEON_TLS_EMAIL", gc.Tls.Email)
+	setEnvIfSet("GATEON_TLS_MIN_VERSION", gc.Tls.MinTlsVersion)
+	setEnvIfSet("GATEON_TLS_MAX_VERSION", gc.Tls.MaxTlsVersion)
+	setEnvIfSet("GATEON_TLS_CLIENT_AUTH_TYPE", gc.Tls.ClientAuthType)
+	if len(gc.Tls.Domains) > 0 {
+		setEnv("GATEON_TLS_DOMAINS", strings.Join(gc.Tls.Domains, ","))
+	}
+	if len(gc.Tls.CipherSuites) > 0 {
+		setEnv("GATEON_TLS_CIPHER_SUITES", strings.Join(gc.Tls.CipherSuites, ","))
+	}
+}
+
+// setEnvIfSet writes value only when the config supplies one, leaving any
+// operator-supplied environment variable intact when it does not.
+func setEnvIfSet(key, value string) {
+	if value == "" {
+		return
+	}
+	setEnv(key, value)
 }
 
 // setEnv sets an environment variable and logs (rather than silently ignoring)

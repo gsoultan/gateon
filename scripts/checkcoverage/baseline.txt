@@ -32,7 +32,7 @@ github.com/gsoultan/gateon/internal/domain/tls -
 github.com/gsoultan/gateon/internal/ebpf 12.4%
 github.com/gsoultan/gateon/internal/ha 19.3%
 github.com/gsoultan/gateon/internal/httputil 45.0%
-github.com/gsoultan/gateon/internal/inits -
+github.com/gsoultan/gateon/internal/inits 41.4%
 github.com/gsoultan/gateon/internal/install -
 github.com/gsoultan/gateon/internal/k8s 35.4%
 github.com/gsoultan/gateon/internal/logger 36.2%
