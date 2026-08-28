@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,7 @@ type Logger interface {
 }
 
 // L is the global logger instance.
-var L *SlogShim = &SlogShim{l: slog.Default()}
+var L = newShim(slog.Default())
 
 var eventPool = sync.Pool{
 	New: func() any {
@@ -47,57 +48,87 @@ func getEvent(l *slog.Logger, level slog.Level) *Event {
 // Default returns the global logger.
 func Default() Logger {
 	if L == nil {
-		return &SlogShim{l: slog.Default()}
+		return newShim(slog.Default())
 	}
 	return L
 }
 
+// SlogShim adapts slog to the Logger interface.
+//
+// The inner logger is held in an atomic.Pointer rather than a plain field, and
+// the package-level L is never reassigned. cmd/gateon configures logging twice
+// on every boot -- once before reading the config file and once after -- and by
+// the second call the pprof goroutine is already logging. Swapping the L
+// pointer there was an unsynchronised write against every reader in the
+// process; swapping the value inside a fixed shim is not.
 type SlogShim struct {
-	l *slog.Logger
+	p atomic.Pointer[slog.Logger]
+}
+
+// get returns the current logger, falling back to slog's default so a shim used
+// before Init never panics on a nil dereference.
+func (s *SlogShim) get() *slog.Logger {
+	if s == nil {
+		return slog.Default()
+	}
+	if l := s.p.Load(); l != nil {
+		return l
+	}
+	return slog.Default()
+}
+
+// set installs a new logger. Callers keep whatever *SlogShim they already hold.
+func (s *SlogShim) set(l *slog.Logger) { s.p.Store(l) }
+
+// newShim builds a shim around l.
+func newShim(l *slog.Logger) *SlogShim {
+	s := &SlogShim{}
+	s.set(l)
+	return s
 }
 
 func (s *SlogShim) Write(p []byte) (n int, err error) {
-	if s == nil || s.l == nil {
+	if s == nil {
 		slog.Info(string(p))
 		return len(p), nil
 	}
-	s.l.Info(string(p))
+	s.get().Info(string(p))
 	return len(p), nil
 }
 
 // Zerolog-compatible methods
 func (s *SlogShim) Info() *Event {
 	l := slog.Default()
-	if s != nil && s.l != nil {
-		l = s.l
+	if s != nil {
+		l = s.get()
 	}
 	return getEvent(l, slog.LevelInfo)
 }
 func (s *SlogShim) Error() *Event {
 	l := slog.Default()
-	if s != nil && s.l != nil {
-		l = s.l
+	if s != nil {
+		l = s.get()
 	}
 	return getEvent(l, slog.LevelError)
 }
 func (s *SlogShim) Debug() *Event {
 	l := slog.Default()
-	if s != nil && s.l != nil {
-		l = s.l
+	if s != nil {
+		l = s.get()
 	}
 	return getEvent(l, slog.LevelDebug)
 }
 func (s *SlogShim) Warn() *Event {
 	l := slog.Default()
-	if s != nil && s.l != nil {
-		l = s.l
+	if s != nil {
+		l = s.get()
 	}
 	return getEvent(l, slog.LevelWarn)
 }
 func (s *SlogShim) Fatal() *Event {
 	l := slog.Default()
-	if s != nil && s.l != nil {
-		l = s.l
+	if s != nil {
+		l = s.get()
 	}
 	e := getEvent(l, slog.LevelError)
 	e.isFatal = true
@@ -148,39 +179,39 @@ func (e *Event) Msgf(format string, v ...any) {
 
 // Now for the Logger interface (DI)
 func (s *SlogShim) LogInfo(msg string, args ...any) {
-	if s == nil || s.l == nil {
+	if s == nil {
 		slog.Info(msg, args...)
 		return
 	}
-	s.l.Info(msg, args...)
+	s.get().Info(msg, args...)
 }
 func (s *SlogShim) LogError(msg string, args ...any) {
-	if s == nil || s.l == nil {
+	if s == nil {
 		slog.Error(msg, args...)
 		return
 	}
-	s.l.Error(msg, args...)
+	s.get().Error(msg, args...)
 }
 func (s *SlogShim) LogWarn(msg string, args ...any) {
-	if s == nil || s.l == nil {
+	if s == nil {
 		slog.Warn(msg, args...)
 		return
 	}
-	s.l.Warn(msg, args...)
+	s.get().Warn(msg, args...)
 }
 func (s *SlogShim) LogDebug(msg string, args ...any) {
-	if s == nil || s.l == nil {
+	if s == nil {
 		slog.Debug(msg, args...)
 		return
 	}
-	s.l.Debug(msg, args...)
+	s.get().Debug(msg, args...)
 }
 
 func (s *SlogShim) IsEnabled(level slog.Level) bool {
-	if s == nil || s.l == nil {
+	if s == nil {
 		return false
 	}
-	return s.l.Enabled(context.Background(), level)
+	return s.get().Enabled(context.Background(), level)
 }
 
 type LogBroadcast struct {
@@ -296,8 +327,10 @@ func initInternal(level slog.Level, prod bool) error {
 	} else {
 		handler = slog.NewTextHandler(io.MultiWriter(os.Stdout, Broadcaster), opts)
 	}
-	L = &SlogShim{l: slog.New(handler)}
-	slog.SetDefault(L.l)
+	next := slog.New(handler)
+	// In place: rebinding L would race every goroutine already logging.
+	L.set(next)
+	slog.SetDefault(next)
 	return nil
 }
 
@@ -308,10 +341,7 @@ func IsProd() bool {
 }
 
 func Fatal(msg string, args ...any) {
-	if L != nil && L.l != nil {
-		L.l.Error(msg, args...)
-	} else {
-		slog.Error(msg, args...)
-	}
+	// get() falls back to slog's default, so this needs no nil dance.
+	L.get().Error(msg, args...)
 	os.Exit(1)
 }
