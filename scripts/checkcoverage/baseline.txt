@@ -35,7 +35,7 @@ github.com/gsoultan/gateon/internal/httputil 45.0%
 github.com/gsoultan/gateon/internal/inits -
 github.com/gsoultan/gateon/internal/install -
 github.com/gsoultan/gateon/internal/k8s 35.4%
-github.com/gsoultan/gateon/internal/logger -
+github.com/gsoultan/gateon/internal/logger 36.2%
 github.com/gsoultan/gateon/internal/middleware 59.1%
 github.com/gsoultan/gateon/internal/middleware/auth 5.2%
 github.com/gsoultan/gateon/internal/middleware/kind 54.5%
@@ -44,7 +44,7 @@ github.com/gsoultan/gateon/internal/redis 84.0%
 github.com/gsoultan/gateon/internal/repositories/entities -
 github.com/gsoultan/gateon/internal/repositories/stores 19.9%
 github.com/gsoultan/gateon/internal/request 47.1%
-github.com/gsoultan/gateon/internal/resource 65.8%
+github.com/gsoultan/gateon/internal/resource 80.3%
 github.com/gsoultan/gateon/internal/router 78.6%
 github.com/gsoultan/gateon/internal/security 30.2%
 github.com/gsoultan/gateon/internal/security/art -
