@@ -6,6 +6,10 @@
 # licence: it is recorded so the count cannot quietly grow.
 # Regenerate with:
 #   go test -cover ./... | go run ./scripts/checkcoverage -update
+#
+# Generate it on Linux. Packages with build-tagged platform files --
+# internal/ebpf and internal/phantom -- compile only their stubs on
+# macOS, and a smaller denominator reads as higher coverage there.
 
 github.com/gsoultan/gateon/dev/backend -
 github.com/gsoultan/gateon/dev/seed -
@@ -25,7 +29,7 @@ github.com/gsoultan/gateon/internal/domain/proxy -
 github.com/gsoultan/gateon/internal/domain/route -
 github.com/gsoultan/gateon/internal/domain/service -
 github.com/gsoultan/gateon/internal/domain/tls -
-github.com/gsoultan/gateon/internal/ebpf 18.3%
+github.com/gsoultan/gateon/internal/ebpf 12.4%
 github.com/gsoultan/gateon/internal/ha 19.3%
 github.com/gsoultan/gateon/internal/httputil 45.0%
 github.com/gsoultan/gateon/internal/inits -
@@ -35,7 +39,7 @@ github.com/gsoultan/gateon/internal/logger -
 github.com/gsoultan/gateon/internal/middleware 59.1%
 github.com/gsoultan/gateon/internal/middleware/auth 5.2%
 github.com/gsoultan/gateon/internal/middleware/kind 54.5%
-github.com/gsoultan/gateon/internal/phantom 20.0%
+github.com/gsoultan/gateon/internal/phantom 9.9%
 github.com/gsoultan/gateon/internal/redis 84.0%
 github.com/gsoultan/gateon/internal/repositories/entities -
 github.com/gsoultan/gateon/internal/repositories/stores 19.9%

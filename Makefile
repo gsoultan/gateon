@@ -165,8 +165,16 @@ check-config:
 ##                 and covers cleanly on its own. That is a toolchain problem,
 ##                 not a coverage one, and gating on it would make this target
 ##                 red for a reason it cannot describe.
+##
+##                 The baseline is authoritative for LINUX, because CI is what
+##                 enforces it. Packages with build-tagged platform files cover
+##                 differently elsewhere: on macOS internal/ebpf and
+##                 internal/phantom compile only their stubs, so a smaller
+##                 denominator reads as higher coverage. Running this on a Mac
+##                 will print "rose" notes for those two; that is the platform
+##                 talking, not progress.
 check-coverage:
-	@go test -cover $$(go list ./... | grep -v 'cmd/gateon') | go run ./scripts/checkcoverage
+	@go test -cover $$(go list ./... | grep -v 'cmd/gateon') | tee /dev/stderr | go run ./scripts/checkcoverage
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
 sec: vuln staticcheck gosec check-invariants check-config
