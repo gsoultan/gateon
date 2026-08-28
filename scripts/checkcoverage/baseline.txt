@@ -54,12 +54,12 @@ github.com/gsoultan/gateon/internal/security/fim 84.3%
 github.com/gsoultan/gateon/internal/security/mitigation 87.2%
 github.com/gsoultan/gateon/internal/security/pqc 82.8%
 github.com/gsoultan/gateon/internal/security/reputation 64.5%
-github.com/gsoultan/gateon/internal/security/scanner -
+github.com/gsoultan/gateon/internal/security/scanner 100.0%
 github.com/gsoultan/gateon/internal/security/siem 63.1%
 github.com/gsoultan/gateon/internal/security/tpm 28.1%
 github.com/gsoultan/gateon/internal/security/waf 62.1%
 github.com/gsoultan/gateon/internal/security/yara 93.8%
-github.com/gsoultan/gateon/internal/server 43.1%
+github.com/gsoultan/gateon/internal/server 43.2%
 github.com/gsoultan/gateon/internal/server/entrypoint 29.9%
 github.com/gsoultan/gateon/internal/server/handlers 14.7%
 github.com/gsoultan/gateon/internal/syncutil -
