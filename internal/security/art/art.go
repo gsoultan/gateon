@@ -66,39 +66,51 @@ func (t *Tree) InsertCIDR(cidr string) error {
 
 func (t *Tree) insert(root *node, ip []byte, bits int) {
 	curr := root
-	bytes := bits / 8
+	full := bits / 8
 	remBits := bits % 8
 
-	for i := range bytes {
+	for i := range full {
 		b := ip[i]
-		if next, ok := curr.children[b]; ok {
-			curr = next
-		} else {
-			next := newNode()
+		next, ok := curr.children[b]
+		if !ok {
+			next = newNode()
 			curr.children[b] = next
-			curr = next
 		}
+		curr = next
 	}
 
-	if remBits > 0 {
-		// Handle partial byte for CIDR masks not aligned to 8 bits
-		// For simplicity in this implementation, we treat partial bytes as full byte branches
-		// with a mask. A true ART would handle this more elegantly.
-		// However, most CIDRs are /8, /16, /24, /32.
-		// To be fully correct, we'd need bit-by-bit or a more complex node.
-		// Let's implement bit-by-bit for the remaining bits if needed,
-		// but 8-bit fanout is much faster.
-		b := ip[bytes] & (0xFF << (8 - remBits))
-		if next, ok := curr.children[b]; ok {
-			curr = next
-		} else {
-			next := newNode()
-			curr.children[b] = next
-			curr = next
-		}
+	if remBits == 0 {
+		curr.isEnd = true
+		return
 	}
 
-	curr.isEnd = true
+	// A prefix that does not end on a byte boundary fixes only the top remBits
+	// of the next byte; every value sharing those bits is inside the range. The
+	// search walks bytes and compares them exactly, so each of those values
+	// needs its own terminal child.
+	//
+	// This previously stored the masked byte alone -- one child for a range of
+	// up to 128 -- so 10.16.0.0/12 matched only addresses whose second byte was
+	// literally 0x10, a /12 covering a sixteenth of itself. Both callers were
+	// hurt by that: internal/request holds the Cloudflare ranges here, almost
+	// none of which are byte-aligned, and internal/middleware holds a deny tree,
+	// where a rule that quietly stops denying is fail-open.
+	//
+	// Bounded at 2^(8-remBits) children, so at most 128 per inserted CIDR, and
+	// only for the single byte where the prefix ends.
+	mask := byte(0xFF) << (8 - remBits)
+	base := ip[full] & mask
+	for v := int(base); v <= int(base|^mask); v++ {
+		b := byte(v)
+		next, ok := curr.children[b]
+		if !ok {
+			next = newNode()
+			curr.children[b] = next
+		}
+		// Marked rather than replaced: a longer prefix may already live here,
+		// and this one is broader, so it must not lose its children.
+		next.isEnd = true
+	}
 }
 
 // ContainsAddr checks if a netip.Addr is contained in any of the inserted CIDRs.

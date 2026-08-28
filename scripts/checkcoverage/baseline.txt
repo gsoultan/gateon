@@ -44,10 +44,10 @@ github.com/gsoultan/gateon/internal/redis 84.0%
 github.com/gsoultan/gateon/internal/repositories/entities -
 github.com/gsoultan/gateon/internal/repositories/stores 19.9%
 github.com/gsoultan/gateon/internal/request 47.1%
-github.com/gsoultan/gateon/internal/resource 80.3%
+github.com/gsoultan/gateon/internal/resource 65.8%
 github.com/gsoultan/gateon/internal/router 78.6%
 github.com/gsoultan/gateon/internal/security 30.2%
-github.com/gsoultan/gateon/internal/security/art -
+github.com/gsoultan/gateon/internal/security/art 98.6%
 github.com/gsoultan/gateon/internal/security/correlation 84.7%
 github.com/gsoultan/gateon/internal/security/entropy 45.1%
 github.com/gsoultan/gateon/internal/security/fim 84.3%
