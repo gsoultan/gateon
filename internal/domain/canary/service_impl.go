@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // serviceImpl handles automated traffic shifting (Canary) for a service.
@@ -70,25 +71,9 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 		return
 	}
 
-	// Deep copy initial service state for potential rollback
-	originalSvc := &gateonv1.Service{
-		Id:                  svc.Id,
-		Name:                svc.Name,
-		LoadBalancerPolicy:  svc.LoadBalancerPolicy,
-		HealthCheckPath:     svc.HealthCheckPath,
-		BackendType:         svc.BackendType,
-		DiscoveryUrl:        svc.DiscoveryUrl,
-		TlsClientConfig:     svc.TlsClientConfig,
-		HealthCheckPort:     svc.HealthCheckPort,
-		HealthCheckProtocol: svc.HealthCheckProtocol,
-		HealthCheckType:     svc.HealthCheckType,
-	}
-	for _, t := range svc.WeightedTargets {
-		originalSvc.WeightedTargets = append(originalSvc.WeightedTargets, &gateonv1.Target{
-			Url:    t.Url,
-			Weight: t.Weight,
-		})
-	}
+	// Snapshot for rollback. See snapshotService: this must copy the whole
+	// message, not a list of fields someone remembered.
+	originalSvc := snapshotService(svc)
 
 	// Store initial weights to interpolate from
 	initialWeights := make(map[string]int32)
@@ -157,4 +142,35 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 	}
 
 	cs.logger.LogInfo("Canary deployment completed successfully", "service_id", req.ServiceId)
+}
+
+// snapshotService deep-copies a service so a failed canary can be rolled back
+// to exactly what was there before.
+//
+// It uses proto.Clone rather than listing fields. The previous version was a
+// hand-written struct literal naming ten of the Service's fifteen fields and
+// two of Target's five, so a rollback silently dropped
+// l4_health_check_interval_ms, l4_health_check_timeout_ms,
+// l4_udp_session_timeout_s, l4_proxy_protocol, and every target's protocol,
+// proxy_protocol_enabled and proxy_protocol_version.
+//
+// Which is the worst possible place for that. Rollback is the safety path: it
+// runs when error rate or p99 has already breached, and it was resetting L4
+// timeouts to zero and switching PROXY protocol off, so the backend stopped
+// seeing real client addresses at the exact moment someone was reading the
+// logs to find out what went wrong.
+//
+// A hand-maintained copy of a generated message rots by construction -- fields
+// 7 to 10 and Target 4 to 5 were added after this was written, and nothing
+// pointed at it. proto.Clone cannot fall behind the schema.
+func snapshotService(svc *gateonv1.Service) *gateonv1.Service {
+	if svc == nil {
+		return nil
+	}
+	cloned, ok := proto.Clone(svc).(*gateonv1.Service)
+	if !ok {
+		// Cannot happen: Clone returns the same concrete type it was given.
+		return nil
+	}
+	return cloned
 }
