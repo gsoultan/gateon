@@ -100,7 +100,17 @@ func main() {
 		defer authManager.Close()
 	}
 
-	shutdown, err := telemetry.InitTracer("server")
+	// otel.service_name, or OTEL_SERVICE_NAME, so instances are distinguishable
+	// in a trace backend instead of all reporting as "server".
+	// context.Background is correct here rather than lazy: the tracer is set up
+	// before signal handling establishes the lifecycle context on purpose, so
+	// spans from the rest of startup are captured. There is no context to
+	// propagate yet.
+	var otelCfg *gateonv1.OtelConfig
+	if gc := globalReg.Get(context.Background()); gc != nil {
+		otelCfg = gc.Otel
+	}
+	shutdown, err := telemetry.InitTracer(telemetry.ResolveServiceName(otelCfg, os.Getenv))
 	if err == nil {
 		defer func() {
 			if err := shutdown(context.Background()); err != nil {
