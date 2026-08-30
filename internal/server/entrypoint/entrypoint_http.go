@@ -136,7 +136,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	// here, *inside* the ACME wrapper below, so the HTTP-01 challenge still
 	// answers on port 80 — redirecting the challenge would break certificate
 	// issuance for the very entrypoint being redirected to.
-	if port := httpsRedirectTargetFor(deps); shouldRedirectToHTTPS(ep, isMgmt, autoRedirectEnabled(deps), port) {
+	if port := httpsRedirectTargetFor(ctx, deps); shouldRedirectToHTTPS(ep, isMgmt, autoRedirectEnabled(ctx, deps), port) {
 		finalEPHandler = httpsRedirect(port)
 		logger.L.LogInfo("entrypoint redirects plaintext traffic to HTTPS",
 			"entrypoint", ep.Id, "address", ep.Address, "target_port", port)

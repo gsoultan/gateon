@@ -98,19 +98,19 @@ func shouldRedirectToHTTPS(ep *gateonv1.EntryPoint, isMgmt, autoRedirect bool, t
 }
 
 // autoRedirectEnabled reports whether tls.auto_redirect is set.
-func autoRedirectEnabled(deps *Deps) bool {
+func autoRedirectEnabled(ctx context.Context, deps *Deps) bool {
 	if deps == nil || deps.GlobalStore == nil {
 		return false
 	}
-	gc := deps.GlobalStore.Get(context.Background())
+	gc := deps.GlobalStore.Get(ctx)
 	return gc.GetTls().GetAutoRedirect()
 }
 
 // httpsRedirectTargetFor resolves the redirect target from the configured
 // entrypoints, returning "" when none of them terminates TLS.
-func httpsRedirectTargetFor(deps *Deps) string {
+func httpsRedirectTargetFor(ctx context.Context, deps *Deps) string {
 	if deps == nil || deps.EpStore == nil {
 		return ""
 	}
-	return httpsRedirectPort(deps.EpStore.List(context.Background()))
+	return httpsRedirectPort(deps.EpStore.List(ctx))
 }
