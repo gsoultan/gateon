@@ -1679,34 +1679,13 @@ export default function SettingsPage() {
                     disabled={formDisabled}
                   />
 
-                  <Divider label="WAF Rules Management" labelPosition="center" />
-                  <Group grow align="flex-start">
-                    <Stack gap="xs">
-                      <Switch
-                        label="Auto Update Rules"
-                        description="Periodically check for CRS updates"
-                        checked={config.waf.autoUpdateRules}
-                        onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, autoUpdateRules: e.currentTarget.checked } })}
-                        disabled={formDisabled}
-                      />
-                    </Stack>
-                    <Stack gap="xs">
-                      <NumberInput
-                        label="Update Interval (hours)"
-                        value={config.waf.updateIntervalHours || 24}
-                        onChange={(v) => setConfig({ ...config, waf: { ...config.waf!, updateIntervalHours: parseInt(v?.toString() || "24") } })}
-                        min={1}
-                        disabled={formDisabled || !config.waf.autoUpdateRules}
-                      />
-                    </Stack>
-                  </Group>
-                  <TextInput
-                    label="Rules Source URL"
-                    description="URL to CRS rules ZIP (leave empty for default)"
-                    placeholder="https://github.com/coreruleset/coreruleset/archive/refs/tags/v4.0.0.zip"
-                    value={config.waf.rulesUrl || ""}
-                    onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, rulesUrl: e.currentTarget.value } })}
-                    disabled={formDisabled || !config.waf.autoUpdateRules}
+                  <Divider label="WAF Custom Rules" labelPosition="center" />
+                  <Switch
+                    label="Load custom rules from disk"
+                    description="Use the rule files in <data_dir>/waf/rules, if that directory exists. The built-in gwaf rules are always active."
+                    checked={config.waf.autoUpdateRules}
+                    onChange={(e) => setConfig({ ...config, waf: { ...config.waf!, autoUpdateRules: e.currentTarget.checked } })}
+                    disabled={formDisabled}
                   />
 
                   <Divider label="ClamAV Anti-Malware" labelPosition="center" />

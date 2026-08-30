@@ -408,8 +408,6 @@ export type WafConfig = {
   auditLogRelevantOnly?: boolean;
   allowedAdminIps?: string[];
   autoUpdateRules?: boolean;
-  updateIntervalHours?: number;
-  rulesUrl?: string;
   clamavAddr?: string;
   clamav?: ClamavConfig;
   entropyThreshold?: number;

@@ -188,9 +188,14 @@ func (s *securitySupervisor) reconcileHA(cfg *gateonv1.HaConfig) {
 	logger.L.LogInfo("high availability (re)configured", "enabled", true)
 }
 
-// reconcileWAFAutoUpdate starts or stops the periodic WAF rule auto-update loop
-// based on Waf.AutoUpdateRules. The loop itself re-reads the live config (URL,
-// interval) on every tick, so only its on/off lifecycle needs reconciling here.
+// reconcileWAFAutoUpdate reconciles the WAF updater's lifecycle against
+// Waf.AutoUpdateRules.
+//
+// There is no longer a loop behind it. Rule downloading was retired with the
+// gwaf engine change, so WAFUpdater.Start returns immediately and the interval
+// and source URL this comment used to describe have been removed from the
+// schema. The lifecycle is kept as the hook a future updater would attach to,
+// and because AutoUpdateRules still carries its repurposed meaning elsewhere.
 func (s *securitySupervisor) reconcileWAFAutoUpdate(cfg *gateonv1.WafConfig) {
 	if s.wafUpdater == nil {
 		return

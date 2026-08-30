@@ -98,5 +98,3 @@ TlsConfig.auto_redirect
 # rules_url: the updater cannot be pointed at a mirror or private
 # ruleset. update_interval_hours: the WafConfig one is dead; the identically
 # named IPReputationConfig field is what is actually read.
-WafConfig.rules_url
-WafConfig.update_interval_hours
