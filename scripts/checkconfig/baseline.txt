@@ -92,7 +92,6 @@ TitanConfig.enabled
 # --- TlsConfig ---
 # auto_redirect: an operator who asked for HTTP-to-HTTPS redirection
 # did not get it. Security-adjacent.
-TlsConfig.auto_redirect
 
 # --- WafConfig ---
 # rules_url: the updater cannot be pointed at a mirror or private
