@@ -294,9 +294,19 @@ message WafConfig {
   bool audit_log_relevant_only = 25;
   BotManagementConfig bot_management = 13;
   repeated string allowed_admin_ips = 26;
+  // AutoUpdateRules no longer updates anything. Rule downloading was retired
+  // when gwaf replaced the previous engine (ADR 0004) and gwaf carries its own
+  // rules, so this now means only "load custom rules from <data_dir>/waf/rules
+  // if that directory exists" -- see waf_factory.go. Kept because that repurposed
+  // behaviour is live; the name is historical.
   bool auto_update_rules = 27;
-  int32 update_interval_hours = 28;
-  string rules_url = 29;
+
+  // 28 and 29 were update_interval_hours and rules_url, removed 2026-08-27.
+  // They configured the retired downloader: an interval for a loop that no
+  // longer runs and a source URL for a fetch that no longer happens.
+  // WAFUpdater.Start is a no-op and PerformUpdate returns ErrRuleUpdatesRetired.
+  reserved 28, 29;
+  reserved "update_interval_hours", "rules_url";
   string clamav_addr = 30; // Deprecated: use clamav.clamav_addr
   ClamavConfig clamav = 31;
   double entropy_threshold = 32;
