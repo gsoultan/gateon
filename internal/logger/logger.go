@@ -296,7 +296,38 @@ func Init(prod bool) error {
 	return initInternal(level, prod)
 }
 
+// resolveJSONOutput decides the log encoding.
+//
+// The handler used to be chosen by ENV=production alone, so log.format was in
+// the schema and rendered in the dashboard while an operator who asked for JSON
+// got text — and a log pipeline parsing JSON got nothing it could read.
+//
+// An explicit format wins because it is the most specific thing the operator
+// said. Failing that, development means text, and otherwise the previous
+// ENV-derived behaviour stands, so an install that sets neither sees no change.
+func resolveJSONOutput(format string, development, prod bool) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "json":
+		return true
+	case "text":
+		return false
+	}
+	if development {
+		return false
+	}
+	return prod
+}
+
+// InitWithConfig configures level only, leaving the encoding to ENV.
+//
+// Deprecated: prefer InitWithOptions, which also honours log.format and
+// log.development. Kept for callers that have no config to pass.
 func InitWithConfig(confLevel string, prod bool) error {
+	return InitWithOptions(confLevel, "", false, prod)
+}
+
+// InitWithOptions configures the logger from the log settings.
+func InitWithOptions(confLevel, format string, development, prod bool) error {
 	level := slog.LevelInfo
 	switch strings.ToLower(confLevel) {
 	case "debug":
@@ -308,10 +339,12 @@ func InitWithConfig(confLevel string, prod bool) error {
 	case "error":
 		level = slog.LevelError
 	}
-	return initInternal(level, prod)
+	return initInternal(level, resolveJSONOutput(format, development, prod))
 }
 
-func initInternal(level slog.Level, prod bool) error {
+// initInternal builds the handler. useJSON, rather than a "prod" flag, because
+// the encoding is now a decision the caller has already made.
+func initInternal(level slog.Level, useJSON bool) error {
 	opts := &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -322,7 +355,7 @@ func initInternal(level slog.Level, prod bool) error {
 		},
 	}
 	var handler slog.Handler
-	if prod {
+	if useJSON {
 		handler = slog.NewJSONHandler(io.MultiWriter(os.Stdout, Broadcaster), opts)
 	} else {
 		handler = slog.NewTextHandler(io.MultiWriter(os.Stdout, Broadcaster), opts)

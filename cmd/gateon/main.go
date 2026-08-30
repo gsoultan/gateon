@@ -119,7 +119,7 @@ func main() {
 
 	// Configure logger with global config if present
 	if g := globalReg.Get(ctx); g != nil && g.Log != nil {
-		_ = logger.InitWithConfig(g.Log.Level, logger.IsProd())
+		_ = logger.InitWithOptions(g.Log.Level, g.Log.Format, g.Log.Development, logger.IsProd())
 	}
 
 	// Initialize WAF rules store

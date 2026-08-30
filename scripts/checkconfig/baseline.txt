@@ -53,8 +53,6 @@ GitOpsConfig.ssh_private_key
 GlobalConfig.titan
 
 # --- LogConfig ---
-LogConfig.development
-LogConfig.format
 
 # --- OidcConfig ---
 # Dashboard-SSO scaffolding. Per-route OIDC *works* -- auth_factory.go
