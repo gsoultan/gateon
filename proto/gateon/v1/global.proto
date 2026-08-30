@@ -247,7 +247,14 @@ message GitOpsConfig {
   string branch = 3;
   string path = 4;
   int32 sync_interval_seconds = 5;
-  string ssh_private_key = 6;
+  // 6 was ssh_private_key, removed 2026-08-30. Nothing read it: gitops.go
+  // imports only go-git's HTTP transport and authenticates with auth_token, so
+  // a pasted deploy key did nothing and a private repo failed to clone with no
+  // hint as to why. Adding SSH means a host-key verification story -- accepting
+  // any host key would let anyone on the path serve this gateway its own
+  // configuration -- so it comes back as a feature, not a field.
+  reserved 6;
+  reserved "ssh_private_key";
   string auth_token = 7;
 }
 
