@@ -70,7 +70,6 @@ OidcConfig.scopes
 
 # --- OtelConfig ---
 OtelConfig.enabled
-OtelConfig.service_name
 
 # --- RedisConfig ---
 # addr/password/db now reach the client through redis.ResolveOptions. `enabled`
