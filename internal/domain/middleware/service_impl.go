@@ -6,6 +6,8 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/config"
@@ -78,11 +80,12 @@ func (s *serviceImpl) DeleteMiddleware(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("missing middleware id")
 	}
-	mw, _ := s.store.Get(ctx, id)
+	mw, mwFound := s.store.Get(ctx, id)
 
 	// 1. Find all routes using this middleware and remove it from them
 	routes := s.routeStore.List(ctx)
 	var affectedRouteIDs []string
+	var stillReferencing []string
 	for _, rt := range routes {
 		found := false
 		newMws := make([]string, 0, len(rt.Middlewares))
@@ -93,27 +96,56 @@ func (s *serviceImpl) DeleteMiddleware(ctx context.Context, id string) error {
 			}
 			newMws = append(newMws, mid)
 		}
-		if found {
-			affectedRouteIDs = append(affectedRouteIDs, rt.Id)
-			rt.Middlewares = newMws
-			if err := s.routeStore.Update(ctx, rt); err != nil {
-				// Continue to next route even if one fails
-				continue
-			}
+		if !found {
+			continue
 		}
+		rt.Middlewares = newMws
+		if err := s.routeStore.Update(ctx, rt); err != nil {
+			// Recorded, not swallowed. See the guard below.
+			stillReferencing = append(stillReferencing, rt.Id)
+			s.logger.LogError("failed to unlink middleware from route",
+				"error", err, "middleware_id", id, "route_id", rt.Id)
+			continue
+		}
+		affectedRouteIDs = append(affectedRouteIDs, rt.Id)
 	}
 
-	// 2. Delete the middleware itself
+	// 2. Refuse to delete while a route still points at it.
+	//
+	// The router resolves a route's middleware IDs with a plain store lookup and
+	// skips any that miss -- no log, no error. So deleting the middleware here
+	// while a route still references it makes that route quietly lose it, and if
+	// it was the WAF or an auth middleware the route is then unprotected. This
+	// used to `continue` past the failure and delete anyway, returning nil, so
+	// the API reported success for an operation that had silently opened a hole.
+	//
+	// Leaving the middleware in place is the safe end of the trade: the routes
+	// that did update no longer use it, and an orphaned middleware record costs
+	// nothing but a row.
+	if len(stillReferencing) > 0 {
+		for _, rid := range affectedRouteIDs {
+			s.invalidator.InvalidateRoute(rid)
+		}
+		return fmt.Errorf("middleware %s not deleted: %d route(s) still reference it (%s)",
+			id, len(stillReferencing), strings.Join(stillReferencing, ", "))
+	}
+
+	// 3. Delete the middleware itself
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
 
-	// 3. Invalidate affected routes
+	// 4. Invalidate affected routes
 	for _, rid := range affectedRouteIDs {
 		s.invalidator.InvalidateRoute(rid)
 	}
 
-	if s.wafCacheInvalidator != nil && mw != nil && mw.Type == "waf" {
+	// The WAF cache is dropped whenever the type is unknown as well as when it
+	// is "waf". Get's miss used to be discarded into a nil middleware, which
+	// skipped this and left the deleted policy live in cache. An unnecessary
+	// rebuild costs a few milliseconds; a missed one keeps enforcing a rule the
+	// operator has deleted.
+	if s.wafCacheInvalidator != nil && (!mwFound || mw == nil || mw.Type == "waf") {
 		s.wafCacheInvalidator.Invalidate()
 	}
 	return nil
