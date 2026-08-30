@@ -12,9 +12,6 @@
 
 
 # --- AcmeConfig ---
-AcmeConfig.challenge_type
-AcmeConfig.dns_config
-AcmeConfig.dns_provider
 
 # --- AnomalyDetectionConfig ---
 AnomalyDetectionConfig.anomaly_retention_days
@@ -46,7 +43,6 @@ EbpfConfig.xdp_cuckoo_filter
 # --- GitOpsConfig ---
 # ssh_private_key: auth_token is read, so token auth works and
 # SSH-authenticated repositories cannot actually be used.
-GitOpsConfig.ssh_private_key
 
 # --- GlobalConfig ---
 # titan: the whole TitanConfig block is unreachable (see below).

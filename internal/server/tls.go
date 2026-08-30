@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/router"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -100,9 +101,10 @@ func BuildGtlsConfig(s *Server) gtls.Config {
 		}
 		if gc.Tls.Acme != nil && gc.Tls.Acme.Enabled {
 			cfg.Acme = gtls.AcmeConfig{
-				Enabled:  true,
-				Email:    gc.Tls.Acme.Email,
-				CAServer: gc.Tls.Acme.CaServer,
+				Enabled:       true,
+				Email:         gc.Tls.Acme.Email,
+				CAServer:      gc.Tls.Acme.CaServer,
+				ChallengeType: acmeChallengeType(gc.Tls.Acme.ChallengeType),
 			}
 			if cfg.Acme.Email == "" {
 				cfg.Acme.Email = gc.Tls.Email
@@ -329,4 +331,34 @@ func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfi
 	cfg.Certificates = certs
 	middleware.SetFingerprints(hello.Conn, getFp())
 	return cfg
+}
+
+// acmeChallengeType validates the configured ACME challenge.
+//
+// The field was previously dropped on the way into the TLS manager, which took
+// its value from GATEON_ACME_CHALLENGE_TYPE alone, so setting it in the
+// dashboard did nothing.
+//
+// "dns" is rejected rather than passed through. The proto used to list it, but
+// ACME here is autocert, which implements HTTP-01 and TLS-ALPN-01 only —
+// forwarding it would leave the manager with a challenge it cannot run, and the
+// operator would see certificate issuance fail with no explanation. Returning
+// empty falls back to the default challenge, which is what happened before.
+func acmeChallengeType(configured string) string {
+	switch strings.ToLower(strings.TrimSpace(configured)) {
+	case "http", "tls-alpn":
+		return strings.ToLower(strings.TrimSpace(configured))
+	case "":
+		return ""
+	case "dns":
+		logger.L.LogError("acme.challenge_type \"dns\" is not supported: this build uses autocert, "+
+			"which implements HTTP-01 and TLS-ALPN-01 only. Falling back to the default challenge. "+
+			"Wildcard certificates require DNS-01 and are not available.",
+			"configured", configured)
+		return ""
+	default:
+		logger.L.LogWarn("unknown acme.challenge_type; falling back to the default",
+			"configured", configured, "supported", "http, tls-alpn")
+		return ""
+	}
 }

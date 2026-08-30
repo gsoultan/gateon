@@ -40,9 +40,16 @@ message AcmeConfig {
   bool enabled = 1;
   string email = 2;
   string ca_server = 3;    // e.g. https://acme-v02.api.letsencrypt.org/directory
-  string challenge_type = 4; // "http", "tls-alpn", "dns"
-  string dns_provider = 5;   // e.g. "cloudflare", "digitalocean" (for DNS-01)
-  map<string, string> dns_config = 6;
+  string challenge_type = 4; // "http" or "tls-alpn"
+
+  // 5 and 6 were dns_provider and dns_config, removed 2026-08-30. ACME here is
+  // golang.org/x/crypto/acme/autocert, which implements HTTP-01 and
+  // TLS-ALPN-01 and has no DNS-01 support at all, so no provider credentials
+  // could ever have been used. Offering DNS-01 -- and with it wildcard
+  // certificates, which require it -- means changing ACME client, not filling
+  // in these fields.
+  reserved 5, 6;
+  reserved "dns_provider", "dns_config";
 }
 
 message Certificate {
