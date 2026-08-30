@@ -100,7 +100,7 @@ func installLinux(binPath string) error {
 		return fmt.Errorf("run as root (sudo) to install: sudo gateon install")
 	}
 
-	content := fmt.Sprintf(systemdUnitTemplate, binPath, stateDir, configDir, configDir, stateDir)
+	content := renderSystemdUnit(binPath)
 	// #nosec G306 -- systemd requires unit files to be world-readable; 0600
 	// makes the unit unloadable. This is the documented mode, not a default
 	// nobody thought about.
@@ -112,22 +112,18 @@ func installLinux(binPath string) error {
 	// credentials, the MaxMind licence key and SIEM tokens. The unit runs
 	// User=root and the chown below makes it root:root, so nothing needs the
 	// world bit that 0755 was granting every local account.
-	if err := os.MkdirAll(configDir, 0o750); err != nil && !os.IsExist(err) {
-		return fmt.Errorf("create config dir %s: %w", configDir, err)
-	}
-	// Ensure root ownership and correct permissions if it was previously owned by another user
 	// #nosec G302 -- a directory, not a file: the execute bit is what makes it
 	// traversable, so 0750 is the tight mode here.
-	_ = os.Chmod(configDir, 0o750)
+	if err := secureDir(configDir, 0o750); err != nil {
+		return err
+	}
 	_ = exec.Command("chown", "-R", "root:root", configDir).Run()
 
-	if err := os.MkdirAll(stateDir, 0o700); err != nil && !os.IsExist(err) {
-		return fmt.Errorf("create state dir %s: %w", stateDir, err)
-	}
-	// Ensure root ownership and correct permissions if it was previously owned by another user
 	// #nosec G302 -- 0700 on a directory is already the tightest useful mode;
 	// the execute bit is what makes it traversable by its owner.
-	_ = os.Chmod(stateDir, 0o700)
+	if err := secureDir(stateDir, 0o700); err != nil {
+		return err
+	}
 	_ = exec.Command("chown", "-R", "root:root", stateDir).Run()
 
 	if err := runCmd(exec.Command("systemctl", "daemon-reload")); err != nil {
@@ -207,5 +203,39 @@ func uninstallWindows() error {
 		return fmt.Errorf("sc delete: %w\n%s", err, msg)
 	}
 	fmt.Println("Gateon service uninstalled.")
+	return nil
+}
+
+// renderSystemdUnit fills the unit template for a binary at binPath.
+//
+// Split out so the installer and its tests fill the template through the same
+// call. The template takes five positional verbs, two of them inside
+// ReadWritePaths, and a positional Sprintf that loses an argument does not fail
+// -- it writes %!s(MISSING) into the unit. Landing that inside ProtectSystem's
+// writable-path list produces a service that cannot write its own state, and
+// systemd reports it as a permissions problem rather than a malformed unit.
+func renderSystemdUnit(binPath string) string {
+	return fmt.Sprintf(systemdUnitTemplate, binPath, stateDir, configDir, configDir, stateDir)
+}
+
+// secureDir creates dir if absent and forces it to mode, returning an error if
+// it cannot.
+//
+// The chmod matters more than the mkdir and used to be the one whose error was
+// discarded. MkdirAll succeeds silently on a directory that already exists, so
+// an upgrade over an earlier install's 0755 /etc/gateon relied entirely on the
+// chmod to remove the world bit -- and with `_ = os.Chmod(...)` a failure left
+// global.json, which carries database credentials, the MaxMind licence key and
+// SIEM tokens, readable by every local account while install reported success.
+//
+// An installer run under sudo by an administrator who can see the message is
+// exactly the place to fail loudly instead.
+func secureDir(dir string, mode os.FileMode) error {
+	if err := os.MkdirAll(dir, mode); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, mode); err != nil {
+		return fmt.Errorf("secure %s to %#o: %w", dir, mode, err)
+	}
 	return nil
 }
