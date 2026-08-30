@@ -477,11 +477,9 @@ export type HaConfig = {
 
 export type AnomalyDetectionConfig = {
   enabled?: boolean;
-  prometheusUrl?: string;
   checkIntervalSeconds?: number;
   sensitivity?: number;
   securityThreatThreshold?: number;
-  anomalyRetentionDays?: number;
   enableBehavioralFingerprinting?: boolean;
   enableBruteForceDetection?: boolean;
   enableExploitDetection?: boolean;
