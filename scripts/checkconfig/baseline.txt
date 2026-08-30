@@ -14,8 +14,6 @@
 # --- AcmeConfig ---
 
 # --- AnomalyDetectionConfig ---
-AnomalyDetectionConfig.anomaly_retention_days
-AnomalyDetectionConfig.prometheus_url
 
 # --- AuthConfig ---
 AuthConfig.oidc
@@ -31,7 +29,6 @@ BotManagementConfig.enable_js_challenge
 # --- CorsConfig ---
 
 # --- DebuggerConfig ---
-DebuggerConfig.max_captures
 
 # --- EbpfConfig ---
 # xdp_cuckoo_filter: the filter's map and mutators are used, but this

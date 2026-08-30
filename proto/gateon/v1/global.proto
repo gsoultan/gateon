@@ -167,7 +167,13 @@ message PowConfig {
 
 message DebuggerConfig {
   bool enabled = 1;
-  int32 max_captures = 2; // Maximum number of requests to keep in memory
+  // 2 was max_captures, "Maximum number of requests to keep in memory".
+  // Removed 2026-08-30: there is no such list. The debugger attaches DebugInfo
+  // to the pooled request state and it is nulled on release, so captured data
+  // rides the request and never accumulates. max_body_size, which bounds what
+  // is captured per request, is read and does work.
+  reserved 2;
+  reserved "max_captures";
   int32 max_body_size = 3; // Maximum body size to capture in bytes
 }
 
@@ -406,11 +412,24 @@ message HaConfig {
 
 message AnomalyDetectionConfig {
   bool enabled = 1;
-  string prometheus_url = 2;
+  // 2 was prometheus_url, removed 2026-08-30. Nothing read it, and nothing
+  // could: anomaly detection reads a local aggregator, not an external
+  // Prometheus. internal/telemetry/anomaly.go says so in as many words -- "It
+  // uses a local aggregator instead of an external Prometheus server" -- so the
+  // field named a data source the design deliberately does not use.
+  reserved 2;
+  reserved "prometheus_url";
   int32 check_interval_seconds = 3;
   double sensitivity = 4;
   double security_threat_threshold = 5;
-  int32 anomaly_retention_days = 6;
+  // 6 was anomaly_retention_days, removed 2026-08-30. There is nothing to
+  // retain. Anomalies live in a single atomic.Pointer slot that is replaced
+  // wholesale on each detection pass, so the previous set is simply dropped;
+  // they are never written to SQL or Pebble. The security threats derived from
+  // them are persisted, and those are already bounded -- by
+  // log.security_threat_retention_days, which does work.
+  reserved 6;
+  reserved "anomaly_retention_days";
   bool enable_behavioral_fingerprinting = 7;
   bool enable_brute_force_detection = 8;
   bool enable_exploit_detection = 9;

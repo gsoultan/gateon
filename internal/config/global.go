@@ -74,7 +74,6 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 		},
 		Debugger: &gateonv1.DebuggerConfig{
 			Enabled:     false,
-			MaxCaptures: 1000,
 			MaxBodySize: 1024 * 64, // 64KB
 		},
 		SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
