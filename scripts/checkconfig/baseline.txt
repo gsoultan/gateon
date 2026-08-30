@@ -32,8 +32,6 @@ BotManagementConfig.enable_browser_integrity
 BotManagementConfig.enable_js_challenge
 
 # --- CorsConfig ---
-CorsConfig.exposed_headers
-CorsConfig.max_age
 
 # --- DebuggerConfig ---
 DebuggerConfig.max_captures
