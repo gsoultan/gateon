@@ -22,9 +22,6 @@ AuthConfig.oidc
 # Global duplicates of the per-route bot middleware, which
 # is configured from its own string map and works. Same shape as the
 # ManagementConfig duplicates removed in this branch.
-BotManagementConfig.challenge_timeout_seconds
-BotManagementConfig.enable_browser_integrity
-BotManagementConfig.enable_js_challenge
 
 # --- CorsConfig ---
 
