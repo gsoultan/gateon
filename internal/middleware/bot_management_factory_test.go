@@ -35,7 +35,11 @@ func TestFallbackSecretIsNotAPublishedConstant(t *testing.T) {
 // Every route in a process must agree, or a client would be re-challenged on
 // each route it touches.
 func TestFallbackSecretIsStableWithinTheProcess(t *testing.T) {
-	if fallbackBotSecret() != fallbackBotSecret() {
+	// Assigned rather than compared inline: staticcheck reads f() != f() as a
+	// mistake (SA4000), and here the repeated call is the whole point.
+	first := fallbackBotSecret()
+	second := fallbackBotSecret()
+	if first != second {
 		t.Fatal("fallback secret changes between calls; tokens would never verify")
 	}
 }
