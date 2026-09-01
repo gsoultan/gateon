@@ -86,6 +86,13 @@ sboms:
     documents:
       - "{{ .ArtifactName }}.sbom.json"
 
+release:
+  header: |
+    Read [doc/upgrading.md](https://github.com/gsoultan/gateon/blob/main/doc/upgrading.md)
+    before upgrading. Changes that can silently disable something which
+    previously worked are listed there, and gateon warns at startup for the
+    shapes it can detect.
+
 changelog:
   use: git
   sort: asc
