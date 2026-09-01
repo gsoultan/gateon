@@ -36,7 +36,6 @@ var mapNames = []string{
 	"lb_backends",
 	"lb_backends_count",
 	"ja4_blocklist",
-	"cuckoo_filter",
 	"xsk_map",
 	"phantom_ports",
 	"global_ebpf_config",

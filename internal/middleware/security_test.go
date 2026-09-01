@@ -88,7 +88,6 @@ func (m *mockEbpfManager) ApplyRLFeedback(ip string, score float64) error       
 func (m *mockEbpfManager) SetRLFeedbackHandler(f func(string, float64))                 {}
 func (m *mockEbpfManager) ShunJA4(ja4Fingerprint string) error                          { return nil }
 func (m *mockEbpfManager) UnshunJA4(ja4Fingerprint string) error                        { return nil }
-func (m *mockEbpfManager) BlocklistCuckoo(key string) error                             { return nil }
 func (m *mockEbpfManager) RegisterPhantomPort(port uint32) error                        { return nil }
 func (m *mockEbpfManager) UnregisterPhantomPort(port uint32) error                      { return nil }
 func (m *mockEbpfManager) GetTopIPs(limit int) ([]ebpf.IPStat, error)                   { return nil, nil }

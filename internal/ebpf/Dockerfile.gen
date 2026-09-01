@@ -8,10 +8,11 @@
 # producing gateon_ebpf_bpfel.go / gateon_ebpf_bpfeb.go and the embedded *.o
 # objects in internal/ebpf/. Commit those generated files.
 #
-# Pinned to the exact go.mod minimum: the floating 1.26 tag shipped 1.26.5
-# against a go.mod asking for 1.26.6, which the base image turns into a hard
-# error because it sets GOTOOLCHAIN=local.
-FROM golang:1.26.6-bookworm
+# Pinned to the exact go.mod minimum. The base image sets GOTOOLCHAIN=local, so
+# a tag older than the go directive is a hard error rather than a silent
+# toolchain download -- which is how this went stale: go.mod moved to 1.27.0 and
+# codegen started failing with "go.mod requires go >= 1.27.0".
+FROM golang:1.27.0-bookworm
 
 # clang/llvm provide the BPF-target compiler + llvm-strip; libbpf-dev provides
 # <bpf/bpf_helpers.h>; linux-headers + libc headers provide <linux/*.h>.
