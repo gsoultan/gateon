@@ -55,13 +55,11 @@ OidcConfig.redirect_url
 OidcConfig.scopes
 
 # --- OtelConfig ---
-OtelConfig.enabled
 
 # --- RedisConfig ---
 # addr/password/db now reach the client through redis.ResolveOptions. `enabled`
 # still is not consulted: Redis is switched on by an address resolving at all,
 # so setting enabled=false leaves it on.
-RedisConfig.enabled
 
 # --- TitanConfig ---
 # The entire TITAN feature set, `enabled` included. GlobalConfig.titan

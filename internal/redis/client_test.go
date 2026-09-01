@@ -21,7 +21,7 @@ func envMap(m map[string]string) func(string) string {
 // a password-protected Redis could not be configured and every deployment shared
 // db 0.
 func TestPasswordAndDBReachTheClient(t *testing.T) {
-	conf := &gateonv1.RedisConfig{Addr: "redis:6379", Password: "s3cret", Db: 4}
+	conf := &gateonv1.RedisConfig{Enabled: true, Addr: "redis:6379", Password: "s3cret", Db: 4}
 
 	got, ok := ResolveOptions(conf, noEnv)
 	if !ok {
@@ -72,7 +72,7 @@ func TestEnvironmentOnlyStillWorks(t *testing.T) {
 
 // An orchestrator injecting a rotated secret must win over a stale config file.
 func TestEnvironmentOverridesConfig(t *testing.T) {
-	conf := &gateonv1.RedisConfig{Addr: "stale:6379", Password: "old", Db: 1}
+	conf := &gateonv1.RedisConfig{Enabled: true, Addr: "stale:6379", Password: "old", Db: 1}
 	got, ok := ResolveOptions(conf, envMap(map[string]string{
 		"REDIS_ADDR": "fresh:6379", "REDIS_PASSWORD": "rotated", "REDIS_DB": "7",
 	}))
@@ -87,7 +87,7 @@ func TestEnvironmentOverridesConfig(t *testing.T) {
 // A malformed REDIS_DB must leave the configured value alone rather than
 // silently selecting db 0, which would point at the wrong dataset.
 func TestUnparseableEnvDBFallsBackToConfig(t *testing.T) {
-	conf := &gateonv1.RedisConfig{Addr: "redis:6379", Db: 3}
+	conf := &gateonv1.RedisConfig{Enabled: true, Addr: "redis:6379", Db: 3}
 	for _, bad := range []string{"abc", "-1", "", "  "} {
 		got, ok := ResolveOptions(conf, envMap(map[string]string{"REDIS_DB": bad}))
 		if !ok {
@@ -100,7 +100,7 @@ func TestUnparseableEnvDBFallsBackToConfig(t *testing.T) {
 }
 
 func TestCommaSeparatedAddressesBecomeACluster(t *testing.T) {
-	conf := &gateonv1.RedisConfig{Addr: "a:6379, b:6379 ,c:6379", Password: "p"}
+	conf := &gateonv1.RedisConfig{Enabled: true, Addr: "a:6379, b:6379 ,c:6379", Password: "p"}
 	got, ok := ResolveOptions(conf, noEnv)
 	if !ok {
 		t.Fatal("no client produced")
@@ -117,18 +117,60 @@ func TestCommaSeparatedAddressesBecomeACluster(t *testing.T) {
 // must be reported, not silently ignored — the symptom is otherwise just data
 // that is not where the operator expects it.
 func TestClusterReportsThatItCannotHonourTheDB(t *testing.T) {
-	cluster, _ := ResolveOptions(&gateonv1.RedisConfig{Addr: "a:6379,b:6379", Db: 2}, noEnv)
+	cluster, _ := ResolveOptions(&gateonv1.RedisConfig{Enabled: true, Addr: "a:6379,b:6379", Db: 2}, noEnv)
 	if !cluster.ClusterIgnoresDB() {
 		t.Error("a cluster with db=2 did not report that the db is ignored")
 	}
 
-	clusterDefault, _ := ResolveOptions(&gateonv1.RedisConfig{Addr: "a:6379,b:6379"}, noEnv)
+	clusterDefault, _ := ResolveOptions(&gateonv1.RedisConfig{Enabled: true, Addr: "a:6379,b:6379"}, noEnv)
 	if clusterDefault.ClusterIgnoresDB() {
 		t.Error("a cluster on the default db reported a problem it does not have")
 	}
 
-	single, _ := ResolveOptions(&gateonv1.RedisConfig{Addr: "a:6379", Db: 2}, noEnv)
+	single, _ := ResolveOptions(&gateonv1.RedisConfig{Enabled: true, Addr: "a:6379", Db: 2}, noEnv)
 	if single.ClusterIgnoresDB() {
 		t.Error("a single-node client can honour the db and must not report otherwise")
+	}
+}
+
+// TestEnabledFlagGatesTheConfiguredAddress is the regression guard: the flag was
+// read by nothing, so the dashboard toggle could not turn Redis off and an
+// operator who unticked it kept a live connection.
+func TestEnabledFlagGatesTheConfiguredAddress(t *testing.T) {
+	on := &gateonv1.RedisConfig{Enabled: true, Addr: "redis:6379"}
+	if _, ok := ResolveOptions(on, noEnv); !ok {
+		t.Error("enabled config with an address produced no client")
+	}
+
+	off := &gateonv1.RedisConfig{Addr: "redis:6379"}
+	if _, ok := ResolveOptions(off, noEnv); ok {
+		t.Error("a disabled config still produced a client; the toggle does nothing")
+	}
+
+	explicitlyOff := &gateonv1.RedisConfig{Enabled: false, Addr: "redis:6379", Password: "p"}
+	if _, ok := ResolveOptions(explicitlyOff, noEnv); ok {
+		t.Error("an explicitly disabled config still produced a client")
+	}
+}
+
+// REDIS_ADDR is an unambiguous instruction with no flag to contradict it, and is
+// how deployments that never touch the config file are wired. Gating it would
+// disconnect them.
+func TestEnvAddressIgnoresTheEnabledFlag(t *testing.T) {
+	env := envMap(map[string]string{"REDIS_ADDR": "cache:6379"})
+
+	if _, ok := ResolveOptions(nil, env); !ok {
+		t.Error("REDIS_ADDR alone stopped working")
+	}
+	if _, ok := ResolveOptions(&gateonv1.RedisConfig{}, env); !ok {
+		t.Error("REDIS_ADDR stopped working alongside a config block with no flag")
+	}
+	// Even an explicit false: the operator set the variable deliberately.
+	got, ok := ResolveOptions(&gateonv1.RedisConfig{Enabled: false, Addr: "stale:6379"}, env)
+	if !ok {
+		t.Fatal("REDIS_ADDR was overridden by a disabled config block")
+	}
+	if got.Addrs[0] != "cache:6379" {
+		t.Errorf("Addrs[0] = %q, want the environment address", got.Addrs[0])
 	}
 }
