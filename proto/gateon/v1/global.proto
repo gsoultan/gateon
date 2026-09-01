@@ -466,14 +466,17 @@ message AuthConfig {
   string sqlite_path = 3;      // Deprecated: use database_config or database_url
   string database_url = 4;     // Fallback: sqlite:path, postgres://..., mysql://...
   DatabaseConfig database_config = 5;
-  OidcConfig oidc = 6;
-}
 
-message OidcConfig {
-  bool enabled = 1;
-  string issuer = 2;
-  string client_id = 3;
-  string client_secret = 4;
-  repeated string scopes = 5;
-  string redirect_url = 6;
+  // 6 was oidc, removed 2026-09-01. It described single sign-on for the
+  // dashboard login, and none of it was ever built: nothing in Go read the
+  // block, LoginPage.tsx has no SSO control, and there is no OIDC callback
+  // route. An operator could not have reached it even by editing global.json.
+  //
+  // Per-route OIDC is a different thing entirely and works: auth_factory
+  // dispatches "oidc" into internal/middleware/auth/oidc_validator.go,
+  // configured from the middleware's own settings. This removal does not touch
+  // it. Dashboard SSO returns as a feature with a login route and a callback
+  // handler, not as six fields waiting for one.
+  reserved 6;
+  reserved "oidc";
 }

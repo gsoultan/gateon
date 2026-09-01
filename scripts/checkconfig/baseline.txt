@@ -16,7 +16,6 @@
 # --- AnomalyDetectionConfig ---
 
 # --- AuthConfig ---
-AuthConfig.oidc
 
 # --- BotManagementConfig ---
 # Global duplicates of the per-route bot middleware, which
@@ -42,17 +41,6 @@ GlobalConfig.titan
 
 # --- LogConfig ---
 
-# --- OidcConfig ---
-# Dashboard-SSO scaffolding. Per-route OIDC *works* -- auth_factory.go
-# dispatches "oidc" into internal/middleware/auth/oidc_validator.go from the
-# middleware's own string map. LoginPage.tsx has no SSO control, so nobody is
-# currently misled. Implement or reserve; not a broken security control.
-OidcConfig.client_id
-OidcConfig.client_secret
-OidcConfig.enabled
-OidcConfig.issuer
-OidcConfig.redirect_url
-OidcConfig.scopes
 
 # --- OtelConfig ---
 
