@@ -45,6 +45,11 @@ internal/ui/dist/*
 # @tanstack/router-core@1.171.19 did. It is the frontend's go.sum.
 ui/.bun-cache
 ui/package-lock.json
+# NOTE: ui/src/services/gen/* is listed here but the 13 files in it are tracked.
+# They predate this rule, and .gitignore does not apply to files already in the
+# index, so this line has no effect. It is kept because untracking them is the
+# intended end state -- see .gitattributes for why that is blocked and what it
+# would take.
 ui/src/services/gen/*
 gateon.exe
 gateon_test.exe

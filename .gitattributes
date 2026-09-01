@@ -1,4 +1,23 @@
 # Normalize line endings for source and generated code to ensure deterministic CI
 *.proto text eol=lf
+
+# The connect-es stubs embed the whole FileDescriptorProto as one base64 string
+# on a single ~9,500-character line. Marking them generated collapses them in
+# review, where they are unreadable and never worth reading.
+#
+# It also means any two concurrent proto changes conflict here, in one hunk whose
+# sides are that single line. There is no textual resolution: you cannot merge two
+# base64 encodings of different schema trees, and taking --ours or --theirs looks
+# like it worked while silently discarding one side's schema change.
+#
+#   ALWAYS resolve by regenerating:  make proto
+#
+# The real fix is to stop tracking these, as proto/gateon/v1/*.pb.go already are.
+# That is blocked on the build: both Dockerfile and .github/ci/Dockerfile.ci build
+# the dashboard in a bun stage that receives only ui/, while `buf generate` needs
+# protoc-gen-es from the ui/node_modules that same stage produces. Untracking
+# requires splitting into uideps -> protogen -> ui -> builder in both files, one of
+# which is the release path.
+ui/src/services/gen/** linguist-generated=true
 *.pb.go text eol=lf
 *.go text eol=lf
