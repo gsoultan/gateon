@@ -82,10 +82,47 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 // bool, and omitting it would make "TLS off in config" indistinguishable from
 // "config says nothing", which is the ambiguity the rest of this function
 // exists to avoid.
+// warnDisabledByUpgrade reports config that used to work and no longer does.
+//
+// redis.enabled and otel.enabled were read by nothing before 2026-09-01, so an
+// address or endpoint alone was enough to connect. Now the flag gates it, which
+// silently disconnects a hand-written config that set one without the other.
+// proto3 cannot tell an unset bool from an explicit false, so nothing can
+// migrate this automatically -- but the exact broken shape is detectable, and an
+// operator who reads one line at startup is better served than one who has to
+// find it in release notes after the fact.
+// It returns the messages rather than logging them so a test can assert that
+// the right config shape produces a warning. Asserting that the function does
+// not panic would pass whether or not it ever warned.
+func disabledByUpgradeWarnings(gc *gateonv1.GlobalConfig) []string {
+	if gc == nil {
+		return nil
+	}
+	var out []string
+	if gc.Redis != nil && gc.Redis.Addr != "" && !gc.Redis.Enabled {
+		out = append(out, "redis.addr is set but redis.enabled is false, so Redis will NOT be used. "+
+			"Before this version the address alone was enough. Set redis.enabled = true to restore it, "+
+			"or clear redis.addr to silence this.")
+	}
+	if gc.Otel != nil && gc.Otel.Endpoint != "" && !gc.Otel.Enabled {
+		out = append(out, "otel.endpoint is set but otel.enabled is false, so traces will NOT be exported. "+
+			"Before this version the endpoint alone was enough. Set otel.enabled = true to restore it, "+
+			"or clear otel.endpoint to silence this.")
+	}
+	return out
+}
+
+func warnDisabledByUpgrade(gc *gateonv1.GlobalConfig) {
+	for _, w := range disabledByUpgradeWarnings(gc) {
+		logger.L.LogWarn(w)
+	}
+}
+
 func applyGlobalEnv(gc *gateonv1.GlobalConfig) {
 	if gc == nil {
 		return
 	}
+	warnDisabledByUpgrade(gc)
 	// otel.enabled gates the endpoint. It was read by nothing, so tracing
 	// exported whenever an endpoint was present and the dashboard toggle could
 	// not stop it. OTEL_EXPORTER_OTLP_ENDPOINT set directly in the environment
