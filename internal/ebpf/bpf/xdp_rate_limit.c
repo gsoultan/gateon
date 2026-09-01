@@ -54,13 +54,6 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1000000);
-    __type(key, __u32);   // IPv4 address
-    __type(value, __u32); // High-performance blocklist
-} cuckoo_filter SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 65536);
     __type(key, __u32);   // IPv4 address
     __type(value, __u32); // State: 0=None, 1=SYN_SENT, 2=ESTABLISHED
@@ -281,13 +274,6 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
         return XDP_DROP;
     }
 
-    // 1b. Cuckoo Filter (High-performance blocklist)
-    __u32 *cuckoo = bpf_map_lookup_elem(&cuckoo_filter, &src_ip);
-    if (cuckoo) {
-        count_drop(DROP_REASON_SHUNNED_IP);
-        return XDP_DROP;
-    }
-
     // 2. TCP State Anomaly & SYN Flood Protection
     if (iph->protocol == IPPROTO_TCP) {
         struct tcphdr *tcph = (void *)(iph + 1);
@@ -433,9 +419,9 @@ int xdp_gateon_main(struct xdp_md *ctx) {
 // per-IP state and load balancing needs XDP_TX/redirect; both stay XDP-only
 // rather than being half-ported into a hook that cannot express them.
 //
-// These read the SAME maps as the XDP program, so ShunIP, BlocklistCuckoo,
-// SetAdaptiveRateLimit and UpdateManagementWhitelist all keep working with no
-// Go-side change regardless of which hook is attached.
+// These read the SAME maps as the XDP program, so ShunIP, SetAdaptiveRateLimit
+// and UpdateManagementWhitelist all keep working with no Go-side change
+// regardless of which hook is attached.
 
 #ifndef TC_ACT_OK
 #define TC_ACT_OK 0
@@ -470,11 +456,6 @@ static __always_inline int tc_filter_ipv4(struct iphdr *iph) {
     }
 
     if (bpf_map_lookup_elem(&shunned_ips, &src_ip)) {
-        count_drop(DROP_REASON_SHUNNED_IP);
-        return TC_ACT_SHOT;
-    }
-
-    if (bpf_map_lookup_elem(&cuckoo_filter, &src_ip)) {
         count_drop(DROP_REASON_SHUNNED_IP);
         return TC_ACT_SHOT;
     }

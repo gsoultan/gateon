@@ -446,7 +446,13 @@ message EbpfConfig {
   int32 mgmt_port = 8;
   repeated int32 knocking_sequence = 9;
   // TITAN extensions
-  bool xdp_cuckoo_filter = 10;
+  // 10 was xdp_cuckoo_filter, removed 2026-09-01. Nothing read it, and there
+  // was nothing to gate: BlocklistCuckoo had no callers, so the map it wrote to
+  // was never populated, while the XDP and TC programs both paid a lookup
+  // against it on every packet that could not match. The map was a
+  // 1,000,000-entry BPF hash preallocated in kernel memory to hold nothing.
+  reserved 10;
+  reserved "xdp_cuckoo_filter";
   bool af_xdp_phantom = 11;
   bool xdp_ja4_blocklist = 12;
   // Permit attaching XDP in generic/SKB mode when the driver rejects the native

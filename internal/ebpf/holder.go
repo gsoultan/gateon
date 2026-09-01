@@ -148,14 +148,6 @@ func (h *Holder) UnshunJA4(ja4Fingerprint string) error {
 	return nil
 }
 
-// BlocklistCuckoo delegates to the active manager, if any.
-func (h *Holder) BlocklistCuckoo(ip string) error {
-	if m := h.Current(); m != nil {
-		return m.BlocklistCuckoo(ip)
-	}
-	return nil
-}
-
 // RegisterPhantomPort delegates to the active manager, if any.
 func (h *Holder) RegisterPhantomPort(port uint32) error {
 	if m := h.Current(); m != nil {

@@ -495,7 +495,6 @@ export type EbpfConfig = {
   enableKnocking?: boolean;
   mgmtPort?: number;
   knockingSequence?: number[];
-  xdpCuckooFilter?: boolean;
   afXdpPhantom?: boolean;
   xdpJa4Blocklist?: boolean;
 };
@@ -788,7 +787,7 @@ export type TitanStats = {
   activePhantomPorts: number;
   aiPredictorEnabled: boolean;
   aiModelStatus: string;
-  cuckooFilterEntries: number;
+  shunnedIpCount: number;
   pqcEnabled: boolean;
   governor?: ResourceGovernorStats;
 };

@@ -26,10 +26,6 @@
 
 # --- DebuggerConfig ---
 
-# --- EbpfConfig ---
-# xdp_cuckoo_filter: the filter's map and mutators are used, but this
-# toggle meant to gate them is not read, so the feature ignores its own switch.
-EbpfConfig.xdp_cuckoo_filter
 
 # --- GitOpsConfig ---
 # ssh_private_key: auth_token is read, so token auth works and

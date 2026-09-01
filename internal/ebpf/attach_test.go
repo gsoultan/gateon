@@ -155,10 +155,10 @@ func TestTCUnsupportedNamesTheGaps(t *testing.T) {
 
 	// Features the TC hook does implement must not be reported as gaps.
 	tcCapable := &gateonv1.EbpfConfig{
-		Enabled: true, XdpIpShunning: true, XdpRateLimit: true, XdpCuckooFilter: true,
+		Enabled: true, XdpIpShunning: true, XdpRateLimit: true,
 	}
 	if gaps := tcUnsupported(tcCapable); len(gaps) != 0 {
-		t.Errorf("tcUnsupported(shun/rate-limit/cuckoo) = %v, want none", gaps)
+		t.Errorf("tcUnsupported(shun/rate-limit) = %v, want none", gaps)
 	}
 
 	full := &gateonv1.EbpfConfig{

@@ -433,7 +433,7 @@ const DiagnosticsPage: React.FC = () => {
                     </Badge>
                   </Group>
                   <Text fw={900} size="xl">{data.system.titan.aiModelStatus || "Inactive"}</Text>
-                  <Text size="10px" c="dimmed">Cuckoo Blocklist: {data.system.titan.cuckooFilterEntries} IPs</Text>
+                  <Text size="10px" c="dimmed">Shunned: {data.system.titan.shunnedIpCount} IPs</Text>
                 </Stack>
               </Paper>
 

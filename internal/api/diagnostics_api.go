@@ -441,7 +441,7 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 	}
 	if s.EbpfManager != nil {
 		if stats, err := s.EbpfManager.GetMapStats(); err == nil {
-			titanStats.CuckooFilterEntries = int32(stats.ShunnedIPsCount) // Cuckoo used for shunning
+			titanStats.ShunnedIpCount = int32(stats.ShunnedIPsCount)
 		}
 	}
 	// circl library is always available for PQC in this build

@@ -90,7 +90,6 @@ type Manager interface {
 	SetRLFeedbackHandler(h func(ip string, score float64))
 	ShunJA4(ja4Fingerprint string) error
 	UnshunJA4(ja4Fingerprint string) error
-	BlocklistCuckoo(ip string) error
 	RegisterPhantomPort(port uint32) error
 	UnregisterPhantomPort(port uint32) error
 	GetTopIPs(limit int) ([]IPStat, error)
@@ -397,26 +396,6 @@ func (m *EbpfManager) UnshunJA4(ja4Fingerprint string) error {
 
 	h := sha256.Sum256([]byte(ja4Fingerprint))
 	return ja4Map.Delete(h)
-}
-
-// BlocklistCuckoo adds an IP to the high-performance Cuckoo Filter in eBPF.
-func (m *EbpfManager) BlocklistCuckoo(ip string) error {
-	logger.L.LogInfo("Adding IP to eBPF Cuckoo Filter blocklist", "ip", ip)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	cuckooMap, ok := m.maps["cuckoo_filter"]
-	if !ok {
-		// Fallback to standard shunning if map not found (legacy BPF)
-		return m.ShunIP(ip)
-	}
-
-	ipUint, err := ipToUint32(ip)
-	if err != nil {
-		return err
-	}
-
-	return cuckooMap.Update(ipUint, uint32(1), ebpf.UpdateAny)
 }
 
 // RegisterPhantomPort enables AF_XDP redirection for a specific port.

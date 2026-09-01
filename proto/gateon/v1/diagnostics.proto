@@ -269,7 +269,13 @@ message TitanStats {
   int32 active_phantom_ports = 3;
   bool ai_predictor_enabled = 4;
   string ai_model_status = 5;
-  int32 cuckoo_filter_entries = 6;
+  // 6 was cuckoo_filter_entries. It was populated with the shunned-IP count --
+  // the cuckoo map was always empty -- so the dashboard reported one number
+  // under another number's name. The value was real and useful; only the label
+  // was wrong, so it moves to a field that says what it is.
+  reserved 6;
+  reserved "cuckoo_filter_entries";
+  int32 shunned_ip_count = 9;
   bool pqc_enabled = 7;
   ResourceGovernorStats governor = 8;
 }
