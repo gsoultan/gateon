@@ -86,10 +86,19 @@ func applyGlobalEnv(gc *gateonv1.GlobalConfig) {
 	if gc == nil {
 		return
 	}
-	if gc.Otel != nil && gc.Otel.Endpoint != "" {
+	// otel.enabled gates the endpoint. It was read by nothing, so tracing
+	// exported whenever an endpoint was present and the dashboard toggle could
+	// not stop it. OTEL_EXPORTER_OTLP_ENDPOINT set directly in the environment
+	// is untouched by this and still exports on its own.
+	if gc.Otel != nil && gc.Otel.Enabled && gc.Otel.Endpoint != "" {
 		setEnv("OTEL_EXPORTER_OTLP_ENDPOINT", gc.Otel.Endpoint)
 	}
-	if gc.Redis != nil && gc.Redis.Addr != "" {
+	// redis.enabled gates the address here too, and this is the gate that
+	// actually matters. Without it the config address is copied into REDIS_ADDR,
+	// and the resolver treats that variable as an explicit instruction exempt
+	// from the flag -- so the toggle would have been defeated by the very
+	// mechanism that carries its value.
+	if gc.Redis != nil && gc.Redis.Enabled && gc.Redis.Addr != "" {
 		setEnv("REDIS_ADDR", gc.Redis.Addr)
 	}
 	if gc.Tls == nil {

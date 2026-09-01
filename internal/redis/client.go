@@ -62,6 +62,18 @@ func ResolveOptions(conf *gateonv1.RedisConfig, getenv func(string) string) (Opt
 		o.DB = int(conf.GetDb())
 	}
 
+	// A config-file address is only honoured when redis.enabled is set. The flag
+	// was previously read by nothing, so the dashboard toggle did not turn Redis
+	// off, and an operator who unticked it kept a live connection.
+	//
+	// REDIS_ADDR is exempt and still enables Redis on its own. Setting that
+	// variable is an unambiguous instruction with no accompanying flag to
+	// contradict it, and it is how deployments that never touch the config file
+	// are wired -- gating it on a flag they do not set would disconnect them.
+	if conf != nil && !conf.GetEnabled() {
+		addr = ""
+	}
+
 	// Environment wins: an orchestrator injecting a rotated secret should not be
 	// overridden by a stale value in a config file.
 	if v := strings.TrimSpace(getenv("REDIS_ADDR")); v != "" {

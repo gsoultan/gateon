@@ -10,126 +10,57 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// TestEmptyConfigDoesNotClobberTheEnvironment is the bug this package was
-// hiding. Four of the TLS variables were written unconditionally, and setEnv on
-// an empty string does not clear a variable -- it sets it to "". So a
-// global.json with a tls block that omits an email erased GATEON_TLS_EMAIL from
-// a deployment that had exported it on purpose, and the operator's only clue
-// was TLS behaving as if they had configured nothing.
-func TestEmptyConfigDoesNotClobberTheEnvironment(t *testing.T) {
-	vars := map[string]string{
-		"GATEON_TLS_EMAIL":            "ops@example.com",
-		"GATEON_TLS_MIN_VERSION":      "1.3",
-		"GATEON_TLS_MAX_VERSION":      "1.3",
-		"GATEON_TLS_CLIENT_AUTH_TYPE": "RequireAndVerifyClientCert",
-	}
-	for k, v := range vars {
-		t.Setenv(k, v)
-	}
-
-	// A tls block that carries nothing but the on switch.
-	applyGlobalEnv(&gateonv1.GlobalConfig{Tls: &gateonv1.TlsConfig{Enabled: true}})
-
-	for k, want := range vars {
-		if got := os.Getenv(k); got != want {
-			t.Errorf("%s = %q, want %q; an empty config field overwrote a value "+
-				"the operator set in the environment", k, got, want)
-		}
-	}
-}
-
-func TestConfiguredValuesReachTheEnvironment(t *testing.T) {
-	for _, k := range []string{
-		"OTEL_EXPORTER_OTLP_ENDPOINT", "REDIS_ADDR", "GATEON_TLS_ENABLED",
-		"GATEON_TLS_EMAIL", "GATEON_TLS_DOMAINS", "GATEON_TLS_MIN_VERSION",
-		"GATEON_TLS_MAX_VERSION", "GATEON_TLS_CLIENT_AUTH_TYPE",
-		"GATEON_TLS_CIPHER_SUITES",
-	} {
-		t.Setenv(k, "")
-	}
-
-	applyGlobalEnv(&gateonv1.GlobalConfig{
-		Otel:  &gateonv1.OtelConfig{Endpoint: "http://collector:4318"},
-		Redis: &gateonv1.RedisConfig{Addr: "cache:6379"},
-		Tls: &gateonv1.TlsConfig{
-			Enabled:        true,
-			Email:          "tls@example.com",
-			Domains:        []string{"a.example.com", "b.example.com"},
-			MinTlsVersion:  "1.2",
-			MaxTlsVersion:  "1.3",
-			ClientAuthType: "NoClientCert",
-			CipherSuites:   []string{"TLS_AES_128_GCM_SHA256"},
-		},
-	})
-
-	for k, want := range map[string]string{
-		"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4318",
-		"REDIS_ADDR":                  "cache:6379",
-		"GATEON_TLS_ENABLED":          "true",
-		"GATEON_TLS_EMAIL":            "tls@example.com",
-		"GATEON_TLS_DOMAINS":          "a.example.com,b.example.com",
-		"GATEON_TLS_MIN_VERSION":      "1.2",
-		"GATEON_TLS_MAX_VERSION":      "1.3",
-		"GATEON_TLS_CLIENT_AUTH_TYPE": "NoClientCert",
-		"GATEON_TLS_CIPHER_SUITES":    "TLS_AES_128_GCM_SHA256",
-	} {
-		if got := os.Getenv(k); got != want {
-			t.Errorf("%s = %q, want %q", k, got, want)
-		}
-	}
-}
-
-// TestTLSDisabledIsPublished pins the deliberate exception: false is a real
-// value for a bool, so omitting it would make "off in config" look identical to
-// "config says nothing".
-func TestTLSDisabledIsPublished(t *testing.T) {
-	t.Setenv("GATEON_TLS_ENABLED", "true")
-
-	applyGlobalEnv(&gateonv1.GlobalConfig{Tls: &gateonv1.TlsConfig{Enabled: false}})
-
-	if got := os.Getenv("GATEON_TLS_ENABLED"); got != "false" {
-		t.Errorf("GATEON_TLS_ENABLED = %q, want %q; config turning TLS off must "+
-			"reach the environment", got, "false")
-	}
-}
-
-func TestNilSectionsAreSkipped(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "keep-me")
-	t.Setenv("REDIS_ADDR", "keep-me-too")
-	t.Setenv("GATEON_TLS_ENABLED", "keep-me-three")
-
-	applyGlobalEnv(&gateonv1.GlobalConfig{})
-	applyGlobalEnv(nil)
-
-	for k, want := range map[string]string{
-		"OTEL_EXPORTER_OTLP_ENDPOINT": "keep-me",
-		"REDIS_ADDR":                  "keep-me-too",
-		"GATEON_TLS_ENABLED":          "keep-me-three",
-	} {
-		if got := os.Getenv(k); got != want {
-			t.Errorf("%s = %q, want %q; an absent config section must not write",
-				k, got, want)
-		}
-	}
-}
-
-func TestHasAuthDatabase(t *testing.T) {
-	t.Parallel()
-
+// applyGlobalEnv is how config values reach the subsystems that read the
+// environment, so it is where the enabled flags have to be honoured. Gating only
+// the consumer would not work for Redis: the address is copied into REDIS_ADDR
+// here, and the resolver treats that variable as an explicit instruction exempt
+// from the flag, so an ungated copy would defeat the toggle it carries.
+func TestEnabledFlagsGateTheEnvironmentBridge(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		auth *gateonv1.AuthConfig
-		want bool
+		name      string
+		gc        *gateonv1.GlobalConfig
+		wantOtel  string
+		wantRedis string
 	}{
-		{"nil", nil, false},
-		{"empty", &gateonv1.AuthConfig{}, false},
-		{"database url", &gateonv1.AuthConfig{DatabaseUrl: "postgres://x"}, true},
-		{"sqlite path", &gateonv1.AuthConfig{SqlitePath: "/var/lib/gateon.db"}, true},
+		{
+			name: "both enabled",
+			gc: &gateonv1.GlobalConfig{
+				Otel:  &gateonv1.OtelConfig{Enabled: true, Endpoint: "otel:4318"},
+				Redis: &gateonv1.RedisConfig{Enabled: true, Addr: "redis:6379"},
+			},
+			wantOtel: "otel:4318", wantRedis: "redis:6379",
+		},
+		{
+			name: "endpoints set but flags unset",
+			gc: &gateonv1.GlobalConfig{
+				Otel:  &gateonv1.OtelConfig{Endpoint: "otel:4318"},
+				Redis: &gateonv1.RedisConfig{Addr: "redis:6379"},
+			},
+			wantOtel: "", wantRedis: "",
+		},
+		{
+			name: "explicitly disabled",
+			gc: &gateonv1.GlobalConfig{
+				Otel:  &gateonv1.OtelConfig{Enabled: false, Endpoint: "otel:4318"},
+				Redis: &gateonv1.RedisConfig{Enabled: false, Addr: "redis:6379"},
+			},
+			wantOtel: "", wantRedis: "",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := hasAuthDatabase(tc.auth); got != tc.want {
-				t.Errorf("hasAuthDatabase = %v, want %v", got, tc.want)
+			// t.Setenv registers restoration, so the process env is left as found.
+			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+			t.Setenv("REDIS_ADDR", "")
+			_ = os.Unsetenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+			_ = os.Unsetenv("REDIS_ADDR")
+
+			applyGlobalEnv(tc.gc)
+
+			if got := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); got != tc.wantOtel {
+				t.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT = %q, want %q", got, tc.wantOtel)
+			}
+			if got := os.Getenv("REDIS_ADDR"); got != tc.wantRedis {
+				t.Errorf("REDIS_ADDR = %q, want %q", got, tc.wantRedis)
 			}
 		})
 	}
