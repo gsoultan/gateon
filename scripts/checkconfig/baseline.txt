@@ -35,9 +35,6 @@ EbpfConfig.xdp_cuckoo_filter
 # ssh_private_key: auth_token is read, so token auth works and
 # SSH-authenticated repositories cannot actually be used.
 
-# --- GlobalConfig ---
-# titan: the whole TitanConfig block is unreachable (see below).
-GlobalConfig.titan
 
 # --- LogConfig ---
 
@@ -49,16 +46,6 @@ GlobalConfig.titan
 # still is not consulted: Redis is switched on by an address resolving at all,
 # so setting enabled=false leaves it on.
 
-# --- TitanConfig ---
-# The entire TITAN feature set, `enabled` included. GlobalConfig.titan
-# is itself unread, so nothing below it can be reached: phantom ports, the AI
-# predictor, post-quantum crypto and the governor are switches attached to nothing.
-TitanConfig.ai_model_path
-TitanConfig.enable_ai_predictor
-TitanConfig.enable_governor
-TitanConfig.enable_phantom
-TitanConfig.enable_pqc
-TitanConfig.enabled
 
 # --- TlsConfig ---
 # auto_redirect: an operator who asked for HTTP-to-HTTPS redirection

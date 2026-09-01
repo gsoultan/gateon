@@ -9,4 +9,3 @@ export * from './AuditSettingsCard';
 export * from './AppearanceCard';
 export * from './PresetsCard';
 export * from './ResourceProfileCard';
-export * from './TitanSettingsCard';

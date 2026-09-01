@@ -35,7 +35,6 @@ import {
   IconBrain,
   IconAlertTriangle,
   IconCode,
-  IconBolt,
   IconRobot
 } from '@tabler/icons-react';
 import { useGateonStatus, apiFetch, useMetricsSnapshot, installClamav, uninstallClamav } from '../hooks/useGateon';
@@ -344,9 +343,6 @@ export default function SecurityCommandCenter() {
               <Stack gap="xs">
                 <Group gap="xs">
                   <Badge variant="dot" color="blue" size="sm">Autonomous Defense Active</Badge>
-                  {globalConfig?.titan?.enabled && (
-                    <Badge variant="filled" color="orange" size="sm" leftSection={<IconBolt size={12} />}>TITAN EVOLUTION</Badge>
-                  )}
                   <TimeDisplay />
                 </Group>
                 <Title order={1} fw={900} style={{ letterSpacing: -1.5 }}>Security Hub</Title>
