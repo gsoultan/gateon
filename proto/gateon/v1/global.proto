@@ -47,16 +47,16 @@ message GlobalConfig {
   // trace store, retention, WAF tier) for the deployment's footprint without
   // removing capabilities. Overridable per-subsystem and by the GATEON_PROFILE env.
   string profile = 19;
-  TitanConfig titan = 20;
-}
-
-message TitanConfig {
-  bool enabled = 1;
-  bool enable_phantom = 2;
-  bool enable_ai_predictor = 3;
-  bool enable_pqc = 4;
-  bool enable_governor = 5;
-  string ai_model_path = 6;
+  // 20 was titan, removed 2026-09-01. Nothing read the block, so all seven
+  // toggles the dashboard rendered for it did nothing, and four named
+  // subsystems that do not exist -- PhantomCore has no predictor, no
+  // post-quantum identity and no governor.
+  //
+  // The phantom core itself is untouched and still runs: cmd/gateon constructs
+  // it unconditionally and TitanStats continues to report on it. What goes is
+  // the pretence that it was configurable.
+  reserved 20;
+  reserved "titan";
 }
 
 message AlertingConfig {

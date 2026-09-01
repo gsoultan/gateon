@@ -529,16 +529,6 @@ export type GlobalConfig = {
   alerting?: AlertingConfig;
   audit?: AuditConfig;
   profile?: string;
-  titan?: TitanConfig;
-};
-
-export type TitanConfig = {
-  enabled: boolean;
-  enablePhantom: boolean;
-  enableAiPredictor: boolean;
-  enablePqc: boolean;
-  enableGovernor: boolean;
-  aiModelPath: string;
 };
 
 export type AlertingConfig = {

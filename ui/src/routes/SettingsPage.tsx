@@ -62,7 +62,6 @@ import {
   PresetsCard,
   AppearanceCard,
   ResourceProfileCard,
-  TitanSettingsCard
 } from "../components/settings";
 import { usePermissions } from "../hooks/usePermissions";
 import { useGateonStatus } from "../hooks/useGateonStatus";
@@ -2254,12 +2253,6 @@ export default function SettingsPage() {
       />
 
       <SecurityAdvancedSettingsCard
-        config={config}
-        onChange={setConfig}
-        disabled={formDisabled}
-      />
-
-      <TitanSettingsCard
         config={config}
         onChange={setConfig}
         disabled={formDisabled}
