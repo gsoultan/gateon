@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/maphash"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -371,7 +373,65 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 	}
 
 	_ = g.Wait()
-	return allAnomalies
+	return capAnomalies(allAnomalies)
+}
+
+// maxAnomaliesPerPass bounds what a single detection pass returns.
+//
+// The result was previously whatever every detector produced, concatenated. It
+// was bounded in practice, but only as a consequence of the caller limiting its
+// inputs to 1000 traces and 1000 threats -- nothing here said so, and a detector
+// that emitted several anomalies per input would have grown past it unnoticed.
+// The ceiling is stated rather than inherited.
+//
+// 1000 matches those input limits: a pass cannot usefully report more findings
+// than it examined records, and the result is held in a single cache slot the
+// Diagnostics view reads.
+const maxAnomaliesPerPass = 1000
+
+// severityRank orders severities worst-first. Unknown values sort last rather
+// than first: a detector inventing a severity should not outrank a known
+// critical, and doing so would let a typo push real findings out of a truncated
+// pass.
+func severityRank(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case severityCritical:
+		return 4
+	case severityHigh:
+		return 3
+	case severityMedium, "warning":
+		return 2
+	case severityLow, "info":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// capAnomalies enforces maxAnomaliesPerPass, keeping the most severe.
+//
+// Truncating the tail of an unordered slice would drop findings at random, so
+// the pass is ordered by severity and then score before it is cut. Dropping is
+// logged: a cap that silently discards security findings reads, from the
+// dashboard, exactly like a quiet period.
+func capAnomalies(anomalies []*gateonv1.Anomaly) []*gateonv1.Anomaly {
+	if len(anomalies) <= maxAnomaliesPerPass {
+		return anomalies
+	}
+
+	sort.SliceStable(anomalies, func(i, j int) bool {
+		ri, rj := severityRank(anomalies[i].GetSeverity()), severityRank(anomalies[j].GetSeverity())
+		if ri != rj {
+			return ri > rj
+		}
+		return anomalies[i].GetScore() > anomalies[j].GetScore()
+	})
+
+	dropped := len(anomalies) - maxAnomaliesPerPass
+	logger.L.LogWarn("anomaly pass exceeded its cap; keeping the most severe findings",
+		"produced", len(anomalies), "cap", maxAnomaliesPerPass, "dropped", dropped)
+
+	return anomalies[:maxAnomaliesPerPass]
 }
 
 func (e *AnomalyAnalysisEngine) checkHeaderConsistency(tr *telemetry.TraceRecord, route *gateonv1.Route, stats *IPStats) {
