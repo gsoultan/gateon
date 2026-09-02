@@ -13,14 +13,21 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 // TCPBackendPool manages multiple TCP backends with health checks and load balancing.
 type TCPBackendPool struct {
-	addrs         []string
-	policy        string // "round_robin", "least_conn"
-	alive         []atomic.Bool
-	active        []atomic.Int32
+	addrs  []string
+	policy string // "round_robin", "least_conn"
+	alive  []atomic.Bool
+	active []atomic.Int32
+	// Consecutive health-check results, so a single blip cannot change a
+	// backend's state. Only the counter that could still change state is
+	// incremented, which keeps both bounded.
+	fails         []atomic.Int32
+	successes     []atomic.Int32
 	next          atomic.Uint64
 	interval      time.Duration
 	timeout       time.Duration
@@ -51,6 +58,8 @@ func NewTCPBackendPool(addrs []string, policy string, intervalMs, timeoutMs int,
 		policy:        policy,
 		alive:         make([]atomic.Bool, len(addrs)),
 		active:        make([]atomic.Int32, len(addrs)),
+		fails:         make([]atomic.Int32, len(addrs)),
+		successes:     make([]atomic.Int32, len(addrs)),
 		interval:      time.Duration(intervalMs) * time.Millisecond,
 		timeout:       time.Duration(timeoutMs) * time.Millisecond,
 		proxyProtocol: proxyProtocol,
@@ -79,15 +88,59 @@ func (p *TCPBackendPool) StartHealthChecks() {
 	}
 }
 
+// Health-check thresholds. A single dial result used to flip a backend's state
+// outright, which is wrong in both directions: one transient timeout -- a GC
+// pause, a brief network blip -- evicted a healthy backend, and one successful
+// dial returned a struggling one to service. A TCP connect also says nothing
+// about whether the application behind it is ready, so recovery in particular
+// should not be believed on first sight.
+//
+// Down takes more evidence than up on purpose: removing capacity from a pool is
+// the more disruptive direction when the pool is small.
+const (
+	tcpFailThreshold = 3
+	tcpRiseThreshold = 2
+)
+
 func (p *TCPBackendPool) healthCheck() {
 	for i, addr := range p.addrs {
 		conn, err := net.DialTimeout("tcp", addr, p.timeout)
 		if err != nil {
-			p.alive[i].Store(false)
+			p.recordFailure(i, addr, err)
 			continue
 		}
 		_ = conn.Close()
+		p.recordSuccess(i, addr)
+	}
+}
+
+// recordFailure counts a failed check, marking the backend down only once the
+// failures are consecutive enough to mean something.
+func (p *TCPBackendPool) recordFailure(i int, addr string, cause error) {
+	p.successes[i].Store(0)
+	if !p.alive[i].Load() {
+		return // already down; nothing further to count toward
+	}
+	if p.fails[i].Add(1) >= tcpFailThreshold {
+		p.alive[i].Store(false)
+		p.fails[i].Store(0)
+		logger.L.LogWarn("L4 backend marked down after consecutive failed health checks",
+			"addr", addr, "consecutive_failures", tcpFailThreshold, "error", cause)
+	}
+}
+
+// recordSuccess counts a passing check, restoring the backend only once it has
+// held up across more than one interval.
+func (p *TCPBackendPool) recordSuccess(i int, addr string) {
+	p.fails[i].Store(0)
+	if p.alive[i].Load() {
+		return // already up
+	}
+	if p.successes[i].Add(1) >= tcpRiseThreshold {
 		p.alive[i].Store(true)
+		p.successes[i].Store(0)
+		logger.L.LogInfo("L4 backend restored after consecutive successful health checks",
+			"addr", addr, "consecutive_successes", tcpRiseThreshold)
 	}
 }
 
