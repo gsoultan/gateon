@@ -1,0 +1,105 @@
+# Verifies, on real AWS ENA hardware, the claims gateon makes to operators about
+# native XDP: that the driver refuses it above a page-sized MTU, and unless it is
+# using at most half its queues. Those numbers were reasoned from driver
+# behaviour and are quoted in the preflight; this is what checks them.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS NEVER RUNS ON pull_request
+# ---------------------------------------------------------------------------
+# This repository is public and this job runs on a self-hosted runner inside an
+# AWS account. A workflow triggered by `pull_request` runs the workflow file and
+# code from the *fork*, which would let anyone who opens a pull request execute
+# arbitrary commands on that instance -- with its instance profile, its network
+# position and its access to the VPC.
+#
+# `pull_request_target` is worse here, not better: it runs with the base repo's
+# secrets.
+#
+# So the only triggers are manual dispatch and a schedule, both of which run code
+# that is already on a branch of this repository. Do not add `pull_request`.
+name: ena-verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      interface:
+        description: "Interface to probe (blank = autodetect ens5/enX0/eth0)"
+        required: false
+        default: ""
+  schedule:
+    # Weekly. The claims only change when the kernel, the ENA driver or the
+    # instance type changes, none of which happen per-commit.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  ena:
+    name: ENA hardware verification
+    # The runner must carry all three labels. `ena` is the one that matters: it
+    # marks a machine that is actually an EC2 instance with an ENA interface,
+    # rather than any self-hosted runner that happens to be idle.
+    runs-on: [self-hosted, linux, ena]
+    # Belt and braces against a fork enabling Actions and picking up the runner.
+    if: github.repository == 'gsoultan/gateon'
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+
+      - name: Generate eBPF bindings
+        run: go generate ./internal/ebpf/...
+
+      - name: Report what this host actually is
+        # Printed unconditionally so a failure downstream can be read against the
+        # hardware it ran on, rather than guessed at from a stack trace.
+        run: |
+          echo "== instance =="
+          curl -s --max-time 2 -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+            -X PUT http://169.254.169.254/latest/api/token > /tmp/imds-token || true
+          if [ -s /tmp/imds-token ]; then
+            for f in instance-type instance-id placement/availability-zone; do
+              printf '%s: ' "$f"
+              curl -s --max-time 2 -H "X-aws-ec2-metadata-token: $(cat /tmp/imds-token)" \
+                "http://169.254.169.254/latest/meta-data/$f" || true
+              echo
+            done
+          else
+            echo "IMDS unavailable (not EC2, or IMDSv2 blocked)"
+          fi
+          echo "== kernel =="
+          uname -r
+          echo "== interfaces =="
+          ip -br link || true
+          for i in ens5 enX0 eth0; do
+            [ -e "/sys/class/net/$i" ] || continue
+            echo "-- $i"
+            ip link show "$i" | head -1
+            echo "  driver: $(basename "$(readlink -f /sys/class/net/$i/device/driver 2>/dev/null)" 2>/dev/null || echo unknown)"
+            echo "  rx queues: $(ls -d /sys/class/net/$i/queues/rx-* 2>/dev/null | wc -l)"
+            ethtool -l "$i" 2>/dev/null || echo "  ethtool -l unavailable"
+          done
+
+      - name: Verify the ENA diagnosis against this hardware
+        env:
+          GATEON_VERIFY_ENA: "1"
+          GATEON_VERIFY_IFACE: ${{ inputs.interface }}
+        run: |
+          # Built into RUNNER_TEMP rather than the checkout, and run under sudo
+          # because attaching needs CAP_NET_ADMIN.
+          go test -c -o "$RUNNER_TEMP/ebpf.test" ./internal/ebpf/
+          sudo --preserve-env=GATEON_VERIFY_ENA,GATEON_VERIFY_IFACE \
+            "$RUNNER_TEMP/ebpf.test" -test.run 'TestENA' -test.v
