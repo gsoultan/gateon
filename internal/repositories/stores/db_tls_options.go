@@ -10,6 +10,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -36,6 +37,11 @@ func (r *DBTLSOptionRegistry) loadFromDB() {
 	query := "SELECT id, name, min_tls_version, max_tls_version, cipher_suites, alpn_protocols, client_auth_type, prefer_server_cipher_suites, sni_strict, client_authority_ids FROM tls_options"
 	rows, err := r.db.Query(query)
 	if err != nil {
+		// Returning quietly is how a schema mismatch here stayed invisible: the
+		// registry simply came up empty, and a gateway with no TLS options looks
+		// exactly like a gateway that was never given any.
+		logger.L.LogError("cannot load TLS options; the gateway will start with none",
+			"error", err)
 		return
 	}
 	defer rows.Close()
