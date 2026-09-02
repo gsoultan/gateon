@@ -63,6 +63,25 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install buf and proto plugins
+        # Same source as ci.yml: versions come from go.mod's tool directive, so
+        # the generators are locked in go.sum rather than pulled at @latest.
+        run: go install tool
+
+      - name: Generate proto stubs
+        # internal/ebpf imports proto/gateon/v1, whose Go stubs are generated
+        # rather than committed. `go generate` produces the eBPF bindings only,
+        # so without this the test binary does not compile at all.
+        #
+        # protoc-gen-es lives in ui/node_modules, which is why bun install is
+        # needed even though this job never builds the dashboard.
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+
       - name: Install eBPF build toolchain
         run: |
           sudo apt-get update
