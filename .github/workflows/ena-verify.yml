@@ -26,6 +26,13 @@ on:
         description: "Interface to probe (blank = autodetect ens5/enX0/eth0)"
         required: false
         default: ""
+  # Pushes to this repository's own branches are safe in a way pull_request is
+  # not: a fork cannot push here, so the code that runs is always code someone
+  # with write access put on a branch. Scoped to the verification branches so an
+  # unrelated push does not occupy the runner.
+  push:
+    branches:
+      - "ci/ena-*"
   schedule:
     # Weekly. The claims only change when the kernel, the ENA driver or the
     # instance type changes, none of which happen per-commit.
@@ -37,10 +44,12 @@ permissions:
 jobs:
   ena:
     name: ENA hardware verification
-    # The runner must carry all three labels. `ena` is the one that matters: it
-    # marks a machine that is actually an EC2 instance with an ENA interface,
-    # rather than any self-hosted runner that happens to be idle.
-    runs-on: [self-hosted, linux, ena]
+    # Deliberately only the labels every self-hosted Linux runner already has.
+    # An `ena` label would be a second place for this requirement to live and to
+    # drift; the test itself checks the driver, and fails rather than skips when
+    # it was explicitly asked to verify and cannot. A mis-scheduled run should be
+    # loud, not quietly green.
+    runs-on: [self-hosted, linux]
     # Belt and braces against a fork enabling Actions and picking up the runner.
     if: github.repository == 'gsoultan/gateon'
     timeout-minutes: 20

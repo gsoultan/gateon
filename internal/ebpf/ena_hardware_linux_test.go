@@ -73,8 +73,14 @@ func TestENADiagnosisMatchesRealHardware(t *testing.T) {
 	t.Logf("RX queues   %d on %d CPUs", facts.RXQueues, facts.NumCPU)
 	t.Logf("page size   %d  -> native-XDP MTU ceiling ~%d", facts.PageSize, nativeXDPMaxMTU(facts.PageSize))
 
+	// Fail rather than skip. Reaching here means GATEON_VERIFY_ENA was set, so
+	// somebody asked for the ENA claims to be verified; doing that on a host
+	// with a different driver verifies nothing, and a green tick saying so would
+	// be worse than a red one.
 	if facts.Driver != "ena" {
-		t.Skipf("driver is %q, not ena; this check is about the ENA claims specifically", facts.Driver)
+		t.Fatalf("asked to verify the ENA claims but %s is driven by %q, not ena. "+
+			"Run this on an EC2 instance, or set GATEON_VERIFY_IFACE to the ENA interface.",
+			facts.Name, facts.Driver)
 	}
 
 	// What the preflight would tell an operator, decided before we try.

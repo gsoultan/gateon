@@ -59,12 +59,14 @@ curl -o actions-runner.tar.gz -L \
   https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
 tar xzf actions-runner.tar.gz
 
-# The labels are what the workflow selects on. `ena` is the load-bearing one:
-# it means "this really is an EC2 instance with an ENA interface", not merely
-# "some self-hosted machine was free".
+# Only the labels a self-hosted Linux runner has by default. There is no `ena`
+# label on purpose: it would be a second place for the requirement to live and
+# to drift. The test checks the driver itself and fails, rather than skipping,
+# when it was asked to verify and cannot -- so a run that lands on the wrong
+# machine is loud instead of quietly green.
 ./config.sh --url https://github.com/gsoultan/gateon \
   --token <REGISTRATION_TOKEN> \
-  --labels self-hosted,linux,ena \
+  --labels self-hosted,linux \
   --name ena-verify-$(hostname) \
   --unattended --ephemeral
 
@@ -76,9 +78,14 @@ For anything beyond a one-off, run it under systemd with `./svc.sh install &&
 
 ## Running it
 
-Actions → **ena-verify** → *Run workflow*. It also runs weekly, because the
-claims only change when the kernel, the ENA driver or the instance type changes
-— none of which happen per commit.
+Actions → **ena-verify** → *Run workflow*, once the workflow is on the default
+branch — `workflow_dispatch` only registers for workflows that exist there, which
+is why pushing to a `ci/ena-*` branch also triggers it. That push trigger is safe
+in a way `pull_request` is not: forks cannot push to this repository, so the code
+that runs is always code someone with write access placed on a branch.
+
+It also runs weekly, because the claims only change when the kernel, the ENA
+driver or the instance type changes — none of which happen per commit.
 
 Leave the interface input blank to autodetect `ens5`, `enX0` or `eth0`, or name
 one explicitly.
@@ -99,4 +106,15 @@ way it diverged:
   worse direction. The attach fails and gateon has nothing specific to say, so
   operators get the driver's bare errno.
 
-A skip means the host is not what this is for: no ENA driver, or not root.
+A skip means the verification was not requested (`GATEON_VERIFY_ENA` unset) or
+the job is not running as root. If it *was* requested and the interface turns out
+not to be ENA-driven, that is a failure rather than a skip.
+
+## A note on arm64
+
+The MTU ceiling is derived from the running page size, not hardcoded, because it
+is `page - frame overhead - XDP headroom - skb_shared_info`. On a 4 KiB-page host
+that is ~3498 and an MTU of 9001 is over it; a kernel with larger pages is far
+more permissive and native XDP may well attach. Both outcomes are correct, and
+the test asserts the *prediction matches the host* rather than assuming either —
+which is the entire reason the ceiling was never written as a constant.
