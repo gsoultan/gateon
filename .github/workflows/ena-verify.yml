@@ -80,6 +80,15 @@ jobs:
       - name: Generate artifacts
         # protoc-gen-es lives in ui/node_modules, which is why bun install is
         # here even though nothing builds the dashboard.
+        #
+        # CPATH replaces gcc-multilib, which is not installed because it does not
+        # exist on arm64. <asm/*.h>, which <linux/types.h> includes, sits under
+        # the multiarch triplet rather than on clang's default search path, and
+        # that package's only job here was to put it there. Naming both triplets
+        # is portable: clang ignores the one that is absent. Same approach as
+        # internal/ebpf/Dockerfile.gen.
+        env:
+          CPATH: /usr/include/x86_64-linux-gnu:/usr/include/aarch64-linux-gnu
         run: |
           bun install --frozen-lockfile --cwd ui
           PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
