@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: ["main"]
 
+# <asm/*.h>, which <linux/types.h> includes, sits under the multiarch triplet
+# rather than on clang's default search path. gcc-multilib used to put it there
+# and was listed in the toolchain install below, but that package exists only on
+# amd64: on arm64 apt refuses outright with "has no installation candidate",
+# which a self-hosted Graviton runner hit. Naming both triplets is portable,
+# since clang ignores whichever is absent, and it is what
+# internal/ebpf/Dockerfile.gen has always done.
+env:
+  CPATH: /usr/include/x86_64-linux-gnu:/usr/include/aarch64-linux-gnu
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,7 +57,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+            clang llvm libbpf-dev libelf-dev linux-libc-dev
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -200,7 +210,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+            clang llvm libbpf-dev libelf-dev linux-libc-dev
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
