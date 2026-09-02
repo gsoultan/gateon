@@ -139,11 +139,29 @@ gap it closes.
 - `auth_pass` now protects both the heartbeat and the gossip cluster, so it must
   match across every node, and mismatched nodes will simply not see each other.
 
-## Not addressed
+## The equal-priority tie-break (resolved 2026-09-02)
 
-The equal-priority tie-break still resolves by accepting whichever peer already
-claims master (`// For simplicity here` in the original). With authentication in
-place this is no longer a security question, but two same-priority nodes can
-still both defer, so neither takes the VIP. Fixing it means implementing the
-documented higher-IP-wins rule and is an election-correctness change, not a
-security one — it wants its own change and its own tests.
+This section previously recorded the tie-break as not addressed, and understated
+it. The equal case had no rule at all: a peer at the same priority refreshed
+`lastSeen` and nothing else, so neither node released. Both waited out three
+intervals seeing no master, both acquired the VIP, and both then sat receiving
+each other's adverts and staying master — two nodes holding one address,
+indefinitely, with nothing logged. The earlier note said "neither takes the VIP";
+the failure is the opposite, and worse.
+
+That is not an exotic misconfiguration. Deploying the same config to both members
+of a pair is the obvious thing to do, and priority is exactly the field an
+operator leaves alone.
+
+`peerOutranks` now implements the documented rule: priority decides when the two
+differ, and the higher address wins when they are equal, compared as bytes rather
+than strings so the winner does not depend on whether someone wrote 10.0.0.9 or
+10.0.0.10. Both nodes evaluate the same rule to opposite answers, so exactly one
+yields. A peer this node outranks is ignored entirely, `lastSeen` included —
+refreshing it was what kept the better candidate waiting for a master that was
+never coming.
+
+A node that cannot determine its own address yields. That is the safer half: a
+node that wrongly yields leaves the pair briefly without a master and recovers on
+its own, while a node that wrongly holds gives two masters for one address and
+does not.

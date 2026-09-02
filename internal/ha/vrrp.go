@@ -26,6 +26,9 @@ type HAManager struct {
 	mu         sync.RWMutex
 	udpConn    *net.UDPConn
 	masterSeen bool
+	// localIP is this node's address on the HA interface, used to break a
+	// priority tie deterministically.
+	localIP net.IP
 	// droppedAdverts counts datagrams rejected before they could influence the
 	// election — wrong length, bad MAC or outside the replay window. A rising
 	// count means either a misconfigured peer or someone probing the port.
@@ -55,6 +58,10 @@ func (m *HAManager) Start(ctx context.Context) {
 	// the feature whose entire purpose is availability shipping its own remote
 	// off switch. Failing closed costs HA until auth_pass is set; failing open
 	// costs the VIP to whoever asks first.
+	// Resolved once: the tie-break needs this per advert, and an interface
+	// lookup on the receive path would be work an attacker could ask for.
+	m.localIP = haInterfaceIP(m.config.Interface)
+
 	key := []byte(m.config.AuthPass)
 	if len(key) == 0 {
 		logger.L.LogError("Refusing to start High Availability: ha.auth_pass is empty. "+
@@ -146,20 +153,18 @@ func (m *HAManager) listenLoop(ctx context.Context, key []byte, window time.Dura
 		priority := adv.Priority
 
 		m.mu.Lock()
-		// If we see a higher priority node, or same priority with higher IP, it's the master
-		if priority > m.config.Priority {
+		if peerOutranks(priority, m.config.Priority, addr.IP, m.localIP) {
 			m.lastSeen = time.Now()
 			m.masterSeen = true
 			if m.active {
-				logger.L.LogInfo("Higher priority peer detected, yielding MASTER status", "peer", addr.String(), "peer_prio", priority)
+				logger.L.LogInfo("Yielding MASTER status to a higher-ranked peer",
+					"peer", addr.String(), "peer_prio", priority, "our_prio", m.config.Priority)
 				m.releaseVIPs()
 			}
-		} else if priority == m.config.Priority {
-			// Tie-breaker: usually the node with higher IP wins
-			// For simplicity here, we just accept the peer as master if it's already master
-			m.lastSeen = time.Now()
-			m.masterSeen = true
 		}
+		// A peer we outrank is deliberately ignored, lastSeen included. Refreshing
+		// it on their advert is what previously kept the better candidate from
+		// ever taking over: it waited for a master that was never coming.
 		m.mu.Unlock()
 	}
 }
