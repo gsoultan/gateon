@@ -42,18 +42,18 @@ permissions:
   contents: read
 
 jobs:
-  ena:
-    name: ENA hardware verification
-    # Deliberately only the labels every self-hosted Linux runner already has.
-    # An `ena` label would be a second place for this requirement to live and to
-    # drift; the test itself checks the driver, and fails rather than skips when
-    # it was explicitly asked to verify and cannot. A mis-scheduled run should be
-    # loud, not quietly green.
-    runs-on: [self-hosted, linux]
-    # Belt and braces against a fork enabling Actions and picking up the runner.
-    if: github.repository == 'gsoultan/gateon'
-    timeout-minutes: 20
-
+  # The self-hosted instance's only unique property is that it has an ENA
+  # interface. Everything else -- generating proto stubs, compiling the BPF
+  # object, building the test -- is ordinary work that a GitHub-hosted runner
+  # does faster, on a machine that is already disposable.
+  #
+  # Doing it here instead of there is not just tidier. Building buf from source
+  # OOM-killed the instance (exit 137), and every build tool installed on a
+  # self-hosted runner is more code executing inside the AWS account for no
+  # reason. The runner ends up needing no Go, no clang, no bun and no buf.
+  build:
+    name: Build the verification binary
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,56 +63,71 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install runner prerequisites
-        # A self-hosted runner is a bare machine. GitHub's hosted images ship
-        # hundreds of tools preinstalled and workflows quietly depend on that;
-        # here nothing is present unless it was installed.
-        #
-        # unzip is what setup-bun extracts its release with, and ethtool is what
-        # the host report below uses to read queue counts -- the very numbers
-        # this job exists to check.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            unzip curl ca-certificates ethtool
-
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
       - name: Install buf and proto plugins
-        # Same source as ci.yml: versions come from go.mod's tool directive, so
-        # the generators are locked in go.sum rather than pulled at @latest.
+        # Versions come from go.mod's tool directive, so the generators are
+        # locked in go.sum rather than pulled at @latest.
         run: go install tool
-
-      - name: Generate proto stubs
-        # internal/ebpf imports proto/gateon/v1, whose Go stubs are generated
-        # rather than committed. `go generate` produces the eBPF bindings only,
-        # so without this the test binary does not compile at all.
-        #
-        # protoc-gen-es lives in ui/node_modules, which is why bun install is
-        # needed even though this job never builds the dashboard.
-        run: |
-          bun install --frozen-lockfile --cwd ui
-          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
 
       - name: Install eBPF build toolchain
         run: |
-          # No gcc-multilib. It exists only on amd64 and fails outright with
-          # "has no installation candidate" on arm64, which is what a Graviton
-          # runner is. The other workflows get away with listing it because
-          # GitHub-hosted runners are x86_64; this one is not.
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang llvm libbpf-dev libelf-dev linux-libc-dev
 
-      - name: Generate eBPF bindings
-        # <asm/*.h>, which <linux/types.h> pulls in, lives under the multiarch
-        # triplet rather than on clang's default search path -- the job
-        # gcc-multilib used to do. Naming both triplets is portable: clang
-        # ignores the one that is not present. Same approach as
-        # internal/ebpf/Dockerfile.gen.
+      - name: Generate artifacts
+        # protoc-gen-es lives in ui/node_modules, which is why bun install is
+        # here even though nothing builds the dashboard.
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./internal/ebpf/...
+
+      - name: Cross-compile the test for the runner
+        # The BPF object is embedded, cilium/ebpf is pure Go and CGO is off for
+        # a cross build, so this produces a self-contained binary. Both
+        # architectures are little-endian, so the bpf2go output travels.
         env:
-          CPATH: /usr/include/aarch64-linux-gnu:/usr/include/x86_64-linux-gnu
-        run: go generate ./internal/ebpf/...
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: go test -c -o ena.test ./internal/ebpf/
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ena-test-binary
+          path: ena.test
+          retention-days: 1
+
+  ena:
+    name: ENA hardware verification
+    needs: build
+    # Deliberately only the labels every self-hosted Linux runner already has.
+    # An `ena` label would be a second place for this requirement to live and to
+    # drift; the test itself checks the driver, and fails rather than skips when
+    # it was explicitly asked to verify and cannot. A mis-scheduled run should be
+    # loud, not quietly green.
+    runs-on: [self-hosted, linux]
+    # Belt and braces against a fork enabling Actions and picking up the runner.
+    if: github.repository == 'gsoultan/gateon'
+    timeout-minutes: 15
+
+    steps:
+      - name: Install report prerequisites
+        # ethtool reads the queue counts this job exists to check. A self-hosted
+        # runner is a bare machine; GitHub's images ship it, this does not.
+        run: |
+          if ! command -v ethtool >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends ethtool
+          fi
+
+      - name: Download the verification binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ena-test-binary
 
       - name: Report what this host actually is
         # Printed unconditionally so a failure downstream can be read against the
@@ -132,7 +147,8 @@ jobs:
             echo "IMDS unavailable (not EC2, or IMDSv2 blocked)"
           fi
           echo "== kernel =="
-          uname -r
+          uname -rm
+          getconf PAGESIZE | sed 's/^/page size: /'
           echo "== interfaces =="
           ip -br link || true
           for i in ens5 enX0 eth0; do
@@ -149,8 +165,6 @@ jobs:
           GATEON_VERIFY_ENA: "1"
           GATEON_VERIFY_IFACE: ${{ inputs.interface }}
         run: |
-          # Built into RUNNER_TEMP rather than the checkout, and run under sudo
-          # because attaching needs CAP_NET_ADMIN.
-          go test -c -o "$RUNNER_TEMP/ebpf.test" ./internal/ebpf/
+          chmod +x ena.test
           sudo --preserve-env=GATEON_VERIFY_ENA,GATEON_VERIFY_IFACE \
-            "$RUNNER_TEMP/ebpf.test" -test.run 'TestENA' -test.v
+            ./ena.test -test.run 'TestENA' -test.v
