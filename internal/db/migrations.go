@@ -1546,6 +1546,10 @@ func init() {
 				`ALTER TABLE services ADD COLUMN IF NOT EXISTS l4_proxy_protocol BOOLEAN NOT NULL DEFAULT FALSE;`,
 
 				// tls_options
+				// name was written by DBTLSOptionRegistry.Update and selected by its
+				// load path, but no migration ever added it, so saving a TLS option
+				// failed and loading returned nothing on every dialect.
+				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS min_tls_version TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS max_tls_version TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE tls_options ADD COLUMN IF NOT EXISTS alpn_protocols TEXT NOT NULL DEFAULT '';`,
@@ -1572,6 +1576,7 @@ func init() {
 				`ALTER TABLE services ADD COLUMN l4_proxy_protocol BOOLEAN NOT NULL DEFAULT 0;`,
 
 				// tls_options
+				`ALTER TABLE tls_options ADD COLUMN name TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE tls_options ADD COLUMN min_tls_version TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE tls_options ADD COLUMN max_tls_version TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE tls_options ADD COLUMN alpn_protocols TEXT NOT NULL DEFAULT '';`,
