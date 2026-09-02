@@ -63,6 +63,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install runner prerequisites
+        # A self-hosted runner is a bare machine. GitHub's hosted images ship
+        # hundreds of tools preinstalled and workflows quietly depend on that;
+        # here nothing is present unless it was installed.
+        #
+        # unzip is what setup-bun extracts its release with, and ethtool is what
+        # the host report below uses to read queue counts -- the very numbers
+        # this job exists to check.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            unzip curl ca-certificates ethtool
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -84,7 +97,6 @@ jobs:
 
       - name: Install eBPF build toolchain
         run: |
-          sudo apt-get update
           # No gcc-multilib. It exists only on amd64 and fails outright with
           # "has no installation candidate" on arm64, which is what a Graviton
           # runner is. The other workflows get away with listing it because
