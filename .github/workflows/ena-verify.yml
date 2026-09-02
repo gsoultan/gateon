@@ -66,10 +66,21 @@ jobs:
       - name: Install eBPF build toolchain
         run: |
           sudo apt-get update
+          # No gcc-multilib. It exists only on amd64 and fails outright with
+          # "has no installation candidate" on arm64, which is what a Graviton
+          # runner is. The other workflows get away with listing it because
+          # GitHub-hosted runners are x86_64; this one is not.
           sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib
+            clang llvm libbpf-dev libelf-dev linux-libc-dev
 
       - name: Generate eBPF bindings
+        # <asm/*.h>, which <linux/types.h> pulls in, lives under the multiarch
+        # triplet rather than on clang's default search path -- the job
+        # gcc-multilib used to do. Naming both triplets is portable: clang
+        # ignores the one that is not present. Same approach as
+        # internal/ebpf/Dockerfile.gen.
+        env:
+          CPATH: /usr/include/aarch64-linux-gnu:/usr/include/x86_64-linux-gnu
         run: go generate ./internal/ebpf/...
 
       - name: Report what this host actually is
