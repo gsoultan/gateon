@@ -232,18 +232,45 @@ func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, prot
 	return cfg
 }
 
+// configHash identifies a configuration so the resolver can tell a cached pool
+// from a stale one.
+//
+// Two things here are load-bearing and were previously wrong.
+//
+// Every value is NUL-terminated. The old version concatenated bare strings, so
+// the byte stream was ambiguous and backends {"ab", "c"} hashed identically to
+// {"a", "bc"}. A collision means a backend change does not look like a change,
+// and the resolver keeps serving traffic to the pool it already had.
+//
+// Only the backends are sorted, and only among themselves. Sorting the scalar
+// fields in with them let a load balancer name or a timeout be reordered against
+// an address, which is what made the concatenation ambiguous in the first place.
+// Backends stay order-insensitive on purpose: reordering a round-robin list is
+// not a change worth tearing down live connections for.
 func configHash(cfg *L4Config) uint64 {
 	h := fnv.New64a()
-	proxy := "0"
-	if cfg.ProxyProtocol {
-		proxy = "1"
+	write := func(s string) {
+		_, _ = h.Write([]byte(s))
+		_, _ = h.Write([]byte{0})
 	}
-	parts := append([]string{cfg.LoadBalancer, fmt.Sprintf("%d", cfg.HealthCheckInterval),
-		fmt.Sprintf("%d", cfg.HealthCheckTimeout), fmt.Sprintf("%d", cfg.UDPSessionTimeout), proxy},
-		cfg.Backends...)
-	sort.Strings(parts)
-	for _, p := range parts {
-		_, _ = h.Write([]byte(p))
+
+	write(cfg.LoadBalancer)
+	write(fmt.Sprintf("%d", cfg.HealthCheckInterval))
+	write(fmt.Sprintf("%d", cfg.HealthCheckTimeout))
+	write(fmt.Sprintf("%d", cfg.UDPSessionTimeout))
+	write(fmt.Sprintf("%d", cfg.UDPMaxSessions))
+	if cfg.ProxyProtocol {
+		write("proxy")
+	} else {
+		write("noproxy")
+	}
+
+	// Copied before sorting: cfg belongs to the caller, and reordering its
+	// backends underneath them would be a surprising side effect of hashing.
+	backends := append([]string(nil), cfg.Backends...)
+	sort.Strings(backends)
+	for _, b := range backends {
+		write(b)
 	}
 	return h.Sum64()
 }
