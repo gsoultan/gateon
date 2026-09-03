@@ -162,6 +162,10 @@ func check(counts, baseline map[string]int) []violation {
 			out = append(out, violation{pkg, fmt.Sprintf(
 				"grew from %d to %d files. It is already over the limit of %d, so it may shrink but not grow: put the new code in a package of its own.",
 				allowed, n, limit)})
+		case listed && n <= limit:
+			out = append(out, violation{pkg, fmt.Sprintf(
+				"is down to %d files from a baseline of %d, which puts it back under the limit of %d. Delete its line from %s in this commit — it does not need a pin any more.",
+				n, allowed, limit, baselinePath)})
 		case listed && n < allowed:
 			out = append(out, violation{pkg, fmt.Sprintf(
 				"is down to %d files from a baseline of %d. Lower its line in %s to %d in this commit, so the ratchet holds the ground you just took.",
