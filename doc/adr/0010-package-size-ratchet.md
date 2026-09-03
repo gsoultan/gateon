@@ -57,8 +57,11 @@ footrace against the feature work landing in the package being refactored.
 Two responses were available and both are wrong. Splitting all nine packages is a
 months-long refactor of the request path, taken on at once, in the least-covered
 and most security-sensitive code in the tree — `internal/middleware` sits at 59.3%
-coverage, `factory.go` alone resolves symbols from 37 of its siblings, and only
-three of its files have no intra-package dependency at all. Splitting only the
+coverage, and it is densely self-referential: a name-reference scan over its 67
+implementation files puts `factory.go`'s dependencies at 41 of its 66 siblings,
+and finds exactly one file, `factory_parse.go`, that references nothing else in
+the package. (That scan matches identifiers rather than resolving types, so it
+over-counts; it is quoted as a shape, not a measurement.) Splitting only the
 largest fixes one ninth and leaves the rule exactly as unenforced for the other
 eight, which is how all nine got here.
 
