@@ -15,6 +15,7 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -165,10 +166,27 @@ func (v *JWTValidator) validateToken(ctx context.Context, claims jwt.MapClaims) 
 		}
 	}
 
-	// Check revocation
+	// Check revocation.
+	//
+	// The error is deliberately fatal to the request rather than discarded.
+	// RedisRevocationStore returns (false, err) when the backend is unreachable,
+	// so treating a failed lookup as "not revoked" honoured every revoked token
+	// for as long as Redis was down — a restart, a network blip, a timeout or a
+	// wrong password. Revocation is the control you reach for after a
+	// compromise, which makes an outage precisely the wrong moment to stop
+	// enforcing it, and the operator turned this on deliberately.
+	//
+	// The cause goes to the log, not to the caller: HandleFailure writes
+	// err.Error() straight into the response body, so a wrapped driver error
+	// would hand an unauthenticated client the address of an internal service.
 	if v.config.RevocationStore != nil {
 		jti, _ := claims["jti"].(string)
-		if revoked, _ := v.config.RevocationStore.IsRevoked(ctx, jti); revoked {
+		revoked, err := v.config.RevocationStore.IsRevoked(ctx, jti)
+		if err != nil {
+			logger.L.LogError("auth: revocation lookup failed, denying request", "error", err)
+			return errors.New("token revocation status unavailable")
+		}
+		if revoked {
 			return errors.New("token revoked")
 		}
 	}
