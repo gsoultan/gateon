@@ -127,6 +127,12 @@ jobs:
       - name: Config fields are read by something
         run: go run ./scripts/checkconfig
 
+      # Nine packages are over arch's ten-file limit and pinned at that size.
+      # This does not ask them to shrink; it refuses to let them grow, and
+      # refuses to let a tenth join them. See doc/adr/0010.
+      - name: Package sizes hold their ratchet
+        run: go run ./scripts/checkfolders
+
       - name: Test
         env:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable

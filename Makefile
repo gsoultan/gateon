@@ -11,7 +11,7 @@ CONTAINER ?= docker
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-coverage ebpf ebpf-docker pgo-profile docker
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-coverage check-folders ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -156,6 +156,15 @@ check-invariants:
 check-config:
 	go run ./scripts/checkconfig
 
+## check-folders: assert arch's ten-file package limit as a ratchet. The nine
+##                packages already over it are pinned at their current size in
+##                scripts/checkfolders/baseline.txt: they may shrink, they may
+##                not grow, and a tenth may not appear. Splitting all nine is a
+##                months-long refactor of the request path; leaving the rule
+##                unenforced is how they got this big.
+check-folders:
+	go run ./scripts/checkfolders
+
 ## check-coverage: assert no package loses its tests or drops below its recorded
 ##                 floor. A ratchet, not a target -- see scripts/checkcoverage.
 ##
@@ -177,7 +186,7 @@ check-coverage:
 	@go test -cover $$(go list ./... | grep -v 'cmd/gateon') | tee /dev/stderr | go run ./scripts/checkcoverage
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
-sec: vuln staticcheck gosec check-invariants check-config
+sec: vuln staticcheck gosec check-invariants check-config check-folders
 	go vet ./...
 
 ## lint: run golangci-lint over the whole tree (reports pre-existing debt too)

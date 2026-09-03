@@ -19,6 +19,8 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0006](./0006-transport-neutral-authorization.md) | Transport-neutral authorization for the management API | Accepted |
 | [0007](./0007-xdp-attach-mode-and-the-tc-ingress-hook.md) | XDP attach mode and the TC ingress hook | Accepted |
 | [0008](./0008-response-inspection-must-control-its-own-encoding.md) | Response inspection must control its own content encoding | Accepted |
+| [0009](./0009-authenticated-ha-heartbeats.md) | Authenticated HA heartbeats and gossip | Accepted |
+| [0010](./0010-package-size-ratchet.md) | The package-size limit is a ratchet, not a wall | Accepted |
 
 ## Conventions
 
