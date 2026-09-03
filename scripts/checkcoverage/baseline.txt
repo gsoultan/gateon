@@ -19,6 +19,18 @@
 # 65.1% to 60.5%. That is the environment, not a regression. CI sets the
 # DSN, which is another reason the baseline comes from CI.
 #
+# internal/resource is pinned at its low-water mark on purpose, and must
+# not be tightened from a green run. Its Governor reads real memory and
+# CPU through gopsutil, and the branches that fire scavenge hooks only
+# execute above 80% and 90%, so how much of it runs depends on how loaded
+# the runner happens to be. Two CI runs on the same commit measured 80.3%
+# and 63.2%. Its one test compounds this: it starts the monitor goroutine
+# and sleeps 100ms to "wait for one tick" against a five-second ticker,
+# so the tick never arrives and what gets covered is whatever the
+# scheduler managed before the test returned. Making this deterministic
+# means injecting the stats source; until then the floor is the figure
+# that holds on the worst runner.
+#
 # Generate this from CI, not from a laptop. Packages with build-tagged
 # platform files -- internal/ebpf, internal/phantom, internal/logger,
 # internal/resource -- compile different code on Linux and macOS, and a
@@ -61,7 +73,7 @@ github.com/gsoultan/gateon/internal/redis 85.2%
 github.com/gsoultan/gateon/internal/repositories/entities -
 github.com/gsoultan/gateon/internal/repositories/stores 80.2%
 github.com/gsoultan/gateon/internal/request 47.1%
-github.com/gsoultan/gateon/internal/resource 80.3%
+github.com/gsoultan/gateon/internal/resource 63.2%
 github.com/gsoultan/gateon/internal/router 78.6%
 github.com/gsoultan/gateon/internal/security 30.8%
 github.com/gsoultan/gateon/internal/security/art 98.6%
