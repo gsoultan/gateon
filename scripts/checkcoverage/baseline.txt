@@ -31,12 +31,20 @@
 # means injecting the stats source; until then the floor is the figure
 # that holds on the worst runner.
 #
-# Generate this from CI, not from a laptop. Packages with build-tagged
-# platform files -- internal/ebpf, internal/phantom, internal/logger,
-# internal/resource -- compile different code on Linux and macOS, and a
-# smaller denominator reads as higher coverage. A baseline made on a Mac
-# describes a build CI never makes, and fails it. Take the "Coverage
-# ratchet" step output from a green ci run and feed it to -update.
+# Generate this from CI, not from a laptop. internal/ebpf and
+# internal/phantom carry build-tagged files -- six and two -- so off Linux
+# they compile only their stubs, and a smaller denominator reads as higher
+# coverage: this laptop reports 18.7% and 20.0% against CI's 12.5% and
+# 9.9%. A baseline made on a Mac describes a build CI never makes, and
+# fails it. Take the "Coverage ratchet" step output from a green ci run
+# and feed it to -update.
+#
+# This list used to name internal/logger and internal/resource too. Neither
+# has a single build-tagged file. logger simply does not diverge -- 38.8%
+# here against 39.4% in CI, inside the tolerance -- and resource diverges
+# for the unrelated reason given above. Naming the wrong cause is worse than
+# naming none, because it sends the next person looking for build tags
+# that were never there.
 #
 # Regenerate with:
 #   go test -cover ./... | go run ./scripts/checkcoverage -update
