@@ -110,31 +110,22 @@ func TestCountableExcludesTestsAndGeneratedCode(t *testing.T) {
 	}
 }
 
-// TestReadBaselineRejectsMalformedLines makes a typo in the baseline a loud
+// TestParseBaselineRejectsMalformedLines makes a typo in the baseline a loud
 // parse error rather than a silently dropped pin, which would quietly let a
-// package grow unbounded.
-func TestReadBaselineRejectsMalformedLines(t *testing.T) {
-	dir := t.TempDir()
-
-	good := filepath.Join(dir, "good.txt")
-	if err := os.WriteFile(good, []byte("# a comment\n\n67 internal/middleware\n11 internal/middleware/auth\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	parsed, err := readBaseline(good)
+// package grow unbounded. Reads from a string, so it needs no temp files.
+func TestParseBaselineRejectsMalformedLines(t *testing.T) {
+	good := "# a comment\n\n67 internal/middleware\n11 internal/middleware/auth\n"
+	parsed, err := parseBaseline("baseline.txt", strings.NewReader(good))
 	if err != nil {
-		t.Fatalf("readBaseline on a valid file: %v", err)
+		t.Fatalf("parseBaseline on a valid file: %v", err)
 	}
 	if parsed["internal/middleware"] != 67 || parsed["internal/middleware/auth"] != 11 {
 		t.Errorf("parsed = %+v, want the two pins", parsed)
 	}
 
 	for _, bad := range []string{"internal/middleware\n", "sixty-seven internal/middleware\n"} {
-		path := filepath.Join(dir, "bad.txt")
-		if err := os.WriteFile(path, []byte(bad), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := readBaseline(path); err == nil {
-			t.Errorf("readBaseline(%q) = nil error, want a parse failure", bad)
+		if _, err := parseBaseline("baseline.txt", strings.NewReader(bad)); err == nil {
+			t.Errorf("parseBaseline(%q) = nil error, want a parse failure", bad)
 		}
 	}
 }
