@@ -4,6 +4,21 @@
 #
 # "-" means the package has no tests. That is a debt, not a
 # licence: it is recorded so the count cannot quietly grow.
+#
+# A wrong "-" is worse than a wrong number. The check skips any package
+# it believes has no tests, so mislabelling one removes it from the gate
+# altogether rather than merely lowering its floor. On 2026-09-03 four
+# packages were recorded that way while CI was covering them --
+# internal/security/art at 98.6%, internal/domain/middleware at 69.2%,
+# internal/domain/canary and internal/install -- so art could have lost
+# every test it has and still passed. Getting the "-" right matters more
+# than getting the percentage right.
+#
+# Local runs on a Mac also fail on internal/db: its Postgres migration
+# tests skip without GATEON_TEST_POSTGRES_DSN, which reads as a drop from
+# 65.1% to 60.5%. That is the environment, not a regression. CI sets the
+# DSN, which is another reason the baseline comes from CI.
+#
 # Generate this from CI, not from a laptop. Packages with build-tagged
 # platform files -- internal/ebpf, internal/phantom, internal/logger,
 # internal/resource -- compile different code on Linux and macOS, and a
@@ -20,49 +35,49 @@ github.com/gsoultan/gateon/internal/ai 69.0%
 github.com/gsoultan/gateon/internal/ai/models/default -
 github.com/gsoultan/gateon/internal/alerting 25.8%
 github.com/gsoultan/gateon/internal/api 48.6%
-github.com/gsoultan/gateon/internal/audit 42.7%
+github.com/gsoultan/gateon/internal/audit 47.6%
 github.com/gsoultan/gateon/internal/auth 71.9%
 github.com/gsoultan/gateon/internal/config 17.2%
 github.com/gsoultan/gateon/internal/db 65.1%
 github.com/gsoultan/gateon/internal/discovery 9.5%
-github.com/gsoultan/gateon/internal/domain/canary -
+github.com/gsoultan/gateon/internal/domain/canary 6.1%
 github.com/gsoultan/gateon/internal/domain/entrypoint -
-github.com/gsoultan/gateon/internal/domain/middleware -
+github.com/gsoultan/gateon/internal/domain/middleware 69.2%
 github.com/gsoultan/gateon/internal/domain/route -
 github.com/gsoultan/gateon/internal/domain/service -
 github.com/gsoultan/gateon/internal/domain/tls -
 github.com/gsoultan/gateon/internal/ebpf 12.4%
-github.com/gsoultan/gateon/internal/ha 19.3%
+github.com/gsoultan/gateon/internal/ha 23.4%
 github.com/gsoultan/gateon/internal/httputil 45.0%
-github.com/gsoultan/gateon/internal/inits 0.0%
-github.com/gsoultan/gateon/internal/install -
-github.com/gsoultan/gateon/internal/k8s 35.4%
-github.com/gsoultan/gateon/internal/logger 25.2%
+github.com/gsoultan/gateon/internal/inits 25.3%
+github.com/gsoultan/gateon/internal/install 5.3%
+github.com/gsoultan/gateon/internal/k8s 68.6%
+github.com/gsoultan/gateon/internal/logger 39.4%
 github.com/gsoultan/gateon/internal/middleware 59.1%
 github.com/gsoultan/gateon/internal/middleware/auth 16.9%
 github.com/gsoultan/gateon/internal/middleware/kind 54.5%
 github.com/gsoultan/gateon/internal/phantom 9.9%
-github.com/gsoultan/gateon/internal/redis 84.0%
+github.com/gsoultan/gateon/internal/redis 85.2%
 github.com/gsoultan/gateon/internal/repositories/entities -
-github.com/gsoultan/gateon/internal/repositories/stores 19.9%
+github.com/gsoultan/gateon/internal/repositories/stores 80.2%
 github.com/gsoultan/gateon/internal/request 47.1%
-github.com/gsoultan/gateon/internal/resource 63.2%
+github.com/gsoultan/gateon/internal/resource 80.3%
 github.com/gsoultan/gateon/internal/router 78.6%
 github.com/gsoultan/gateon/internal/security 30.8%
-github.com/gsoultan/gateon/internal/security/art -
+github.com/gsoultan/gateon/internal/security/art 98.6%
 github.com/gsoultan/gateon/internal/security/correlation 84.7%
 github.com/gsoultan/gateon/internal/security/entropy 45.1%
 github.com/gsoultan/gateon/internal/security/fim 84.3%
 github.com/gsoultan/gateon/internal/security/mitigation 87.2%
 github.com/gsoultan/gateon/internal/security/pqc 82.8%
 github.com/gsoultan/gateon/internal/security/reputation 64.5%
-github.com/gsoultan/gateon/internal/security/scanner 0.0%
+github.com/gsoultan/gateon/internal/security/scanner 100.0%
 github.com/gsoultan/gateon/internal/security/siem 63.1%
 github.com/gsoultan/gateon/internal/security/tpm 28.1%
 github.com/gsoultan/gateon/internal/security/waf 62.1%
 github.com/gsoultan/gateon/internal/security/yara 93.8%
-github.com/gsoultan/gateon/internal/server 43.1%
-github.com/gsoultan/gateon/internal/server/entrypoint 29.9%
+github.com/gsoultan/gateon/internal/server 48.6%
+github.com/gsoultan/gateon/internal/server/entrypoint 33.0%
 github.com/gsoultan/gateon/internal/server/handlers 14.7%
 github.com/gsoultan/gateon/internal/syncutil -
 github.com/gsoultan/gateon/internal/telemetry 56.3%
@@ -71,7 +86,7 @@ github.com/gsoultan/gateon/internal/tls 48.6%
 github.com/gsoultan/gateon/internal/tui -
 github.com/gsoultan/gateon/internal/ui -
 github.com/gsoultan/gateon/pkg/httputil 100.0%
-github.com/gsoultan/gateon/pkg/l4 19.8%
+github.com/gsoultan/gateon/pkg/l4 42.2%
 github.com/gsoultan/gateon/pkg/proxy 47.5%
 github.com/gsoultan/gateon/proto/gateon/v1 -
 github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect -
