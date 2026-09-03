@@ -10,8 +10,8 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -19,24 +19,81 @@ import (
 )
 
 // TechDetector probes a backend service to identify its technology stack and provide configuration recommendations.
-type TechDetector struct{}
+type TechDetector struct {
+	// blockedTarget decides which resolved addresses the probe refuses to
+	// connect to. nil means blockedProbeTarget, the production policy; tests
+	// replace it so they can probe an httptest server, which always binds
+	// loopback. It exists because the previous escape hatch was
+	// `os.Getenv("GATEON_TEST") != "1"` guarding the whole check -- an
+	// environment variable that switched off an SSRF control for the process.
+	blockedTarget func(net.IP) (reason string, blocked bool)
+}
+
+// blockedProbeTarget reports whether the probe must refuse an address.
+//
+// The check happens in the dialer rather than on the URL, because the URL is
+// attacker-supplied and every string-level check on it has a bypass. The
+// previous one had several: it parsed the host by splitting on "/", so
+// http://evil.com@127.0.0.1/ yielded the host "evil.com@127.0.0.1", which fails
+// to resolve, and a failed resolve skipped the check entirely. http://[::1]/
+// kept its brackets and failed the same way. It compared for equality with
+// "127.0.0.1", so 127.0.0.2 -- or any of the other sixteen million loopback
+// addresses -- passed. It never looked at 169.254.169.254 at all. And even a
+// correct URL check is defeated by DNS rebinding, since the name is resolved
+// once for the check and again for the connection.
+//
+// Dialing is the only place that sees the address actually being connected to,
+// after resolution, on the original request and on every redirect.
+//
+// RFC1918 private addresses are deliberately allowed: probing a backend on
+// 10.0.0.5 or a NAS on 192.168.1.10 is what this feature is for. What is
+// refused is the machine itself and the addresses that are dangerous precisely
+// because the gateway can reach them and the caller cannot.
+func blockedProbeTarget(ip net.IP) (string, bool) {
+	switch {
+	case ip == nil:
+		return "unparseable", true
+	case ip.IsLoopback():
+		// Blocks all of 127.0.0.0/8 and ::1, including the gateway's own
+		// management API if it is bound to loopback.
+		return "loopback", true
+	case ip.IsLinkLocalUnicast():
+		// 169.254.0.0/16 and fe80::/10. This is the cloud metadata service:
+		// on EC2, 169.254.169.254 hands out the instance's IAM credentials to
+		// anything that can reach it, which would turn "may edit services"
+		// into control of the account.
+		return "link-local, which is where cloud instance metadata lives", true
+	case ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast():
+		return "link-local multicast", true
+	case ip.IsUnspecified():
+		// 0.0.0.0 and :: route to the local host on most stacks.
+		return "unspecified", true
+	}
+	return "", false
+}
+
+// refuseBlockedAddress is the net.Dialer Control hook. It runs after the name
+// has been resolved and before the socket connects, with the address the
+// connection is actually about to use.
+func (d *TechDetector) refuseBlockedAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("refusing to probe %q: cannot read its address: %w", address, err)
+	}
+	blocked := d.blockedTarget
+	if blocked == nil {
+		blocked = blockedProbeTarget
+	}
+	if reason, deny := blocked(net.ParseIP(host)); deny {
+		return fmt.Errorf("refusing to probe %s: %s address", host, reason)
+	}
+	return nil
+}
 
 // Discover probes the given URL and returns identified technology and recommendations.
 func (d *TechDetector) Discover(ctx context.Context, targetURL string, tlsConfig *gateonv1.TlsClientConfig) (*gateonv1.DiscoverTechResponse, error) {
 	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
 		targetURL = "http://" + targetURL
-	}
-
-	// SSRF prevention: validate host
-	if os.Getenv("GATEON_TEST") != "1" {
-		u, err := net.LookupHost(extractHost(targetURL))
-		if err == nil {
-			for _, ip := range u {
-				if ip == "127.0.0.1" || ip == "::1" || ip == "localhost" {
-					return nil, fmt.Errorf("access to localhost is forbidden")
-				}
-			}
-		}
 	}
 
 	var tlsClientCfg *tls.Config
@@ -48,6 +105,12 @@ func (d *TechDetector) Discover(ctx context.Context, targetURL string, tlsConfig
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: tlsClientCfg,
+			// SSRF prevention. See blockedProbeTarget: this is checked per
+			// connection, so it also covers the redirects allowed below.
+			DialContext: (&net.Dialer{
+				Timeout: 10 * time.Second,
+				Control: d.refuseBlockedAddress,
+			}).DialContext,
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
@@ -142,17 +205,4 @@ func (d *TechDetector) Discover(ctx context.Context, targetURL string, tlsConfig
 	}
 
 	return res, nil
-}
-
-func extractHost(rawURL string) string {
-	parts := strings.Split(rawURL, "/")
-	if len(parts) < 3 {
-		return rawURL
-	}
-	hostPort := parts[2]
-	host, _, err := net.SplitHostPort(hostPort)
-	if err != nil {
-		return hostPort
-	}
-	return host
 }
