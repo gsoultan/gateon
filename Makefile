@@ -126,9 +126,38 @@ bench:
 vuln:
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-## staticcheck: run staticcheck static analysis
+## staticcheck: run staticcheck static analysis for both GOOS values the tree
+##              builds for, because build tags make a single-platform run a
+##              partial one. A _linux.go or _linux_test.go file does not exist as
+##              far as a macOS run is concerned, so CI was the first thing that
+##              ever compiled it -- twice now a dead symbol behind a linux tag
+##              was found by CI and not by the developer who wrote it.
+##
+##              The binary is installed and *then* pointed at a GOOS, rather than
+##              `GOOS=linux go run ...`, which cross-compiles the linter itself
+##              for Linux and cannot execute it on a Mac.
+##
+##              Requires generated code to be present: run `make proto` and
+##              `make ebpf` (or `make ebpf-docker` off Linux) first, or the
+##              GOOS=linux pass fails on the bpf2go symbols rather than on
+##              anything you wrote. CI generates both before it runs this.
 staticcheck:
-	go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+	@if [ ! -f internal/ebpf/gateon_ebpf_bpf.o ]; then \
+		echo "staticcheck: internal/ebpf/gateon_ebpf_bpf.o is missing, so the"; \
+		echo "  GOOS=linux pass would fail on generated symbols instead of on your"; \
+		echo "  code. Generate it first:"; \
+		echo ""; \
+		echo "      make ebpf          # on Linux, with a BPF toolchain"; \
+		echo "      make ebpf-docker   # anywhere else"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@dir="$$(mktemp -d)"; \
+	GOBIN="$$dir" go install honnef.co/go/tools/cmd/staticcheck@latest || exit 1; \
+	for goos in linux darwin; do \
+		echo "==> staticcheck GOOS=$$goos"; \
+		GOOS=$$goos "$$dir/staticcheck" ./... || exit 1; \
+	done
 
 ## gosec: run the gosec security scanner.
 ##        G115 (integer conversion overflow) is excluded: it fires 81 times on
