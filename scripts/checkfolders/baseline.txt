@@ -1,0 +1,49 @@
+# Packages over arch's ten-file limit, pinned at the size they had when the
+# ratchet landed on 2026-09-03. Format: "<count> <path>".
+#
+# These are debt, not exemptions. Each line is a ceiling: the package may shrink
+# and the line must then be lowered in the same commit, but it may not grow. New
+# code that would push one of these up belongs in a package of its own.
+#
+# Do not add a line here to make a failure go away. A tenth package crossing the
+# limit is the check working — it means a package grew past the size a reader can
+# hold in their head, and the answer is to split it while it is still nine files
+# of drift rather than sixty.
+
+# The request-path middleware chain, and the largest single piece of debt in the
+# tree. Splitting it is a real refactor rather than a file move: factory.go alone
+# resolves symbols from 37 of its siblings, only three files have no intra-package
+# dependency at all, and the waf cluster's ten files all reach for Middleware,
+# Factory, RequestState and Chain, which are defined elsewhere in the package. So
+# nothing extracts until those core types move first, and they are on the hot path
+# at 59.3% coverage. That is a sequenced project with its own ADR, not a cleanup to
+# fold into an unrelated change.
+67 internal/middleware
+
+# The dashboard/control-plane API surface. Grows a file per RPC group, so it is
+# the package most likely to cross a pin during ordinary feature work; that is
+# the case the ceiling exists to catch.
+36 internal/api
+
+# Metric collection, trace sampling and the gossip transport. Three concerns
+# already, and the most plausible near-term split in this list.
+31 internal/telemetry
+
+# HTTP handlers for the control plane, split from internal/server once already.
+22 internal/server/handlers
+
+# Config loading, tier defaults and validation.
+20 internal/config
+
+# The proxy data path.
+17 pkg/proxy
+
+# Server lifecycle, wiring and shutdown.
+13 internal/server
+
+# WAF rule evaluation and rule-set management.
+13 internal/security/waf
+
+# Authentication middleware. One file over, so it is by far the cheapest of the
+# nine to bring back under the limit and retire its line entirely.
+11 internal/middleware/auth

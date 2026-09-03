@@ -101,6 +101,16 @@ giant switch.
   registry-based dispatch are **still tracked, not yet executed** — each is its own
   shippable session to honor the "production-ready every session" rule. Tracked in
   `doc/recommendations.md` (Session 7).
+- **Measured 2026-09-03: the two shipped stages did not shrink the package.** This
+  ADR recorded 65 non-test files on 2026-06-15. Stages 0 and 1 extracted roughly
+  thirteen into `kind` and `auth`, and `internal/middleware` today holds **67** —
+  two more than before the refactor started. New middleware landed in the root
+  package faster than the extraction drained it, and `internal/middleware/auth`,
+  which this ADR promised would land inside the ten-file budget, has since grown to
+  eleven. The staged plan below is unchanged and still correct; what it was missing
+  is something stopping the parent package from growing underneath it while the
+  stages land. ADR-0010 adds that ratchet, so the remaining stages keep their
+  ground instead of spending it.
 
 ## Related
 

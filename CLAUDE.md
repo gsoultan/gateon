@@ -188,6 +188,17 @@ at adoption on 2026-08-05**, paid down opportunistically — fix what you touch.
 leaves `noUnusedLocals`/`noUnusedParameters` off, so the frontend side is still partly
 manual.
 
+**`make check-folders`** enforces the ≤10-files rule, which until 2026-09-03 nothing
+measured — nine packages were over it, led by `internal/middleware` at 67. It is a
+ratchet, not a wall: the nine are pinned at that size in
+`scripts/checkfolders/baseline.txt` and may shrink but not grow, a tenth package
+crossing the limit fails, and shrinking below a pin fails until the pin is lowered in
+the same commit. Tests don't count toward the limit. The reason it exists is
+ADR-0002: a well-planned staged split of `internal/middleware` shipped two stages,
+extracted thirteen files, and the package still grew from 65 to 67, because nothing
+stopped new middleware landing in it faster than the refactor drained it. See
+ADR-0010.
+
 **`make check-invariants`** (folded into `make sec`, and a CI step) enforces the four
 vetoes above that no compiler or linter can see. The first three were each violated in
 shipped code and each failed silently:
