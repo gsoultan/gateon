@@ -59,7 +59,7 @@ github.com/gsoultan/gateon/internal/audit 47.6%
 github.com/gsoultan/gateon/internal/auth 71.9%
 github.com/gsoultan/gateon/internal/config 17.2%
 github.com/gsoultan/gateon/internal/db 65.1%
-github.com/gsoultan/gateon/internal/discovery 45.3%
+github.com/gsoultan/gateon/internal/discovery 46.4%
 github.com/gsoultan/gateon/internal/domain/canary 6.1%
 github.com/gsoultan/gateon/internal/domain/entrypoint -
 github.com/gsoultan/gateon/internal/domain/middleware 69.2%

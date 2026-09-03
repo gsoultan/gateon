@@ -80,6 +80,13 @@ func TestTechDiscovery(t *testing.T) {
 		fmt.Sprintf("TLS_OPTIONS_FILE=%s", filepath.Join(env.Dir, "config/tls_options.json")),
 		fmt.Sprintf("GATEON_MANAGEMENT_PORT=%d", env.Ports["mgmt"]),
 		"GATEON_TEST=1",
+		// The mock backend this suite probes is on 127.0.0.1, which the SSRF
+		// guard refuses by default. This used to work because the guard was
+		// wrapped in `os.Getenv("GATEON_TEST") != "1"` -- so the suite ran with
+		// the check switched off entirely, and never exercised it. The opt-in
+		// is now specific to loopback: link-local stays refused with it set,
+		// which is what actually matters.
+		"GATEON_ALLOW_LOOPBACK_PROBE=1",
 	)
 
 	stdout, _ := cmd.StdoutPipe()

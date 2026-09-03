@@ -176,6 +176,7 @@ make proto
 - `GATEON_ENTRYPOINT_RATE_LIMIT_BURST`: Burst size when rate limiting is enabled (default 2× QPS).
 - `GATEON_ACCESS_LOG_SAMPLE_RATE`: Access log sampling. `1` = log all; `N` = log 1 in N requests; `0` = no access log. Use `1000`+ for high-throughput to reduce I/O.
 - `GATEON_TRUST_CLOUDFLARE_HEADERS`: Set to `true`, `1`, or `yes` when Gateon is behind Cloudflare; IPFilter and ratelimit will use `CF-Connecting-IP` for client IP.
+- `GATEON_ALLOW_LOOPBACK_PROBE`: Set to `true`, `1`, or `yes` to let the "Discover tech" probe reach `127.0.0.0/8` and `::1`. Default off, because the probe follows a URL an API caller supplies and loopback is where the gateway's own management API lives. Turn it on only when the backend really is on the same host — a sidecar, or a gateway sharing a pod with the app it fronts. It permits loopback and nothing else: link-local (`169.254.0.0/16`, `fe80::/10`) stays refused however this is set, because that is where cloud instance metadata hands out IAM credentials.
 - `GATEON_TURNSTILE_SECRET`: Cloudflare Turnstile secret key (fallback when middleware config omits it).
 - `GATEON_GEOIP_DB_PATH`: Path to GeoLite2-Country.mmdb for GeoIP middleware (fallback when config omits db_path).
 - `GATEON_HMAC_SECRET`: HMAC secret for webhook signature verification (fallback when middleware config omits it).

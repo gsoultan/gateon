@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -56,7 +57,17 @@ func blockedProbeTarget(ip net.IP) (string, bool) {
 	case ip.IsLoopback():
 		// Blocks all of 127.0.0.0/8 and ::1, including the gateway's own
 		// management API if it is bound to loopback.
-		return "loopback", true
+		//
+		// A gateway running beside its backend in one pod or container is a
+		// real deployment, and there the backend genuinely is on 127.0.0.1, so
+		// this one case can be opted into. It is deliberately its own switch
+		// rather than a general "skip the SSRF check": it permits loopback and
+		// nothing else, and the link-local case below stays refused however it
+		// is set, because that is the one that leaks credentials.
+		if allowLoopbackProbes() {
+			return "", false
+		}
+		return "loopback; set GATEON_ALLOW_LOOPBACK_PROBE=1 if the backend really is on this host", true
 	case ip.IsLinkLocalUnicast():
 		// 169.254.0.0/16 and fe80::/10. This is the cloud metadata service:
 		// on EC2, 169.254.169.254 hands out the instance's IAM credentials to
@@ -70,6 +81,19 @@ func blockedProbeTarget(ip net.IP) (string, bool) {
 		return "unspecified", true
 	}
 	return "", false
+}
+
+// allowLoopbackProbes reports whether probing 127.0.0.0/8 and ::1 is permitted.
+//
+// Read per probe rather than cached: DiscoverTech is an operator-initiated RPC,
+// not request-path work, so the lookup costs nothing that matters and picking up
+// a change without a restart is worth more than the nanoseconds.
+func allowLoopbackProbes() bool {
+	switch strings.TrimSpace(strings.ToLower(os.Getenv("GATEON_ALLOW_LOOPBACK_PROBE"))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 // refuseBlockedAddress is the net.Dialer Control hook. It runs after the name

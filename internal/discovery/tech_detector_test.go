@@ -275,3 +275,64 @@ func TestDiscoverAcceptsAHostWithoutAScheme(t *testing.T) {
 		t.Errorf("Tech = %q, want generic_http", res.Tech)
 	}
 }
+
+// TestLoopbackOptIn covers the one address class an operator can permit, and
+// pins the limits of that permission. A gateway sharing a pod with its backend
+// genuinely needs 127.0.0.1; nothing needs 169.254.169.254.
+func TestLoopbackOptIn(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		if _, blocked := blockedProbeTarget(net.ParseIP("127.0.0.1")); !blocked {
+			t.Error("loopback allowed without the opt-in")
+		}
+	})
+
+	t.Run("the refusal says how to allow it", func(t *testing.T) {
+		reason, _ := blockedProbeTarget(net.ParseIP("127.0.0.1"))
+		if !strings.Contains(reason, "GATEON_ALLOW_LOOPBACK_PROBE") {
+			t.Errorf("reason = %q, want it to name the switch", reason)
+		}
+	})
+
+	t.Run("opt-in permits loopback", func(t *testing.T) {
+		t.Setenv("GATEON_ALLOW_LOOPBACK_PROBE", "1")
+		for _, ip := range []string{"127.0.0.1", "127.0.0.2", "::1"} {
+			if _, blocked := blockedProbeTarget(net.ParseIP(ip)); blocked {
+				t.Errorf("%s still blocked with the opt-in set", ip)
+			}
+		}
+	})
+
+	t.Run("opt-in does not unlock metadata or anything else", func(t *testing.T) {
+		t.Setenv("GATEON_ALLOW_LOOPBACK_PROBE", "1")
+		for _, ip := range []string{"169.254.169.254", "fe80::1", "0.0.0.0", "224.0.0.1"} {
+			if _, blocked := blockedProbeTarget(net.ParseIP(ip)); !blocked {
+				t.Errorf("%s was unblocked by the loopback opt-in; it permits loopback only", ip)
+			}
+		}
+	})
+
+	t.Run("only affirmative values count", func(t *testing.T) {
+		for _, v := range []string{"", "0", "false", "no", "maybe"} {
+			t.Setenv("GATEON_ALLOW_LOOPBACK_PROBE", v)
+			if _, blocked := blockedProbeTarget(net.ParseIP("127.0.0.1")); !blocked {
+				t.Errorf("GATEON_ALLOW_LOOPBACK_PROBE=%q enabled the opt-in", v)
+			}
+		}
+	})
+
+	t.Run("end to end through Discover", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte("<title>pgAdmin 4</title>"))
+		}))
+		defer srv.Close()
+
+		t.Setenv("GATEON_ALLOW_LOOPBACK_PROBE", "1")
+		res, err := (&TechDetector{}).Discover(context.Background(), srv.URL, nil)
+		if err != nil {
+			t.Fatalf("Discover with the opt-in set: %v", err)
+		}
+		if res.Tech != "pgadmin4" {
+			t.Errorf("Tech = %q, want pgadmin4", res.Tech)
+		}
+	})
+}
