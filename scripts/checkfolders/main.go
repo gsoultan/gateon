@@ -36,6 +36,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -112,16 +113,14 @@ func countPackages() (map[string]int, error) {
 	return counts, nil
 }
 
-// readBaseline parses "<count> <path>" lines, ignoring blanks and # comments.
-func readBaseline(path string) (map[string]int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
+// parseBaseline reads "<count> <path>" lines, ignoring blanks and # comments.
+// It takes a reader rather than a filename so the only os.Open in this command
+// is on a constant path: a variable one is a directory-traversal shape (G304),
+// and a build-time tool is a poor place to argue about whether it is reachable.
+// name appears in error messages only.
+func parseBaseline(name string, r io.Reader) (map[string]int, error) {
 	baseline := make(map[string]int)
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	for line := 1; scanner.Scan(); line++ {
 		text := strings.TrimSpace(scanner.Text())
 		if text == "" || strings.HasPrefix(text, "#") {
@@ -129,11 +128,11 @@ func readBaseline(path string) (map[string]int, error) {
 		}
 		count, pkg, ok := strings.Cut(text, " ")
 		if !ok {
-			return nil, fmt.Errorf("%s:%d: want \"<count> <path>\", got %q", path, line, text)
+			return nil, fmt.Errorf("%s:%d: want \"<count> <path>\", got %q", name, line, text)
 		}
 		n, err := strconv.Atoi(count)
 		if err != nil {
-			return nil, fmt.Errorf("%s:%d: %q is not a count: %w", path, line, count, err)
+			return nil, fmt.Errorf("%s:%d: %q is not a count: %w", name, line, count, err)
 		}
 		baseline[strings.TrimSpace(pkg)] = n
 	}
@@ -185,7 +184,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "checkfolders: walking the tree: %v\n", err)
 		os.Exit(2)
 	}
-	baseline, err := readBaseline(baselinePath)
+	f, err := os.Open(baselinePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "checkfolders: reading the baseline: %v\n", err)
+		os.Exit(2)
+	}
+	baseline, err := parseBaseline(baselinePath, f)
+	_ = f.Close()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "checkfolders: reading the baseline: %v\n", err)
 		os.Exit(2)
