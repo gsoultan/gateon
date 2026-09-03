@@ -51,11 +51,28 @@ func TestCheckRatchet(t *testing.T) {
 			wantSays: "grew from 36 to 37",
 		},
 		{
-			name:     "a pinned package shrinking without banking the gain fails",
+			name:     "a pinned package shrinking but still over the limit says lower the pin",
 			counts:   map[string]int{"internal/api": 30},
 			baseline: map[string]int{"internal/api": 36},
 			wantPkg:  "internal/api",
 			wantSays: "Lower its line",
+		},
+		{
+			// The two shrink cases have different remedies, and getting this
+			// wrong leaves a redundant pin sitting at the limit implying the
+			// package is still over it.
+			name:     "a pinned package back under the limit says retire the pin",
+			counts:   map[string]int{"internal/middleware/auth": limit},
+			baseline: map[string]int{"internal/middleware/auth": 11},
+			wantPkg:  "internal/middleware/auth",
+			wantSays: "Delete its line",
+		},
+		{
+			name:     "a pin sitting exactly at the limit is itself redundant",
+			counts:   map[string]int{"internal/tls": limit},
+			baseline: map[string]int{"internal/tls": limit},
+			wantPkg:  "internal/tls",
+			wantSays: "Delete its line",
 		},
 		{
 			name:     "a baseline line for a package that no longer exists fails",
