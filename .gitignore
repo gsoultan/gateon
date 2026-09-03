@@ -88,6 +88,12 @@ telemetry_pebble/
 /tests/e2e/test_out.txt
 /tests/e2e/test_run.log
 /gateon
+# `go build ./scripts/<pkg>` drops a binary named after the package in the repo
+# root, and a `git add -A` will happily commit it. One 2.5 MB Mach-O got as far
+# as a pushed branch this way.
+/checkconfig
+/checkcoverage
+/checkfolders
 /gateon.db
 /gateon.db-shm
 /gateon.db-wal
