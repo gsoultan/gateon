@@ -226,11 +226,28 @@ func (c *Controller) syncHTTPRoute(hr *gatewayv1.HTTPRoute) {
 		for j, match := range rule.Matches {
 			routeID := fmt.Sprintf("%s-r%d-m%d", routeIDPrefix, i, j)
 
+			// Hostnames and paths are interpolated into a backtick-quoted rule,
+			// so a backtick in either escapes the quoting. syncIngress already
+			// guards this; the Gateway API path never did, and it is reachable by
+			// anyone who can create an HTTPRoute. A hostname of
+			// "a`) || Host(`bank.example.com" is a *working* rule that captures
+			// another service's traffic.
 			var ruleParts []string
 			if len(hr.Spec.Hostnames) > 0 {
-				hosts := make([]string, len(hr.Spec.Hostnames))
-				for k, h := range hr.Spec.Hostnames {
-					hosts[k] = string(h)
+				hosts := make([]string, 0, len(hr.Spec.Hostnames))
+				for _, h := range hr.Spec.Hostnames {
+					if !safeForRule(string(h)) {
+						logger.L.LogError("refusing k8s HTTPRoute hostname containing rule metacharacters",
+							"namespace", hr.Namespace, "httproute", hr.Name, "hostname", string(h))
+						continue
+					}
+					hosts = append(hosts, string(h))
+				}
+				// Every hostname rejected means the rule would match on path
+				// alone, which is broader than what was asked for, so the match
+				// is skipped rather than widened.
+				if len(hosts) == 0 {
+					continue
 				}
 				ruleParts = append(ruleParts, fmt.Sprintf("Host(`%s`)", strings.Join(hosts, "`, `")))
 			}
@@ -240,11 +257,22 @@ func (c *Controller) syncHTTPRoute(hr *gatewayv1.HTTPRoute) {
 				if match.Path.Value != nil {
 					path = *match.Path.Value
 				}
+				if !safeForRule(path) {
+					logger.L.LogError("refusing k8s HTTPRoute path containing rule metacharacters",
+						"namespace", hr.Namespace, "httproute", hr.Name, "path", path)
+					continue
+				}
 				if match.Path.Type == nil || *match.Path.Type == gatewayv1.PathMatchPathPrefix {
 					ruleParts = append(ruleParts, fmt.Sprintf("PathPrefix(`%s`)", path))
 				} else {
 					ruleParts = append(ruleParts, fmt.Sprintf("Path(`%s`)", path))
 				}
+			}
+
+			// A match that produced no constraints would become an empty rule,
+			// which matches everything.
+			if len(ruleParts) == 0 {
+				continue
 			}
 
 			ruleStr := strings.Join(ruleParts, " && ")
@@ -286,7 +314,12 @@ func (c *Controller) syncHTTPRoute(hr *gatewayv1.HTTPRoute) {
 
 func (c *Controller) deleteHTTPRoute(hr *gatewayv1.HTTPRoute) {
 	ctx := context.Background()
-	prefix := fmt.Sprintf("k8s-hr-%s-%s", hr.Namespace, hr.Name)
+	// The "-r" is what keeps this from deleting a different HTTPRoute's routes.
+	// Route IDs are "<prefix>-r<i>-m<j>", and matching on the prefix alone made
+	// "web" a prefix of "web-staging", so removing one HTTPRoute silently tore
+	// down another's routing — in the direction that drops traffic. deleteIngress
+	// was fixed for exactly this; the Gateway API path was left behind.
+	prefix := fmt.Sprintf("k8s-hr-%s-%s-r", hr.Namespace, hr.Name)
 	routes := c.routeStore.List(ctx)
 	for _, r := range routes {
 		if strings.HasPrefix(r.Id, prefix) {
