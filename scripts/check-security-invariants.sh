@@ -47,7 +47,7 @@ drop_comment_hits() { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true; 
 # needs to tolerate a not-yet-available service, make the callee deny on a nil
 # verifier (see middleware/auth.PasetoAuth) and build unconditionally.
 # ---------------------------------------------------------------------------
-note "1/6  auth.Service nil-comparisons"
+note "1/7  auth.Service nil-comparisons"
 auth_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '(\.AuthManager|deps\.Auth|s\.Auth|svc\.Auth)[[:space:]]*[!=]=[[:space:]]*nil' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -68,7 +68,7 @@ fi
 # stored-XSS bug plus a readable token equals administrator compromise. The
 # token lives only in the HttpOnly gateon_session cookie.
 # ---------------------------------------------------------------------------
-note "2/6  session token in web storage"
+note "2/7  session token in web storage"
 storage_hits=$( (grep -rnE '(localStorage|sessionStorage)\.(setItem|getItem)' ui/src \
 	--include='*.ts' --include='*.tsx' 2>/dev/null |
 	grep -viE 'token|jwt|paseto|bearer|credential|gateon-auth') || true)
@@ -105,7 +105,7 @@ fi
 # '/', which made the -o path invalid and produced a build that "succeeded"
 # and then failed at exec with a confusing error.
 # ---------------------------------------------------------------------------
-note "3/6  tests building into the repository root"
+note "3/7  tests building into the repository root"
 root_builds=$( (grep -rnE '"go",[[:space:]]*"build",[[:space:]]*"-o",[[:space:]]*[a-zA-Z]' tests/ --include='*.go' 2>/dev/null |
 	grep -vE 'filepath\.Join\((env\.Dir|tmpDir|t\.TempDir)') || true)
 # Re-check the argument actually resolves under a temp dir.
@@ -147,7 +147,7 @@ fi
 # protoc-gen-es all copy the leading comment out of the .proto, so fixing the
 # .proto fixes the generated file on the next `make proto`.
 # ---------------------------------------------------------------------------
-note "4/6  SPDX license header on every source file"
+note "4/7  SPDX license header on every source file"
 SPDX_LINE='SPDX-License-Identifier: MIT'
 missing_spdx=""
 while IFS= read -r f; do
@@ -195,7 +195,7 @@ fi
 # authentication is distinguishable from no authentication at all. Until then
 # this check holds the line. See doc/adr/0006-transport-neutral-authorization.md.
 # ---------------------------------------------------------------------------
-note "5/6  DryRun on the management auth chain"
+note "5/7  DryRun on the management auth chain"
 dryrun_hits=$( (find internal/server -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE 'DryRun' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -227,7 +227,7 @@ fi
 # enforce. No compiler sees it, because both sides are string literals in
 # different languages.
 # ---------------------------------------------------------------------------
-note "6/6  Dashboard middleware config keys match the Go readers"
+note "6/7  Dashboard middleware config keys match the Go readers"
 mw_editors="ui/src/components/MiddlewareConfig"
 if [ -d "$mw_editors" ]; then
 	go_keys=$(grep -rhoE '\["[A-Za-z0-9_]+"\]' internal/middleware/ 2>/dev/null |
@@ -261,6 +261,42 @@ if [ -d "$mw_editors" ]; then
 	fi
 else
 	echo "  ok - no middleware editors present"
+fi
+
+# ---------------------------------------------------------------------------
+# 7. No compiled executable is tracked in git.
+#
+# `go build ./scripts/checkcoverage` writes ./checkcoverage into the repo root,
+# named after the package rather than anywhere obviously temporary, and a
+# `git add -A` commits it without comment. That is not hypothetical: a 2.9 MB
+# Mach-O binary called checkcoverage rode onto main in the very commit that
+# added the coverage ratchet, and sat there unnoticed. A second one nearly
+# shipped the same way with this check's own tooling.
+#
+# The existing test-hygiene rule does not cover it. That one governs what
+# `go test` leaves behind; this arrives from `go build`, which no amount of
+# t.TempDir() discipline prevents. .gitignore covers the binaries we can name
+# in advance, and this covers the ones we cannot: a new script, a new cmd, or
+# anyone's `go build ./...` on a machine where that writes to the tree.
+#
+# Matched by content rather than by name, because the name is the part that
+# keeps changing. Executable *scripts* are text and do not match.
+# ---------------------------------------------------------------------------
+note "7/7  No compiled binaries tracked in git"
+tracked_binaries=$(git ls-files -z |
+	xargs -0 file --mime-type 2>/dev/null |
+	grep -E 'application/x-(mach-binary|executable|sharedlib|pie-executable)' |
+	cut -d: -f1 || true)
+if [ -n "$tracked_binaries" ]; then
+	err "compiled executables are tracked in git"
+	printf '%s\n' "$tracked_binaries" | while read -r b; do
+		[ -n "$b" ] && printf '  %s (%s)\n' "$b" "$(du -h "$b" 2>/dev/null | cut -f1)"
+	done
+	printf '  Remove with `git rm --cached <file>` and add it to .gitignore.\n'
+	printf '  `go build ./path/to/pkg` writes a binary named after the package\n'
+	printf '  into the working directory; `go build -o` takes a destination.\n'
+else
+	echo "  ok - no compiled executables under version control"
 fi
 
 printf '\n'

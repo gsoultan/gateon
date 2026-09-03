@@ -199,8 +199,8 @@ extracted thirteen files, and the package still grew from 65 to 67, because noth
 stopped new middleware landing in it faster than the refactor drained it. See
 ADR-0010.
 
-**`make check-invariants`** (folded into `make sec`, and a CI step) enforces the four
-vetoes above that no compiler or linter can see. The first three were each violated in
+**`make check-invariants`** (folded into `make sec`, and a CI step) enforces the vetoes
+above that no compiler or linter can see. Four of the five below were violated in
 shipped code and each failed silently:
 
 1. **An `auth.Service` is never compared to `nil`** — use `auth.Available(svc)`.
@@ -218,6 +218,14 @@ shipped code and each failed silently:
    better message, but **CI does not run golangci-lint**, so this check re-covers Go and
    adds `.proto` and TypeScript, which no Go linter reaches. Generated protobuf output
    is exempt — it inherits the header from the `.proto`, so `make proto` propagates it.
+5. **No compiled executable is tracked in git** — `go build ./scripts/checkcoverage`
+   writes `./checkcoverage` into the repo root, named after the package, and `git add -A`
+   commits it. A 2.9 MB Mach-O binary rode onto `main` that way in the very commit that
+   added the coverage ratchet, and a second nearly shipped with the folder ratchet.
+   Rule 3 does not cover this: that one is about what `go test` leaves behind, and no
+   amount of `t.TempDir()` discipline stops `go build`. Matched by content, not by name,
+   because the name is the part that keeps changing; `.gitignore` covers the ones we can
+   name in advance. `go build -o` takes a destination.
 
 Each check is negative-tested: introduce the violation and the gate must fail. If you
 add an invariant to the roster above that a tool can check, add it here rather than
