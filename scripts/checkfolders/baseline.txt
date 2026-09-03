@@ -11,13 +11,14 @@
 # of drift rather than sixty.
 
 # The request-path middleware chain, and the largest single piece of debt in the
-# tree. Splitting it is a real refactor rather than a file move: factory.go alone
-# resolves symbols from 37 of its siblings, only three files have no intra-package
-# dependency at all, and the waf cluster's ten files all reach for Middleware,
-# Factory, RequestState and Chain, which are defined elsewhere in the package. So
-# nothing extracts until those core types move first, and they are on the hot path
-# at 59.3% coverage. That is a sequenced project with its own ADR, not a cleanup to
-# fold into an unrelated change.
+# tree. Splitting it is a real refactor rather than a file move: a name-reference
+# scan puts factory.go's dependencies at 41 of its 66 siblings and finds exactly
+# one file that references nothing else in the package, while the waf cluster's
+# ten files all reach for Middleware, Factory, RequestState and Chain, which are
+# defined elsewhere. So nothing extracts until those core types move first, and
+# they sit on the hot path at 59.3% coverage. That is a sequenced project with
+# its own ADR (0002, with 0010 protecting it), not a cleanup to fold into an
+# unrelated change.
 67 internal/middleware
 
 # The dashboard/control-plane API surface. Grows a file per RPC group, so it is
