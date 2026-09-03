@@ -283,6 +283,15 @@ fi
 # keeps changing. Executable *scripts* are text and do not match.
 # ---------------------------------------------------------------------------
 note "7/7  No compiled binaries tracked in git"
+if ! command -v file >/dev/null 2>&1; then
+	# Without file(1) the pipeline below returns nothing and the check would
+	# report "ok" while inspecting exactly zero bytes. A gate that passes
+	# because its tooling is absent is the failure this whole file exists to
+	# prevent, so say so instead.
+	err "file(1) is not installed, so this check cannot run"
+	printf '  Install it (apt-get install file / brew install file) or this\n'
+	printf '  invariant silently passes without inspecting anything.\n'
+else
 tracked_binaries=$(git ls-files -z |
 	xargs -0 file --mime-type 2>/dev/null |
 	grep -E 'application/x-(mach-binary|executable|sharedlib|pie-executable)' |
@@ -297,6 +306,7 @@ if [ -n "$tracked_binaries" ]; then
 	printf '  into the working directory; `go build -o` takes a destination.\n'
 else
 	echo "  ok - no compiled executables under version control"
+fi
 fi
 
 printf '\n'
