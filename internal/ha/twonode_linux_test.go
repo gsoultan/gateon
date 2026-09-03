@@ -86,18 +86,6 @@ func runNode(t *testing.T, m *HAManager) func() {
 	}
 }
 
-func activeCount(nodes ...*HAManager) int {
-	n := 0
-	for _, m := range nodes {
-		m.mu.RLock()
-		if m.active {
-			n++
-		}
-		m.mu.RUnlock()
-	}
-	return n
-}
-
 // TestSingleNodeElection runs one node and reports whether it ended up master.
 //
 // The election has to be exercised across two processes with genuinely distinct
