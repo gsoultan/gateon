@@ -44,7 +44,3 @@
 
 # WAF rule evaluation and rule-set management.
 13 internal/security/waf
-
-# Authentication middleware. One file over, so it is by far the cheapest of the
-# nine to bring back under the limit and retire its line entirely.
-11 internal/middleware/auth
