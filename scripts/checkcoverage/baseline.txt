@@ -44,11 +44,16 @@
 # and feed it to -update.
 #
 # This list used to name internal/logger and internal/resource too. Neither
-# has a single build-tagged file. logger simply does not diverge -- 38.8%
-# here against 39.4% in CI, inside the tolerance -- and resource diverged for
-# the unrelated reason given above, until that was fixed. Naming the wrong
-# cause is worse than naming none, because it sends the next person looking
-# for build tags that were never there.
+# has a single build-tagged file, and both moved for reasons that had nothing
+# to do with platforms. resource sampled the machine, as described above.
+# logger had a concurrency test whose readers looped until a stop channel
+# closed, so at GOMAXPROCS=1 they never ran at all and the package measured
+# 28.2% instead of 39.4% -- which is how it failed the ratchet on a pull
+# request that did not touch it. Both now do a bounded amount of work and
+# report the same figure on every host.
+#
+# Naming the wrong cause is worse than naming none: anyone chasing either
+# difference would have gone looking for build tags that were never there.
 #
 # Regenerate with:
 #   go test -cover ./... | go run ./scripts/checkcoverage -update
