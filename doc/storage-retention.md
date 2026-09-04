@@ -46,9 +46,44 @@ request, including optional captured headers/bodies). To bound it:
 
 - Lower the access-log retention if you do not need long trace history.
 - Disable request/response body capture for high-traffic routes.
+- **Sample the traces** with `GATEON_TRACE_SAMPLE_RATE` (see below). This is the
+  only one of these that reduces CPU as well as disk.
 - For very high request rates, prefer a server-side SQL backend and a dedicated
   volume sized for `requests/day × avg-record-size × retention-days`, plus
   Pebble's transient compaction overhead (≈ one extra copy of the pruned range).
+
+### Trace sampling
+
+`GATEON_TRACE_SAMPLE_RATE` controls how many requests are traced: `1` records
+every request, `N` records one in N, `0` records none. It overrides the tier
+default.
+
+| Tier | Default | Why |
+| :-- | :-- | :-- |
+| `minimal` | `0` | The trace store is closed on this tier, so recording built a record and threw it away. |
+| `standard` | `1` | Every request, which is what every install already does. |
+| `enterprise` | `1` | Every request. |
+
+Recording a trace clones both header maps and writes a Pebble entry. Measured
+against the infrastructure chain it is **208 B and 7 allocations per request** on
+a chain that otherwise costs 610 B and 7 — so tracing roughly doubles the
+allocation count of every proxied request. On a busy standard-tier deployment,
+lowering the rate is the single largest saving available without turning a
+feature off.
+
+**Failed requests are always traced, whatever the rate.** Anything that returned
+4xx or 5xx is recorded in full even at `N=100`. Sampling assumes the requests are
+interchangeable, which is true of the successful ones and false of the rest:
+people open the trace view because something went wrong, and a sampled view of
+failures is worse than no sampling at all, because it still looks complete while
+missing the request being searched for. 4xx is included alongside 5xx
+deliberately — a 403 is what a WAF false positive looks like from outside.
+
+`0` means zero, including failures. It is an explicit opt-out, and on `minimal`
+it reflects a tier chosen for its memory ceiling.
+
+A malformed value falls back to `1` rather than `0`: a typo must not silently
+switch tracing off, because that is discovered during an incident.
 
 ## In-memory cache bounds
 

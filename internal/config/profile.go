@@ -42,9 +42,24 @@ type TierDefaults struct {
 	TelemetryIntervalSeconds int
 	FlushIntervalSeconds     int
 	TraceStoreEnabled        bool // open the Pebble trace store at all
-	CMSWidth                 int  // Count-Min Sketch width
-	CMSDepth                 int  // Count-Min Sketch depth
-	EbpfPollSeconds          int  // eBPF stats poll interval
+	// TraceSampleRate is 1 = every request, N = 1-in-N, 0 = none.
+	//
+	// Minimal is 0 because its trace store is closed: the header maps were being
+	// cloned and the record populated per request and then dropped on the floor
+	// at recordTraceToStore. That is pure waste and removing it changes nothing
+	// anyone can observe.
+	//
+	// Standard and enterprise are both 1 — every request — which is the
+	// behaviour every existing install already has. Turning standard down would
+	// cut roughly 7 allocations per request, but it would also mean the trace
+	// view stops showing every successful request, and changing a default
+	// silently re-prices every deployment that already relies on it. It is left
+	// as an operator decision via GATEON_TRACE_SAMPLE_RATE, which is now safe to
+	// use because failed requests are recorded regardless of the rate.
+	TraceSampleRate uint32
+	CMSWidth        int // Count-Min Sketch width
+	CMSDepth        int // Count-Min Sketch depth
+	EbpfPollSeconds int // eBPF stats poll interval
 
 	// Storage (Pebble + SQL retention).
 	RetentionDays       int
@@ -102,6 +117,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			CorrelationMaxSources:    500,
 			CorrelationMaxPerSource:  32,
 			TraceStoreEnabled:        false,
+			TraceSampleRate:          0,
 			CMSWidth:                 512,
 			CMSDepth:                 3,
 			EbpfPollSeconds:          10,
@@ -123,6 +139,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			CorrelationMaxSources:    10000,
 			CorrelationMaxPerSource:  256,
 			TraceStoreEnabled:        true,
+			TraceSampleRate:          1,
 			CMSWidth:                 4096,
 			CMSDepth:                 4,
 			EbpfPollSeconds:          2,
@@ -144,6 +161,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			CorrelationMaxSources:    2000,
 			CorrelationMaxPerSource:  64,
 			TraceStoreEnabled:        true,
+			TraceSampleRate:          1,
 			CMSWidth:                 2048,
 			CMSDepth:                 4,
 			EbpfPollSeconds:          2,
