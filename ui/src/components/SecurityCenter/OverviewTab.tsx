@@ -23,6 +23,7 @@ import { DonutChart } from '@mantine/charts';
 import { 
   IconShieldCheck, 
   IconShieldOff, 
+  IconEye,
   IconActivity, 
   IconFingerprint, 
   IconRefresh, 
@@ -147,8 +148,78 @@ export function OverviewTab({
     return { stages, ingress };
   }, [metrics?.mitigationFunnel]);
 
+  /**
+   * What an audit-only WAF declined to refuse.
+   *
+   * Audit-only produces a 200 and a threat-list entry, so from the dashboard it
+   * is indistinguishable from a WAF that found nothing. That left an operator
+   * two choices -- enforce blind, or leave detection on forever -- and most
+   * picked the second. These counts are the missing third option: the cost of
+   * enforcing, measured on this deployment's own traffic before it is paid.
+   *
+   * Capped at the ten noisiest rules. The list is fed by gateway traffic, and a
+   * view that renders one row per rule seen is a view that stops rendering.
+   */
+  const wouldBlock = React.useMemo(() => {
+    const rows = metrics?.middleware?.wafWouldBlock ?? [];
+    const total = rows.reduce((sum, r) => sum + (r.value || 0), 0);
+    const top = [...rows].sort((a, b) => (b.value || 0) - (a.value || 0)).slice(0, 10);
+    return { total, top, ruleCount: rows.length };
+  }, [metrics?.middleware?.wafWouldBlock]);
+
   return (
     <Stack gap="lg">
+      {wouldBlock.total > 0 && (
+        <Alert
+          color="blue"
+          variant="light"
+          icon={<IconEye size={18} />}
+          title="Detection only: these requests would be blocked if you enforced"
+        >
+          <Stack gap="sm">
+            <Text size="sm">
+              A WAF on this gateway is running in audit-only mode. It has found{' '}
+              <strong>{safeToLocaleString(wouldBlock.total)}</strong>{' '}
+              {wouldBlock.total === 1 ? 'request' : 'requests'} across{' '}
+              <strong>{wouldBlock.ruleCount}</strong>{' '}
+              {wouldBlock.ruleCount === 1 ? 'rule' : 'rules'} that it would have
+              refused. Nothing was blocked; this is what switching enforcement on
+              would cost. Work through the rules below and confirm each one is
+              catching an attack rather than your own traffic.
+            </Text>
+            <Table highlightOnHover withTableBorder={false} verticalSpacing={4}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Rule</Table.Th>
+                  <Table.Th style={{ textAlign: 'right' }}>Would block</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {wouldBlock.top.map((r) => (
+                  <Table.Tr key={r.label}>
+                    {/* Rendered as text. Everything on this page is derived from
+                        traffic the gateway observed, which comes from hostile
+                        clients -- a dashboard that interprets it is the exploit. */}
+                    <Table.Td>
+                      <Text size="xs" ff="monospace">{r.label}</Text>
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>
+                      <Badge size="xs" variant="light" color="blue">
+                        {safeToLocaleString(r.value)}
+                      </Badge>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+            {wouldBlock.ruleCount > wouldBlock.top.length && (
+              <Text size="xs" c="dimmed">
+                Showing the {wouldBlock.top.length} noisiest of {wouldBlock.ruleCount} rules.
+              </Text>
+            )}
+          </Stack>
+        </Alert>
+      )}
       {wafEnabled === false && (
         <Alert
           color="orange"

@@ -44,6 +44,15 @@ export type LabeledCount = {
 export type MiddlewareMetrics = {
   rateLimitRejected: LabeledCount[] | null;
   wafBlocked: LabeledCount[] | null;
+  /**
+   * Refusals an audit-only WAF declined to make, by rule.
+   *
+   * Non-empty means a route is running in detection mode: every entry is a block
+   * that would happen the moment enforcement is switched on. This is the number
+   * to look at before enforcing, and it is deliberately separate from wafBlocked
+   * so that summing the two never double-counts a request.
+   */
+  wafWouldBlock: LabeledCount[] | null;
   fastPathBlocked: LabeledCount[] | null;
   cacheHits: number;
   cacheMisses: number;
