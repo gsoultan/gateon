@@ -26,21 +26,24 @@ func TestReconfigureIsSafeWhileLogging(t *testing.T) {
 	)
 
 	var wg sync.WaitGroup
-	stop := make(chan struct{})
 
+	// Each reader does a fixed number of iterations rather than looping until
+	// a stop channel closes. Under "until stopped", how many times these lines
+	// run is a scheduling outcome: at GOMAXPROCS=1 the readers never ran at all
+	// before the writer finished and closed the channel, which took this
+	// package's measured coverage from 38.8% to 28.2% and failed the coverage
+	// ratchet on an unrelated pull request. A bounded count executes the same
+	// statements on every host, and still interleaves with the writer below --
+	// which is the thing being tested, and which the race detector is what
+	// actually judges.
 	for range readers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-					// Both styles, because both are used across the codebase.
-					L.LogInfo("serving", "path", "/healthz")
-					L.Info().Str("path", "/healthz").Msg("serving")
-				}
+			for range rounds {
+				// Both styles, because both are used across the codebase.
+				L.LogInfo("serving", "path", "/healthz")
+				L.Info().Str("path", "/healthz").Msg("serving")
 			}
 		}()
 	}
@@ -54,7 +57,6 @@ func TestReconfigureIsSafeWhileLogging(t *testing.T) {
 		}
 	}
 
-	close(stop)
 	wg.Wait()
 }
 
