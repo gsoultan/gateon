@@ -66,6 +66,13 @@ type corpusSample struct {
 	// (mem:gwaf_v040, TestAppProfileIsScopedNotAGlobalOff).
 	Profiles []string `json:"profiles,omitempty"`
 
+	// ScopePaths and ScopeFields are the deployment half of a profile: which of
+	// this application's routes and field names hold the content that trips those
+	// rules. A profile without them is what gateon shipped, and it did nothing
+	// outside Jira's own /rest/api/* — see appprofile_scope.go.
+	ScopePaths  []string `json:"scope_paths,omitempty"`
+	ScopeFields []string `json:"scope_fields,omitempty"`
+
 	// KnownFP records that this sample is refused today and states why, keyed by
 	// paranoia level ("1", "2"). Absent means the sample must pass at that level.
 	//
@@ -174,16 +181,18 @@ func loadBenignCorpus(t *testing.T) map[string][]corpusSample {
 // waf_factory.go): the WordPress admin lockdown refuses ordinary WordPress
 // traffic by design and is opt-in, so leaving it on would measure a
 // configuration nobody ships and report its refusals as false positives.
-func fpCorpusHandler(t *testing.T, paranoia int, profiles ...string) http.Handler {
+func fpCorpusHandler(t *testing.T, paranoia int, s corpusSample) http.Handler {
 	t.Helper()
 	mw, err := WAF(WAFConfig{
-		ParanoiaLevel:    paranoia,
-		DisableWordPress: true,
-		Origins:          []string{corpusHost},
-		AppProfiles:      profiles,
+		ParanoiaLevel:         paranoia,
+		DisableWordPress:      true,
+		Origins:               []string{corpusHost},
+		AppProfiles:           s.Profiles,
+		AppProfileScopePaths:  s.ScopePaths,
+		AppProfileScopeFields: s.ScopeFields,
 	})
 	if err != nil {
-		t.Fatalf("create WAF at PL%d profiles=%v: %v", paranoia, profiles, err)
+		t.Fatalf("create WAF at PL%d profiles=%v: %v", paranoia, s.Profiles, err)
 	}
 	return mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -196,11 +205,12 @@ func fpCorpusHandler(t *testing.T, paranoia int, profiles ...string) http.Handle
 // slow enough that someone would stop running it.
 func handlerFor(t *testing.T, paranoia int, cache map[string]http.Handler, s corpusSample) http.Handler {
 	t.Helper()
-	key := strings.Join(s.Profiles, ",")
+	key := strings.Join(s.Profiles, ",") + "|" +
+		strings.Join(s.ScopePaths, ",") + "|" + strings.Join(s.ScopeFields, ",")
 	if h, ok := cache[key]; ok {
 		return h
 	}
-	h := fpCorpusHandler(t, paranoia, s.Profiles...)
+	h := fpCorpusHandler(t, paranoia, s)
 	cache[key] = h
 	return h
 }
@@ -213,8 +223,19 @@ func serveSample(h http.Handler, s corpusSample) (int, string) {
 	}
 
 	var body io.Reader = strings.NewReader(s.Body)
-	req := httptest.NewRequest(method, "https://"+corpusHost+s.Path, body)
+
+	// Origin-form target, not an absolute URL.
+	//
+	// httptest.NewRequest copies the target verbatim into RequestURI, and the WAF
+	// hands RequestURI to the engine as the request line. Building this with
+	// "https://host/path" therefore made every rule and every exception see
+	// "https://app.example.com/pastes" as the path — which no real request
+	// carries, and which silently prevented any path-scoped exception from
+	// matching. The Host is set on the field instead, which is where a real
+	// request keeps it.
+	req := httptest.NewRequest(method, s.Path, body)
 	req.Host = corpusHost
+	req.TLS = nil
 	for k, v := range s.Headers {
 		req.Header.Set(k, v)
 	}

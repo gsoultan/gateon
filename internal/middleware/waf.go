@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -119,6 +120,21 @@ type WAFConfig struct {
 	// app_profiles field on the global WAF config.
 	AppProfiles []string
 
+	// AppProfileScopePaths and AppProfileScopeFields re-point the selected
+	// profiles' exceptions at this deployment's own routes and field names.
+	//
+	// Both are needed for either to take effect. gwaf ships IssueTracker scoped
+	// to "/rest/api/*" with keys description|body — Jira's shape — so a paste
+	// service on /pastes or a support desk on /tickets selected the profile and
+	// got no change at all. Which rules an application legitimately trips stays
+	// upstream's decision; where its content lives is only knowable here.
+	//
+	// Configure with the "app_profile_scope_paths" and "app_profile_scope_fields"
+	// keys (comma-separated), or GATEON_WAF_APP_PROFILE_SCOPE_PATHS and
+	// GATEON_WAF_APP_PROFILE_SCOPE_FIELDS.
+	AppProfileScopePaths  []string
+	AppProfileScopeFields []string
+
 	// EnableSSRFProtection blocks an off-origin URL in a parameter the server
 	// fetches. Off by default: registering a webhook or importing an avatar is
 	// the same request shape, so only a deployment that knows it never fetches
@@ -168,7 +184,12 @@ func (c WAFConfig) Fingerprint() string {
 	// which rules do, so two configs differing only in these describe different
 	// engines and must not share a cached one. Both are written unconditionally:
 	// an empty profile list is a meaningful value, not an absent one.
-	fmt.Fprintf(h, "p:%s|%t\n", waf.AppProfileFingerprint(c.AppProfiles), c.EnableSSRFProtection)
+	// The scope is in the key for the same reason the profile list is: engines
+	// are memoised per fingerprint, so a field left out means the first route to
+	// build one wins and every later route with a different policy silently
+	// inherits it.
+	fmt.Fprintf(h, "p:%s|%t|%s\n", waf.AppProfileFingerprint(c.AppProfiles), c.EnableSSRFProtection,
+		waf.AppProfileScopeFingerprint(c.appProfileScope()))
 	// Origins decide what counts as off-origin, so two configs with different
 	// ones reach different verdicts on the same request and must not share an
 	// engine. Sorted, because the routing table's iteration order is not
@@ -783,6 +804,8 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		RouteID:                     routeID,
 		AllowedAdminIps:             allowedAdminIps,
 		AppProfiles:                 parseAppProfiles(cfg["app_profiles"]),
+		AppProfileScopePaths:        parseScopeList(cfg["app_profile_scope_paths"], scopePathsEnv),
+		AppProfileScopeFields:       parseScopeList(cfg["app_profile_scope_fields"], scopeFieldsEnv),
 		EnableSSRFProtection:        strings.TrimSpace(strings.ToLower(cfg["ssrf_protection"])) == "true",
 		Origins:                     resolveOrigins(parseCSV(cfg["origins"])),
 	}
@@ -795,6 +818,26 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 // of the linked engine and can log it against a route; dropping it here would
 // turn a typo into silence.
 func parseAppProfiles(v string) []string { return parseCSV(v) }
+
+// The environment paths for the app-profile scope, so a deployment can point a
+// profile at its own routes without a config write. Every tunable needs one.
+const (
+	scopePathsEnv  = "GATEON_WAF_APP_PROFILE_SCOPE_PATHS"
+	scopeFieldsEnv = "GATEON_WAF_APP_PROFILE_SCOPE_FIELDS"
+)
+
+// parseScopeList reads a comma-separated list, falling back to the environment.
+func parseScopeList(value, env string) []string {
+	if strings.TrimSpace(value) == "" {
+		value = os.Getenv(env)
+	}
+	return parseCSV(value)
+}
+
+// appProfileScope assembles the configured scope.
+func (c WAFConfig) appProfileScope() waf.AppProfileScope {
+	return waf.AppProfileScope{Paths: c.AppProfileScopePaths, Fields: c.AppProfileScopeFields}
+}
 
 // parseCSV splits a comma-separated config value, dropping empty entries.
 func parseCSV(v string) []string {

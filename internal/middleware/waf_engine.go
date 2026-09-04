@@ -97,6 +97,7 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 		DisabledCategories: categories,
 		DisabledTags:       tags,
 		AppProfiles:        cfg.AppProfiles,
+		AppProfileScope:    cfg.appProfileScope(),
 		SSRFProtection:     cfg.EnableSSRFProtection,
 		Origins:            cfg.Origins,
 		OnDecision:         onDecision,

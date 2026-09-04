@@ -148,6 +148,16 @@ type Policy struct {
 	// itself. See AppProfile.
 	AppProfiles []string
 
+	// AppProfileScope re-points those profiles' exceptions at this deployment's
+	// own paths and fields. Empty leaves each profile's shipped defaults alone.
+	//
+	// gwaf's IssueTracker is scoped to "/rest/api/*" with keys description|body,
+	// and its own doc comment says the paths are examples meant to be edited.
+	// Nothing edited them, so an operator running a paste service or a support
+	// desk on any other path selected the profile and got nothing at all. See
+	// appprofile_scope.go.
+	AppProfileScope AppProfileScope
+
 	// SSRFProtection admits IDSSRFParam, which blocks an off-origin URL in a
 	// parameter the server itself fetches. It is a statement about the
 	// application — that it does not take user-supplied URLs to retrieve — and
@@ -352,6 +362,13 @@ func (p Policy) Options() []gwaf.Option {
 	// reader needs to see them in to understand where one came from.
 	exceptions := DefaultExceptions()
 	profileExceptions, _ := AppProfileExceptions(p.AppProfiles)
+	// A scope that does not validate is dropped rather than applied loosely: the
+	// failure mode of a bad scope is an exception broader than intended, and a
+	// profile that quietly does nothing is safer than one that quietly disables
+	// detection. NewEngine reports it so the operator is not left guessing.
+	if scoped, err := ScopeAppProfileExceptions(profileExceptions, p.AppProfileScope); err == nil {
+		profileExceptions = scoped
+	}
 	exceptions = append(exceptions, profileExceptions...)
 	exceptions = append(exceptions, p.Exceptions...)
 	opts = append(opts, gwaf.WithExceptions(exceptions...))
@@ -379,6 +396,14 @@ func (p Policy) NewEngine() (*gwaf.WAF, error) {
 		return nil, err
 	}
 	logDiagnostics(w, p.ParanoiaLevel)
+	if err := p.AppProfileScope.Validate(); err != nil {
+		// Loud, and once per engine build rather than per request. The scope is
+		// ignored when it does not validate, so without this the operator sees a
+		// profile selected in the dashboard, no change in behaviour, and nothing
+		// anywhere explaining which of the two they are looking at.
+		logger.L.LogWarn("WAF app profile scope ignored: it is not a valid scope",
+			"error", err, "paths", p.AppProfileScope.Paths, "fields", p.AppProfileScope.Fields)
+	}
 	return w, nil
 }
 
