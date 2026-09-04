@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -25,8 +26,12 @@ const (
 func Pow(difficulty int, threshold float64, secret string, routeID string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip for internal paths or if difficulty is 0.
-			if IsInternalPath(r.URL.Path) || difficulty <= 0 {
+			// Skip for internal paths, if difficulty is 0, or for an allowlisted
+			// source. A proof-of-work challenge is an active mitigation: it costs
+			// the client a round trip and CPU, and an API client or monitoring
+			// probe the operator has vouched for cannot solve one at all.
+			if IsInternalPath(r.URL.Path) || difficulty <= 0 ||
+				mitigation.IsAllowlisted(telemetry.ClientIPOf(r)) {
 				next.ServeHTTP(w, r)
 				return
 			}

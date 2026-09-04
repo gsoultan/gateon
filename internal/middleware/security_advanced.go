@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/scanner"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -68,7 +69,8 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) Middlewar
 			// IsLoopback was being handed a JA4+ fingerprint, which is never an
 			// address, so the loopback exemption never fired. Check the resolved
 			// client address, the same correction made in the reputation blocker.
-			if httputil.IsLoopback(telemetry.ClientIPOf(r)) {
+			clientIP := telemetry.ClientIPOf(r)
+			if httputil.IsLoopback(clientIP) || mitigation.IsAllowlisted(clientIP) {
 				next.ServeHTTP(w, r)
 				return
 			}
