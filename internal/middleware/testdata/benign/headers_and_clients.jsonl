@@ -1,0 +1,54 @@
+# Headers, client software and protocol shapes.
+# Non-browser clients are the risk here. A WAF tuned on browser traffic tends to
+# treat a missing Accept-Language or an unusual User-Agent as a bot signal, which
+# refuses the API clients, mobile apps, monitors and package managers that make up
+# most of an API's traffic. Gateon's own scanner rules match on User-Agent, so the
+# line between "a tool" and "a scanner" is drawn in this file.
+{"name": "curl client", "path": "/api/v1/status", "headers": {"User-Agent": "curl/8.6.0", "Accept": "*/*"}, "note": "curl is how most API integrations start; it is not a scanner"}
+{"name": "wget client", "path": "/downloads/gateon_1.24.0_amd64.deb", "headers": {"User-Agent": "Wget/1.21.4"}, "note": "wget fetching a release artifact"}
+{"name": "go http client", "path": "/api/v1/status", "headers": {"User-Agent": "Go-http-client/2.0", "Accept-Encoding": "gzip"}, "note": "the default Go client User-Agent, which every Go service sends"}
+{"name": "python requests", "path": "/api/v1/status", "headers": {"User-Agent": "python-requests/2.32.3", "Accept": "*/*", "Accept-Encoding": "gzip, deflate"}, "note": "the most common scripting client on the internet"}
+{"name": "python httpx", "path": "/api/v1/status", "headers": {"User-Agent": "python-httpx/0.27.2"}, "note": "modern async Python client"}
+{"name": "node undici", "path": "/api/v1/status", "headers": {"User-Agent": "undici", "Accept": "*/*"}, "note": "Node's built-in fetch sends this"}
+{"name": "axios", "path": "/api/v1/status", "headers": {"User-Agent": "axios/1.7.7"}, "note": "axios from a server-side Node integration"}
+{"name": "java http client", "path": "/api/v1/status", "headers": {"User-Agent": "Java-http-client/21.0.4"}, "note": "JDK HttpClient default agent"}
+{"name": "okhttp android", "path": "/api/v1/feed", "headers": {"User-Agent": "okhttp/4.12.0"}, "note": "the Android HTTP stack; a mobile app's real traffic"}
+{"name": "alamofire ios", "path": "/api/v1/feed", "headers": {"User-Agent": "Acme/3.2.1 (com.acme.app; build:412; iOS 18.1.0) Alamofire/5.9.1"}, "note": "an iOS app's user agent"}
+{"name": "dotnet http client", "path": "/api/v1/status", "headers": {"User-Agent": "Mozilla/5.0 (compatible; .NET Core HttpClient)"}, "note": ".NET client agent"}
+{"name": "ruby faraday", "path": "/api/v1/status", "headers": {"User-Agent": "Faraday v2.10.1"}, "note": "Ruby integration client"}
+{"name": "php guzzle", "path": "/api/v1/status", "headers": {"User-Agent": "GuzzleHttp/7"}, "note": "the dominant PHP HTTP client"}
+{"name": "postman", "path": "/api/v1/status", "headers": {"User-Agent": "PostmanRuntime/7.42.0", "Accept": "*/*", "Cache-Control": "no-cache"}, "note": "a developer exploring the API from Postman"}
+{"name": "insomnia", "path": "/api/v1/status", "headers": {"User-Agent": "insomnia/9.3.2"}, "note": "another API client developers use daily"}
+{"name": "httpie", "path": "/api/v1/status", "headers": {"User-Agent": "HTTPie/3.2.3", "Accept": "application/json, */*;q=0.5"}, "note": "HTTPie CLI"}
+{"name": "terraform provider", "method": "POST", "path": "/api/v1/routes", "headers": {"User-Agent": "Terraform/1.9.5 terraform-provider-gateon/0.4.0", "Content-Type": "application/json"}, "body": "{\"host\":\"api.example.com\",\"service\":\"api-backend\"}", "note": "infrastructure-as-code applying a route"}
+{"name": "kubernetes client", "path": "/healthz", "headers": {"User-Agent": "kube-probe/1.31"}, "note": "the kubelet liveness probe; blocking it restarts the pod in a loop"}
+{"name": "prometheus scraper", "path": "/metrics", "headers": {"User-Agent": "Prometheus/2.54.1", "Accept": "application/openmetrics-text;version=1.0.0,text/plain;version=0.0.4;q=0.5,*/*;q=0.1"}, "note": "a metrics scrape; blocking it blinds monitoring"}
+{"name": "uptime monitor", "path": "/healthz", "headers": {"User-Agent": "Better Uptime Bot Mozilla/5.0 (compatible; UptimeBot/1.0; +https://betteruptime.com)"}, "note": "an external uptime check"}
+{"name": "datadog synthetic", "path": "/", "headers": {"User-Agent": "Datadog/Synthetics"}, "note": "a synthetic browser test"}
+{"name": "googlebot", "path": "/blog/how-we-cut-p99-latency", "headers": {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "From": "googlebot(at)googlebot.com"}, "note": "the crawler whose refusal costs a site its search ranking"}
+{"name": "bingbot", "path": "/blog/how-we-cut-p99-latency", "headers": {"User-Agent": "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)"}, "note": "Bing's crawler"}
+{"name": "slack unfurl", "path": "/blog/how-we-cut-p99-latency", "headers": {"User-Agent": "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)"}, "note": "Slack fetching a link preview when someone pastes a URL"}
+{"name": "discord embed", "path": "/blog/how-we-cut-p99-latency", "headers": {"User-Agent": "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)"}, "note": "Discord unfurling a link"}
+{"name": "whatsapp preview", "path": "/products/gateway", "headers": {"User-Agent": "WhatsApp/2.24.20.79 A"}, "note": "WhatsApp fetching an OG preview"}
+{"name": "apple mail privacy proxy", "path": "/pixel/open?id=01K4YQ8XJ2", "headers": {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"}, "note": "Apple Mail Privacy Protection prefetching a tracking pixel"}
+{"name": "rss reader", "path": "/feed.xml", "headers": {"User-Agent": "Feedbin feed-id:4821 - 12 subscribers", "Accept": "application/atom+xml, application/rss+xml"}, "note": "an RSS aggregator polling a feed"}
+{"name": "package manager", "path": "/registry/gateway-client/-/gateway-client-1.24.0.tgz", "headers": {"User-Agent": "npm/10.8.2 node/v22.9.0 darwin arm64 workspaces/false"}, "note": "npm downloading a tarball"}
+{"name": "go module proxy", "path": "/mod/github.com/acme/gateway/@v/v1.24.0.zip", "headers": {"User-Agent": "GoModuleProxy/1.0", "Disable-Module-Fetch": "true"}, "note": "the Go module proxy fetching a module"}
+{"name": "docker registry client", "path": "/v2/acme/gateway/manifests/v1.24.0", "headers": {"User-Agent": "docker/27.2.0 go/go1.22.7 kernel/6.10.0 os/linux arch/amd64", "Accept": "application/vnd.oci.image.manifest.v1+json"}, "note": "docker pull against a registry"}
+{"name": "grpc web client", "method": "POST", "path": "/gateon.v1.ApiService/GetStatus", "headers": {"Content-Type": "application/grpc-web+proto", "X-Grpc-Web": "1", "X-User-Agent": "grpc-web-javascript/0.1"}, "body": "\u0000\u0000\u0000\u0000\u0000", "note": "a gRPC-Web call; a five-byte framed empty message and a protobuf content type"}
+{"name": "connect rpc client", "method": "POST", "path": "/gateon.v1.ApiService/GetStatus", "headers": {"Content-Type": "application/json", "Connect-Protocol-Version": "1"}, "body": "{}", "note": "a ConnectRPC unary call, which is how this project's own dashboard talks to it"}
+{"name": "server sent events", "path": "/api/v1/events/stream", "headers": {"Accept": "text/event-stream", "Cache-Control": "no-cache"}, "note": "an SSE subscription for live updates"}
+{"name": "websocket upgrade", "path": "/api/v1/ws", "headers": {"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Protocol": "gateon.v1", "Origin": "https://app.example.com"}, "note": "a WebSocket handshake; the nonce is base64 and the protocol enforcement rules must not treat the upgrade as malformed framing"}
+{"name": "early data", "path": "/api/v1/status", "headers": {"Early-Data": "1"}, "note": "TLS 1.3 0-RTT indicator, set by intermediaries"}
+{"name": "forwarded header", "path": "/api/v1/status", "headers": {"Forwarded": "for=203.0.113.42;proto=https;host=app.example.com"}, "note": "RFC 7239 Forwarded, the standard version of X-Forwarded-For"}
+{"name": "cdn forwarding headers", "path": "/api/v1/status", "headers": {"X-Forwarded-For": "203.0.113.42, 198.51.100.7", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example.com", "CF-Connecting-IP": "203.0.113.42", "CF-IPCountry": "GB"}, "note": "the header set a request arrives with behind a CDN"}
+{"name": "content encoding br accepted", "path": "/api/v1/reports/monthly", "headers": {"Accept-Encoding": "br, gzip, deflate, zstd"}, "note": "a modern browser's Accept-Encoding; mem:dlp negotiates this down to something decodable rather than stripping it"}
+{"name": "no accept encoding", "path": "/api/v1/status", "headers": {"Accept-Encoding": "identity"}, "note": "a client explicitly refusing compression"}
+{"name": "keep alive", "path": "/api/v1/status", "headers": {"Connection": "keep-alive", "Keep-Alive": "timeout=5, max=1000"}, "note": "HTTP/1.1 connection reuse hints"}
+{"name": "authorization basic", "path": "/api/v1/status", "headers": {"Authorization": "Basic amFuZS5kb2VAZXhhbXBsZS5jb206aHVudGVyMnRydXN0bm8x"}, "note": "HTTP Basic credentials, still used by many integrations"}
+{"name": "authorization digest", "path": "/api/v1/status", "headers": {"Authorization": "Digest username=\"jane\", realm=\"api\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/api/v1/status\", response=\"6629fae49393a05397450978507c4ef1\", qop=auth, nc=00000001, cnonce=\"0a4f113b\""}, "note": "Digest auth, a header full of quoted key-value pairs"}
+{"name": "authorization aws sigv4", "path": "/api/v1/status", "headers": {"Authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260904/eu-west-2/execute-api/aws4_request, SignedHeaders=host;x-amz-date, Signature=b2c3d4e5f6a7089192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809", "X-Amz-Date": "20260904T120000Z"}, "note": "SigV4 signing, with semicolons and slashes in the header value"}
+{"name": "prefer header", "method": "POST", "path": "/api/v1/jobs", "headers": {"Prefer": "respond-async, wait=10", "Content-Type": "application/json"}, "body": "{\"task\":\"reindex\"}", "note": "RFC 7240 Prefer header"}
+{"name": "custom app headers", "path": "/api/v1/feed", "headers": {"X-Client-Version": "3.2.1", "X-Device-Id": "01K4YQ8XJ2R7N3V6B0C9D5E1F8", "X-Platform": "ios", "X-Locale": "en-GB"}, "note": "the custom headers a mobile app attaches to every call"}
+{"name": "very long cookie", "path": "/dashboard", "headers": {"Cookie": "session=eyJ1c2VyIjo0MDM4NSwicm9sZXMiOlsibWVtYmVyIiwiYmlsbGluZyJdLCJvcmciOiJhY21lIiwiaWF0IjoxNzg4MTM0NzY0LCJleHAiOjE3ODgyMjExNjR9.aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcdef; _ga=GA1.2.1234567890.1788134764; _fbp=fb.1.1788134764000.1234567890; intercom-session-abc123=xyz789; ajs_anonymous_id=%22a1b2c3d4-e5f6-4718-9a0b-1c2d3e4f5a6b%22"}, "note": "the cookie header an analytics-heavy site accumulates"}
+{"name": "http 1 0 client", "path": "/api/v1/status", "headers": {"User-Agent": "legacy-integration/1.0"}, "note": "an old integration; protocol enforcement must not treat an older client as an attack"}

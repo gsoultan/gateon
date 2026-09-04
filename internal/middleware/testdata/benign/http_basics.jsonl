@@ -1,0 +1,60 @@
+# Ordinary request shapes: methods, paths, pagination, sorting, filtering.
+# Nothing exotic here. If the WAF refuses one of these the gateway is unusable
+# for every application, so this file is the smoke test for the corpus itself.
+{"name": "root", "path": "/", "note": "the homepage"}
+{"name": "trailing slash", "path": "/products/", "note": "many frameworks serve both forms"}
+{"name": "deep path", "path": "/org/acme/team/platform/project/gateway/settings", "note": "nested resource routing"}
+{"name": "hyphenated slug", "path": "/blog/how-we-cut-p99-latency-by-40-percent", "note": "ordinary CMS slug"}
+{"name": "numeric id", "path": "/users/40385", "note": "integer primary key in a path"}
+{"name": "negative number param", "path": "/chart?offset=-30", "note": "relative offsets are commonly negative"}
+{"name": "float param", "path": "/products?max_price=19.99", "note": "decimal prices in a filter"}
+{"name": "pagination", "path": "/products?page=2&per_page=50", "note": "the single most common query shape on the web"}
+{"name": "cursor pagination", "path": "/feed?after=Y3Vyc29yOnYyOpK5MjAyNi0wOC0wMVQxMjowMDowMFrOAV2R4A%3D%3D", "note": "base64 cursor, as GitHub and Shopify emit"}
+{"name": "sort descending", "path": "/orders?sort=-created_at", "note": "JSON:API sort syntax with a leading minus"}
+{"name": "multi sort", "path": "/orders?sort=status,-updated_at", "note": "comma-separated multi-column sort"}
+{"name": "repeated param", "path": "/search?tag=go&tag=proxy&tag=security", "note": "repeated keys are how HTML multi-selects serialise"}
+{"name": "array bracket param", "path": "/search?tag%5B%5D=go&tag%5B%5D=proxy", "note": "PHP and Rails style tag[] array parameters"}
+{"name": "empty param value", "path": "/search?q=&page=1", "note": "an empty search box still submits"}
+{"name": "boolean flag param", "path": "/reports?include_archived=true", "note": "boolean query flag"}
+{"name": "HEAD request", "method": "HEAD", "path": "/assets/app.css", "note": "caches and monitors issue HEAD"}
+{"name": "PUT json", "method": "PUT", "path": "/api/v1/users/40385", "headers": {"Content-Type": "application/json"}, "body": "{\"display_name\":\"Jane Doe\",\"locale\":\"en-GB\"}", "note": "idempotent update, the standard REST verb"}
+{"name": "PATCH json merge", "method": "PATCH", "path": "/api/v1/users/40385", "headers": {"Content-Type": "application/merge-patch+json"}, "body": "{\"locale\":\"fr-FR\"}", "note": "RFC 7386 merge patch"}
+{"name": "DELETE", "method": "DELETE", "path": "/api/v1/sessions/current", "note": "logout is a DELETE in most modern APIs"}
+{"name": "form login", "method": "POST", "path": "/login", "body": "email=jane.doe%40example.com&password=hunter2trustno1&remember=on", "note": "the most common POST on the internet"}
+{"name": "form with apostrophe", "method": "POST", "path": "/feedback", "body": "comment=I%27d+buy+it+again%2C+it%27s+great", "note": "an apostrophe in prose is not a quote break"}
+{"name": "form with ampersand in value", "method": "POST", "path": "/companies", "body": "name=Marks+%26+Spencer", "note": "percent-encoded ampersand inside a value"}
+{"name": "form with equals in value", "method": "POST", "path": "/kv", "body": "expr=a%3Db%2Bc", "note": "an equals sign inside an encoded value"}
+{"name": "form with plus as space", "method": "POST", "path": "/search", "body": "q=load+balancer+health+check", "note": "plus-encoded spaces, the default form encoding"}
+{"name": "static js", "path": "/assets/app.1a2b3c4d.js", "note": "content-hashed bundle"}
+{"name": "static css sourcemap", "path": "/assets/app.1a2b3c4d.css.map", "note": "source maps are fetched by devtools"}
+{"name": "favicon", "path": "/favicon.ico", "note": "every browser requests it unprompted"}
+{"name": "robots", "path": "/robots.txt", "note": "crawlers fetch this first"}
+{"name": "sitemap", "path": "/sitemap.xml", "note": "search engines fetch this"}
+{"name": "webmanifest", "path": "/site.webmanifest", "note": "PWA manifest"}
+{"name": "service worker", "path": "/sw.js", "note": "registered service worker script"}
+{"name": "well-known change password", "path": "/.well-known/change-password", "note": "RFC 8615 well-known URI; password managers probe it"}
+{"name": "well-known acme challenge", "path": "/.well-known/acme-challenge/kR8sT2vX9wQ1nL5mP7hJ3fD6gB0yA4cE", "note": "Let's Encrypt HTTP-01 validation"}
+{"name": "well-known security txt", "path": "/.well-known/security.txt", "note": "RFC 9116; researchers fetch it"}
+{"name": "health endpoint", "path": "/healthz", "note": "kubernetes liveness probe"}
+{"name": "readiness endpoint", "path": "/readyz", "note": "kubernetes readiness probe"}
+{"name": "metrics endpoint", "path": "/metrics", "note": "prometheus scrape"}
+{"name": "versioned api", "path": "/api/v2/accounts/self", "note": "path-versioned API"}
+{"name": "date range filter", "path": "/reports?from=2026-01-01&to=2026-03-31", "note": "date range on a report"}
+{"name": "iso timestamp param", "path": "/events?since=2026-08-14T07%3A26%3A04.162Z", "note": "RFC 3339 timestamp, colons percent-encoded"}
+{"name": "unix timestamp param", "path": "/events?since=1788134764", "note": "epoch seconds"}
+{"name": "microsecond timestamp", "path": "/events?cursor=1788134764162044", "note": "16 digits; the shape that used to match a card regex"}
+{"name": "timezone offset param", "path": "/schedule?tz=%2B05%3A30", "note": "encoded plus in a timezone offset"}
+{"name": "currency and locale", "path": "/pricing?currency=EUR&locale=de-DE", "note": "localised pricing page"}
+{"name": "geo bounding box", "path": "/map?bbox=-0.489%2C51.28%2C0.236%2C51.686", "note": "comma-separated float tuple, negative values"}
+{"name": "colour hex param", "path": "/theme?accent=%23ff6b35", "note": "encoded hash in a colour value"}
+{"name": "percent literal in value", "path": "/discounts?off=20%25", "note": "a literal percent sign, encoded"}
+{"name": "conditional get etag", "path": "/api/v1/config", "headers": {"If-None-Match": "W/\"3f8a-1b2c3d4e\""}, "note": "weak etag revalidation"}
+{"name": "conditional get modified since", "path": "/api/v1/config", "headers": {"If-Modified-Since": "Wed, 03 Sep 2026 09:14:00 GMT"}, "note": "date revalidation"}
+{"name": "range request", "path": "/media/talk.mp4", "headers": {"Range": "bytes=1048576-2097151"}, "note": "video seek issues a byte range"}
+{"name": "options preflightless cors get", "path": "/api/v1/config", "headers": {"Origin": "https://app.example.com"}, "note": "simple cross-origin GET carries Origin without a preflight"}
+{"name": "do not track", "path": "/", "headers": {"DNT": "1"}, "note": "legacy privacy header some browsers still send"}
+{"name": "sec fetch navigation", "path": "/dashboard", "headers": {"Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1"}, "note": "a normal top-level browser navigation"}
+{"name": "sec fetch xhr", "path": "/api/v1/notifications", "headers": {"Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin", "X-Requested-With": "XMLHttpRequest"}, "note": "a normal in-page fetch"}
+{"name": "client hints", "path": "/", "headers": {"Sec-CH-UA": "\"Chromium\";v=\"141\", \"Not?A_Brand\";v=\"24\"", "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": "\"macOS\""}, "note": "user-agent client hints; the quoting looks odd but is the spec"}
+{"name": "early hints preload probe", "path": "/assets/hero.avif", "headers": {"Accept": "image/avif,image/webp,image/apng,*/*;q=0.8"}, "note": "image request with a q-weighted accept list"}
+{"name": "long accept header", "path": "/", "headers": {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"}, "note": "the exact Accept Chrome sends on navigation"}

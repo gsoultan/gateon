@@ -1,0 +1,60 @@
+# Free text: search boxes, comments, support tickets, product descriptions.
+# This is the highest-yield false-positive category there is, because English
+# contains every SQL keyword and most shell metacharacters. The natural-language
+# SQL class (select/delete/update/drop/insert in prose) was a real refusal in
+# this gateway, measured 2026-08-06 and since fixed; these keep it fixed.
+{"name": "select a plan", "path": "/search?q=select+a+plan", "note": "pricing page search; SELECT is an ordinary English verb"}
+{"name": "delete my account", "path": "/search?q=how+do+I+delete+my+account", "note": "the single most common support search on any SaaS"}
+{"name": "update my profile", "path": "/search?q=update+my+profile+picture", "note": "help centre query"}
+{"name": "drop off location", "path": "/search?q=drop+off+location+near+me", "note": "logistics search"}
+{"name": "insert coin", "path": "/search?q=insert+coin", "note": "arcade merchandise search"}
+{"name": "union square", "path": "/search?q=union+square+san+francisco", "note": "UNION is a place name here"}
+{"name": "union rep", "path": "/search?q=contact+our+union+rep", "note": "UNION as a noun in HR content"}
+{"name": "order by phone", "path": "/search?q=can+I+order+by+phone", "note": "ORDER BY as ordinary English"}
+{"name": "group by department", "path": "/search?q=group+by+department", "note": "a legitimate reporting request phrased in English"}
+{"name": "having trouble", "path": "/search?q=having+trouble+logging+in", "note": "HAVING in prose"}
+{"name": "where is my order", "path": "/search?q=where+is+my+order", "note": "WHERE in the most common support question there is"}
+{"name": "table booking", "path": "/search?q=book+a+table+for+four", "note": "restaurant booking; TABLE"}
+{"name": "alter a garment", "path": "/search?q=where+can+I+alter+a+garment", "note": "ALTER in retail content"}
+{"name": "grant application", "path": "/search?q=grant+application+deadline", "note": "GRANT as a noun"}
+{"name": "execute a contract", "path": "/search?q=how+to+execute+a+contract", "note": "EXEC in legal prose"}
+{"name": "cat behaviour", "path": "/search?q=why+does+my+cat+knead", "note": "cat is a shell binary and a pet"}
+{"name": "id badge", "path": "/search?q=replacement+id+badge", "note": "id is a shell binary and an abbreviation"}
+{"name": "env conference", "path": "/search?q=env+2026+conference", "note": "env is a shell binary and a common abbreviation"}
+{"name": "ping pong table", "path": "/search?q=ping+pong+table", "note": "ping is a network tool and a game"}
+{"name": "curl your hair", "path": "/search?q=how+to+curl+your+hair", "note": "curl is a binary and a verb"}
+{"name": "wget vs curl article", "path": "/search?q=wget+vs+curl+which+should+I+use", "note": "a devtools blog legitimately serves this query"}
+{"name": "base64 explainer", "path": "/search?q=what+is+base64+encoding", "note": "documentation search on a developer site"}
+{"name": "passwd file article", "path": "/search?q=what+is+the+etc+passwd+file", "note": "a Linux tutorial site serves exactly this"}
+{"name": "comment with semicolons", "method": "POST", "path": "/comments", "body": "body=Three+things%3B+first%2C+it+works%3B+second%2C+it+is+fast%3B+third%2C+it+is+cheap.", "note": "semicolons in prose are punctuation, not command separators"}
+{"name": "comment with pipe character", "method": "POST", "path": "/comments", "body": "body=I+rate+it+8%2F10+%7C+would+recommend", "note": "a pipe used as a visual separator, as people do"}
+{"name": "comment with ampersand", "method": "POST", "path": "/comments", "body": "body=Fish+%26+chips+was+great", "note": "ampersand in a name"}
+{"name": "comment with backtick quote", "method": "POST", "path": "/comments", "body": "body=He+said+%60it+depends%60+and+left", "note": "backticks used as quotation marks in casual writing"}
+{"name": "comment with angle brackets", "method": "POST", "path": "/comments", "body": "body=Use+%3Cname%3E+as+a+placeholder+in+the+template", "note": "angle brackets as placeholder notation in documentation"}
+{"name": "comment with less than", "method": "POST", "path": "/comments", "body": "body=Latency+was+%3C+5ms+throughout", "note": "a mathematical less-than in prose"}
+{"name": "comment with arrow", "method": "POST", "path": "/comments", "body": "body=The+flow+is+client+-%3E+gateway+-%3E+origin", "note": "ASCII arrows in a technical comment"}
+{"name": "comment with double dash", "method": "POST", "path": "/comments", "body": "body=Great+product+--+shipped+fast+too", "note": "em-dash typed as a double hyphen, the SQL comment token"}
+{"name": "comment with hash", "method": "POST", "path": "/comments", "body": "body=Filed+as+%234821+if+anyone+wants+to+follow", "note": "hash-prefixed issue reference"}
+{"name": "comment with at mention", "method": "POST", "path": "/comments", "body": "body=cc+%40jane+and+%40sam+for+review", "note": "at-mentions in a comment thread"}
+{"name": "comment with url", "method": "POST", "path": "/comments", "body": "body=See+https%3A%2F%2Fdocs.example.com%2Fguides%2Ftls+for+the+setup", "note": "a link in a comment"}
+{"name": "comment with markdown", "method": "POST", "path": "/comments", "body": "body=%23%23+Summary%0A%0A-+**fast**%0A-+_cheap_%0A-+%60reliable%60", "note": "markdown in a comment field"}
+{"name": "comment with quotes", "method": "POST", "path": "/comments", "body": "body=She+said+%22it+is+the+best+one+yet%22+and+I+agree", "note": "double quotes around reported speech"}
+{"name": "comment with parentheses", "method": "POST", "path": "/comments", "body": "body=The+result+(surprisingly)+held+under+load", "note": "parenthetical aside"}
+{"name": "comment with math", "method": "POST", "path": "/comments", "body": "body=Roughly+(a+%2B+b)+*+c+%2F+2+for+the+estimate", "note": "arithmetic in prose"}
+{"name": "comment with percent", "method": "POST", "path": "/comments", "body": "body=We+saw+a+40%25+drop+in+p99", "note": "a percentage"}
+{"name": "comment with path", "method": "POST", "path": "/comments", "body": "body=Config+lives+at+.%2Fconfig%2Fgateway.yaml+in+the+repo", "note": "a relative path in a technical comment"}
+{"name": "comment with parent path", "method": "POST", "path": "/comments", "body": "body=Then+cd+..+and+run+the+build+again", "note": "a double-dot path reference in instructions, not traversal"}
+{"name": "comment with windows path", "method": "POST", "path": "/comments", "body": "body=On+Windows+it+is+C%3A%5CUsers%5Cyou%5CAppData", "note": "a Windows path with backslashes"}
+{"name": "comment with emoji", "method": "POST", "path": "/comments", "body": "body=Shipped+it+%F0%9F%9A%A2+and+it+works+%E2%9C%85", "note": "emoji in a comment"}
+{"name": "long review", "method": "POST", "path": "/reviews", "body": "rating=5&body=I+have+used+this+for+about+three+months+now.+Setup+took+under+an+hour%2C+the+docs+were+clear%2C+and+support+answered+within+a+day+when+I+had+a+question+about+the+TLS+configuration.+My+only+note+is+that+the+default+timeouts+are+conservative%3B+once+I+raised+them+everything+was+smooth.+Would+buy+again.", "note": "a long-form product review, the shape a review site posts constantly"}
+{"name": "support ticket with error text", "method": "POST", "path": "/tickets", "body": "subject=Cannot+connect&body=I+keep+getting+%22connection+refused%22+when+I+point+the+client+at+port+8443.+Firewall+is+open.+Any+ideas%3F", "note": "a user pasting an error message into a ticket"}
+{"name": "job description", "method": "POST", "path": "/jobs", "body": "title=Backend+Engineer&body=You+will+design+and+operate+services+that+handle+millions+of+requests.+Experience+with+Go%2C+SQL+and+Linux+is+expected%3B+familiarity+with+eBPF+is+a+plus.", "note": "a job posting mentioning SQL and Linux by name"}
+{"name": "recipe", "method": "POST", "path": "/recipes", "body": "title=Sourdough&body=Mix+500g+flour+with+350g+water%2C+rest+30+minutes%2C+add+10g+salt.+Fold+every+30+minutes+for+3+hours.", "note": "recipe text with numbers and units"}
+{"name": "address with hash", "method": "POST", "path": "/addresses", "body": "line1=Flat+%234%2C+12+Union+Street&city=Aberdeen&postcode=AB10+1BA", "note": "a flat number written with a hash, on Union Street"}
+{"name": "name with apostrophe", "method": "POST", "path": "/contacts", "body": "name=Se%C3%A1n+O%27Brien&email=sean%40example.ie", "note": "an Irish surname; the classic quote-injection lookalike that is just a name"}
+{"name": "name with hyphen", "method": "POST", "path": "/contacts", "body": "name=Anne-Marie+Delacroix-Smith", "note": "double-barrelled name"}
+{"name": "company with quotes", "method": "POST", "path": "/companies", "body": "name=%22The+Good+Coffee%22+Ltd", "note": "a company whose registered name contains quotes"}
+{"name": "password with metacharacters", "method": "POST", "path": "/register", "body": "email=new%40example.com&password=%27%3B+DROP--%7C%26%3C%3E%60", "note": "a strong password made of metacharacters is not an injection; refusing it teaches users to pick weaker ones", "known_fp": {"1": "a password built from metacharacters is inspected as though it were a payload. Refusing it teaches users to choose weaker passwords, which makes the gateway a net negative for account security. Needs the password field exempted by name, not the rule weakened.", "2": "a password built from metacharacters is inspected as though it were a payload. Refusing it teaches users to choose weaker passwords, which makes the gateway a net negative for account security. Needs the password field exempted by name, not the rule weakened."}}
+{"name": "bio with script word", "method": "POST", "path": "/profile", "body": "bio=I+write+shell+scripts+and+the+occasional+JavaScript+library", "note": "the words script and JavaScript in a professional bio"}
+{"name": "search for xss", "path": "/search?q=what+is+an+xss+attack", "note": "a security blog's own search box; naming an attack is not performing one"}
+{"name": "search for sql injection", "path": "/search?q=how+to+prevent+sql+injection", "note": "the most-read security article topic on the internet"}

@@ -162,3 +162,8 @@ telemetry_pebble/
 /.gemini/
 /.windsurfrules
 /opencode.json
+
+# Test binaries. `go test -memprofile/-cpuprofile` writes the compiled test
+# binary into the package directory, so a profiling run leaves one in the
+# checkout -- and CI fails if `go test ./...` leaves the tree dirty.
+*.test

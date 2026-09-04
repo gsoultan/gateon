@@ -1,0 +1,55 @@
+# Identifiers and opaque tokens: the values applications pass around constantly.
+# Two failure modes live here. High-entropy strings look like obfuscated
+# payloads to entropy heuristics, and long digit runs look like card numbers to
+# a naive regex — the exact false positive that made Gateon's old Visa-only
+# card rule refuse order ids starting with 4.
+{"name": "uuid v4 path", "path": "/orders/7c9e6679-7425-40de-944b-e07fc1f90ae7", "note": "UUID as a path segment"}
+{"name": "uuid v7 path", "path": "/events/01997c4e-6f2a-7c3d-9b1e-4f8a2d6c0e15", "note": "time-ordered UUIDv7, increasingly the default"}
+{"name": "uuid uppercase", "path": "/orders/7C9E6679-7425-40DE-944B-E07FC1F90AE7", "note": "some stacks emit uppercase UUIDs"}
+{"name": "uuid braced", "path": "/orders?id=%7B7c9e6679-7425-40de-944b-e07fc1f90ae7%7D", "note": ".NET Guid.ToString(\"B\") emits braces"}
+{"name": "ulid", "path": "/events/01K4YQ8XJ2R7N3V6B0C9D5E1F8", "note": "ULID, Crockford base32"}
+{"name": "nanoid", "path": "/s/V1StGXR8_Z5jdHi6B-myT", "note": "nanoid with URL-safe alphabet including underscore and hyphen"}
+{"name": "snowflake id", "path": "/messages/1180422938473129984", "note": "Discord/Twitter-style 19-digit snowflake"}
+{"name": "stripe style object id", "path": "/payments/pi_3PqR8s2eZvKYlo2C1aBcDeFg", "note": "Stripe PaymentIntent id, prefixed and mixed case"}
+{"name": "order id starting with four", "path": "/orders/4532015112830366", "note": "16 digits beginning with 4; a Luhn-valid-looking order id is the classic card false positive"}
+{"name": "long numeric reference", "path": "/invoices?ref=378282246310005", "note": "15 digits; an invoice reference in Amex card shape"}
+{"name": "sequential order numbers", "path": "/orders?ids=4000000000000001,4000000000000002,4000000000000003", "note": "a batch of sequential order ids"}
+{"name": "imei style number", "path": "/devices/356938035643809", "note": "15-digit device identifier"}
+{"name": "iban", "method": "POST", "path": "/bank-accounts", "body": "iban=GB33BUKB20201555555555&holder=Jane+Doe", "note": "an IBAN a user legitimately submits to be paid"}
+{"name": "isbn", "path": "/books/9780132350884", "note": "13-digit ISBN"}
+{"name": "ean barcode", "path": "/products?ean=4006381333931", "note": "EAN-13 barcode scan"}
+{"name": "vin", "path": "/vehicles/1HGCM82633A004352", "note": "vehicle identification number, 17 alphanumerics"}
+{"name": "tracking number", "path": "/track?code=1Z999AA10123456784", "note": "UPS tracking number"}
+{"name": "git sha short", "path": "/builds/a1b2c3d", "note": "abbreviated git commit"}
+{"name": "git sha full", "path": "/builds/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", "note": "full 40-hex commit sha"}
+{"name": "sha256 digest", "path": "/artifacts?digest=sha256%3Ae3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "note": "container image digest"}
+{"name": "md5 etag", "path": "/files/d41d8cd98f00b204e9800998ecf8427e", "note": "md5 used as a content address"}
+{"name": "base64 state param", "path": "/oauth/callback?state=eyJyZXR1cm5UbyI6Ii9kYXNoYm9hcmQiLCJub25jZSI6IjhmM2EifQ%3D%3D", "note": "OAuth state carrying base64 JSON, exactly as every OAuth client emits"}
+{"name": "base64url no padding", "path": "/cb?data=eyJhIjoxLCJiIjoyfQ", "note": "unpadded base64url, the JOSE convention"}
+{"name": "base64 with padding", "path": "/cb?data=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo%3D", "note": "padded base64 with encoded equals signs"}
+{"name": "jwt in query", "path": "/verify?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkphbmUgRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", "note": "a magic-link token in a query string; long, high entropy, three dotted segments"}
+{"name": "jwt in authorization header", "path": "/api/v1/me", "headers": {"Authorization": "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjFhMmIzYyJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyfDQwMzg1IiwiYXVkIjoiYXBpLmV4YW1wbGUuY29tIiwiZXhwIjoxNzg4MTM4MzY0LCJpYXQiOjE3ODgxMzQ3NjR9.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}, "note": "the standard authenticated API request"}
+{"name": "paseto token", "path": "/api/v1/me", "headers": {"Authorization": "Bearer v4.public.eyJzdWIiOiI0MDM4NSIsImV4cCI6IjIwMjYtMDktMDRUMTI6MDA6MDBaIn3Nn0ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm"}, "note": "PASETO v4 public token"}
+{"name": "session cookie", "path": "/dashboard", "headers": {"Cookie": "gateon_session=s%3A9dK2mQ8xR4tV6yB1nC3fG5hJ7kL0pW.aBcDeFgHiJkLmNoPqRsTuVwXyZ; theme=dark"}, "note": "a signed session cookie plus a preference cookie"}
+{"name": "multiple cookies", "path": "/", "headers": {"Cookie": "_ga=GA1.2.1234567890.1788134764; _gid=GA1.2.9876543210.1788134764; cf_clearance=abc123XYZ_-def456; locale=en-GB; consent=analytics%3D1%2Cmarketing%3D0"}, "note": "the cookie header a real browser sends after a week on a site"}
+{"name": "csrf token", "method": "POST", "path": "/settings", "body": "csrf_token=8f3a2b1c9d0e4f5a6b7c8d9e0f1a2b3c&display_name=Jane", "note": "a hidden CSRF field, hex, high entropy"}
+{"name": "api key header", "path": "/api/v1/usage", "headers": {"X-API-Key": "gk_live_7fB2xQ9mR4tV6yN1pS3dF5hJ8kL0wZ"}, "note": "a customer's own API key on their own request"}
+{"name": "idempotency key", "method": "POST", "path": "/api/v1/charges", "headers": {"Idempotency-Key": "a1b2c3d4-e5f6-4718-9a0b-1c2d3e4f5a6b", "Content-Type": "application/json"}, "body": "{\"amount\":2500,\"currency\":\"gbp\"}", "note": "idempotency key on a payment, standard practice"}
+{"name": "request id header", "path": "/api/v1/config", "headers": {"X-Request-ID": "01K4YQ8XJ2R7N3V6B0C9D5E1F8"}, "note": "a client-supplied correlation id"}
+{"name": "traceparent", "path": "/api/v1/config", "headers": {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}, "note": "W3C trace context, propagated by every OTel SDK"}
+{"name": "tracestate", "path": "/api/v1/config", "headers": {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "tracestate": "vendorname1=opaqueValue1,vendorname2=opaqueValue2"}, "note": "tracestate carries opaque vendor blobs by design"}
+{"name": "webhook signature", "method": "POST", "path": "/webhooks/payments", "headers": {"X-Signature": "t=1788134764,v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd", "Content-Type": "application/json"}, "body": "{\"type\":\"payment.succeeded\",\"id\":\"evt_1PqR8s\"}", "note": "an inbound webhook with an HMAC signature header"}
+{"name": "content digest header", "method": "POST", "path": "/api/v1/upload-meta", "headers": {"Content-Digest": "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:", "Content-Type": "application/json"}, "body": "{\"name\":\"report.pdf\"}", "note": "RFC 9530 content digest; colons and base64 in a header"}
+{"name": "hex colour list", "path": "/palette?colors=%23ff6b35%2C%23004e89%2C%23f7c59f", "note": "a design tool passing hex colours"}
+{"name": "semver query", "path": "/packages/gateway?version=1.24.0-rc.2%2Bbuild.5678", "note": "full semver with prerelease and build metadata"}
+{"name": "npm scoped package", "path": "/registry/%40acme%2Fgateway-client", "note": "an encoded scoped npm package name"}
+{"name": "docker image ref", "path": "/images?ref=ghcr.io%2Facme%2Fgateway%3Av1.24.0", "note": "a container image reference in a parameter"}
+{"name": "mac address", "path": "/devices?mac=3c%3A22%3Afb%3A1a%3A2b%3A3c", "note": "colon-separated MAC address, encoded"}
+{"name": "ipv4 in param", "path": "/lookup?ip=203.0.113.42", "note": "an address lookup tool passing an IPv4"}
+{"name": "ipv6 in param", "path": "/lookup?ip=2001%3Adb8%3A85a3%3A%3A8a2e%3A370%3A7334", "note": "IPv6 with colons and a double-colon elision"}
+{"name": "cidr in param", "path": "/allowlist?cidr=203.0.113.0%2F24", "note": "a CIDR block with an encoded slash"}
+{"name": "port range", "path": "/scan-config?ports=8000-8100", "note": "a port range in a config UI"}
+{"name": "phone e164", "method": "POST", "path": "/contacts", "body": "phone=%2B442071838750&name=Jane", "note": "E.164 phone with an encoded leading plus"}
+{"name": "license plate", "path": "/vehicles?plate=AB12+CDE", "note": "UK plate with a space"}
+{"name": "coordinates", "path": "/places?at=51.5074%2C-0.1278", "note": "lat,long pair with a negative longitude"}
+{"name": "s3 presigned style params", "path": "/download?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20260904%2Feu-west-2%2Fs3%2Faws4_request&X-Amz-Date=20260904T120000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=b2c3d4e5f6a7089192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809", "note": "a presigned URL redirect; long, structured, full of slashes and hex"}

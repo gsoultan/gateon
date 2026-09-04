@@ -473,15 +473,17 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				defer tx.Close()
 			}
 
-			observe := func(d gwaf.Decision) {
+			observePhase := func(d gwaf.Decision, phase string) {
 				matches := tx.Matches()
 				obs := wafObservation{
 					decision: d, matches: matches, request: r,
 					routeID: cfg.RouteID, cfg: cfg, repScore: repScore,
+					phase: phase,
 				}
 				recordWAFDecision(obs)
 				engine.audit.record(d, matches, obs)
 			}
+			observe := func(d gwaf.Decision) { observePhase(d, wafPhaseRequest) }
 
 			if err != nil {
 				// The engine could not finish inspecting. Whether that permits
@@ -542,7 +544,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				ResponseWriter: w,
 				tx:             tx,
 				auditOnly:      cfg.AuditOnly,
-				onDecision:     observe,
+				onDecision:     func(d gwaf.Decision) { observePhase(d, wafPhaseResponse) },
 				bufLimit:       responseBufferLimit(cfg),
 				encDecodable:   true,
 				routeID:        cfg.RouteID,
