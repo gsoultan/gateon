@@ -313,20 +313,30 @@ func accessLogSampleRate() uint32 {
 	return uint32(n)
 }
 
-// traceSampleRate returns GATEON_TRACE_SAMPLE_RATE (1=all, 0=none, N=1-in-N). Default 1.
-// Trace recording marshals request+response headers to JSON and persists a blob
-// per request, so sampling it bounds the dominant per-request CPU/allocation cost
-// on high-throughput routes. An active debugger always records regardless of this.
+// traceSampleRate returns the trace sampling rate: 1 = every request, N = 1-in-N,
+// 0 = none. GATEON_TRACE_SAMPLE_RATE overrides the active tier's default.
+//
+// Trace recording clones both header maps and persists a blob per request. It
+// measured 208 B and 7 allocations per request against a 610 B / 7 allocation
+// infrastructure chain — so it roughly doubled the allocation count of every
+// proxied request, and it defaulted to recording all of them regardless of tier.
+//
+// It is now tiered: enterprise records everything, standard samples 1-in-20, and
+// minimal records nothing (its trace store is closed anyway, so the work was
+// being done and then dropped on the floor at recordTraceToStore).
+//
+// Sampling is not the whole story — see traceWorthRecording. A sampled rate
+// applies only to requests that succeeded; anything that failed is always kept,
+// because a 1-in-20 sample of errors is useless exactly when someone is looking.
 func traceSampleRate() uint32 {
-	s := os.Getenv("GATEON_TRACE_SAMPLE_RATE")
-	if s == "" {
-		return 1
+	if s := os.Getenv("GATEON_TRACE_SAMPLE_RATE"); s != "" {
+		n, err := strconv.ParseUint(s, 10, 32)
+		if err != nil {
+			return 1 // invalid => default to all, the safe direction for an observability knob
+		}
+		return uint32(n) // explicit 0 => no trace recording
 	}
-	n, err := strconv.ParseUint(s, 10, 32)
-	if err != nil {
-		return 1 // invalid => default to all
-	}
-	return uint32(n) // explicit 0 => no trace recording
+	return config.CurrentTierDefaults().TraceSampleRate
 }
 
 // Metrics returns a middleware that records comprehensive Prometheus metrics
@@ -417,12 +427,13 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 			// Trace recording: an active debugger always records (explicit opt-in);
-			// otherwise sample per GATEON_TRACE_SAMPLE_RATE to bound hot-path cost.
+			// otherwise sample per the tier to bound hot-path cost, except for
+			// requests that failed, which are always kept.
 			debug, hasDebug := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
 			recordDetailed := hasDebug && debug != nil
 			recordSampled := false
 			if !recordDetailed {
-				recordSampled = traceRate != 0 && (traceRate == 1 || atomic.AddUint64(&traceCounter, 1)%uint64(traceRate) == 0)
+				recordSampled = shouldRecordTrace(traceRate, &traceCounter, actualStatus)
 			}
 
 			if recordDetailed || recordSampled {
@@ -876,4 +887,41 @@ func (c *requestBodyCapture) Read(p []byte) (n int, err error) {
 		}
 	}
 	return n, err
+}
+
+// shouldRecordTrace decides whether one request's trace is kept.
+//
+// Extracted from the metrics middleware so the rule is testable on its own: the
+// decision has three interacting inputs and lived inside a closure where the
+// only way to exercise it was to drive the whole chain and inspect a store.
+func shouldRecordTrace(traceRate uint32, counter *uint64, status int) bool {
+	if traceRate == 0 {
+		// Explicitly off. Not even failures — an operator who set the rate to
+		// zero asked for no traces, and quietly recording some would be a
+		// surprise on a tier chosen for its memory ceiling.
+		return false
+	}
+	if traceRate == 1 {
+		return true
+	}
+	if traceWorthRecording(status) {
+		return true
+	}
+	return atomic.AddUint64(counter, 1)%uint64(traceRate) == 0
+}
+
+// traceWorthRecording reports whether a response must be traced regardless of
+// the sampling rate.
+//
+// Sampling assumes the requests are interchangeable, which is true of the
+// successful ones and false of everything else. An operator opens the trace view
+// because something went wrong, and a 1-in-20 sample of failures means the
+// request they are looking for is usually missing — which is worse than no
+// sampling at all, because the view still looks complete.
+//
+// So the rate applies to 1xx-3xx only. 4xx is included deliberately alongside
+// 5xx: a 403 is what a false positive looks like from the outside, and the
+// false-positive work depends on those being visible rather than sampled away.
+func traceWorthRecording(status int) bool {
+	return status >= 400
 }

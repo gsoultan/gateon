@@ -6,6 +6,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/db"
@@ -14,7 +15,7 @@ import (
 
 // benchResponseHandler builds a response-inspecting WAF over an origin that
 // answers with body of the given type and size.
-func benchResponseHandler(b *testing.B, contentType string, size int) http.Handler {
+func benchResponseHandler(b *testing.B, contentType string, size int, declareLength bool) http.Handler {
 	b.Helper()
 
 	d, dialect, err := db.Open("sqlite::memory:")
@@ -48,13 +49,16 @@ func benchResponseHandler(b *testing.B, contentType string, size int) http.Handl
 	}
 	return mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", contentType)
+		if declareLength {
+			w.Header().Set("Content-Length", strconv.Itoa(size))
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(body)
 	}))
 }
 
-func benchResponse(b *testing.B, contentType string, size int) {
-	handler := benchResponseHandler(b, contentType, size)
+func benchResponse(b *testing.B, contentType string, size int, declareLength bool) {
+	handler := benchResponseHandler(b, contentType, size, declareLength)
 	req := httptest.NewRequest(http.MethodGet, "/asset", nil)
 	req.Header.Set("Accept-Encoding", "identity")
 
@@ -69,8 +73,21 @@ func benchResponse(b *testing.B, contentType string, size int) {
 // BenchmarkWAFResponseBinary is the case the content-type gate exists for: a
 // body no data-leak rule could match, which used to be held to the ceiling and
 // scanned anyway.
-func BenchmarkWAFResponseBinary(b *testing.B) { benchResponse(b, "image/png", 256<<10) }
+func BenchmarkWAFResponseBinary(b *testing.B) { benchResponse(b, "image/png", 256<<10, false) }
 
 // BenchmarkWAFResponseText is the case that must not regress: a body that is
 // genuinely inspected, where the pool replaces a per-response allocation.
-func BenchmarkWAFResponseText(b *testing.B) { benchResponse(b, "text/html", 256<<10) }
+func BenchmarkWAFResponseText(b *testing.B) { benchResponse(b, "text/html", 256<<10, false) }
+
+// BenchmarkWAFResponseTextDeclaredLength is the same body from an origin that
+// declares Content-Length, which is what a non-chunked origin actually does.
+//
+// The distinction matters to the hold-back buffer. With no declared length there
+// is nothing to size from and the buffer doubles its way up from zero,
+// reallocating and copying at each step; with one, it is allocated once at the
+// right size and then survives in the pool instead of overshooting the return
+// ceiling and being discarded. The original benchmark only ever measured the
+// undeclared case, so the common shape had no coverage at all.
+func BenchmarkWAFResponseTextDeclaredLength(b *testing.B) {
+	benchResponse(b, "text/html", 256<<10, true)
+}
