@@ -107,7 +107,7 @@ github.com/gsoultan/gateon/internal/security/waf 62.1%
 github.com/gsoultan/gateon/internal/security/yara 93.8%
 github.com/gsoultan/gateon/internal/server 48.6%
 github.com/gsoultan/gateon/internal/server/entrypoint 33.0%
-github.com/gsoultan/gateon/internal/server/handlers 14.7%
+github.com/gsoultan/gateon/internal/server/handlers 17.4%
 github.com/gsoultan/gateon/internal/syncutil -
 github.com/gsoultan/gateon/internal/telemetry 56.3%
 github.com/gsoultan/gateon/internal/testutil -
@@ -120,6 +120,7 @@ github.com/gsoultan/gateon/pkg/proxy 47.5%
 github.com/gsoultan/gateon/proto/gateon/v1 -
 github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect -
 github.com/gsoultan/gateon/scripts -
+github.com/gsoultan/gateon/scripts/checkauthnil 79.4%
 github.com/gsoultan/gateon/scripts/checkconfig -
 github.com/gsoultan/gateon/scripts/checkcoverage -
 github.com/gsoultan/gateon/scripts/checkfolders 65.7%

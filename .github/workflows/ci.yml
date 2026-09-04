@@ -127,6 +127,13 @@ jobs:
       - name: Config fields are read by something
         run: go run ./scripts/checkconfig
 
+      # The grep in check-security-invariants matches field access by name and
+      # missed a nil-comparison on a parameter that authorized the log stream.
+      # This resolves types, so it catches the comparison wherever the value
+      # came from and under any name.
+      - name: No auth.Service compared against nil
+        run: go run ./scripts/checkauthnil
+
       # Nine packages are over arch's ten-file limit and pinned at that size.
       # This does not ask them to shrink; it refuses to let them grow, and
       # refuses to let a tenth join them. See doc/adr/0010.

@@ -11,7 +11,7 @@ CONTAINER ?= docker
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-coverage check-folders ebpf ebpf-docker pgo-profile docker
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -194,6 +194,15 @@ check-config:
 check-folders:
 	go run ./scripts/checkfolders
 
+## check-auth-nil: assert no auth.Service is compared against nil, with types
+##                 resolved rather than names matched. check-invariants greps for
+##                 `.AuthManager == nil` and three siblings; that missed a
+##                 comparison on a parameter, which authorized the system log
+##                 stream whenever the service was absent. Both checks are kept:
+##                 the grep is instant and needs no build, this one is thorough.
+check-auth-nil:
+	go run ./scripts/checkauthnil
+
 ## check-coverage: assert no package loses its tests or drops below its recorded
 ##                 floor. A ratchet, not a target -- see scripts/checkcoverage.
 ##
@@ -215,7 +224,7 @@ check-coverage:
 	@go test -cover $$(go list ./... | grep -v 'cmd/gateon') | tee /dev/stderr | go run ./scripts/checkcoverage
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
-sec: vuln staticcheck gosec check-invariants check-config check-folders
+sec: vuln staticcheck gosec check-invariants check-config check-auth-nil check-folders
 	go vet ./...
 
 ## lint: run golangci-lint over the whole tree (reports pre-existing debt too)
