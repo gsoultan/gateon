@@ -630,7 +630,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		if resp.Success && isLoginStep {
 			// Set HttpOnly secure cookie for session (24h)
-			middleware.SetSessionCookie(w, resp.Token, int(auth.TokenLifetime.Seconds()), r.TLS != nil)
+			middleware.SetSessionCookie(w, r, resp.Token, int(auth.TokenLifetime.Seconds()))
 		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -697,7 +697,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		if !resp.TwoFactorRequired && !resp.TwoFactorSetupRequired {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
-			middleware.SetSessionCookie(w, resp.Token, int(auth.TokenLifetime.Seconds()), r.TLS != nil)
+			middleware.SetSessionCookie(w, r, resp.Token, int(auth.TokenLifetime.Seconds()))
 		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -810,7 +810,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if claims != nil {
 			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.GetClientIP(r, true))
 		}
-		middleware.ClearSessionCookie(w, r.TLS != nil)
+		middleware.ClearSessionCookie(w, r)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})

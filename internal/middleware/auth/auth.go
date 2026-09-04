@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -271,21 +270,55 @@ type TokenVerifier interface {
 const sessionCookieName = "gateon_session"
 
 // SetSessionCookie sets an HttpOnly, SameSite=Lax session cookie. Secure=true when isTLS.
-func SetSessionCookie(w http.ResponseWriter, token string, maxAge int, isTLS bool) {
-	v := sessionCookieName + "=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + strconv.Itoa(maxAge)
-	if isTLS {
-		v += "; Secure"
-	}
-	w.Header().Add("Set-Cookie", v)
+// It takes the request rather than a bool because the bool was being computed
+// wrongly at all three call sites, as `r.TLS != nil`. That answers "did this
+// process terminate the TLS", which is the wrong question: behind a load
+// balancer, ingress or CDN it is nil on a request the user made over HTTPS, so
+// the management session cookie lost its Secure attribute in exactly the
+// deployments that terminate TLS elsewhere -- and then rode the next plaintext
+// request to the same host. request.IsSecure asks whether the request reached
+// the edge over TLS, and only trusts X-Forwarded-Proto from a trusted peer.
+//
+// The same reasoning that put newOIDCCookie in one place applies here: an
+// attribute every caller has to recompute is an attribute some caller will get
+// wrong.
+func SetSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
+	// #nosec G124 -- Secure is conditional by design, not missing. gosec wants
+	// a literal true and cannot evaluate request.IsSecure, which is the whole
+	// point: the gateway serves both TLS and plain-HTTP entrypoints, and a
+	// hardcoded Secure would make the cookie undeliverable on the second
+	// without protecting anything on the first. HttpOnly and SameSite are
+	// literals here precisely because they have no such tradeoff. Building the
+	// header by hand hid this from gosec entirely; being visible and explained
+	// is the better state.
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   request.IsSecure(r),
+	})
 }
 
 // ClearSessionCookie instructs the client to clear the session cookie.
-func ClearSessionCookie(w http.ResponseWriter, isTLS bool) {
-	v := sessionCookieName + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
-	if isTLS {
-		v += "; Secure"
-	}
-	w.Header().Add("Set-Cookie", v)
+// The attributes must match the ones the cookie was set with. A browser matches
+// an expiring cookie on name, path and domain, and a Secure cookie cannot be
+// cleared by a non-Secure Set-Cookie on an HTTPS origin -- so this has to make
+// the same Secure decision as SetSessionCookie, from the same input.
+func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	// #nosec G124 -- same as SetSessionCookie, and it must stay the same: a
+	// browser will not clear a Secure cookie with a non-Secure Set-Cookie.
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   request.IsSecure(r),
+	})
 }
 
 // ExtractToken returns the token from Cookie (gateon_session), Authorization Bearer,
