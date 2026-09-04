@@ -17,10 +17,12 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/hashicorp/vault/api"
 )
 
@@ -207,11 +209,34 @@ func GenerateRandomSecret(length int) string {
 	return hex.EncodeToString(b)
 }
 
+// minEncryptionKeyLen is the shortest GATEON_ENCRYPTION_KEY that will be used.
+// Documented in README.md and SECURITY.md as "min 16 chars".
+const minEncryptionKeyLen = 16
+
+// warnShortKeyOnce keeps the warning below to one line per process. This is
+// called on every secret read and write, and a config reload walks all of them.
+var warnShortKeyOnce sync.Once
+
 // encryptionKey returns the 32-byte key derived from GATEON_ENCRYPTION_KEY.
 // Returns nil if the env var is not set or too short.
+//
+// A key that is set but too short is warned about, loudly and once. Returning
+// nil makes EncryptIfKeySet hand back its plaintext, so an operator who typed a
+// short key gets the paseto secret, the database password and the database URL
+// written to global.json in the clear, having done the one thing that was
+// supposed to prevent it. The length rule is documented; a typo is not, and
+// silence is indistinguishable from success here.
 func encryptionKey() []byte {
 	k := os.Getenv("GATEON_ENCRYPTION_KEY")
-	if k == "" || len(k) < 16 {
+	if k == "" {
+		return nil
+	}
+	if len(k) < minEncryptionKeyLen {
+		warnShortKeyOnce.Do(func() {
+			logger.L.LogWarn(
+				"GATEON_ENCRYPTION_KEY is set but too short, so secrets are NOT being encrypted",
+				"length", len(k), "minimum", minEncryptionKeyLen)
+		})
 		return nil
 	}
 	h := sha256.Sum256([]byte(k))
