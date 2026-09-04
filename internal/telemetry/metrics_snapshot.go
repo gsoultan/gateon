@@ -365,8 +365,20 @@ type RouteMetric struct {
 
 // MiddlewareMetrics holds counters for all middleware instrumentation.
 type MiddlewareMetrics struct {
-	RateLimitRejected  []LabeledCount `json:"rateLimitRejected,omitzero"`
-	WAFBlocked         []LabeledCount `json:"wafBlocked,omitzero"`
+	RateLimitRejected []LabeledCount `json:"rateLimitRejected,omitzero"`
+	WAFBlocked        []LabeledCount `json:"wafBlocked,omitzero"`
+
+	// WAFWouldBlock is what an audit-only WAF declined to refuse, by rule.
+	//
+	// This is the number an operator needs before enforcing, and until it was
+	// surfaced there was no way to get it: audit-only produced a 200 and a
+	// threat-list entry, and nothing anywhere said how many real users would have
+	// seen a block page. Deployments therefore either enforced blind or left
+	// detection on forever.
+	//
+	// Read it against WAFBlocked: if this is non-empty the route is in audit-only,
+	// and every entry is a refusal that would happen the moment it is not.
+	WAFWouldBlock      []LabeledCount `json:"wafWouldBlock,omitzero"`
 	FastPathBlocked    []LabeledCount `json:"fastPathBlocked,omitzero"`
 	CacheHits          float64        `json:"cacheHits"`
 	CacheMisses        float64        `json:"cacheMisses"`
@@ -829,6 +841,7 @@ func buildMiddlewareMetrics(idx map[string]*dto.MetricFamily) MiddlewareMetrics 
 
 	mm.RateLimitRejected = collectLabeledCounts(idx, "gateon_middleware_ratelimit_rejected_total", "limiter_type")
 	mm.WAFBlocked = collectLabeledCounts(idx, "gateon_middleware_waf_blocked_total", "rule_id")
+	mm.WAFWouldBlock = collectLabeledCounts(idx, "gateon_middleware_waf_would_block_total", "rule_id")
 	mm.FastPathBlocked = collectLabeledCounts(idx, "gateon_middleware_fast_path_blocked_total", "check_type")
 	mm.CacheHits = sumCounter(idx, "gateon_middleware_cache_hits_total", nil)
 	mm.CacheMisses = sumCounter(idx, "gateon_middleware_cache_misses_total", nil)
