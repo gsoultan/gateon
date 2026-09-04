@@ -5,6 +5,7 @@ package install
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,14 +118,18 @@ func installLinux(binPath string) error {
 	if err := secureDir(configDir, 0o750); err != nil {
 		return err
 	}
-	_ = exec.Command("chown", "-R", "root:root", configDir).Run()
+	if err := secureOwner(configDir); err != nil {
+		return err
+	}
 
 	// #nosec G302 -- 0700 on a directory is already the tightest useful mode;
 	// the execute bit is what makes it traversable by its owner.
 	if err := secureDir(stateDir, 0o700); err != nil {
 		return err
 	}
-	_ = exec.Command("chown", "-R", "root:root", stateDir).Run()
+	if err := secureOwner(stateDir); err != nil {
+		return err
+	}
 
 	if err := runCmd(exec.Command("systemctl", "daemon-reload")); err != nil {
 		return err
@@ -236,6 +241,65 @@ func secureDir(dir string, mode os.FileMode) error {
 	}
 	if err := os.Chmod(dir, mode); err != nil {
 		return fmt.Errorf("secure %s to %#o: %w", dir, mode, err)
+	}
+	return nil
+}
+
+// secureOwner gives dir and everything under it to root, returning an error if
+// it cannot.
+//
+// This is the other half of the argument in secureDir, and was the last piece
+// still discarding its result: `_ = exec.Command("chown", "-R", "root:root",
+// dir).Run()`. The mode alone is not enough on an upgrade. 0750 over a
+// directory still owned by an unprivileged account leaves that account with rwx
+// on global.json -- the database URL, the paseto signing secret, the MaxMind
+// licence key -- while the unit it configures runs User=root. Losing the chown
+// silently turns a permissions fix into a local privilege escalation, and the
+// install prints "installed" either way.
+//
+// It also stops shelling out. exec.Command("chown", ...) resolves through PATH,
+// so on a minimal image without coreutils the command simply does not exist,
+// and with the error discarded that failure was indistinguishable from success.
+// os.Lchown is a syscall: it cannot be missing, and it does not follow a symlink
+// planted inside the tree.
+func secureOwner(dir string) error {
+	const rootUID, rootGID = 0, 0
+
+	// The traversal is scoped to an os.Root rather than done with
+	// filepath.WalkDir over absolute paths. Walking and then acting on a path
+	// is two operations on a name, and the thing the name refers to can change
+	// in between; os.Root resolves every step inside the opened directory, so a
+	// symlink planted mid-install cannot redirect a chown out of the tree. That
+	// this runs as root during an install is exactly why it is worth scoping.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+
+	if err := fs.WalkDir(root.FS(), ".", func(rel string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk %s: %w", filepath.Join(dir, rel), err)
+		}
+		if rel == "." {
+			return nil
+		}
+		// Lchown, not Chown: a symlink in the tree should have its own
+		// ownership changed, never its target's.
+		if err := root.Lchown(rel, rootUID, rootGID); err != nil {
+			return fmt.Errorf("chown %s to root:root: %w", filepath.Join(dir, rel), err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// The directory itself sits outside its own root, so it is done by name,
+	// last: doing it first would mean a failure here masked anything the walk
+	// would have reported, and a test could not tell the two apart.
+	// dir is a package constant, not anything a caller supplies.
+	if err := os.Lchown(dir, rootUID, rootGID); err != nil {
+		return fmt.Errorf("chown %s to root:root: %w", dir, err)
 	}
 	return nil
 }

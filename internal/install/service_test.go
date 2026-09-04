@@ -161,3 +161,53 @@ func TestSecureDirReportsFailure(t *testing.T) {
 		t.Error("secureDir reported success for a directory it could not create")
 	}
 }
+
+// TestSecureOwnerReachesEveryEntry covers the walk rather than the syscall. The
+// chown it replaces was `_ = exec.Command("chown", "-R", ...).Run()`, so the
+// property that was missing is not "the owner changed" -- it is that a failure
+// anywhere under the directory reaches the caller instead of being dropped.
+//
+// Running as root is not required and not assumed: an unprivileged Lchown to
+// uid 0 fails, which is exactly the error path this needs to see reported.
+func TestSecureOwnerReachesEveryEntry(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "a", "b")
+	if err := os.MkdirAll(nested, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "global.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := secureOwner(dir)
+
+	if os.Geteuid() == 0 {
+		if err != nil {
+			t.Fatalf("secureOwner as root: %v", err)
+		}
+		return
+	}
+	// Unprivileged: the walk must surface the refusal, naming the path, rather
+	// than returning nil the way the shelled-out version did.
+	if err == nil {
+		t.Fatal("secureOwner returned nil while unable to chown; the failure was swallowed")
+	}
+	if !strings.Contains(err.Error(), "chown") {
+		t.Errorf("error = %v, want it to say what it could not do", err)
+	}
+	// Naming a path *inside* the directory is what proves the walk reported,
+	// rather than the directory itself failing first and masking it. Which
+	// entry it stops on is WalkDir's ordering, not this test's business.
+	if !strings.Contains(err.Error(), dir+string(filepath.Separator)) {
+		t.Errorf("error = %v, want it to name an entry inside %s", err, dir)
+	}
+}
+
+// TestSecureOwnerReportsAMissingDirectory keeps a typo'd path from looking like
+// a successful install.
+func TestSecureOwnerReportsAMissingDirectory(t *testing.T) {
+	err := secureOwner(filepath.Join(t.TempDir(), "does-not-exist"))
+	if err == nil {
+		t.Fatal("secureOwner returned nil for a directory that is not there")
+	}
+}
