@@ -83,7 +83,7 @@ github.com/gsoultan/gateon/internal/install 5.3%
 github.com/gsoultan/gateon/internal/k8s 68.6%
 github.com/gsoultan/gateon/internal/logger 39.4%
 github.com/gsoultan/gateon/internal/middleware 59.1%
-github.com/gsoultan/gateon/internal/middleware/auth 16.9%
+github.com/gsoultan/gateon/internal/middleware/auth 26.7%
 github.com/gsoultan/gateon/internal/middleware/kind 54.5%
 github.com/gsoultan/gateon/internal/phantom 9.9%
 github.com/gsoultan/gateon/internal/redis 85.2%
