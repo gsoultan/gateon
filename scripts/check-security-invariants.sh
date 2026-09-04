@@ -47,7 +47,7 @@ drop_comment_hits() { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true; 
 # needs to tolerate a not-yet-available service, make the callee deny on a nil
 # verifier (see middleware/auth.PasetoAuth) and build unconditionally.
 # ---------------------------------------------------------------------------
-note "1/7  auth.Service nil-comparisons"
+note "1/8  auth.Service nil-comparisons"
 auth_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '(\.AuthManager|deps\.Auth|s\.Auth|svc\.Auth)[[:space:]]*[!=]=[[:space:]]*nil' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -68,7 +68,7 @@ fi
 # stored-XSS bug plus a readable token equals administrator compromise. The
 # token lives only in the HttpOnly gateon_session cookie.
 # ---------------------------------------------------------------------------
-note "2/7  session token in web storage"
+note "2/8  session token in web storage"
 storage_hits=$( (grep -rnE '(localStorage|sessionStorage)\.(setItem|getItem)' ui/src \
 	--include='*.ts' --include='*.tsx' 2>/dev/null |
 	grep -viE 'token|jwt|paseto|bearer|credential|gateon-auth') || true)
@@ -105,7 +105,7 @@ fi
 # '/', which made the -o path invalid and produced a build that "succeeded"
 # and then failed at exec with a confusing error.
 # ---------------------------------------------------------------------------
-note "3/7  tests building into the repository root"
+note "3/8  tests building into the repository root"
 root_builds=$( (grep -rnE '"go",[[:space:]]*"build",[[:space:]]*"-o",[[:space:]]*[a-zA-Z]' tests/ --include='*.go' 2>/dev/null |
 	grep -vE 'filepath\.Join\((env\.Dir|tmpDir|t\.TempDir)') || true)
 # Re-check the argument actually resolves under a temp dir.
@@ -147,7 +147,7 @@ fi
 # protoc-gen-es all copy the leading comment out of the .proto, so fixing the
 # .proto fixes the generated file on the next `make proto`.
 # ---------------------------------------------------------------------------
-note "4/7  SPDX license header on every source file"
+note "4/8  SPDX license header on every source file"
 SPDX_LINE='SPDX-License-Identifier: MIT'
 missing_spdx=""
 while IFS= read -r f; do
@@ -195,7 +195,7 @@ fi
 # authentication is distinguishable from no authentication at all. Until then
 # this check holds the line. See doc/adr/0006-transport-neutral-authorization.md.
 # ---------------------------------------------------------------------------
-note "5/7  DryRun on the management auth chain"
+note "5/8  DryRun on the management auth chain"
 dryrun_hits=$( (find internal/server -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE 'DryRun' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -227,7 +227,7 @@ fi
 # enforce. No compiler sees it, because both sides are string literals in
 # different languages.
 # ---------------------------------------------------------------------------
-note "6/7  Dashboard middleware config keys match the Go readers"
+note "6/8  Dashboard middleware config keys match the Go readers"
 mw_editors="ui/src/components/MiddlewareConfig"
 if [ -d "$mw_editors" ]; then
 	go_keys=$(grep -rhoE '\["[A-Za-z0-9_]+"\]' internal/middleware/ 2>/dev/null |
@@ -282,7 +282,7 @@ fi
 # Matched by content rather than by name, because the name is the part that
 # keeps changing. Executable *scripts* are text and do not match.
 # ---------------------------------------------------------------------------
-note "7/7  No compiled binaries tracked in git"
+note "7/8  No compiled binaries tracked in git"
 if ! command -v file >/dev/null 2>&1; then
 	# Without file(1) the pipeline below returns nothing and the check would
 	# report "ok" while inspecting exactly zero bytes. A gate that passes
@@ -307,6 +307,69 @@ if [ -n "$tracked_binaries" ]; then
 else
 	echo "  ok - no compiled executables under version control"
 fi
+# 8. A reputation score may only be read under a network-scoped identity.
+#
+# JA4+ is built from the TLS stack and the shape of the HTTP headers and reads no
+# address, connection or credential, so it identifies a *browser configuration*
+# and not a client. Every stock-Chrome user of one version and language shares
+# one fingerprint.
+#
+# The reputation blocker is attached to every route unconditionally and refuses
+# with 403 below a score of 2.0, so while it keyed on the bare fingerprint a
+# single patient attacker on an unmodified browser could drive that shared score
+# to zero and lock out every other user of that browser, everywhere -- with no
+# volume and nothing unusual about the traffic. telemetry.ReputationIDFor pairs
+# the class with the client's network so a refusal reaches one network instead of
+# one browser.
+#
+# Nothing in the type system distinguishes the two strings: both are a string,
+# and passing the wrong one compiles, runs, and silently restores the old blast
+# radius. Hence a grep. GetIPFingerprint is still the right call for telemetry,
+# correlation and display -- this only constrains what a *score* is looked up by.
+# ---------------------------------------------------------------------------
+# internal/api/security_threat_detector.go is exempt, deliberately. It reads by
+# raw IP, and it only ever *relaxes*: a high score discounts an already-computed
+# threat score so that busy offices and known proxies are not flagged for minor
+# oddities. Scoping it would change nothing, because a threat recorded without a
+# fingerprint is still stored under its bare address (ReputationIDFor returns the
+# address when the fingerprint is empty), so that lookup keeps finding exactly
+# what it found before.
+#
+# PerFingerprint and PerJA4H are exempt too. They are rate-limit key functions an
+# operator selects by name, so grouping every client of one browser into a shared
+# bucket is a choice that was made rather than a default nobody saw. The footgun
+# is real and it is theirs to point.
+#
+# Worth knowing separately: that call reads GetReputation's neutral 100 for an
+# unrecorded client, so "I have never seen you" grants the full discount, same as
+# "you have behaved perfectly". Tightening it would halve the detector's
+# effective threshold for every unknown client and re-tune detection on every
+# install, so it is not being changed as a side effect of this work.
+fi
+note "8/8  reputation reads use a network-scoped identity"
+# Checked by where the *class identity* is produced, not by what a variable is
+# called. An earlier version of this check allow-listed calls whose argument was
+# named repID, which a negative test defeated immediately: renaming the producer
+# while keeping the variable name sailed straight through. A grep cannot follow
+# dataflow, so it has to constrain something it can actually see -- here, that
+# the two functions returning a bare JA4+ class do not escape the package that
+# composes them into a scoped identity.
+rep_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
+	xargs -0 grep -nE 'telemetry\.(GetIPFingerprint|GetFingerprintHash)\(' 2>/dev/null |
+	drop_comment_hits |
+	grep -vE '^internal/telemetry/' |
+	grep -vE 'ratelimit\.go:[0-9]+:[[:space:]]*return telemetry\.GetFingerprintHash\(r\)$') || true)
+
+if [ -n "$rep_hits" ]; then
+	err "a bare browser-class fingerprint escaped internal/telemetry"
+	printf '%s\n' "$rep_hits"
+	printf '  Use telemetry.GetReputationID(r) (request path) or\n'
+	printf '  telemetry.ReputationIDFor(fingerprint, sourceIP) (recording path).\n'
+	printf '  JA4+ names a browser build, not a client: every stock-Chrome user of\n'
+	printf '  one version and language shares it, so anything that refuses,\n'
+	printf '  throttles or challenges on it hits all of them at once.\n'
+else
+	echo "  ok - the browser-class identity stays inside internal/telemetry"
 fi
 
 printf '\n'

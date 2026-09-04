@@ -318,11 +318,23 @@ func (r *GlobalRegistry) ConfigFileExists() bool {
 
 // EffectiveTrustCloudflare returns true if Cloudflare headers should be trusted,
 // checking the global configuration first and falling back to the environment variable.
+// trustCloudflareFromEnv resolves the environment fallback once.
+//
+// It used to run on every call: TrimSpace + ToLower on a getenv, which allocates.
+// EffectiveTrustCloudflare is on the request path — the metrics middleware and
+// the reputation identity both ask for it per request — and the fallback is
+// taken on any deployment that has not written a WAF config, which includes
+// every fresh install. An environment variable cannot change under a running
+// process, so reading it more than once was only ever a cost.
+var trustCloudflareFromEnv = sync.OnceValue(func() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("GATEON_TRUST_CLOUDFLARE_HEADERS")))
+	return v == "true" || v == "1" || v == "yes"
+})
+
 func EffectiveTrustCloudflare() bool {
 	gc := GetGlobalConfig()
 	if gc != nil && gc.Waf != nil {
 		return gc.Waf.TrustCloudflareHeaders
 	}
-	s := strings.TrimSpace(strings.ToLower(os.Getenv("GATEON_TRUST_CLOUDFLARE_HEADERS")))
-	return s == "true" || s == "1" || s == "yes"
+	return trustCloudflareFromEnv()
 }

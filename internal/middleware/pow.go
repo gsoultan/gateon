@@ -31,8 +31,11 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 				return
 			}
 
-			fingerprint := telemetry.GetIPFingerprint(r)
-			score := telemetry.GetReputationScore(fingerprint)
+			// Scoped to the client's network, not the browser class: a challenge
+			// served because someone else's score is bad is a false positive that
+			// costs every user of that browser a round trip.
+			repID := telemetry.GetReputationID(r)
+			score := telemetry.GetReputationScore(repID)
 
 			// If reputation is below threshold, require PoW.
 			if score < threshold {
@@ -75,7 +78,10 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	// by construction, which is safe in all three contexts at once, and stops
 	// echoing a client's own fingerprint back to it. Truncating to 8 bytes keeps
 	// the ID short; it identifies a challenge, it is not a secret.
-	fpSum := sha256.Sum256([]byte(telemetry.GetIPFingerprint(r)))
+	// Scoped rather than the bare fingerprint: the challenge id binds a challenge
+	// to a client, and a value every user of one browser shares binds it to all of
+	// them at once.
+	fpSum := sha256.Sum256([]byte(telemetry.GetReputationID(r)))
 	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), hex.EncodeToString(fpSum[:8]), salt)
 
 	w.Header().Set("X-Gateon-Pow-ID", challengeID)

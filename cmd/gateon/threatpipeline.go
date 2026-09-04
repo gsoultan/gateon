@@ -120,9 +120,15 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 		logger.L.LogInfo("incident auto-shun enabled (hard eBPF block for critical multi-signal incidents)")
 	}
 	return mitigation.New(cfg, mitigation.Deps{
-		Shun:    shun,
-		Degrade: telemetry.DecreaseReputation,
-		Mark:    telemetry.MarkIPMitigated,
+		Shun: shun,
+		// Compose the scoped identity here rather than inside the responder, so
+		// internal/security/mitigation stays free of a telemetry dependency and
+		// remains unit-testable without it.
+		Degrade: func(fingerprint, sourceIP string, penalty float64, reason string) {
+			telemetry.DecreaseReputation(
+				telemetry.ReputationIDFor(fingerprint, sourceIP), penalty, reason)
+		},
+		Mark: telemetry.MarkIPMitigated,
 		Log: func(action mitigation.Action, inc correlation.Incident, reason string) {
 			if action == mitigation.ActionNone || action == mitigation.ActionFlag {
 				return // avoid log spam for no-op/flag-only outcomes

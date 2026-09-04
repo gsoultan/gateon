@@ -65,13 +65,16 @@ var securityBufferPool = sync.Pool{
 func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fingerprint := telemetry.GetIPFingerprint(r)
-			// Whitelist localhost and management traffic from tarpitting
-			if httputil.IsLoopback(fingerprint) {
+			// IsLoopback was being handed a JA4+ fingerprint, which is never an
+			// address, so the loopback exemption never fired. Check the resolved
+			// client address, the same correction made in the reputation blocker.
+			if httputil.IsLoopback(telemetry.ClientIPOf(r)) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			reputation := telemetry.GetReputationScore(fingerprint)
+			// Scoped to the network: delaying every user of a browser because one
+			// of them behaved badly is a latency penalty applied to bystanders.
+			reputation := telemetry.GetReputationScore(telemetry.GetReputationID(r))
 			threatScore := 100.0 - reputation
 
 			if threatScore >= scoreThreshold {

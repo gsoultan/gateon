@@ -21,6 +21,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0008](./0008-response-inspection-must-control-its-own-encoding.md) | Response inspection must control its own content encoding | Accepted |
 | [0009](./0009-authenticated-ha-heartbeats.md) | Authenticated HA heartbeats and gossip | Accepted |
 | [0010](./0010-package-size-ratchet.md) | The package-size limit is a ratchet, not a wall | Accepted |
+| [0011](./0011-reputation-is-scoped-to-a-network.md) | A reputation score belongs to a browser on a network, not to a browser | Accepted |
 
 ## Conventions
 

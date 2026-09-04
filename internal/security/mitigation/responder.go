@@ -97,7 +97,7 @@ func (c Config) Normalize() Config {
 type Responder struct {
 	cfg     Config
 	shun    Shunner
-	degrade func(fingerprint string, penalty float64, reason string)
+	degrade func(fingerprint, sourceIP string, penalty float64, reason string)
 	mark    func(ip, reason string)
 	log     func(action Action, inc correlation.Incident, reason string)
 }
@@ -105,9 +105,14 @@ type Responder struct {
 // Deps are the injected effectors, kept as functions/interfaces so the responder
 // is unit-testable without telemetry/eBPF.
 type Deps struct {
-	Shun    Shunner                                                  // may be nil (no shunning available)
-	Degrade func(fingerprint string, penalty float64, reason string) // required for degrade/restrict
-	Mark    func(ip, reason string)                                  // optional: record mitigated IP
+	Shun Shunner // may be nil (no shunning available)
+	// Degrade applies a reputation penalty. It takes the source address as well
+	// as the fingerprint because a reputation score is scoped to a browser class
+	// *on a network* -- see telemetry.ReputationIDFor and ADR 0010. Passing the
+	// fingerprint alone would write a key nothing reads, and the penalty would
+	// silently do nothing.
+	Degrade func(fingerprint, sourceIP string, penalty float64, reason string)
+	Mark    func(ip, reason string) // optional: record mitigated IP
 	Log     func(action Action, inc correlation.Incident, reason string)
 }
 
@@ -178,11 +183,42 @@ func (r *Responder) Handle(inc correlation.Incident) Action {
 	}
 }
 
+// degradeRep penalises every network that took part in the incident.
+//
+// An incident can span many addresses -- that is what the correlation engine is
+// for, and a botnet sharing one fingerprint across a hundred hosts is the case it
+// exists to catch. Reputation is scoped per network (ADR 0010), so penalising
+// only inc.SourceIP would leave the other participants untouched while the
+// operator reads that the incident was mitigated.
+//
+// Penalising every *participant* is the safe way to keep the cross-address reach
+// that made JA4+ attractive in the first place: reach is derived from addresses
+// that actually appeared in the incident, never extended to bystanders who happen
+// to run the same browser.
 func (r *Responder) degradeRep(inc correlation.Incident, penalty float64) {
 	if r.degrade == nil || inc.Fingerprint == "" {
 		return
 	}
-	r.degrade(inc.Fingerprint, penalty, "correlated incident: "+strings.Join(inc.SignalTypes, ","))
+	reason := "correlated incident: " + strings.Join(inc.SignalTypes, ",")
+
+	seen := make(map[string]struct{}, len(inc.SourceIPs)+1)
+	for _, ip := range append([]string{inc.SourceIP}, inc.SourceIPs...) {
+		if ip == "" {
+			continue
+		}
+		if _, dup := seen[ip]; dup {
+			continue
+		}
+		seen[ip] = struct{}{}
+		r.degrade(inc.Fingerprint, ip, penalty, reason)
+	}
+
+	// An incident with no address at all still deserves the penalty; the
+	// identity degrades to the fingerprint's own unknown-network bucket rather
+	// than being dropped.
+	if len(seen) == 0 {
+		r.degrade(inc.Fingerprint, "", penalty, reason)
+	}
 }
 
 func (r *Responder) emit(a Action, inc correlation.Incident, reason string) {

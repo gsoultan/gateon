@@ -221,9 +221,13 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				return
 			}
 
-			// Adaptive Rate Limiting based on Reputation
-			fpHash := telemetry.GetFingerprintHash(r)
-			reputation := telemetry.GetReputation(fpHash)
+			// Adaptive Rate Limiting based on Reputation.
+			//
+			// Scoped to the client's network. GetFingerprintHash is GetJA4Plus,
+			// so this used to tighten the limit for every client running the same
+			// browser as one bad actor -- a throttle applied to bystanders, and a
+			// cheaper attack than exhausting the limit honestly.
+			reputation := telemetry.GetReputation(telemetry.GetReputationID(r))
 
 			limiter := rl.getLimiter(key, reputation)
 			if !limiter.Allow() {
@@ -342,9 +346,13 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 				return
 			}
 
-			// Adaptive logic for Redis
-			fpHash := telemetry.GetFingerprintHash(r)
-			reputation := telemetry.GetReputation(fpHash)
+			// Adaptive logic for Redis.
+			//
+			// Scoped to the client's network. GetFingerprintHash is GetJA4Plus,
+			// so this used to tighten the limit for every client running the same
+			// browser as one bad actor -- a throttle applied to bystanders, and a
+			// cheaper attack than exhausting the limit honestly.
+			reputation := telemetry.GetReputation(telemetry.GetReputationID(r))
 			adjLimit := int(float64(rl.rate+rl.burst) * (reputation * 0.01))
 			if adjLimit < 1 {
 				adjLimit = 1

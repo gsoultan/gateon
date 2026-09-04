@@ -39,8 +39,8 @@ func Deception(cfg DeceptionConfig) Middleware {
 					if cfg.EnableTrollResponse {
 						// Only troll if reputation is significantly degraded.
 						// High-reputation clients (e.g. mistaken browser reuse) should get a standard error.
-						fingerprint := telemetry.GetIPFingerprint(r)
-						reputation := telemetry.GetReputationScore(fingerprint)
+						repID := telemetry.GetReputationID(r)
+						reputation := telemetry.GetReputationScore(repID)
 						if reputation < 50 {
 							serveTrollResponse(w)
 							return
@@ -56,8 +56,8 @@ func Deception(cfg DeceptionConfig) Middleware {
 				if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
 					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID, "deception", "CRITICAL", actionBlocked)
 					if cfg.EnableTrollResponse {
-						fingerprint := telemetry.GetIPFingerprint(r)
-						reputation := telemetry.GetReputationScore(fingerprint)
+						repID := telemetry.GetReputationID(r)
+						reputation := telemetry.GetReputationScore(repID)
 						if reputation < 50 {
 							serveTrollResponse(w)
 							return
@@ -73,8 +73,8 @@ func Deception(cfg DeceptionConfig) Middleware {
 				if link != "" && path == link {
 					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID, "deception", "CRITICAL", actionBlocked)
 					if cfg.EnableTrollResponse {
-						fingerprint := telemetry.GetIPFingerprint(r)
-						reputation := telemetry.GetReputationScore(fingerprint)
+						repID := telemetry.GetReputationID(r)
+						reputation := telemetry.GetReputationScore(repID)
 						if reputation < 50 {
 							serveTrollResponse(w)
 							return
