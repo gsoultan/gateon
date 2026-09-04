@@ -19,17 +19,21 @@
 # 65.1% to 60.5%. That is the environment, not a regression. CI sets the
 # DSN, which is another reason the baseline comes from CI.
 #
-# internal/resource is pinned at its low-water mark on purpose, and must
-# not be tightened from a green run. Its Governor reads real memory and
-# CPU through gopsutil, and the branches that fire scavenge hooks only
-# execute above 80% and 90%, so how much of it runs depends on how loaded
-# the runner happens to be. Two CI runs on the same commit measured 80.3%
-# and 63.2%. Its one test compounds this: it starts the monitor goroutine
-# and sleeps 100ms to "wait for one tick" against a five-second ticker,
-# so the tick never arrives and what gets covered is whatever the
-# scheduler managed before the test returned. Making this deterministic
-# means injecting the stats source; until then the floor is the figure
-# that holds on the worst runner.
+# A floor is only worth as much as the measurement is repeatable, and a
+# package that samples the machine does not measure the same thing twice.
+# internal/resource was the example: its Governor read real memory and CPU
+# through gopsutil, and the branches that fire scavenge hooks only execute
+# above 80% and 90%, so how much of it ran depended on how loaded the
+# runner was. Two CI runs on one commit measured 80.3% and 63.2%, and a
+# floor taken from either would have failed at random. Its one test made
+# that worse, sleeping 100ms to "wait for one tick" against a five-second
+# ticker.
+#
+# It was fixed by injecting the sampler rather than by lowering the floor,
+# which is the order to try: a number that moves on its own is usually a
+# testability problem wearing a coverage problem's clothes. It now reads
+# 90.9% on every run. If another package starts oscillating, look for what
+# it samples before pinning it at its low-water mark.
 #
 # Generate this from CI, not from a laptop. internal/ebpf and
 # internal/phantom carry build-tagged files -- six and two -- so off Linux
@@ -41,10 +45,10 @@
 #
 # This list used to name internal/logger and internal/resource too. Neither
 # has a single build-tagged file. logger simply does not diverge -- 38.8%
-# here against 39.4% in CI, inside the tolerance -- and resource diverges
-# for the unrelated reason given above. Naming the wrong cause is worse than
-# naming none, because it sends the next person looking for build tags
-# that were never there.
+# here against 39.4% in CI, inside the tolerance -- and resource diverged for
+# the unrelated reason given above, until that was fixed. Naming the wrong
+# cause is worse than naming none, because it sends the next person looking
+# for build tags that were never there.
 #
 # Regenerate with:
 #   go test -cover ./... | go run ./scripts/checkcoverage -update
