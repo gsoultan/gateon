@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -24,13 +25,27 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
-	fpID := telemetry.GetIPFingerprint(r)
-	// Never block localhost or management traffic
-	if fpID == "127.0.0.1" || fpID == "::1" || fpID == "localhost" {
+	// Never block localhost or management traffic.
+	//
+	// This used to compare the *fingerprint* to "127.0.0.1", which was dead code
+	// wherever it mattered: the fingerprint is JA4+ whenever one is available,
+	// and JA4+ is always available because JA4H is derived from headers alone and
+	// needs no TLS. The literal address only ever appeared here on the
+	// fingerprint's own last-resort fallback, so loopback was in practice not
+	// exempt at all. Comparing the resolved client address instead makes the
+	// guard mean what it says.
+	clientIP := telemetry.ClientIPOf(r)
+	if httputil.IsLoopback(clientIP) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
-	reputation := telemetry.GetReputationScore(fpID)
+
+	// The identity a refusal may act on is the browser class scoped to the
+	// client's network, never the class alone. See telemetry.ReputationIDFor:
+	// JA4+ describes the software making the request, not the party making it,
+	// so a 403 keyed on it refuses every user of that browser everywhere.
+	repID := telemetry.GetReputationID(r)
+	reputation := telemetry.GetReputationScore(repID)
 
 	// Cache reputation in request state for downstream middlewares (like WAF)
 	if rs := request.GetRequestState(r); rs != nil {
@@ -50,14 +65,14 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"route", h.routeID,
 				"request_id", GetRequestID(r),
 				"reputation", reputation,
-				"fingerprint", fpID)
+				"reputation_id", repID)
 
 			telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-				ID:          fmt.Sprintf("rep-block-%s-%s", h.routeID, fpID),
+				ID:          fmt.Sprintf("rep-block-%s-%s", h.routeID, repID),
 				Type:        "reputation_block",
-				SourceIP:    request.GetClientIP(r, true),
+				SourceIP:    clientIP,
 				Score:       100 - reputation,
-				Details:     fmt.Sprintf("Blocked due to low reputation: %.2f (fingerprint: %s)", reputation, fpID),
+				Details:     fmt.Sprintf("Blocked due to low reputation: %.2f (identity: %s)", reputation, repID),
 				Time:        time.Now(),
 				RouteID:     h.routeID,
 				RequestURI:  r.URL.Path,

@@ -34,8 +34,10 @@ func newTestResponder(cfg Config, shun Shunner) (*Responder, *[]string) {
 	var degraded []string
 	r := New(cfg, Deps{
 		Shun: shun,
-		Degrade: func(fp string, _ float64, _ string) {
-			degraded = append(degraded, fp)
+		Degrade: func(fp, sourceIP string, _ float64, _ string) {
+			// Record the pair the responder now penalises, so a test asserting on
+			// the fingerprint alone cannot pass while the network scope is wrong.
+			degraded = append(degraded, fp+"@"+sourceIP)
 		},
 	})
 	return r, &degraded

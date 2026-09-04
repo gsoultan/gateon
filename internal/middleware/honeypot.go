@@ -24,8 +24,83 @@ import (
 
 var (
 	honeypotBlocklist = make(map[string]time.Time)
+	honeypotStrikes   = make(map[string]honeypotStrike)
 	blocklistMu       sync.RWMutex
 )
+
+// honeypotStrike counts how many times one address has reached a trap, and when
+// it last did, so a ban can escalate rather than starting at its maximum.
+type honeypotStrike struct {
+	count int
+	last  time.Time
+}
+
+// honeypotBanLadder is how long an address is banned for on its 1st, 2nd, 3rd
+// and subsequent trap hits.
+//
+// A single hit used to cost 24 hours. The trap paths are chosen so that no
+// legitimate client requests them (/.env, /.git, /.aws ...), which makes one hit
+// strong evidence about the *request* — but the ban lands on an address, and an
+// address is shared. Behind CGNAT or a corporate egress, one security scan the
+// customer ran themselves, one compromised laptop, or one over-eager crawler
+// took the whole office off the site until the next day.
+//
+// Escalation is the corroboration. A one-off costs fifteen minutes, which is
+// unremarkable if it was a mistake and useless to an attacker; anyone who comes
+// back reaches the full day quickly, and repetition over time is exactly the
+// independent evidence a single request cannot supply. This is the same
+// principle internal/security/mitigation applies to correlated incidents:
+// escalate on repetition rather than act at maximum severity on first contact.
+var honeypotBanLadder = []time.Duration{
+	15 * time.Minute,
+	1 * time.Hour,
+	6 * time.Hour,
+	24 * time.Hour,
+}
+
+// honeypotStrikeWindow is how long a strike counts toward escalation. An address
+// that stays away for a day starts again at the bottom of the ladder, so a
+// dynamic address reassigned to someone else does not inherit a stranger's
+// record.
+const honeypotStrikeWindow = 24 * time.Hour
+
+// honeypotBanFor records a strike for clientIP and returns how long it should be
+// banned. Callers hold no lock; this takes it.
+func honeypotBanFor(clientIP string, now time.Time) time.Duration {
+	blocklistMu.Lock()
+	defer blocklistMu.Unlock()
+
+	st := honeypotStrikes[clientIP]
+	if now.Sub(st.last) > honeypotStrikeWindow {
+		st.count = 0
+	}
+	st.count++
+	st.last = now
+
+	// Bounded by the same cap as the blocklist and swept the same way: this map
+	// is keyed by attacker-supplied addresses, so it needs a ceiling for the
+	// same reason.
+	if _, exists := honeypotStrikes[clientIP]; !exists && len(honeypotStrikes) >= maxHoneypotBlocklist {
+		for ip, s := range honeypotStrikes {
+			if now.Sub(s.last) > honeypotStrikeWindow {
+				delete(honeypotStrikes, ip)
+			}
+		}
+		if len(honeypotStrikes) >= maxHoneypotBlocklist {
+			// Cannot record the strike, so escalation is unavailable. Fall back to
+			// the top of the ladder rather than the bottom: under a scan large
+			// enough to fill this map, being generous to each new address is how
+			// the trap stops working at exactly the moment it is needed.
+			return honeypotBanLadder[len(honeypotBanLadder)-1]
+		}
+	}
+	honeypotStrikes[clientIP] = st
+
+	if st.count > len(honeypotBanLadder) {
+		return honeypotBanLadder[len(honeypotBanLadder)-1]
+	}
+	return honeypotBanLadder[st.count-1]
+}
 
 // maxHoneypotBlocklist caps the blocklist. Entries are keyed by client IP and
 // otherwise only removed when that same address returns after its ban expires,
@@ -126,7 +201,7 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 			// Check for breadcrumb triggers first
 			if strings.HasPrefix(path, "/_gateon_trap_") {
 				recordHoneypotThreat(r, "dynamic_breadcrumb")
-				blockHoneypotIP(clientIP, time.Now().Add(24*time.Hour))
+				blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
@@ -138,7 +213,7 @@ func HoneypotGlobal(globalStore config.GlobalConfigStore) Middleware {
 				// Exact match or prefix match for directories
 				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
 					recordHoneypotThreat(r, trapPath)
-					blockHoneypotIP(clientIP, time.Now().Add(24*time.Hour))
+					blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
 
 					// Return 403 Forbidden to the attacker
 					http.Error(w, "Forbidden", http.StatusForbidden)
@@ -253,7 +328,7 @@ func Honeypot(cfg HoneypotConfig) Middleware {
 				// Exact match or prefix match for directories
 				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
 					recordHoneypotThreat(r, trapPath)
-					blockHoneypotIP(clientIP, time.Now().Add(24*time.Hour))
+					blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
 
 					// Return 403 Forbidden to the attacker
 					http.Error(w, "Forbidden", http.StatusForbidden)

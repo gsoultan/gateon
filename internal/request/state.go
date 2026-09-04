@@ -34,8 +34,20 @@ type RequestState struct {
 	JA4              string
 	JA4H             string
 	JA4Plus          string
-	Recommendation   string
-	Reputation       float64
+
+	// ResolvedClientIP is the trust-aware client address, memoised. Resolving it
+	// walks the forwarding headers and consults the trust setting, and several
+	// middlewares on one request need it.
+	ResolvedClientIP string
+
+	// ReputationID is the identity a reputation score is recorded under and
+	// enforced against: the JA4+ class scoped to the client's network. It is
+	// cached here because several middlewares on one request ask for it (the
+	// reputation blocker, proof-of-work, deception, the tarpit) and building it
+	// allocates. See telemetry.ReputationIDFor for why it is a pair.
+	ReputationID   string
+	Recommendation string
+	Reputation     float64
 	// Breakdown timings (nanoseconds for precision)
 	TEntrypoint      int64
 	TRoute           int64
@@ -88,6 +100,8 @@ func (rs *RequestState) Reset() {
 	rs.JA4 = ""
 	rs.JA4H = ""
 	rs.JA4Plus = ""
+	rs.ResolvedClientIP = ""
+	rs.ReputationID = ""
 	rs.Recommendation = ""
 	rs.Reputation = 0
 	rs.TEntrypoint = 0
