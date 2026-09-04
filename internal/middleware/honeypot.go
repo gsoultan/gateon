@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -137,6 +138,14 @@ func defaultHoneypotPaths() []string {
 // The request itself is still refused; only the durable ban is skipped.
 func blockHoneypotIP(clientIP string, until time.Time) {
 	if httputil.IsLoopback(clientIP) {
+		return
+	}
+	// An allowlisted source is not banned. A trap hit from the customer's own
+	// scanner, or from a monitoring vendor they told us about, is exactly the
+	// case GATEON_MITIGATION_ALLOWLIST exists for -- and a ban lands on an
+	// address, so without this it takes out everything sharing that egress.
+	// The security event is still recorded; only the ban is skipped.
+	if mitigation.IsAllowlisted(clientIP) {
 		return
 	}
 

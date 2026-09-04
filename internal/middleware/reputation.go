@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -35,7 +36,10 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// exempt at all. Comparing the resolved client address instead makes the
 	// guard mean what it says.
 	clientIP := telemetry.ClientIPOf(r)
-	if httputil.IsLoopback(clientIP) {
+	if httputil.IsLoopback(clientIP) || mitigation.IsAllowlisted(clientIP) {
+		// The allowlist exempts enforcement, never observation: the threat is
+		// still recorded downstream and still feeds correlation. An operator who
+		// allowlists their own pentest team wants to see what it found.
 		h.next.ServeHTTP(w, r)
 		return
 	}

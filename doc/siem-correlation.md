@@ -151,7 +151,43 @@ escalating responses so legitimate heavy traffic is not knocked offline:
 |----------|---------|-------------|
 | `GATEON_MITIGATION_ENABLED` | `true` | Master switch for active mitigation (flag-only when false). |
 | `GATEON_MITIGATION_AUTO_SHUN` | `false` | Enable hard eBPF shunning for critical multi-signal incidents (requires eBPF privileges). |
-| `GATEON_MITIGATION_ALLOWLIST` | _(unset)_ | Comma-separated CIDRs/IPs that must never be actively mitigated. |
+| `GATEON_MITIGATION_ALLOWLIST` | _(unset)_ | Comma-separated CIDRs/IPs that must never be actively mitigated. See below — it covers the whole gateway, not just correlated incidents. |
+
+### What the allowlist covers
+
+Sources matching `GATEON_MITIGATION_ALLOWLIST` are exempt from **every active
+mitigation gateon applies**:
+
+| | |
+| :-- | :-- |
+| Reputation blocker | no 403, whatever the score |
+| Honeypot | trap hits are recorded, the address is not banned |
+| Tarpit | no progressive delay |
+| Proof-of-work | no challenge |
+| Correlated incidents | no reputation degradation, no eBPF shun |
+
+Accepts both CIDRs and bare addresses (`203.0.113.0/24, 198.51.100.7`), IPv4 and
+IPv6. A v4-mapped IPv6 address matches its IPv4 prefix, because it is the same
+host arriving over a dual-stack listener.
+
+**It exempts enforcement, never observation.** An allowlisted source still has its
+threats recorded, still appears in the dashboard and still feeds correlation. That
+is deliberate: an operator allowlists their own pentest team to stop it being
+blocked, not to stop seeing what it found, and a control that hid the evidence
+along with the block would be worse than no allowlist at all.
+
+Use it for the sources whose refusal is a self-inflicted outage: your office
+egress, your monitoring vendor, your own security team's scanner, a partner
+integration that legitimately looks like a bot. Do not use it to silence a false
+positive — that is what an app profile scope or a WAF exception is for
+(`doc/waf-app-profiles.md`), and the allowlist would turn off every other control
+for that source at the same time.
+
+Note that correlated-incident handling additionally never mitigates loopback,
+RFC1918 and link-local sources. That broader rule is deliberately **not** applied
+to the request path: extending it there would silently disable the reputation
+blocker and the honeypot on any deployment whose proxy does not set forwarding
+headers correctly, because every client would resolve to a private address.
 
 ## Security & resource notes
 

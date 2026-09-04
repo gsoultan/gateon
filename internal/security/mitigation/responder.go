@@ -237,7 +237,19 @@ func (r *Responder) isAllowlisted(ip string) bool {
 	}
 	// Never mitigate loopback/private/link-local sources — these are operators,
 	// health checks, sidecars, and internal mesh traffic.
+	//
+	// Deliberately not shared with the request-path enforcement sites. Extending
+	// "never mitigate any RFC1918 source" to them would silently disable the
+	// reputation blocker and the honeypot on any deployment whose proxy does not
+	// set forwarding headers correctly, because every client would resolve to a
+	// private address. Correlated incidents arrive with an address the pipeline
+	// has already attributed; a request has whatever the hop in front supplied.
 	if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() {
+		return true
+	}
+	// The process-wide list, so a Responder built without its own copy still
+	// honours what the operator configured.
+	if IsAllowlisted(ip) {
 		return true
 	}
 	for _, p := range r.cfg.Allowlist {
