@@ -102,6 +102,35 @@ test:
 test-race:
 	go test -race ./...
 
+## test-fp: measure the WAF's false-positive rate against the benign corpus.
+##          Replays internal/middleware/testdata/benign/*.jsonl — traffic ordinary
+##          applications serve — at paranoia 1 and 2 and fails on any refusal that
+##          is not recorded.
+##
+##          Why this exists as its own target: the attack corpus proves the WAF
+##          blocks attacks, and on its own that number is meaningless, because a
+##          WAF that refuses everything scores perfectly on it. The control used to
+##          be eleven hand-written cases, which cannot tell a 0.01% false-positive
+##          rate from a 5% one — and 5% of a real site's traffic is an outage.
+##
+##          The gate ratchets rather than demanding zero on day one. Refusals that
+##          exist today carry a known_fp entry with a written reason; the build
+##          fails on any NEW one, and also when a recorded one starts passing, so a
+##          fix gets promoted instead of sitting in the file forever.
+##
+##          Prints the rate at each paranoia level; full log in dist/fp.txt.
+##
+##          Not a pipeline: `go test | grep` returns grep's exit status, so the
+##          target would report success on a red gate. The status is captured
+##          before anything filters the output.
+test-fp:
+	@mkdir -p dist
+	@go test ./internal/middleware/ -run 'TestWAFFalsePositives|TestBenignCorpus' -v \
+		> dist/fp.txt 2>&1; \
+		status=$$?; \
+		grep -E 'corpus at PL|FALSE POSITIVE|RECORDED FALSE|^(ok|FAIL)' dist/fp.txt || true; \
+		exit $$status
+
 ## bench: run benchmarks with allocation tracking, sampled for benchstat.
 ##        Writes dist/bench.txt; compare two runs with
 ##          go run golang.org/x/perf/cmd/benchstat@latest old.txt new.txt

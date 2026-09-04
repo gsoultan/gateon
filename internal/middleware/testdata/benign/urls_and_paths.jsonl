@@ -1,0 +1,50 @@
+# URLs in parameters, redirect targets, and file paths.
+# This is where the off-origin and traversal rules live, so it is the category
+# most likely to produce a refusal that looks like a login loop rather than a
+# block. Origins are declared for this corpus (see corpusHost) so those rules are
+# armed rather than silently inert.
+{"name": "relative redirect", "path": "/login?next=%2Fdashboard", "note": "the single most common redirect parameter on the web"}
+{"name": "relative redirect deep", "path": "/login?next=%2Fdashboard%2Fsettings%2Fbilling", "note": "a deep return path after login"}
+{"name": "relative redirect with query", "path": "/login?next=%2Fsearch%3Fq%3Dgateway%26page%3D2", "note": "a return path that itself carries a query string"}
+{"name": "relative redirect with fragment", "path": "/login?next=%2Fdocs%23installation", "note": "a return path with an anchor"}
+{"name": "same origin absolute redirect", "path": "/login?next=https%3A%2F%2Fapp.example.com%2Fdashboard", "note": "an absolute URL back to this same origin; must pass or SSO breaks"}
+{"name": "same origin oauth return", "path": "/oauth/authorize?client_id=gateway-ui&redirect_uri=https%3A%2F%2Fapp.example.com%2Foauth%2Fcallback&response_type=code&scope=openid+profile+email&state=8f3a2b1c&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256", "note": "a full OAuth 2.1 PKCE authorize request to this origin"}
+{"name": "dash path segment", "path": "/redirect?next=https%3A%2F%2Fapp.example.com%2Fdash", "note": "gwaf rule 4010 fires on a path segment named like a shell; /dash is an ordinary dashboard link and this is a known upstream false positive", "known_fp": {"1": "gwaf rule 4010 (command injection, structural) matches a URL path segment named like a shell, so /dash blocks while /dashboard passes. Recorded upstream in mem:gwaf_v040; the fix belongs in gwaf rather than an exception here, because every gwaf consumer has it.", "2": "gwaf rule 4010 (command injection, structural) matches a URL path segment named like a shell, so /dash blocks while /dashboard passes. Recorded upstream in mem:gwaf_v040; the fix belongs in gwaf rather than an exception here, because every gwaf consumer has it."}}
+{"name": "dashboard path segment", "path": "/redirect?next=https%3A%2F%2Fapp.example.com%2Fdashboard", "note": "the /dashboard control for the /dash case above"}
+{"name": "sh path segment", "path": "/redirect?next=https%3A%2F%2Fapp.example.com%2Fsh", "note": "a two-letter route; short routes are common in URL shorteners", "known_fp": {"1": "same gwaf rule 4010 defect as 'dash path segment': a two-letter route whose name collides with a shell binary.", "2": "same gwaf rule 4010 defect as 'dash path segment': a two-letter route whose name collides with a shell binary."}}
+{"name": "docs link with anchor", "path": "/go?to=%2Fdocs%2Fconfiguration%23tls-options", "note": "an internal doc link through a redirector"}
+{"name": "file path in param", "path": "/download?file=reports%2F2026%2Fq3%2Fsummary.pdf", "note": "a relative file path in a download parameter"}
+{"name": "filename with dots", "path": "/files/report.2026.q3.final.pdf", "note": "multiple dots in a filename"}
+{"name": "filename with spaces", "path": "/files/Quarterly%20Report%20Q3%202026.pdf", "note": "encoded spaces in a filename"}
+{"name": "filename with parentheses", "path": "/files/invoice%20(2).pdf", "note": "the duplicate-download naming every browser produces"}
+{"name": "filename with plus", "path": "/files/c%2B%2B-primer.pdf", "note": "a C++ book; encoded plus signs in a filename"}
+{"name": "filename with hash", "path": "/files/notes%20%231.md", "note": "an encoded hash inside a filename"}
+{"name": "filename with ampersand", "path": "/files/terms%20%26%20conditions.pdf", "note": "an ampersand in a document title"}
+{"name": "filename with comma", "path": "/files/Doe%2C%20Jane%20-%20CV.pdf", "note": "surname-first CV naming"}
+{"name": "filename with unicode", "path": "/files/%C3%9Cbersicht-2026.xlsx", "note": "a German filename with an umlaut"}
+{"name": "dotfile asset", "path": "/assets/.well-known-config.json", "note": "a leading dot on a legitimate asset"}
+{"name": "path with double slash in query", "path": "/preview?url=https%3A%2F%2Fexample.com%2Fa%2F%2Fb", "note": "a doubled slash inside an encoded URL value"}
+{"name": "path with encoded dot segment in text", "path": "/search?q=use+..+to+go+up+a+directory", "note": "prose explaining relative paths; the words, not a traversal"}
+{"name": "version path with v prefix", "path": "/api/v1.2.3/status", "note": "a dotted version inside a path segment"}
+{"name": "path with encoded colon", "path": "/repos/acme%2Fgateway/refs/tags%2Fv1.24.0", "note": "encoded slashes inside a path segment, as git forges use"}
+{"name": "path with at sign", "path": "/users/@janedoe", "note": "at-prefixed handles, as Mastodon and GitHub use"}
+{"name": "path with tilde", "path": "/~jane/public_html/index.html", "note": "classic tilde user directory, still served by universities"}
+{"name": "path with parentheses", "path": "/wiki/Gateway_(computing)", "note": "Wikipedia-style disambiguation parentheses"}
+{"name": "path with apostrophe", "path": "/wiki/O%27Brien", "note": "an apostrophe in an article title"}
+{"name": "path with exclamation", "path": "/blog/it-works!", "note": "an exclamation mark in a slug"}
+{"name": "path with comma", "path": "/compare/gateway,proxy,loadbalancer", "note": "comma-separated comparison slugs"}
+{"name": "path with semicolon matrix param", "path": "/maps/route;mode=transit;depart=now", "note": "RFC 3986 matrix parameters, used by JAX-RS and older mapping APIs"}
+{"name": "url in param http scheme", "path": "/preview?url=http%3A%2F%2Fexample.com%2Farticle", "note": "a link preview service given an http URL, which is its entire purpose"}
+{"name": "url in param with port", "path": "/preview?url=https%3A%2F%2Fexample.com%3A8443%2Fstatus", "note": "a URL with an explicit port"}
+{"name": "url in param with credentials free userinfo", "path": "/preview?url=https%3A%2F%2Fdocs.example.com%2Fguide%3Futm_source%3Dnewsletter%26utm_medium%3Demail", "note": "a tracked marketing URL"}
+{"name": "rss feed url", "path": "/subscribe?feed=https%3A%2F%2Fblog.example.com%2Ffeed.xml", "note": "an RSS reader adding a feed"}
+{"name": "webhook target url", "method": "POST", "path": "/api/v1/webhooks", "headers": {"Content-Type": "application/json"}, "body": "{\"url\":\"https://hooks.partner.example/ingest/9f8e7d\",\"events\":[\"order.created\"]}", "note": "registering a webhook is byte-identical to SSRF; SSRFParamRule is opt-in for exactly this reason"}
+{"name": "avatar import url", "method": "POST", "path": "/api/v1/profile/avatar", "headers": {"Content-Type": "application/json"}, "body": "{\"import_from\":\"https://cdn.partner.example/avatars/40385.png\"}", "note": "importing an avatar by URL, a documented product feature"}
+{"name": "sitemap submit url", "method": "POST", "path": "/api/v1/sitemaps", "headers": {"Content-Type": "application/json"}, "body": "{\"url\":\"https://app.example.com/sitemap.xml\"}", "note": "submitting a same-origin sitemap"}
+{"name": "canonical link header", "path": "/blog/post", "headers": {"Link": "<https://app.example.com/blog/post>; rel=\"canonical\""}, "note": "a Link header carrying a URL in angle brackets"}
+{"name": "referer from search engine", "path": "/products", "headers": {"Referer": "https://www.google.com/search?q=gateway+proxy&oq=gateway+proxy&sourceid=chrome&ie=UTF-8"}, "note": "the Referer a search-engine visitor arrives with"}
+{"name": "referer from own origin", "path": "/checkout", "headers": {"Referer": "https://app.example.com/cart"}, "note": "same-origin navigation Referer"}
+{"name": "origin header own site", "method": "POST", "path": "/api/v1/cart", "headers": {"Origin": "https://app.example.com", "Content-Type": "application/json"}, "body": "{\"sku\":\"AB-1234\",\"qty\":1}", "note": "a same-origin XHR carrying Origin"}
+{"name": "utm parameters", "path": "/landing?utm_source=newsletter&utm_medium=email&utm_campaign=autumn_2026&utm_content=cta_top&gclid=Cj0KCQjw1a2bAhCUARIsA", "note": "a full marketing attribution query string"}
+{"name": "facebook click id", "path": "/landing?fbclid=IwAR2xYzAbCdEfGhIjKlMnOpQrStUvWxYz0123456789", "note": "Facebook appends this to outbound links automatically"}
+{"name": "next path is a full app route", "path": "/auth/callback?code=4%2F0AY0e-g7abcdefgHIJKLmnop&scope=openid%20email&state=%2Fprojects%2F42%2Fsettings", "note": "an OAuth callback whose state carries a return path with slashes"}

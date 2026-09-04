@@ -66,6 +66,39 @@ type wafObservation struct {
 	routeID  string
 	cfg      WAFConfig
 	repScore float64
+
+	// phase names which side of the proxy produced this decision, so an
+	// operator reading the would-block counter can tell an inbound refusal from
+	// a data-leak refusal on the way out. The two have completely different
+	// remedies and averaging them together hides which one is happening.
+	phase string
+}
+
+// WAF decision phases, used as a metric label.
+const (
+	wafPhaseRequest  = "request"
+	wafPhaseResponse = "response"
+)
+
+// wouldHaveBlocked reports whether an audit-only decision would have refused the
+// request had the WAF been enforcing.
+//
+// It reads Reason rather than the verdict because gwaf overwrites the verdict in
+// detection-only mode -- `if tx.waf.cfg.mode == DetectionOnly { d.verdict =
+// VerdictAllow }`, transaction.go -- while leaving intact the reason that
+// produced it. In audit-only the verdict is therefore always Allow and carries
+// no information at all; the reason is the only surviving record of what the
+// engine actually concluded, which is why the counter cannot simply read
+// Blocked().
+//
+// ReasonNoMatch is the sole value meaning nothing terminal happened. A rule
+// whose action is rules.Log -- the whole inbound data-leak corpus, which logs
+// and by design never blocks (mem:dlp) -- surfaces as a match rather than as a
+// reason, so it is not counted here. TestWouldBlockIgnoresLogOnlyRules pins
+// that, because a counter that inflated itself with rules that never block
+// would tell an operator to expect an outage that was never going to happen.
+func wouldHaveBlocked(d gwaf.Decision) bool {
+	return d.Reason() != gwaf.ReasonNoMatch
 }
 
 // recordWAFDecision turns a decision into telemetry, metrics and a threat
@@ -77,6 +110,19 @@ func recordWAFDecision(o wafObservation) {
 		// recording one per request is how a telemetry store fills up with
 		// entries nobody can act on.
 		return
+	}
+
+	if o.cfg.AuditOnly && wouldHaveBlocked(o.decision) {
+		// Audit-only: record the refusal that did not happen. This is the number
+		// an operator needs before enforcing, and the one nothing reported.
+		telemetry.MiddlewareWAFWouldBlockTotal.
+			WithLabelValues(o.routeID, o.decision.RuleID().String(), o.phaseOrRequest()).Inc()
+		logger.L.LogInfo("WAF would have blocked a request (audit-only)",
+			"rule", o.decision.RuleID(),
+			"reason", o.decision.Reason(),
+			"score", o.decision.Score(),
+			"phase", o.phaseOrRequest(),
+			"route", o.routeID)
 	}
 
 	if blocked {
@@ -303,4 +349,16 @@ func wafRecommendation(d gwaf.Decision, matches []gwaf.Match) string {
 	default:
 		return fmt.Sprintf("Rule %s (%s confidence) fired. If this is a false positive, scope an exception to the path and field shown rather than turning off the category.", d.RuleID(), d.Confidence())
 	}
+}
+
+// phaseOrRequest defaults an unset phase to the request side.
+//
+// Every construction site sets it, but a metric label that can silently become
+// the empty string is a series an operator cannot read, and defaulting is
+// cheaper than a panic on a telemetry path.
+func (o wafObservation) phaseOrRequest() string {
+	if o.phase == "" {
+		return wafPhaseRequest
+	}
+	return o.phase
 }

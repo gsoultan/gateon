@@ -143,6 +143,24 @@ var MiddlewareWAFUninspectedResponsesTotal = promauto.NewCounterVec(prometheus.C
 	Help: "Responses whose body the WAF could not inspect, by route and reason.",
 }, []string{"route", "reason"})
 
+// MiddlewareWAFWouldBlockTotal counts requests an audit-only WAF declined to
+// refuse but would have refused if it were enforcing.
+//
+// This is what makes audit-only usable as a measurement rather than a switch.
+// An operator turning the WAF on for the first time needs to know what it would
+// cost them before it costs them, and until this counter existed there was no
+// way to find out: audit-only produced a 200 and an entry in a threat list, and
+// nothing anywhere said "this many real users would have seen a block page".
+// Deployments therefore either enforced blind or left detection on forever.
+//
+// Cardinality is bounded the same way MiddlewareWAFBlockedTotal is — routes are
+// configuration and rule ids come from a fixed ruleset — with phase adding a
+// constant factor of two.
+var MiddlewareWAFWouldBlockTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_waf_would_block_total",
+	Help: "Total requests an audit-only WAF would have blocked if enforcing.",
+}, []string{"route", "rule_id", "phase"})
+
 // MiddlewareFastPathBlockedTotal counts requests blocked by fast-path security checks.
 var MiddlewareFastPathBlockedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_fast_path_blocked_total",

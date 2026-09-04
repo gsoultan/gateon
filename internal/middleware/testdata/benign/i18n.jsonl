@@ -1,0 +1,48 @@
+# Non-English and non-ASCII traffic.
+# Rules written against ASCII payloads tend to treat anything else as suspicious
+# encoding. Multi-byte UTF-8 percent-encodes into long %XX runs that look like
+# obfuscation, and normalisation forms that differ byte-wise are the same word to
+# a human. Refusing these locks out entire markets, which is the most expensive
+# false positive a gateway can produce.
+{"name": "japanese search", "path": "/search?q=%E6%97%A5%E6%9C%AC%E8%AA%9E%E3%81%AE%E6%A4%9C%E7%B4%A2", "note": "Japanese search query, percent-encoded UTF-8"}
+{"name": "japanese path segment", "path": "/%E5%95%86%E5%93%81/%E3%82%AB%E3%83%A1%E3%83%A9", "note": "Japanese words as path segments; common on JP sites"}
+{"name": "simplified chinese", "path": "/search?q=%E4%BA%A7%E5%93%81%E4%BB%B7%E6%A0%BC", "note": "Simplified Chinese product-price query"}
+{"name": "traditional chinese", "path": "/search?q=%E7%94%A2%E5%93%81%E5%83%B9%E6%A0%BC", "note": "Traditional Chinese, same query"}
+{"name": "korean", "path": "/search?q=%EA%B0%80%EA%B2%A9+%EB%B9%84%EA%B5%90", "note": "Korean price comparison"}
+{"name": "arabic rtl", "path": "/search?q=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7+%D8%A8%D8%A7%D9%84%D8%B9%D8%A7%D9%84%D9%85", "note": "Arabic, right-to-left script"}
+{"name": "hebrew rtl", "path": "/search?q=%D7%A9%D7%9C%D7%95%D7%9D+%D7%A2%D7%95%D7%9C%D7%9D", "note": "Hebrew, right-to-left script"}
+{"name": "persian", "path": "/search?q=%D8%B3%D9%84%D8%A7%D9%85+%D8%AF%D9%86%DB%8C%D8%A7", "note": "Persian with characters outside the Arabic block"}
+{"name": "cyrillic", "path": "/search?q=%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82+%D0%BC%D0%B8%D1%80", "note": "Russian Cyrillic"}
+{"name": "greek", "path": "/search?q=%CE%B3%CE%B5%CE%B9%CE%B1+%CF%83%CE%BF%CF%85", "note": "Greek"}
+{"name": "thai no spaces", "path": "/search?q=%E0%B8%AA%E0%B8%A7%E0%B8%B1%E0%B8%AA%E0%B8%94%E0%B8%B5%E0%B8%8A%E0%B8%B2%E0%B8%A7%E0%B9%82%E0%B8%A5%E0%B8%81", "note": "Thai runs words together with no spaces, producing one long encoded token"}
+{"name": "hindi devanagari", "path": "/search?q=%E0%A4%A8%E0%A4%AE%E0%A4%B8%E0%A5%8D%E0%A4%A4%E0%A5%87+%E0%A4%A6%E0%A5%81%E0%A4%A8%E0%A4%BF%E0%A4%AF%E0%A4%BE", "note": "Hindi in Devanagari"}
+{"name": "vietnamese diacritics", "path": "/search?q=ti%E1%BA%BFng+Vi%E1%BB%87t+c%C3%B3+d%E1%BA%A5u", "note": "Vietnamese stacks multiple diacritics per character"}
+{"name": "german umlaut", "path": "/search?q=Gr%C3%BC%C3%9Fe+aus+M%C3%BCnchen", "note": "German umlauts and eszett"}
+{"name": "french accents", "path": "/search?q=caf%C3%A9+cr%C3%A8me+br%C3%BBl%C3%A9e", "note": "French accented vowels"}
+{"name": "spanish enye", "path": "/search?q=ma%C3%B1ana+se%C3%B1or", "note": "Spanish n-tilde"}
+{"name": "polish", "path": "/search?q=%C5%BC%C3%B3%C5%82%C4%87+g%C4%99%C5%9Bl%C4%85+ja%C5%BA%C5%84", "note": "Polish, the pangram; many rare Latin Extended codepoints"}
+{"name": "turkish dotless i", "path": "/search?q=%C4%B1st%C4%B1rap+%C4%B0stanbul", "note": "Turkish dotless i and dotted capital I; case folding traps live here"}
+{"name": "icelandic thorn", "path": "/search?q=%C3%BEetta+reddast", "note": "Icelandic thorn character"}
+{"name": "nfd normalisation", "path": "/search?q=cafe%CC%81", "note": "the same word as cafe-acute but in NFD; byte-different, human-identical"}
+{"name": "nfc normalisation", "path": "/search?q=caf%C3%A9", "note": "the NFC form of the previous case"}
+{"name": "emoji query", "path": "/search?q=%F0%9F%8D%95+near+me", "note": "emoji in a search box"}
+{"name": "emoji zwj sequence", "path": "/reactions?emoji=%F0%9F%91%A8%E2%80%8D%F0%9F%91%A9%E2%80%8D%F0%9F%91%A7%E2%80%8D%F0%9F%91%A6", "note": "family emoji built from zero-width joiners; a long encoded run with U+200D inside"}
+{"name": "emoji skin tone", "path": "/reactions?emoji=%F0%9F%91%8D%F0%9F%8F%BD", "note": "thumbs up with a skin tone modifier"}
+{"name": "flag emoji", "path": "/reactions?emoji=%F0%9F%87%AF%F0%9F%87%B5", "note": "regional indicator pair forming a flag"}
+{"name": "emoji in display name", "method": "POST", "path": "/profile", "body": "display_name=Jane+%F0%9F%8C%B8+Doe", "note": "emoji in a profile name, extremely common"}
+{"name": "cjk in form body", "method": "POST", "path": "/reviews", "headers": {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}, "body": "title=%E7%B4%A0%E6%99%B4%E3%82%89%E3%81%97%E3%81%84&body=%E9%80%9F%E3%81%8F%E3%81%A6%E5%AE%89%E5%AE%9A%E3%81%97%E3%81%A6%E3%81%84%E3%81%BE%E3%81%99%E3%80%82%E3%81%8A%E3%81%99%E3%81%99%E3%82%81%E3%81%97%E3%81%BE%E3%81%99%E3%80%82", "note": "a Japanese product review posted as a form"}
+{"name": "arabic in json body", "method": "POST", "path": "/api/v1/messages", "headers": {"Content-Type": "application/json; charset=utf-8"}, "body": "{\"text\":\"مرحبا، كيف حالك اليوم؟\",\"lang\":\"ar\"}", "note": "raw UTF-8 Arabic in a JSON body, not percent-encoded"}
+{"name": "mixed script", "path": "/search?q=iPhone+15+%E4%BB%B7%E6%A0%BC+in+%E6%9D%B1%E4%BA%AC", "note": "Latin, Chinese and Japanese in one query, as real bilingual users type"}
+{"name": "accept language multiple", "path": "/", "headers": {"Accept-Language": "ja,en-US;q=0.9,en;q=0.8,zh-CN;q=0.7"}, "note": "a multilingual user's Accept-Language"}
+{"name": "accept language rare tag", "path": "/", "headers": {"Accept-Language": "gsw-u-sd-chzh,de-CH;q=0.9"}, "note": "Swiss German with a BCP 47 extension subtag"}
+{"name": "idn host in param", "path": "/preview?url=https%3A%2F%2Fxn--bcher-kva.example%2Fseite", "note": "punycode IDN in a URL parameter"}
+{"name": "idn utf8 in param", "path": "/preview?url=https%3A%2F%2Fb%C3%BCcher.example%2Fseite", "note": "the same host written in UTF-8"}
+{"name": "unicode filename download", "path": "/files/%E5%A0%B1%E5%91%8A%E6%9B%B8-2026.pdf", "note": "a Japanese-named PDF"}
+{"name": "currency symbols", "path": "/pricing?display=%C2%A3%2C%E2%82%AC%2C%C2%A5%2C%E2%82%B9", "note": "pound, euro, yen and rupee symbols"}
+{"name": "typographic quotes", "method": "POST", "path": "/comments", "body": "body=%E2%80%9CIt+just+works%2C%E2%80%9D+she+said%E2%80%94and+it+does.", "note": "curly quotes and an em dash, what word processors paste"}
+{"name": "non breaking space", "method": "POST", "path": "/comments", "body": "body=10%C2%A0km+in+42%C2%A0minutes", "note": "non-breaking spaces, inserted by many editors"}
+{"name": "soft hyphen", "method": "POST", "path": "/comments", "body": "body=extra%C2%ADordinarily+long+word", "note": "soft hyphen, a legitimate invisible typographic character"}
+{"name": "combining diacritics stack", "path": "/search?q=a%CC%80%CC%81%CC%82", "note": "a base letter with three stacked combining marks; valid Unicode"}
+{"name": "cjk fullwidth forms", "path": "/search?q=%EF%BC%A1%EF%BC%A2%EF%BC%A3%EF%BC%91%EF%BC%92%EF%BC%93", "note": "fullwidth Latin letters and digits, common in CJK input"}
+{"name": "katakana halfwidth", "path": "/search?q=%EF%BD%B6%EF%BE%80%EF%BD%B6%EF%BE%85", "note": "halfwidth katakana, still emitted by Japanese POS systems"}
+{"name": "long unicode ticket", "method": "POST", "path": "/tickets", "headers": {"Content-Type": "application/json; charset=utf-8"}, "body": "{\"subject\":\"ログインできません\",\"body\":\"昨日からダッシュボードにログインできません。パスワードは正しいはずです。エラーメッセージは「認証に失敗しました」と表示されます。よろしくお願いいたします。\"}", "note": "a Japanese support ticket, the length real tickets have"}
