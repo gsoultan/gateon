@@ -206,7 +206,12 @@ shipped code and each failed silently:
 1. **An `auth.Service` is never compared to `nil`** — use `auth.Available(svc)`.
    `Server.AuthManager` and the `Auth` fields are `*auth.Holder`, which is never nil but
    is unusable until Setup runs, so `== nil` reads "auth is present" at exactly the
-   moment it isn't. That is how the first-run bypass worked.
+   moment it isn't. That is how the first-run bypass worked. Enforced twice: the grep
+   here, and **`make check-auth-nil`**, which resolves types instead of matching names.
+   The second exists because the first missed `if verifier == nil { return true }` in
+   `isLogsRequestAuthorized` — the same service, passed as a parameter and named for
+   the narrow interface it was typed as, authorizing the system log stream whenever
+   auth was absent. A name is not the property being checked.
 2. **No session token in `localStorage`/`sessionStorage`** — the dashboard renders
    hostile traffic, so a readable token turns any stored XSS into admin compromise. The
    token lives only in the HttpOnly `gateon_session` cookie.

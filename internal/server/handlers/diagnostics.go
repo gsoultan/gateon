@@ -153,7 +153,12 @@ func ssrfSafeTransport() *http.Transport {
 	}
 }
 
-func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier) bool {
+// The parameter is typed auth.Service rather than middleware.TokenVerifier
+// because the availability question below can only be asked of the former, and
+// because the narrower type is how the nil-check underneath it stayed invisible:
+// check-security-invariants greps for `.AuthManager == nil` and its siblings, so
+// the same comparison on a parameter goes unseen.
+func isLogsRequestAuthorized(r *http.Request, verifier auth.Service) bool {
 	claimsVal := r.Context().Value(middleware.UserContextKey)
 	if claimsVal != nil {
 		claims, ok := claimsVal.(*auth.Claims)
@@ -164,9 +169,19 @@ func isLogsRequestAuthorized(r *http.Request, verifier middleware.TokenVerifier)
 		return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceDiagnostics)
 	}
 
-	if verifier == nil {
-		// Auth disabled
-		return true
+	// This read `if verifier == nil { return true }`, commented "auth disabled",
+	// and streamed the system log to anyone when it was taken. auth.Available's
+	// own documentation says the opposite: a nil service and a Holder that Setup
+	// has not filled are both unusable, and "both must deny".
+	//
+	// It was not reachable in the shipped binary -- the one NewServer call site
+	// passes WithAuthManager, which always wraps in a Holder, so the interface is
+	// never nil and the token path below denied anyway. That is a property of one
+	// call site remembering an option, which is not what a management-plane log
+	// stream should rest on. It is the same shape as the first-run bypass that
+	// put invariant 1 in the tree.
+	if !auth.Available(verifier) {
+		return false
 	}
 
 	// Try extracting from query params (needed for WebSockets if middleware didn't run)

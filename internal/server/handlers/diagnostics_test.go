@@ -14,7 +14,13 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 )
 
+// The embedded auth.Service supplies the method set this stub does not care
+// about. It is embedded rather than implemented because isLogsRequestAuthorized
+// takes an auth.Service: the parameter used to be the narrower
+// middleware.TokenVerifier, which is part of how a nil-comparison on it stayed
+// invisible to check-security-invariants.
 type testTokenVerifier struct {
+	auth.Service
 	token  string
 	claims *auth.Claims
 	err    error
@@ -38,11 +44,36 @@ func TestIsLogsRequestAuthorized(t *testing.T) {
 		}
 	})
 
-	t.Run("allows when auth manager is disabled", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/logs", nil)
+	// This subtest asserted the opposite until 2026-09-04: a nil verifier
+	// authorized the log stream, on the reading that a missing auth service
+	// means auth is disabled. auth.Available's documentation says a nil service
+	// and a Holder that Setup has not filled are both unusable and "both must
+	// deny", and the first-run hardening moved the rest of the management plane
+	// to that position. This was the last place still reading an absent service
+	// as permission.
+	//
+	// Nothing shipped depended on the old behaviour: the single NewServer call
+	// site passes WithAuthManager, which always wraps in a Holder, so the
+	// interface was never nil in the binary. The expectation was reachable only
+	// from a test.
+	t.Run("denies when the auth service cannot answer", func(t *testing.T) {
+		for _, tt := range []struct {
+			name     string
+			verifier auth.Service
+		}{
+			{"no service at all", nil},
+			{"a Holder Setup never filled", auth.NewHolder(nil)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "/v1/logs", nil)
+				// A credential is offered, so a denial cannot be mistaken for
+				// "nothing was presented".
+				req.Header.Set("Authorization", "Bearer some-token")
 
-		if !isLogsRequestAuthorized(req, nil) {
-			t.Fatal("expected request to be authorized when verifier is nil")
+				if isLogsRequestAuthorized(req, tt.verifier) {
+					t.Fatal("the system log stream was authorized while auth could not answer")
+				}
+			})
 		}
 	})
 
