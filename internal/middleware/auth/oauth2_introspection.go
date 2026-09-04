@@ -6,12 +6,15 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 // OAuth2IntrospectionConfig configures OAuth 2.0 token introspection (RFC 7662).
@@ -52,6 +55,11 @@ func (r *oauth2IntrospectionResponse) UnmarshalJSON(data []byte) error {
 
 const oauth2IntrospectionTimeout = 10 * time.Second
 
+// maxIntrospectionResponse caps the body read from the introspection endpoint.
+// RFC 7662 responses are a small JSON object; 64 KiB is orders of magnitude
+// more than a legitimate one needs and still bounded.
+const maxIntrospectionResponse = 64 << 10
+
 // OAuth2IntrospectionValidator validates opaque access tokens via RFC 7662 introspection.
 type OAuth2IntrospectionValidator struct {
 	config OAuth2IntrospectionConfig
@@ -85,7 +93,14 @@ func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 
 		resp, err := v.introspect(r.Context(), token)
 		if err != nil {
-			v.config.HandleFailure(w, r, next, fmt.Errorf("token introspection failed: %w", err))
+			// The cause is logged rather than returned. HandleFailure writes
+			// err.Error() into the response body, and the error from introspect
+			// carries the provider's own response verbatim -- which handed an
+			// unauthenticated caller things like the provider's database DSN
+			// and trace IDs whenever the provider was unhealthy. All the caller
+			// needs to know is that its token could not be checked.
+			logger.L.LogError("auth: token introspection failed", "error", err)
+			v.config.HandleFailure(w, r, next, errors.New("token introspection unavailable"))
 			return
 		}
 		if !resp.Active {
@@ -132,7 +147,12 @@ func (v *OAuth2IntrospectionValidator) introspect(ctx context.Context, token str
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	// Bounded because the response is another service's output, and an
+	// introspection endpoint having a bad day can answer with a stack trace or
+	// an HTML error page far larger than the JSON object this expects. An
+	// unbounded read here is one misbehaving dependency away from being a
+	// memory exhaustion bug on the request path.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxIntrospectionResponse))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("introspection returned %d: %s", resp.StatusCode, string(body))
