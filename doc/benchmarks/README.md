@@ -138,11 +138,37 @@ p=0.001). The declared length is treated as a hint and clamped to the configured
 body limit, so a request claiming a gigabyte reserves no more than the WAF was
 already willing to buffer.
 
-**What is left is not gateon's.** A profile after the change puts **90% of the
-remaining 2060 allocations inside gwaf's `engine.(*Evaluator).evalRule`**, and on
-the response path **82% of allocated bytes inside `gwaf/internal/memz.Arena`**
-(1.8 MiB reserved for a 256 KiB body). Both are upstream. Gateon's own share of
-these paths has been paid.
+### The upstream half — gwaf v0.6.1, 2026-09-06
+
+A profile after the body-read change put **90% of the remaining 2060 allocations
+on one line of gwaf**: `internal/engine/eval.go`, `e.ctx.Key = string(v.Key)`,
+run once per (reading x group x candidate rule) while the key is constant across
+all of them. Its comment called that path "rare on real traffic"; on a benign
+16 KiB JSON POST against a large ruleset it was 90% of every object allocated.
+
+Fixed upstream in gwaf v0.6.1 — materialised at most once per value, lazily,
+because hoisting it outright broke gwaf's own zero-allocation SLO for requests no
+rule is a candidate for.
+
+| Benchmark | allocs/op at v0.6.0 | at v0.6.1 |
+| :-- | --: | --: |
+| `WAFRequestWithInboundDLP` | 2060 | **563 (-72.67%)** |
+| `WAFRequestWithoutInboundDLP` | 2060 | **563 (-72.67%)** |
+
+Bytes fell from 57.9 KiB to 34.4 KiB on the same benchmarks. Taken with the
+body-read change, the request path went from **142.9 KiB and 2081 allocations**
+to **34.4 KiB and 563** — a quarter of the bytes and a quarter of the objects.
+
+Worth recording for whoever profiles gwaf next: this is **not reproducible in
+gwaf's own benchmark suite**. `RulesetScaling` keys its synthetic rules on tokens
+no benign body contains, so the prefilter nominates nothing and it measures the
+prefilter rather than the evaluator — which is why it reads 0 B/op at 10,000
+rules. Five attempts at an in-tree reproduction are documented in that release's
+commit message. The verification stands on the paired measurement above.
+
+**What is left is not gateon's.** On the response path **82% of allocated bytes
+are inside `gwaf/internal/memz.Arena`** — 1.8 MiB reserved for a 256 KiB body —
+which remains open upstream. Gateon's own share of these paths has been paid.
 
 Two things were tried and produced nothing measurable, recorded so they are not
 tried again:
