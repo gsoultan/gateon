@@ -114,12 +114,22 @@ func networkScope(ip string) string {
 		return ip
 	}
 
-	bits := ipv4ScopeBits
-	if addr.Is6() && !addr.Is4In6() {
-		bits = ipv6ScopeBits
-	}
 	if addr.Is4In6() {
+		// A v4-mapped address is the same host as its v4 form, and a client on a
+		// dual-stack listener can present either spelling. Unmap and take the fast
+		// path so both produce the *same* scope string: the fast path returns a
+		// substring ("203.0.113") while the general path formats a prefix
+		// ("203.0.113.0/24"), so without this the two spellings of one host became
+		// two identities and a score never accumulated across them.
 		addr = addr.Unmap()
+		if scope, ok := ipv4Scope(addr.String()); ok {
+			return scope
+		}
+	}
+
+	bits := ipv4ScopeBits
+	if addr.Is6() {
+		bits = ipv6ScopeBits
 	}
 
 	prefix, err := addr.Prefix(bits)
