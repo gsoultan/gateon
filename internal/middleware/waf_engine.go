@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
 	"github.com/gsoultan/gwaf"
 )
 
@@ -165,7 +166,7 @@ func loadOperatorTuning(policy *secwaf.Policy, cfg WAFConfig) {
 
 	for _, name := range policy.UnknownAppProfiles() {
 		logger.L.LogWarn("WAF app profile is not recognised",
-			"profile", name, "route", cfg.RouteID, "known", secwaf.AppProfileNames())
+			"profile", name, "route", cfg.RouteID, "known", appprofile.Names())
 	}
 }
 

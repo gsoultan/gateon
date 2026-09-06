@@ -11,6 +11,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
 // These tests pin what a reputation-based refusal is allowed to affect.
@@ -81,7 +82,7 @@ func TestReputationBlockIsScopedToTheOffendersNetwork(t *testing.T) {
 	// Record the violation exactly as the threat pipeline does, through the one
 	// function that decides what a score is about. A test that invented its own
 	// key would prove only that the test and itself agree.
-	offenderID := telemetry.ReputationIDFor(offender.ja4Plus, offender.remoteIP)
+	offenderID := repid.For(offender.ja4Plus, offender.remoteIP)
 	telemetry.DecreaseReputation(offenderID, 99, "test: repeated waf violations")
 
 	h := blockerHandler(t)
@@ -141,7 +142,7 @@ func TestReputationScopeSeparatesNetworksNotUsers(t *testing.T) {
 	offender := repTestClient{ja4Plus: sharedBrowser, remoteIP: "203.0.113.10"}
 
 	telemetry.DecreaseReputation(
-		telemetry.ReputationIDFor(offender.ja4Plus, offender.remoteIP),
+		repid.For(offender.ja4Plus, offender.remoteIP),
 		99, "test: same-network offender")
 
 	h := blockerHandler(t)

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package waf
+package appprofile
 
 import (
 	"github.com/gsoultan/gwaf/rules"
@@ -25,7 +25,7 @@ import (
 // weaker ruleset. `TestGateonProfileRulesAreScopedNotAGlobalOff` pins that the
 // same payload elsewhere still blocks.
 
-// gateonProfileRules names the gateon-authored rules each profile must also
+// gateonRules names the gateon-authored rules each profile must also
 // exempt, alongside the ones gwaf contributes.
 //
 // Adding an entry is a security decision and should read like one. The test for
@@ -33,8 +33,8 @@ import (
 // on an application built to store attack text — but "is this field genuinely
 // displayed rather than acted on". A rule whose finding would still be dangerous
 // in stored content does not belong here at any paranoia level.
-var gateonProfileRules = map[AppProfile][]types.RuleID{
-	AppProfileIssueTracker: {
+var gateonRules = map[Profile][]types.RuleID{
+	IssueTracker: {
 		// 1150003, "SSRF attempt against an internal target": matches
 		// 127.0.0.1, localhost and the cloud metadata hosts in an argument.
 		//
@@ -57,14 +57,14 @@ var gateonProfileRules = map[AppProfile][]types.RuleID{
 	},
 }
 
-// GateonProfileExceptions returns gateon's own contribution to a profile.
+// GateonExceptions returns gateon's own contribution to a profile.
 //
 // The shape deliberately mirrors gwaf's: the same default path and field names,
 // so that an install which configures no scope behaves consistently across both
-// halves, and one which does gets both re-pointed by ScopeAppProfileExceptions.
+// halves, and one which does gets both re-pointed by ApplyScope.
 // A keyed exception is what that function re-scopes, so these carry keys.
-func GateonProfileExceptions(p AppProfile) []rules.Exception {
-	ids := gateonProfileRules[p]
+func GateonExceptions(p Profile) []rules.Exception {
+	ids := gateonRules[p]
 	if len(ids) == 0 {
 		return nil
 	}

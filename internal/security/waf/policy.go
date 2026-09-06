@@ -5,6 +5,8 @@ package waf
 
 import (
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
+
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/rules"
 	"github.com/gsoultan/gwaf/ruleset/core"
@@ -148,15 +150,15 @@ type Policy struct {
 	// itself. See AppProfile.
 	AppProfiles []string
 
-	// AppProfileScope re-points those profiles' exceptions at this deployment's
+	// appprofile.Scope re-points those profiles' exceptions at this deployment's
 	// own paths and fields. Empty leaves each profile's shipped defaults alone.
 	//
 	// gwaf's IssueTracker is scoped to "/rest/api/*" with keys description|body,
 	// and its own doc comment says the paths are examples meant to be edited.
 	// Nothing edited them, so an operator running a paste service or a support
 	// desk on any other path selected the profile and got nothing at all. See
-	// appprofile_scope.go.
-	AppProfileScope AppProfileScope
+	// internal/security/waf/appprofile.
+	AppProfileScope appprofile.Scope
 
 	// SSRFProtection admits IDSSRFParam, which blocks an off-origin URL in a
 	// parameter the server itself fetches. It is a statement about the
@@ -361,12 +363,12 @@ func (p Policy) Options() []gwaf.Option {
 	// applied in sequence, so this does not change behaviour — it is the order a
 	// reader needs to see them in to understand where one came from.
 	exceptions := DefaultExceptions()
-	profileExceptions, _ := AppProfileExceptions(p.AppProfiles)
+	profileExceptions, _ := appprofile.Exceptions(p.AppProfiles)
 	// A scope that does not validate is dropped rather than applied loosely: the
 	// failure mode of a bad scope is an exception broader than intended, and a
 	// profile that quietly does nothing is safer than one that quietly disables
 	// detection. NewEngine reports it so the operator is not left guessing.
-	if scoped, err := ScopeAppProfileExceptions(profileExceptions, p.AppProfileScope); err == nil {
+	if scoped, err := appprofile.ApplyScope(profileExceptions, p.AppProfileScope); err == nil {
 		profileExceptions = scoped
 	}
 	exceptions = append(exceptions, profileExceptions...)
@@ -385,7 +387,7 @@ func (p Policy) Options() []gwaf.Option {
 // caller is still able to say so. Silence here would let an operator believe
 // they had tuning they do not have.
 func (p Policy) UnknownAppProfiles() []string {
-	_, unknown := AppProfileExceptions(p.AppProfiles)
+	_, unknown := appprofile.Exceptions(p.AppProfiles)
 	return unknown
 }
 

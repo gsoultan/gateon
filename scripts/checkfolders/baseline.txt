@@ -42,5 +42,8 @@
 # Server lifecycle, wiring and shutdown.
 13 internal/server
 
-# WAF rule evaluation and rule-set management.
-13 internal/security/waf
+# WAF rule evaluation and rule-set management. App profiles left for
+# internal/security/waf/appprofile on 2026-09-06, which is where the ratchet
+# sent them: profile selection, scoping and gateon's own contributions are one
+# concern and they were the code that would have pushed this package up.
+12 internal/security/waf

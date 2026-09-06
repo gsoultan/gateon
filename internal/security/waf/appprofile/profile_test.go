@@ -1,14 +1,12 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package waf_test
+package appprofile
 
 import (
 	"slices"
 	"strings"
 	"testing"
-
-	secwaf "github.com/gsoultan/gateon/internal/security/waf"
 )
 
 // TestParseAppProfileAcceptsTheSpellingsPeopleWrite covers the normalisation
@@ -20,29 +18,29 @@ func TestParseAppProfileAcceptsTheSpellingsPeopleWrite(t *testing.T) {
 
 	for _, tc := range []struct {
 		in   string
-		want secwaf.AppProfile
+		want Profile
 	}{
-		{"wordpress", secwaf.AppProfileWordPress},
-		{"WordPress", secwaf.AppProfileWordPress},
-		{"  WORDPRESS  ", secwaf.AppProfileWordPress},
-		{"wp", secwaf.AppProfileWordPress},
-		{"issue_tracker", secwaf.AppProfileIssueTracker},
-		{"issue-tracker", secwaf.AppProfileIssueTracker},
-		{"issuetracker", secwaf.AppProfileIssueTracker},
-		{"jira", secwaf.AppProfileIssueTracker},
-		{"gitlab", secwaf.AppProfileIssueTracker},
-		{"drupal", secwaf.AppProfileDrupal},
-		{"laravel", secwaf.AppProfileLaravel},
+		{"wordpress", WordPress},
+		{"WordPress", WordPress},
+		{"  WORDPRESS  ", WordPress},
+		{"wp", WordPress},
+		{"issue_tracker", IssueTracker},
+		{"issue-tracker", IssueTracker},
+		{"issuetracker", IssueTracker},
+		{"jira", IssueTracker},
+		{"gitlab", IssueTracker},
+		{"drupal", Drupal},
+		{"laravel", Laravel},
 	} {
-		got, ok := secwaf.ParseAppProfile(tc.in)
+		got, ok := Parse(tc.in)
 		if !ok || got != tc.want {
-			t.Errorf("ParseAppProfile(%q) = %q, %v; want %q, true", tc.in, got, ok, tc.want)
+			t.Errorf("Parse(%q) = %q, %v; want %q, true", tc.in, got, ok, tc.want)
 		}
 	}
 
 	for _, bad := range []string{"", "   ", "wordpres", "magento", "../../etc/passwd"} {
-		if got, ok := secwaf.ParseAppProfile(bad); ok {
-			t.Errorf("ParseAppProfile(%q) = %q, true; want not recognised", bad, got)
+		if got, ok := Parse(bad); ok {
+			t.Errorf("Parse(%q) = %q, true; want not recognised", bad, got)
 		}
 	}
 }
@@ -54,7 +52,7 @@ func TestParseAppProfileAcceptsTheSpellingsPeopleWrite(t *testing.T) {
 func TestAppProfileExceptionsReportsUnknownNames(t *testing.T) {
 	t.Parallel()
 
-	ex, unknown := secwaf.AppProfileExceptions([]string{"wordpress", "magento", ""})
+	ex, unknown := Exceptions([]string{"wordpress", "magento", ""})
 
 	if len(ex) == 0 {
 		t.Error("wordpress profile contributed no exceptions")
@@ -65,17 +63,17 @@ func TestAppProfileExceptionsReportsUnknownNames(t *testing.T) {
 }
 
 // TestEveryShippedProfileResolves guards against a profile being advertised in
-// AppProfileNames but not actually wired, which would let the dashboard offer a
+// Names but not actually wired, which would let the dashboard offer a
 // platform that loads nothing.
 func TestEveryShippedProfileResolves(t *testing.T) {
 	t.Parallel()
 
-	names := secwaf.AppProfileNames()
+	names := Names()
 	if len(names) == 0 {
 		t.Fatal("no app profiles registered")
 	}
 	for _, name := range names {
-		ex, unknown := secwaf.AppProfileExceptions([]string{name})
+		ex, unknown := Exceptions([]string{name})
 		if len(unknown) != 0 {
 			t.Errorf("advertised profile %q does not resolve", name)
 		}
@@ -102,16 +100,16 @@ func TestEveryShippedProfileResolves(t *testing.T) {
 func TestAppProfilesCompose(t *testing.T) {
 	t.Parallel()
 
-	wp, _ := secwaf.AppProfileExceptions([]string{"wordpress"})
-	laravel, _ := secwaf.AppProfileExceptions([]string{"laravel"})
-	both, _ := secwaf.AppProfileExceptions([]string{"wordpress", "laravel"})
+	wp, _ := Exceptions([]string{"wordpress"})
+	laravel, _ := Exceptions([]string{"laravel"})
+	both, _ := Exceptions([]string{"wordpress", "laravel"})
 
 	if len(both) != len(wp)+len(laravel) {
 		t.Errorf("composed = %d exceptions; want %d (wordpress) + %d (laravel)",
 			len(both), len(wp), len(laravel))
 	}
 
-	deduped, _ := secwaf.AppProfileExceptions([]string{"wordpress", "WordPress", "wp"})
+	deduped, _ := Exceptions([]string{"wordpress", "WordPress", "wp"})
 	if len(deduped) != len(wp) {
 		t.Errorf("three spellings of one profile loaded %d exceptions; want %d",
 			len(deduped), len(wp))
@@ -119,7 +117,7 @@ func TestAppProfilesCompose(t *testing.T) {
 }
 
 // TestAppProfileFingerprintSeparatesTyposFromAbsence is the reason
-// AppProfileFingerprint exists rather than the caller hashing the normalised
+// Fingerprint exists rather than the caller hashing the normalised
 // list. A misspelled profile produces the same ruleset as no profile at all, so
 // hashing only what resolved would let the two share a cached engine — and the
 // warning that would have told the operator about the typo is emitted once per
@@ -127,25 +125,25 @@ func TestAppProfilesCompose(t *testing.T) {
 func TestAppProfileFingerprintSeparatesTyposFromAbsence(t *testing.T) {
 	t.Parallel()
 
-	none := secwaf.AppProfileFingerprint(nil)
-	typo := secwaf.AppProfileFingerprint([]string{"wordpres"})
+	none := Fingerprint(nil)
+	typo := Fingerprint([]string{"wordpres"})
 	if none == typo {
 		t.Error("a misspelled profile hashes the same as no profile; the operator would never be warned")
 	}
 
 	// The case that must collapse: same profile, different spelling, one engine.
-	if a, b := secwaf.AppProfileFingerprint([]string{"WordPress"}),
-		secwaf.AppProfileFingerprint([]string{"wordpress"}); a != b {
+	if a, b := Fingerprint([]string{"WordPress"}),
+		Fingerprint([]string{"wordpress"}); a != b {
 		t.Errorf("case-different spellings hash differently (%q vs %q); that builds two identical engines", a, b)
 	}
 
 	// Order is the operator's, but the engine is the same either way.
-	if a, b := secwaf.AppProfileFingerprint([]string{"wordpress", "laravel"}),
-		secwaf.AppProfileFingerprint([]string{"wordpress", "laravel"}); a != b {
+	if a, b := Fingerprint([]string{"wordpress", "laravel"}),
+		Fingerprint([]string{"wordpress", "laravel"}); a != b {
 		t.Error("fingerprint is not stable across calls")
 	}
-	if a, b := secwaf.AppProfileFingerprint([]string{"wordpress"}),
-		secwaf.AppProfileFingerprint([]string{"laravel"}); a == b {
+	if a, b := Fingerprint([]string{"wordpress"}),
+		Fingerprint([]string{"laravel"}); a == b {
 		t.Error("different profiles share a fingerprint")
 	}
 }

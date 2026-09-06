@@ -15,9 +15,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -481,4 +483,46 @@ func GetWorstReputations(limit int) []ReputationRecord {
 	}
 
 	return res
+}
+
+// GetReputationID returns the identity this request's reputation is tracked
+// under, caching it on the request state.
+//
+// Several middlewares ask for it on one request — the reputation blocker,
+// proof-of-work, deception, the tarpit — and each ends up building the same
+// string. Caching keeps that to one allocation per request rather than one per
+// consumer, which matters because this sits on the request path and the blocker
+// runs for every route.
+func GetReputationID(r *http.Request) string {
+	rs := request.GetRequestState(r)
+	if rs != nil && rs.ReputationID != "" {
+		return rs.ReputationID
+	}
+
+	id := repid.For(GetIPFingerprint(r), ClientIPOf(r))
+	if rs != nil {
+		rs.ReputationID = id
+	}
+	return id
+}
+
+// ClientIPOf resolves the address a reputation score should be scoped to.
+//
+// It goes through request.GetClientIP with the configured trust setting rather
+// than reading X-Forwarded-For directly, which is what GetIPFingerprint's own
+// fallback does. That header is attacker-writable on any deployment not behind a
+// proxy that overwrites it, and an identity the attacker chooses is not an
+// identity: they could scope their own bad score onto someone else's network, or
+// mint a clean one per request. Scoping is a security decision, so it uses the
+// resolver that knows which hops are trusted.
+func ClientIPOf(r *http.Request) string {
+	rs := request.GetRequestState(r)
+	if rs != nil && rs.ResolvedClientIP != "" {
+		return rs.ResolvedClientIP
+	}
+	ip := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+	if rs != nil {
+		rs.ResolvedClientIP = ip
+	}
+	return ip
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -1673,7 +1674,7 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// see ReputationIDFor. The recording key and the enforcement key come from
 	// the same function on purpose: if they ever diverge, every lookup returns
 	// the neutral 100 and the control reports "clean" while checking nothing.
-	repID := ReputationIDFor(st.Fingerprint, st.SourceIP)
+	repID := repid.For(st.Fingerprint, st.SourceIP)
 	if repID != "" {
 		DecreaseReputation(repID, st.Score/2, st.Type) // Penalty is half the threat score
 	}

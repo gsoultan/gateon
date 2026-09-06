@@ -26,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/entropy"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/rules"
@@ -188,8 +189,8 @@ func (c WAFConfig) Fingerprint() string {
 	// are memoised per fingerprint, so a field left out means the first route to
 	// build one wins and every later route with a different policy silently
 	// inherits it.
-	fmt.Fprintf(h, "p:%s|%t|%s\n", waf.AppProfileFingerprint(c.AppProfiles), c.EnableSSRFProtection,
-		waf.AppProfileScopeFingerprint(c.appProfileScope()))
+	fmt.Fprintf(h, "p:%s|%t|%s\n", appprofile.Fingerprint(c.AppProfiles), c.EnableSSRFProtection,
+		appprofile.ScopeFingerprint(c.appProfileScope()))
 	// Origins decide what counts as off-origin, so two configs with different
 	// ones reach different verdicts on the same request and must not share an
 	// engine. Sorted, because the routing table's iteration order is not
@@ -835,8 +836,8 @@ func parseScopeList(value, env string) []string {
 }
 
 // appProfileScope assembles the configured scope.
-func (c WAFConfig) appProfileScope() waf.AppProfileScope {
-	return waf.AppProfileScope{Paths: c.AppProfileScopePaths, Fields: c.AppProfileScopeFields}
+func (c WAFConfig) appProfileScope() appprofile.Scope {
+	return appprofile.Scope{Paths: c.AppProfileScopePaths, Fields: c.AppProfileScopeFields}
 }
 
 // parseCSV splits a comma-separated config value, dropping empty entries.

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package waf
+package appprofile
 
 import (
 	"fmt"
@@ -46,13 +46,13 @@ const (
 	maxScopeEntries = 64
 )
 
-// AppProfileScope is the deployment's answer to "where does this application
+// Scope is the deployment's answer to "where does this application
 // keep the content that trips those rules".
 //
 // Both lists must be non-empty to take effect. A scope with paths and no fields
 // would exempt every argument on those paths, which is a great deal broader than
 // anything a profile ships and is the shape a mistake takes.
-type AppProfileScope struct {
+type Scope struct {
 	// Paths are request paths, with a trailing "*" for a subtree — the same
 	// syntax gwaf's own exceptions use.
 	Paths []string
@@ -64,7 +64,7 @@ type AppProfileScope struct {
 
 // IsZero reports whether no scope was configured, in which case each profile's
 // shipped defaults apply unchanged.
-func (s AppProfileScope) IsZero() bool { return len(s.Paths) == 0 && len(s.Fields) == 0 }
+func (s Scope) IsZero() bool { return len(s.Paths) == 0 && len(s.Fields) == 0 }
 
 // Validate rejects a scope that would widen an exception past what a profile is
 // allowed to be.
@@ -74,7 +74,7 @@ func (s AppProfileScope) IsZero() bool { return len(s.Paths) == 0 && len(s.Field
 // a way to switch detection off. Making the scope configurable is exactly the
 // change that could break it, so the validation lives next to the feature rather
 // than in a review checklist.
-func (s AppProfileScope) Validate() error {
+func (s Scope) Validate() error {
 	if s.IsZero() {
 		return nil
 	}
@@ -141,7 +141,7 @@ func validateScopePath(p string) error {
 	return nil
 }
 
-// ScopeAppProfileExceptions re-points a profile's exceptions at the operator's
+// ApplyScope re-points a profile's exceptions at the operator's
 // own paths and fields.
 //
 // The rule ids and targets come from the profile untouched — those encode which
@@ -153,7 +153,7 @@ func validateScopePath(p string) error {
 //
 // Returns the input unchanged when the scope is empty, so an install that has
 // not configured anything keeps exactly the behaviour it has today.
-func ScopeAppProfileExceptions(exceptions []rules.Exception, scope AppProfileScope) ([]rules.Exception, error) {
+func ApplyScope(exceptions []rules.Exception, scope Scope) ([]rules.Exception, error) {
 	if scope.IsZero() || len(exceptions) == 0 {
 		return exceptions, nil
 	}
@@ -212,7 +212,7 @@ func normaliseScopeList(in []string) []string {
 	return out
 }
 
-// AppProfileScopeFingerprint renders a scope for the engine cache key.
+// ScopeFingerprint renders a scope for the engine cache key.
 //
 // Engines are memoised per config fingerprint, so a field left out of the key
 // means the first route to build an engine wins and every later route with a
@@ -222,7 +222,7 @@ func normaliseScopeList(in []string) []string {
 //
 // Sorted, because the scope is a set: two operators writing the same paths in a
 // different order should get one engine, not two.
-func AppProfileScopeFingerprint(scope AppProfileScope) string {
+func ScopeFingerprint(scope Scope) string {
 	if scope.IsZero() {
 		return ""
 	}
