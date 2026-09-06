@@ -1,18 +1,14 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package telemetry
+package repid
 
 import (
-	"net/http"
 	"net/netip"
 	"strings"
-
-	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/request"
 )
 
-// This file decides what a reputation score is *about*.
+// This package decides what a reputation score is *about*.
 //
 // It used to be the JA4+ fingerprint alone, and that was wrong in a way no test
 // could see, because JA4+ does not identify a client. GenerateJA4H is built from
@@ -32,20 +28,20 @@ import (
 // The fix is to make the identity a pair: which software, on which network.
 
 const (
-	// repIDSeparator joins the fingerprint to the network scope. It is a byte
+	// separator joins the fingerprint to the network scope. It is a byte
 	// that appears in neither half — JA4+ is hex, dots and underscores, and a
 	// network prefix is dotted quad or hex — so the composite can be split back
 	// apart to recover the class for cross-network correlation.
-	repIDSeparator = "|"
+	separator = "|"
 
-	// repScopeUnknown is the network scope for a client whose address could not
+	// scopeUnknown is the network scope for a client whose address could not
 	// be parsed. It is a distinct bucket rather than a fallback to the bare
 	// fingerprint: falling back would put every unparseable client into the
 	// shared class key and reintroduce exactly the blast radius this exists to
 	// remove, for the requests least able to explain themselves.
-	repScopeUnknown = "?"
+	scopeUnknown = "?"
 
-	// repIPv4ScopeBits and repIPv6ScopeBits set how wide a "network" is.
+	// ipv4ScopeBits and ipv6ScopeBits set how wide a "network" is.
 	//
 	// /24 and /64 are the smallest units an operator is normally delegated, so
 	// they are the narrowest scope that still survives a client legitimately
@@ -53,11 +49,11 @@ const (
 	// Narrower and a NAT pool would fragment into scores that never accumulate;
 	// wider and one abusive customer of a large hosting provider would start
 	// taking their neighbours down again.
-	repIPv4ScopeBits = 24
-	repIPv6ScopeBits = 64
+	ipv4ScopeBits = 24
+	ipv6ScopeBits = 64
 )
 
-// ReputationIDFor returns the identity a reputation score is recorded under and
+// For returns the identity a reputation score is recorded under and
 // enforced against.
 //
 // Both sides must agree or the control silently stops working: score under one
@@ -70,22 +66,22 @@ const (
 // attribution — the genuine strength of JA4+, and the reason it was chosen — is
 // still available as a query over keys sharing a prefix. What changes is that it
 // is no longer the thing a 403 hangs on.
-func ReputationIDFor(fingerprint, sourceIP string) string {
+func For(fingerprint, sourceIP string) string {
 	if fingerprint == "" {
 		// No fingerprint at all: the address is the only identity available and
 		// is already as narrow as this function could make it.
 		return sourceIP
 	}
-	return fingerprint + repIDSeparator + networkScope(sourceIP)
+	return fingerprint + separator + networkScope(sourceIP)
 }
 
-// ReputationClassOf returns the fingerprint half of a composite identity.
+// ClassOf returns the fingerprint half of a composite identity.
 //
 // This is how a dashboard or a correlation pass gets back to "every client
 // running this browser", which is what JA4+ is genuinely good at. A key with no
 // separator predates the composite or had no fingerprint, and is returned whole.
-func ReputationClassOf(repID string) string {
-	if i := strings.LastIndex(repID, repIDSeparator); i >= 0 {
+func ClassOf(repID string) string {
+	if i := strings.LastIndex(repID, separator); i >= 0 {
 		return repID[:i]
 	}
 	return repID
@@ -98,7 +94,7 @@ func ReputationClassOf(repID string) string {
 // path where the reputation blocker reads it.
 func networkScope(ip string) string {
 	if ip == "" {
-		return repScopeUnknown
+		return scopeUnknown
 	}
 
 	// IPv4 fast path. The /24 is exactly the text before the third dot, so it is
@@ -118,9 +114,9 @@ func networkScope(ip string) string {
 		return ip
 	}
 
-	bits := repIPv4ScopeBits
+	bits := ipv4ScopeBits
 	if addr.Is6() && !addr.Is4In6() {
-		bits = repIPv6ScopeBits
+		bits = ipv6ScopeBits
 	}
 	if addr.Is4In6() {
 		addr = addr.Unmap()
@@ -131,48 +127,6 @@ func networkScope(ip string) string {
 		return ip
 	}
 	return prefix.String()
-}
-
-// GetReputationID returns the identity this request's reputation is tracked
-// under, caching it on the request state.
-//
-// Several middlewares ask for it on one request — the reputation blocker,
-// proof-of-work, deception, the tarpit — and each ends up building the same
-// string. Caching keeps that to one allocation per request rather than one per
-// consumer, which matters because this sits on the request path and the blocker
-// runs for every route.
-func GetReputationID(r *http.Request) string {
-	rs := request.GetRequestState(r)
-	if rs != nil && rs.ReputationID != "" {
-		return rs.ReputationID
-	}
-
-	id := ReputationIDFor(GetIPFingerprint(r), ClientIPOf(r))
-	if rs != nil {
-		rs.ReputationID = id
-	}
-	return id
-}
-
-// ClientIPOf resolves the address a reputation score should be scoped to.
-//
-// It goes through request.GetClientIP with the configured trust setting rather
-// than reading X-Forwarded-For directly, which is what GetIPFingerprint's own
-// fallback does. That header is attacker-writable on any deployment not behind a
-// proxy that overwrites it, and an identity the attacker chooses is not an
-// identity: they could scope their own bad score onto someone else's network, or
-// mint a clean one per request. Scoping is a security decision, so it uses the
-// resolver that knows which hops are trusted.
-func ClientIPOf(r *http.Request) string {
-	rs := request.GetRequestState(r)
-	if rs != nil && rs.ResolvedClientIP != "" {
-		return rs.ResolvedClientIP
-	}
-	ip := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-	if rs != nil {
-		rs.ResolvedClientIP = ip
-	}
-	return ip
 }
 
 // ipv4Scope returns the /24 of a dotted-quad address as a substring of the

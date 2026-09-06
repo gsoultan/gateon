@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/siem"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
 // Mitigation tuning environment variables.
@@ -126,7 +127,7 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 		// remains unit-testable without it.
 		Degrade: func(fingerprint, sourceIP string, penalty float64, reason string) {
 			telemetry.DecreaseReputation(
-				telemetry.ReputationIDFor(fingerprint, sourceIP), penalty, reason)
+				repid.For(fingerprint, sourceIP), penalty, reason)
 		},
 		Mark: telemetry.MarkIPMitigated,
 		Log: func(action mitigation.Action, inc correlation.Incident, reason string) {

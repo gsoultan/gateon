@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package waf
+package appprofile
 
 import (
 	"strings"
@@ -24,7 +24,7 @@ import (
 // off-switch, because nobody reviewing it sees a switch.
 func TestScopeRefusesPathsThatMatchEverything(t *testing.T) {
 	for _, p := range []string{"/", "/*", "*", " / ", "/*  "} {
-		scope := AppProfileScope{Paths: []string{p}, Fields: []string{"body"}}
+		scope := Scope{Paths: []string{p}, Fields: []string{"body"}}
 		if err := scope.Validate(); err == nil {
 			t.Errorf("path %q was accepted as a profile scope; it matches every "+
 				"request, so it turns a scoped exception into a global one", p)
@@ -38,15 +38,15 @@ func TestScopeRefusesPathsThatMatchEverything(t *testing.T) {
 // anything a shipped profile does. Fields with no paths exempts those field
 // names everywhere, which is worse still: "body" is a common field name.
 func TestScopeRequiresBothHalves(t *testing.T) {
-	if err := (AppProfileScope{Paths: []string{"/pastes"}}).Validate(); err == nil {
+	if err := (Scope{Paths: []string{"/pastes"}}).Validate(); err == nil {
 		t.Error("a scope with paths and no fields was accepted; it would exempt " +
 			"every argument on those paths")
 	}
-	if err := (AppProfileScope{Fields: []string{"body"}}).Validate(); err == nil {
+	if err := (Scope{Fields: []string{"body"}}).Validate(); err == nil {
 		t.Error("a scope with fields and no paths was accepted; it would exempt " +
 			"that field name on every route the gateway serves")
 	}
-	if err := (AppProfileScope{}).Validate(); err != nil {
+	if err := (Scope{}).Validate(); err != nil {
 		t.Errorf("an empty scope must be valid and mean 'use the profile's own "+
 			"defaults', got %v", err)
 	}
@@ -60,7 +60,7 @@ func TestScopeRequiresBothHalves(t *testing.T) {
 // profile that appears configured and does nothing — the exact failure this
 // whole feature exists to fix.
 func TestScopeRefusesMidStringWildcards(t *testing.T) {
-	scope := AppProfileScope{Paths: []string{"/api/*/issues"}, Fields: []string{"body"}}
+	scope := Scope{Paths: []string{"/api/*/issues"}, Fields: []string{"body"}}
 	if err := scope.Validate(); err == nil {
 		t.Error("a mid-string wildcard was accepted; it matches nothing while " +
 			"reading as though it covered a subtree")
@@ -69,7 +69,7 @@ func TestScopeRefusesMidStringWildcards(t *testing.T) {
 
 // TestScopeRefusesFieldWildcards keeps field names exact.
 func TestScopeRefusesFieldWildcards(t *testing.T) {
-	scope := AppProfileScope{Paths: []string{"/pastes"}, Fields: []string{"body*"}}
+	scope := Scope{Paths: []string{"/pastes"}, Fields: []string{"body*"}}
 	if err := scope.Validate(); err == nil {
 		t.Error("a wildcard field name was accepted; keys are matched exactly, so " +
 			"this covers less than it appears to")
@@ -86,7 +86,7 @@ func TestScopeIsBounded(t *testing.T) {
 	for i := range many {
 		many[i] = "/p" + strings.Repeat("x", i%5) + string(rune('a'+i%26)) + string(rune('a'+i/26))
 	}
-	scope := AppProfileScope{Paths: many, Fields: []string{"body"}}
+	scope := Scope{Paths: many, Fields: []string{"body"}}
 	if err := scope.Validate(); err == nil {
 		t.Errorf("a scope with %d paths was accepted, cap is %d", len(many), maxScopeEntries)
 	}
@@ -103,11 +103,11 @@ func TestScopeRepointsProfileExceptions(t *testing.T) {
 		t.Fatal("IssueTracker profile is empty; this test has nothing to scope")
 	}
 
-	scope := AppProfileScope{
+	scope := Scope{
 		Paths:  []string{"/pastes", "/tickets/*"},
 		Fields: []string{"content", "body"},
 	}
-	scoped, err := ScopeAppProfileExceptions(original, scope)
+	scoped, err := ApplyScope(original, scope)
 	if err != nil {
 		t.Fatalf("scope rejected: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestScopeLeavesKeylessExceptionsAlone(t *testing.T) {
 	}
 	in[0].Key = "" // explicit: the first is keyless
 
-	out, err := ScopeAppProfileExceptions(in, AppProfileScope{
+	out, err := ApplyScope(in, Scope{
 		Paths: []string{"/mine"}, Fields: []string{"body"},
 	})
 	if err != nil {
@@ -179,7 +179,7 @@ func TestScopeLeavesKeylessExceptionsAlone(t *testing.T) {
 // TestEmptyScopeIsAPassthrough guarantees existing installs are unchanged.
 func TestEmptyScopeIsAPassthrough(t *testing.T) {
 	original := profiles.IssueTracker()
-	out, err := ScopeAppProfileExceptions(original, AppProfileScope{})
+	out, err := ApplyScope(original, Scope{})
 	if err != nil {
 		t.Fatalf("empty scope errored: %v", err)
 	}
@@ -197,21 +197,21 @@ func TestEmptyScopeIsAPassthrough(t *testing.T) {
 // different scopes must not, or the first to build one wins and the second
 // silently inherits exceptions it never configured.
 func TestScopeFingerprintIsOrderIndependent(t *testing.T) {
-	a := AppProfileScope{Paths: []string{"/a", "/b"}, Fields: []string{"x", "y"}}
-	b := AppProfileScope{Paths: []string{"/b", "/a"}, Fields: []string{"y", "x"}}
-	if AppProfileScopeFingerprint(a) != AppProfileScopeFingerprint(b) {
+	a := Scope{Paths: []string{"/a", "/b"}, Fields: []string{"x", "y"}}
+	b := Scope{Paths: []string{"/b", "/a"}, Fields: []string{"y", "x"}}
+	if ScopeFingerprint(a) != ScopeFingerprint(b) {
 		t.Error("the same scope in a different order produced two fingerprints, so " +
 			"two identical engines get built")
 	}
 
-	c := AppProfileScope{Paths: []string{"/a", "/b"}, Fields: []string{"x", "z"}}
-	if AppProfileScopeFingerprint(a) == AppProfileScopeFingerprint(c) {
+	c := Scope{Paths: []string{"/a", "/b"}, Fields: []string{"x", "z"}}
+	if ScopeFingerprint(a) == ScopeFingerprint(c) {
 		t.Error("two different scopes share a fingerprint; the first route to build " +
 			"an engine would win and the second would inherit exceptions it never " +
 			"configured")
 	}
 
-	if AppProfileScopeFingerprint(AppProfileScope{}) != "" {
+	if ScopeFingerprint(Scope{}) != "" {
 		t.Error("an unconfigured scope must not perturb the fingerprint of installs " +
 			"that never set one")
 	}

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package waf
+package appprofile
 
 import (
 	"sort"
@@ -11,7 +11,7 @@ import (
 	"github.com/gsoultan/gwaf/ruleset/profiles"
 )
 
-// AppProfile names a platform whose ordinary traffic is a superset of an attack
+// Profile names a platform whose ordinary traffic is a superset of an attack
 // shape, and which therefore needs a handful of scoped exceptions to run behind
 // the default ruleset without blocking itself.
 //
@@ -26,80 +26,80 @@ import (
 // Weakening the underlying rules instead was measured and rejected upstream:
 // demoting the PHP open-tag signal removed the false positive and also dropped
 // 32 real exploits, taking RCE detection from 84% to 43%.
-type AppProfile string
+type Profile string
 
 // The profiles gwaf ships. They compose — an install running WordPress behind a
 // Laravel API can enable both, because every exception is scoped by path and a
 // path belongs to one application.
 const (
-	AppProfileWordPress    AppProfile = "wordpress"
-	AppProfileDrupal       AppProfile = "drupal"
-	AppProfileLaravel      AppProfile = "laravel"
-	AppProfileIssueTracker AppProfile = "issue_tracker"
+	WordPress    Profile = "wordpress"
+	Drupal       Profile = "drupal"
+	Laravel      Profile = "laravel"
+	IssueTracker Profile = "issue_tracker"
 )
 
-// appProfiles maps a configured name onto the exception set it selects.
+// byName maps a configured name onto the exception set it selects.
 //
 // The functions are called per lookup rather than cached: an engine is built
 // once per distinct config fingerprint, not per request, and holding a package
 // level slice would let a caller that appends to the result corrupt every
 // subsequent build.
-var appProfiles = map[AppProfile]func() []rules.Exception{
-	AppProfileWordPress:    profiles.WordPress,
-	AppProfileDrupal:       profiles.Drupal,
-	AppProfileLaravel:      profiles.Laravel,
-	AppProfileIssueTracker: profiles.IssueTracker,
+var byName = map[Profile]func() []rules.Exception{
+	WordPress:    profiles.WordPress,
+	Drupal:       profiles.Drupal,
+	Laravel:      profiles.Laravel,
+	IssueTracker: profiles.IssueTracker,
 }
 
-// AppProfileNames lists the profiles this build understands, sorted so the API
+// Names lists the profiles this build understands, sorted so the API
 // and the dashboard render them in a stable order.
-func AppProfileNames() []string {
-	names := make([]string, 0, len(appProfiles))
-	for name := range appProfiles {
+func Names() []string {
+	names := make([]string, 0, len(byName))
+	for name := range byName {
 		names = append(names, string(name))
 	}
 	sort.Strings(names)
 	return names
 }
 
-// ParseAppProfile normalises a configured name.
+// Parse normalises a configured name.
 //
 // Case and separator are forgiven — "WordPress", "issue-tracker" and
 // "issue_tracker" all resolve — because these names are typed into a dashboard
 // field and a config file, and rejecting "WordPress" for its capital letters
 // would be a support ticket rather than a safety property.
-func ParseAppProfile(s string) (AppProfile, bool) {
+func Parse(s string) (Profile, bool) {
 	normalised := strings.ToLower(strings.TrimSpace(s))
 	normalised = strings.ReplaceAll(normalised, "-", "_")
 	normalised = strings.ReplaceAll(normalised, " ", "_")
 	// The compact spellings people actually write.
 	switch normalised {
 	case "issuetracker", "jira", "gitlab":
-		normalised = string(AppProfileIssueTracker)
+		normalised = string(IssueTracker)
 	case "wp":
-		normalised = string(AppProfileWordPress)
+		normalised = string(WordPress)
 	}
-	p := AppProfile(normalised)
-	if _, ok := appProfiles[p]; !ok {
+	p := Profile(normalised)
+	if _, ok := byName[p]; !ok {
 		return "", false
 	}
 	return p, true
 }
 
-// AppProfileExceptions resolves configured profile names to their exceptions.
+// Exceptions resolves configured profile names to their exceptions.
 //
 // Unknown names are returned rather than dropped. A profile that silently did
 // nothing is the worst outcome available here: the operator reads the dashboard,
 // sees the platform they selected, and concludes their false positives are
 // somebody else's problem — while the exceptions that would have fixed them were
 // never loaded. The caller logs what it could not resolve.
-func AppProfileExceptions(names []string) (exceptions []rules.Exception, unknown []string) {
-	seen := make(map[AppProfile]bool, len(names))
+func Exceptions(names []string) (exceptions []rules.Exception, unknown []string) {
+	seen := make(map[Profile]bool, len(names))
 	for _, raw := range names {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		p, ok := ParseAppProfile(raw)
+		p, ok := Parse(raw)
 		if !ok {
 			unknown = append(unknown, raw)
 			continue
@@ -110,25 +110,25 @@ func AppProfileExceptions(names []string) (exceptions []rules.Exception, unknown
 			continue
 		}
 		seen[p] = true
-		exceptions = append(exceptions, appProfiles[p]()...)
+		exceptions = append(exceptions, byName[p]()...)
 		// gwaf answers "is this field displayed rather than executed" for the
 		// rules it ships and cannot answer it for the ones gateon adds, because
 		// it has never heard of them. Without this a paste service selecting a
 		// profile had gwaf's exceptions applied and gateon's own rules still
 		// refusing the same content.
-		exceptions = append(exceptions, GateonProfileExceptions(p)...)
+		exceptions = append(exceptions, GateonExceptions(p)...)
 	}
 	return exceptions, unknown
 }
 
-// NormaliseAppProfiles returns the canonical spelling of the profiles it
+// Normalise returns the canonical spelling of the profiles it
 // recognises, dropping duplicates and unknown names and preserving the caller's
 // order. It is what the API returns and what the dashboard displays.
-func NormaliseAppProfiles(names []string) []string {
+func Normalise(names []string) []string {
 	out := make([]string, 0, len(names))
-	seen := make(map[AppProfile]bool, len(names))
+	seen := make(map[Profile]bool, len(names))
 	for _, raw := range names {
-		p, ok := ParseAppProfile(raw)
+		p, ok := Parse(raw)
 		if !ok || seen[p] {
 			continue
 		}
@@ -138,7 +138,7 @@ func NormaliseAppProfiles(names []string) []string {
 	return out
 }
 
-// AppProfileFingerprint renders a profile list for the config fingerprint.
+// Fingerprint renders a profile list for the config fingerprint.
 //
 // It resolves known names to their canonical form so "WordPress" and
 // "wordpress" hash alike and build one engine rather than two identical ones.
@@ -149,9 +149,9 @@ func NormaliseAppProfiles(names []string) []string {
 // once per fingerprint, and the operator with the typo would never see it.
 // Keeping the typo in the key costs one extra engine on a misconfigured install
 // and guarantees the warning reaches whoever made the mistake.
-func AppProfileFingerprint(names []string) string {
-	known := NormaliseAppProfiles(names)
-	_, unknown := AppProfileExceptions(names)
+func Fingerprint(names []string) string {
+	known := Normalise(names)
+	_, unknown := Exceptions(names)
 	sort.Strings(unknown)
 	return strings.Join(known, ",") + "|" + strings.Join(unknown, ",")
 }

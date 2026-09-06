@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package waf
+package appprofile
 
 import (
 	"testing"
@@ -21,8 +21,8 @@ import (
 // is what a profile is specifically not allowed to be — and it would read, in a
 // config file, exactly like the narrow thing it is not.
 func TestGateonProfileRulesAreScopedNotAGlobalOff(t *testing.T) {
-	for profile := range gateonProfileRules {
-		for _, e := range GateonProfileExceptions(profile) {
+	for profile := range gateonRules {
+		for _, e := range GateonExceptions(profile) {
 			switch {
 			case e.RuleID == 0:
 				t.Errorf("%s: an exception names no rule, so it suppresses every rule", profile)
@@ -49,18 +49,18 @@ func TestGateonProfileRulesAreScopedNotAGlobalOff(t *testing.T) {
 // re-pointing the gwaf half does.
 //
 // gwaf's shipped paths are Jira's, so an exception left at its default does
-// nothing for a paste service on /pastes. ScopeAppProfileExceptions re-points
+// nothing for a paste service on /pastes. ApplyScope re-points
 // only entries that carry a Key, so a gateon contribution written without one
 // would silently keep Jira's path and quietly do nothing — the exact failure the
 // scoping work existed to fix.
 func TestGateonProfileRulesAreScopeable(t *testing.T) {
-	in := GateonProfileExceptions(AppProfileIssueTracker)
+	in := GateonExceptions(IssueTracker)
 	if len(in) == 0 {
 		t.Fatal("the issue_tracker profile contributes no gateon rules; this test " +
 			"would pass vacuously")
 	}
 
-	out, err := ScopeAppProfileExceptions(in, AppProfileScope{
+	out, err := ApplyScope(in, Scope{
 		Paths:  []string{"/pastes"},
 		Fields: []string{"content"},
 	})
@@ -86,7 +86,7 @@ func TestGateonProfileRulesAreScopeable(t *testing.T) {
 // entry stays argued in a comment.
 func TestGateonProfileRulesAreDeliberate(t *testing.T) {
 	const max = 8
-	for profile, ids := range gateonProfileRules {
+	for profile, ids := range gateonRules {
 		if len(ids) > max {
 			t.Errorf("%s contributes %d gateon rules, which is more than this "+
 				"mechanism was meant to carry (%d). A long list means the bar has "+

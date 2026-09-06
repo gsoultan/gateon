@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
 // GATEON_MITIGATION_ALLOWLIST is documented as a "CIDR/IP list never mitigated".
@@ -43,7 +44,7 @@ func TestAllowlistedSourceIsNotRefusedByReputation(t *testing.T) {
 
 	// Earn a score of zero the way the threat pipeline would.
 	telemetry.DecreaseReputation(
-		telemetry.ReputationIDFor(client.ja4Plus, client.remoteIP),
+		repid.For(client.ja4Plus, client.remoteIP),
 		99, "test: allowlisted source with a bad score")
 
 	h := blockerHandler(t)
@@ -112,11 +113,11 @@ func TestAllowlistExemptsEnforcementNotObservation(t *testing.T) {
 	// one. That is the design, and this assertion is what stops someone "tidying"
 	// an allowlist check into it later.
 	before := telemetry.GetReputationScore(
-		telemetry.ReputationIDFor("fp-observed", "203.0.113.7"))
+		repid.For("fp-observed", "203.0.113.7"))
 	telemetry.DecreaseReputation(
-		telemetry.ReputationIDFor("fp-observed", "203.0.113.7"), 50, "test: still recorded")
+		repid.For("fp-observed", "203.0.113.7"), 50, "test: still recorded")
 	after := telemetry.GetReputationScore(
-		telemetry.ReputationIDFor("fp-observed", "203.0.113.7"))
+		repid.For("fp-observed", "203.0.113.7"))
 
 	if after >= before {
 		t.Errorf("an allowlisted source's score did not move (%v → %v). The "+
@@ -182,7 +183,7 @@ func TestAllowlistedSourceIsNotChallengedByProofOfWork(t *testing.T) {
 	// to have earned a bad score first. Without this the test would pass whether
 	// or not the allowlist is consulted, which is the most common way an
 	// exemption test proves nothing.
-	telemetry.DecreaseReputation(telemetry.ReputationIDFor(browser, ip), 99, "test: pow")
+	telemetry.DecreaseReputation(repid.For(browser, ip), 99, "test: pow")
 
 	serve := func() (bool, int) {
 		reached := false
