@@ -111,6 +111,12 @@ func AppProfileExceptions(names []string) (exceptions []rules.Exception, unknown
 		}
 		seen[p] = true
 		exceptions = append(exceptions, appProfiles[p]()...)
+		// gwaf answers "is this field displayed rather than executed" for the
+		// rules it ships and cannot answer it for the ones gateon adds, because
+		// it has never heard of them. Without this a paste service selecting a
+		// profile had gwaf's exceptions applied and gateon's own rules still
+		// refusing the same content.
+		exceptions = append(exceptions, GateonProfileExceptions(p)...)
 	}
 	return exceptions, unknown
 }

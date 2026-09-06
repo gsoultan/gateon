@@ -87,19 +87,50 @@ An invalid scope is **ignored, not applied loosely** — the failure mode of a b
 scope is an exception broader than intended — and logged once per engine build so
 you are not left comparing a dashboard against unchanged behaviour.
 
+## What a profile exempts
+
+Two halves, and both matter:
+
+- **gwaf's rules** — the semantic detections (XSS, SQLi, shell, PHP) *and* their
+  Medium-tier counterparts. gwaf v0.6.2 added the second group; before it, a
+  profile exempted `IDSQLiSemantic` while `IDSQLiSuspicious` still refused the
+  same stored SQL, so the exception only half applied. A lower bar fires more
+  readily on prose, which makes the Medium tier the *more* likely of the two to
+  refuse a page on an application built to store attack text.
+- **gateon's own rules** — currently the internal-target SSRF rule (1150003) and
+  the advanced shell-injection rule (1151008) for `issue_tracker`. gwaf answers
+  "is this field displayed rather than executed?" for the rules it ships and
+  cannot answer it for the rules gateon adds, because it has never heard of
+  them. Without this half, selecting a profile applied gwaf's exceptions while
+  gateon's own rules kept refusing the same content.
+
+Both halves are re-pointed by the same scope, so one set of paths and fields
+configures the lot.
+
+The bar for adding a gateon rule to that list is not "it produced a false
+positive" — every rule does, on an application whose purpose is to store attack
+text. It is "this field is genuinely displayed rather than acted on". An SSRF
+finding is about a URL the *server* fetches; a paste service renders the string
+and nothing dials it. A shell-injection finding is about a string reaching a
+shell; in a displayed field it reaches a renderer.
+
 ## Measured effect
 
 Scoping `issue_tracker` to a paste service's real routes closed **7 of the 12**
 false positives the corpus records at paranoia 1, taking the measured rate from
-**2.96% to 1.23%** (and 4.94% to 3.21% at paranoia 2). See
-`internal/middleware/testdata/benign/` and `make test-fp`.
+**2.96% to 1.23%**. Two gwaf rule narrowings (v0.6.1) took it to **0.49%**.
+
+At paranoia 2 the same scoping plus the two exemption halves above took it from
+**4.94% to 1.98%**. See `internal/middleware/testdata/benign/` and
+`make test-fp`.
 
 The cases it does not close are recorded with reasons in that corpus. One is
-worth repeating here, because it is the profile's limit rather than the scope's:
-a pasted Rails backtrace still trips rule 4917 (`IDDoubleExtension`, body phase)
-on strings like `implicit_render.rb:6`. `issue_tracker` names the XSS, SQLi,
-shell and PHP semantic rules and not the file-upload-shaped ones a stack trace
-also trips. That belongs in gwaf's profile, where it fixes every consumer.
+worth repeating here because it is the mechanism's limit rather than a missing
+rule: a **markdown file upload** still blocks at paranoia 2. The value arrives
+keyed by the multipart part name with a filename attached, not as a text field
+called `content` or `body`, and the scope re-points exceptions at named argument
+fields. Closing it means deciding what a profile should say about uploaded file
+*contents*, which is a broader question than scoping answered.
 
 ## What a profile will not do for you
 
