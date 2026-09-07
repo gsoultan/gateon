@@ -44,7 +44,7 @@ type RequestState struct {
 	// enforced against: the JA4+ class scoped to the client's network. It is
 	// cached here because several middlewares on one request ask for it (the
 	// reputation blocker, proof-of-work, deception, the tarpit) and building it
-	// allocates. See telemetry.ReputationIDFor for why it is a pair.
+	// allocates. See repid.For for why it is a pair.
 	ReputationID   string
 	Recommendation string
 	Reputation     float64

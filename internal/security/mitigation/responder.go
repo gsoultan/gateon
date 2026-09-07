@@ -108,7 +108,7 @@ type Deps struct {
 	Shun Shunner // may be nil (no shunning available)
 	// Degrade applies a reputation penalty. It takes the source address as well
 	// as the fingerprint because a reputation score is scoped to a browser class
-	// *on a network* -- see telemetry.ReputationIDFor and ADR 0010. Passing the
+	// *on a network* -- see repid.For and ADR 0011. Passing the
 	// fingerprint alone would write a key nothing reads, and the penalty would
 	// silently do nothing.
 	Degrade func(fingerprint, sourceIP string, penalty float64, reason string)
@@ -187,7 +187,7 @@ func (r *Responder) Handle(inc correlation.Incident) Action {
 //
 // An incident can span many addresses -- that is what the correlation engine is
 // for, and a botnet sharing one fingerprint across a hundred hosts is the case it
-// exists to catch. Reputation is scoped per network (ADR 0010), so penalising
+// exists to catch. Reputation is scoped per network (ADR 0011), so penalising
 // only inc.SourceIP would leave the other participants untouched while the
 // operator reads that the incident was mitigated.
 //
