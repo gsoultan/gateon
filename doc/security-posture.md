@@ -163,3 +163,36 @@ defensive subsystems:
 The `fim` section is omitted when FIM is disabled. The endpoint never fails on a
 partially-initialized server: if posture cannot be assembled it returns a
 minimal report containing the build version and timestamp.
+
+## Measuring false positives
+
+`make test-fp` reports two numbers, because the gateway refuses requests for two
+different reasons and one number cannot cover both.
+
+**Request content — the WAF.** 405 samples of traffic ordinary applications
+serve, replayed at paranoia 1 and 2
+(`internal/middleware/testdata/benign/*.jsonl`). Refusals that exist today carry
+a written reason; the build fails on any new one, and also when a recorded one
+starts passing, so a fix is promoted rather than left in the file.
+
+**Client identity and history — the always-on chain.** Replayed *sessions*
+against the three middlewares every route carries — IP mitigation, user
+mitigation and the reputation blocker
+(`internal/middleware/chain_fp_test.go`). The question here is different: not
+"is this request an attack?" but "does one client's behaviour refuse another?"
+
+That second number needs its own harness because a stateless corpus cannot
+produce the state those controls act on, and all three defects found in that
+area were silent — a reputation score keyed on a browser build rather than a
+client, an allowlist honoured by one code path out of five, and a 24-hour ban on
+a single trap hit. Scenarios cover the shapes a real deployment produces: the
+same browser on different networks, a compromised machine behind a corporate
+NAT, a monitoring probe on a schedule, a crawler, a phone changing cell, and an
+attacker rotating addresses.
+
+The harness carries its own negative test. A gate that cannot observe a refusal
+reports zero forever, and the zero gets quoted.
+
+The opt-in controls — tarpit, proof-of-work, deception — are deliberately not in
+either number: a scenario that enabled them would measure one deployment's
+configuration rather than the shipped default.

@@ -118,17 +118,27 @@ test-race:
 ##          fails on any NEW one, and also when a recorded one starts passing, so a
 ##          fix gets promoted instead of sitting in the file forever.
 ##
-##          Prints the rate at each paranoia level; full log in dist/fp.txt.
+##          It measures two things, because the gateway refuses requests for two
+##          different reasons and one number cannot cover both:
+##
+##            * the WAF, on request *content* — 405 samples at paranoia 1 and 2;
+##            * the always-on chain, on client *identity and history* — replayed
+##              sessions, where the question is whether one client's behaviour
+##              refuses another. A stateless corpus cannot reach that, and all
+##              three defects found there in 2026-09 were silent.
+##
+##          Prints the rate for each; full log in dist/fp.txt.
 ##
 ##          Not a pipeline: `go test | grep` returns grep's exit status, so the
 ##          target would report success on a red gate. The status is captured
 ##          before anything filters the output.
 test-fp:
 	@mkdir -p dist
-	@go test ./internal/middleware/ -run 'TestWAFFalsePositives|TestBenignCorpus' -v \
+	@go test ./internal/middleware/ \
+		-run 'TestWAFFalsePositives|TestBenignCorpus|TestChain' -v \
 		> dist/fp.txt 2>&1; \
 		status=$$?; \
-		grep -E 'corpus at PL|FALSE POSITIVE|RECORDED FALSE|^(ok|FAIL)' dist/fp.txt || true; \
+		grep -E 'corpus at PL|chain false-positive|FALSE POSITIVE|RECORDED FALSE|^(ok|FAIL)' dist/fp.txt || true; \
 		exit $$status
 
 ## bench: run benchmarks with allocation tracking, sampled for benchstat.
