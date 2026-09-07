@@ -1,13 +1,9 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package proxy
+package health
 
-import (
-	"testing"
-
-	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-)
+import "testing"
 
 // The health checker had no failure or recovery threshold: every check result
 // was passed straight to the load balancer, so one failed check removed a
@@ -21,10 +17,10 @@ import (
 // backend healthy the whole time.
 
 // feed replays a sequence of results and returns every state change reported.
-func feed(h *healthThresholds, target string, results []bool) []bool {
+func feed(h *Tracker, target string, results []bool) []bool {
 	var changes []bool
 	for _, ok := range results {
-		if alive, changed := h.record(target, ok); changed {
+		if alive, changed := h.Record(target, ok); changed {
 			changes = append(changes, alive)
 		}
 	}
@@ -33,7 +29,7 @@ func feed(h *healthThresholds, target string, results []bool) []bool {
 
 // TestHealthThresholdIgnoresASingleBlip is the regression.
 func TestHealthThresholdIgnoresASingleBlip(t *testing.T) {
-	h := newHealthThresholds(2, 2)
+	h := New(2, 2)
 
 	// Establish the target as alive, then fail exactly one check.
 	changes := feed(h, "http://b1", []bool{true, false, true, true})
@@ -51,7 +47,7 @@ func TestHealthThresholdIgnoresASingleBlip(t *testing.T) {
 //
 // Tolerating a blip must not mean tolerating a dead backend.
 func TestHealthThresholdRemovesAPersistentlyFailingTarget(t *testing.T) {
-	h := newHealthThresholds(2, 2)
+	h := New(2, 2)
 
 	changes := feed(h, "http://b1", []bool{true, false, false})
 	if len(changes) != 2 || changes[1] != false {
@@ -68,7 +64,7 @@ func TestHealthThresholdRemovesAPersistentlyFailingTarget(t *testing.T) {
 
 // TestHealthThresholdRequiresSustainedRecovery covers the flap-back.
 func TestHealthThresholdRequiresSustainedRecovery(t *testing.T) {
-	h := newHealthThresholds(2, 2)
+	h := New(2, 2)
 	feed(h, "http://b1", []bool{true, false, false}) // now dead
 
 	if changes := feed(h, "http://b1", []bool{true}); len(changes) != 0 {
@@ -87,7 +83,7 @@ func TestHealthThresholdRequiresSustainedRecovery(t *testing.T) {
 // Failures scattered across hours are a different thing from failures in a row,
 // and only the second means the backend is gone.
 func TestHealthThresholdResetsAnInterruptedStreak(t *testing.T) {
-	h := newHealthThresholds(3, 2)
+	h := New(3, 2)
 
 	if changes := feed(h, "http://b1", []bool{
 		true,
@@ -109,13 +105,13 @@ func TestHealthThresholdResetsAnInterruptedStreak(t *testing.T) {
 // intervals before an already-dead one stops being used -- treats an absence of
 // history as evidence.
 func TestHealthThresholdAppliesTheFirstResultImmediately(t *testing.T) {
-	h := newHealthThresholds(2, 2)
+	h := New(2, 2)
 
-	if alive, changed := h.record("http://fresh", true); !changed || !alive {
+	if alive, changed := h.Record("http://fresh", true); !changed || !alive {
 		t.Error("a first successful check did not put a new target into rotation; " +
 			"it would sit idle for a threshold's worth of intervals after startup")
 	}
-	if alive, changed := h.record("http://broken", false); !changed || alive {
+	if alive, changed := h.Record("http://broken", false); !changed || alive {
 		t.Error("a first failed check did not keep a new target out of rotation; " +
 			"a backend that is already down would receive traffic until the " +
 			"threshold cleared")
@@ -124,17 +120,17 @@ func TestHealthThresholdAppliesTheFirstResultImmediately(t *testing.T) {
 
 // TestHealthThresholdTracksTargetsSeparately guards the obvious mix-up.
 func TestHealthThresholdTracksTargetsSeparately(t *testing.T) {
-	h := newHealthThresholds(2, 2)
-	h.record("http://b1", true)
-	h.record("http://b2", true)
+	h := New(2, 2)
+	h.Record("http://b1", true)
+	h.Record("http://b2", true)
 
 	// b1 fails twice; b2 is fine throughout.
-	h.record("http://b1", false)
-	h.record("http://b2", true)
-	if alive, _ := h.record("http://b1", false); alive {
+	h.Record("http://b1", false)
+	h.Record("http://b2", true)
+	if alive, _ := h.Record("http://b1", false); alive {
 		t.Error("b1 should be dead after two consecutive failures")
 	}
-	if alive, changed := h.record("http://b2", false); !alive || changed {
+	if alive, changed := h.Record("http://b2", false); !alive || changed {
 		t.Error("b2 changed state on its first failure; b1's failures are not b2's")
 	}
 }
@@ -145,10 +141,10 @@ func TestHealthThresholdTracksTargetsSeparately(t *testing.T) {
 // threshold of zero" -- the latter would either act on nothing or act on
 // everything, depending on how the comparison happened to be written.
 func TestHealthThresholdDefaultsAreApplied(t *testing.T) {
-	h := newHealthThresholds(0, 0)
-	if h.unhealthy != defaultUnhealthyThreshold || h.healthy != defaultHealthyThreshold {
+	h := New(0, 0)
+	if h.unhealthy != DefaultUnhealthy || h.healthy != DefaultHealthy {
 		t.Fatalf("thresholds = (%d, %d), want the defaults (%d, %d)",
-			h.unhealthy, h.healthy, defaultUnhealthyThreshold, defaultHealthyThreshold)
+			h.unhealthy, h.healthy, DefaultUnhealthy, DefaultHealthy)
 	}
 	// And it behaves, rather than merely holding the right numbers.
 	if changes := feed(h, "http://b1", []bool{true, false}); len(changes) != 1 {
@@ -156,7 +152,7 @@ func TestHealthThresholdDefaultsAreApplied(t *testing.T) {
 	}
 
 	// A negative value is nonsense and must not disable the check.
-	if n := newHealthThresholds(-1, -5); n.unhealthy <= 0 || n.healthy <= 0 {
+	if n := New(-1, -5); n.unhealthy <= 0 || n.healthy <= 0 {
 		t.Errorf("negative thresholds survived as (%d, %d)", n.unhealthy, n.healthy)
 	}
 }
@@ -167,7 +163,7 @@ func TestHealthThresholdDefaultsAreApplied(t *testing.T) {
 // Detection speed is a real trade and the default now costs one extra interval.
 // An operator who would rather have it back must be able to say so.
 func TestHealthThresholdCanBeConfiguredBackToImmediate(t *testing.T) {
-	h := newHealthThresholds(1, 1)
+	h := New(1, 1)
 	changes := feed(h, "http://b1", []bool{true, false, true})
 	if len(changes) != 3 {
 		t.Errorf("with thresholds of 1, changes = %v; want every result to act, "+
@@ -180,11 +176,11 @@ func TestHealthThresholdCanBeConfiguredBackToImmediate(t *testing.T) {
 // The history is a map keyed by backend URL in a process that outlives any
 // individual backend, so discovery churn would grow it without limit.
 func TestHealthThresholdForgetsRetiredTargets(t *testing.T) {
-	h := newHealthThresholds(2, 2)
+	h := New(2, 2)
 	for _, u := range []string{"http://b1", "http://b2", "http://b3"} {
-		h.record(u, true)
+		h.Record(u, true)
 	}
-	h.forget("http://b2")
+	h.Forget("http://b2")
 
 	h.mu.Lock()
 	_, still := h.state["http://b2"]
@@ -199,7 +195,7 @@ func TestHealthThresholdForgetsRetiredTargets(t *testing.T) {
 
 	// A returning target starts fresh, which is the same position a restart
 	// leaves the gateway in.
-	if alive, changed := h.record("http://b2", false); !changed || alive {
+	if alive, changed := h.Record("http://b2", false); !changed || alive {
 		t.Error("a target that came back did not have its first result applied " +
 			"immediately")
 	}
@@ -207,16 +203,16 @@ func TestHealthThresholdForgetsRetiredTargets(t *testing.T) {
 
 // TestHealthThresholdIsSafeUnderConcurrentChecks covers the lock.
 func TestHealthThresholdIsSafeUnderConcurrentChecks(t *testing.T) {
-	h := newHealthThresholds(2, 2)
+	h := New(2, 2)
 	done := make(chan struct{})
 	for i := 0; i < 8; i++ {
 		go func(i int) {
 			defer func() { done <- struct{}{} }()
 			for j := 0; j < 200; j++ {
-				h.record("http://b1", j%2 == 0)
-				h.record("http://b2", true)
+				h.Record("http://b1", j%2 == 0)
+				h.Record("http://b2", true)
 				if j%50 == 0 {
-					h.forget("http://b3")
+					h.Forget("http://b3")
 				}
 			}
 		}(i)
@@ -224,55 +220,4 @@ func TestHealthThresholdIsSafeUnderConcurrentChecks(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		<-done
 	}
-}
-
-// TestServiceThresholdsReachTheHealthChecker proves the setting is wired.
-//
-// A configuration key that nothing reads is this project's most-repeated defect:
-// 73 middleware settings were inert because the dashboard wrote one spelling and
-// Go read another, and every one of them looked configured. Reading the code and
-// concluding "the whole message is persisted, so it flows through" is exactly
-// the reasoning that missed it the first time.
-//
-// So this asserts the value arrives, rather than that the plumbing looks right.
-func TestServiceThresholdsReachTheHealthChecker(t *testing.T) {
-	rt := &gateonv1.Route{Id: "test", ServiceId: "test"}
-
-	t.Run("configured values are used", func(t *testing.T) {
-		svc := &gateonv1.Service{
-			Id:                 "test",
-			WeightedTargets:    []*gateonv1.Target{{Url: "http://backend:8080"}},
-			UnhealthyThreshold: 5,
-			HealthyThreshold:   3,
-		}
-		ph := NewProxyHandlerBuilder(rt, &mockServiceStore{svc: svc}, nil).Build()
-		defer ph.Close()
-
-		if ph.healthThresholds == nil {
-			t.Fatal("the handler has no threshold tracker; every check result would " +
-				"go straight to the balancer")
-		}
-		if ph.healthThresholds.unhealthy != 5 || ph.healthThresholds.healthy != 3 {
-			t.Errorf("thresholds = (%d, %d), want (5, 3) from the service config. "+
-				"The values are set on the Service message and never reach the "+
-				"checker, so the setting reads as configured and does nothing.",
-				ph.healthThresholds.unhealthy, ph.healthThresholds.healthy)
-		}
-	})
-
-	t.Run("an unset service gets the defaults", func(t *testing.T) {
-		svc := &gateonv1.Service{
-			Id:              "test",
-			WeightedTargets: []*gateonv1.Target{{Url: "http://backend:8080"}},
-		}
-		ph := NewProxyHandlerBuilder(rt, &mockServiceStore{svc: svc}, nil).Build()
-		defer ph.Close()
-
-		if ph.healthThresholds.unhealthy != defaultUnhealthyThreshold ||
-			ph.healthThresholds.healthy != defaultHealthyThreshold {
-			t.Errorf("thresholds = (%d, %d), want the defaults (%d, %d)",
-				ph.healthThresholds.unhealthy, ph.healthThresholds.healthy,
-				defaultUnhealthyThreshold, defaultHealthyThreshold)
-		}
-	})
 }

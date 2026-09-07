@@ -94,6 +94,6 @@ func (h *ProxyHandler) retireTargetMetrics(url string) {
 	telemetry.TargetHealth.DeleteLabelValues(h.RouteName(), url)
 	telemetry.ActiveConnections.DeleteLabelValues(url)
 	if h.healthThresholds != nil {
-		h.healthThresholds.forget(url)
+		h.healthThresholds.Forget(url)
 	}
 }

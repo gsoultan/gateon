@@ -1,7 +1,14 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package proxy
+// Package health decides when a run of check results means a backend's state
+// actually changed.
+//
+// It lives apart from pkg/proxy because it is not about proxying: it holds no
+// connection, touches no request, and runs on the health checker's goroutine
+// every fifteen seconds. Keeping it separate also keeps it testable without
+// standing up a handler, which is how the thresholds got tested at all.
+package health
 
 import "sync"
 
@@ -20,18 +27,18 @@ import "sync"
 // configurable per service for operators who would rather have the faster
 // detection back.
 const (
-	defaultUnhealthyThreshold = 2
-	defaultHealthyThreshold   = 2
+	DefaultUnhealthy = 2
+	DefaultHealthy   = 2
 )
 
-// healthThresholds turns a stream of per-target check results into the far
+// Tracker turns a stream of per-target check results into the far
 // smaller stream of state changes that are worth acting on.
 //
 // It is deliberately not the load balancer's problem. The balancer answers
 // "which target now", which is on the request path; deciding whether three
 // failures in a row mean something belongs to the checker, which runs every
 // fifteen seconds on its own goroutine.
-type healthThresholds struct {
+type Tracker struct {
 	unhealthy int32
 	healthy   int32
 
@@ -49,21 +56,24 @@ type targetHealthState struct {
 	seen bool
 }
 
-func newHealthThresholds(unhealthy, healthy int32) *healthThresholds {
+// New builds a Tracker. A non-positive threshold means the default: an unset
+// proto field is 0, and "unset" has to mean the default rather than a threshold
+// of zero, which would either act on nothing or act on everything.
+func New(unhealthy, healthy int32) *Tracker {
 	if unhealthy <= 0 {
-		unhealthy = defaultUnhealthyThreshold
+		unhealthy = DefaultUnhealthy
 	}
 	if healthy <= 0 {
-		healthy = defaultHealthyThreshold
+		healthy = DefaultHealthy
 	}
-	return &healthThresholds{
+	return &Tracker{
 		unhealthy: unhealthy,
 		healthy:   healthy,
 		state:     make(map[string]*targetHealthState),
 	}
 }
 
-// record folds one check result into a target's history and reports whether the
+// Record folds one check result into a target's history and reports whether the
 // balancer should be told something new.
 //
 // The first result for a target is applied immediately whatever it says. A
@@ -71,7 +81,7 @@ func newHealthThresholds(unhealthy, healthy int32) *healthThresholds {
 // newly discovered target wait two intervals before it can be used -- or two
 // intervals before an already-dead one stops being used -- would be treating an
 // absence of history as evidence.
-func (h *healthThresholds) record(target string, ok bool) (alive bool, changed bool) {
+func (h *Tracker) Record(target string, ok bool) (alive bool, changed bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -112,13 +122,13 @@ func (h *healthThresholds) record(target string, ok bool) (alive bool, changed b
 	return s.alive, true
 }
 
-// forget drops a target's history.
+// Forget drops a target's history.
 //
 // Called when discovery retires a target, so the map cannot grow without bound
 // across a long-lived process whose backends come and go. A target that returns
 // starts over with no history, which is the same position the gateway is in
 // after a restart.
-func (h *healthThresholds) forget(target string) {
+func (h *Tracker) Forget(target string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.state, target)
