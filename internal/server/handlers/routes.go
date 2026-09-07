@@ -9,7 +9,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
-	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -97,11 +96,7 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 		}
 
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		userID := "system"
-		if claims != nil {
-			userID = claims.Username
-		}
+		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "save", "route", "Saved route: "+rt.Id, request.GetClientIP(r, true))
 
 		WriteProtoResponse(w, http.StatusOK, &rt)
@@ -121,11 +116,7 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 		}
 
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		userID := "system"
-		if claims != nil {
-			userID = claims.Username
-		}
+		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "delete", "route", "Deleted route: "+id, request.GetClientIP(r, true))
 
 		w.WriteHeader(http.StatusNoContent)

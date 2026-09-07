@@ -190,11 +190,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		userID := "system"
-		if claims != nil {
-			userID = claims.Username
-		}
+		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "update", "global_config", "Updated global configuration", request.GetClientIP(r, true))
 
 		// Apply settings that require immediate action
@@ -230,7 +226,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		mux.ServeHTTP(w, r)
 	})
 	mux.HandleFunc("GET /v1/me", func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
+		claims, ok := callerClaims(r)
 		if !ok || claims == nil {
 			WriteHTTPError(w, http.StatusUnauthorized, "not authenticated")
 			return
@@ -564,13 +560,18 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 
-		// Verify permission (admin or self)
-		claimsVal := r.Context().Value(middleware.UserContextKey)
-		if claimsVal == nil {
+		// Verify permission (self only -- see below).
+		//
+		// Both an absent caller and one whose claims cannot be read are refused.
+		// The check below is the only thing standing between a request and
+		// another account's second factor, so skipping it on an unreadable
+		// credential is not an option.
+		claims, ok := callerClaims(r)
+		if !ok || claims == nil {
 			WriteHTTPError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
+		{
 			// 2FA setup is strictly self-service: the response contains the
 			// TOTP secret, QR code, and recovery codes, which must only ever be
 			// disclosed to the account owner. Even admins must not be able to
@@ -603,13 +604,17 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 
-		// If it's for enabling (authenticated user)
-		claimsVal := r.Context().Value(middleware.UserContextKey)
-		var isLoginStep bool
-		if claimsVal == nil {
-			// Might be the second step of login, which is not yet "authenticated" in context
-			isLoginStep = true
+		// Whether this is the second step of a login or an already-authenticated
+		// user enabling 2FA. It decides whether a session cookie is issued, so a
+		// claims value that cannot be read is refused rather than guessed: both
+		// readings are wrong, and the permissive one mints a session.
+		claims, ok := callerClaims(r)
+		if !ok {
+			WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
+			return
 		}
+		// No claims means no session yet, which is the login step.
+		isLoginStep := claims == nil
 
 		resp, err := svc.Verify2FA(r.Context(), &req)
 		if err != nil {
@@ -739,11 +744,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		userID := "system"
-		if claims != nil {
-			userID = claims.Username
-		}
+		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "update", "user", "Updated user: "+req.Username, request.GetClientIP(r, true))
 
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -760,16 +761,22 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 
-		// Allow if admin OR if changing own password
-		claimsVal := r.Context().Value(middleware.UserContextKey)
-		if claimsVal != nil {
-			if claims, ok := claimsVal.(*auth.Claims); ok && claims != nil {
-				isAdmin := auth.Allowed(r.Context(), claims.Role, auth.ActionWrite, auth.ResourceUsers)
-				isSelf := claims.ID == req.Id
-				if !isAdmin && !isSelf {
-					WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
-					return
-				}
+		// Allow if admin OR if changing own password.
+		//
+		// A claims value that cannot be read is refused rather than skipped: it
+		// establishes neither admin nor self, and continuing would change the
+		// password of whatever user id the request names.
+		claims, ok := callerClaims(r)
+		if !ok {
+			WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+		if claims != nil {
+			isAdmin := auth.Allowed(r.Context(), claims.Role, auth.ActionWrite, auth.ResourceUsers)
+			isSelf := claims.ID == req.Id
+			if !isAdmin && !isSelf {
+				WriteHTTPError(w, http.StatusForbidden, "insufficient permissions")
+				return
 			}
 		}
 
@@ -794,11 +801,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		userID := "system"
-		if claims != nil {
-			userID = claims.Username
-		}
+		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "delete", "user", "Deleted user ID: "+id, request.GetClientIP(r, true))
 
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -806,8 +809,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	})
 	mux.HandleFunc("POST /v1/logout", func(w http.ResponseWriter, r *http.Request) {
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		if claims != nil {
+		if claims, _ := callerClaims(r); claims != nil {
 			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.GetClientIP(r, true))
 		}
 		middleware.ClearSessionCookie(w, r)

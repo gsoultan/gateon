@@ -47,7 +47,7 @@ drop_comment_hits() { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true; 
 # needs to tolerate a not-yet-available service, make the callee deny on a nil
 # verifier (see middleware/auth.PasetoAuth) and build unconditionally.
 # ---------------------------------------------------------------------------
-note "1/8  auth.Service nil-comparisons"
+note "1/9  auth.Service nil-comparisons"
 auth_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '(\.AuthManager|deps\.Auth|s\.Auth|svc\.Auth)[[:space:]]*[!=]=[[:space:]]*nil' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -68,7 +68,7 @@ fi
 # stored-XSS bug plus a readable token equals administrator compromise. The
 # token lives only in the HttpOnly gateon_session cookie.
 # ---------------------------------------------------------------------------
-note "2/8  session token in web storage"
+note "2/9  session token in web storage"
 storage_hits=$( (grep -rnE '(localStorage|sessionStorage)\.(setItem|getItem)' ui/src \
 	--include='*.ts' --include='*.tsx' 2>/dev/null |
 	grep -viE 'token|jwt|paseto|bearer|credential|gateon-auth') || true)
@@ -105,7 +105,7 @@ fi
 # '/', which made the -o path invalid and produced a build that "succeeded"
 # and then failed at exec with a confusing error.
 # ---------------------------------------------------------------------------
-note "3/8  tests building into the repository root"
+note "3/9  tests building into the repository root"
 root_builds=$( (grep -rnE '"go",[[:space:]]*"build",[[:space:]]*"-o",[[:space:]]*[a-zA-Z]' tests/ --include='*.go' 2>/dev/null |
 	grep -vE 'filepath\.Join\((env\.Dir|tmpDir|t\.TempDir)') || true)
 # Re-check the argument actually resolves under a temp dir.
@@ -147,7 +147,7 @@ fi
 # protoc-gen-es all copy the leading comment out of the .proto, so fixing the
 # .proto fixes the generated file on the next `make proto`.
 # ---------------------------------------------------------------------------
-note "4/8  SPDX license header on every source file"
+note "4/9  SPDX license header on every source file"
 SPDX_LINE='SPDX-License-Identifier: MIT'
 missing_spdx=""
 while IFS= read -r f; do
@@ -195,7 +195,7 @@ fi
 # authentication is distinguishable from no authentication at all. Until then
 # this check holds the line. See doc/adr/0006-transport-neutral-authorization.md.
 # ---------------------------------------------------------------------------
-note "5/8  DryRun on the management auth chain"
+note "5/9  DryRun on the management auth chain"
 dryrun_hits=$( (find internal/server -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE 'DryRun' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -227,7 +227,7 @@ fi
 # enforce. No compiler sees it, because both sides are string literals in
 # different languages.
 # ---------------------------------------------------------------------------
-note "6/8  Dashboard middleware config keys match the Go readers"
+note "6/9  Dashboard middleware config keys match the Go readers"
 mw_editors="ui/src/components/MiddlewareConfig"
 if [ -d "$mw_editors" ]; then
 	go_keys=$(grep -rhoE '\["[A-Za-z0-9_]+"\]' internal/middleware/ 2>/dev/null |
@@ -282,7 +282,7 @@ fi
 # Matched by content rather than by name, because the name is the part that
 # keeps changing. Executable *scripts* are text and do not match.
 # ---------------------------------------------------------------------------
-note "7/8  No compiled binaries tracked in git"
+note "7/9  No compiled binaries tracked in git"
 if ! command -v file >/dev/null 2>&1; then
 	# Without file(1) the pipeline below returns nothing and the check would
 	# report "ok" while inspecting exactly zero bytes. A gate that passes
@@ -346,7 +346,7 @@ fi
 # effective threshold for every unknown client and re-tune detection on every
 # install, so it is not being changed as a side effect of this work.
 fi
-note "8/8  reputation reads use a network-scoped identity"
+note "8/9  reputation reads use a network-scoped identity"
 # Checked by where the *class identity* is produced, not by what a variable is
 # called. An earlier version of this check allow-listed calls whose argument was
 # named repID, which a negative test defeated immediately: renaming the producer
@@ -370,6 +370,43 @@ if [ -n "$rep_hits" ]; then
 	printf '  throttles or challenges on it hits all of them at once.\n'
 else
 	echo "  ok - the browser-class identity stays inside internal/telemetry"
+fi
+
+note "9/9  handlers resolve the caller in one place"
+# The management plane makes some authorization decisions itself rather than
+# through RequirePermission -- "admin or self" on the password change, "self
+# only" on 2FA setup. Those were written as:
+#
+#   if claims, ok := v.(*auth.Claims); ok && claims != nil { ...check... }
+#
+# which skips its own check when the assertion fails and continues to the
+# privileged operation. RequirePermission, in the same file, denies on exactly
+# that condition. The two disagreed, and the fail-open half was on the password
+# change and the endpoint that returns another account's TOTP secret.
+#
+# It was latent: the management plane authenticates with Paseto, whose verifier
+# returns *auth.Claims. But there is one context key -- middleware.UserContextKey
+# aliases auth.UserContextKey -- and one writer, InjectContext(ctx, claims any),
+# which stores whatever it is handed; the JWT middleware hands it jwt.MapClaims.
+#
+# Checked by constraining where the caller is *read*, not by trying to recognise
+# a safe assertion. rbac.go owns the key; callerClaims and auditUser are the way
+# in. A handler that cannot reach the raw value cannot mis-assert it.
+claims_hits=$( (find internal/server/handlers -name '*.go' -not -name '*_test.go' -print0 |
+	xargs -0 grep -n 'middleware\.UserContextKey' 2>/dev/null |
+	drop_comment_hits |
+	grep -vE '^internal/server/handlers/rbac\.go:') || true)
+
+if [ -n "$claims_hits" ]; then
+	err "a handler read middleware.UserContextKey directly"
+	printf '%s\n' "$claims_hits"
+	printf '  Use callerClaims(r) for an authorization decision, or auditUser(r)\n'
+	printf '  for an audit entry. Both live in rbac.go, which owns this key.\n'
+	printf '  A direct read invites `if claims, ok := v.(*auth.Claims); ok {...}`,\n'
+	printf '  which silently skips the check it guards when the value is not the\n'
+	printf '  type expected -- and continues to the privileged operation.\n'
+else
+	echo "  ok - handlers go through callerClaims/auditUser, not the raw key"
 fi
 
 printf '\n'

@@ -223,7 +223,21 @@ shipped code and each failed silently:
    better message, but **CI does not run golangci-lint**, so this check re-covers Go and
    adds `.proto` and TypeScript, which no Go linter reaches. Generated protobuf output
    is exempt — it inherits the header from the `.proto`, so `make proto` propagates it.
-5. **No compiled executable is tracked in git** — `go build ./scripts/checkcoverage`
+5. **A handler never reads `middleware.UserContextKey` directly** — `rbac.go` owns
+   it, via `callerClaims` (authorization) and `auditUser` (audit entries). A raw
+   read invites `if claims, ok := v.(*auth.Claims); ok && claims != nil { ...check... }`,
+   which *skips the check it guards* when the value is not the expected type and
+   continues to the privileged operation. `RequirePermission`, in the same file,
+   denies on exactly that condition; the two disagreed, and the fail-open half was
+   on the password change and on the endpoint that returns another account's TOTP
+   secret and recovery codes. Latent rather than live — the management plane uses
+   Paseto, whose verifier returns `*auth.Claims` — but there is one context key
+   (`middleware.UserContextKey` aliases `auth.UserContextKey`) and one writer,
+   `InjectContext(ctx, claims any)`, which stores whatever it is handed; the JWT
+   middleware hands it `jwt.MapClaims`. Constrained at the *read*, not by trying to
+   recognise a safe assertion: a handler that cannot reach the raw value cannot
+   mis-assert it.
+6. **No compiled executable is tracked in git** — `go build ./scripts/checkcoverage`
    writes `./checkcoverage` into the repo root, named after the package, and `git add -A`
    commits it. A 2.9 MB Mach-O binary rode onto `main` that way in the very commit that
    added the coverage ratchet, and a second nearly shipped with the folder ratchet.
