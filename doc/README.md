@@ -11,6 +11,7 @@ Setup guides and configuration references.
 | [email-backend-setup.md](./email-backend-setup.md) | Configure Gateon to proxy email servers (SMTP, IMAP, POP3) with SPF and DKIM support via PROXY protocol |
 | [proxy-protocol.md](./proxy-protocol.md) | Full guide to PROXY protocol concepts, v1/v2 differences, configuration, security, and troubleshooting |
 | [websockets-sse.md](./websockets-sse.md) | Native support for WebSockets and Server-Sent Events (SSE) |
+| [waf-rollout.md](./waf-rollout.md) | Turning the WAF on without breaking your application: audit-only first, what to measure, when to enforce, how to roll back |
 | [deployment-sizing.md](./deployment-sizing.md) | What the 2 core / 2 GB target was measured to mean, how to re-measure it, and the runtime budget knobs |
 | [storage-retention.md](./storage-retention.md) | Persistent stores, retention/disk-reclamation behavior, and tunable cache-size/disk-usage settings |
 | [security-posture.md](./security-posture.md) | File Integrity Monitoring (FIM) configuration and the `GET /v1/security/posture` endpoint (WAF/ClamAV/FIM freshness) |
