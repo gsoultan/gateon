@@ -109,6 +109,8 @@ export function ServiceForm({
       loadBalancerPolicy: "roundRobin",
       healthCheckPath: "",
       healthCheckPort: 0,
+      unhealthyThreshold: 0,
+      healthyThreshold: 0,
       healthCheckProtocol: "",
       healthCheckType: HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED,
       l4HealthCheckIntervalMs: 10000,
@@ -225,6 +227,8 @@ export function ServiceForm({
       );
       form.setFieldValue("healthCheckPath", initialData.healthCheckPath || "");
       form.setFieldValue("healthCheckPort", initialData.healthCheckPort ?? 0);
+      form.setFieldValue("unhealthyThreshold", initialData.unhealthyThreshold ?? 0);
+      form.setFieldValue("healthyThreshold", initialData.healthyThreshold ?? 0);
       form.setFieldValue("healthCheckProtocol", initialData.healthCheckProtocol || "");
       form.setFieldValue("healthCheckType", initialData.healthCheckType ?? HealthCheckType.HEALTH_CHECK_TYPE_UNSPECIFIED);
       form.setFieldValue(
@@ -851,6 +855,38 @@ export function ServiceForm({
                         value={field.state.value ?? ""}
                         onBlur={field.handleBlur}
                         onChange={(v) => field.handleChange(v ?? "")}
+                        size="md"
+                      />
+                    )}
+                  />
+                </Group>
+                <Group grow>
+                  <form.Field
+                    name="unhealthyThreshold"
+                    children={(field: any) => (
+                      <TextInput
+                        label="Unhealthy Threshold"
+                        description="Consecutive failed checks before a target leaves rotation (0 = default 2)"
+                        type="number"
+                        placeholder="2"
+                        value={field.state.value ?? 0}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(Number(e.target.value) || 0)}
+                        size="md"
+                      />
+                    )}
+                  />
+                  <form.Field
+                    name="healthyThreshold"
+                    children={(field: any) => (
+                      <TextInput
+                        label="Healthy Threshold"
+                        description="Consecutive successful checks before a target returns (0 = default 2)"
+                        type="number"
+                        placeholder="2"
+                        value={field.state.value ?? 0}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(Number(e.target.value) || 0)}
                         size="md"
                       />
                     )}

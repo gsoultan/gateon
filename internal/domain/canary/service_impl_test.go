@@ -27,6 +27,8 @@ func fullService() *gateonv1.Service {
 		DiscoveryUrl:            "dns:checkout.svc.local",
 		TlsClientConfig:         &gateonv1.TlsClientConfig{Enabled: true, SkipVerify: true, ServerName: "checkout.internal"},
 		HealthCheckPort:         8443,
+		UnhealthyThreshold:      4,
+		HealthyThreshold:        3,
 		HealthCheckProtocol:     "https",
 		HealthCheckType:         gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_HTTP,
 		WeightedTargets: []*gateonv1.Target{{

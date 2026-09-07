@@ -42,8 +42,18 @@ func (h *ProxyHandler) runHealthCheck() {
 			currentStats := h.lb.GetStats()
 			for _, s := range currentStats {
 				u := s.URL
-				alive := h.checkTargetHealth(context.Background(), client, u)
-				h.lb.SetAlive(u, alive)
+				ok := h.checkTargetHealth(context.Background(), client, u)
+
+				// One check result is not a state change. See healthThresholds:
+				// every target is checked in this one loop on this one goroutine,
+				// so whatever makes a single check fail tends to fail all of them
+				// in the same tick, and acting on each result individually is how
+				// a busy gateway empties its own backend pool.
+				alive, changed := h.healthThresholds.record(u, ok)
+				if changed {
+					h.lb.SetAlive(u, alive)
+				}
+
 				// Update Prometheus target health gauge
 				healthVal := 0.0
 				if alive {

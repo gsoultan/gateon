@@ -87,7 +87,13 @@ func (h *ProxyHandler) currentTargetURLs() map[string]struct{} {
 // retireTargetMetrics drops the per-target time series of a backend that is no
 // longer part of the service, preventing unbounded Prometheus cardinality
 // growth on clusters with churning backends.
+//
+// The health-check history goes with them, for the same reason: it is another
+// per-target map in a process that outlives any individual backend.
 func (h *ProxyHandler) retireTargetMetrics(url string) {
 	telemetry.TargetHealth.DeleteLabelValues(h.RouteName(), url)
 	telemetry.ActiveConnections.DeleteLabelValues(url)
+	if h.healthThresholds != nil {
+		h.healthThresholds.forget(url)
+	}
 }
