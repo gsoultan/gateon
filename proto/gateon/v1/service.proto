@@ -100,6 +100,21 @@ message Service {
   string health_check_protocol = 14;
   // health_check_type determines whether to use HTTP or gRPC standard health check.
   HealthCheckType health_check_type = 15;
+  // unhealthy_threshold is how many consecutive failed checks remove a target
+  // from rotation. Defaults to 2.
+  //
+  // At 1 a single failed check removes a backend, so one GC pause, one dropped
+  // packet or one moment of load on the gateway itself takes it out -- and
+  // because the checks run in the same loop, a blip that affects one target
+  // usually affects all of them, which empties the pool and fails every request
+  // until the next tick.
+  int32 unhealthy_threshold = 16;
+  // healthy_threshold is how many consecutive successful checks return a target
+  // to rotation. Defaults to 2.
+  //
+  // At 1 a backend that is failing intermittently rejoins on its first lucky
+  // response and immediately takes traffic again.
+  int32 healthy_threshold = 17;
 }
 
 enum HealthCheckType {

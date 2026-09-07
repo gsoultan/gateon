@@ -37,6 +37,7 @@ type ProxyHandler struct {
 	healthCheckPort     int32
 	healthCheckProtocol string
 	healthCheckType     gateonv1.HealthCheckType
+	healthThresholds    *healthThresholds
 	discoveryURL        string
 	routeName           string
 	stopDiscovery       chan struct{}

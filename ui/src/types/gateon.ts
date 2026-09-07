@@ -129,6 +129,8 @@ export type Service = {
   tlsClientConfig?: TlsClientConfig;
   /** Overrides the target port for health checks (e.g. HTTP health on port 3001 while gRPC runs on 3000). */
   healthCheckPort?: number;
+  unhealthyThreshold?: number;
+  healthyThreshold?: number;
   /** Overrides the scheme for health checks (e.g. "http", "https"). */
   healthCheckProtocol?: string;
   /** Determines whether to use HTTP or gRPC standard health check. */

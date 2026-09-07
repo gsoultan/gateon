@@ -29,6 +29,8 @@ type ProxyHandlerBuilder struct {
 	healthCheckPort     int32
 	healthCheckProtocol string
 	healthCheckType     gateonv1.HealthCheckType
+	unhealthyThreshold  int32
+	healthyThreshold    int32
 	routeType           string
 	transportFactory    *backendTransportFactory
 	healthCheckClient   *http.Client
@@ -76,6 +78,8 @@ func (b *ProxyHandlerBuilder) resolveService() {
 	b.healthCheckPort = svc.HealthCheckPort
 	b.healthCheckProtocol = svc.HealthCheckProtocol
 	b.healthCheckType = svc.HealthCheckType
+	b.unhealthyThreshold = svc.UnhealthyThreshold
+	b.healthyThreshold = svc.HealthyThreshold
 	b.tlsClientConfig = svc.TlsClientConfig
 	policy := svc.LoadBalancerPolicy
 	if policy == "" {
@@ -148,6 +152,7 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		healthCheckPort:     b.healthCheckPort,
 		healthCheckProtocol: b.healthCheckProtocol,
 		healthCheckType:     b.healthCheckType,
+		healthThresholds:    newHealthThresholds(b.unhealthyThreshold, b.healthyThreshold),
 		discoveryURL:        b.discoveryURL,
 		routeName:           cmp.Or(b.route.Name, b.route.Id),
 		stopDiscovery:       make(chan struct{}),
