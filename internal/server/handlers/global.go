@@ -482,7 +482,12 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			LoggingDatabaseConfig *gateonv1.DatabaseConfig `json:"logging_database_config"`
 		}
 		var body setupBody
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		// Bounded to the same 1 MiB the shared decoders use. The outer handler
+		// already caps every request at 10 MiB, so this is not an unbounded
+		// read -- but /v1/setup is one of the handful of paths that skip
+		// authentication entirely, and the loosest limit on the plane sitting
+		// in front of the least-trusted callers is the wrong way round.
+		if err := json.NewDecoder(io.LimitReader(r.Body, MaxRequestBodySize)).Decode(&body); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
@@ -656,7 +661,8 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Bounded like /v1/setup above: this path also skips authentication.
+		if err := json.NewDecoder(io.LimitReader(r.Body, MaxRequestBodySize)).Decode(&req); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}

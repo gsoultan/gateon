@@ -109,7 +109,7 @@ github.com/gsoultan/gateon/internal/security/waf/appprofile 94.8%
 github.com/gsoultan/gateon/internal/security/yara 93.8%
 github.com/gsoultan/gateon/internal/server 48.6%
 github.com/gsoultan/gateon/internal/server/entrypoint 33.0%
-github.com/gsoultan/gateon/internal/server/handlers 20.1%
+github.com/gsoultan/gateon/internal/server/handlers 20.9%
 github.com/gsoultan/gateon/internal/syncutil -
 github.com/gsoultan/gateon/internal/telemetry/repid 97.5%
 github.com/gsoultan/gateon/internal/telemetry 56.3%
