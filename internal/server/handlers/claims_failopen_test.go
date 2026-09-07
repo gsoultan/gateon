@@ -168,3 +168,44 @@ func (s *failOpenAPI) Setup2FA(_ context.Context, req *gateonv1.Setup2FARequest)
 	s.setup2FAID = req.Id
 	return &gateonv1.Setup2FAResponse{Secret: "TOTP-SECRET-FOR-" + req.Id}, nil
 }
+
+// TestUnauthenticatedEndpointsBoundTheirBody pins a limit that was the wrong way
+// round.
+//
+// The outer handler caps every request at 10 MiB, so nothing here was unbounded
+// — that hypothesis was checked and is wrong. What was true is that the shared
+// decoders bound authenticated requests to 1 MiB while /v1/setup and
+// /v1/auth/2fa/enroll, the two management paths that skip authentication
+// entirely, decoded straight from r.Body and so got the looser 10 MiB. The
+// tightest limit belonged in front of the least-trusted callers, not behind
+// them.
+func TestUnauthenticatedEndpointsBoundTheirBody(t *testing.T) {
+	svc := &failOpenAPI{}
+	mux := http.NewServeMux()
+	registerGlobalHandlers(mux, svc, &Deps{})
+
+	// A syntactically valid JSON document larger than the 1 MiB bound. Truncated
+	// mid-string by the limit reader, it cannot parse, which is the observable
+	// consequence of the bound being applied.
+	oversize := `{"username":"` + strings.Repeat("A", MaxRequestBodySize+1024) + `"}`
+
+	// Only /v1/setup is driven here. /v1/auth/2fa/enroll carries the identical
+	// bound but checks auth.Available before decoding — correct ordering, and it
+	// means the decode is unreachable without a configured auth manager, which
+	// this test deliberately does not stand up.
+	for _, path := range []string{"/v1/setup"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(oversize))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("a %d-byte body to an unauthenticated endpoint got %d, want 400. "+
+					"These two paths skip authentication, so they should carry the "+
+					"tightest body limit on the management plane rather than the "+
+					"loosest.", len(oversize), rr.Code)
+			}
+		})
+	}
+}
