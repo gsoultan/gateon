@@ -22,10 +22,15 @@ the target budget and drives sustained load through it.
 | Resident memory | 131 MB idle · 140 MB peak · 121 MB after load stopped |
 | Goroutines | 127 idle → ~145 under load |
 
+**What was in the request path:** the `/test` route runs the headers
+middleware, the WAF in **blocking** mode (`audit_only: false`, SQLi + XSS + LFI
++ RCE detectors, anomaly threshold 5) and CORS. This is not a bare proxy
+measurement — every one of those 479,317 requests was inspected and scored.
+
 The headline is the memory. Gateon holds around **140 MB of a 2 GB host** under
 sustained load — roughly 7% — so the target is not a tight fit, it has an order
 of magnitude of headroom. Two cores serve five figures of requests per second
-with a single-digit-millisecond median.
+through a blocking WAF with a single-digit-millisecond median.
 
 A second run at 30s measured 7,489 req/s and p99 16.2ms. Run-to-run spread on a
 shared machine is wide; treat a single number as an order of magnitude, not a
@@ -45,8 +50,10 @@ Read these before quoting the numbers.
   spends those cores on its network stack. Read the throughput as the gateway's
   own appetite, not as a capacity figure for the target.
 - **It is one route, one backend, small responses.** Large bodies, many routes,
-  WAF at a higher paranoia level and trace storage all cost more. The tier
-  defaults below exist for exactly that reason.
+  a higher WAF paranoia level and trace storage all cost more. The tier defaults
+  below exist for exactly that reason. Request bodies in particular are not
+  exercised here: these are GETs, so the WAF's body-inspection path — the
+  expensive half — is not on this measurement.
 
 ## Re-measuring
 
