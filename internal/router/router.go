@@ -334,6 +334,20 @@ func HostMatches(rh string, qh string) bool {
 
 // SelectRoute finds the best matching route for the given request using a high-performance Radix Tree (PathTrie).
 func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
+	// Resolve dot segments before anything decides which route this is.
+	//
+	// Done here rather than at each caller because this is where every route
+	// decision converges, and a guarantee that holds only while both callers
+	// remember to normalise first is the kind that breaks quietly. Mutating the
+	// request is deliberate: the proxy forwards r.URL.Path, so resolving it here
+	// is also what keeps the route the gateway chose and the path the backend
+	// receives from disagreeing. r.RequestURI keeps the original, so the WAF and
+	// the access log still see what the client actually sent.
+	if clean := NormalizePath(r.URL.Path); clean != r.URL.Path {
+		r.URL.Path = clean
+		r.URL.RawPath = ""
+	}
+
 	host := ""
 	if rs := request.GetRequestState(r); rs != nil && rs.StrippedHost != "" {
 		host = rs.StrippedHost

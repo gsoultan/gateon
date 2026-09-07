@@ -66,7 +66,7 @@ github.com/gsoultan/gateon/internal/alerting 25.8%
 github.com/gsoultan/gateon/internal/api 48.6%
 github.com/gsoultan/gateon/internal/audit 47.6%
 github.com/gsoultan/gateon/internal/auth 71.9%
-github.com/gsoultan/gateon/internal/config 22.3%
+github.com/gsoultan/gateon/internal/config 28.9%
 github.com/gsoultan/gateon/internal/db 65.1%
 github.com/gsoultan/gateon/internal/discovery 46.4%
 github.com/gsoultan/gateon/internal/domain/canary 6.1%
@@ -91,7 +91,7 @@ github.com/gsoultan/gateon/internal/repositories/entities -
 github.com/gsoultan/gateon/internal/repositories/stores 80.2%
 github.com/gsoultan/gateon/internal/request 47.1%
 github.com/gsoultan/gateon/internal/resource 90.9%
-github.com/gsoultan/gateon/internal/router 78.6%
+github.com/gsoultan/gateon/internal/router 80.0%
 github.com/gsoultan/gateon/internal/security 30.8%
 github.com/gsoultan/gateon/internal/security/art 98.6%
 github.com/gsoultan/gateon/internal/security/correlation 84.7%
