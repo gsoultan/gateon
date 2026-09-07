@@ -11,7 +11,9 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/secretmask"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // MiddlewarePreset defines a predefined bundle of middlewares.
@@ -104,7 +106,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		page, pageSize, search := ParsePagination(r)
 		mws, total := d.MwService.ListPaginated(r.Context(), page, pageSize, search)
 		WriteProtoResponse(w, http.StatusOK, &gateonv1.ListMiddlewaresResponse{
-			Middlewares: mws, TotalCount: total, Page: page, PageSize: pageSize,
+			Middlewares: maskMiddlewares(r, mws), TotalCount: total, Page: page, PageSize: pageSize,
 		})
 	})
 	mux.HandleFunc("GET /v1/middlewares/{id}/routes", func(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +129,15 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if err := DecodeRequestBody(r, &mw); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		// The caller was shown a placeholder instead of each credential, so a
+		// save that did not touch them sends the placeholder back. Writing it
+		// literally would destroy the secret through an edit that had nothing to
+		// do with it.
+		if mw.Id != "" {
+			if prev, ok := d.MwService.GetMiddleware(r.Context(), mw.Id); ok && prev != nil {
+				mw.Config = secretmask.Preserve(mw.Config, prev.Config)
+			}
 		}
 		if err := d.MwService.SaveMiddleware(r.Context(), &mw); err != nil {
 			// Validation/config errors are client errors
@@ -168,4 +179,54 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+// maskMiddlewares replaces every credential with a placeholder unless the caller
+// could change it anyway.
+//
+// Write permission is the right line. Someone who can set the secret gains
+// nothing by reading it -- they can already replace it with one they know --
+// while a caller who can only read gains the signing key for a protected route.
+// Drawing it here also leaves config export working for the operators and admins
+// who use it for backup, which masking unconditionally would have broken.
+//
+// The returned messages are copies. The originals are the live configuration,
+// and masking them in place would delete the credentials from the running
+// gateway on a GET.
+func maskMiddlewares(r *http.Request, mws []*gateonv1.Middleware) []*gateonv1.Middleware {
+	if hasPermission(r, auth.ActionWrite, auth.ResourceMiddlewares) {
+		return mws
+	}
+	out := make([]*gateonv1.Middleware, 0, len(mws))
+	for _, mw := range mws {
+		if mw == nil {
+			continue
+		}
+		// proto.Clone rather than a struct copy: a generated message carries
+		// internal state that must not be copied by value, and listing the
+		// fields by hand would silently drop any field added to Middleware
+		// later -- from the masked response only, which is the half nobody
+		// would be looking at.
+		clone, ok := proto.Clone(mw).(*gateonv1.Middleware)
+		if !ok {
+			continue
+		}
+		clone.Config = secretmask.Config(mw.Config)
+		out = append(out, clone)
+	}
+	return out
+}
+
+// hasPermission answers the same question as RequirePermission without writing a
+// response, for deciding how much of an allowed response to fill in.
+func hasPermission(r *http.Request, action auth.Action, resource auth.Resource) bool {
+	claimsVal := r.Context().Value(middleware.UserContextKey)
+	if claimsVal == nil {
+		return true // auth disabled; RequirePermission allows the same case
+	}
+	claims, ok := claimsVal.(*auth.Claims)
+	if !ok || claims == nil {
+		return false
+	}
+	return auth.Allowed(r.Context(), claims.Role, action, resource)
 }
