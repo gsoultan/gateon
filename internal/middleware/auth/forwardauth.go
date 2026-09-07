@@ -80,16 +80,25 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
 			// The auth service is authoritative for the AuthResponseHeaders
 			// (identity headers). Strip any client-supplied copies up front so
 			// they can neither be forwarded to the auth service as forged input
 			// nor reach the backend if the auth service omits them.
+			//
+			// Above the preflight bypass rather than below it. A preflight skips
+			// the auth *call* for a good reason -- a browser sends OPTIONS without
+			// credentials, so checking it would break every cross-origin request
+			// before the real one is made -- but that is no reason to let it carry
+			// an identity the backend has been told came from the auth service.
+			// Whatever the backend does with these on an OPTIONS request, it does
+			// on a value the client chose.
 			for h := range authResponseSet {
 				r.Header.Del(h)
+			}
+
+			if IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
 			}
 
 			method := "GET"

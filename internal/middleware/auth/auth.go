@@ -442,6 +442,37 @@ func BasicAuthWithConfig(username, password, realm string, cfg AuthBaseConfig) M
 	if realm == "" {
 		realm = "Gateon"
 	}
+
+	// An empty username or password is a misconfiguration, not a credential.
+	//
+	// Without this the middleware authenticates anyone who presents the same
+	// empty values -- one header away for an attacker who tries it -- while
+	// reading in a config file as "basic auth is enabled". The factory does
+	// check, so no shipped configuration reaches here empty; these constructors
+	// are exported, and a guarantee that depends on every caller remembering is
+	// the kind this project has already been bitten by.
+	//
+	// Denied at request time rather than refused at construction, which is the
+	// same choice PasetoAuth documents a few lines below: these are built once at
+	// startup, and returning an error would change an exported signature to
+	// prevent a case the caller can already see. A middleware that refuses
+	// everything is loud in exactly the way a silent success is not.
+	if username == "" || password == "" {
+		logger.L.LogError("basic auth configured with an empty username or password; " +
+			"refusing every request rather than accepting empty credentials")
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if IsCorsPreflight(r) {
+					next.ServeHTTP(w, r)
+					return
+				}
+				telemetry.MiddlewareAuthFailuresTotal.
+					WithLabelValues(GetRouteName(r), "basic").Inc()
+				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
+				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
+			})
+		}
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if IsCorsPreflight(r) {
