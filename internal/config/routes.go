@@ -106,7 +106,10 @@ func (r *RouteRegistry) rebuildSortedLocked() {
 		if rt.Rule == "" {
 			continue
 		}
-		host := hostFromRule(rt.Rule)
+		// Normalised at the point the key is made, so a rule written with the
+		// fully-qualified spelling or in mixed case indexes under the same key a
+		// request will be looked up by.
+		host := NormalizeHost(hostFromRule(rt.Rule))
 		path, isPrefix, isRegex := rulePathInfo(rt.Rule)
 
 		if host != "" && RouteHostIsExact(host) {
@@ -182,7 +185,7 @@ func (r *RouteRegistry) List(ctx context.Context) []*gateonv1.Route {
 func (r *RouteRegistry) GetByHost(host string) []*gateonv1.Route {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.hostIndex[strings.ToLower(host)]
+	return r.hostIndex[NormalizeHost(host)]
 }
 
 func (r *RouteRegistry) ListWildcards(ctx context.Context) []*gateonv1.Route {
@@ -194,7 +197,7 @@ func (r *RouteRegistry) ListWildcards(ctx context.Context) []*gateonv1.Route {
 func (r *RouteRegistry) GetTrieByHost(host string) (*PathTrie, []*gateonv1.Route) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	host = strings.ToLower(host)
+	host = NormalizeHost(host)
 	return r.hostTries[host], r.hostRegexes[host]
 }
 

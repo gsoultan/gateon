@@ -3,7 +3,11 @@
 
 package config
 
-import "testing"
+import (
+	"testing"
+
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
 
 // TestHostMatches pins the routing decision. Over-matching here sends a request
 // to a route it was not meant for, so the negative cases carry more weight than
@@ -52,14 +56,43 @@ func TestHostMatches(t *testing.T) {
 	}
 }
 
-// TestHostMatchesTrailingDot records a known limitation rather than asserting a
-// fix. "example.com." is the fully qualified form and some clients send it; it
-// does not match a route for "example.com". That fails closed -- the request
-// finds no route rather than the wrong one -- so it is documented here instead
-// of being changed on the request path without a reason to.
-func TestHostMatchesTrailingDot(t *testing.T) {
-	if HostMatches("example.com", "example.com.") {
-		t.Skip("trailing-dot hosts now match; update this test and delete the note")
+// TestHostMatchesIgnoresTheDNSRootLabel replaces a note that used to record this
+// as a known limitation.
+//
+// That note said the mismatch failed closed -- "the request finds no route
+// rather than the wrong one" -- and asked for a reason before changing anything
+// on the request path. The reason is that it does not always fail closed. A
+// fully-qualified host misses its own host trie and misses a wildcard covering
+// it, but an empty route host still matches everything, so the request falls
+// through to any host-agnostic route the deployment has. A route carries its
+// middleware chain, so that is the chain attached to the specific host being
+// skipped, in the same way a path with dot segments skipped it.
+//
+// It only failed closed in a deployment where every single route was
+// host-scoped.
+func TestHostMatchesIgnoresTheDNSRootLabel(t *testing.T) {
+	for _, tc := range []struct {
+		rule, req string
+		want      bool
+	}{
+		// The regression.
+		{"app.example.com", "app.example.com.", true},
+		{"app.example.com", "app.example.com.:8080", true},
+		{"*.example.com", "app.example.com.", true},
+		// An operator may write the FQDN in the rule too.
+		{"app.example.com.", "app.example.com", true},
+		{"app.example.com.", "app.example.com.", true},
+		{"app.example.com", "APP.EXAMPLE.COM.", true},
+
+		// What must still not match.
+		{"app.example.com", "evil.example.com.", false},
+		{"app.example.com", "app.example.com.evil.com", false},
+		{"*.example.com", "example.com.evil.com", false},
+	} {
+		if got := HostMatches(tc.rule, tc.req); got != tc.want {
+			t.Errorf("HostMatches(rule=%q, req=%q) = %v, want %v",
+				tc.rule, tc.req, got, tc.want)
+		}
 	}
 }
 
@@ -79,5 +112,72 @@ func TestRouteHostIsExact(t *testing.T) {
 				t.Errorf("RouteHostIsExact(%q) = %v, want %v", host, got, want)
 			}
 		})
+	}
+}
+
+// TestNormalizeHost covers the key builder both sides use.
+func TestNormalizeHost(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"app.example.com", "app.example.com"},
+		{"app.example.com.", "app.example.com"},
+		{"APP.Example.COM.", "app.example.com"},
+		{"", ""},
+		{".", "."}, // the bare root is not a host anyone routes to
+	} {
+		if got := NormalizeHost(tc.in); got != tc.want {
+			t.Errorf("NormalizeHost(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestNormalizeHostDoesNotAllocateForOrdinaryHosts keeps the hot path honest.
+//
+// This runs per request through GetTrieByHost. An already-lower-case host with
+// no root label is the common case and must cost nothing.
+func TestNormalizeHostDoesNotAllocateForOrdinaryHosts(t *testing.T) {
+	hosts := []string{"app.example.com", "api.internal", "localhost"}
+	got := testing.AllocsPerRun(100, func() {
+		for _, h := range hosts {
+			_ = NormalizeHost(h)
+		}
+	})
+	if got != 0 {
+		t.Errorf("NormalizeHost allocated %v times per run on ordinary hosts, want 0", got)
+	}
+}
+
+// TestRouteRegistryFindsFullyQualifiedHosts proves the two sides agree.
+//
+// HostMatches being right is not enough: the host trie is a map, and a request
+// only reaches the matcher if the key built from the rule and the key built from
+// the request are the same string. Normalising one and not the other just moves
+// which spelling fails.
+func TestRouteRegistryFindsFullyQualifiedHosts(t *testing.T) {
+	reg := NewRouteRegistry(t.TempDir() + "/routes.json")
+	if err := reg.Update(t.Context(), &gateonv1.Route{
+		Id:   "admin",
+		Rule: "Host(`app.example.com`) && PathPrefix(`/admin`)",
+	}); err != nil {
+		t.Fatalf("seed route: %v", err)
+	}
+
+	for _, host := range []string{
+		"app.example.com",
+		"app.example.com.", // the DNS root label
+		"APP.EXAMPLE.COM",  // case
+		"App.Example.Com.", // both
+	} {
+		trie, _ := reg.GetTrieByHost(host)
+		if trie == nil {
+			t.Errorf("GetTrieByHost(%q) found no trie; the route is indexed under a "+
+				"different spelling of the same host, so the request skips every "+
+				"host-scoped route and falls through to whatever is host-agnostic",
+				host)
+			continue
+		}
+		if got := trie.Lookup("/admin/users"); len(got) == 0 {
+			t.Errorf("GetTrieByHost(%q) returned a trie with no candidates for "+
+				"/admin/users", host)
+		}
 	}
 }
