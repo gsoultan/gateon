@@ -9,7 +9,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
-	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/secretmask"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -146,11 +145,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		userID := "system"
-		if claims != nil {
-			userID = claims.Username
-		}
+		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "save", "middleware", "Saved middleware: "+mw.Id, request.GetClientIP(r, true))
 
 		WriteProtoResponse(w, http.StatusOK, &mw)
@@ -170,11 +165,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		}
 
 		// Audit Log
-		claims, _ := r.Context().Value(middleware.UserContextKey).(*auth.Claims)
-		userID := "system"
-		if claims != nil {
-			userID = claims.Username
-		}
+		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "delete", "middleware", "Deleted middleware: "+id, request.GetClientIP(r, true))
 
 		w.WriteHeader(http.StatusNoContent)
@@ -220,13 +211,12 @@ func maskMiddlewares(r *http.Request, mws []*gateonv1.Middleware) []*gateonv1.Mi
 // hasPermission answers the same question as RequirePermission without writing a
 // response, for deciding how much of an allowed response to fill in.
 func hasPermission(r *http.Request, action auth.Action, resource auth.Resource) bool {
-	claimsVal := r.Context().Value(middleware.UserContextKey)
-	if claimsVal == nil {
-		return true // auth disabled; RequirePermission allows the same case
-	}
-	claims, ok := claimsVal.(*auth.Claims)
-	if !ok || claims == nil {
+	claims, ok := callerClaims(r)
+	if !ok {
 		return false
+	}
+	if claims == nil {
+		return true // auth disabled; RequirePermission allows the same case
 	}
 	return auth.Allowed(r.Context(), claims.Role, action, resource)
 }

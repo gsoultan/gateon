@@ -159,12 +159,11 @@ func ssrfSafeTransport() *http.Transport {
 // check-security-invariants greps for `.AuthManager == nil` and its siblings, so
 // the same comparison on a parameter goes unseen.
 func isLogsRequestAuthorized(r *http.Request, verifier auth.Service) bool {
-	claimsVal := r.Context().Value(middleware.UserContextKey)
-	if claimsVal != nil {
-		claims, ok := claimsVal.(*auth.Claims)
-		if !ok || claims == nil {
-			return false
-		}
+	claims, ok := callerClaims(r)
+	if !ok {
+		return false
+	}
+	if claims != nil {
 		// System logs are read-only observability: Admin, Operator, and Viewer.
 		return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceDiagnostics)
 	}
@@ -194,11 +193,11 @@ func isLogsRequestAuthorized(r *http.Request, verifier auth.Service) bool {
 	if err != nil {
 		return false
 	}
-	claims, ok := claimsRaw.(*auth.Claims)
-	if !ok || claims == nil {
+	tokenClaims, isClaims := claimsRaw.(*auth.Claims)
+	if !isClaims || tokenClaims == nil {
 		return false
 	}
-	return auth.Allowed(r.Context(), claims.Role, auth.ActionRead, auth.ResourceDiagnostics)
+	return auth.Allowed(r.Context(), tokenClaims.Role, auth.ActionRead, auth.ResourceDiagnostics)
 }
 
 // netInterfaceInfo describes one host network interface for the eBPF interface
