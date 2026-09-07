@@ -84,9 +84,26 @@ func HMAC(cfg HMACConfig) (Middleware, error) {
 				return
 			}
 
-			body, err := io.ReadAll(io.LimitReader(r.Body, bodyLimit))
+			// One byte past the limit, deliberately, the same way the WAF's
+			// request-body inspection does it.
+			//
+			// Reading exactly the limit cannot tell "the body is this long" from
+			// "the body is longer and got truncated", and those two need different
+			// answers. Hashing a truncated body produces a digest that cannot match
+			// a signature computed over the whole one, so the request was refused
+			// either way -- but it was refused as "Invalid signature", which sends
+			// an operator to check a secret that is fine while the provider insists
+			// it is signing correctly. The sender signed the whole payload; the
+			// gateway hashed the first bodyLimit bytes of it. Only one of those two
+			// facts is something they can act on.
+			body, err := io.ReadAll(io.LimitReader(r.Body, bodyLimit+1))
 			if err != nil {
 				http.Error(w, "Failed to read body", http.StatusBadRequest)
+				return
+			}
+			if int64(len(body)) > bodyLimit {
+				telemetry.MiddlewareHMACFailuresTotal.WithLabelValues(activeRouteID).Inc()
+				http.Error(w, "Request body too large to verify", http.StatusRequestEntityTooLarge)
 				return
 			}
 			r.Body = &bodyReader{data: body}
