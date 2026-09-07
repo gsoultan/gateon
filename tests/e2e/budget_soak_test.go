@@ -39,6 +39,11 @@ import (
 // network stack of a real two-core box competing for them. Read the numbers as
 // the gateway's own appetite, not as a capacity figure for the target.
 //
+// The route under load is not a bare proxy: it runs the headers middleware, the
+// WAF in blocking mode (SQLi, XSS, LFI and RCE detectors, anomaly threshold 5)
+// and CORS, so every request is inspected and scored. These are GETs, though, so
+// the WAF's body-inspection path is not covered by this number.
+//
 // Measured on 2026-09-07, 2 cores / 1536 MiB, 45s at concurrency 24:
 //
 //	479,317 requests, 0 failed, 10,651 req/s
