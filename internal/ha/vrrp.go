@@ -35,6 +35,36 @@ type HAManager struct {
 	// election — wrong length, bad MAC or outside the replay window. A rising
 	// count means either a misconfigured peer or someone probing the port.
 	droppedAdverts atomic.Int64
+	// runIP executes an `ip` invocation, or nil for the real one.
+	//
+	// The seam exists because the decision this package makes -- whether a node
+	// may call itself MASTER -- cannot otherwise be tested anywhere the command
+	// would really run. Gating on runtime.GOOS instead only moves the problem:
+	// the assertions then pass on a developer's machine precisely because the
+	// work was skipped, and fail on Linux CI where an unprivileged process has
+	// no eth0 to add an address to.
+	runIP func(args ...string) error
+}
+
+// ipCmd runs an `ip` invocation through the injected executor, or the real one.
+func (m *HAManager) ipCmd(args ...string) error {
+	if m.runIP != nil {
+		return m.runIP(args...)
+	}
+	return defaultRunIP(args...)
+}
+
+// defaultRunIP executes `ip` on Linux and is a deliberate no-op elsewhere, so a
+// developer machine can run the election without pretending to manage addresses.
+func defaultRunIP(args ...string) error {
+	if runtime.GOOS != "linux" {
+		logger.L.LogInfo("VIP management (ip addr) is skipped on non-Linux OS")
+		return nil
+	}
+	// #nosec G204 -- no shell is involved (exec.Command, not sh -c) and every
+	// argument is validated by the caller, so `ip` receives an address and an
+	// interface name or nothing at all.
+	return exec.Command("ip", args...).Run()
 }
 
 // DroppedAdverts reports how many heartbeats were rejected before they could
@@ -250,6 +280,20 @@ func (m *HAManager) sendAdvert() {
 // validating first is what makes this decision testable somewhere other than a
 // Linux host with root.
 func (m *HAManager) acquireVIPs() error {
+	// A node with no virtual IPs configured has nothing to hold, and holding
+	// nothing is not a false claim -- it is what the election looks like on its
+	// own. The two-node verification harness relies on exactly this to separate
+	// "who decides they are master" from "did ip addr add work".
+	//
+	// The defect this function guards is narrower and worth stating: claiming
+	// MASTER while failing to acquire addresses that *were* configured. Nothing
+	// was expected here, so nothing is missing.
+	if len(m.config.VirtualIps) == 0 {
+		logger.L.LogWarn("HA node has no virtual IPs configured; participating in " +
+			"the election without managing any address")
+		return nil
+	}
+
 	if m.config.Interface == "" {
 		logger.L.LogWarn("No interface specified for HA VIPs")
 		return errors.New("no interface specified")
@@ -279,19 +323,10 @@ func (m *HAManager) acquireVIPs() error {
 		return errors.New("no usable virtual IP configured")
 	}
 
-	if runtime.GOOS != "linux" {
-		logger.L.LogInfo("VIP management (ip addr) is skipped on non-Linux OS")
-		return nil
-	}
-
 	var acquired int
 	for _, vip := range usable {
 		// Example: ip addr add 192.168.1.100/24 dev eth0
-		// #nosec G204 -- no shell is involved (exec.Command, not sh -c) and both
-		// arguments are validated above, so `ip` receives an address and an
-		// interface name or nothing at all.
-		cmd := exec.Command("ip", "addr", "add", vip, "dev", m.config.Interface)
-		if err := cmd.Run(); err != nil {
+		if err := m.ipCmd("addr", "add", vip, "dev", m.config.Interface); err != nil {
 			logger.L.LogError("Failed to add VIP to interface", "error", err, "vip", vip)
 		} else {
 			logger.L.LogInfo("Successfully acquired VIP", "vip", vip)
@@ -319,10 +354,6 @@ func (m *HAManager) releaseVIPs() {
 	}
 	m.active = false
 
-	if runtime.GOOS != "linux" {
-		return
-	}
-
 	if !validInterfaceName(m.config.Interface) {
 		logger.L.LogError("Cannot release VIPs: invalid interface name",
 			"interface", m.config.Interface)
@@ -333,9 +364,7 @@ func (m *HAManager) releaseVIPs() {
 		if !validVIP(vip) {
 			continue
 		}
-		// #nosec G204 -- see acquireVIPs: no shell, both arguments validated.
-		cmd := exec.Command("ip", "addr", "del", vip, "dev", m.config.Interface)
-		if err := cmd.Run(); err != nil {
+		if err := m.ipCmd("addr", "del", vip, "dev", m.config.Interface); err != nil {
 			logger.L.LogError("Failed to release VIP", "error", err, "vip", vip)
 		} else {
 			logger.L.LogInfo("Successfully released VIP", "vip", vip)

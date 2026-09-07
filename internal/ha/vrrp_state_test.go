@@ -5,6 +5,7 @@ package ha
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -17,9 +18,32 @@ import (
 //
 // step, acquireVIPs and releaseVIPs were all at 0% coverage.
 
+// manager builds a node whose `ip` invocations succeed without touching the
+// machine.
+//
+// The executor is injected rather than left to the real one, because otherwise
+// these assertions depend on the host: on a developer's macOS box the command is
+// skipped and every takeover "succeeds", and on Linux CI an unprivileged process
+// has no eth0, so the same test says the node correctly refused to become
+// master. Both are the platform answering, not the state machine.
 func manager(t *testing.T, cfg *gateonv1.HaConfig) *HAManager {
 	t.Helper()
-	return &HAManager{config: cfg, lastSeen: time.Now().Add(-time.Hour)}
+	return &HAManager{
+		config:   cfg,
+		lastSeen: time.Now().Add(-time.Hour),
+		runIP:    func(...string) error { return nil },
+	}
+}
+
+// failingManager builds a node whose `ip` invocations all fail, which is what an
+// unprivileged process or a missing interface looks like.
+func failingManager(t *testing.T, cfg *gateonv1.HaConfig) *HAManager {
+	t.Helper()
+	return &HAManager{
+		config:   cfg,
+		lastSeen: time.Now().Add(-time.Hour),
+		runIP:    func(...string) error { return errors.New("ip: operation not permitted") },
+	}
 }
 
 func goodConfig() *gateonv1.HaConfig {
@@ -52,7 +76,6 @@ func TestNodeDoesNotClaimMasterWhenItCannotHoldTheVIP(t *testing.T) {
 	}{
 		{"no interface", func(c *gateonv1.HaConfig) { c.Interface = "" }},
 		{"invalid interface name", func(c *gateonv1.HaConfig) { c.Interface = "eth0; rm -rf /" }},
-		{"no virtual IPs", func(c *gateonv1.HaConfig) { c.VirtualIps = nil }},
 		{"unparseable virtual IP", func(c *gateonv1.HaConfig) { c.VirtualIps = []string{"not-an-ip"} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -179,5 +202,70 @@ func TestOneBadVIPDoesNotLoseTheOthers(t *testing.T) {
 		t.Error("one malformed address in the list stopped the node taking over at " +
 			"all. The other address is well-formed and serviceable; refusing " +
 			"everything makes a one-line config mistake an outage.")
+	}
+}
+
+// TestNodeStaysBackupWhenTheAddressCommandFails covers the case CI found by
+// accident.
+//
+// Validation passing is not the same as the address being taken. An
+// unprivileged process, a missing interface, an address already held elsewhere
+// -- each leaves `ip` returning non-zero with a configuration that looked
+// entirely reasonable. A node in that position must not advertise, for the same
+// reason a misconfigured one must not: an active node suppresses every peer that
+// does not outrank it, so claiming MASTER without the address takes the service
+// down rather than just failing locally.
+func TestNodeStaysBackupWhenTheAddressCommandFails(t *testing.T) {
+	m := failingManager(t, goodConfig())
+
+	m.step(context.Background())
+
+	if m.active {
+		t.Error("the node took MASTER after every `ip addr add` failed. The config " +
+			"validates, so nothing earlier catches it; the address is simply not " +
+			"there. Advertising now silences the peer that could have taken it.")
+	}
+}
+
+// TestYieldingClearsMasterStateWhenTheCommandFails is the same asymmetry on the
+// way out.
+//
+// Releasing has to take effect even when the command does not, or a node that
+// cannot run `ip` keeps advertising against the peer it just yielded to and can
+// never re-acquire either.
+func TestYieldingClearsMasterStateWhenTheCommandFails(t *testing.T) {
+	m := failingManager(t, goodConfig())
+	m.active = true
+
+	m.releaseVIPs()
+
+	if m.active {
+		t.Error("a node whose `ip addr del` failed still considers itself MASTER; " +
+			"yielding is a decision, not a consequence of the command exiting zero")
+	}
+}
+
+// TestElectionOnlyNodeCanStillBecomeMaster marks where the refusal stops.
+//
+// A node with no virtual IPs configured holds nothing, but it is not claiming to
+// hold anything either -- the check above is about a node that was given
+// addresses and failed to take them. Refusing here as well looked tidy and broke
+// something real: the documented two-node verification runs both managers with
+// no VIPs precisely to isolate the election from `ip addr add`, greps their
+// HA_VERDICT lines, and would have found two BACKUPs and no master forever.
+//
+// It is opt-in and Linux-only, so CI would never have said so.
+func TestElectionOnlyNodeCanStillBecomeMaster(t *testing.T) {
+	cfg := goodConfig()
+	cfg.VirtualIps = nil
+	m := manager(t, cfg)
+
+	m.step(context.Background())
+
+	if !m.active {
+		t.Error("a node with no VIPs configured refused to become master. It has " +
+			"nothing to acquire, so there is nothing it can be failing to hold; " +
+			"refusing here breaks the two-node election check, which runs exactly " +
+			"this configuration on purpose.")
 	}
 }
