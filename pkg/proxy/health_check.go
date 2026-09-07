@@ -49,7 +49,7 @@ func (h *ProxyHandler) runHealthCheck() {
 				// so whatever makes a single check fail tends to fail all of them
 				// in the same tick, and acting on each result individually is how
 				// a busy gateway empties its own backend pool.
-				alive, changed := h.healthThresholds.record(u, ok)
+				alive, changed := h.healthThresholds.Record(u, ok)
 				if changed {
 					h.lb.SetAlive(u, alive)
 				}

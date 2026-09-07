@@ -21,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/pkg/proxy/health"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -37,7 +38,7 @@ type ProxyHandler struct {
 	healthCheckPort     int32
 	healthCheckProtocol string
 	healthCheckType     gateonv1.HealthCheckType
-	healthThresholds    *healthThresholds
+	healthThresholds    *health.Tracker
 	discoveryURL        string
 	routeName           string
 	stopDiscovery       chan struct{}

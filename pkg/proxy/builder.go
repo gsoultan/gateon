@@ -14,6 +14,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	gtls "github.com/gsoultan/gateon/internal/tls"
+	"github.com/gsoultan/gateon/pkg/proxy/health"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -152,7 +153,7 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		healthCheckPort:     b.healthCheckPort,
 		healthCheckProtocol: b.healthCheckProtocol,
 		healthCheckType:     b.healthCheckType,
-		healthThresholds:    newHealthThresholds(b.unhealthyThreshold, b.healthyThreshold),
+		healthThresholds:    health.New(b.unhealthyThreshold, b.healthyThreshold),
 		discoveryURL:        b.discoveryURL,
 		routeName:           cmp.Or(b.route.Name, b.route.Id),
 		stopDiscovery:       make(chan struct{}),
