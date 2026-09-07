@@ -120,6 +120,15 @@ func TestSelectRouteResolvesDotSegments(t *testing.T) {
 		{"/public/./../admin", "admin"},
 		{"/public/a/b/../../../admin", "admin"},
 		{"//public/../admin", "admin"},
+
+		// Percent-encoded spellings need no separate handling: r.URL.Path is
+		// already decoded by the time routing sees it, so %2e%2e and %2f have
+		// become ".." and "/" and resolve like any other dot segment. Asserted
+		// rather than assumed, because it is the difference between one fix and
+		// three.
+		{"/public/%2e%2e/admin", "admin"},
+		{"/public%2f..%2fadmin", "admin"},
+		{"/public/..%2fadmin", "admin"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tc.path, nil)
@@ -185,5 +194,34 @@ func BenchmarkNormalizePath(b *testing.B) {
 				_ = NormalizePath(tc.path)
 			}
 		})
+	}
+}
+
+// TestSelectRouteLeavesPathParametersAlone records a deliberate non-change.
+//
+// A path segment may legally contain a semicolon, and some servers -- Tomcat and
+// other Java containers most notably -- strip ";name=value" path parameters
+// before dispatching. Against one of those backends, /admin;x=1 and
+// /public/..;/admin are the same bypass shape as the dot-segment case: the
+// gateway routes one path and the backend serves another.
+//
+// It is left alone because, unlike a dot segment, this is not one resource with
+// two spellings. RFC 3986 allows a semicolon in a path segment, so /admin;x=1
+// and /admin are different paths to most backends, and stripping would break the
+// ones that mean it literally. Which behaviour is correct depends on a backend
+// the gateway does not know about.
+//
+// Recorded rather than silently accepted, so it is a decision with a reason
+// attached and not a gap someone finds later.
+func TestSelectRouteLeavesPathParametersAlone(t *testing.T) {
+	if got := NormalizePath("/admin;x=1"); got != "/admin;x=1" {
+		t.Errorf("NormalizePath(\"/admin;x=1\") = %q; path parameters are being "+
+			"stripped now. That closes a bypass against Tomcat-style backends and "+
+			"breaks any backend that means the semicolon literally — make sure that "+
+			"trade was made deliberately and update this test.", got)
+	}
+	if got := NormalizePath("/public/..;/admin"); got != "/public/..;/admin" {
+		t.Errorf("NormalizePath(\"/public/..;/admin\") = %q, want it unchanged; "+
+			"\"..;\" is not a dot segment to this layer", got)
 	}
 }
