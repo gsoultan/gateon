@@ -5,6 +5,8 @@ package ha
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"os/exec"
 	"runtime"
@@ -182,8 +184,16 @@ func (m *HAManager) step(ctx context.Context) {
 	if time.Since(m.lastSeen) > 3*interval {
 		if !m.active {
 			logger.L.LogInfo("No master detected, transitioning to MASTER state")
-			m.acquireVIPs()
-			m.active = true
+			// Only claim it if the address was actually taken. Setting active
+			// regardless is how a misconfigured node came to advertise as
+			// MASTER while holding nothing, silencing the peer that could have
+			// held it.
+			if err := m.acquireVIPs(); err != nil {
+				logger.L.LogError("Staying BACKUP: cannot take the virtual IPs",
+					"error", err)
+			} else {
+				m.active = true
+			}
 		}
 	}
 
@@ -194,6 +204,12 @@ func (m *HAManager) step(ctx context.Context) {
 }
 
 func (m *HAManager) sendAdvert() {
+	// Start opens the socket; without it there is nothing to write to and the
+	// call below has no defined behaviour worth relying on.
+	if m.udpConn == nil {
+		return
+	}
+
 	addr, err := net.ResolveUDPAddr("udp", "224.0.0.18:8946")
 	if err != nil {
 		return
@@ -220,47 +236,96 @@ func (m *HAManager) sendAdvert() {
 	}
 }
 
-func (m *HAManager) acquireVIPs() {
-	if runtime.GOOS != "linux" {
-		logger.L.LogInfo("VIP management (ip addr) is skipped on non-Linux OS")
-		return
-	}
-
+// acquireVIPs takes the virtual addresses, reporting whether this node can
+// actually hold them.
+//
+// The answer matters more than it looks. An active node advertises, and every
+// peer that receives an advert it does not outrank stays BACKUP -- so a node
+// that marks itself MASTER without holding the address does not just fail, it
+// suppresses the peer that would have succeeded. Nobody owns the VIP and every
+// node reports itself healthy.
+//
+// Configuration is checked before the platform gate, deliberately: whether an
+// interface name is nonsense does not depend on the operating system, and
+// validating first is what makes this decision testable somewhere other than a
+// Linux host with root.
+func (m *HAManager) acquireVIPs() error {
 	if m.config.Interface == "" {
 		logger.L.LogWarn("No interface specified for HA VIPs")
-		return
+		return errors.New("no interface specified")
 	}
 
 	if !validInterfaceName(m.config.Interface) {
 		logger.L.LogError("Refusing to configure VIPs: invalid interface name",
 			"interface", m.config.Interface)
-		return
+		return fmt.Errorf("invalid interface name %q", m.config.Interface)
 	}
 
+	// A malformed address is dropped rather than fatal. Refusing the whole set
+	// because one of several entries has a typo would turn a one-line
+	// configuration mistake into a total loss of the service; what must not
+	// happen is claiming MASTER while holding nothing at all, which is the
+	// len(usable) == 0 case below.
+	usable := make([]string, 0, len(m.config.VirtualIps))
 	for _, vip := range m.config.VirtualIps {
 		if !validVIP(vip) {
 			logger.L.LogError("Refusing to add VIP: not an IP address or CIDR", "vip", vip)
 			continue
 		}
+		usable = append(usable, vip)
+	}
+	if len(usable) == 0 {
+		logger.L.LogWarn("No usable virtual IP configured for HA")
+		return errors.New("no usable virtual IP configured")
+	}
+
+	if runtime.GOOS != "linux" {
+		logger.L.LogInfo("VIP management (ip addr) is skipped on non-Linux OS")
+		return nil
+	}
+
+	var acquired int
+	for _, vip := range usable {
 		// Example: ip addr add 192.168.1.100/24 dev eth0
 		// #nosec G204 -- no shell is involved (exec.Command, not sh -c) and both
-		// arguments are validated just above, so `ip` receives an address and an
+		// arguments are validated above, so `ip` receives an address and an
 		// interface name or nothing at all.
 		cmd := exec.Command("ip", "addr", "add", vip, "dev", m.config.Interface)
 		if err := cmd.Run(); err != nil {
 			logger.L.LogError("Failed to add VIP to interface", "error", err, "vip", vip)
 		} else {
 			logger.L.LogInfo("Successfully acquired VIP", "vip", vip)
+			acquired++
 		}
 	}
+	if acquired == 0 {
+		return errors.New("no virtual IP could be added to the interface")
+	}
+	return nil
 }
 
+// releaseVIPs gives up the virtual addresses and stops considering this node
+// MASTER.
+//
+// The flag is cleared first and unconditionally. It records the intent to be
+// master, and yielding to a higher-ranked peer is a decision that has already
+// been made -- making it conditional on `ip addr del` succeeding meant a node
+// that could not run the command kept advertising against the peer it had just
+// yielded to, and, since step only acquires when !active, could never take the
+// address back either.
 func (m *HAManager) releaseVIPs() {
-	if runtime.GOOS != "linux" || !m.active {
+	if !m.active {
+		return
+	}
+	m.active = false
+
+	if runtime.GOOS != "linux" {
 		return
 	}
 
 	if !validInterfaceName(m.config.Interface) {
+		logger.L.LogError("Cannot release VIPs: invalid interface name",
+			"interface", m.config.Interface)
 		return
 	}
 
@@ -276,7 +341,6 @@ func (m *HAManager) releaseVIPs() {
 			logger.L.LogInfo("Successfully released VIP", "vip", vip)
 		}
 	}
-	m.active = false
 }
 
 // HA configuration reaches this package from the management API, so the values
