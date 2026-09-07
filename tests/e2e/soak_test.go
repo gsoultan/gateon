@@ -41,7 +41,10 @@ const (
 // process, its HTTPS port and the pprof port. The caller owns the lifecycle:
 // nothing is auto-killed, because the drain test needs to send its own signal
 // and watch the process exit on its own.
-func startGateon(t *testing.T, projectRoot string, env *TestEnv) (cmd *exec.Cmd, httpsPort, pprofPort int) {
+// extraEnv is appended last so a caller can pin the runtime budget -- GOMAXPROCS
+// and GATEON_MEMORY_LIMIT -- to something other than whatever the machine
+// running the test happens to have.
+func startGateon(t *testing.T, projectRoot string, env *TestEnv, extraEnv ...string) (cmd *exec.Cmd, httpsPort, pprofPort int) {
 	t.Helper()
 	binary := filepath.Join(env.Dir, "gateon"+exeSuffix())
 	build := exec.Command("go", "build", "-o", binary, "./cmd/gateon")
@@ -64,6 +67,7 @@ func startGateon(t *testing.T, projectRoot string, env *TestEnv) (cmd *exec.Cmd,
 		"GATEON_TEST=1",
 		fmt.Sprintf("GATEON_PPROF_ADDR=127.0.0.1:%d", pprofPort),
 	)
+	cmd.Env = append(cmd.Env, extraEnv...)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start gateon: %v", err)
 	}
