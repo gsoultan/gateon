@@ -59,7 +59,7 @@ A reputation score is recorded under, and enforced against, a **pair**: the
 browser class and the client's network.
 
 ```
-ReputationIDFor(fingerprint, sourceIP) = fingerprint + "|" + networkScope(sourceIP)
+repid.For(fingerprint, sourceIP) = fingerprint + "|" + networkScope(sourceIP)
 ```
 
 `networkScope` is the /24 for IPv4 and the /64 for IPv6 — the smallest units an
@@ -72,14 +72,14 @@ neighbours down again.
 Three properties this depends on:
 
 - **One function, both sides.** The recording path (`store.go`) and every
-  enforcement site call `ReputationIDFor`. If they ever diverge, every lookup
+  enforcement site call `repid.For`. If they ever diverge, every lookup
   misses and returns the neutral 100, and the control reports "clean" while
   checking nothing — a silent failure of exactly the kind this codebase has been
   bitten by before.
 - **The class stays recoverable.** The fingerprint is the composite's prefix, so
   cross-address attribution — the real strength of JA4+, and the reason it was
   chosen — is still available as a query over keys sharing a prefix
-  (`ReputationClassOf`). What changed is that it is no longer the thing a 403
+  (`repid.ClassOf`). What changed is that it is no longer the thing a 403
   hangs on.
 - **Unparseable addresses get their own bucket**, not a fallback to the bare
   fingerprint. Falling back would put every client the gateway cannot place into
@@ -91,6 +91,19 @@ setting rather than by reading `X-Forwarded-For` directly, which is what the
 fingerprint's own fallback did. Scoping is a security decision, and an identity
 the attacker chooses is not an identity: they could otherwise scope their own bad
 score onto someone else's network, or mint a clean one per request.
+
+## Where it lives
+
+`internal/telemetry/repid`. The identity logic is pure — an address and a
+fingerprint in, a string out — so it is a leaf package that the recording path,
+the enforcement sites and the correlation wiring can all reach without any of
+them reaching each other.
+
+The two request-path accessors (`GetReputationID`, `ClientIPOf`) cannot follow it
+there: they need the request, the trust configuration and `GetIPFingerprint`, so
+moving them would make `repid` import `telemetry` while `telemetry`'s store
+imports `repid`. They sit in `telemetry/reputation.go` beside `GetIPFingerprint`,
+which is the same kind of thing — a request in, an identity out.
 
 ## Consequences
 
@@ -142,7 +155,7 @@ no TLS, so the literal address appeared there only on a last-resort fallback and
 loopback was in practice not exempt at all. Both now compare the resolved client
 address.
 
-**Enforced by a check, not by review.** `make check-invariants` gained a seventh
+**Enforced by a check, not by review.** `make check-invariants` gained an eighth
 invariant: `telemetry.GetIPFingerprint` and `telemetry.GetFingerprintHash` must
 not be called outside `internal/telemetry`. Nothing in the type system separates
 the two identities — both are a `string`, and passing the wrong one compiles,

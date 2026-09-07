@@ -10,7 +10,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/correlation"
 )
 
-// A reputation score belongs to a browser class *on a network* (ADR 0010),
+// A reputation score belongs to a browser class *on a network* (ADR 0011),
 // because JA4+ on its own names a browser build rather than a client and every
 // user of that build shares it.
 //

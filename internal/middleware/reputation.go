@@ -45,7 +45,7 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The identity a refusal may act on is the browser class scoped to the
-	// client's network, never the class alone. See telemetry.ReputationIDFor:
+	// client's network, never the class alone. See repid.For:
 	// JA4+ describes the software making the request, not the party making it,
 	// so a 403 keyed on it refuses every user of that browser everywhere.
 	repID := telemetry.GetReputationID(r)

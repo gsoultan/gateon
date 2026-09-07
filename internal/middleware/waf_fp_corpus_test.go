@@ -69,7 +69,7 @@ type corpusSample struct {
 	// ScopePaths and ScopeFields are the deployment half of a profile: which of
 	// this application's routes and field names hold the content that trips those
 	// rules. A profile without them is what gateon shipped, and it did nothing
-	// outside Jira's own /rest/api/* — see appprofile_scope.go.
+	// outside Jira's own /rest/api/* — see internal/security/waf/appprofile.
 	ScopePaths  []string `json:"scope_paths,omitempty"`
 	ScopeFields []string `json:"scope_fields,omitempty"`
 
