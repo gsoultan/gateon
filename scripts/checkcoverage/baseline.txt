@@ -76,7 +76,7 @@ github.com/gsoultan/gateon/internal/domain/route -
 github.com/gsoultan/gateon/internal/domain/service -
 github.com/gsoultan/gateon/internal/domain/tls -
 github.com/gsoultan/gateon/internal/ebpf 12.4%
-github.com/gsoultan/gateon/internal/ha 40.4%
+github.com/gsoultan/gateon/internal/ha 47.2%
 github.com/gsoultan/gateon/internal/httputil 45.0%
 github.com/gsoultan/gateon/internal/inits 25.3%
 github.com/gsoultan/gateon/internal/install 18.6%
