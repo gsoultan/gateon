@@ -15,6 +15,34 @@ func RouteHostIsExact(routeHost string) bool {
 
 // HostMatches checks if the request host matches the route's host specification,
 // supporting wildcards like *.example.com.
+// stripRootLabel removes the trailing dot from a fully-qualified host name.
+//
+// "app.example.com." and "app.example.com" are the same name -- the trailing dot
+// is the DNS root label, and clients, proxies and health checkers do send the
+// fully-qualified spelling. String comparison does not know that, so without
+// this a request for the FQDN matched neither the host's own routes nor a
+// wildcard, and fell through to whatever host-agnostic route existed. That is
+// the same failure as a path with dot segments: one resource, two spellings, and
+// the middleware chain attached to only one of them.
+//
+// The bare root "." is left alone; it is not a host anyone routes to.
+func stripRootLabel(h string) string {
+	if len(h) > 1 && h[len(h)-1] == '.' {
+		return h[:len(h)-1]
+	}
+	return h
+}
+
+// NormalizeHost puts a host into the single spelling used as a routing key:
+// lower-cased, with the DNS root label removed.
+//
+// Both sides have to agree. Route keys are built from the rule and lookups come
+// from the request, so normalising only one of them just moves which spelling
+// fails to match.
+func NormalizeHost(h string) string {
+	return strings.ToLower(stripRootLabel(h))
+}
+
 func HostMatches(rh string, qh string) bool {
 	if rh == "" {
 		return true
@@ -37,6 +65,10 @@ func HostMatches(rh string, qh string) bool {
 	if len(qh) > 1 && qh[0] == '[' && qh[len(qh)-1] == ']' {
 		qh = qh[1 : len(qh)-1]
 	}
+
+	// One resource, one spelling: see stripRootLabel.
+	qh = stripRootLabel(qh)
+	rh = stripRootLabel(rh)
 
 	// Case-insensitive comparison without allocation
 	if !strings.HasPrefix(rh, "*.") {
