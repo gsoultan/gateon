@@ -75,7 +75,7 @@ github.com/gsoultan/gateon/internal/domain/middleware 69.2%
 github.com/gsoultan/gateon/internal/domain/route 90.0%
 github.com/gsoultan/gateon/internal/domain/service 71.4%
 github.com/gsoultan/gateon/internal/domain/tls 86.7%
-github.com/gsoultan/gateon/internal/ebpf 12.4%
+github.com/gsoultan/gateon/internal/ebpf 16.9%
 github.com/gsoultan/gateon/internal/ha 47.2%
 github.com/gsoultan/gateon/internal/httputil 45.0%
 github.com/gsoultan/gateon/internal/inits 25.3%
@@ -85,7 +85,7 @@ github.com/gsoultan/gateon/internal/logger 39.4%
 github.com/gsoultan/gateon/internal/middleware 60.5%
 github.com/gsoultan/gateon/internal/middleware/auth 64.5%
 github.com/gsoultan/gateon/internal/middleware/kind 54.5%
-github.com/gsoultan/gateon/internal/phantom 9.9%
+github.com/gsoultan/gateon/internal/phantom 26.9%
 github.com/gsoultan/gateon/internal/redis 85.2%
 github.com/gsoultan/gateon/internal/repositories/entities -
 github.com/gsoultan/gateon/internal/repositories/stores 80.2%
