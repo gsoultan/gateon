@@ -119,12 +119,29 @@ func (c *linuxCore) proxyWithSplice(ctx context.Context, client net.Conn, target
 		client.Close()
 		return err
 	}
-	defer backend.Close()
-	defer client.Close()
+	// Whichever direction finishes first closes both sides.
+	//
+	// Without this the two copies were waited on together while neither could
+	// end the other: the caller's copy returns when its source stops, and the
+	// wait on `done` then blocks on a copy whose source is simply idle. A client
+	// that disconnects while the backend holds its side open -- any protocol
+	// where the server speaks only when spoken to -- left that second copy
+	// blocked forever, and the Close calls were deferred behind the wait for it.
+	// One goroutine and two sockets per disconnected client, held for the life of
+	// the process, on the path whose whole purpose is connection volume.
+	var once sync.Once
+	shutdown := func() {
+		once.Do(func() {
+			_ = client.Close()
+			_ = backend.Close()
+		})
+	}
+	defer shutdown()
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer shutdown()
 		// Splice from backend to client
 		if _, err := l4.SpliceCopy(client, backend); err != nil {
 			_, _ = io.Copy(client, backend)
@@ -135,6 +152,7 @@ func (c *linuxCore) proxyWithSplice(ctx context.Context, client net.Conn, target
 	if _, err := l4.SpliceCopy(backend, client); err != nil {
 		_, _ = io.Copy(backend, client)
 	}
+	shutdown()
 	<-done
 	return nil
 }

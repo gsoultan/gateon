@@ -147,6 +147,15 @@ func (m *EbpfManager) close() {
 	m.attached = false
 	m.loadErr = ""
 	m.attachMode = ""
+
+	// The shunned map is gone with the objects above, so the count of what is in
+	// it is zero. Leaving the counter alone survived a detach and reattach and
+	// kept reporting entries that no longer existed anywhere -- into the security
+	// posture report, the diagnostics screen and the ActiveShunnedEntitiesTotal
+	// gauge, all of which read it. A metric that only ever drifts upward is worse
+	// than no metric, because it is the one an operator checks to decide whether
+	// mitigation is working.
+	m.shunnedCount.Store(0)
 }
 
 func ipToUint32(ipStr string) (uint32, error) {
@@ -185,11 +194,24 @@ func (m *EbpfManager) ShunIP(ip string) error {
 
 	logger.L.LogInfo("Shunning IP at XDP level", "ip", ip)
 	reason := uint32(1) // General reason
-	err = shunnedMap.Update(ipUint, reason, ebpf.UpdateAny)
-	if err == nil {
+
+	// UpdateNoExist rather than UpdateAny, so that "this is a new entry" and
+	// "this was already shunned" are distinguishable. With UpdateAny both
+	// succeeded and both incremented, so shunning the same address twice --
+	// which is ordinary, since the same attacker trips the same rule again --
+	// left the counter above the number of entries in the map, permanently.
+	err = shunnedMap.Update(ipUint, reason, ebpf.UpdateNoExist)
+	switch {
+	case err == nil:
 		m.shunnedCount.Add(1)
+		return nil
+	case errors.Is(err, ebpf.ErrKeyExist):
+		// Already shunned. The intent is satisfied, so this is not an error;
+		// it is simply not a new entry.
+		return nil
+	default:
+		return err
 	}
-	return err
 }
 
 // UnshunIP removes an IP from the XDP blocklist.
