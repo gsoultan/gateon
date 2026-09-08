@@ -6,6 +6,7 @@ package phantom
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,22 +31,34 @@ func idleBackend(t *testing.T) (addr string, stop func()) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	held := make(chan net.Conn, 4)
+	// A slice under a mutex, not a channel. The first version sent accepted
+	// connections into a buffered channel that the stopper closed, which races
+	// the accept loop: close between Accept returning and the send, and the send
+	// panics on a closed channel. It also blocked once more than the buffer's
+	// worth of connections arrived. Neither showed up running this package alone
+	// and both did under the full-tree run, which is the usual way a test's own
+	// concurrency bug announces itself.
+	var mu sync.Mutex
+	var held []net.Conn
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
-				return
+				return // the listener was closed
 			}
-			held <- c // keep it open and silent
+			mu.Lock()
+			held = append(held, c) // keep it open and silent
+			mu.Unlock()
 		}
 	}()
 	return ln.Addr().String(), func() {
-		_ = ln.Close()
-		close(held)
-		for c := range held {
+		_ = ln.Close() // ends the accept loop
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range held {
 			_ = c.Close()
 		}
+		held = nil
 	}
 }
 
