@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // serviceImpl implements Service.
@@ -57,18 +58,7 @@ func (s *serviceImpl) DeleteService(ctx context.Context, id string) error {
 	}
 
 	// 1. Find and update routes using this service
-	routes := s.routeStore.List(ctx)
-	var affectedIDs []string
-	for _, rt := range routes {
-		if rt.ServiceId == id {
-			affectedIDs = append(affectedIDs, rt.Id)
-			rt.ServiceId = "" // Remove reference
-			if err := s.routeStore.Update(ctx, rt); err != nil {
-				// Continue to next route even if one fails
-				continue
-			}
-		}
-	}
+	affectedIDs := ClearRouteReferences(ctx, s.routeStore, id)
 
 	// 2. Delete the service itself
 	if err := s.store.Delete(ctx, id); err != nil {
@@ -81,4 +71,45 @@ func (s *serviceImpl) DeleteService(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// ClearRouteReferences removes a service id from every route naming it and
+// returns the ids of the routes that changed.
+//
+// Exported because deleting a service is reachable from two transports and was
+// implemented twice: the REST handler goes through this package, while
+// internal/api talked to the stores directly and cleared nothing, so the same
+// operation left two different persisted states depending on how the caller
+// arrived. One copy of the rule is the fix; a second correct copy would only
+// have delayed the next divergence.
+//
+// A route whose Update fails is skipped rather than aborting the rest: the
+// service is going away regardless, and stopping halfway would leave some routes
+// updated and some not, which is worse than leaving one behind for the operator
+// to see.
+//
+// Each route is cloned before being changed. RouteRegistry.List returns the
+// registry's own slice of live pointers, and the request path reads those same
+// objects while it routes -- writing ServiceId in place was a data race the
+// detector reports against every concurrent read of the field. Cloning also
+// means a route whose Update fails is left exactly as it was, rather than
+// detached in memory while the stored copy still names the service.
+func ClearRouteReferences(ctx context.Context, routes config.RouteStore, serviceID string) []string {
+	var affected []string
+	for _, rt := range routes.List(ctx) {
+		if rt.ServiceId != serviceID {
+			continue
+		}
+		affected = append(affected, rt.Id)
+
+		clone, ok := proto.Clone(rt).(*gateonv1.Route)
+		if !ok {
+			continue
+		}
+		clone.ServiceId = ""
+		if err := routes.Update(ctx, clone); err != nil {
+			continue
+		}
+	}
+	return affected
 }
