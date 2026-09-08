@@ -146,7 +146,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)
-	epService := dentrypoint.NewService(s.EpStore, s.Logger)
+	epService := dentrypoint.NewService(s.EpStore, proxyInvalidator, s.Logger)
 	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ipReputation, ".")
 
 	// Tell the WAF which hostnames this gateway answers on, so the off-origin
@@ -163,7 +163,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		return config.RouteOrigins(context.Background(), s.RouteStore)
 	})
 	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger)
-	tlsOptService := dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger)
+	tlsOptService := dtls.NewService(s.TLSOptStore, proxyInvalidator, s.Logger)
 	canaryService := canary.NewService(ctx, serviceService, s.Logger)
 
 	// The interceptor is not optional. This server carries the whole ApiService,
