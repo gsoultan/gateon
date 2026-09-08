@@ -5,6 +5,13 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # Manual trigger. CI here fires only on pull_request and on push to main, so
+  # when GitHub drops those events -- which it did on 2026-09-07, leaving seven
+  # pushed commits on an open PR with no check runs at all -- there is no way to
+  # ask for a run without pushing another commit. The stale checks from the last
+  # commit that did run stay attached to the PR and read as green, which is worse
+  # than red: nothing indicates the newer commits were never built.
+  workflow_dispatch:
 
 # <asm/*.h>, which <linux/types.h> includes, sits under the multiarch triplet
 # rather than on clang's default search path. gcc-multilib used to put it there
