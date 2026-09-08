@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/gsoultan/gateon/internal/domain/entrypoint"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -24,22 +25,9 @@ func (s *ApiService) UpdateEntryPoint(ctx context.Context, req *gateonv1.UpdateE
 	if err := s.EntryPoints.Update(ctx, req.EntryPoint); err != nil {
 		return &gateonv1.UpdateEntryPointResponse{Success: false}, err
 	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
-			if len(r.Entrypoints) == 0 {
-				return true // Global route
-			}
-			for _, epID := range r.Entrypoints {
-				if epID == req.EntryPoint.Id {
-					return true
-				}
-			}
-			return false
-		})
-		if req.EntryPoint.Tls != nil {
-			s.Invalidator.InvalidateTLS()
-		}
-	}
+	// The same helper the REST path uses. This logic lived here only, so a save
+	// through the dashboard invalidated nothing at all.
+	entrypoint.Invalidate(s.Invalidator, req.EntryPoint)
 	s.logAudit(ctx, "update", "entrypoint", fmt.Sprintf("Updated entrypoint %s", req.EntryPoint.Id))
 	return &gateonv1.UpdateEntryPointResponse{Success: true}, nil
 }

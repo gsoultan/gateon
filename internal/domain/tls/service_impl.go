@@ -17,14 +17,17 @@ import (
 // serviceImpl implements Service.
 type serviceImpl struct {
 	store       config.TLSOptionStore
-	routeStore  config.RouteStore
 	invalidator proxy.Invalidator
 	logger      logger.Logger
 }
 
 // NewService creates a TLS Option Service.
-func NewService(store config.TLSOptionStore, routeStore config.RouteStore, invalidator proxy.Invalidator, l logger.Logger) Service {
-	return &serviceImpl{store: store, routeStore: routeStore, invalidator: invalidator, logger: l}
+// NewService takes no route store: nothing references a TLS option by id.
+// EntryPoint.tls is inline TlsConfig, not a reference, so deleting an option
+// cannot orphan anything and there is no cascade to run. The parameter was
+// carried and never read, which reads as a cascade someone forgot to write.
+func NewService(store config.TLSOptionStore, invalidator proxy.Invalidator, l logger.Logger) Service {
+	return &serviceImpl{store: store, invalidator: invalidator, logger: l}
 }
 
 // ListPaginated returns paginated TLS options.
