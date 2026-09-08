@@ -63,7 +63,7 @@ github.com/gsoultan/gateon/dev/seed -
 github.com/gsoultan/gateon/internal/ai 69.0%
 github.com/gsoultan/gateon/internal/ai/models/default -
 github.com/gsoultan/gateon/internal/alerting 25.8%
-github.com/gsoultan/gateon/internal/api 49.4%
+github.com/gsoultan/gateon/internal/api 49.6%
 github.com/gsoultan/gateon/internal/audit 47.6%
 github.com/gsoultan/gateon/internal/auth 71.9%
 github.com/gsoultan/gateon/internal/config 36.8%
@@ -73,7 +73,7 @@ github.com/gsoultan/gateon/internal/domain/canary 6.1%
 github.com/gsoultan/gateon/internal/domain/entrypoint -
 github.com/gsoultan/gateon/internal/domain/middleware 69.2%
 github.com/gsoultan/gateon/internal/domain/route -
-github.com/gsoultan/gateon/internal/domain/service -
+github.com/gsoultan/gateon/internal/domain/service 71.4%
 github.com/gsoultan/gateon/internal/domain/tls -
 github.com/gsoultan/gateon/internal/ebpf 12.4%
 github.com/gsoultan/gateon/internal/ha 47.2%
