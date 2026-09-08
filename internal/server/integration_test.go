@@ -34,9 +34,9 @@ func handlerDeps(s *Server) *handlers.Deps {
 	return &handlers.Deps{
 		RouteService:   route.NewService(s.RouteStore, proxyInvalidator, s.Logger),
 		ServiceService: service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger),
-		EpService:      entrypoint.NewService(s.EpStore, s.Logger),
+		EpService:      entrypoint.NewService(s.EpStore, proxyInvalidator, s.Logger),
 		MwService:      dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger),
-		TLSOptService:  dtls.NewService(s.TLSOptStore, s.RouteStore, proxyInvalidator, s.Logger),
+		TLSOptService:  dtls.NewService(s.TLSOptStore, proxyInvalidator, s.Logger),
 		AuthManager:    s.AuthManager,
 		Version:        s.Version,
 		StartTime:      s.StartTime(),

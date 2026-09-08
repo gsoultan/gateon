@@ -70,11 +70,11 @@ github.com/gsoultan/gateon/internal/config 36.8%
 github.com/gsoultan/gateon/internal/db 65.1%
 github.com/gsoultan/gateon/internal/discovery 46.4%
 github.com/gsoultan/gateon/internal/domain/canary 6.1%
-github.com/gsoultan/gateon/internal/domain/entrypoint -
+github.com/gsoultan/gateon/internal/domain/entrypoint 75.0%
 github.com/gsoultan/gateon/internal/domain/middleware 69.2%
-github.com/gsoultan/gateon/internal/domain/route -
+github.com/gsoultan/gateon/internal/domain/route 90.0%
 github.com/gsoultan/gateon/internal/domain/service 71.4%
-github.com/gsoultan/gateon/internal/domain/tls -
+github.com/gsoultan/gateon/internal/domain/tls 86.7%
 github.com/gsoultan/gateon/internal/ebpf 12.4%
 github.com/gsoultan/gateon/internal/ha 47.2%
 github.com/gsoultan/gateon/internal/httputil 45.0%
