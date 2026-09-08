@@ -35,6 +35,13 @@ func NewService(lifetime context.Context, svcService service.Service, l logger.L
 	return &serviceImpl{svcService: svcService, logger: l, lifetime: lifetime}
 }
 
+// minCanaryInterval is the shortest gap between weight changes.
+//
+// Each step writes the service and invalidates route chains, and consults
+// metrics that do not move faster than this, so anything below it is cost
+// without signal.
+const minCanaryInterval = time.Second
+
 // StartCanary starts a background task to gradually shift traffic to target weights.
 func (cs *serviceImpl) StartCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) (string, error) {
 	taskID := uuid.NewString()
@@ -62,7 +69,27 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 		req.DurationMinutes = 1
 	}
 
-	interval := time.Duration(req.DurationMinutes) * time.Minute / time.Duration(req.Steps)
+	total := time.Duration(req.DurationMinutes) * time.Minute
+	interval := total / time.Duration(req.Steps)
+
+	// Steps arrives from the request and nothing between the handler and here
+	// checks anything but its sign. At Steps=1000000 over one minute the interval
+	// is sixty nanoseconds, and every round writes the service to disk and
+	// invalidates route chains -- one API call spending the gateway on rewriting
+	// its own configuration.
+	//
+	// The floor is applied to the interval rather than to the step count so the
+	// rollout still takes the time the operator asked for; only the number of
+	// increments inside it changes. A second is already far below anything
+	// useful: GetServiceGoldenSignals is what each step consults, and error rate
+	// and p99 do not move meaningfully faster than that.
+	if interval < minCanaryInterval {
+		interval = minCanaryInterval
+		req.Steps = int32(total / minCanaryInterval)
+		if req.Steps < 1 {
+			req.Steps = 1
+		}
+	}
 
 	// Get initial service state
 	svc, ok := cs.svcService.GetService(ctx, req.ServiceId)
@@ -82,7 +109,18 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 	}
 
 	for i := range int(req.Steps) {
-		time.Sleep(interval)
+		// Not time.Sleep. StartCanary detaches this onto the process lifetime and
+		// says it stops at shutdown; a sleep no cancellation can interrupt is what
+		// made that untrue. A rollout spread over an hour sat in an
+		// uninterruptible wait of minutes while the process drained, then wrote
+		// one more weight change on its way out.
+		select {
+		case <-ctx.Done():
+			cs.logger.LogInfo("Canary stopped: context cancelled",
+				"service_id", req.ServiceId, "completed_steps", i)
+			return
+		case <-time.After(interval):
+		}
 
 		// Automated Canary Analysis: Evaluate metrics
 		metrics := telemetry.GetServiceGoldenSignals(ctx, req.ServiceId)
