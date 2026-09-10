@@ -9,6 +9,35 @@ here after the fact.
 
 ---
 
+## Unreleased
+
+### Session revocation reaches every instance, when Redis is configured
+
+Disabling, deleting, demoting or changing the password of an account has always
+ended its sessions immediately on the instance that handled the request, and
+left the others serving the cached binding until it expired — up to 30 seconds.
+
+Revocations now publish on `gateon:config:invalidation`, the channel that
+already carries route, TLS and WAF invalidations, so a healthy multi-instance
+deployment converges in a round trip.
+
+**Who is affected:** nobody has to do anything. With Redis configured you get
+the faster path automatically. **With no Redis — the default, and every
+single-instance deployment — nothing changes:** the 30-second binding TTL
+remains the whole mechanism, which is deliberate, because Redis pub/sub is
+at-most-once and a dropped message would otherwise restore unbounded staleness.
+
+One related fix ships with it: node identity for *all* invalidation types moves
+from the hostname to a per-process value. The listener discards messages whose
+node id matches its own, so two gateon processes on one host — an ordinary
+container arrangement — were discarding each other's route, TLS and WAF
+invalidations as self-broadcast. If you run more than one instance per host,
+those now propagate where they previously did not.
+
+See [ADR 0012](adr/0012-session-revocation-propagates-but-expiry-guarantees.md).
+
+---
+
 ## v2.6.0
 
 ### Every session ends on upgrade — **everyone signs in again**

@@ -34,12 +34,23 @@ never written to `localStorage` or `sessionStorage`, and no script on the page
 can read it. API and CLI clients send `Authorization: Bearer <token>`; query
 parameters are accepted only for WebSocket and SSE, which cannot set headers.
 
-**Known limitation — multi-instance deployments.** Binding state is cached per
-process. Instances sharing one database do not currently see each other's
-revocations, so a disable is immediate on the instance that performed it and
-takes effect elsewhere only after that instance's cache entry is evicted or it
-restarts. Single-instance and active-passive HA deployments are unaffected in
-practice; see `doc/adr/0005-session-lifecycle-and-first-run-trust.md`.
+**Multi-instance deployments.** Binding state is cached per process, and a
+revocation is propagated to the other instances over the Redis channel that
+already carries route, TLS and WAF invalidations. With Redis configured, a
+disable takes effect across the deployment in a round trip.
+
+Redis pub/sub is at-most-once, so propagation is an optimisation and never the
+guarantee. Cached bindings carry `DefaultBindingTTL` (30s, overridable with
+`GATEON_SESSION_BINDING_TTL`) and an expired entry is treated as absent, so a
+sibling re-reads the account from the database within that window regardless of
+whether it received the message. **With no Redis configured — the default, and
+every single-instance deployment — the TTL is the whole mechanism and the
+window is up to 30 seconds.**
+
+A message on that channel can only *drop* a cached binding, never create or
+change one, so the next verify re-reads the account and the check gets stricter
+rather than weaker. See
+`doc/adr/0012-session-revocation-propagates-but-expiry-guarantees.md`.
 
 **On upgrade, everyone is logged out once.** Tokens minted before this
 mechanism carry no binding and are refused rather than grandfathered in.
