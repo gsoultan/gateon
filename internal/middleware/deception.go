@@ -126,6 +126,22 @@ func (w *deceptionResponseWriter) WriteHeader(code int) {
 // Hijack forwards to the underlying writer so a WebSocket upgrade behind the
 // deception middleware can take the raw connection. Breadcrumb injection only
 // applies to an HTML response body, which a hijacked connection does not have.
+
+// Flush forwards to the underlying writer so a Server-Sent Events stream behind
+// this middleware reaches the client as it is produced.
+//
+// Embedding http.ResponseWriter promotes only Header, Write and WriteHeader, so
+// a wrapper silently stops being an http.Flusher -- and an SSE response then
+// buffers until the upstream closes, arriving complete and far too late. That
+// reads as a dead feed rather than as a middleware bug, which is why it
+// survived: Hijack was added here for WebSocket upgrades and Flush was not,
+// so the streaming case that fails is the one nobody was thinking about.
+func (w *deceptionResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (w *deceptionResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hj, ok := w.ResponseWriter.(http.Hijacker)
 	if !ok {
