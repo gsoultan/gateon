@@ -1,0 +1,46 @@
+Gateon {{ .Chart.AppVersion }} installed as {{ include "gateon.fullname" . }}.
+
+1. Reach the dashboard. It is on a ClusterIP Service of its own, deliberately
+   not on the traffic ports:
+
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gateon.fullname" . }}-management {{ .Values.service.managementPort }}:{{ .Values.service.managementPort }}
+
+   Then open http://localhost:{{ .Values.service.managementPort }} and complete
+   setup. Until an administrator exists the management API answers 503 for
+   everything except setup and the probes — a fresh install on a reachable
+   address cannot be claimed by whoever finds it first.
+
+2. Back up your encryption key, now, before anything is configured.
+
+   kubectl -n {{ .Release.Namespace }} get secret {{ default (printf "%s-secrets" (include "gateon.fullname" .)) .Values.secrets.existingSecret }} -o jsonpath='{.data.encryption-key}' | base64 -d
+
+   It encrypts the paseto secret and the database password, and it is in no
+   backup of the config or the database. Losing it makes those unrecoverable.
+   Keep it where you keep credentials, not on the backup volume. See
+   doc/backup-restore.md.
+{{- if not .Values.secrets.encryptionKey }}
+
+   This install generated one. The Secret carries helm.sh/resource-policy: keep
+   and the template reuses the existing value on upgrade, so `helm upgrade` will
+   not rotate it out from under your data — but `helm uninstall` plus a fresh
+   install is a different key and unreadable secrets.
+{{- end }}
+{{- if not (include "gateon.hasGlobalConfig" .) }}
+
+3. No global.json was supplied, so gateon started on built-in defaults — and the
+   built-in default has the WAF switched off. Configure it through the dashboard,
+   or set `globalConfig` in values. `kubectl logs` says so at startup too.
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+
+   Running {{ .Values.replicaCount }} replicas against a shared
+   {{ .Values.externalDatabase.driver }} with Redis. Session revocation
+   propagates over Redis and falls back to a 30s binding TTL if the broker is
+   unreachable, so a disabled account is out within that window either way.
+{{- end }}
+{{- if .Values.kubernetesIntegration.gatewayAPI }}
+
+   Gateway API is on. If the gateway.networking.k8s.io CRDs are not installed,
+   the controller's informer never syncs and the client retries in a loop — set
+   kubernetesIntegration.gatewayAPI=false. Ingress handling is unaffected.
+{{- end }}
