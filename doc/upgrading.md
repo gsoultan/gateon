@@ -9,7 +9,175 @@ here after the fact.
 
 ---
 
-## Unreleased
+## v2.6.0
+
+### Every session ends on upgrade — **everyone signs in again**
+
+Management sessions are PASETO tokens. They now carry an `sb` claim: a digest
+over the account's password hash, role and disabled flag, recomputed and checked
+on every request. Tokens minted before this change carry no `sb` and are refused
+by design.
+
+This is what makes revocation work at all. Disabling an account, deleting it,
+changing its password or changing its role previously wrote to a row that no
+authenticated request ever read — an operator disabling a departing employee set
+a column and changed nothing, and a demoted administrator kept `role=admin`
+until the token expired on its own. All four now end the session immediately.
+
+Token lifetime also drops from 24 hours to 8.
+
+**Who is affected:** everyone holding an open dashboard session or a stored
+bearer token, once. Scripts using a long-lived token must re-authenticate.
+
+**Multi-instance caveat:** the binding is cached per process with a 30-second TTL
+(`GATEON_SESSION_BINDING_TTL`). A revocation is immediate on the instance that
+performed it and takes up to that long to reach the others. See
+[ADR 0005](adr/0005-session-lifecycle-and-first-run-trust.md).
+
+### Data-leak rules now run against compressed responses — **may start refusing responses**
+
+Response-phase DLP had matched nothing on real traffic since the gwaf migration,
+and reported every response clean while it did.
+
+`httputil.ReverseProxy` forwards the client's `Accept-Encoding` verbatim, and
+Go's `http.Transport` decompresses transparently only when it set that header
+itself. Every browser sends `gzip, deflate, br`, so the origin compressed and the
+engine was handed a DEFLATE stream. There is no grammar in a DEFLATE stream: no
+rule matched, nothing was recorded, and the browser decompressed and painted the
+card number.
+
+The encoding is now negotiated down to something this build can decode, and the
+held body is inflated once under a cap for inspection while the origin's own
+bytes are forwarded untouched — so client compression and `Content-Length` both
+survive. An encoding that still cannot be read is counted as **uninspected**,
+never as clean.
+
+**Effect: rules that fired on nothing now fire on real traffic, and `dlp_action`
+defaults to `block`.** A response carrying something the corpus recognises — a
+card number by issuer range and Luhn, a cloud or SaaS credential, a private key,
+a database URI with an embedded password, a stack trace or database error from
+the origin — is refused rather than served.
+
+**Who is affected:** the enterprise tier, where DLP and response inspection are
+on by default; and any tier where `waf.dlp` is explicitly `true`, because an
+explicit opt-in upgrades response inspection along with it.
+
+**Who is not:** minimal and standard tiers without that opt-in. Response
+inspection stays off there, as it always was.
+
+Set `dlp_action` to `audit` for one release and read
+`gateon_middleware_waf_would_block_total{route,rule_id,phase}` before letting it
+refuse anything — that counter is what makes audit mode a measurement rather
+than an off switch. `redact` forwards the response with the finding replaced.
+See [ADR 0008](adr/0008-response-inspection-must-control-its-own-encoding.md).
+
+### Connect and gRPC now enforce authorization — **a role that worked over gRPC may now be refused**
+
+The management API is reachable over REST, Connect and gRPC, and all three end at
+the same methods. Authorization existed on one of them: `RequirePermission` takes
+an `http.ResponseWriter`, so it could not be called from a Connect or gRPC
+handler — and dropping a check with that signature does not fail to compile.
+
+A viewer was refused by `POST /v1/diagnostics/mitigate` and accepted by
+`/gateon.v1.ApiService/MitigateThreat`. Because `HandleProxyOrLocal` dispatches on
+`Content-Type` before the mux is consulted, any authenticated principal of any
+role could reach every RPC by sending `application/grpc-web`. The escalation was
+selectable by a request header.
+
+One permission table now backs both interceptors, unmapped procedures are denied,
+and a test reflects over the generated handler interface so a new RPC fails the
+build rather than shipping unguarded.
+
+**Who is affected:** any client that relied — knowingly or not — on a non-REST
+transport reaching a method its role cannot call over REST. Separately, the read
+routes that had no check at all (`/v1/routes`, `/v1/services`, `/v1/middlewares`,
+`/v1/tls-options`, `/v1/certs`, `/v1/entryPoints`, `/v1/traces`,
+`/v1/cloudflare-ips`) now require the permission their RPC twin requires. See
+[ADR 0006](adr/0006-transport-neutral-authorization.md).
+
+### Middleware credentials are masked for callers who cannot write them
+
+A middleware's config is a `map[string]string`, and for the auth middlewares the
+values in it are credentials: `secret` for jwt, hmac and pow, `password` and
+`users` for basic auth, `client_secret` for oidc. The list endpoints returned
+those maps exactly as stored, and `RoleViewer` — the lowest role there is,
+read-only by definition — holds read on middlewares.
+
+That is not a configuration disclosure. For jwt and hmac the value is the signing
+key for a route the gateway is protecting, so whoever holds it can mint a token
+the gateway will accept: a read-only dashboard account was access to the backend
+as any user. `users` is worse in the small — it is `alice:pw1,bob:pw2`, every
+basic-auth password in one string.
+
+Credentials now come back as a placeholder for any caller who cannot already
+write them. Write permission is the right line, because someone who can set the
+secret gains nothing by reading it.
+
+**Who is affected:** tooling that reads middleware secrets through a viewer or
+operator token. Config export is unchanged for admins, so backup flows still
+round-trip.
+
+### Route selection resolves dot segments and normalises host spellings — **a request may now match a different route**
+
+Both are bypass fixes, and both change which route — and therefore which
+middleware chain — a request gets.
+
+`/public/../admin` used to select `/public`'s routes. Selection walked the path
+one segment at a time and treated `..` as an ordinary segment name; there is no
+child node named `..`, so the lookup stopped at the `/public` node. Nothing
+upstream resolved it first — Go's HTTP server leaves `r.URL.Path` exactly as the
+client sent it — and the proxy joined that same string onto the backend URL,
+where nginx, Apache and most frameworks *do* resolve it and serve `/admin`. The
+gateway ran `/public`'s chain while the backend returned `/admin`'s content, so
+if `/admin` carried authentication and `/public` did not, it did not run. The WAF
+was not a mitigation: it is itself middleware on the route that was chosen.
+
+Paths are now resolved in `SelectRoute`, where both callers converge.
+`r.RequestURI` keeps the original, so the WAF and the access log still see what
+was actually sent.
+
+Separately, `app.example.com.` and `app.example.com` are the same host — the
+trailing dot is the DNS root label, and clients, proxies and health checkers do
+send the fully-qualified spelling. Routing compared strings, so a fully-qualified
+host missed its own host trie *and* any wildcard covering it, and fell through to
+whatever host-agnostic route the deployment had. It found the wrong route, not no
+route. `NormalizeHost` is now applied on both sides — where the keys are built and
+where they are looked up.
+
+**Who is affected:** any deployment whose routes overlap once paths are resolved,
+or that mixes host-scoped and host-agnostic routes. The already-clean case, which
+is all real traffic, costs a byte scan and no allocation.
+
+### Reputation, rate limiting and proof-of-work key on network + client class — **accumulated scores reset**
+
+`ReputationBlocker` is appended to every route's chain unconditionally and
+refuses with 403 below a score of 2.0. It keyed that score on the JA4+
+fingerprint, which is the TLS stack plus the shape of the HTTP headers: method,
+version, cookie-present, referer-present, header count, header-name mask,
+Accept-Language. It reads no address, no connection and no credential. It names
+the software making a request and was never capable of naming the party making
+it.
+
+Two people running the same Chrome build in the same language produce the same
+fingerprint. So one patient attacker on an unmodified browser could drive that
+shared score to zero, and every other user of that browser was then refused on
+every route — no volume required, the attacker's entire advantage being that they
+looked ordinary. The inverse was equally invisible: a client that varies its
+headers gets a fresh identity per request and never accumulates a score at all.
+The same identity ran the adaptive rate limiter, the proof-of-work difficulty
+gate and its challenge id, the tarpit, and deception's troll threshold.
+
+`ReputationIDFor` now pairs that client class with the client's network — /24 for
+v4, /64 for v6, the narrowest scope that still survives a phone changing cell or
+a DHCP lease renewing.
+
+**Effect:** scores accumulated under the old key no longer resolve, so reputation
+starts from neutral on upgrade. Blocks that were mass false positives stop;
+blocks that were correct have to re-earn themselves. Honeypot bans now escalate
+(15m → 1h → 6h → 24h) instead of landing flat at 24 hours, because the trap makes
+one hit strong evidence about the *request* while the ban lands on an *address*,
+and addresses are shared. See
+[ADR 0011](adr/0011-reputation-is-scoped-to-a-network.md).
 
 ### `redis.enabled` and `otel.enabled` are now honoured — **may disconnect Redis or stop traces**
 
