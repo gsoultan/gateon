@@ -17,6 +17,19 @@ on:
 permissions:
   contents: write
 
+# <asm/*.h>, which <linux/types.h> includes, sits under the multiarch triplet
+# rather than on clang's default search path, so the BPF compile in goreleaser's
+# `before` hook fails with "'asm/types.h' file not found" without this. ci.yml
+# and security.yml both set it; release.yml did not, which is how a release that
+# built fine everywhere else died two seconds into its first hook.
+#
+# Naming both triplets is portable -- clang ignores whichever is absent -- and it
+# is what internal/ebpf/Dockerfile.gen has always done. gcc-multilib would also
+# place the headers, but that package exists only on amd64 and apt refuses it
+# outright on arm64.
+env:
+  CPATH: /usr/include/x86_64-linux-gnu:/usr/include/aarch64-linux-gnu
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
