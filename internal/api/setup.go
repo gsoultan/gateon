@@ -51,8 +51,12 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		return &gateonv1.SetupResponse{Success: false, Error: "paseto secret must be exactly 32 characters"}, nil
 	}
 	// Check if setup is already done
+	// Fail closed on an unknown setup state. This guard is what stops Setup
+	// being re-run against a configured gateway, and re-running it creates an
+	// administrator -- so "I could not tell" has to deny. The old form let an
+	// error through to the account-creation path below.
 	setupReq, err := s.IsSetupRequired(ctx, &gateonv1.IsSetupRequiredRequest{})
-	if err == nil && !setupReq.Required {
+	if err != nil || !setupReq.Required {
 		return &gateonv1.SetupResponse{Success: false, Error: "setup already completed"}, nil
 	}
 

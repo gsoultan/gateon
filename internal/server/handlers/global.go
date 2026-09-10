@@ -436,9 +436,17 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		DatabaseConfig *gateonv1.DatabaseConfig `json:"database_config"`
 	}
 	mux.HandleFunc("POST /v1/setup/test-db", func(w http.ResponseWriter, r *http.Request) {
-		// Only allow test-db during setup
+		// Only allow test-db during setup.
+		//
+		// `err != nil ||` rather than `err == nil &&`: an error means the setup
+		// state is unknown, and the old form treated unknown as permitted --
+		// falling through to open a caller-supplied DSN. IsSetupRequired
+		// returns a nil error on every path today, so this is latent rather
+		// than live, which is exactly how the last two fail-open defects in
+		// this codebase read right up until something on the path started
+		// returning errors.
 		setupReq, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{})
-		if err == nil && !setupReq.Required {
+		if err != nil || !setupReq.Required {
 			WriteHTTPError(w, http.StatusForbidden, "test-db is only allowed during initial setup")
 			return
 		}
