@@ -131,7 +131,21 @@ func isLoginPath(path string) bool {
 
 // isPublicAuthPath returns true for setup, health, status, or login — these skip Paseto auth.
 func isPublicAuthPath(path string) bool {
+	// "/v1/setup/test-db" is the wizard's connection test, and it belongs here
+	// for the same reason "/v1/setup" does: it runs before an administrator
+	// exists, so there is no credential to present. Without it the base handler
+	// answered 503 during first run while the handler itself answers 403 once
+	// setup completes -- no reachable state, and the wizard's button always
+	// failed.
+	//
+	// It is the narrowest addition that works. Comparisons here are exact
+	// rather than prefixed on purpose: HasPrefix("/v1/setup") would make every
+	// future /v1/setup/* endpoint unauthenticated by accident, and the handler
+	// behind this one opens a database connection to a caller-supplied DSN.
+	// That is an outbound-connection primitive, so it is bounded twice -- by
+	// this list, and by the handler refusing once setup is done.
 	return path == "/v1/setup" || path == "/v1/setup/required" ||
+		path == "/v1/setup/test-db" ||
 		path == "/gateon.v1.ApiService/Setup" || path == "/gateon.v1.ApiService/IsSetupRequired" ||
 		path == "/v1/auth/2fa/enroll" || path == "/v1/auth/2fa/verify" ||
 		path == "/gateon.v1.ApiService/Enroll2FA" || path == "/gateon.v1.ApiService/Verify2FA" ||
