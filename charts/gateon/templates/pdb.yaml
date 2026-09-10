@@ -1,0 +1,14 @@
+{{/* Copyright (c) 2026 Gembit Soultan Shirazi. SPDX-License-Identifier: MIT */}}
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gateon.fullname" . }}
+  labels: {{- include "gateon.labels" . | nindent 4 }}
+spec:
+  {{- with .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "gateon.selectorLabels" . | nindent 6 }}
+{{- end }}

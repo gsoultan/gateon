@@ -1,0 +1,55 @@
+{{/* Copyright (c) 2026 Gembit Soultan Shirazi. SPDX-License-Identifier: MIT */}}
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "gateon.serviceAccountName" . }}
+  labels: {{- include "gateon.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.rbac.create }}
+---
+# Read-only, and that is a statement about the controller rather than a default.
+#
+# It watches Ingress and HTTPRoute and writes what it learns into gateon's own
+# route and service stores — never back to the Kubernetes API. There is no
+# UpdateStatus, no patch and no finalizer, so the usual ingress-controller
+# permissions (ingresses/status, events, leases) would all be unused authority
+# on a component that terminates hostile traffic.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if .Values.kubernetesIntegration.watchNamespace }}Role{{ else }}ClusterRole{{ end }}
+metadata:
+  name: {{ include "gateon.fullname" . }}
+  {{- if .Values.kubernetesIntegration.watchNamespace }}
+  namespace: {{ .Values.kubernetesIntegration.watchNamespace }}
+  {{- end }}
+  labels: {{- include "gateon.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  {{- if .Values.kubernetesIntegration.gatewayAPI }}
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "gatewayclasses", "httproutes"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if .Values.kubernetesIntegration.watchNamespace }}RoleBinding{{ else }}ClusterRoleBinding{{ end }}
+metadata:
+  name: {{ include "gateon.fullname" . }}
+  {{- if .Values.kubernetesIntegration.watchNamespace }}
+  namespace: {{ .Values.kubernetesIntegration.watchNamespace }}
+  {{- end }}
+  labels: {{- include "gateon.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: {{ if .Values.kubernetesIntegration.watchNamespace }}Role{{ else }}ClusterRole{{ end }}
+  name: {{ include "gateon.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gateon.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

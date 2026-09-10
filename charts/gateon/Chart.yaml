@@ -1,0 +1,20 @@
+apiVersion: v2
+name: gateon
+description: Gateon — API gateway, reverse proxy and security gateway with a semantic WAF
+type: application
+version: 0.1.0
+appVersion: "2.6.0"
+home: https://github.com/gsoultan/gateon
+sources:
+  - https://github.com/gsoultan/gateon
+maintainers:
+  - name: Gembit Soultan Shirazi
+    email: gembit.soultan@gmail.com
+keywords:
+  - gateway
+  - proxy
+  - waf
+  - ingress
+  - security
+annotations:
+  licenses: MIT

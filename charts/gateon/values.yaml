@@ -1,0 +1,213 @@
+# Copyright (c) 2026 Gembit Soultan Shirazi. SPDX-License-Identifier: MIT
+
+image:
+  repository: ghcr.io/gsoultan/gateon
+  # Defaults to .Chart.AppVersion. Pin a digest for production.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Scaling out needs externalDatabase.enabled and redis.enabled; the chart
+# refuses to render otherwise, because each replica would otherwise keep its own
+# SQLite file and the replicas would serve different configuration. See
+# _helpers.tpl.
+replicaCount: 1
+
+# minimal | standard | enterprise. Sizes caches, trace sampling and which WAF
+# subsystems run. `standard` is the image default.
+#
+# Note enterprise turns on DLP response inspection, which buffers response
+# bodies and defaults to *blocking* on a finding. Read doc/upgrading.md before
+# moving a live deployment onto it.
+profile: standard
+
+# Matches the 2 core / 2 GB target gateon is measured against
+# (doc/deployment-sizing.md: 10,651 req/s, p99 11.4ms, 140 MB peak, WAF
+# blocking). The memory request is deliberately well above the measured peak:
+# the figure is for a specific workload, and the WAF's body buffers scale with
+# request size.
+resources:
+  requests:
+    cpu: 500m
+    memory: 256Mi
+  limits:
+    # No CPU limit by default. Go derives GOMAXPROCS from the cgroup quota, so a
+    # limit here throttles the request path under exactly the burst it exists to
+    # absorb. Set one only if your cluster requires it.
+    memory: 2Gi
+
+# GOMEMLIMIT, as a soft ceiling that makes the GC work harder rather than the
+# kernel OOM-kill the pod. Left empty it is derived from resources.limits.memory
+# at 80%, which is the headroom the Go runtime wants for non-heap memory.
+memoryLimit: ""
+
+service:
+  type: ClusterIP
+  # The management API, dashboard and /healthz all live here. Do not expose this
+  # to the internet: the allowlist defaults to 0.0.0.0/0 and the dashboard is the
+  # gateway's full control plane.
+  managementPort: 8080
+  annotations: {}
+
+# Proxy entrypoints — the ports that actually carry traffic. Declared here so
+# the Service and container ports agree; the routes themselves come from the
+# dashboard, a config file or Ingress.
+entrypoints:
+  - name: web
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  - name: websecure
+    port: 443
+    targetPort: 8443
+    protocol: TCP
+
+# --- Secrets -----------------------------------------------------------------
+#
+# encryptionKey encrypts the paseto secret, the database URL and password, the
+# MaxMind key and the proof-of-work secret at rest. It is NOT stored in any
+# backup of the config or database, so losing it makes those five unrecoverable
+# — see doc/backup-restore.md.
+#
+# **A key shorter than 16 characters is silently ignored and the secrets are
+# written in cleartext.** The chart refuses one, because the runtime only warns.
+secrets:
+  # Generated on first install if left empty. Supply your own to keep it in your
+  # own secret manager, which is where it belongs.
+  encryptionKey: ""
+  # Use an existing Secret instead. Must contain key `encryption-key`.
+  existingSecret: ""
+
+# --- State -------------------------------------------------------------------
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  # /var/lib/gateon holds the SQLite database, the Pebble trace store, the ACME
+  # cache and audit archives. Traces dominate the size; see
+  # doc/storage-retention.md to bound them.
+  mountPath: /var/lib/gateon
+
+# --- External stores ---------------------------------------------------------
+externalDatabase:
+  enabled: false
+  # postgres | mysql
+  driver: postgres
+  host: ""
+  port: 5432
+  database: gateon
+  user: gateon
+  password: ""
+  existingSecret: ""
+  existingSecretPasswordKey: password
+  sslMode: require
+
+redis:
+  enabled: false
+  addr: ""
+  password: ""
+  existingSecret: ""
+  existingSecretPasswordKey: password
+  db: 0
+
+# --- Kubernetes integration --------------------------------------------------
+#
+# The controller starts whenever KUBERNETES_SERVICE_HOST is set, which is always
+# true in-cluster. It is read-only against the API: it watches Ingress and
+# HTTPRoute and writes only into gateon's own stores, so the role below needs no
+# update, patch or status permission.
+rbac:
+  create: true
+
+kubernetesIntegration:
+  # Watch gateway.networking.k8s.io HTTPRoutes.
+  #
+  # **Turn this off if the Gateway API CRDs are not installed.** The controller
+  # waits for both informers to sync, and the Gateway one never will without its
+  # CRDs — so the client retries in a loop and fills the log. Ingress handling is
+  # unaffected either way, but the noise is permanent.
+  gatewayAPI: false
+  # Restrict the Ingress watch to one namespace. Empty means cluster-wide, which
+  # is what an ingress controller normally wants.
+  watchNamespace: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# --- Pod ---------------------------------------------------------------------
+#
+# The image is distroless/static:nonroot, so it already runs as uid 65532 with
+# no shell and no package manager. These make that explicit and unwritable.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# eBPF and the L4 proxy need capabilities the defaults above deny. Enabling this
+# grants NET_ADMIN and BPF, which is a real privilege increase — eBPF is marked
+# experimental in the README for a reason, and on most virtualised NICs it
+# attaches at the TC hook rather than native XDP anyway. Off by default.
+ebpf:
+  enabled: false
+
+# Probes hit /healthz and /readyz on the management port. Both are served before
+# setup completes, so a fresh install becomes Ready and you can reach the setup
+# wizard — the management API answers 503 for everything else until an
+# administrator exists.
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: management
+  initialDelaySeconds: 5
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: management
+  initialDelaySeconds: 3
+  periodSeconds: 5
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+# Drain time for in-flight requests. Gateon's own shutdown budget is 30s, so a
+# terminationGracePeriodSeconds below that cuts connections the gateway was
+# still draining.
+terminationGracePeriodSeconds: 40
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Extra environment, for anything the chart does not model. Every GATEON_* knob
+# is settable here.
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
+
+# global.json, mounted read-only at /etc/gateon. Left empty the gateway starts
+# on built-in defaults — which have the WAF switched off — and logs a warning
+# saying so.
+globalConfig: {}

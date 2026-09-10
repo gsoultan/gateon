@@ -1,0 +1,39 @@
+{{/* Copyright (c) 2026 Gembit Soultan Shirazi. SPDX-License-Identifier: MIT */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gateon.fullname" . }}
+  labels: {{- include "gateon.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "gateon.selectorLabels" . | nindent 4 }}
+  ports:
+    {{- range .Values.entrypoints }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort }}
+      protocol: {{ default "TCP" .protocol }}
+    {{- end }}
+---
+# The management API, dashboard and probes, on a Service of their own.
+#
+# Separate because it is the gateway's control plane and the traffic ports are
+# not: a single Service of type LoadBalancer carrying both would publish the
+# dashboard on the same address as the proxy, and the management allowlist ships
+# as 0.0.0.0/0. Keeping it ClusterIP means exposing it is a deliberate act.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gateon.fullname" . }}-management
+  labels: {{- include "gateon.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "gateon.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: management
+      port: {{ .Values.service.managementPort }}
+      targetPort: management
+      protocol: TCP

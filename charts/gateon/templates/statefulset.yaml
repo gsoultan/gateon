@@ -1,0 +1,149 @@
+{{/* Copyright (c) 2026 Gembit Soultan Shirazi. SPDX-License-Identifier: MIT */}}
+{{- include "gateon.validateScaleOut" . -}}
+# A StatefulSet rather than a Deployment, because gateon keeps state per replica
+# even when the configuration store is external: the Pebble trace store, the
+# ACME cache when Redis is not configured, and audit archives all live on the
+# volume. A Deployment with a shared ReadWriteOnce claim cannot roll without two
+# pods contending for it, and one with an emptyDir loses the ACME cache on every
+# restart — which means re-issuing from Let's Encrypt, and its rate limits.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "gateon.fullname" . }}
+  labels: {{- include "gateon.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "gateon.fullname" . }}-management
+  selector:
+    matchLabels: {{- include "gateon.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gateon.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      annotations:
+        checksum/config: {{ printf "%s%s" (include "gateon.entrypointsJSON" .) (include "gateon.globalConfig" .) | sha256sum }}
+        {{- with .Values.podAnnotations }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec:
+      serviceAccountName: {{ include "gateon.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateon
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- if .Values.ebpf.enabled }}
+            # eBPF needs to load programs and touch the interface. This is a
+            # real privilege increase on a process that terminates hostile
+            # traffic, and eBPF is marked experimental in the README.
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_ADMIN", "BPF"]
+            {{- end }}
+          ports:
+            - name: management
+              containerPort: {{ .Values.service.managementPort }}
+              protocol: TCP
+            {{- range .Values.entrypoints }}
+            - name: {{ .name }}
+              containerPort: {{ .targetPort }}
+              protocol: {{ default "TCP" .protocol }}
+            {{- end }}
+          env:
+            - name: GATEON_PROFILE
+              value: {{ .Values.profile | quote }}
+            {{- with (include "gateon.memoryLimit" .) }}
+            - name: GOMEMLIMIT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: GATEON_MANAGEMENT_PORT
+              value: {{ .Values.service.managementPort | quote }}
+            - name: GATEON_DATA_DIR
+              value: {{ .Values.persistence.mountPath | quote }}
+            - name: GATEON_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-secrets" (include "gateon.fullname" .)) .Values.secrets.existingSecret }}
+                  key: encryption-key
+            {{- if .Values.redis.enabled }}
+            # REDIS_ADDR enables Redis on its own; the redis.enabled flag in
+            # global.json is the dashboard's switch and an env var is an
+            # unambiguous instruction with no flag to contradict it. See
+            # doc/upgrading.md under v2.6.0.
+            - name: REDIS_ADDR
+              value: {{ .Values.redis.addr | quote }}
+            - name: REDIS_DB
+              value: {{ .Values.redis.db | quote }}
+            {{- if or .Values.redis.password .Values.redis.existingSecret }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-secrets" (include "gateon.fullname" .)) .Values.redis.existingSecret }}
+                  key: {{ .Values.redis.existingSecretPasswordKey }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe: {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            - name: config
+              mountPath: /etc/gateon
+              readOnly: true
+            # readOnlyRootFilesystem is on, and the Go runtime and TLS stack
+            # still want a writable temp dir.
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "gateon.fullname" . }}-config
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}
