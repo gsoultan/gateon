@@ -21,6 +21,17 @@ type Service interface {
 	SetUserDisabled(id string, disabled bool) error
 	SetTwoFactorPending(id string, pending bool) error
 
+	// InvalidateBinding drops a cached session binding without republishing it.
+	// It is how an invalidation from another instance is applied; see ADR 0012
+	// for why the remote path may only invalidate and never populate.
+	InvalidateBinding(id string)
+
+	// SetBindingPublisher installs the peer-notification publisher. It is on
+	// the interface so a Holder can re-apply it to the Manager that Setup
+	// creates on a first run, which does not exist when the publisher is
+	// configured at startup.
+	SetBindingPublisher(p BindingPublisher)
+
 	// 2FA methods
 	Setup2FA(id string) (string, string, []string, error)
 	EnrollPending2FA(username, password string) (string, string, []string, string, error)

@@ -122,6 +122,12 @@ change.
 > Wiring Redis into `auth.Manager` also adds a dependency to a constructor on the
 > trust boundary, which needs its own ADR and an `arch`/`sec` co-sign rather than
 > being folded into a cache fix.
+>
+> **Superseded 2026-09-10 by [ADR 0012](0012-session-revocation-propagates-but-expiry-guarantees.md).**
+> Propagation now ships, on the terms set out above: the expiry remains the
+> guarantee and propagation is the optimisation, and `auth.NewManager` gained no
+> broker dependency — the publisher is an interface in `internal/auth`, installed
+> after construction.
 
 A first run now refuses the management API until setup completes. An operator
 automating a fresh install against `/v1/routes` before creating an administrator

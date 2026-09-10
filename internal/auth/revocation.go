@@ -220,3 +220,59 @@ func (m *Manager) checkSessionBinding(id, presented string) error {
 	}
 	return nil
 }
+
+// BindingPublisher broadcasts a session-binding revocation to the other
+// instances sharing this deployment's database.
+//
+// It is an interface here, and implemented in internal/server where the Redis
+// client already lives, so internal/auth carries no broker dependency. ADR 0005
+// deferred propagation partly because wiring Redis into a constructor on the
+// trust boundary is not a cache fix; NewManager is unchanged and the publisher
+// is installed afterwards, the way the ACME cache is.
+//
+// Publishing is best effort by design. The mutation has already been applied
+// and invalidated locally before this is called, and the expiry in
+// DefaultBindingTTL still bounds every sibling regardless — so a failed publish
+// costs latency, never correctness. See ADR 0012.
+type BindingPublisher interface {
+	PublishBindingRevocation(userID string)
+}
+
+// SetBindingPublisher installs the publisher used to tell other instances about
+// a revocation. Passing nil disables propagation, which is the default and the
+// single-instance case: the TTL is then the whole mechanism.
+func (m *Manager) SetBindingPublisher(p BindingPublisher) {
+	if p == nil {
+		m.bindingPub.Store(nil)
+		return
+	}
+	m.bindingPub.Store(&p)
+}
+
+// InvalidateBinding drops one user's cached binding **without** publishing.
+//
+// This is the entry point for an invalidation that arrived from another
+// instance, and not publishing is what stops two nodes echoing one revocation
+// back and forth forever.
+//
+// It is also the only capability the remote path has, and deliberately so: it
+// deletes a cache entry, so the worst a message can do is force the next verify
+// to re-read the account from the database. A remote message can make the check
+// stricter and can never make it weaker, which is why an input from the broker
+// is acceptable here at all. There is no path from a received message to
+// bindingCache.put.
+func (m *Manager) InvalidateBinding(id string) {
+	if id == "" || m.bindings == nil {
+		return
+	}
+	m.bindings.invalidate(id)
+}
+
+// publishBindingRevocation tells other instances to drop their cached binding
+// for id. Errors are the publisher's to log: this returns nothing because there
+// is nothing the caller could usefully do about it.
+func (m *Manager) publishBindingRevocation(id string) {
+	if p := m.bindingPub.Load(); p != nil {
+		(*p).PublishBindingRevocation(id)
+	}
+}

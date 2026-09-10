@@ -31,6 +31,13 @@ var ErrUnavailable = errors.New("auth service is not available")
 // safe for concurrent use: Set may run while requests are reading.
 type Holder struct {
 	svc atomic.Pointer[Service]
+
+	// pub is remembered rather than just forwarded. On a first run the
+	// publisher is configured at startup, when there is no Manager to put it
+	// on; Setup swaps one in later. Storing it here means Set can apply it to
+	// the new service, instead of propagation silently never starting on
+	// exactly the installs that began life unconfigured.
+	pub atomic.Pointer[BindingPublisher]
 }
 
 // NewHolder returns a Holder wrapping initial, which may be nil.
@@ -47,7 +54,23 @@ func (h *Holder) Set(s Service) {
 		h.svc.Store(nil)
 		return
 	}
+	if p := h.pub.Load(); p != nil {
+		s.SetBindingPublisher(*p)
+	}
 	h.svc.Store(&s)
+}
+
+// SetBindingPublisher records the publisher and applies it to the service
+// installed now, if there is one. A service installed later gets it from Set.
+func (h *Holder) SetBindingPublisher(p BindingPublisher) {
+	if p == nil {
+		h.pub.Store(nil)
+	} else {
+		h.pub.Store(&p)
+	}
+	if s := h.Get(); s != nil {
+		s.SetBindingPublisher(p)
+	}
 }
 
 // Get returns the backing service, or nil when none is installed.
@@ -57,6 +80,16 @@ func (h *Holder) Get() Service {
 		return nil
 	}
 	return *p
+}
+
+// InvalidateBinding forwards a local-only cache invalidation to the backing
+// service. A Holder with no service has no cache to drop, so this is a no-op
+// rather than an error: the remote instance that published it has already
+// applied it, and this one has nothing yet to be stale.
+func (h *Holder) InvalidateBinding(id string) {
+	if s := h.Get(); s != nil {
+		s.InvalidateBinding(id)
+	}
 }
 
 // Ready reports whether a backing service is installed.

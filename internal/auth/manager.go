@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"aidanwoods.dev/go-paseto"
@@ -29,6 +30,11 @@ type Manager struct {
 	encKey       []byte
 	logger       logger.Logger
 	bindings     *bindingCache
+
+	// bindingPub is installed after construction (SetBindingPublisher) so the
+	// trust boundary's constructor gains no broker dependency. nil means no
+	// propagation, which is the default and the single-instance case.
+	bindingPub atomic.Pointer[BindingPublisher]
 }
 
 // NewManager creates an auth manager using the given database URL.
@@ -240,6 +246,11 @@ func (m *Manager) revokeSessions(id string) {
 		return
 	}
 	m.bindings.invalidate(id)
+
+	// Local first, then the peers. The local drop is the part that has to
+	// happen; the publish turns a sibling's delay from up to DefaultBindingTTL
+	// into a round trip, and its failure leaves the TTL doing what it does now.
+	m.publishBindingRevocation(id)
 }
 
 func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.User, int32, error) {

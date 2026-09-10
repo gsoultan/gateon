@@ -50,8 +50,16 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	proxyInvalidator := NewServerProxyInvalidator(s, l4Resolver, s.RouteStore)
 	if s.RedisClient != nil {
 		proxyInvalidator = NewDistributedProxyInvalidator(proxyInvalidator, s.RedisClient)
+
+		// Session revocations ride the same channel. The publisher goes onto
+		// the auth service rather than into its constructor, so the trust
+		// boundary gains no broker dependency; when Redis is absent this whole
+		// block is skipped and the binding TTL remains the only mechanism,
+		// exactly as before. See ADR 0012.
+		//
+		installBindingPublisher(s.AuthManager, s.RedisClient)
 		wg.Go(func() {
-			StartInvalidationListener(ctx, proxyInvalidator, s.RedisClient)
+			StartInvalidationListener(ctx, proxyInvalidator, s.AuthManager, s.RedisClient)
 		})
 	}
 	s.TLSManager = CreateTLSManager(s)
