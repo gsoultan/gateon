@@ -76,9 +76,21 @@ func (r *RouteRegistry) load() {
 		}
 	}
 
+	// Replace rather than merge. Merging into the existing map meant a route
+	// deleted from the file survived the read that was meant to remove it --
+	// the gateway kept serving it, with nothing logged, because the only
+	// evidence would have been an entry that failed to disappear.
+	//
+	// Nothing exercises that today: load() is called once, from the
+	// constructor, when this map is empty, so replace and merge are identical
+	// here. It is written this way so it stays correct if the file ever gains
+	// a watcher -- for a file-backed registry the file is the source of truth,
+	// and "the file no longer lists it" has to mean "stop serving it".
+	fresh := make(map[string]*gateonv1.Route, len(routes))
 	for _, rt := range routes {
-		r.routes[rt.Id] = rt
+		fresh[rt.Id] = rt
 	}
+	r.routes = fresh
 	r.rebuildSortedLocked()
 	logger.L.LogInfo("loaded routes", "count", len(r.routes), "path", r.path)
 }

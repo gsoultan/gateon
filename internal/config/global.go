@@ -29,6 +29,16 @@ type GlobalRegistry struct {
 	certIndex atomic.Pointer[map[string]*gateonv1.Certificate] // cert ID -> certificate for O(1) lookup
 	path      string
 	listeners []ConfigChangeFunc
+
+	// defaults is the shipped configuration as it stood before the file was
+	// read, captured once. load() starts from a clone of this rather than from
+	// the live config, so a key deleted from the file reverts to its default
+	// instead of keeping the value the previous read gave it.
+	//
+	// Snapshotted rather than rebuilt: the defaults include a per-install
+	// proof-of-work secret, and regenerating it on each load would invalidate
+	// every challenge in flight.
+	defaults *gateonv1.GlobalConfig
 }
 
 var (
@@ -96,6 +106,7 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 		Profile:  "standard",
 	}
 	reg.config.Store(initialConfig)
+	reg.defaults = proto.Clone(initialConfig).(*gateonv1.GlobalConfig)
 	idx := make(map[string]*gateonv1.Certificate)
 	reg.certIndex.Store(&idx)
 
@@ -124,11 +135,20 @@ func (r *GlobalRegistry) load() {
 		return
 	}
 
-	cfg := r.config.Load()
-	if cfg == nil {
-		cfg = &gateonv1.GlobalConfig{}
+	// Start from the shipped defaults, not from the config currently loaded.
+	//
+	// Unmarshalling into the live config merges, so any key absent from the
+	// file keeps whatever the previous read put there -- and a setting deleted
+	// from global.json therefore stays in force. Nothing exercises that today
+	// because load() is called once, from the constructor: there is no file
+	// watcher, no SIGHUP handler and no reload endpoint, and fsnotify is not
+	// even a dependency. This is behaviour-identical now and correct if that
+	// ever changes, which is the cheaper order to do it in.
+	var cfg *gateonv1.GlobalConfig
+	if r.defaults != nil {
+		cfg = proto.Clone(r.defaults).(*gateonv1.GlobalConfig)
 	} else {
-		cfg = proto.Clone(cfg).(*gateonv1.GlobalConfig)
+		cfg = &gateonv1.GlobalConfig{}
 	}
 
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
