@@ -9,7 +9,7 @@ here after the fact.
 
 ---
 
-## Unreleased
+## v2.6.1
 
 ### Session revocation reaches every instance, when Redis is configured
 
@@ -35,6 +35,38 @@ invalidations as self-broadcast. If you run more than one instance per host,
 those now propagate where they previously did not.
 
 See [ADR 0012](adr/0012-session-revocation-propagates-but-expiry-guarantees.md).
+
+### Server-Sent Events now stream through the honeypot and deception middlewares
+
+Both wrap the response writer, and neither re-exposed `Flush`. Wrapping
+`http.ResponseWriter` promotes only `Header`, `Write` and `WriteHeader`, so a
+wrapper silently stops being an `http.Flusher` — and an SSE response behind
+either middleware buffered in `net/http` until the upstream closed, then arrived
+complete and far too late.
+
+**Who is affected:** anyone running a route with `honeypot` or `deception`
+enabled that also serves SSE. The data was never wrong; it arrived at the end
+instead of as it was produced, which reads as a dead feed rather than a
+middleware bug.
+
+Both middlewares already forwarded `Hijack`, so WebSockets were unaffected
+throughout. If you worked around this by taking a route off one of these
+middlewares, you can put it back.
+
+### The first-run setup wizard can test a database connection
+
+`POST /v1/setup/test-db` — the wizard's "Test connection" button — answered
+`503` before setup completed and `403` afterwards, so it could not succeed in
+any state. It is now reachable during first run, which is the only window it is
+permitted in.
+
+### Removing a setting from a config file now takes effect
+
+`global.json` and `routes.json` were merged into what was already loaded, so a
+deleted key or route survived a re-read. This is behaviour-identical today —
+the files are read once at startup and nothing watches them — and is listed
+only because the semantics changed: a read now reflects the file as written
+rather than accumulating across reads.
 
 ---
 
