@@ -276,8 +276,6 @@ func (p schemaProbe) reset() {
 		if _, err := p.db.Exec(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
 			p.t.Fatalf("reset postgres schema: %v", err)
 		}
-	case DriverMySQL:
-		p.resetMySQL()
 	}
 }
 
@@ -288,19 +286,5 @@ func (p schemaProbe) dropAllTables() {
 		if _, err := p.db.Exec("DROP TABLE IF EXISTS " + table); err != nil { //nolint:gosec
 			p.t.Fatalf("drop %s: %v", table, err)
 		}
-	}
-}
-
-func (p schemaProbe) resetMySQL() {
-	if _, err := p.db.Exec(`SET FOREIGN_KEY_CHECKS=0`); err != nil {
-		p.t.Fatalf("disable foreign key checks: %v", err)
-	}
-	for _, table := range append(p.tables(), "migrations") {
-		if _, err := p.db.Exec("DROP TABLE IF EXISTS " + table); err != nil { //nolint:gosec
-			p.t.Fatalf("drop %s: %v", table, err)
-		}
-	}
-	if _, err := p.db.Exec(`SET FOREIGN_KEY_CHECKS=1`); err != nil {
-		p.t.Fatalf("re-enable foreign key checks: %v", err)
 	}
 }

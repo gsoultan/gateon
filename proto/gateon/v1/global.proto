@@ -91,7 +91,7 @@ message AuditConfig {
   // Optional dedicated database for audit/logging storage. When unset, the
   // auth/management database is reused. database_url takes precedence over
   // database_config.
-  string database_url = 4;             // sqlite:path, postgres://..., mysql://...
+  string database_url = 4;             // sqlite:path, postgres://...
   DatabaseConfig database_config = 5;
   int32 retention_days = 6;
   bool archive_on_retention = 7;
@@ -470,7 +470,7 @@ message AuthConfig {
   bool enabled = 1;
   string paseto_secret = 2;
   string sqlite_path = 3;      // Deprecated: use database_config or database_url
-  string database_url = 4;     // Fallback: sqlite:path, postgres://..., mysql://...
+  string database_url = 4;     // Fallback: sqlite:path, postgres://...
   DatabaseConfig database_config = 5;
 
   // 6 was oidc, removed 2026-09-01. It described single sign-on for the

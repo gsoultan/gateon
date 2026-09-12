@@ -334,7 +334,7 @@ export type AuditConfig = Message<"gateon.v1.AuditConfig"> & {
    * auth/management database is reused. database_url takes precedence over
    * database_config.
    *
-   * sqlite:path, postgres://..., mysql://...
+   * sqlite:path, postgres://...
    *
    * @generated from field: string database_url = 4;
    */
@@ -1598,7 +1598,7 @@ export type AuthConfig = Message<"gateon.v1.AuthConfig"> & {
   sqlitePath: string;
 
   /**
-   * Fallback: sqlite:path, postgres://..., mysql://...
+   * Fallback: sqlite:path, postgres://...
    *
    * @generated from field: string database_url = 4;
    */

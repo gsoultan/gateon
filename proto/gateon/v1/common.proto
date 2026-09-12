@@ -77,7 +77,7 @@ message ClientAuthority {
 
 // DatabaseConfig holds structured DB connection params.
 message DatabaseConfig {
-  string driver = 1;      // sqlite | postgres | mysql | mariadb
+  string driver = 1;      // sqlite | postgres
   string sqlite_path = 2; // For sqlite only
   string host = 3;
   int32 port = 4;

@@ -118,10 +118,10 @@ tar czf "/backup/gateon-files-$(date +%F).tar.gz" \
   -C "$DATA_DIR" certs audit
 ```
 
-### Postgres or MySQL
+### Postgres
 
 The database is external, so back it up with that engine's tooling on its own
-schedule — `pg_dump` or `mysqldump`. Items 2, 4 and 5 still live on the gateway's
+schedule — `pg_dump`. Items 2, 4 and 5 still live on the gateway's
 disk and still need the `tar` above; a database dump alone is not a backup of
 gateon.
 

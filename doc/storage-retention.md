@@ -8,12 +8,12 @@ environment variables you can tune to control memory and disk usage.
 
 | Store | Backend | Holds | Location |
 |-------|---------|-------|----------|
-| Telemetry SQL | SQLite (default), Postgres, MySQL/MariaDB | Aggregated path/domain stats, security threats, audit rows | `gateon.db` (SQLite) or the configured DSN |
+| Telemetry SQL | SQLite (default), Postgres | Aggregated path/domain stats, security threats, audit rows | `gateon.db` (SQLite) or the configured DSN |
 | Telemetry traces | Pebble (embedded LSM) | Per-request access-log / trace records | `telemetry_pebble/` next to the SQLite DB |
 | Cache / rate-limit | Redis (optional) | Response cache, distributed rate-limit counters | External Redis |
 
 > SQLite is used out of the box so a single binary is fully self-contained.
-> Point the telemetry store at Postgres/MySQL for multi-node deployments; those
+> Point the telemetry store at Postgres for multi-node deployments; those
 > engines manage their own vacuuming, so the SQLite-specific reclamation below
 > becomes a no-op.
 

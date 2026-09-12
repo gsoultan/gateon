@@ -18,7 +18,6 @@ require (
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/e-XpertSolutions/go-iforest/v2 v2.0.0
 	github.com/go-git/go-git/v5 v5.19.2
-	github.com/go-sql-driver/mysql v1.9.3
 	github.com/go-zookeeper/zk v1.0.4
 	github.com/godzie44/go-uring v0.0.0-20250501163612-d16a9e597639
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -90,7 +89,6 @@ require (
 	cel.dev/expr v0.25.2 // indirect
 	connectrpc.com/otelconnect v0.9.0 // indirect
 	dario.cat/mergo v1.0.0 // indirect
-	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/MicahParks/jwkset v0.11.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect

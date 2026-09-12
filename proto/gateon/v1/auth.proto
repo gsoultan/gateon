@@ -38,7 +38,7 @@ message SetupRequest {
   // DatabaseUrl is an optional connection string for the management/auth database.
   // If provided, it overrides DatabaseConfig.
   // Supported: plain sqlite path (e.g. "gateon.db"),
-  //            sqlite://path/to.db, postgres://..., mysql://...
+  //            sqlite://path/to.db, postgres://...
   string database_url = 7;
 
   // DatabaseConfig is an optional structured database configuration.
