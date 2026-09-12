@@ -9,6 +9,41 @@ here after the fact.
 
 ---
 
+## Unreleased
+
+### `mysql://` and `mariadb://` are refused at startup — **they never worked**
+
+`Open` accepted both schemes, and most migrations carry a `DriverMySQL` branch,
+but none of it has ever run. Migration 2 puts `host TEXT` and `path TEXT` in a
+`PRIMARY KEY`, which MySQL rejects outright:
+
+```
+Error 1170 (42000): BLOB/TEXT column 'host' used in key specification without a key length
+```
+
+A fresh install fails on the *second* migration, so no MySQL or MariaDB database
+has ever reached the third — at any version. Repairing that one statement does
+not help: **43 of the 62 migrations fail on a real MySQL server**, most of them
+on `ADD COLUMN IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`, which MySQL does
+not support, and on `DEFAULT` values attached to `TEXT` columns, which it
+forbids. The branches are not untested, they are written in a dialect MySQL does
+not speak. CI has never had a MySQL target, which is why this stood.
+
+Both schemes are now refused by `Open` with an error naming the supported
+engines, and the MySQL driver is no longer linked into the binary.
+
+**Who is affected:** nobody with a working deployment, because there is no
+working MySQL deployment to have. A configuration carrying a `mysql://` DSN was
+already failing at startup; it now fails with an error that says why, before the
+connection is attempted, and without echoing the DSN — and therefore its
+password — back into the log.
+
+**What to use instead:** SQLite for a single node, Postgres for anything
+multi-node. Both are exercised on every commit by
+`TestUpgradeFromShippedReleaseKeepsData`.
+
+---
+
 ## v2.6.1
 
 ### Session revocation reaches every instance, when Redis is configured
@@ -474,9 +509,8 @@ What has been verified for that jump:
   removed since v1.5.0 are listed under v2.6.0; all were read by nothing.
   A v1.5.0 `global.json` therefore still parses, and unknown keys are ignored
   rather than rejected.
-- **Only SQLite and Postgres are real backends.** Migration 2 puts two `TEXT`
-  columns in a `PRIMARY KEY`, which MySQL and MariaDB have never accepted, so no
-  MySQL database has ever reached migration 3 — at v1.5.0 or now.
+- **Only SQLite and Postgres are real backends**, and the other two are now
+  refused rather than accepted and failed on. See the Unreleased section above.
 
 Migrations have no `Down`. There is no rollback, so take a backup of the
 database before starting; restoring it is the only way back.

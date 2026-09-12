@@ -96,7 +96,7 @@ persistence:
 # --- External stores ---------------------------------------------------------
 externalDatabase:
   enabled: false
-  # postgres | mysql
+  # postgres
   driver: postgres
   host: ""
   port: 5432

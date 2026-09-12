@@ -1045,8 +1045,6 @@ export default function SettingsPage() {
                       data={[
                         { value: "sqlite", label: "SQLite" },
                         { value: "postgres", label: "PostgreSQL" },
-                        { value: "mysql", label: "MySQL" },
-                        { value: "mariadb", label: "MariaDB" },
                       ]}
                       value={
                         config?.auth?.databaseConfig?.driver ||

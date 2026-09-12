@@ -12,8 +12,19 @@ import (
 const (
 	DriverSQLite   = "sqlite"
 	DriverPostgres = "postgres"
-	DriverMySQL    = "mysql"
-	DriverMariaDB  = "mysql" // MariaDB uses the MySQL driver
+
+	// DriverMySQL and DriverMariaDB are unreachable: Open refuses mysql:// and
+	// mariadb://, so no Dialect is ever constructed with them. The constants and
+	// the `case DriverMySQL` branches throughout this package are dead code kept
+	// only so the diff that removed the support stayed readable.
+	//
+	// Do not maintain those branches, and do not take them as evidence the
+	// engine works. They are written in a dialect MySQL does not accept: 43 of
+	// 62 migrations fail on a real server, most on ADD COLUMN IF NOT EXISTS and
+	// DEFAULT values on TEXT columns. Re-enabling the engine means rewriting
+	// them against a MySQL in CI, not deleting the guard in Open.
+	DriverMySQL   = "mysql"
+	DriverMariaDB = "mysql" // MariaDB uses the MySQL driver
 )
 
 // Dialect describes database-specific behavior.

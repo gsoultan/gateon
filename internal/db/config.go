@@ -82,6 +82,11 @@ func BuildURLFromConfig(cfg *gateonv1.DatabaseConfig) string {
 		}
 		u.RawQuery = q.Encode()
 		return u.String()
+	// Still builds a URL for an engine Open refuses, deliberately. Returning ""
+	// here would surface as "invalid database URL", which tells an operator who
+	// selected MySQL nothing about why. Building it lets the refusal in Open --
+	// the one place that explains the engine was never supported -- be what they
+	// actually see.
 	case "mysql", "mariadb":
 		port := cfg.Port
 		if port <= 0 {

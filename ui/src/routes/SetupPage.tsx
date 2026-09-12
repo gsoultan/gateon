@@ -481,8 +481,6 @@ export default function SetupPage() {
                         data={[
                           { value: "sqlite", label: "SQLite" },
                           { value: "postgres", label: "PostgreSQL" },
-                          { value: "mysql", label: "MySQL" },
-                          { value: "mariadb", label: "MariaDB" },
                         ]}
                         {...form.getInputProps("databaseDriver")}
                       />
@@ -595,8 +593,6 @@ export default function SetupPage() {
                             data={[
                               { value: "sqlite", label: "SQLite" },
                               { value: "postgres", label: "PostgreSQL" },
-                              { value: "mysql", label: "MySQL" },
-                              { value: "mariadb", label: "MariaDB" },
                             ]}
                             {...form.getInputProps("loggingDriver")}
                           />
