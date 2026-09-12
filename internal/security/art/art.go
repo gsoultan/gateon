@@ -101,6 +101,9 @@ func (t *Tree) insert(root *node, ip []byte, bits int) {
 	mask := byte(0xFF) << (8 - remBits)
 	base := ip[full] & mask
 	for v := int(base); v <= int(base|^mask); v++ {
+		// #nosec G115 -- v is bounded by base and base|^mask, both of which are
+		// byte values, so the loop cannot leave [0,255] and the conversion cannot
+		// truncate. gosec cannot carry that bound through the int widening.
 		b := byte(v)
 		next, ok := curr.children[b]
 		if !ok {
