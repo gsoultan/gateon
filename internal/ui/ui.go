@@ -51,7 +51,7 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
-		w.Write(data)
+		_, _ = w.Write(data)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +87,7 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 			serveIndex(w, r)
 			return
 		} else {
-			f.Close()
+			_ = f.Close()
 		}
 		fileServer.ServeHTTP(w, r)
 	})

@@ -73,7 +73,7 @@ func newPhantomCore(ebpf EbpfManager) PhantomCore {
 
 	rea, err := reactor.New([]*uring.Ring{ring})
 	if err != nil {
-		ring.Close()
+		_ = ring.Close()
 		logger.L.LogWarn("io_uring reactor initialization failed, falling back to standard I/O", "error", err)
 		return &linuxCore{ebpf: ebpf}
 	}
@@ -116,7 +116,7 @@ func (c *linuxCore) proxyWithSplice(ctx context.Context, client net.Conn, target
 	dialer := net.Dialer{}
 	backend, err := dialer.DialContext(ctx, "tcp", targetAddr)
 	if err != nil {
-		client.Close()
+		_ = client.Close()
 		return err
 	}
 	// Whichever direction finishes first closes both sides.
@@ -318,7 +318,7 @@ func (l *iouringListener) Accept() (net.Conn, error) {
 	// Convert the file descriptor back to a net.Conn.
 	file := os.NewFile(uintptr(newFd), "iouring-accept")
 	conn, err := net.FileConn(file)
-	file.Close() // net.FileConn dups the fd, so we can close our copy
+	_ = file.Close() // net.FileConn dups the fd, so we can close our copy
 	if err != nil {
 		return nil, err
 	}

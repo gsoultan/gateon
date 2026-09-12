@@ -134,11 +134,26 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
 
       # gosec parses rather than type-checks, so unlike govulncheck and
-      # staticcheck it does not need the generated sources. Emit SARIF for GitHub
-      # code scanning; never fail the build on findings here
-      # (govulncheck/staticcheck are the hard gates).
+      # staticcheck it does not need the generated sources.
+      #
+      # The scope matches `make gosec` exactly, and that is the point of this
+      # step's history: CI scanned ./... with -no-fail while the Makefile
+      # scanned a curated set and failed. So CI reported 27 findings -- 19 of
+      # them in the e2e harness, one in a generated Connect stub, one in a build
+      # script -- to a SARIF upload that cannot land on a private repository
+      # without Advanced Security. The findings were produced every push and
+      # read by nobody, and the job was green by construction.
+      #
+      # Same flags as the Makefile so the two cannot disagree again: the e2e
+      # harness is not shipped, generated code inherits its provenance, and G115
+      # fires on int->int32 conversions that are bounded by construction.
       - name: Run gosec
-        run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
+        run: |
+          gosec -fmt sarif -out gosec.sarif \
+            -exclude=G115 \
+            -exclude-dir=proto -exclude-dir=tests -exclude-dir=ui \
+            -exclude-generated \
+            ./...
 
       # Kept as a guard, not a workaround for the version we run. gosec v2.22.9
       # emitted SARIF that the uploader rejected outright:

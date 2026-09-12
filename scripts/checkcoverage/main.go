@@ -243,7 +243,7 @@ func writeBaseline(got []result) error {
 			fmt.Fprintf(&b, "%s -\n", r.pkg)
 		}
 	}
-	return os.WriteFile(baselinePath, []byte(b.String()), 0o644)
+	return os.WriteFile(baselinePath, []byte(b.String()), 0o600)
 }
 
 func fail(format string, args ...any) {

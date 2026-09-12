@@ -62,10 +62,30 @@ func httpsRedirectPort(eps []*gateonv1.EntryPoint) string {
 // redirectTargetURL builds the https URL for a request.
 //
 // The host comes from the request, which is how every gateway does this: the
-// client is sent back to the name it asked for, over TLS. That is not an open
-// redirect — a caller can only redirect itself, and net/http has already
-// rejected a Host containing header-injection characters. Any port on the
-// inbound host is dropped, since it is the plaintext one.
+// client is sent back to the name it asked for, over TLS. A caller can only
+// redirect itself — a victim's browser sends the origin it is visiting, so
+// there is no link an attacker can hand someone that lands them elsewhere.
+//
+// That is the property, but the previous wording ("the host comes from the
+// request") was not the reason for it, and the difference matters. r.Host is
+// *not* always the Host header: for an absolute-form request line net/http
+// sets it from the request target instead, per RFC 7230, so
+//
+//	GET http://evil.com/p HTTP/1.1
+//	Host: gateway.example.com
+//
+// builds https://evil.com/p. It stays self-only because no browser emits
+// absolute-form to an origin server, but it is worth knowing the guarantee
+// rests on the client's request shape rather than on this function.
+//
+// The path is built from EscapedPath and RawQuery rather than RequestURI().
+// RequestURI() returns u.Opaque when set, and an opaque target concatenates
+// rather than appends: "GET http:evil.com" produced
+// https://gateway.example.comevil.com, whose registrable domain is
+// comevil.com — something an attacker can register. EscapedPath is always
+// path-shaped, so the host cannot be extended by the target.
+//
+// Any port on the inbound host is dropped, since it is the plaintext one.
 func redirectTargetURL(r *http.Request, port string) string {
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil && h != "" {
@@ -74,12 +94,28 @@ func redirectTargetURL(r *http.Request, port string) string {
 	if port != "" && port != "443" {
 		host = net.JoinHostPort(host, port)
 	}
-	return "https://" + host + r.URL.RequestURI()
+
+	path := r.URL.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	if r.URL.RawQuery != "" {
+		path += "?" + r.URL.RawQuery
+	}
+	return "https://" + host + path
 }
 
 // httpsRedirect returns a handler that sends everything to HTTPS.
 func httpsRedirect(port string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// #nosec G710 -- the target is built from the request, which taint
+		// analysis cannot clear and which is also the whole point: an
+		// HTTP->HTTPS redirect has to send the client back to the name it asked
+		// for. It is self-only, because a victim's browser sends the origin it
+		// is visiting. The reasoning and the shapes that make r.Host something
+		// other than the Host header are written out on redirectTargetURL, and
+		// https_redirect_target_test.go pins all of them -- including the one
+		// that used to let a request target extend the host.
 		http.Redirect(w, r, redirectTargetURL(r, port), httpsRedirectStatus)
 	})
 }
