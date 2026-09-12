@@ -130,11 +130,37 @@ jobs:
       # tracks a moving reference runs arbitrary code in a workflow with
       # repository access, so an upstream force-push or compromise would execute
       # here.
+      # gosec's taint rules (G703 path traversal, G704 SSRF, G710 open
+      # redirect) run on the SSA form, which needs the package to type-check --
+      # and this repository's protobuf and eBPF bindings are gitignored. Without
+      # them gosec logs
+      #
+      #   package middleware has type errors, skipping SSA analysis
+      #
+      # and carries on, so every taint rule silently did not run on the packages
+      # that matter. Under -no-fail that was invisible twice over: the analysis
+      # was skipped and the job was green anyway. staticcheck's job has always
+      # generated first; this one had not, which is why it was cheaper to keep
+      # believing gosec "parses rather than type-checks".
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Generate all artifacts
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          go install tool
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
       - name: Install gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
 
-      # gosec parses rather than type-checks, so unlike govulncheck and
-      # staticcheck it does not need the generated sources.
       #
       # The scope matches `make gosec` exactly, and that is the point of this
       # step's history: CI scanned ./... with -no-fail while the Makefile
