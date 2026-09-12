@@ -273,7 +273,7 @@ export const ClientAuthoritySchema: GenMessage<ClientAuthority> = /*@__PURE__*/
  */
 export type DatabaseConfig = Message<"gateon.v1.DatabaseConfig"> & {
   /**
-   * sqlite | postgres | mysql | mariadb
+   * sqlite | postgres
    *
    * @generated from field: string driver = 1;
    */

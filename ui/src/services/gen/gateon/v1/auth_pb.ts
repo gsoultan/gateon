@@ -114,7 +114,7 @@ export type SetupRequest = Message<"gateon.v1.SetupRequest"> & {
    * DatabaseUrl is an optional connection string for the management/auth database.
    * If provided, it overrides DatabaseConfig.
    * Supported: plain sqlite path (e.g. "gateon.db"),
-   *            sqlite://path/to.db, postgres://..., mysql://...
+   *            sqlite://path/to.db, postgres://...
    *
    * @generated from field: string database_url = 7;
    */

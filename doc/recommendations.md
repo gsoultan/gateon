@@ -349,7 +349,7 @@ then architecture, then features.
   + `reclaimSQLDisk`). Pebble trace `DeleteRange` is followed by `Compact` over the pruned
   range (tombstones were never reclaimed before); SQLite runs `PRAGMA incremental_vacuum`
   + `PRAGMA wal_checkpoint(TRUNCATE)`, with `auto_vacuum=INCREMENTAL` added to
-  `SQLitePragmas`. Server SQL backends (Postgres/MySQL) self-vacuum (no-op). Added
+  `SQLitePragmas`. Server SQL backends (Postgres) self-vacuum (no-op). Added
   `TestPruneRemovesExpiredStatsAndReclaimsDisk`. Documented stores, retention, disk-usage
   sizing, cache env vars, and the cache gauges in `doc/storage-retention.md`.
 - ✅ **buffer_pool reuse on hot paths.** The WebSocket tunnel (`pkg/proxy/websocket.go`) now
