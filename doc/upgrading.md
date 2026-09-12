@@ -353,3 +353,130 @@ updates anything and means "load custom rules from `<data_dir>/waf/rules`".
 The field was populated with the shunned-IP count while the cuckoo map was
 always empty, so the dashboard reported one number under another's name. The
 value was real; only the label was wrong.
+
+---
+
+## v2.5.2
+
+### Route, service and entrypoint configuration moved into the database
+
+Until v2.5.1 the five configuration registries — routes, services, entrypoints,
+middlewares and TLS options — were read from `routes.json`, `services.json`,
+`entrypoints.json`, `middlewares.json` and `tls_options.json` on every start.
+From v2.5.2, **a deployment with a management database reads all five from that
+database instead**, and the files are consulted exactly once, to seed a store
+that is still empty. The selection is in `cmd/gateon/main.go`: a database-backed
+store when `authManager.DB()` is non-nil, the file-backed registry otherwise.
+
+**Who is affected:** anyone with auth configured, which is everyone who has
+completed setup — auth is what creates the database. After the first start on
+v2.5.2 or later, **editing `routes.json` changes nothing**. The dashboard and
+the API are the source of truth; the file is an import format, not a live one.
+
+**Who is not:** a deployment running with no management database at all. It
+stays on the file-backed registries, unchanged.
+
+This matters most for config managed outside gateon. A pipeline that templates
+`routes.json` and restarts the process was, before this change, the whole
+mechanism; afterwards it silently stops applying and the last-imported set keeps
+serving. Export the current configuration from the dashboard before you upgrade,
+so you can tell what the import produced.
+
+### Do not stop on v2.5.2 or v2.5.3 — upgrade straight to v2.6.1
+
+The import described above (`seedConfigFromFiles`) **did not ship until v2.6.0**.
+In v2.5.2 and v2.5.3 the database-backed stores start empty and nothing copies
+the files into them, so a file-configured deployment comes up with no
+entrypoints, no routes and no services, and answers nothing.
+
+The fix is in v2.6.0 and the only safe path is to skip the two releases that
+have the gap. Upgrading from anything at or below v2.5.1 directly to v2.6.1
+imports correctly, because the seeding step runs against stores that are still
+empty — which is exactly the state those releases leave them in, so a deployment
+that already stopped on v2.5.2 recovers by upgrading rather than by restoring.
+
+---
+
+## v2.2.2
+
+### An account with no role becomes a viewer
+
+Migration 52 runs `UPDATE users SET role = 'viewer' WHERE role IS NULL OR role
+= ''`, giving every account an explicit role. A blank string is not a role any
+permission check knows how to answer, and the safe reading of one is the least
+privileged.
+
+**Who is affected:** any deployment with an account whose role was blank. It
+becomes read-only. Nothing is escalated — `viewer` is the lowest role there is —
+but an account someone was using as an administrator can stop being able to
+write. Check the user list after upgrading and set the intended role.
+
+---
+
+## v2.2.1
+
+### Six-digit WAF rule ids gained a leading `1` — **custom rule ids change**
+
+Migration 51 rewrites every `waf_rules` row whose id is exactly six digits and
+starts with `9`, `1` or `2`, prefixing it with `1` and rewriting the matching
+`id:` inside the rule's directive text so the two stay consistent. The reason is
+collision: the shipped rules occupied the same six-digit space as the OWASP core
+rule set.
+
+**Who is affected:** anyone who wrote custom rules in that range — the `WHERE`
+clause does not distinguish gateon's own rules from an operator's. A rule
+authored as `900123` is `1900123` afterwards. Anything that names a rule id
+outside the `waf_rules` table does **not** get rewritten with it: dashboard
+filters, alert routing, SIEM correlation rules and per-rule exceptions all keep
+pointing at an id that no longer exists, and silently stop matching.
+
+Inventory your custom rule ids before upgrading, and re-point whatever refers to
+them afterwards.
+
+---
+
+## v2.2.0
+
+### JA3 is gone; JA4+ replaces it
+
+Migration 50 removes the `ja3` column from `security_threats` and `traces` on
+Postgres and MySQL, and blanks it to the empty string on SQLite, where dropping
+a column is not practical. JA4+ had already replaced it everywhere that reads a
+fingerprint.
+
+**Who is affected:** anything querying the database directly for `ja3` —
+a Grafana panel, an export job, a retention script. Historical JA3 values are
+**not** recoverable after this runs; there is no backfill, because JA4+ cannot
+be computed from a stored JA3. Export anything you need first.
+
+Note that the migration ignores errors from both statements by design, so it is
+recorded as applied whether or not the column was there to remove.
+
+---
+
+## Upgrading from v1.5.x
+
+There is no per-release note between v1.5.0 and v2.2.0. The sections above cover
+the changes in that span that are visible in the schema, the configuration
+contract or the startup path, which is what a mechanical comparison of the two
+releases can establish; they are not a complete behavioural history of the forty
+releases in between.
+
+What has been verified for that jump:
+
+- The migration chain is **append-only**. v1.5.0 ends at migration 30, and all
+  thirty still carry the same ids and names, with no change to what they do —
+  so the chain from 31 onward applies to a v1.5.0 database in order and lands on
+  the same schema a fresh install has.
+  `TestUpgradeFromShippedReleaseKeepsData` rehearses this with data in the
+  tables, on SQLite and Postgres.
+- **No configuration setting changed its name, type or field number.** Settings
+  removed since v1.5.0 are listed under v2.6.0; all were read by nothing.
+  A v1.5.0 `global.json` therefore still parses, and unknown keys are ignored
+  rather than rejected.
+- **Only SQLite and Postgres are real backends.** Migration 2 puts two `TEXT`
+  columns in a `PRIMARY KEY`, which MySQL and MariaDB have never accepted, so no
+  MySQL database has ever reached migration 3 — at v1.5.0 or now.
+
+Migrations have no `Down`. There is no rollback, so take a backup of the
+database before starting; restoring it is the only way back.
