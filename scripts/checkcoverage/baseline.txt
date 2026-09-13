@@ -16,8 +16,16 @@
 #
 # Local runs on a Mac also fail on internal/db: its Postgres migration
 # tests skip without GATEON_TEST_POSTGRES_DSN, which reads as a drop from
-# 65.1% to 60.5%. That is the environment, not a regression. CI sets the
+# 73.7% to 65.2%. That is the environment, not a regression. CI sets the
 # DSN, which is another reason the baseline comes from CI.
+#
+# That gap is now wide enough to mislead. The upgrade tests added on
+# 2026-09-13 rehearse a populated database on both engines, so skipping
+# Postgres skips half of them -- and 65.2% happens to sit within a tenth of
+# a point of the floor this package carried before they landed. A local run
+# therefore reads as "unchanged and fine" while CI is eight points higher.
+# Do not take a floor for this package from a laptop; take it from the
+# number in the CI log, which is what the note names.
 #
 # A floor is only worth as much as the measurement is repeatable, and a
 # package that samples the machine does not measure the same thing twice.
@@ -67,7 +75,7 @@ github.com/gsoultan/gateon/internal/api 49.6%
 github.com/gsoultan/gateon/internal/audit 47.6%
 github.com/gsoultan/gateon/internal/auth 71.9%
 github.com/gsoultan/gateon/internal/config 36.8%
-github.com/gsoultan/gateon/internal/db 65.1%
+github.com/gsoultan/gateon/internal/db 73.7%
 github.com/gsoultan/gateon/internal/discovery 46.4%
 github.com/gsoultan/gateon/internal/domain/canary 66.7%
 github.com/gsoultan/gateon/internal/domain/entrypoint 75.0%
