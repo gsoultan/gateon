@@ -52,6 +52,17 @@
 # fails it. Take the "Coverage ratchet" step output from a green ci run
 # and feed it to -update.
 #
+# internal/security diverges for a fourth reason, and a quieter one: no
+# build tags, no sampling, no GOMAXPROCS -- just `runtime.GOOS` branches in
+# clamav_manager.go that take the darwin path on a laptop and the linux one
+# on CI. Same files compiled, same denominator, different arms executed.
+# It reads 34.1% here against CI's 34.7%. That is small enough to look like
+# noise and is not: banking the local figure sets the floor 0.6 points low
+# and leaves the ratchet noting the same package on every future run.
+# Ordinary untagged code with a platform branch in it is invisible to every
+# heuristic above, so the rule has to be the blunt one -- the number comes
+# from CI, for every package, not only the ones with a known excuse.
+#
 # This list used to name internal/logger and internal/resource too. Neither
 # has a single build-tagged file, and both moved for reasons that had nothing
 # to do with platforms. resource sampled the machine, as described above.
@@ -74,8 +85,8 @@ github.com/gsoultan/gateon/internal/ai/models/default -
 github.com/gsoultan/gateon/internal/alerting 25.8%
 github.com/gsoultan/gateon/internal/api 49.6%
 github.com/gsoultan/gateon/internal/audit 47.6%
-github.com/gsoultan/gateon/internal/auth 71.9%
-github.com/gsoultan/gateon/internal/config 36.8%
+github.com/gsoultan/gateon/internal/auth 74.7%
+github.com/gsoultan/gateon/internal/config 39.5%
 github.com/gsoultan/gateon/internal/db 77.7%
 github.com/gsoultan/gateon/internal/discovery 46.4%
 github.com/gsoultan/gateon/internal/domain/canary 66.7%
@@ -101,7 +112,7 @@ github.com/gsoultan/gateon/internal/repositories/stores 80.2%
 github.com/gsoultan/gateon/internal/request 47.1%
 github.com/gsoultan/gateon/internal/resource 90.9%
 github.com/gsoultan/gateon/internal/router 80.0%
-github.com/gsoultan/gateon/internal/security 30.8%
+github.com/gsoultan/gateon/internal/security 34.7%
 github.com/gsoultan/gateon/internal/security/art 98.6%
 github.com/gsoultan/gateon/internal/security/correlation 84.7%
 github.com/gsoultan/gateon/internal/security/entropy 45.1%
