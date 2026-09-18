@@ -319,7 +319,7 @@ func SetAlertingHandler(h AlertingHandler) {
 // - Append/increment aggregated rows per (day, host, path)
 // - Batch updates via a buffered channel to keep hot path non-blocking
 // - Periodic pruning based on retention days
-// Supports SQLite, PostgreSQL, MySQL, and MariaDB.
+// Supports SQLite and PostgreSQL.
 
 var (
 	store   *pathStatsStore
@@ -852,17 +852,11 @@ func (s *pathStatsStore) restoreWAFBlockCounter() {
 }
 
 func (s *pathStatsStore) upsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	if s.dialect.Driver == db.DriverMySQL {
-		return tx.Prepare(QueryUpsertPathStatsMySQL)
-	}
 	q := s.dialect.Rebind(QueryUpsertPathStatsConflict)
 	return tx.Prepare(q)
 }
 
 func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	if s.dialect.Driver == db.DriverMySQL {
-		return tx.Prepare(QueryUpsertDomainStatsMySQL)
-	}
 	q := s.dialect.Rebind(QueryUpsertDomainStatsConflict)
 	return tx.Prepare(q)
 }
@@ -1232,7 +1226,7 @@ func (s *pathStatsStore) pruneAuditLogs(ctx context.Context) {
 }
 
 // reclaimSQLDisk returns the space freed by the SQLite deletes back to the OS.
-// It is a no-op for server databases (Postgres/MySQL) which manage their own
+// It is a no-op for server databases (Postgres) which manage their own
 // vacuuming. incremental_vacuum needs auto_vacuum=INCREMENTAL (set in
 // SQLitePragmas); the WAL checkpoint truncates the write-ahead log file.
 func (s *pathStatsStore) reclaimSQLDisk(ctx context.Context) {
@@ -1763,9 +1757,6 @@ func MarkIPMitigated(ip string, reason string) {
 		return
 	}
 	query := s.dialect.Rebind("INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, updated_at) VALUES (?, 'mitigated', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
-	if s.dialect.Driver == db.DriverMySQL {
-		query = "INSERT INTO ip_mitigations (ip, status, reason, mitigated_at) VALUES (?, 'mitigated', ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
-	}
 	now := time.Now()
 	_, err := s.db.Exec(query, ip, reason, now, reason, now)
 	if err != nil {
@@ -2057,9 +2048,6 @@ func MarkUserMitigated(ja4plus string, fpType string, reason string, category st
 	}
 	// We only use the fingerprint column for JA4+ suite. ja4h column is kept for schema compatibility but left empty.
 	query := s.dialect.Rebind("INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, updated_at) VALUES (?, '', ?, 'mitigated', ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(fingerprint, ja4h) DO UPDATE SET status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
-	if s.dialect.Driver == db.DriverMySQL {
-		query = "INSERT INTO user_mitigations (fingerprint, ja4h, fp_type, status, reason, category, mitigated_at) VALUES (?, '', ?, 'mitigated', ?, ?, ?) ON DUPLICATE KEY UPDATE status = 'mitigated', reason = ?, category = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP"
-	}
 
 	now := time.Now()
 	_, err := s.db.Exec(query, ja4plus, fpType, reason, category, now, reason, category, now)
@@ -2929,7 +2917,7 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 		case time.Time:
 			t = v
 		case string:
-			// SQLite/MySQL return strings
+			// SQLite returns strings
 			if len(v) > 19 {
 				v = v[:19]
 			}

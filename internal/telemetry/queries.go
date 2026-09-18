@@ -20,15 +20,6 @@ const (
 
 // SQL queries for path stats. Dialect.Rebind replaces ? with $N (Postgres) as needed.
 const (
-	QueryUpsertPathStatsMySQL = `
-	INSERT INTO path_stats (day, host, path, req_count, latency_sum_s, bytes_total, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-	ON DUPLICATE KEY UPDATE
-	  req_count = req_count + VALUES(req_count),
-	  latency_sum_s = latency_sum_s + VALUES(latency_sum_s),
-	  bytes_total = bytes_total + VALUES(bytes_total),
-	  updated_at = CURRENT_TIMESTAMP;`
-
 	QueryUpsertPathStatsConflict = `
 	INSERT INTO path_stats (day, host, path, req_count, latency_sum_s, bytes_total, updated_at)
 	VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -48,15 +39,6 @@ const (
 		FROM path_stats
 		WHERE day >= ?
 		GROUP BY host, path`
-
-	QueryUpsertDomainStatsMySQL = `
-	INSERT INTO domain_stats (day, hour, domain, req_count, latency_sum_s, bytes_total, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-	ON DUPLICATE KEY UPDATE
-	  req_count = req_count + VALUES(req_count),
-	  latency_sum_s = latency_sum_s + VALUES(latency_sum_s),
-	  bytes_total = bytes_total + VALUES(bytes_total),
-	  updated_at = CURRENT_TIMESTAMP;`
 
 	QueryUpsertDomainStatsConflict = `
 	INSERT INTO domain_stats (day, hour, domain, req_count, latency_sum_s, bytes_total, updated_at)
@@ -125,10 +107,6 @@ const (
 	QueryGetDomainStatsHourly = `SELECT domain, hour, req_count, latency_sum_s, bytes_total
 		FROM domain_stats
 		WHERE day = ? AND hour = ?`
-
-	QueryInsertTraceMySQL = `
-	INSERT IGNORE INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, user_agent, method, referer, request_uri, ja4, ja4h, request_headers, request_body, response_headers, response_body)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	QueryInsertTraceConflict = `
 	INSERT INTO traces (id, operation_name, service_name, duration_ms, timestamp, status, path, source_ip, fingerprint, country_code, user_agent, method, referer, request_uri, ja4, ja4h, request_headers, request_body, response_headers, response_body)

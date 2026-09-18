@@ -77,9 +77,6 @@ func init() {
 			return nil
 		case DriverPostgres:
 			query = `ALTER TABLE traces ALTER COLUMN duration_ms TYPE DOUBLE PRECISION;`
-		default:
-			// MySQL / MariaDB
-			query = `ALTER TABLE traces MODIFY COLUMN duration_ms DOUBLE PRECISION NOT NULL;`
 		}
 		if query != "" {
 			_, err := db.Exec(query)
@@ -102,12 +99,6 @@ func init() {
 				key TEXT PRIMARY KEY,
 				data BYTEA NOT NULL,
 				updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-			)`
-		case DriverMySQL:
-			query = `CREATE TABLE IF NOT EXISTS acme_certs (
-				` + "`key`" + ` VARCHAR(255) PRIMARY KEY,
-				data LONGBLOB NOT NULL,
-				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 			)`
 		default: // sqlite
 			query = `CREATE TABLE IF NOT EXISTS acme_certs (
@@ -139,8 +130,6 @@ func init() {
 		var query string
 		switch dialect.Driver {
 		case DriverPostgres:
-			query = `ALTER TABLE path_stats ADD COLUMN IF NOT EXISTS bytes_total BIGINT NOT NULL DEFAULT 0;`
-		case DriverMySQL:
 			query = `ALTER TABLE path_stats ADD COLUMN IF NOT EXISTS bytes_total BIGINT NOT NULL DEFAULT 0;`
 		default:
 			query = `ALTER TABLE path_stats ADD COLUMN bytes_total INTEGER NOT NULL DEFAULT 0;`
@@ -189,8 +178,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS source_ip TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
-			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS source_ip TEXT NOT NULL DEFAULT '';`
 		default:
 			query = `ALTER TABLE traces ADD COLUMN source_ip TEXT NOT NULL DEFAULT '';`
 		}
@@ -208,8 +195,6 @@ func init() {
 		var query string
 		switch dialect.Driver {
 		case DriverPostgres:
-			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS country_code VARCHAR(5) NOT NULL DEFAULT '';`
-		case DriverMySQL:
 			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS country_code VARCHAR(5) NOT NULL DEFAULT '';`
 		default:
 			query = `ALTER TABLE traces ADD COLUMN country_code TEXT NOT NULL DEFAULT '';`
@@ -231,11 +216,6 @@ func init() {
 			queries = []string{
 				`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0;`,
 				`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;`,
-			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;`,
-				`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP NULL;`,
 			}
 		default: // sqlite
 			queries = []string{
@@ -260,8 +240,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
-			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '';`
 		default:
 			query = `ALTER TABLE traces ADD COLUMN user_agent TEXT NOT NULL DEFAULT '';`
 		}
@@ -279,11 +257,6 @@ func init() {
 		var queries []string
 		switch dialect.Driver {
 		case DriverPostgres:
-			queries = []string{
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT '';`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS referer TEXT NOT NULL DEFAULT '';`,
-			}
-		case DriverMySQL:
 			queries = []string{
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS referer TEXT NOT NULL DEFAULT '';`,
@@ -311,8 +284,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
-			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`
 		default:
 			query = `ALTER TABLE traces ADD COLUMN request_uri TEXT NOT NULL DEFAULT '';`
 		}
@@ -339,16 +310,6 @@ func init() {
 				timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				ja3 TEXT NOT NULL DEFAULT ''
 			);`
-		case DriverMySQL:
-			query = `CREATE TABLE IF NOT EXISTS security_threats (
-				id VARCHAR(36) PRIMARY KEY,
-				type TEXT NOT NULL,
-				source_ip VARCHAR(45) NOT NULL,
-				score DOUBLE NOT NULL,
-				details TEXT NOT NULL,
-				timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				ja3 TEXT NOT NULL DEFAULT ''
-			);`
 		default: // sqlite
 			query = `CREATE TABLE IF NOT EXISTS security_threats (
 				id TEXT PRIMARY KEY,
@@ -368,8 +329,6 @@ func init() {
 		var query string
 		switch dialect.Driver {
 		case DriverPostgres:
-			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja3 TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
 			query = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja3 TEXT NOT NULL DEFAULT '';`
 		default:
 			query = `ALTER TABLE traces ADD COLUMN ja3 TEXT NOT NULL DEFAULT '';`
@@ -392,13 +351,6 @@ func init() {
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_body TEXT;`,
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_headers TEXT;`,
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_body TEXT;`,
-			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_headers LONGTEXT;`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS request_body LONGTEXT;`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_headers LONGTEXT;`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS response_body LONGTEXT;`,
 			}
 		default: // sqlite
 			queries = []string{
@@ -433,11 +385,6 @@ func init() {
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS fingerprint TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS fingerprint TEXT NOT NULL DEFAULT '';`,
 			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(255) NOT NULL DEFAULT '';`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(255) NOT NULL DEFAULT '';`,
-			}
 		default: // sqlite
 			queries = []string{
 				`ALTER TABLE traces ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';`,
@@ -462,11 +409,6 @@ func init() {
 		case DriverPostgres:
 			queries = []string{
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS route_id TEXT NOT NULL DEFAULT '';`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`,
-			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS route_id VARCHAR(255) NOT NULL DEFAULT '';`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_uri TEXT NOT NULL DEFAULT '';`,
 			}
 		default: // sqlite
@@ -495,11 +437,6 @@ func init() {
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja4 TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS ja4 TEXT NOT NULL DEFAULT '';`,
 			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS ja4 VARCHAR(255) NOT NULL DEFAULT '';`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS ja4 VARCHAR(255) NOT NULL DEFAULT '';`,
-			}
 		default: // sqlite
 			queries = []string{
 				`ALTER TABLE traces ADD COLUMN ja4 TEXT NOT NULL DEFAULT '';`,
@@ -522,12 +459,6 @@ func init() {
 		var queries []string
 		switch dialect.Driver {
 		case DriverPostgres:
-			queries = []string{
-				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;`,
-				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret TEXT NOT NULL DEFAULT '';`,
-				`ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes TEXT NOT NULL DEFAULT '';`,
-			}
-		case DriverMySQL:
 			queries = []string{
 				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;`,
 				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret TEXT NOT NULL DEFAULT '';`,
@@ -566,17 +497,6 @@ func init() {
 				ip_address TEXT NOT NULL,
 				signature TEXT NOT NULL DEFAULT ''
 			);`
-		case DriverMySQL:
-			query = `CREATE TABLE IF NOT EXISTS audit_logs (
-				id VARCHAR(36) PRIMARY KEY,
-				user_id TEXT NOT NULL,
-				action TEXT NOT NULL,
-				resource TEXT NOT NULL,
-				details TEXT NOT NULL,
-				timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-				ip_address TEXT NOT NULL,
-				signature TEXT NOT NULL DEFAULT ''
-			);`
 		default: // sqlite
 			query = `CREATE TABLE IF NOT EXISTS audit_logs (
 				id TEXT PRIMARY KEY,
@@ -602,13 +522,6 @@ func init() {
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS severity TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS asn TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS action_taken TEXT NOT NULL DEFAULT '';`,
-			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS category VARCHAR(50) NOT NULL DEFAULT '';`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT '';`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS asn VARCHAR(100) NOT NULL DEFAULT '';`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS action_taken VARCHAR(50) NOT NULL DEFAULT '';`,
 			}
 		default: // sqlite
 			queries = []string{
@@ -652,8 +565,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS country_code TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
-			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS country_code VARCHAR(10) NOT NULL DEFAULT '';`
 		default: // sqlite
 			query = `ALTER TABLE security_threats ADD COLUMN country_code TEXT NOT NULL DEFAULT '';`
 		}
@@ -667,9 +578,7 @@ func init() {
 	})
 
 	Register(28, "create_ip_mitigations_table", func(db *sql.DB, dialect Dialect) error {
-		var query string
-		if dialect.Driver == DriverSQLite || dialect.Driver == DriverPostgres {
-			query = `CREATE TABLE IF NOT EXISTS ip_mitigations (
+		query := `CREATE TABLE IF NOT EXISTS ip_mitigations (
 				ip VARCHAR(50) PRIMARY KEY,
 				status VARCHAR(20) NOT NULL,
 				reason TEXT,
@@ -677,16 +586,6 @@ func init() {
 				unmitigated_at TIMESTAMP,
 				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 			);`
-		} else { // MySQL
-			query = `CREATE TABLE IF NOT EXISTS ip_mitigations (
-				ip VARCHAR(50) PRIMARY KEY,
-				status VARCHAR(20) NOT NULL,
-				reason TEXT,
-				mitigated_at TIMESTAMP NULL,
-				unmitigated_at TIMESTAMP NULL,
-				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-			);`
-		}
 		_, err := db.Exec(query)
 		return err
 	})
@@ -696,8 +595,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_hash TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
-			query = `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_hash VARCHAR(255) NOT NULL DEFAULT '';`
 		default: // sqlite
 			query = `ALTER TABLE audit_logs ADD COLUMN previous_hash TEXT NOT NULL DEFAULT '';`
 		}
@@ -720,15 +617,6 @@ func init() {
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS response_body TEXT;`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS user_agent TEXT;`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS method TEXT;`,
-			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_headers LONGTEXT;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS request_body LONGTEXT;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS response_headers LONGTEXT;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS response_body LONGTEXT;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS user_agent TEXT;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS method VARCHAR(10);`,
 			}
 		default: // sqlite
 			queries = []string{
@@ -760,11 +648,6 @@ func init() {
 				`ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT FALSE;`,
 				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_pending BOOLEAN DEFAULT FALSE;`,
 			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT FALSE;`,
-				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_pending BOOLEAN DEFAULT FALSE;`,
-			}
 		default: // sqlite
 			queries = []string{
 				`ALTER TABLE users ADD COLUMN disabled BOOLEAN DEFAULT FALSE;`,
@@ -786,7 +669,6 @@ func init() {
 	Register(32, "add_performance_indexes_v2", func(db *sql.DB, dialect Dialect) error {
 		// These indices improve performance for dashboard aggregations and security lookups.
 		// Note: CREATE INDEX IF NOT EXISTS is supported by SQLite and Postgres (9.5+).
-		// For MySQL/MariaDB, IF NOT EXISTS is followed here for consistency with earlier migrations.
 		tracesExists := TableExists(db, dialect, "traces")
 		queries := []string{
 			`CREATE INDEX IF NOT EXISTS idx_security_threats_source_ip ON security_threats(source_ip);`,
@@ -849,30 +731,6 @@ func init() {
 				fingerprint TEXT NOT NULL DEFAULT '',
 				route_id TEXT NOT NULL DEFAULT ''
 			);`
-		case DriverMySQL:
-			query = `CREATE TABLE IF NOT EXISTS traces (
-				id VARCHAR(255) PRIMARY KEY,
-				operation_name TEXT NOT NULL,
-				service_name TEXT NOT NULL,
-				duration_ms DOUBLE PRECISION NOT NULL,
-				timestamp TIMESTAMP NOT NULL,
-				status VARCHAR(20) NOT NULL,
-				path TEXT NOT NULL,
-				source_ip TEXT NOT NULL DEFAULT '',
-				country_code VARCHAR(5) NOT NULL DEFAULT '',
-				user_agent TEXT NOT NULL DEFAULT '',
-				method TEXT NOT NULL DEFAULT '',
-				referer TEXT NOT NULL DEFAULT '',
-				request_uri TEXT NOT NULL DEFAULT '',
-				ja3 TEXT NOT NULL DEFAULT '',
-				ja4 TEXT NOT NULL DEFAULT '',
-				request_headers LONGTEXT NOT NULL DEFAULT '',
-				request_body LONGTEXT NOT NULL DEFAULT '',
-				response_headers LONGTEXT NOT NULL DEFAULT '',
-				response_body LONGTEXT NOT NULL DEFAULT '',
-				fingerprint VARCHAR(255) NOT NULL DEFAULT '',
-				route_id VARCHAR(255) NOT NULL DEFAULT ''
-			);`
 		default: // sqlite
 			query = `CREATE TABLE IF NOT EXISTS traces (
 				id TEXT PRIMARY KEY,
@@ -907,8 +765,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			alterQuery = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_id TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
-			alterQuery = `ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_id VARCHAR(255) NOT NULL DEFAULT '';`
 		default: // sqlite
 			alterQuery = `ALTER TABLE traces ADD COLUMN route_id TEXT NOT NULL DEFAULT '';`
 		}
@@ -939,12 +795,6 @@ func init() {
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS entropy DOUBLE PRECISION DEFAULT 0;`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS cluster_size INTEGER DEFAULT 0;`,
 			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS confidence DOUBLE DEFAULT 0;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS entropy DOUBLE DEFAULT 0;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS cluster_size INT DEFAULT 0;`,
-			}
 		default: // sqlite
 			queries = []string{
 				`ALTER TABLE security_threats ADD COLUMN confidence REAL DEFAULT 0;`,
@@ -969,8 +819,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS recommendation TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
-			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS recommendation TEXT NOT NULL DEFAULT '';`
 		default: // sqlite
 			query = `ALTER TABLE security_threats ADD COLUMN recommendation TEXT NOT NULL DEFAULT '';`
 		}
@@ -987,8 +835,6 @@ func init() {
 		var query string
 		switch dialect.Driver {
 		case DriverPostgres:
-			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS triggered_rules TEXT NOT NULL DEFAULT '';`
-		case DriverMySQL:
 			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS triggered_rules TEXT NOT NULL DEFAULT '';`
 		default: // sqlite
 			query = `ALTER TABLE security_threats ADD COLUMN triggered_rules TEXT NOT NULL DEFAULT '';`
@@ -1036,8 +882,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS reputation DOUBLE PRECISION NOT NULL DEFAULT 0;`
-		case DriverMySQL:
-			query = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS reputation DOUBLE NOT NULL DEFAULT 0;`
 		default: // sqlite
 			query = `ALTER TABLE security_threats ADD COLUMN reputation DOUBLE NOT NULL DEFAULT 0;`
 		}
@@ -1059,13 +903,6 @@ func init() {
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_delay_ms DOUBLE PRECISION NOT NULL DEFAULT 0;`,
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS middleware_delay_ms DOUBLE PRECISION NOT NULL DEFAULT 0;`,
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS service_delay_ms DOUBLE PRECISION NOT NULL DEFAULT 0;`,
-			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS entrypoint_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS route_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS middleware_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS service_delay_ms DOUBLE NOT NULL DEFAULT 0;`,
 			}
 		default: // sqlite
 			queries = []string{
@@ -1093,11 +930,6 @@ func init() {
 			queries = []string{
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS recommendation TEXT NOT NULL DEFAULT '';`,
 				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS reputation DOUBLE PRECISION NOT NULL DEFAULT 0;`,
-			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS recommendation TEXT;`,
-				`ALTER TABLE traces ADD COLUMN IF NOT EXISTS reputation DOUBLE NOT NULL DEFAULT 0;`,
 			}
 		default: // sqlite
 			queries = []string{
@@ -1139,11 +971,6 @@ func init() {
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION DEFAULT 0;`,
 				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION DEFAULT 0;`,
 			}
-		case DriverMySQL:
-			queries = []string{
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS latitude DOUBLE DEFAULT 0;`,
-				`ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS longitude DOUBLE DEFAULT 0;`,
-			}
 		default: // sqlite
 			queries = []string{
 				`ALTER TABLE security_threats ADD COLUMN latitude REAL DEFAULT 0;`,
@@ -1163,9 +990,7 @@ func init() {
 	})
 
 	Register(43, "create_fingerprint_mitigations_table", func(db *sql.DB, dialect Dialect) error {
-		var query string
-		if dialect.Driver == DriverSQLite || dialect.Driver == DriverPostgres {
-			query = `CREATE TABLE IF NOT EXISTS fingerprint_mitigations (
+		query := `CREATE TABLE IF NOT EXISTS fingerprint_mitigations (
 				fingerprint VARCHAR(255) PRIMARY KEY,
 				fp_type VARCHAR(10) NOT NULL,
 				status VARCHAR(20) NOT NULL,
@@ -1174,17 +999,6 @@ func init() {
 				unmitigated_at TIMESTAMP,
 				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 			);`
-		} else { // MySQL
-			query = `CREATE TABLE IF NOT EXISTS fingerprint_mitigations (
-				fingerprint VARCHAR(255) PRIMARY KEY,
-				fp_type VARCHAR(10) NOT NULL,
-				status VARCHAR(20) NOT NULL,
-				reason TEXT,
-				mitigated_at TIMESTAMP NULL,
-				unmitigated_at TIMESTAMP NULL,
-				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-			);`
-		}
 		if _, err := db.Exec(query); err != nil {
 			return err
 		}
@@ -1203,15 +1017,7 @@ func init() {
 	})
 
 	Register(44, "add_category_to_fingerprint_mitigations", func(db *sql.DB, dialect Dialect) error {
-		var query string
-		switch dialect.Driver {
-		case DriverSQLite:
-			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
-		case DriverPostgres:
-			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
-		default: // MySQL
-			query = `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
-		}
+		query := `ALTER TABLE fingerprint_mitigations ADD COLUMN category VARCHAR(50);`
 		if _, err := db.Exec(query); err != nil {
 			// Ignore error if column already exists (can happen during development)
 			return nil
@@ -1220,15 +1026,8 @@ func init() {
 	})
 
 	Register(45, "rename_fingerprint_mitigations_to_user_mitigations", func(db *sql.DB, dialect Dialect) error {
-		var queries []string
-		if dialect.Driver == DriverMySQL {
-			queries = []string{
-				`RENAME TABLE fingerprint_mitigations TO user_mitigations;`,
-			}
-		} else {
-			queries = []string{
-				`ALTER TABLE fingerprint_mitigations RENAME TO user_mitigations;`,
-			}
+		queries := []string{
+			`ALTER TABLE fingerprint_mitigations RENAME TO user_mitigations;`,
 		}
 		for _, q := range queries {
 			if _, err := db.Exec(q); err != nil {
@@ -1239,15 +1038,7 @@ func init() {
 	})
 
 	Register(46, "add_ja4h_to_user_mitigations", func(db *sql.DB, dialect Dialect) error {
-		var query string
-		switch dialect.Driver {
-		case DriverSQLite:
-			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
-		case DriverPostgres:
-			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
-		default: // MySQL
-			query = `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
-		}
+		query := `ALTER TABLE user_mitigations ADD COLUMN ja4h VARCHAR(255) DEFAULT '';`
 		if _, err := db.Exec(query); err != nil {
 			return err
 		}
@@ -1287,11 +1078,6 @@ func init() {
 				`ALTER TABLE user_mitigations ALTER COLUMN ja4h SET NOT NULL;`,
 				`ALTER TABLE user_mitigations ADD PRIMARY KEY (fingerprint, ja4h);`,
 			}
-		default: // MySQL
-			queries = []string{
-				`ALTER TABLE user_mitigations MODIFY ja4h VARCHAR(255) NOT NULL DEFAULT '';`,
-				`ALTER TABLE user_mitigations DROP PRIMARY KEY, ADD PRIMARY KEY (fingerprint, ja4h);`,
-			}
 		}
 		for _, q := range queries {
 			if _, err := db.Exec(q); err != nil {
@@ -1302,15 +1088,7 @@ func init() {
 	})
 
 	Register(48, "add_ja4h_to_security_threats", func(db *sql.DB, dialect Dialect) error {
-		var query string
-		switch dialect.Driver {
-		case DriverSQLite:
-			query = `ALTER TABLE security_threats ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		case DriverPostgres:
-			query = `ALTER TABLE security_threats ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		default: // MySQL
-			query = `ALTER TABLE security_threats ADD COLUMN ja4h VARCHAR(255) NOT NULL DEFAULT '';`
-		}
+		query := `ALTER TABLE security_threats ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
 		if _, err := db.Exec(query); err != nil {
 			return err
 		}
@@ -1318,15 +1096,7 @@ func init() {
 	})
 
 	Register(49, "add_ja4h_to_traces", func(db *sql.DB, dialect Dialect) error {
-		var query string
-		switch dialect.Driver {
-		case DriverSQLite:
-			query = `ALTER TABLE traces ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		case DriverPostgres:
-			query = `ALTER TABLE traces ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
-		default: // MySQL
-			query = `ALTER TABLE traces ADD COLUMN ja4h VARCHAR(255) NOT NULL DEFAULT '';`
-		}
+		query := `ALTER TABLE traces ADD COLUMN ja4h TEXT NOT NULL DEFAULT '';`
 		if _, err := db.Exec(query); err != nil {
 			return err
 		}
@@ -1349,7 +1119,7 @@ func init() {
 				`UPDATE traces SET ja3 = '';`,
 			}
 		} else {
-			// Postgres and MySQL support DROP COLUMN
+			// Postgres supports DROP COLUMN
 			queries = []string{
 				`ALTER TABLE security_threats DROP COLUMN ja3;`,
 				`ALTER TABLE traces DROP COLUMN ja3;`,
@@ -1366,8 +1136,6 @@ func init() {
 		// This matches the new Seed logic and avoids CRS collisions.
 		var query string
 		switch dialect.Driver {
-		case DriverMySQL:
-			query = "UPDATE waf_rules SET directive = REPLACE(directive, CONCAT('id:', id), CONCAT('id:1', id)), id = CONCAT('1', id) WHERE LENGTH(id) = 6 AND (id LIKE '9%' OR id LIKE '1%' OR id LIKE '2%')"
 		case DriverPostgres:
 			query = "UPDATE waf_rules SET directive = REPLACE(directive, 'id:' || id::text, 'id:1' || id::text), id = '1' || id::text WHERE LENGTH(id::text) = 6 AND (id::text LIKE '9%' OR id::text LIKE '1%' OR id::text LIKE '2%')"
 		default:
@@ -1384,12 +1152,7 @@ func init() {
 		return err
 	})
 	Register(53, "add_source_ips_to_security_threats", func(db *sql.DB, dialect Dialect) error {
-		var query string
-		if dialect.Driver == DriverSQLite || dialect.Driver == DriverPostgres {
-			query = `ALTER TABLE security_threats ADD COLUMN source_ips TEXT NOT NULL DEFAULT '';`
-		} else { // MySQL
-			query = `ALTER TABLE security_threats ADD COLUMN source_ips LONGTEXT NOT NULL DEFAULT '';`
-		}
+		query := `ALTER TABLE security_threats ADD COLUMN source_ips TEXT NOT NULL DEFAULT '';`
 		_, err := db.Exec(query)
 		return err
 	})
@@ -1398,8 +1161,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE waf_rules ALTER COLUMN id TYPE VARCHAR(255) USING id::text;`
-		case DriverMySQL:
-			query = `ALTER TABLE waf_rules MODIFY COLUMN id VARCHAR(255);`
 		default:
 			return nil
 		}
@@ -1694,10 +1455,7 @@ func init() {
 			return nil
 		}
 
-		textType := "TEXT"
-		if dialect.Driver == DriverMySQL {
-			textType = "LONGTEXT"
-		}
+		const textType = "TEXT"
 		for _, col := range []struct{ name, spec string }{
 			{"definition", textType},
 			{"format", "VARCHAR(32)"},
@@ -1749,17 +1507,6 @@ func init() {
 				enabled BOOLEAN NOT NULL DEFAULT TRUE,
 				created_at TIMESTAMPTZ NOT NULL
 			)`
-		case DriverMySQL:
-			query = `CREATE TABLE IF NOT EXISTS waf_exceptions (
-				id VARCHAR(255) PRIMARY KEY,
-				rule_id BIGINT NOT NULL,
-				path TEXT,
-				target VARCHAR(64) NOT NULL DEFAULT '',
-				key_name VARCHAR(255) NOT NULL DEFAULT '',
-				note TEXT,
-				enabled BOOLEAN NOT NULL DEFAULT TRUE,
-				created_at DATETIME NOT NULL
-			)`
 		default:
 			query = `CREATE TABLE IF NOT EXISTS waf_exceptions (
 				id TEXT PRIMARY KEY,
@@ -1787,7 +1534,7 @@ func init() {
 	// those well past 36 characters.
 	//
 	// SQLite declares the column TEXT and ignores the length entirely, so this
-	// never showed up there. On Postgres and MySQL the insert fails — and
+	// never showed up there. On Postgres the insert fails — and
 	// because the flush writes the batch in one transaction, the first
 	// oversized row aborted it and took every other threat in the batch with it
 	// (Postgres 25P02). The Security Hub, threat explorer and everything derived
@@ -1800,8 +1547,6 @@ func init() {
 		switch dialect.Driver {
 		case DriverPostgres:
 			query = `ALTER TABLE security_threats ALTER COLUMN id TYPE VARCHAR(255)`
-		case DriverMySQL:
-			query = `ALTER TABLE security_threats MODIFY COLUMN id VARCHAR(255) NOT NULL`
 		default:
 			// SQLite's column is TEXT and has no length to widen. Returning nil
 			// still records the migration as applied, which is what keeps the
