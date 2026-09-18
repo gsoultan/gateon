@@ -314,12 +314,7 @@ func (m *Manager) UpsertUser(u *gateonv1.User) error {
 // change here is a privilege change — demoting an administrator to viewer must
 // not leave them holding an administrator token.
 func (m *Manager) upsertUserWithPassword(id, username, password, role string) error {
-	var err error
-	if m.dialect.Driver == db.DriverMySQL {
-		err = m.upsertMySQL(id, username, password, role)
-	} else {
-		err = m.upsertSQLitePostgres(id, username, password, role)
-	}
+	err := m.upsertSQLitePostgres(id, username, password, role)
 	if err != nil {
 		return err
 	}
@@ -342,15 +337,6 @@ func (m *Manager) upsertSQLitePostgres(id, username, password, role string) erro
 		return fmt.Errorf("failed to upsert user without password (sqlite/postgres): %w", err)
 	}
 	return nil
-}
-
-func (m *Manager) upsertMySQL(id, username, password, role string) error {
-	if password != "" {
-		_, err := m.db.Exec(QueryInsertUserMySQLWithPassword, id, username, password, role)
-		return err
-	}
-	_, err := m.db.Exec(QueryInsertUserMySQLNoPassword, id, username, "", role)
-	return err
 }
 
 func (m *Manager) ChangePassword(id, password string) error {

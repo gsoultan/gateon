@@ -22,14 +22,15 @@ var ErrUnsupportedEngine = errors.New("unsupported database engine")
 
 // refusedSchemes are engines this package advertised without ever supporting.
 //
-// MySQL and MariaDB were accepted by parseURL, and most migrations carry a
-// DriverMySQL branch, but none of it has ever run: migration 2 puts two TEXT
+// MySQL and MariaDB were accepted by parseURL, and nearly every migration
+// carried a MySQL arm, but none of it ever ran: migration 2 puts two TEXT
 // columns in a PRIMARY KEY, which MySQL rejects outright, so no MySQL database
-// has ever reached migration 3. The branches below it are not merely untested,
-// they are written in a dialect MySQL does not accept -- 43 of 62 migrations
-// fail on a real server even with migration 2 repaired, most of them on
-// ADD COLUMN IF NOT EXISTS and DEFAULT values on TEXT columns, neither of which
-// MySQL supports.
+// has ever reached migration 3. Those arms were not merely untested, they were
+// written in a dialect MySQL does not accept -- 43 of 62 migrations failed on a
+// real server even with migration 2 repaired, most of them on ADD COLUMN IF NOT
+// EXISTS and DEFAULT values on TEXT columns, neither of which MySQL supports.
+// They have since been deleted, so this map is now the only thing standing
+// between an operator and a database that cannot build its own schema.
 //
 // Accepting the DSN and failing at the second migration is the worst of the
 // available behaviours: it happens at startup, after the operator has committed

@@ -77,12 +77,6 @@ func ensureMigrationsTable(db *sql.DB, dialect Dialect) error {
 			name TEXT NOT NULL,
 			applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		)`
-	case DriverMySQL:
-		query = `CREATE TABLE IF NOT EXISTS migrations (
-			id INTEGER PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`
 	default: // sqlite
 		query = `CREATE TABLE IF NOT EXISTS migrations (
 			id INTEGER PRIMARY KEY,
@@ -116,8 +110,6 @@ func TableExists(db *sql.DB, dialect Dialect, name string) bool {
 	switch dialect.Driver {
 	case DriverPostgres:
 		query = "SELECT 1 FROM information_schema.tables WHERE table_name = ?"
-	case DriverMySQL:
-		query = "SHOW TABLES LIKE ?"
 	default: // sqlite
 		query = "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?"
 	}

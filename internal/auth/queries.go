@@ -23,11 +23,6 @@ const (
 	QueryInsertUserSQLitePostgresNoPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
 		ON CONFLICT(username) DO UPDATE SET role=excluded.role`
 
-	QueryInsertUserMySQLWithPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE password=VALUES(password), role=VALUES(role)`
-	QueryInsertUserMySQLNoPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE role=VALUES(role)`
-
 	// QuerySessionBindingByID reads only the columns that make up a session
 	// binding (see revocation.go). Kept narrow so the per-verify cache miss is
 	// as cheap as possible and so the password hash is never pulled into a

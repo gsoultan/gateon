@@ -101,7 +101,7 @@ func (r *DBRouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error 
 				disabled = EXCLUDED.disabled,
 				updated_at = CURRENT_TIMESTAMP`
 	} else {
-		// SQLite / MySQL
+		// SQLite
 		query = `REPLACE INTO routes (id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 	}
