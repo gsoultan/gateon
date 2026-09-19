@@ -90,7 +90,7 @@ func factoryCases(t *testing.T) []factoryCase {
 		{typ: "xss_recognition", cfg: map[string]string{}},
 		{typ: "sqli_recognition", cfg: map[string]string{}},
 		{typ: "threat_recognition", cfg: map[string]string{}},
-		{typ: "schema_validation", cfg: map[string]string{}},
+		{typ: "schema_validation", cfg: map[string]string{"schema": `{"type":"object"}`}},
 		{typ: "honeypot", cfg: map[string]string{"paths": "/.env"}},
 		{typ: "turnstile", cfg: map[string]string{"secret": "s", "site_key": "k"},
 			skipServe: true, why: "verifies against Cloudflare"},

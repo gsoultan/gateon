@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -57,6 +58,11 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 	maxBody := cfg.MaxBodySize
 	if maxBody == 0 {
 		maxBody = 1024 * 1024 // 1MB default
+	}
+	if maxBody < 0 {
+		// -1 is documented as unlimited. io.LimitReader treats a negative
+		// limit as already exhausted, so "unlimited" forwarded an empty body.
+		maxBody = math.MaxInt64
 	}
 
 	client := &http.Client{
@@ -136,17 +142,6 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 				return
 			}
 
-			// X-Forwarded-* headers (Traefik-style)
-			authReq.Header.Set("X-Forwarded-Method", r.Method)
-			authReq.Header.Set("X-Forwarded-Proto", request.Scheme(r))
-			authReq.Header.Set("X-Forwarded-Host", r.Host)
-			authReq.Header.Set("X-Forwarded-Uri", r.URL.RequestURI())
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" && cfg.TrustForwardHeader {
-				authReq.Header.Set("X-Forwarded-For", xff)
-			} else {
-				authReq.Header.Set("X-Forwarded-For", request.GetClientIP(r, config.EffectiveTrustCloudflare()))
-			}
-
 			// Copy request headers
 			for k, vv := range r.Header {
 				canon := http.CanonicalHeaderKey(k)
@@ -155,6 +150,21 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 						authReq.Header.Add(k, v)
 					}
 				}
+			}
+
+			// X-Forwarded-* headers (Traefik-style). Set *after* the copy
+			// above: Set replaces and Add appends, and these are the values the
+			// auth service decides on. Set before the copy, a client-supplied
+			// X-Forwarded-Uri rode along as a second value on the same header,
+			// which most stacks read joined ("/admin, /public") or last-wins.
+			authReq.Header.Set("X-Forwarded-Method", r.Method)
+			authReq.Header.Set("X-Forwarded-Proto", request.Scheme(r))
+			authReq.Header.Set("X-Forwarded-Host", r.Host)
+			authReq.Header.Set("X-Forwarded-Uri", r.URL.RequestURI())
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" && cfg.TrustForwardHeader {
+				authReq.Header.Set("X-Forwarded-For", xff)
+			} else {
+				authReq.Header.Set("X-Forwarded-For", request.GetClientIP(r, config.EffectiveTrustCloudflare()))
 			}
 
 			// #nosec G704 -- not SSRF. The destination is cfg.Address, a static

@@ -6,6 +6,7 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -18,17 +19,22 @@ type SchemaValidationConfig struct {
 }
 
 // SchemaValidation returns a middleware that validates JSON request bodies against a schema.
-func SchemaValidation(cfg SchemaValidationConfig) Middleware {
+//
+// A schema that does not compile is a configuration error and is refused
+// here, at route build time. It used to be logged, after which the middleware
+// passed every body through unvalidated -- a validation rule the dashboard
+// showed as active and the gateway never applied.
+func SchemaValidation(cfg SchemaValidationConfig) (Middleware, error) {
 	compiler := jsonschema.NewCompiler()
 	schema, err := compiler.Compile([]byte(cfg.Schema))
 	if err != nil {
-		logger.L.LogError("failed to compile JSON schema", "error", err)
+		return nil, fmt.Errorf("schema_validation: compile schema: %w", err)
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Only validate for methods that typically have a body and if schema is available
-			if schema == nil || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch) {
+			// Only validate for methods that typically have a body
+			if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -84,7 +90,7 @@ func SchemaValidation(cfg SchemaValidationConfig) Middleware {
 
 			next.ServeHTTP(w, r)
 		})
-	}
+	}, nil
 }
 
 func jsonContentType(ct string) bool {

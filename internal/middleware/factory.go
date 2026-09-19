@@ -141,7 +141,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "threat_recognition":
 		return ThreatRecognition(routeID), nil
 	case "schema_validation":
-		return SchemaValidation(SchemaValidationConfig{Schema: cfg["schema"]}), nil
+		return SchemaValidation(SchemaValidationConfig{Schema: cfg["schema"]})
 	case "honeypot":
 		return Honeypot(parseHoneypotConfig(cfg)), nil
 	case "turnstile":
