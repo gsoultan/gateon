@@ -176,40 +176,26 @@ func (c powChallenge) verify(r *http.Request) bool {
 		hashHex == r.Header.Get(PowHeaderSolution)
 }
 
-// serve issues a challenge: headers plus a JSON body for XHR callers, or a
-// page whose script solves it for browsers.
-func (c powChallenge) serve(w http.ResponseWriter, r *http.Request) {
-	nonce := GenerateNonce()
-	salt := strconv.FormatInt(time.Now().UnixNano(), 36)
-	challengeID := c.id(time.Now().Unix(), r)
-	difficulty := c.difficulty
+// issuedChallenge is one challenge handed to one client: the id it must
+// answer, the salt and difficulty it is told, and the CSP nonce for the page
+// that solves it. Grouped so the two writers take a receiver rather than four
+// positional arguments of which three are strings.
+type issuedChallenge struct {
+	id         string
+	salt       string
+	difficulty int
+	nonce      string
+}
 
-	w.Header().Set(PowHeaderID, challengeID)
-	w.Header().Set(PowHeaderChallenge, salt)
-	w.Header().Set("X-Gateon-Pow-Difficulty", strconv.Itoa(difficulty))
-
-	// If it's an XHR/Fetch request, return 429 with headers.
-	if r.Header.Get("X-Requested-With") == "XMLHttpRequest" || strings.Contains(r.Header.Get("Accept"), "application/json") {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusTooManyRequests)
-		// #nosec G705 -- every interpolated value is a constrained alphabet, not
-		// free text: salt is base36 of UnixNano ([0-9a-z]), challengeID is
-		// unix-hex-hex ([0-9a-f-]) by construction in id, and difficulty is an
-		// int. None can carry a quote or an angle bracket.
-		fmt.Fprintf(w, `{"error":"proof_of_work_required","challenge_id":"%s","salt":"%s","difficulty":%d}`, challengeID, salt, difficulty)
-		return
-	}
-
-	// For standard browser requests, serve a simple HTML page that solves it via JS.
-	w.Header().Set("Content-Type", "text/html")
-	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", nonce))
-	w.WriteHeader(http.StatusTooManyRequests)
-	// #nosec G705 -- the three sinks in this page (CSP nonce attribute, JS
-	// string literal, body text) all receive constrained alphabets: nonce is
-	// standard base64, challengeID is [0-9a-f-] by construction, difficulty is
-	// an int. See id for why the fingerprint is hashed.
-	fmt.Fprintf(w, `
-<html>
+// powChallengePage is the browser fallback: a page whose script solves the
+// challenge and retries with the answer in headers.
+//
+// #nosec G705 -- its three sinks (the CSP nonce attribute, a JS string literal
+// and the body text) all receive constrained alphabets: nonce is standard
+// base64, id is [0-9a-f-] by construction in powChallenge.id, and difficulty
+// is an int. None can carry a quote or an angle bracket. See id for why the
+// client fingerprint is hashed before it reaches any of them.
+const powChallengePage = `<html>
 <head><title>Security Check - Gateon</title></head>
 <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f4f4f9;">
 	<div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 400px;">
@@ -249,5 +235,51 @@ func (c powChallenge) serve(w http.ResponseWriter, r *http.Request) {
 		<style>@keyframes spin { 0%% { transform: rotate(0deg); } 100%% { transform: rotate(360deg); } }</style>
 	</div>
 </body>
-</html>`, nonce, challengeID, difficulty)
+</html>`
+
+// wantsJSON reports whether the caller is an XHR or fetch rather than a
+// navigation, and so wants a machine-readable challenge.
+func wantsJSON(r *http.Request) bool {
+	return r.Header.Get("X-Requested-With") == "XMLHttpRequest" ||
+		strings.Contains(r.Header.Get(headerAccept), "application/json")
+}
+
+// writeJSON answers an XHR caller with the challenge as JSON.
+func (ch issuedChallenge) writeJSON(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	// #nosec G705 -- constrained alphabets only; see powChallengePage.
+	fmt.Fprintf(w, `{"error":"proof_of_work_required","challenge_id":"%s","salt":"%s","difficulty":%d}`,
+		ch.id, ch.salt, ch.difficulty)
+}
+
+// writePage answers a browser with the page that solves the challenge.
+func (ch issuedChallenge) writePage(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Security-Policy",
+		fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", ch.nonce))
+	w.WriteHeader(http.StatusTooManyRequests)
+	// #nosec G705 -- constrained alphabets only; see powChallengePage.
+	fmt.Fprintf(w, powChallengePage, ch.nonce, ch.id, ch.difficulty)
+}
+
+// serve issues a challenge: headers plus a JSON body for XHR callers, or a
+// page whose script solves it for browsers.
+func (c powChallenge) serve(w http.ResponseWriter, r *http.Request) {
+	ch := issuedChallenge{
+		id:         c.id(time.Now().Unix(), r),
+		salt:       strconv.FormatInt(time.Now().UnixNano(), 36),
+		difficulty: c.difficulty,
+		nonce:      GenerateNonce(),
+	}
+
+	w.Header().Set(PowHeaderID, ch.id)
+	w.Header().Set(PowHeaderChallenge, ch.salt)
+	w.Header().Set("X-Gateon-Pow-Difficulty", strconv.Itoa(ch.difficulty))
+
+	if wantsJSON(r) {
+		ch.writeJSON(w)
+		return
+	}
+	ch.writePage(w)
 }

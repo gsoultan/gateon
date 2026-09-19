@@ -14,6 +14,15 @@ import (
 const (
 	corsHeaderAllowOrigin    = "Access-Control-Allow-Origin"
 	corsHeaderRequestHeaders = "Access-Control-Request-Headers"
+
+	// headerAccept is named because rs/cors' own default allowlist, the
+	// presets and the display fallback all have to agree on it: a divergence
+	// between them is the bug this file was changed to stop.
+	headerAccept = "Accept"
+	// headerAuthorization is named for the same reason: it is both a CORS
+	// preset entry and the header the cache treats as "this reply belongs to
+	// one caller", and those two must not drift apart.
+	headerAuthorization = "Authorization"
 )
 
 func (f *Factory) createCORS(cfg map[string]string) (Middleware, error) {
@@ -117,7 +126,7 @@ func corsEffectivePolicy(cfg CORSConfig) CORSConfig {
 		cfg.AllowedMethods = []string{http.MethodGet, http.MethodPost, http.MethodHead}
 	}
 	if len(cfg.AllowedHeaders) == 0 {
-		cfg.AllowedHeaders = []string{"Accept", "Content-Type", "X-Requested-With"}
+		cfg.AllowedHeaders = []string{headerAccept, "Content-Type", "X-Requested-With"}
 	}
 	return cfg
 }

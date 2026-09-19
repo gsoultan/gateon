@@ -149,7 +149,7 @@ func GlobalCORS() Middleware {
 		ExposedHeaders: []string{
 			"Grpc-Status", "Grpc-Message", "Grpc-Encoding",
 			"Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding",
-			"X-Accept-Response-Streaming", "Authorization", "Content-Type",
+			"X-Accept-Response-Streaming", headerAuthorization, "Content-Type",
 		},
 		AllowCredentials: false,
 		MaxAge:           86400,

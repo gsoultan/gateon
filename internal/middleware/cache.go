@@ -120,7 +120,7 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 // a fragment: caching it would serve five bytes to a client that asked for the
 // whole resource.
 func cacheBypass(r *http.Request) bool {
-	return r.Header.Get("Authorization") != "" ||
+	return r.Header.Get(headerAuthorization) != "" ||
 		r.Header.Get("Proxy-Authorization") != "" ||
 		r.Header.Get("Cookie") != "" ||
 		r.Header.Get("Range") != ""

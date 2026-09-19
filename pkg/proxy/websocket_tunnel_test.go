@@ -86,6 +86,9 @@ func dialUpgrade(t *testing.T, gwURL string, extra http.Header) (net.Conn, *bufi
 	if err != nil {
 		t.Fatalf("read upgrade response: %v", err)
 	}
+	// A 101 has no body and the connection is deliberately kept for the
+	// tunnel, so this closes the Body only, not conn.
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("upgrade status = %d, want 101", resp.StatusCode)
 	}
