@@ -4,38 +4,40 @@
 import { Stack, TextInput, Group, NumberInput, Switch, TagsInput, Select } from "@mantine/core";
 import { KeyValueList } from "./KeyValueList";
 
+// Keyed the way the editor fields below and internal/middleware/cors_factory.go
+// read the config map; applying a preset spreads these straight into it.
 export const CORS_PRESETS: Record<string, Record<string, string>> = {
   permissive: {
-    allowedOrigins: "*",
-    allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
-    allowedHeaders: "*",
-    exposedHeaders: "*",
-    allowCredentials: "true",
-    maxAge: "86400",
+    allowed_origins: "*",
+    allowed_methods: "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
+    allowed_headers: "*",
+    exposed_headers: "*",
+    allow_credentials: "true",
+    max_age: "86400",
   },
   standard: {
-    allowedOrigins: "*",
-    allowedMethods: "GET, POST, OPTIONS",
-    allowedHeaders: "Content-Type, Authorization, Accept",
-    exposedHeaders: "Content-Length, Content-Type",
-    allowCredentials: "true",
-    maxAge: "3600",
+    allowed_origins: "*",
+    allowed_methods: "GET, POST, OPTIONS",
+    allowed_headers: "Content-Type, Authorization, Accept",
+    exposed_headers: "Content-Length, Content-Type",
+    allow_credentials: "true",
+    max_age: "3600",
   },
   "grpc-web": {
-    allowedOrigins: "*",
-    allowedMethods: "POST, OPTIONS",
-    allowedHeaders: "Content-Type, X-User-Agent, X-Grpc-Web, Grpc-Timeout",
-    exposedHeaders: "Grpc-Status, Grpc-Message, Grpc-Encoding, Grpc-Accept-Encoding, X-Grpc-Web, X-Accept-Content-Transfer-Encoding, X-Accept-Response-Streaming",
-    allowCredentials: "true",
-    maxAge: "86400",
+    allowed_origins: "*",
+    allowed_methods: "POST, OPTIONS",
+    allowed_headers: "Content-Type, X-User-Agent, X-Grpc-Web, Grpc-Timeout",
+    exposed_headers: "Grpc-Status, Grpc-Message, Grpc-Encoding, Grpc-Accept-Encoding, X-Grpc-Web, X-Accept-Content-Transfer-Encoding, X-Accept-Response-Streaming",
+    allow_credentials: "true",
+    max_age: "86400",
   },
   restricted: {
-    allowedOrigins: "",
-    allowedMethods: "GET",
-    allowedHeaders: "Accept",
-    exposedHeaders: "",
-    allowCredentials: "false",
-    maxAge: "600",
+    allowed_origins: "",
+    allowed_methods: "GET",
+    allowed_headers: "Accept",
+    exposed_headers: "",
+    allow_credentials: "false",
+    max_age: "600",
   },
 };
 
@@ -191,7 +193,9 @@ export function PrefixConfigEditor({ config, updateConfig }: Omit<EditorProps, '
 
 export function StripPrefixConfigEditor({ config, updateConfig }: Omit<EditorProps, 'onChange'>) {
   const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const joinTags = (tags: string[]) => tags.join(", ");
+  // No space after the comma: the gateway splits "prefixes" on "," without
+  // trimming, so " /v1" is a prefix no path ever starts with.
+  const joinTags = (tags: string[]) => tags.join(",");
 
   return (
     <TagsInput

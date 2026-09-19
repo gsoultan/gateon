@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Stack, Select, NumberInput } from "@mantine/core";
+import { Stack, Select, NumberInput, Text } from "@mantine/core";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -58,15 +58,10 @@ export function BufferingConfigEditor({ config, updateConfig }: EditorProps) {
         }
         min={0}
       />
-      <NumberInput
-        label="Max Response Body (Bytes)"
-        placeholder="1048576"
-        value={parseInt(config.maxResponseBodyBytes) || 1048576}
-        onChange={(val) =>
-          updateConfig("maxResponseBodyBytes", (val ?? 1048576).toString())
-        }
-        min={0}
-      />
+      <Text size="xs" c="dimmed">
+        This middleware buffers requests only. To cap a response, use the WAF
+        middleware's Response Body Limit.
+      </Text>
     </Stack>
   );
 }

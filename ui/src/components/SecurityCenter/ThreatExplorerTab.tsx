@@ -15,6 +15,7 @@ import {
   Button,
   Loader,
   Alert,
+  Modal,
   Tooltip,
   Center,
   Pagination,
@@ -43,6 +44,7 @@ import { useTableDensity } from "../../hooks/useTableDensity";
 import { SecurityAnomalyModal } from "../SecurityAnomalyModal";
 import { ManualMitigationModal } from "./ManualMitigationModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
+import { QueryError } from "../QueryError";
 import type { Anomaly } from "../../types/gateon";
 import { safeFormatDate } from "../../utils/format";
 import { getSeverityColor } from "../../utils/security";
@@ -75,6 +77,10 @@ export function ThreatExplorerTab() {
   const density = useTableDensity();
   const removeMitigation = useRemoveMitigation();
   const [unmitigating, setUnmitigating] = useState<string | null>(null);
+  // "Allow" re-admits a source the gateway had blocked. It used to fire on the
+  // click itself, with nothing between a misclick and an unblocked attacker;
+  // the same action in SecurityAnomalyModal has always confirmed first.
+  const [pendingAllow, setPendingAllow] = useState<Anomaly | null>(null);
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
   const [manualMitigationOpened, { open: openManualMitigation, close: closeManualMitigation }] = useDisclosure(false);
@@ -110,12 +116,11 @@ export function ThreatExplorerTab() {
     return <IconAlertTriangle size={16} />;
   };
 
-  const handleUnmitigate = async (e: React.MouseEvent, threat: Anomaly) => {
-    e.stopPropagation();
+  const handleUnmitigate = async (threat: Anomaly) => {
     const id = threat.source;
     setUnmitigating(id);
     try {
-      await removeMitigation.mutateAsync({ source: threat.source, ja4h: threat.ja4h });
+      await removeMitigation.mutateAsync({ source: threat.source, ja4plus: threat.ja4plus, ja4h: threat.ja4h });
       notifications.show({
         title: 'Mitigation Removed',
         message: `Mitigation for ${threat.source} has been removed.`,
@@ -242,7 +247,10 @@ export function ThreatExplorerTab() {
                 variant="subtle" 
                 color="red"
                 loading={unmitigating === threat.source}
-                onClick={(e) => handleUnmitigate(e, threat)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPendingAllow(threat);
+                }}
               >
                 Allow
               </Button>
@@ -254,11 +262,10 @@ export function ThreatExplorerTab() {
   };
 
   if (error) {
-    return (
-      <Alert color="red" title="Error" icon={<IconAlertTriangle />}>
-        Failed to load threats: {(error as Error).message}
-      </Alert>
-    );
+    // Through QueryError rather than `error.message` verbatim: the message is
+    // the server's error body, and a permission envelope or a stack trace is
+    // not something to put in front of the operator.
+    return <QueryError error={error} what="threats" onRetry={() => void refetch()} />;
   }
 
   return (
@@ -349,6 +356,38 @@ export function ThreatExplorerTab() {
         opened={manualMitigationOpened} 
         onClose={closeManualMitigation} 
       />
+
+      <Modal
+        opened={pendingAllow !== null}
+        onClose={() => setPendingAllow(null)}
+        title={<Text fw={700}>Allow this source again?</Text>}
+        centered
+        size="sm"
+      >
+        <Stack gap="md">
+          <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+            This removes the mitigation for <b>{pendingAllow?.source}</b>
+            {pendingAllow?.ja4plus ? ` (fingerprint ${pendingAllow.ja4plus})` : ""}. It will be able to
+            reach your services again.
+          </Alert>
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={() => setPendingAllow(null)}>
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              data-testid="confirm-allow"
+              onClick={() => {
+                const threat = pendingAllow;
+                setPendingAllow(null);
+                if (threat) void handleUnmitigate(threat);
+              }}
+            >
+              Allow {pendingAllow?.source}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <SecurityAnomalyModal
         anomaly={selectedAnomaly}

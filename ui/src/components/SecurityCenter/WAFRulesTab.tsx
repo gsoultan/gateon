@@ -79,10 +79,14 @@ export function WAFRulesTab() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this rule?')) {
+  // The confirmation names the rule. "Are you sure you want to delete this
+  // rule?" was the same question for every trash icon in the table, so a
+  // misclick on the wrong row read exactly like the right one.
+  const handleDelete = async (rule: WafRule) => {
+    const target = rule.name ? `"${rule.name}" (${rule.id})` : rule.id;
+    if (window.confirm(`Delete WAF rule ${target}? Requests it matches will no longer be blocked by it.`)) {
       try {
-        await deleteRule(id);
+        await deleteRule(rule.id);
         notifications.show({ title: 'Success', message: 'WAF Rule deleted successfully', color: 'green' });
       } catch (err: any) {
         notifications.show({ title: 'Error', message: err.message || 'Failed to delete rule', color: 'red' });
@@ -135,7 +139,7 @@ export function WAFRulesTab() {
           >
             <IconEdit size={16} />
           </ActionIcon>
-          <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(rule.id)} disabled={!canWrite}>
+          <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(rule)} disabled={!canWrite}>
             <IconTrash size={16} />
           </ActionIcon>
         </Group>

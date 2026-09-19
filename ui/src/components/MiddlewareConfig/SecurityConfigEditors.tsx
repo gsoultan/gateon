@@ -34,288 +34,257 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
 
   return (
     <Stack gap="md">
-      <Switch
-        label="Use OWASP CRS"
-        description="Enable OWASP Core Rule Set (recommended)"
-        checked={config.useCrs !== "false"}
-        onChange={(e) =>
-          updateConfig("useCrs", e.currentTarget.checked ? "true" : "false")
-        }
-      />
+      <Text size="xs" c="dimmed">
+        The OWASP Core Rule Set is switched on for the whole gateway in Settings
+        under Global WAF Settings; the controls below tune it for this route.
+      </Text>
 
-      {config.useCrs !== "false" && (
-        <>
-          <Divider label="Protection Categories" labelPosition="center" />
-          <Group grow>
-            <Stack gap="xs">
-              <Switch
-                label="SQL Injection"
-                description="Detects common SQL injection attacks"
-                checked={isEnabled("sqli")}
-                onChange={(e) => toggle("sqli", e.currentTarget.checked)}
-              />
-              <Switch
-                label="Cross-Site Scripting (XSS)"
-                description="Detects XSS injection attempts"
-                checked={isEnabled("xss")}
-                onChange={(e) => toggle("xss", e.currentTarget.checked)}
-              />
-              <Switch
-                label="Local/Remote File Inclusion"
-                description="Detects LFI/RFI attacks"
-                checked={isEnabled("lfi")}
-                onChange={(e) => toggle("lfi", e.currentTarget.checked)}
-              />
-              <Switch
-                label="Remote Code Execution"
-                description="Detects RCE and shell commands"
-                checked={isEnabled("rce")}
-                onChange={(e) => toggle("rce", e.currentTarget.checked)}
-              />
-            </Stack>
-            <Stack gap="xs">
-              <Switch
-                label="Scanner Detection"
-                description="Blocks known vulnerability scanners"
-                checked={isEnabled("scanner")}
-                onChange={(e) => toggle("scanner", e.currentTarget.checked)}
-              />
-              <Switch
-                label="Protocol Enforcement"
-                description="Enforces strict HTTP protocol compliance"
-                checked={isEnabled("protocol")}
-                onChange={(e) => toggle("protocol", e.currentTarget.checked)}
-              />
-              <Switch
-                label="PHP Injection"
-                description="Detects PHP-specific injection attacks"
-                checked={isEnabled("php")}
-                onChange={(e) => toggle("php", e.currentTarget.checked)}
-              />
-              <Switch
-                label="NodeJS Attacks"
-                description="Detects NodeJS-specific injection attacks"
-                checked={isEnabled("nodejs")}
-                onChange={(e) => toggle("nodejs", e.currentTarget.checked)}
-              />
-              <Switch
-                label="Java Injection"
-                description="Detects Java-specific injection attacks"
-                checked={isEnabled("java")}
-                onChange={(e) => toggle("java", e.currentTarget.checked)}
-              />
-              <Switch
-                label="WordPress Protection"
-                description="Detects WP-specific attacks and probes"
-                checked={isEnabled("wordpress")}
-                onChange={(e) => toggle("wordpress", e.currentTarget.checked)}
-              />
-            </Stack>
-          </Group>
-
-          <Divider label="Advanced Protections" labelPosition="center" />
-          <Group grow align="start">
-            <Stack gap="xs">
-              <Switch
-                label="IP Reputation"
-                description="Block requests from known malicious IPs"
-                checked={config.ip_reputation === "true"}
-                onChange={(e) => updateConfig("ip_reputation", e.currentTarget.checked ? "true" : "false")}
-              />
-              <Switch
-                label="DOS Protection"
-                description="Basic HTTP-level DOS protection rules"
-                checked={config.dos_protection === "true"}
-                onChange={(e) => updateConfig("dos_protection", e.currentTarget.checked ? "true" : "false")}
-              />
-              <Switch
-                label="Malware Detection"
-                description="Detect common malware and web shell patterns"
-                checked={config.malware_detection === "true"}
-                onChange={(e) => updateConfig("malware_detection", e.currentTarget.checked ? "true" : "false")}
-              />
-              <Switch
-                label="Ransomware Detection"
-                description="Detect ransomware file extension uploads"
-                checked={config.ransomware_detection === "true"}
-                onChange={(e) => updateConfig("ransomware_detection", e.currentTarget.checked ? "true" : "false")}
-              />
-            </Stack>
-            <Stack gap="xs">
-              <Switch
-                label="Data Loss Prevention (DLP)"
-                description="Detect card numbers, credentials and stack traces leaking in responses"
-                checked={config.dlp === "true"}
-                onChange={(e) => updateConfig("dlp", e.currentTarget.checked ? "true" : "false")}
-              />
-              {config.dlp === "true" && (
-                <Select
-                  label="When a leak is found"
-                  description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known."
-                  data={[
-                    { value: "block", label: "Block — refuse the whole response (default)" },
-                    { value: "redact", label: "Redact — remove the finding, send the rest" },
-                    { value: "audit", label: "Audit — record it, send the response untouched" },
-                  ]}
-                  value={config.dlp_action || "block"}
-                  onChange={(value) => updateConfig("dlp_action", value || "block")}
-                  allowDeselect={false}
-                />
-              )}
-              <Switch
-                label="Behavioral Profiling"
-                description="Detect robotic patterns and path jumping"
-                checked={config.behavioralProfiling === "true"}
-                onChange={(e) => updateConfig("behavioralProfiling", e.currentTarget.checked ? "true" : "false")}
-              />
-              <Switch
-                label="Impossible Travel"
-                description="Detect logins from geographically impossible distances"
-                checked={config.impossibleTravel === "true"}
-                onChange={(e) => updateConfig("impossibleTravel", e.currentTarget.checked ? "true" : "false")}
-              />
-              <Switch
-                label="Device Posture Check"
-                description="Alert on fingerprint changes for same session"
-                checked={config.devicePosture === "true"}
-                onChange={(e) => updateConfig("devicePosture", e.currentTarget.checked ? "true" : "false")}
-              />
-            </Stack>
-          </Group>
-
-          <Divider label="Fast-Path Entropy" labelPosition="center" />
-          <Group grow align="start">
-            <Stack gap="xs">
-              <Switch
-                label="Enable Entropy Check"
-                description="Fast-path detection of obfuscated payloads (shellcode/malware)"
-                checked={config.disable_entropy !== "true"}
-                onChange={(e) =>
-                  updateConfig(
-                    "disable_entropy",
-                    e.currentTarget.checked ? "false" : "true"
-                  )
-                }
-              />
-            </Stack>
-            <Stack gap="xs">
-              <NumberInput
-                label="Entropy Threshold"
-                description="Threshold for entropy check (0.0-8.0). Default: 5.8"
-                decimalScale={1}
-                step={0.1}
-                value={parseFloat(config.entropy_threshold) || 5.8}
-                onChange={(val) =>
-                  updateConfig("entropy_threshold", (val ?? 5.8).toString())
-                }
-                min={0}
-                max={8}
-                disabled={config.disable_entropy === "true"}
-              />
-            </Stack>
-          </Group>
-
-          <Divider label="CRS Settings" labelPosition="center" />
-          <Group grow>
-            <NumberInput
-              label="Paranoia Level"
-              description="CRS paranoia 1-4. Higher = stricter."
-              value={parseInt(config.paranoia_level) || 1}
-              onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
-              min={1}
-              max={4}
-            />
-            <NumberInput
-              label="Anomaly Threshold"
-              description="Score required to block. Default: 5"
-              value={parseInt(config.anomaly_threshold) || 5}
-              onChange={(val) => updateConfig("anomaly_threshold", (val ?? 5).toString())}
-              min={1}
-            />
-          </Group>
-
-          <Divider label="Application Tuning" labelPosition="center" />
-          {/*
-            These two keys are written snake_case because that is what the
-            gateway reads (internal/middleware/waf.go parses cfg["app_profiles"]
-            and cfg["ssrf_protection"]), and it is what persisted route configs
-            already use. Several older controls in this editor write camelCase
-            for multi-word keys and therefore never reach the parser; do not copy
-            that pattern here.
-          */}
-          <MultiSelect
-            label="Platform Profiles"
-            description="Platforms behind this route. Each suppresses the false positives that platform
-              generates against itself, scoped to a named rule on a named path and field. Nothing is
-              disabled globally."
-            placeholder={config.app_profiles ? undefined : "None — the default ruleset, untuned"}
-            data={WAF_APP_PROFILES}
-            value={config.app_profiles ? config.app_profiles.split(",").filter(Boolean) : []}
-            onChange={(v) => updateConfig("app_profiles", v.join(","))}
-            clearable
-            searchable
+      <Divider label="Protection Categories" labelPosition="center" />
+      <Group grow>
+        <Stack gap="xs">
+          <Switch
+            label="SQL Injection"
+            description="Detects common SQL injection attacks"
+            checked={isEnabled("sqli")}
+            onChange={(e) => toggle("sqli", e.currentTarget.checked)}
           />
           <Switch
-            label="SSRF Parameter Protection"
-            description="Block an off-origin URL in a parameter the server fetches (url, webhook, feed).
-              Leave off if this route accepts user-supplied URLs by design — registering a webhook is the
-              same request shape as the attack. Off-origin user redirects are always blocked regardless."
-            checked={config.ssrf_protection === "true"}
-            onChange={(e) => updateConfig("ssrf_protection", e.currentTarget.checked ? "true" : "false")}
+            label="Cross-Site Scripting (XSS)"
+            description="Detects XSS injection attempts"
+            checked={isEnabled("xss")}
+            onChange={(e) => toggle("xss", e.currentTarget.checked)}
           />
+          <Switch
+            label="Local/Remote File Inclusion"
+            description="Detects LFI/RFI attacks"
+            checked={isEnabled("lfi")}
+            onChange={(e) => toggle("lfi", e.currentTarget.checked)}
+          />
+          <Switch
+            label="Remote Code Execution"
+            description="Detects RCE and shell commands"
+            checked={isEnabled("rce")}
+            onChange={(e) => toggle("rce", e.currentTarget.checked)}
+          />
+        </Stack>
+        <Stack gap="xs">
+          <Switch
+            label="Scanner Detection"
+            description="Blocks known vulnerability scanners"
+            checked={isEnabled("scanner")}
+            onChange={(e) => toggle("scanner", e.currentTarget.checked)}
+          />
+          <Switch
+            label="Protocol Enforcement"
+            description="Enforces strict HTTP protocol compliance"
+            checked={isEnabled("protocol")}
+            onChange={(e) => toggle("protocol", e.currentTarget.checked)}
+          />
+          <Switch
+            label="PHP Injection"
+            description="Detects PHP-specific injection attacks"
+            checked={isEnabled("php")}
+            onChange={(e) => toggle("php", e.currentTarget.checked)}
+          />
+          <Switch
+            label="NodeJS Attacks"
+            description="Detects NodeJS-specific injection attacks"
+            checked={isEnabled("nodejs")}
+            onChange={(e) => toggle("nodejs", e.currentTarget.checked)}
+          />
+          <Switch
+            label="Java Injection"
+            description="Detects Java-specific injection attacks"
+            checked={isEnabled("java")}
+            onChange={(e) => toggle("java", e.currentTarget.checked)}
+          />
+          <Switch
+            label="WordPress Protection"
+            description="Detects WP-specific attacks and probes"
+            checked={isEnabled("wordpress")}
+            onChange={(e) => toggle("wordpress", e.currentTarget.checked)}
+          />
+        </Stack>
+      </Group>
 
-          <Divider label="Body Limits" labelPosition="center" />
-          <Group grow>
-            <NumberInput
-              label="Request Body Limit"
-              description="Max request body size in bytes. 0 = unlimited."
-              value={parseInt(config.request_body_limit) || 0}
-              onChange={(val) => updateConfig("request_body_limit", (val ?? 0).toString())}
-              min={0}
+      <Divider label="Advanced Protections" labelPosition="center" />
+      <Group grow align="start">
+        <Stack gap="xs">
+          <Switch
+            label="IP Reputation"
+            description="Block requests from known malicious IPs"
+            checked={config.ip_reputation === "true"}
+            onChange={(e) => updateConfig("ip_reputation", e.currentTarget.checked ? "true" : "false")}
+          />
+          <Switch
+            label="DOS Protection"
+            description="Basic HTTP-level DOS protection rules"
+            checked={config.dos_protection === "true"}
+            onChange={(e) => updateConfig("dos_protection", e.currentTarget.checked ? "true" : "false")}
+          />
+          <Switch
+            label="Malware Detection"
+            description="Detect common malware and web shell patterns"
+            checked={config.malware_detection === "true"}
+            onChange={(e) => updateConfig("malware_detection", e.currentTarget.checked ? "true" : "false")}
+          />
+          <Switch
+            label="Ransomware Detection"
+            description="Detect ransomware file extension uploads"
+            checked={config.ransomware_detection === "true"}
+            onChange={(e) => updateConfig("ransomware_detection", e.currentTarget.checked ? "true" : "false")}
+          />
+        </Stack>
+        <Stack gap="xs">
+          <Switch
+            label="Data Loss Prevention (DLP)"
+            description="Detect card numbers, credentials and stack traces leaking in responses"
+            checked={config.dlp === "true"}
+            onChange={(e) => updateConfig("dlp", e.currentTarget.checked ? "true" : "false")}
+          />
+          {config.dlp === "true" && (
+            <Select
+              label="When a leak is found"
+              description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known."
+              data={[
+                { value: "block", label: "Block — refuse the whole response (default)" },
+                { value: "redact", label: "Redact — remove the finding, send the rest" },
+                { value: "audit", label: "Audit — record it, send the response untouched" },
+              ]}
+              value={config.dlp_action || "block"}
+              onChange={(value) => updateConfig("dlp_action", value || "block")}
+              allowDeselect={false}
             />
-            <NumberInput
-              label="Response Body Limit"
-              description="Max response body size in bytes. 0 = unlimited."
-              value={parseInt(config.response_body_limit) || 0}
-              onChange={(val) => updateConfig("response_body_limit", (val ?? 0).toString())}
-              min={0}
-            />
-          </Group>
+          )}
+          <Text size="xs" c="dimmed">
+            Behavioral profiling and impossible-travel detection run for the whole
+            gateway and are configured in Settings under Advanced Security.
+          </Text>
+        </Stack>
+      </Group>
 
-          <Divider label="Audit Logging" labelPosition="center" />
-          <Stack gap="xs">
-            <TextInput
-              label="Audit Log Path (optional)"
-              description="Leave blank — Gateon automatically creates the folder and file and writes WAF audit events there. Only set this to override the default location."
-              placeholder="Auto: <data-dir>/audit/waf/<route>_audit.log"
-              value={config.audit_log_path || ""}
-              onChange={(e) => updateConfig("audit_log_path", e.currentTarget.value)}
-            />
-            <Text size="xs" c="dimmed">
-              {config.audit_log_path
-                ? `Gateon will create this file and its parent folder if they don't exist.`
-                : `Default location: the Gateon data directory under audit/waf/. The folder and log file are created for you on save.`}
-            </Text>
-            <Switch
-              label="Relevant Only"
-              description="Only log 'relevant' events (e.g. those that triggered a rule)"
-              checked={config.audit_log_relevant_only === "true"}
-              onChange={(e) => updateConfig("audit_log_relevant_only", e.currentTarget.checked ? "true" : "false")}
-            />
-          </Stack>
-        </>
-      )}
+      <Divider label="Fast-Path Entropy" labelPosition="center" />
+      <Group grow align="start">
+        <Stack gap="xs">
+          <Switch
+            label="Enable Entropy Check"
+            description="Fast-path detection of obfuscated payloads (shellcode/malware)"
+            checked={config.disable_entropy !== "true"}
+            onChange={(e) =>
+              updateConfig(
+                "disable_entropy",
+                e.currentTarget.checked ? "false" : "true"
+              )
+            }
+          />
+        </Stack>
+        <Stack gap="xs">
+          <NumberInput
+            label="Entropy Threshold"
+            description="Threshold for entropy check (0.0-8.0). Default: 5.8"
+            decimalScale={1}
+            step={0.1}
+            value={parseFloat(config.entropy_threshold) || 5.8}
+            onChange={(val) =>
+              updateConfig("entropy_threshold", (val ?? 5.8).toString())
+            }
+            min={0}
+            max={8}
+            disabled={config.disable_entropy === "true"}
+          />
+        </Stack>
+      </Group>
+
+      <Divider label="CRS Settings" labelPosition="center" />
+      <Group grow>
+        <NumberInput
+          label="Paranoia Level"
+          description="CRS paranoia 1-4. Higher = stricter."
+          value={parseInt(config.paranoia_level) || 1}
+          onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
+          min={1}
+          max={4}
+        />
+        <NumberInput
+          label="Anomaly Threshold"
+          description="Score required to block. Default: 5"
+          value={parseInt(config.anomaly_threshold) || 5}
+          onChange={(val) => updateConfig("anomaly_threshold", (val ?? 5).toString())}
+          min={1}
+        />
+      </Group>
+
+      <Divider label="Application Tuning" labelPosition="center" />
+      {/*
+        These two keys are written snake_case because that is what the
+        gateway reads (internal/middleware/waf.go parses cfg["app_profiles"]
+        and cfg["ssrf_protection"]), and it is what persisted route configs
+        already use. Several older controls in this editor write camelCase
+        for multi-word keys and therefore never reach the parser; do not copy
+        that pattern here.
+      */}
+      <MultiSelect
+        label="Platform Profiles"
+        description="Platforms behind this route. Each suppresses the false positives that platform
+          generates against itself, scoped to a named rule on a named path and field. Nothing is
+          disabled globally."
+        placeholder={config.app_profiles ? undefined : "None — the default ruleset, untuned"}
+        data={WAF_APP_PROFILES}
+        value={config.app_profiles ? config.app_profiles.split(",").filter(Boolean) : []}
+        onChange={(v) => updateConfig("app_profiles", v.join(","))}
+        clearable
+        searchable
+      />
+      <Switch
+        label="SSRF Parameter Protection"
+        description="Block an off-origin URL in a parameter the server fetches (url, webhook, feed).
+          Leave off if this route accepts user-supplied URLs by design — registering a webhook is the
+          same request shape as the attack. Off-origin user redirects are always blocked regardless."
+        checked={config.ssrf_protection === "true"}
+        onChange={(e) => updateConfig("ssrf_protection", e.currentTarget.checked ? "true" : "false")}
+      />
+
+      <Divider label="Body Limits" labelPosition="center" />
+      <Group grow>
+        <NumberInput
+          label="Request Body Limit"
+          description="Max request body size in bytes. 0 = unlimited."
+          value={parseInt(config.request_body_limit) || 0}
+          onChange={(val) => updateConfig("request_body_limit", (val ?? 0).toString())}
+          min={0}
+        />
+        <NumberInput
+          label="Response Body Limit"
+          description="Max response body size in bytes. 0 = unlimited."
+          value={parseInt(config.response_body_limit) || 0}
+          onChange={(val) => updateConfig("response_body_limit", (val ?? 0).toString())}
+          min={0}
+        />
+      </Group>
+
+      <Divider label="Audit Logging" labelPosition="center" />
+      <Stack gap="xs">
+        <TextInput
+          label="Audit Log Path (optional)"
+          description="Leave blank — Gateon automatically creates the folder and file and writes WAF audit events there. Only set this to override the default location."
+          placeholder="Auto: <data-dir>/audit/waf/<route>_audit.log"
+          value={config.audit_log_path || ""}
+          onChange={(e) => updateConfig("audit_log_path", e.currentTarget.value)}
+        />
+        <Text size="xs" c="dimmed">
+          {config.audit_log_path
+            ? `Gateon will create this file and its parent folder if they don't exist.`
+            : `Default location: the Gateon data directory under audit/waf/. The folder and log file are created for you on save.`}
+        </Text>
+        <Switch
+          label="Relevant Only"
+          description="Only log 'relevant' events (e.g. those that triggered a rule)"
+          checked={config.audit_log_relevant_only === "true"}
+          onChange={(e) => updateConfig("audit_log_relevant_only", e.currentTarget.checked ? "true" : "false")}
+        />
+      </Stack>
 
       <Divider label="Advanced" labelPosition="center" />
-      <Textarea
-        label="Custom Directives"
-        description="Coraza/ModSecurity compatible SecLang rules (advanced)"
-        placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
-        value={config.directives || ""}
-        onChange={(e) => updateConfig("directives", e.currentTarget.value)}
-        minRows={4}
-        autosize
-      />
       <Switch
         label="Trust Cloudflare Headers"
         description="Use CF-Connecting-IP for WAF REMOTE_ADDR"
@@ -382,14 +351,14 @@ export function BotManagementConfigEditor({ config, updateConfig }: EditorProps)
       <Switch
         label="Browser Integrity Check"
         description="Verify request is from a legitimate browser using Sec-Fetch-* headers"
-        checked={isEnabled("enableBrowserIntegrity")}
-        onChange={(e) => toggle("enableBrowserIntegrity", e.currentTarget.checked)}
+        checked={isEnabled("enable_browser_integrity")}
+        onChange={(e) => toggle("enable_browser_integrity", e.currentTarget.checked)}
       />
       <Switch
         label="JS Challenge"
         description="Serve a non-interactive JS challenge to verify browser capability"
-        checked={isEnabled("enableJsChallenge")}
-        onChange={(e) => toggle("enableJsChallenge", e.currentTarget.checked)}
+        checked={isEnabled("enable_js_challenge")}
+        onChange={(e) => toggle("enable_js_challenge", e.currentTarget.checked)}
       />
       <NumberInput
         label="Challenge Timeout"
@@ -727,8 +696,11 @@ export function PolicyConfigEditor({ config, onChange }: { config: Record<string
     const id = Date.now();
     onChange({
       ...config,
-      [`ruleNewRule_${id}`]: "true",
-      [`messageNewRule_${id}`]: "",
+      // The list above and internal/middleware/policy_factory.go both select
+      // rules by the "rule_" prefix; a key that only starts with "rule" is
+      // invisible to both.
+      [`rule_new_rule_${id}`]: "true",
+      [`message_new_rule_${id}`]: "",
     });
   };
 
@@ -800,10 +772,10 @@ export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) 
       <Switch
         label="Enable ClamAV Scanning"
         description="Stream file uploads to ClamAV for virus detection"
-        checked={isEnabled("enableClamav")}
-        onChange={(e) => toggle("enableClamav", e.currentTarget.checked)}
+        checked={isEnabled("enable_clamav")}
+        onChange={(e) => toggle("enable_clamav", e.currentTarget.checked)}
       />
-      {isEnabled("enableClamav") && (
+      {isEnabled("enable_clamav") && (
         <TextInput
           label="ClamAV Address"
           description="TCP or Unix socket address (e.g. tcp://localhost:3310)"
@@ -836,12 +808,11 @@ export function FileSecurityConfigEditor({ config, updateConfig }: EditorProps) 
         onChange={(val) => updateConfig("max_file_size", (val ?? 0).toString())}
         min={0}
       />
-      <Switch
-        label="Strict Magic Number Check"
-        description="Verify that file extension matches its magic number/content"
-        checked={config.strictMagic !== "false"}
-        onChange={(e) => updateConfig("strictMagic", e.currentTarget.checked ? "true" : "false")}
-      />
+      <Text size="xs" c="dimmed">
+        Every upload is checked for an extension that disagrees with its magic
+        number, and for executable content hidden inside a benign file type. Both
+        checks are always on and cannot be turned off.
+      </Text>
     </Stack>
   );
 }
