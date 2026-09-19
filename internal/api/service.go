@@ -12,7 +12,11 @@ import (
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/domain/entrypoint"
+	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
+	"github.com/gsoultan/gateon/internal/domain/route"
+	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -49,6 +53,11 @@ type ApiService struct {
 	WafExceptions      *waf.ExceptionStore
 	PhantomCore        phantom.PhantomCore
 	Governor           *resource.Governor
+
+	// MiddlewareValidator proves a middleware's config can be built before it is
+	// persisted -- the middleware factory, in production. Nil skips the check,
+	// exactly as the domain service does when constructed without one.
+	MiddlewareValidator dmw.ConfigValidator
 
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
@@ -101,7 +110,7 @@ func (s *ApiService) Close() error {
 
 func (s *ApiService) logAudit(ctx context.Context, action, resource, details string) {
 	userID := "system"
-	if claims, ok := ctx.Value(middleware.UserContextKey).(*auth.Claims); ok && claims != nil {
+	if claims, _ := callerClaims(ctx); claims != nil {
 		userID = claims.ID
 	}
 
@@ -276,6 +285,8 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		WafExceptions:      cfg.WafExceptions,
 		PhantomCore:        cfg.PhantomCore,
 		Governor:           cfg.Governor,
+
+		MiddlewareValidator: cfg.MiddlewareValidator,
 	}
 
 	if cfg.IPReputation != nil {
@@ -288,4 +299,83 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 	}
 
 	return s
+}
+
+// The Connect and gRPC transports change configuration through the same domain
+// services the REST handlers use, built here over the stores this struct
+// already holds.
+//
+// They used to write to the stores directly and carry their own copy of the
+// rules, and the copy was always behind. A route saved here needed no service
+// and no rule; an entrypoint needed no address; a middleware was persisted
+// without the factory ever proving it could be built; deleting one left every
+// route still naming it -- an id the router silently skips, so a route given a
+// WAF or an auth middleware ran without it while the RPC reported success; and
+// deleting a service invalidated nothing, because the predicate looked for an
+// id that had just been cleared. The same shape as the authorization gap these
+// transports once had: one operation, two implementations, one maintained.
+//
+// Built per call rather than injected: the services are stateless wrappers over
+// the stores, and constructing them here means a bare ApiService literal --
+// which is how the tests build one -- gets the rules too, instead of a fallback
+// that skips them.
+
+func (s *ApiService) routeService() route.Service {
+	return route.NewService(s.Routes, s.invalidator(), logger.Default())
+}
+
+func (s *ApiService) serviceService() service.Service {
+	return service.NewService(s.Services, s.Routes, s.invalidator(), logger.Default())
+}
+
+func (s *ApiService) entryPointService() entrypoint.Service {
+	return entrypoint.NewService(s.EntryPoints, s.invalidator(), logger.Default())
+}
+
+func (s *ApiService) middlewareService() dmw.Service {
+	return dmw.NewService(s.Middlewares, s.Routes, s.invalidator(), s.MiddlewareValidator,
+		middleware.WAFCacheInvalidator{}, logger.Default())
+}
+
+// invalidator is the proxy invalidator, or one that does nothing when the
+// service was built without one. The domain services require one; whether an
+// RPC proceeds at all is decided by the store guards on each method.
+func (s *ApiService) invalidator() proxy.Invalidator {
+	if s.Invalidator != nil {
+		return s.Invalidator
+	}
+	return unwiredInvalidator{}
+}
+
+type unwiredInvalidator struct{}
+
+func (unwiredInvalidator) InvalidateRoute(string)                      {}
+func (unwiredInvalidator) InvalidateRoutes(func(*gateonv1.Route) bool) {}
+func (unwiredInvalidator) InvalidateTLS()                              {}
+func (unwiredInvalidator) InvalidateWAF()                              {}
+
+// callerClaims resolves the caller's verified claims from the request context.
+//
+// present is false only when there is no claims value at all, which means the
+// authenticating middleware never ran; callerMayWrite and
+// handlers.RequirePermission both read that as "auth is disabled" and permit.
+// present true with claims nil means a value was there and could not be read
+// as *auth.Claims -- that establishes nothing about who is calling, so every
+// caller must refuse rather than continue.
+//
+// It exists so the raw context key is read in one place. InjectContext takes
+// `claims any` and stores whatever it is handed, and the JWT middleware hands
+// it jwt.MapClaims, so an unreadable value is reachable by construction. A
+// handler that cannot touch the raw value cannot mis-assert it; this is the
+// same rule rbac.go's callerClaims enforces for internal/server/handlers.
+func callerClaims(ctx context.Context) (claims *auth.Claims, present bool) {
+	v := ctx.Value(middleware.UserContextKey)
+	if v == nil {
+		return nil, false
+	}
+	c, ok := v.(*auth.Claims)
+	if !ok {
+		return nil, true
+	}
+	return c, true
 }

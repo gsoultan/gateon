@@ -392,16 +392,25 @@ note "9/9  handlers resolve the caller in one place"
 # Checked by constraining where the caller is *read*, not by trying to recognise
 # a safe assertion. rbac.go owns the key; callerClaims and auditUser are the way
 # in. A handler that cannot reach the raw value cannot mis-assert it.
-claims_hits=$( (find internal/server/handlers -name '*.go' -not -name '*_test.go' -print0 |
+# internal/api is covered too, and was added after the grep above missed a live
+# instance of the very bug it describes: ChangePassword there read the key with
+# a discarded ok and tested `claims != nil && ...`, so a claims value that could
+# not be asserted skipped the self-or-admin check and changed any account's
+# password -- while requireAdmin in the same file denied on that condition. The
+# two planes make the same authorization decisions, so they need the same rule;
+# service.go owns the key here, as rbac.go does for handlers.
+claims_hits=$( (find internal/server/handlers internal/api -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -n 'middleware\.UserContextKey' 2>/dev/null |
 	drop_comment_hits |
-	grep -vE '^internal/server/handlers/rbac\.go:') || true)
+	grep -vE '^internal/server/handlers/rbac\.go:' |
+	grep -vE '^internal/api/service\.go:') || true)
 
 if [ -n "$claims_hits" ]; then
 	err "a handler read middleware.UserContextKey directly"
 	printf '%s\n' "$claims_hits"
-	printf '  Use callerClaims(r) for an authorization decision, or auditUser(r)\n'
-	printf '  for an audit entry. Both live in rbac.go, which owns this key.\n'
+	printf '  Use callerClaims for an authorization decision, or auditUser(r) for\n'
+	printf '  an audit entry: rbac.go owns this key for handlers, service.go for\n'
+	printf '  internal/api.\n'
 	printf '  A direct read invites `if claims, ok := v.(*auth.Claims); ok {...}`,\n'
 	printf '  which silently skips the check it guards when the value is not the\n'
 	printf '  type expected -- and continues to the privileged operation.\n'

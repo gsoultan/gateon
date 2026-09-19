@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/gsoultan/gateon/internal/auth"
-	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security/secretmask"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
@@ -61,12 +60,11 @@ func maskMiddlewares(ctx context.Context, mws []*gateonv1.Middleware) []*gateonv
 // canWriteMiddlewares reports whether the caller could set these values anyway,
 // in which case showing them reveals nothing they do not already control.
 func canWriteMiddlewares(ctx context.Context) bool {
-	claimsVal := ctx.Value(middleware.UserContextKey)
-	if claimsVal == nil {
+	claims, present := callerClaims(ctx)
+	if !present {
 		return true // auth disabled, as elsewhere
 	}
-	claims, ok := claimsVal.(*auth.Claims)
-	if !ok || claims == nil {
+	if claims == nil {
 		return false
 	}
 	return auth.Allowed(ctx, claims.Role, auth.ActionWrite, auth.ResourceMiddlewares)
@@ -84,39 +82,30 @@ func (s *ApiService) UpdateMiddleware(ctx context.Context, req *gateonv1.UpdateM
 			req.Middleware.Config = secretmask.Preserve(req.Middleware.Config, prev.Config)
 		}
 	}
-	if err := s.Middlewares.Update(ctx, req.Middleware); err != nil {
+	// Through the domain service, as the REST handler: the factory proves the
+	// config can be built before anything is written, an id is assigned, and a
+	// WAF policy drops the WAF cache. Written to the store directly, a config
+	// the factory cannot build was persisted and never failed -- the router
+	// skips a middleware whose Create fails, so the route ran without it. See
+	// domain_services.go.
+	if err := s.middlewareService().SaveMiddleware(ctx, req.Middleware); err != nil {
 		return &gateonv1.UpdateMiddlewareResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
-			for _, mID := range r.Middlewares {
-				if mID == req.Middleware.Id {
-					return true
-				}
-			}
-			return false
-		})
 	}
 	s.logAudit(ctx, "update", "middleware", fmt.Sprintf("Updated middleware %s", req.Middleware.Id))
 	return &gateonv1.UpdateMiddlewareResponse{Success: true}, nil
 }
 
 func (s *ApiService) DeleteMiddleware(ctx context.Context, req *gateonv1.DeleteMiddlewareRequest) (*gateonv1.DeleteMiddlewareResponse, error) {
-	if s.Middlewares == nil || req == nil || req.Id == "" {
+	if s.Middlewares == nil || s.Routes == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteMiddlewareResponse{Success: false}, nil
 	}
-	if err := s.Middlewares.Delete(ctx, req.Id); err != nil {
+	// Through the domain service, as the REST handler: it unlinks the middleware
+	// from every route naming it and refuses to delete while one still does.
+	// Deleting the record directly left those routes pointing at an id the
+	// router silently skips -- a route given a WAF or an auth middleware lost it
+	// and the RPC reported success.
+	if err := s.middlewareService().DeleteMiddleware(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteMiddlewareResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
-			for _, mID := range r.Middlewares {
-				if mID == req.Id {
-					return true
-				}
-			}
-			return false
-		})
 	}
 	s.logAudit(ctx, "delete", "middleware", fmt.Sprintf("Deleted middleware %s", req.Id))
 	return &gateonv1.DeleteMiddlewareResponse{Success: true}, nil

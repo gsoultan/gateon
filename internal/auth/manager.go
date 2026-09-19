@@ -505,6 +505,17 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 		return false, "", nil, err
 	}
 
+	// An account that never enrolled has no secret, and the column defaults to
+	// "" rather than NULL. totp.Validate does not refuse an empty secret: it
+	// base32-decodes "" to an empty HMAC key and accepts the six-digit code
+	// derived from it, which is the same code for every unenrolled account. So
+	// the absence of a secret has to be refused here, before the library sees
+	// it, or this path mints a session for any account by id with no password.
+	if plainSecret == "" {
+		m.handleFailedLogin(user.Username, failedAttempts)
+		return false, "", nil, ErrInvalidTwoFactorCode
+	}
+
 	// Recovery codes are only valid once 2FA is fully enabled, never during the
 	// enrollment verification step.
 	if user.TwoFactorEnabled && recoveryCodes != "" {

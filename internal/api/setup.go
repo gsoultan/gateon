@@ -23,23 +23,17 @@ func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupReq
 		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
 	}
 
-	// Setup is required if:
-	// 1. No users exist in the database.
-	// 2. OR Paseto Secret is still the default one.
-
-	setupDone := s.Auth.IsSetupDone()
-
-	pasetoSecret := ""
-	if s.Globals != nil {
-		conf := s.Globals.Get(ctx)
-		if conf != nil && conf.Auth != nil {
-			pasetoSecret = conf.Auth.PasetoSecret
-		}
-	}
-
-	required := !setupDone || pasetoSecret == ""
-
-	return &gateonv1.IsSetupRequiredResponse{Required: required}, nil
+	// Setup is required only while no administrator exists.
+	//
+	// An empty PASETO secret used to count as well ("still the default one").
+	// It never described a real first run: the bootstrap generates a random key
+	// whenever the stored one is empty, so the only way a running gateway
+	// reached that state was a global-config write that left the field blank.
+	// Treating that as "setup required" reopened Setup -- public, served before
+	// authentication -- on a configured gateway, and Setup reuses the id of an
+	// existing administrator with the requested username and overwrites their
+	// password. That turned a global-config write into an administrator account.
+	return &gateonv1.IsSetupRequiredResponse{Required: !s.Auth.IsSetupDone()}, nil
 }
 
 func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error) {
