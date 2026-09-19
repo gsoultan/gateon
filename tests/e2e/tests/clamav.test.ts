@@ -33,6 +33,15 @@ async function confirmUninstall(page: Page) {
   const dialog = page.getByRole('dialog').filter({ hasText: 'Uninstall ClamAV?' });
   await expect(dialog).toBeVisible({ timeout: 10000 });
   await dialog.getByRole('button', { name: 'Uninstall ClamAV' }).click();
+  await expect(dialog).toBeHidden({ timeout: 10000 });
+}
+
+// sudoPrompt is the password dialog, located by its own heading. The confirm
+// button on it reads "Uninstall" for a removal and "Confirm" otherwise, and
+// the confirmation dialog in front of it also carries "Uninstall" -- so a
+// locator scoped to "any dialog" matches two buttons and Playwright refuses.
+function sudoPrompt(page: Page) {
+  return page.getByRole('dialog').filter({ hasText: 'Administrative Privileges Required' });
 }
 
   test('ClamAV Installation and Uninstallation', async ({ page }) => {
@@ -44,7 +53,7 @@ async function confirmUninstall(page: Page) {
         const sudoDialog = page.getByRole('heading', { name: 'Administrative Privileges Required' });
         if (await sudoDialog.isVisible({ timeout: 5000 })) {
             await page.getByPlaceholder('Your password').fill('password123');
-            await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+            await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Uninstall)$/ }).click();
         }
         await expect(page.getByRole('button', { name: 'Install Now' })).toBeVisible({ timeout: 60000 });
     }
@@ -58,7 +67,7 @@ async function confirmUninstall(page: Page) {
     await expect(sudoDialog).toBeVisible({ timeout: 10000 });
     await page.getByPlaceholder('Your password').fill('password123');
     // Use dialog context to avoid strict mode violation with "Install Now" button
-    await page.getByRole('dialog').getByRole('button', { name: /Confirm|Install/i, exact: true }).click();
+    await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Install)$/ }).click();
     
     // Wait for Uninstall button to appear (meaning installed)
     await expect(page.getByRole('button', { name: 'Uninstall ClamAV' }).first()).toBeVisible({ timeout: 60000 });
@@ -72,7 +81,7 @@ async function confirmUninstall(page: Page) {
     const sudoDialogUninstall = page.getByRole('heading', { name: 'Administrative Privileges Required' });
     await expect(sudoDialogUninstall).toBeVisible({ timeout: 10000 });
     await page.getByPlaceholder('Your password').fill('password123');
-    await page.getByRole('dialog').getByRole('button', { name: /Confirm|Uninstall/i, exact: true }).click();
+    await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Uninstall)$/ }).click();
 
     // Wait for Install Now button to reappear
     await expect(page.getByRole('button', { name: 'Install Now' })).toBeVisible({ timeout: 60000 });

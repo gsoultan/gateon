@@ -139,6 +139,11 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     await expect(row, 'the address does not appear under Mitigated after being blocked')
       .toBeVisible({ timeout: 20000 });
     await row.getByRole('button', { name: /^Allow$/ }).click();
+    // Releasing a mitigation now asks first: the row button used to call the
+    // mutation on the click itself, with no dialog and no undo, while the same
+    // operation in the anomaly modal had always confirmed. The confirm button
+    // carries the source in its label, so it is located by test id.
+    await page.getByTestId('confirm-allow').click();
 
     // 4. And the release has to land. Asserted against the control plane rather
     // than by replaying the request: every request.get() in this suite shares
