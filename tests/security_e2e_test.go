@@ -107,7 +107,7 @@ func TestSecurityE2E(t *testing.T) {
 			time.Sleep(2500 * time.Millisecond)
 
 			// Check if threat was recorded
-			threats := telemetry.GetSecurityThreats(context.Background(), 50, 0, nil)
+			threats := telemetry.GetSecurityThreatsLite(context.Background(), 50, 0, nil)
 			found := false
 			for _, th := range threats {
 				if th.Type == tc.threatType && strings.Contains(th.RequestURI, tc.url) {
