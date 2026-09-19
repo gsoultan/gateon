@@ -42,6 +42,41 @@ type queryAnalysis struct {
 	isIntrospect bool
 }
 
+// maxCachedQueryBytes bounds what may become a cache key. The ARC cache holds
+// 2048 entries and the key is the query text itself, so without a per-key cap
+// the bound is 2048 x the body limit.
+const maxCachedQueryBytes = 8 << 10
+
+// fragmentIndex resolves fragment spreads during a walk. Every check below
+// (introspection, depth, complexity, field auth) used to skip FragmentSpread,
+// so `{ ...F } fragment F on Query { ... }` hid whatever F held from all four.
+// open tracks the spreads currently being walked, so a cyclic fragment --
+// invalid GraphQL that the parser still accepts -- terminates instead of
+// recursing until the stack is gone.
+type fragmentIndex struct {
+	defs map[string]*ast.FragmentDefinition
+	open map[string]bool
+}
+
+func newFragmentIndex(doc *ast.QueryDocument) *fragmentIndex {
+	defs := make(map[string]*ast.FragmentDefinition, len(doc.Fragments))
+	for _, f := range doc.Fragments {
+		defs[f.Name] = f
+	}
+	return &fragmentIndex{defs: defs, open: make(map[string]bool, len(defs))}
+}
+
+// enter returns the named fragment's selections and a release func, or a nil
+// func when the fragment is unknown or already open (a cycle).
+func (fi *fragmentIndex) enter(name string) (ast.SelectionSet, func()) {
+	def, ok := fi.defs[name]
+	if !ok || fi.open[name] {
+		return nil, nil
+	}
+	fi.open[name] = true
+	return def.SelectionSet, func() { delete(fi.open, name) }
+}
+
 func initGraphQLCache() {
 	graphqlCacheOnce.Do(func() {
 		graphqlQueryCache, _ = lru.NewARC(2048)
@@ -99,8 +134,7 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) Middleware {
 			var found bool
 			if graphqlQueryCache != nil {
 				if cached, ok := graphqlQueryCache.Get(body.Query); ok {
-					analysis = cached.(queryAnalysis)
-					found = true
+					analysis, found = cached.(queryAnalysis)
 				}
 			}
 
@@ -117,7 +151,12 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) Middleware {
 					complexity:   calculateComplexity(doc, cfg.FieldCosts),
 					isIntrospect: isIntrospectionQuery(doc),
 				}
-				if graphqlQueryCache != nil {
+				// The cache key is the whole query text, which the client
+				// chooses and which the body limit lets reach 10 MiB. Caching
+				// those filled 2048 slots with attacker-sized keys; a query
+				// this long is not one a client repeats, so it is analysed
+				// each time instead of retained.
+				if graphqlQueryCache != nil && len(body.Query) <= maxCachedQueryBytes {
 					graphqlQueryCache.Add(body.Query, analysis)
 				}
 			}
@@ -166,12 +205,37 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) Middleware {
 }
 
 func isIntrospectionQuery(doc *ast.QueryDocument) bool {
+	fi := newFragmentIndex(doc)
 	for _, op := range doc.Operations {
-		for _, sel := range op.SelectionSet {
-			if field, ok := sel.(*ast.Field); ok {
-				if strings.HasPrefix(field.Name, "__") {
-					return true
-				}
+		if fi.introspects(op.SelectionSet) {
+			return true
+		}
+	}
+	return false
+}
+
+// introspects reports whether the effective top level of ss selects an
+// introspection field, looking through fragments rather than past them.
+func (fi *fragmentIndex) introspects(ss ast.SelectionSet) bool {
+	for _, sel := range ss {
+		switch s := sel.(type) {
+		case *ast.Field:
+			if strings.HasPrefix(s.Name, "__") {
+				return true
+			}
+		case *ast.InlineFragment:
+			if fi.introspects(s.SelectionSet) {
+				return true
+			}
+		case *ast.FragmentSpread:
+			inner, release := fi.enter(s.Name)
+			if release == nil {
+				continue
+			}
+			hit := fi.introspects(inner)
+			release()
+			if hit {
+				return true
 			}
 		}
 	}
@@ -179,49 +243,53 @@ func isIntrospectionQuery(doc *ast.QueryDocument) bool {
 }
 
 func calculateDepth(doc *ast.QueryDocument) int {
+	fi := newFragmentIndex(doc)
 	maxDepth := 0
 	for _, op := range doc.Operations {
-		d := selectionSetDepth(op.SelectionSet)
-		if d > maxDepth {
+		if d := fi.depth(op.SelectionSet); d > maxDepth {
 			maxDepth = d
 		}
 	}
 	return maxDepth
 }
 
-func selectionSetDepth(ss ast.SelectionSet) int {
+func (fi *fragmentIndex) depth(ss ast.SelectionSet) int {
 	maxSubDepth := 0
+	sub := func(inner ast.SelectionSet) {
+		if d := fi.depth(inner); d > maxSubDepth {
+			maxSubDepth = d
+		}
+	}
 	for _, sel := range ss {
 		switch s := sel.(type) {
 		case *ast.Field:
 			if len(s.SelectionSet) > 0 {
-				d := selectionSetDepth(s.SelectionSet)
-				if d > maxSubDepth {
-					maxSubDepth = d
-				}
+				sub(s.SelectionSet)
 			}
 		case *ast.InlineFragment:
-			d := selectionSetDepth(s.SelectionSet)
-			if d > maxSubDepth {
-				maxSubDepth = d
-			}
+			sub(s.SelectionSet)
 		case *ast.FragmentSpread:
-			// For simplicity, we don't resolve fragments here.
-			// In a full implementation, we should look up the fragment definition.
+			inner, release := fi.enter(s.Name)
+			if release == nil {
+				continue
+			}
+			sub(inner)
+			release()
 		}
 	}
 	return 1 + maxSubDepth
 }
 
 func calculateComplexity(doc *ast.QueryDocument, costs map[string]int) int {
+	fi := newFragmentIndex(doc)
 	totalComplexity := 0
 	for _, op := range doc.Operations {
-		totalComplexity += selectionSetComplexity(op.SelectionSet, costs)
+		totalComplexity += fi.complexity(op.SelectionSet, costs)
 	}
 	return totalComplexity
 }
 
-func selectionSetComplexity(ss ast.SelectionSet, costs map[string]int) int {
+func (fi *fragmentIndex) complexity(ss ast.SelectionSet, costs map[string]int) int {
 	complexity := 0
 	for _, sel := range ss {
 		switch s := sel.(type) {
@@ -231,50 +299,125 @@ func selectionSetComplexity(ss ast.SelectionSet, costs map[string]int) int {
 				cost = c
 			}
 			if len(s.SelectionSet) > 0 {
-				complexity += cost + selectionSetComplexity(s.SelectionSet, costs)
-			} else {
-				complexity += cost
+				cost += fi.complexity(s.SelectionSet, costs)
 			}
+			complexity += cost
 		case *ast.InlineFragment:
-			complexity += selectionSetComplexity(s.SelectionSet, costs)
+			complexity += fi.complexity(s.SelectionSet, costs)
+		case *ast.FragmentSpread:
+			inner, release := fi.enter(s.Name)
+			if release == nil {
+				continue
+			}
+			complexity += fi.complexity(inner, costs)
+			release()
 		}
 	}
 	return complexity
 }
 
-func checkFieldAuth(doc *ast.QueryDocument, r *http.Request, fieldClaims map[string]string) error {
-	// Extract claims from request (assuming auth middleware already ran and put them in context or header)
-	// For simplicity, we'll check a header X-Gateon-Claims which could be a JSON or comma-separated list
-	claimsStr := r.Header.Get("X-Gateon-Claims")
-	claims := make(map[string]bool)
-	for _, c := range strings.Split(claimsStr, ",") {
-		claims[strings.TrimSpace(c)] = true
-	}
+// fieldAuth checks a query's fields against the caller's verified claims.
+type fieldAuth struct {
+	have  map[string]bool   // claims the caller actually presented
+	need  map[string]string // field name -> required claim
+	frags *fragmentIndex
+}
 
+func checkFieldAuth(doc *ast.QueryDocument, r *http.Request, fieldClaims map[string]string) error {
+	fa := &fieldAuth{have: callerClaimSet(r), need: fieldClaims, frags: newFragmentIndex(doc)}
 	for _, op := range doc.Operations {
-		if err := validateFields(op.SelectionSet, claims, fieldClaims); err != nil {
+		if err := fa.check(op.SelectionSet); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateFields(ss ast.SelectionSet, userClaims map[string]bool, fieldClaims map[string]string) error {
+// callerClaimSet builds the set of claims the request has proven it holds,
+// from the claims the auth middleware verified and stored in the context.
+//
+// It used to read them from an X-Gateon-Claims request header. Nothing in the
+// gateway sets that header, so the only thing that could was the client: a
+// request asking for a claim-gated field merely had to name the claim it
+// needed. Roles and scopes count alongside the claim names themselves, because
+// that is how an operator writes `field -> admin`.
+func callerClaimSet(r *http.Request) map[string]bool {
+	claims := ToMap(r.Context().Value(UserContextKey))
+	set := make(map[string]bool, len(claims))
+	for k, v := range claims {
+		if !claimPresent(v) {
+			continue
+		}
+		set[k] = true
+		switch k {
+		case "roles", "groups", "scope", "scp":
+			for _, s := range claimValues(v) {
+				set[s] = true
+			}
+		}
+	}
+	return set
+}
+
+// claimPresent reports whether a claim carries a value worth counting: a claim
+// explicitly set to false, null or "" is not one the caller holds.
+func claimPresent(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return t
+	case string:
+		return strings.TrimSpace(t) != ""
+	default:
+		return true
+	}
+}
+
+// claimValues flattens the several shapes a roles/scopes claim arrives in.
+func claimValues(v any) []string {
+	switch t := v.(type) {
+	case string:
+		return strings.FieldsFunc(t, func(r rune) bool { return r == ' ' || r == ',' })
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func (fa *fieldAuth) check(ss ast.SelectionSet) error {
 	for _, sel := range ss {
 		switch s := sel.(type) {
 		case *ast.Field:
-			if requiredClaim, ok := fieldClaims[s.Name]; ok {
-				if !userClaims[requiredClaim] {
-					return fmt.Errorf("access denied for field: %s (requires claim: %s)", s.Name, requiredClaim)
-				}
+			if requiredClaim, ok := fa.need[s.Name]; ok && !fa.have[requiredClaim] {
+				return fmt.Errorf("access denied for field: %s (requires claim: %s)", s.Name, requiredClaim)
 			}
 			if len(s.SelectionSet) > 0 {
-				if err := validateFields(s.SelectionSet, userClaims, fieldClaims); err != nil {
+				if err := fa.check(s.SelectionSet); err != nil {
 					return err
 				}
 			}
 		case *ast.InlineFragment:
-			if err := validateFields(s.SelectionSet, userClaims, fieldClaims); err != nil {
+			if err := fa.check(s.SelectionSet); err != nil {
+				return err
+			}
+		case *ast.FragmentSpread:
+			inner, release := fa.frags.enter(s.Name)
+			if release == nil {
+				continue
+			}
+			err := fa.check(inner)
+			release()
+			if err != nil {
 				return err
 			}
 		}

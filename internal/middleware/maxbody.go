@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
@@ -46,7 +45,10 @@ func MaxBodySize(max int64) Middleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.Header.Get("Upgrade") != "" {
+			// A protocol upgrade carries no body to cap. The skip used to key
+			// off the Upgrade header alone, which the client controls, so any
+			// POST that also said `Upgrade: h2c` went past the limit.
+			if IsCorsPreflight(r) || (r.Header.Get("Upgrade") != "" && r.ContentLength == 0) {
 				next.ServeHTTP(w, r)
 				return
 			}

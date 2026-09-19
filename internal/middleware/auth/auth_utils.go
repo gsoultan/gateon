@@ -114,11 +114,17 @@ func (c AuthBaseConfig) validateRoles(claims map[string]any) error {
 }
 
 // MapClaimsToHeaders injects mapped claims into the request headers.
+//
+// A mapped header is one the backend has been told to read as the verified
+// token's value, so a claim absent from the token must remove the header
+// rather than leave the client's own copy in place.
 func (c AuthBaseConfig) MapClaimsToHeaders(r *http.Request, claims any) {
 	m := ToMap(claims)
 	for claim, header := range c.ClaimMappings {
 		if val, ok := m[claim]; ok {
 			r.Header.Set(header, fmt.Sprintf("%v", val))
+		} else {
+			r.Header.Del(header)
 		}
 	}
 }
@@ -126,7 +132,9 @@ func (c AuthBaseConfig) MapClaimsToHeaders(r *http.Request, claims any) {
 // HandleFailure handles an authentication failure based on DryRun and ErrorTemplate.
 func (c AuthBaseConfig) HandleFailure(w http.ResponseWriter, r *http.Request, next http.Handler, err error) {
 	if c.DryRun {
-		// Log error but continue
+		// Continue, but without the client's copies of the mapped identity
+		// headers: only a verified token may set those, and there is none.
+		c.MapClaimsToHeaders(r, nil)
 		next.ServeHTTP(w, r)
 		return
 	}

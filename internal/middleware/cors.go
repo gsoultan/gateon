@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,8 +28,31 @@ type CORSConfig struct {
 	Debug            bool
 }
 
+// corsOptions maps a CORSConfig onto the rs/cors options struct. Extracted so
+// that EvaluateCORS judges a request with exactly the options the served
+// middleware is built from: a second mapping is how the Diagnostics validator
+// drifted away from what the proxy enforces in the first place.
+func corsOptions(cfg CORSConfig) cors.Options {
+	return cors.Options{
+		AllowedOrigins:   cfg.AllowedOrigins,
+		AllowedMethods:   cfg.AllowedMethods,
+		AllowedHeaders:   cfg.AllowedHeaders,
+		ExposedHeaders:   cfg.ExposedHeaders,
+		AllowCredentials: cfg.AllowCredentials,
+		MaxAge:           cfg.MaxAge,
+		Debug:            cfg.Debug,
+	}
+}
+
 // CORS returns a middleware that handles Cross-Origin Resource Sharing (CORS).
 func CORS(cfg CORSConfig) Middleware {
+	opts := corsOptions(cfg)
+	// Built once. cors.New normalises the origin, method and header lists,
+	// and doing that on every request allocated route-derivable state on the
+	// hot path. A recording span still gets its own instance, because its
+	// logger is bound to the span.
+	base := cors.New(opts)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Context().Value(CORSHandledContextKey) != nil {
@@ -38,26 +60,20 @@ func CORS(cfg CORSConfig) Middleware {
 				return
 			}
 
-			span := trace.SpanFromContext(r.Context())
-			opts := cors.Options{
-				AllowedOrigins:   cfg.AllowedOrigins,
-				AllowedMethods:   cfg.AllowedMethods,
-				AllowedHeaders:   cfg.AllowedHeaders,
-				ExposedHeaders:   cfg.ExposedHeaders,
-				AllowCredentials: cfg.AllowCredentials,
-				MaxAge:           cfg.MaxAge,
-				Debug:            cfg.Debug || span.IsRecording(),
+			c := base
+			if span := trace.SpanFromContext(r.Context()); span.IsRecording() {
+				traced := opts
+				traced.Debug = true
+				traced.Logger = &spanLogger{span: span, rs: request.GetRequestState(r)}
+				c = cors.New(traced)
 			}
 
-			if span.IsRecording() {
-				opts.Logger = &spanLogger{span: span, rs: request.GetRequestState(r)}
-			}
-
-			c := cors.New(opts)
-
-			// Detect invalid CORS request
-			origin := r.Header.Get("Origin")
-			if origin != "" && !isOriginAllowed(origin, cfg.AllowedOrigins) {
+			// Detect invalid CORS request. The library's own matcher decides,
+			// so a wildcard pattern such as https://*.example.com is judged
+			// here the same way it is on the response; the exact-match helper
+			// this used reported every request from such an origin as a
+			// violation while the response allowed it.
+			if origin := r.Header.Get("Origin"); origin != "" && !c.OriginAllowed(r) {
 				reportCORSViolation(r, origin, cfg)
 			}
 
@@ -151,18 +167,6 @@ func GlobalCORS() Middleware {
 			c.Handler(next).ServeHTTP(w, r)
 		})
 	}
-}
-
-func isOriginAllowed(origin string, allowed []string) bool {
-	if len(allowed) == 0 {
-		return false
-	}
-	for _, a := range allowed {
-		if a == "*" || strings.EqualFold(a, origin) {
-			return true
-		}
-	}
-	return false
 }
 
 // corsRouteID resolves the identifier of the route that handled the request.

@@ -102,19 +102,11 @@ func Policy(cfg PolicyConfig) (Middleware, error) {
 	}, nil
 }
 
+// getAuthClaims returns the verified claims the auth middleware stored, as a
+// plain map. ToMap handles the plain map the introspection validator stores,
+// the named jwt.MapClaims the JWT validator stores, and anything with a ToMap
+// method. A direct assertion to map[string]any does not match the named type,
+// which left every policy over `auth` blind to JWT claims.
 func getAuthClaims(r *http.Request) map[string]any {
-	if val := r.Context().Value(UserContextKey); val != nil {
-		if claims, ok := val.(map[string]any); ok {
-			return claims
-		}
-		// In case it's jwt.MapClaims
-		if m, ok := val.(interface{ ToMap() map[string]any }); ok {
-			return m.ToMap()
-		}
-		// Fallback for jwt.MapClaims which is map[string]any
-		if m, ok := val.(map[string]any); ok {
-			return m
-		}
-	}
-	return make(map[string]any)
+	return ToMap(r.Context().Value(UserContextKey))
 }

@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 func (f *Factory) createHeaders(cfg map[string]string) (Middleware, error) {
-	stsSeconds, _ := strconv.Atoi(cfg["sts_seconds"])
-	stsIncludeSubdomains := parseBoolStrict(cfg["sts_include_subdomains"], false)
-	stsPreload := parseBoolStrict(cfg["sts_preload"], false)
+	stsValue := hstsValue(cfg)
 	forceSTSHeader := parseBoolStrict(cfg["force_sts_header"], false)
 
 	return func(next http.Handler) http.Handler {
@@ -37,18 +37,33 @@ func (f *Factory) createHeaders(cfg map[string]string) (Middleware, error) {
 					sw.Header().Del(strings.TrimPrefix(k, "del_response_"))
 				}
 			}
-			next.ServeHTTP(sw, r)
 
-			if stsSeconds > 0 && (r.TLS != nil || forceSTSHeader) {
-				val := "max-age=" + strconv.Itoa(stsSeconds)
-				if stsIncludeSubdomains {
-					val += "; includeSubDomains"
-				}
-				if stsPreload {
-					val += "; preload"
-				}
-				w.Header().Set("Strict-Transport-Security", val)
+			// Before next, like the set_response_ headers above: once the
+			// response has been written the header map is on the wire, and a
+			// Set after it changes nothing. This used to run after next and so
+			// never reached a client. request.IsSecure rather than r.TLS, which
+			// is nil behind a TLS-terminating proxy.
+			if stsValue != "" && (forceSTSHeader || request.IsSecure(r)) {
+				sw.Header().Set("Strict-Transport-Security", stsValue)
 			}
+			next.ServeHTTP(sw, r)
 		})
 	}, nil
+}
+
+// hstsValue builds the Strict-Transport-Security value once, when the route is
+// built; "" when sts_seconds is unset or not positive.
+func hstsValue(cfg map[string]string) string {
+	stsSeconds, _ := strconv.Atoi(cfg["sts_seconds"])
+	if stsSeconds <= 0 {
+		return ""
+	}
+	val := "max-age=" + strconv.Itoa(stsSeconds)
+	if parseBoolStrict(cfg["sts_include_subdomains"], false) {
+		val += "; includeSubDomains"
+	}
+	if parseBoolStrict(cfg["sts_preload"], false) {
+		val += "; preload"
+	}
+	return val
 }
