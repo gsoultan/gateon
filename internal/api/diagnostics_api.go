@@ -585,6 +585,21 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Source IP is required to block"}, nil
 	}
 
+	// Several detectors put a client fingerprint in Source rather than an
+	// address -- detectMultiIPAttacks and detectImpossibleTravel both emit
+	// "security_threat" keyed by fingerprint. An ipfilter deny_list is parsed as
+	// addresses and CIDRs, so a fingerprint written there matches nothing: the
+	// middleware was created, attached to every route and reported as a block
+	// that could never fire. Mitigate the fingerprint through the mechanism that
+	// does enforce it (IsUserMitigated), as MitigateThreat already does.
+	if net.ParseIP(sourceIP) == nil {
+		telemetry.MarkUserMitigated(sourceIP, "JA4+", "Recommendation applied via API", "manual")
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: true,
+			Message: fmt.Sprintf("Fingerprint %s mitigated. It is not an IP address, so no network-level block was applied.", sourceIP),
+		}, nil
+	}
+
 	mwID := "block-ip-" + strings.ReplaceAll(sourceIP, ".", "-")
 	mwID = strings.ReplaceAll(mwID, ":", "-")
 
@@ -796,8 +811,14 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 
 	isIP := net.ParseIP(source) != nil
 
+	// Both Mark* calls swallow a missing store and log-and-continue on a failed
+	// write, and a fingerprint released in the last 24h stays released through
+	// its hold, so "we called it" is not "it is blocked". Ask the same predicate
+	// the request path asks before telling an operator the source is contained.
+	var mitigated bool
 	if isIP {
 		telemetry.MarkIPMitigated(source, reason)
+		mitigated = telemetry.IsIPMitigated(source)
 	} else {
 		// Default to JA4+ for fingerprints if not specified
 		fpType := typ
@@ -805,6 +826,16 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 			fpType = "JA4+"
 		}
 		telemetry.MarkUserMitigated(source, fpType, reason, category)
+		mitigated = telemetry.IsUserMitigated(source)
+	}
+
+	if !mitigated {
+		return &gateonv1.MitigateThreatResponse{
+			Success: false,
+			Message: fmt.Sprintf("Mitigation for %s is not in force, so the source is "+
+				"not blocked. A fingerprint released in the last 24 hours stays "+
+				"released until that hold expires.", source),
+		}, nil
 	}
 
 	return &gateonv1.MitigateThreatResponse{
@@ -866,24 +897,44 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 	if isIP {
 		telemetry.MarkIPUnmitigated(source)
 		s.resetReputationForIP(ctx, source)
-	} else {
-		// If it's a fingerprint, mark the specific entry as unmitigated
-		ja4plus := req.Ja4Plus
-		if ja4plus == "" && req.Ja4H != "" {
-			// Fallback for old clients
-			ja4plus = source + "_" + req.Ja4H
-		}
-		if ja4plus == "" {
-			ja4plus = source
-		}
-		telemetry.MarkUserUnmitigated(ja4plus)
-		telemetry.ResetReputation(source)
+	} else if !releaseFingerprintMitigation(source, req.GetJa4Plus(), req.GetJa4H()) {
+		return &gateonv1.RemoveMitigatedThreatResponse{
+			Success: false,
+			Message: fmt.Sprintf("No active mitigation found for %s, so nothing was released. "+
+				"Reputation was reset; if the source is still blocked, release it from the "+
+				"mitigation list, which carries the exact fingerprint.", source),
+		}, nil
 	}
 
 	return &gateonv1.RemoveMitigatedThreatResponse{
 		Success: true,
 		Message: fmt.Sprintf("Mitigation for %s removed successfully.", source),
 	}, nil
+}
+
+// releaseFingerprintMitigation releases a non-IP source and reports whether an
+// in-force mitigation was actually removed.
+//
+// The key is the whole problem. MarkUserMitigated stores the fingerprint string
+// it is handed verbatim, so the only keys that exist are ones some caller
+// chose; rebuilding source+"_"+ja4h for a client too old to send ja4plus is a
+// guess at that choice, and a wrong guess matches no row while still returning
+// normally. So the legacy shape is used only when the store confirms a
+// mitigation is filed under it.
+func releaseFingerprintMitigation(source, ja4plus, ja4h string) bool {
+	// Reputation is reset either way: it is a separate decay, not the block, and
+	// an operator who asked for a release should get it even when the block they
+	// were looking at has already expired.
+	telemetry.ResetReputation(source)
+
+	key := ja4plus
+	if key == "" {
+		var found bool
+		if key, found = telemetry.FindUserMitigationKey(source, ja4h); !found {
+			return false
+		}
+	}
+	return telemetry.MarkUserUnmitigated(key)
 }
 
 func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityThreat) *gateonv1.Anomaly {

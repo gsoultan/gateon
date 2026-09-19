@@ -8,6 +8,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -47,4 +48,8 @@ type ApiServiceConfig struct {
 	WafExceptions      *waf.ExceptionStore
 	PhantomCore        phantom.PhantomCore
 	Governor           *resource.Governor
+
+	// MiddlewareValidator is consulted before a middleware is persisted over
+	// Connect or gRPC, as the REST handler's domain service consults it.
+	MiddlewareValidator dmw.ConfigValidator
 }

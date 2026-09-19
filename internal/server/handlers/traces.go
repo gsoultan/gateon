@@ -8,6 +8,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -29,7 +30,12 @@ func registerTracesHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 			Summary: summary,
 		})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			// The store's error names the backing engine, its query and often a
+			// filesystem path. It goes to the operator's log, not into a
+			// response body rendered in a dashboard that also renders hostile
+			// traffic.
+			logger.L.LogError("failed to list traces", "error", err)
+			http.Error(w, "Could not load traces", http.StatusInternalServerError)
 			return
 		}
 
@@ -53,7 +59,8 @@ func registerTracesHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 			Timestamp: ts,
 		})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			logger.L.LogError("failed to load trace", "error", err, "trace_id", id)
+			http.Error(w, "Trace not found", http.StatusNotFound)
 			return
 		}
 

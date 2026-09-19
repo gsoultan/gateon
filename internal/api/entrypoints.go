@@ -6,7 +6,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/gsoultan/gateon/internal/domain/entrypoint"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -22,12 +21,14 @@ func (s *ApiService) UpdateEntryPoint(ctx context.Context, req *gateonv1.UpdateE
 	if s.EntryPoints == nil || req == nil || req.EntryPoint == nil {
 		return &gateonv1.UpdateEntryPointResponse{Success: false}, nil
 	}
-	if err := s.EntryPoints.Update(ctx, req.EntryPoint); err != nil {
+	// Through the domain service, as the REST handler: an entrypoint needs an
+	// address -- stored without one, every runner returns on `addr == ""`
+	// without logging, so it is listed and bindable and never listens -- is
+	// given an id, has its type inferred from its protocols, and invalidates the
+	// routes and TLS state it affects. See domain_services.go.
+	if err := s.entryPointService().SaveEntryPoint(ctx, req.EntryPoint); err != nil {
 		return &gateonv1.UpdateEntryPointResponse{Success: false}, err
 	}
-	// The same helper the REST path uses. This logic lived here only, so a save
-	// through the dashboard invalidated nothing at all.
-	entrypoint.Invalidate(s.Invalidator, req.EntryPoint)
 	s.logAudit(ctx, "update", "entrypoint", fmt.Sprintf("Updated entrypoint %s", req.EntryPoint.Id))
 	return &gateonv1.UpdateEntryPointResponse{Success: true}, nil
 }

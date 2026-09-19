@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // serviceImpl implements Service.
@@ -82,33 +85,14 @@ func (s *serviceImpl) DeleteMiddleware(ctx context.Context, id string) error {
 	}
 	mw, mwFound := s.store.Get(ctx, id)
 
-	// 1. Find all routes using this middleware and remove it from them
-	routes := s.routeStore.List(ctx)
-	var affectedRouteIDs []string
-	var stillReferencing []string
-	for _, rt := range routes {
-		found := false
-		newMws := make([]string, 0, len(rt.Middlewares))
-		for _, mid := range rt.Middlewares {
-			if mid == id {
-				found = true
-				continue
-			}
-			newMws = append(newMws, mid)
-		}
-		if !found {
-			continue
-		}
-		rt.Middlewares = newMws
-		if err := s.routeStore.Update(ctx, rt); err != nil {
-			// Recorded, not swallowed. See the guard below.
-			stillReferencing = append(stillReferencing, rt.Id)
-			s.logger.LogError("failed to unlink middleware from route",
-				"error", err, "middleware_id", id, "route_id", rt.Id)
-			continue
-		}
-		affectedRouteIDs = append(affectedRouteIDs, rt.Id)
+	// 1. Unlink it from every route naming it. A failure is recorded, not
+	// swallowed; see the guard below.
+	affectedRouteIDs, failed := unlinkFromRoutes(ctx, s.routeStore, id)
+	for rid, err := range failed {
+		s.logger.LogError("failed to unlink middleware from route",
+			"error", err, "middleware_id", id, "route_id", rid)
 	}
+	stillReferencing := slices.Sorted(maps.Keys(failed))
 
 	// 2. Refuse to delete while a route still points at it.
 	//
@@ -149,6 +133,41 @@ func (s *serviceImpl) DeleteMiddleware(ctx context.Context, id string) error {
 		s.wafCacheInvalidator.Invalidate()
 	}
 	return nil
+}
+
+// unlinkFromRoutes removes middlewareID from every route naming it and persists
+// each change. It returns the ids of the routes that no longer reference the
+// middleware, and the ids of those that still do because their update failed,
+// each with its error.
+//
+// Each route is cloned before it is changed. RouteRegistry.List returns the
+// registry's own slice of live pointers, and the router reads rt.Middlewares off
+// those same objects every time it builds a route's chain -- writing the field
+// in place was a data race the detector reports against every concurrent read,
+// the same one service.ClearRouteReferences was fixed for. Cloning also leaves a
+// route whose Update fails exactly as it was in memory, rather than detached
+// from a middleware the stored copy still names.
+func unlinkFromRoutes(ctx context.Context, routes config.RouteStore, middlewareID string) (unlinked []string, failed map[string]error) {
+	failed = map[string]error{}
+	for _, rt := range routes.List(ctx) {
+		if !slices.Contains(rt.Middlewares, middlewareID) {
+			continue
+		}
+		clone, ok := proto.Clone(rt).(*gateonv1.Route)
+		if !ok {
+			failed[rt.Id] = errors.New("route could not be cloned")
+			continue
+		}
+		clone.Middlewares = slices.DeleteFunc(clone.Middlewares, func(mid string) bool {
+			return mid == middlewareID
+		})
+		if err := routes.Update(ctx, clone); err != nil {
+			failed[rt.Id] = err
+			continue
+		}
+		unlinked = append(unlinked, rt.Id)
+	}
+	return unlinked, failed
 }
 
 // RoutesUsingMiddleware returns routes that reference the given middleware ID.

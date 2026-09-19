@@ -9,11 +9,23 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/router"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
+
+// CORS header names the validator reads off the request it is asked about and
+// off the response the proxy would send.
+const (
+	corsRequestOrigin    = "Origin"
+	corsRequestMethod    = "Access-Control-Request-Method"
+	corsRequestHeaders   = "Access-Control-Request-Headers"
+	corsAllowOrigin      = "Access-Control-Allow-Origin"
+	corsAllowCredentials = "Access-Control-Allow-Credentials"
+	corsExposeHeaders    = "Access-Control-Expose-Headers"
+	corsMaxAge           = "Access-Control-Max-Age"
 )
 
 func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCORSRequest) (*gateonv1.ValidateCORSResponse, error) {
@@ -46,8 +58,21 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 		}, nil
 	}
 
-	// Create a dummy http.Request for matching
-	dummyReq, _ := http.NewRequest(req.Method, req.Url, nil)
+	// Create a dummy http.Request for matching.
+	//
+	// The error is checked rather than discarded: the method is caller-supplied
+	// and http.NewRequest rejects anything that is not an HTTP token, returning
+	// a nil request. Every line below dereferences it, so discarding the error
+	// turned a typo in the dashboard's method box into a wedged request
+	// goroutine that never returns.
+	dummyReq, err := http.NewRequest(req.Method, req.Url, nil)
+	if err != nil {
+		return &gateonv1.ValidateCORSResponse{
+			IsAllowed:   false,
+			Message:     fmt.Sprintf("Invalid request: %v", err),
+			Suggestions: []string{"Use a valid HTTP method (e.g., GET, POST, OPTIONS) and a valid URL."},
+		}, nil
+	}
 	// Propagate headers to dummy request for proper route matching (e.g., Access-Control-Request-Method)
 	if req.Headers == nil {
 		req.Headers = make(map[string]string)
@@ -58,6 +83,13 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 
 	for k, v := range req.Headers {
 		dummyReq.Header.Set(k, v)
+	}
+	// Origin is its own field on the request, so it wins over anything the
+	// caller also put in Headers; an empty one means "not a CORS request".
+	if req.Origin != "" {
+		dummyReq.Header.Set(corsRequestOrigin, req.Origin)
+	} else {
+		dummyReq.Header.Del(corsRequestOrigin)
 	}
 	// We might need to set Host if it's missing in req.Url but provided in headers
 	if dummyReq.Host == "" && req.Headers != nil {
@@ -127,8 +159,8 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 		}, nil
 	}
 
-	// 3. Simulate CORS logic
-	resp, err := s.simulateCORS(req, corsMW, rt.Name)
+	// 3. Ask the real middleware what it would do with this request
+	resp, err := s.simulateCORS(dummyReq, corsMW, rt.Name)
 	if err == nil && resp != nil {
 		resp.RouteId = rt.Id
 		resp.Suggestions = append(resp.Suggestions, s.analyzeRoute(ctx, rt, req)...)
@@ -204,34 +236,20 @@ func (s *ApiService) analyzeRoute(ctx context.Context, rt *gateonv1.Route, req *
 	return suggestions
 }
 
-func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv1.Middleware, routeName string) (*gateonv1.ValidateCORSResponse, error) {
-	config := mw.Config
-	allowedOrigins := parseList(config["allowed_origins"])
-	allowedMethods := parseList(config["allowed_methods"])
-	if len(allowedMethods) == 0 {
-		allowedMethods = []string{"GET", "POST", "HEAD"} // rs/cors defaults
-	}
-	allowedHeaders := parseList(config["allowed_headers"])
-	if len(allowedHeaders) == 0 {
-		allowedHeaders = []string{"Origin", "Accept", "Content-Type", "Authorization"} // typical defaults
-	}
-	exposedHeaders := parseList(config["exposed_headers"])
-	allowCredentials, _ := strconv.ParseBool(config["allow_credentials"])
-	maxAge, _ := strconv.Atoi(config["max_age"])
-
+// simulateCORS answers what the proxy would do with r, by asking the CORS
+// middleware built from the same config rather than by re-deriving the policy.
+// It used to do the latter, and disagreed with the gateway in eight ways --
+// including telling operators that an Authorization preflight was fine on a
+// config under which the proxy rejects it.
+func (s *ApiService) simulateCORS(r *http.Request, mw *gateonv1.Middleware, routeName string) (*gateonv1.ValidateCORSResponse, error) {
 	checks := []string{
 		fmt.Sprintf("Route matched: %s", routeName),
 		fmt.Sprintf("CORS Middleware: %s", mw.Name),
 	}
 
-	respHeaders := make(map[string]string)
-	isAllowed := true
-	message := "CORS validation successful"
-	var suggestions []string
-
-	origin := req.Origin
-	if origin == "" {
-		// If no origin, it's a same-origin request or direct access
+	if r.Header.Get(corsRequestOrigin) == "" {
+		// Not a cross-origin request: the proxy answers with no CORS headers
+		// and the browser never applies the policy.
 		return &gateonv1.ValidateCORSResponse{
 			IsAllowed: true,
 			Message:   "No Origin header provided. Request treated as same-origin or non-CORS.",
@@ -239,129 +257,115 @@ func (s *ApiService) simulateCORS(req *gateonv1.ValidateCORSRequest, mw *gateonv
 		}, nil
 	}
 
-	// Origin check
-	if slices.Contains(allowedOrigins, "*") {
-		checks = append(checks, "Origin check: Allowed (*) ")
-	} else if slices.Contains(allowedOrigins, origin) {
-		checks = append(checks, fmt.Sprintf("Origin check: Allowed (%s)", origin))
-	} else {
-		isAllowed = false
-		message = fmt.Sprintf("Origin '%s' is not allowed", origin)
-		checks = append(checks, fmt.Sprintf("Origin check: FAILED (%s not in %v)", origin, allowedOrigins))
-		suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Origins in CORS middleware configuration.", origin))
-	}
-
-	if isAllowed {
-		if slices.Contains(allowedOrigins, "*") {
-			respHeaders["Access-Control-Allow-Origin"] = "*"
-		} else {
-			respHeaders["Access-Control-Allow-Origin"] = origin
-			respHeaders["Vary"] = "Origin"
-		}
-
-		if allowCredentials {
-			if slices.Contains(allowedOrigins, "*") {
-				isAllowed = false
-				message = "AllowCredentials cannot be used with AllowedOrigins: *"
-				checks = append(checks, "Credentials check: FAILED (cannot use credentials with *)")
-				suggestions = append(suggestions, "Change Allowed Origins to specific domains (not '*') if you need to use Credentials.")
-			} else {
-				respHeaders["Access-Control-Allow-Credentials"] = "true"
-				checks = append(checks, "Credentials check: Allowed")
-			}
-		}
-	}
-
-	isPreflight := req.Method == http.MethodOptions && req.Headers["Access-Control-Request-Method"] != ""
-	if isAllowed && isPreflight {
-		// Preflight check
-		reqMethod := req.Headers["Access-Control-Request-Method"]
-		if slices.Contains(allowedMethods, reqMethod) || slices.Contains(allowedMethods, "*") {
-			respHeaders["Access-Control-Allow-Methods"] = reqMethod
-			checks = append(checks, fmt.Sprintf("Method check: Allowed (%s)", reqMethod))
-		} else {
-			isAllowed = false
-			message = fmt.Sprintf("Method '%s' is not allowed", reqMethod)
-			checks = append(checks, fmt.Sprintf("Method check: FAILED (%s not in %v)", reqMethod, allowedMethods))
-			suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Methods in CORS middleware configuration.", reqMethod))
-		}
-
-		if isAllowed {
-			reqHeadersStr := req.Headers["Access-Control-Request-Headers"]
-			if reqHeadersStr != "" {
-				reqHeaders := strings.Split(reqHeadersStr, ",")
-				for _, h := range reqHeaders {
-					h = strings.TrimSpace(h)
-					if h == "" {
-						continue
-					}
-					allowed := false
-					for _, ah := range allowedHeaders {
-						if ah == "*" || strings.EqualFold(ah, h) {
-							allowed = true
-							break
-						}
-					}
-					if !allowed {
-						isAllowed = false
-						message = fmt.Sprintf("Header '%s' is not allowed", h)
-						checks = append(checks, fmt.Sprintf("Header check: FAILED (%s not in %v)", h, allowedHeaders))
-						suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Headers in CORS middleware configuration.", h))
-						break
-					}
-				}
-				if isAllowed {
-					respHeaders["Access-Control-Allow-Headers"] = reqHeadersStr
-					checks = append(checks, fmt.Sprintf("Headers check: Allowed (%s)", reqHeadersStr))
-				}
-			} else {
-				checks = append(checks, "Headers check: Skipped (no requested headers)")
-			}
-
-			if isAllowed && len(exposedHeaders) > 0 {
-				respHeaders["Access-Control-Expose-Headers"] = strings.Join(exposedHeaders, ", ")
-				checks = append(checks, fmt.Sprintf("Exposed Headers: %v", exposedHeaders))
-			}
-			if isAllowed && maxAge > 0 {
-				respHeaders["Access-Control-Max-Age"] = strconv.Itoa(maxAge)
-				checks = append(checks, fmt.Sprintf("Max Age: %d seconds", maxAge))
-			}
-		}
-	} else if isAllowed {
-		// Regular request method check
-		if slices.Contains(allowedMethods, req.Method) || slices.Contains(allowedMethods, "*") {
-			checks = append(checks, fmt.Sprintf("Method check: Allowed (%s)", req.Method))
-		} else {
-			isAllowed = false
-			message = fmt.Sprintf("Method '%s' is not allowed", req.Method)
-			checks = append(checks, fmt.Sprintf("Method check: FAILED (%s not in %v)", req.Method, allowedMethods))
-			suggestions = append(suggestions, fmt.Sprintf("Add '%s' to Allowed Methods in CORS middleware configuration.", req.Method))
-		}
-	}
+	decision := middleware.EvaluateCORS(mw.Config, r)
+	outcome := describeCORS(decision, r)
+	outcome.suggestions = append(outcome.suggestions, corsCredentialWarnings(decision)...)
 
 	return &gateonv1.ValidateCORSResponse{
-		IsAllowed:        isAllowed,
-		Message:          message,
-		ResponseHeaders:  respHeaders,
-		Checks:           checks,
-		IsPreflight:      isPreflight,
+		IsAllowed:        decision.Allowed,
+		Message:          outcome.message,
+		ResponseHeaders:  decision.Headers,
+		Checks:           append(checks, outcome.checks...),
+		IsPreflight:      decision.IsPreflight,
 		MiddlewareConfig: mw.Config,
 		RouteName:        routeName,
-		Suggestions:      suggestions,
+		Suggestions:      outcome.suggestions,
 	}, nil
 }
 
-func parseList(s string) []string {
-	if s == "" {
+// corsOutcome is the operator-facing half of a decision: which checks ran, why
+// the request was refused, and what to change.
+type corsOutcome struct {
+	checks      []string
+	message     string
+	suggestions []string
+}
+
+func (o *corsOutcome) pass(check string) {
+	o.checks = append(o.checks, check)
+}
+
+func (o *corsOutcome) deny(check, message, suggestion string) {
+	o.checks = append(o.checks, check)
+	o.message = message
+	o.suggestions = append(o.suggestions, suggestion)
+}
+
+// describeCORS narrates a decision in the order rs/cors evaluates it -- origin,
+// then method, then requested headers -- and stops at the check that refused,
+// because that is where the gateway stops too.
+func describeCORS(d middleware.CORSDecision, r *http.Request) corsOutcome {
+	out := corsOutcome{message: "CORS validation successful"}
+	origin := r.Header.Get(corsRequestOrigin)
+
+	if !d.OriginAllowed {
+		out.deny(
+			fmt.Sprintf("Origin check: FAILED (%s not in %v)", origin, d.Policy.AllowedOrigins),
+			fmt.Sprintf("Origin '%s' is not allowed", origin),
+			fmt.Sprintf("Add '%s' to Allowed Origins in CORS middleware configuration.", origin))
+		return out
+	}
+	out.pass(fmt.Sprintf("Origin check: Allowed (%s)", origin))
+
+	method := r.Method
+	if d.IsPreflight {
+		method = r.Header.Get(corsRequestMethod)
+	}
+	if !d.MethodAllowed {
+		out.deny(
+			fmt.Sprintf("Method check: FAILED (%s not in %v)", method, d.Policy.AllowedMethods),
+			fmt.Sprintf("Method '%s' is not allowed", method),
+			fmt.Sprintf("Add '%s' to Allowed Methods in CORS middleware configuration.", method))
+		return out
+	}
+	out.pass(fmt.Sprintf("Method check: Allowed (%s)", method))
+
+	describeCORSHeaders(&out, d, r)
+	return out
+}
+
+// describeCORSHeaders reports the preflight header check and the extras the
+// gateway would answer with. The reported values are read back off the response
+// the proxy would send, so they cannot drift from it.
+func describeCORSHeaders(out *corsOutcome, d middleware.CORSDecision, r *http.Request) {
+	requested := r.Header.Get(corsRequestHeaders)
+	switch {
+	case !d.IsPreflight || requested == "":
+		out.pass("Headers check: Skipped (no requested headers)")
+	case !d.HeadersAllowed:
+		out.deny(
+			fmt.Sprintf("Headers check: FAILED (%s not in %v)", requested, d.Policy.AllowedHeaders),
+			fmt.Sprintf("Request headers '%s' are not allowed", requested),
+			fmt.Sprintf("Add the requested headers (%s) to Allowed Headers in CORS middleware configuration, or set '*'.", requested))
+		out.suggestions = append(out.suggestions,
+			"Browsers send Access-Control-Request-Headers lowercase, comma-separated and in alphabetical order, and the gateway matches that exact form.")
+		return
+	default:
+		out.pass(fmt.Sprintf("Headers check: Allowed (%s)", requested))
+	}
+
+	if d.Headers[corsAllowCredentials] == "true" {
+		out.pass("Credentials check: Allowed")
+	}
+	if exposed := d.Headers[corsExposeHeaders]; exposed != "" {
+		out.pass("Exposed Headers: " + exposed)
+	}
+	if maxAge := d.Headers[corsMaxAge]; maxAge != "" {
+		out.pass("Max Age: " + maxAge + " seconds")
+	}
+}
+
+// corsCredentialWarnings covers the one combination the gateway answers but
+// browsers refuse. rs/cors emits `Access-Control-Allow-Origin: *` even with
+// credentials enabled, so the verdict has to say allowed to describe the
+// gateway honestly -- but the credentialed fetch still fails in the browser,
+// which is worth saying out loud. An empty origin list is the same trap: it
+// means every origin, which is the wildcard by another name.
+func corsCredentialWarnings(d middleware.CORSDecision) []string {
+	if !d.Policy.AllowCredentials || !slices.Contains(d.Policy.AllowedOrigins, "*") {
 		return nil
 	}
-	parts := strings.Split(s, ",")
-	res := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			res = append(res, p)
-		}
+	return []string{
+		"Allowed Origins is '*' while credentials are enabled: the gateway answers 'Access-Control-Allow-Origin: *', which browsers reject for credentialed requests. List the origins explicitly if the client sends cookies or an Authorization header.",
 	}
-	return res
 }

@@ -104,6 +104,9 @@ func TestValidateCORS(t *testing.T) {
 			message:  "Origin 'https://evil.com' is not allowed",
 		},
 		{
+			// Access-Control-Request-Headers is lowercase because that is what
+			// a browser sends; the gateway matches that exact form, so the
+			// validator has to answer for it rather than for a friendlier one.
 			name: "Preflight Allowed",
 			req: &gateonv1.ValidateCORSRequest{
 				Url:    "http://gateon/api/test",
@@ -111,7 +114,7 @@ func TestValidateCORS(t *testing.T) {
 				Method: "OPTIONS",
 				Headers: map[string]string{
 					"Access-Control-Request-Method":  "POST",
-					"Access-Control-Request-Headers": "Content-Type",
+					"Access-Control-Request-Headers": "content-type",
 				},
 			},
 			expected: true,
@@ -209,8 +212,15 @@ func TestValidateCORS(t *testing.T) {
 				assert.Contains(t, resp.Suggestions[0], "Add 'https://evil.com' to Allowed Origins")
 			}
 			if tc.name == "Exposed Headers and Max Age" {
-				assert.Equal(t, "X-Custom-Response", resp.ResponseHeaders["Access-Control-Expose-Headers"])
+				// A preflight answer carries Max-Age but not Expose-Headers:
+				// the latter describes an actual response, so the gateway only
+				// sets it there. The validator reports the headers the gateway
+				// would really send, not a plausible-looking set.
 				assert.Equal(t, "3600", resp.ResponseHeaders["Access-Control-Max-Age"])
+				assert.Empty(t, resp.ResponseHeaders["Access-Control-Expose-Headers"])
+			}
+			if tc.name == "Allowed Origin and Method" {
+				assert.Equal(t, "X-Custom-Response", resp.ResponseHeaders["Access-Control-Expose-Headers"])
 			}
 			if tc.name == "Bearer Token and Suggestions" {
 				// Should not have the suggestion if token provided
