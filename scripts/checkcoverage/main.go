@@ -57,12 +57,22 @@ var (
 	// leading whitespace is the only thing distinguishing that from a package
 	// that has tests covering nothing, so it is load-bearing.
 	untestedCoverLine = regexp.MustCompile(`^\s+(\S+)\s+coverage:\s+([0-9.]+)%`)
+	// "FAIL\tgithub.com/x/y\t0.4s" or "FAIL\tgithub.com/x/y [build failed]".
+	// A package that fails or does not compile emits no parseable coverage for
+	// itself, so without this it is simply absent from the run and every check
+	// below skips it -- the gate then reports "ok" for a package it did not
+	// look at. The bare "FAIL" summary line carries no package and must not
+	// match, hence the required second field.
+	failLine = regexp.MustCompile(`^FAIL\s+(\S+)`)
 )
 
 type result struct {
 	pkg      string
 	coverage float64
 	hasTests bool
+	// failed marks a package that reported no coverage because its tests failed
+	// or did not build.
+	failed bool
 }
 
 func main() {
@@ -79,6 +89,15 @@ func main() {
 	}
 
 	if *update {
+		// Banking a baseline from a red run records "no tests" for every
+		// package that failed to build, which retires it from the ratchet
+		// permanently and silently -- the opposite of what -update is for.
+		for _, r := range got {
+			if r.failed {
+				fail("refusing to write a baseline from a run with failures: "+
+					"%s reported no coverage. Fix the build or the test first.", r.pkg)
+			}
+		}
 		// The baseline describes the platform that enforces it. Packages with
 		// build-tagged files -- internal/ebpf, internal/phantom, internal/logger,
 		// internal/resource -- compile different code on Linux and macOS, and the
@@ -106,6 +125,17 @@ func main() {
 	var problems, notes []string
 	for _, r := range got {
 		prev, known := base[r.pkg]
+		// Checked before the baseline lookup, because the point is that this
+		// package produced no figure to compare: `make check-coverage` pipes
+		// `go test` into this command, and a pipeline takes the exit status of
+		// its last stage, so a package whose tests fail or do not compile
+		// exited 0 here and the gate printed "ok" over a run that never
+		// happened.
+		if r.failed {
+			problems = append(problems, fmt.Sprintf(
+				"%s reported no coverage: its tests failed or did not build", r.pkg))
+			continue
+		}
 		if !known {
 			// A brand-new package is welcome to have no tests yet; it enters the
 			// baseline at whatever it has. Refusing new packages outright would
@@ -184,6 +214,12 @@ func parse(f *os.File) ([]result, error) {
 			if !seen[m[1]] {
 				seen[m[1]] = true
 				out = append(out, result{pkg: m[1], hasTests: false})
+			}
+		case failLine.MatchString(line):
+			m := failLine.FindStringSubmatch(line)
+			if !seen[m[1]] {
+				seen[m[1]] = true
+				out = append(out, result{pkg: m[1], failed: true})
 			}
 		}
 	}

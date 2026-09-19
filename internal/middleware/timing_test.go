@@ -68,10 +68,19 @@ func TestTraceTimingBreakdown(t *testing.T) {
 	// Execute
 	finalHandler.ServeHTTP(rr, req)
 
-	// Wait for asynchronous trace flush
+	// Drain the trace asynchronously handed to the telemetry loop.
+	//
+	// This used to sleep 100ms up to ten times and give up, which made the test
+	// a measurement of how loaded the machine was: under a parallel
+	// `go test ./...` the flush did not land inside a second and the package
+	// failed, while the same test passed on its own. FlushThreats round-trips
+	// an ack through the loop that drains traceInCh, so each pass makes real
+	// progress instead of guessing at a duration. A few passes are needed
+	// because select picks randomly between a pending trace and the flush
+	// request, so the first flush can run before the trace is received.
 	var traces []*telemetry.TraceRecord
-	for i := 0; i < 10; i++ {
-		time.Sleep(100 * time.Millisecond)
+	for range 20 {
+		telemetry.FlushThreats()
 		traces = telemetry.GetTraces(context.Background(), 1)
 		if len(traces) > 0 {
 			break
@@ -79,7 +88,7 @@ func TestTraceTimingBreakdown(t *testing.T) {
 	}
 
 	if len(traces) == 0 {
-		t.Fatal("no traces recorded after wait")
+		t.Fatal("no traces recorded after flushing the telemetry loop")
 	}
 
 	tr := traces[0]
