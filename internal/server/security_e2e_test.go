@@ -156,10 +156,15 @@ func TestIntegration_SecurityHub(t *testing.T) {
 		// Wait for batch flush
 		time.Sleep(1500 * time.Millisecond)
 
-		// Verify via telemetry.GetSecurityThreats (which is what the API uses)
+		// Verify through GetSecurityThreatsLite, which is the query every API
+		// path actually runs. This used to read the full-blob variant and say it
+		// was "what the API uses" -- it is not, and the two have drifted before:
+		// clampThreatBounds exists because one guarded its offset and the other
+		// did not. Asserting against the query production does not run is how a
+		// suite stays green through a regression in the one it does.
 		ctx := context.Background()
 		filter := &telemetry.ThreatFilter{Status: "all"}
-		results := telemetry.GetSecurityThreats(ctx, 10, 0, filter)
+		results := telemetry.GetSecurityThreatsLite(ctx, 10, 0, filter)
 
 		if len(results) < 2 {
 			t.Errorf("Expected at least 2 threats, got %d", len(results))
@@ -267,7 +272,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		// Wait for async threat recording
 		time.Sleep(1500 * time.Millisecond)
 
-		results := telemetry.GetSecurityThreats(context.Background(), 10, 0, &telemetry.ThreatFilter{Status: "all"})
+		results := telemetry.GetSecurityThreatsLite(context.Background(), 10, 0, &telemetry.ThreatFilter{Status: "all"})
 		found := false
 		for _, th := range results {
 			if th.Type == "cors_violation" && strings.Contains(th.Details, "http://malicious.com") {
@@ -282,7 +287,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 
 	t.Run("Valid Origin Allowed", func(t *testing.T) {
 		// Clear threats by resetting store if possible, or just check count increase
-		before := len(telemetry.GetSecurityThreats(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
+		before := len(telemetry.GetSecurityThreatsLite(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
 
 		req := httptest.NewRequest("GET", "http://localhost/foo", nil)
 		req.Header.Set("Origin", "http://allowed.com")
@@ -290,7 +295,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		finalHandler.ServeHTTP(w, req)
 
 		time.Sleep(1500 * time.Millisecond)
-		after := len(telemetry.GetSecurityThreats(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
+		after := len(telemetry.GetSecurityThreatsLite(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
 
 		if after > before {
 			t.Errorf("Valid origin should not trigger a CORS violation. Count went from %d to %d", before, after)
@@ -307,7 +312,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		time.Sleep(1500 * time.Millisecond)
 
 		// 2. Get the threat ID
-		results := telemetry.GetSecurityThreats(context.Background(), 1, 0, &telemetry.ThreatFilter{Status: "all"})
+		results := telemetry.GetSecurityThreatsLite(context.Background(), 1, 0, &telemetry.ThreatFilter{Status: "all"})
 		if len(results) == 0 || results[0].Type != "cors_violation" {
 			t.Fatalf("CORS violation threat not found")
 		}
@@ -339,12 +344,12 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		}
 
 		// 5. Verify request now passes without new violation
-		before := len(telemetry.GetSecurityThreats(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
+		before := len(telemetry.GetSecurityThreatsLite(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
 		w2 := httptest.NewRecorder()
 		finalHandler.ServeHTTP(w2, req)
 
 		time.Sleep(1500 * time.Millisecond)
-		after := len(telemetry.GetSecurityThreats(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
+		after := len(telemetry.GetSecurityThreatsLite(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
 
 		if after > before {
 			t.Errorf("Request should now be allowed without triggering new violation")

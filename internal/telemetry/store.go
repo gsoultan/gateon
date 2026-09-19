@@ -2629,7 +2629,24 @@ func FlushThreats() {
 	}
 }
 
-// GetSecurityThreats returns a paged list of security threats from the store.
+// GetSecurityThreats returns a paged list of security threats from the store,
+// including the request/response header and body blobs its Lite sibling omits.
+//
+// Nothing in production calls it today, and that is a gap rather than a reason
+// to delete it. Every API path -- GetDiagnostics, detectAnomalies and
+// ListSecurityThreats alike -- runs the Lite query, which does not select those
+// columns, so threats read back from the store carry empty blobs.
+// SecurityAnomalyModal renders them behind `{(headers || body) && ...}`, so the
+// request-evidence section of the incident detail simply does not appear: no
+// empty state, no "not captured", nothing to tell an operator that the evidence
+// exists and was not fetched.
+//
+// Flipping ListSecurityThreats to this function is not the fix -- it would put
+// four LONGTEXT columns into every row of a page that can ask for a thousand,
+// which is the cost Lite was introduced to avoid. The fix is a per-threat
+// detail fetch that the modal calls when it opens, which is a proto RPC and a
+// UI change rather than a one-line swap. Until then this is the only query that
+// can answer it.
 
 // Bounds for a threat query. The lower bound matters as much as the upper one:
 // the result slice is sized with min(limit, 100) as its capacity, and make()
