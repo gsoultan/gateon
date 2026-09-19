@@ -623,3 +623,40 @@ func (m *EbpfManager) GetMapStats() (MapStats, error) {
 
 	return stats, nil
 }
+
+// seedManagementWhitelist installs the configured management allowlist and
+// reports how many addresses actually reached the kernel. It returns 0 when
+// the feature is off, which is what keeps the kernel branch off with it.
+//
+// The count is the point. mgmt_whitelist is an exact-match IPv4 hash, and the
+// programs read it as "if the allowlist is on, a packet to the management port
+// whose source is absent is dropped". Switching that on against an empty map
+// drops every management packet at the NIC, and the only way back is detaching
+// the program -- which needs the access that was just refused. So the flag is
+// only ever written after at least one address is in.
+//
+// ManagementConfig.AllowedIps is deliberately not the source: it is
+// CIDR-capable and defaults to 0.0.0.0/0, and a __u32 key cannot express
+// either. mgmt_whitelist_ips takes bare IPv4 addresses and says so.
+func (m *EbpfManager) seedManagementWhitelist() int {
+	if m.config == nil || !m.config.EnableMgmtWhitelist {
+		return 0
+	}
+	if err := m.UpdateManagementWhitelist(m.config.MgmtWhitelistIps); err != nil {
+		logger.L.LogError("failed to install the management whitelist", "error", err)
+	}
+
+	m.mu.RLock()
+	installed := len(m.mgmtWhitelist)
+	m.mu.RUnlock()
+
+	if installed == 0 {
+		logger.L.LogError("enable_mgmt_whitelist is on but no configured address could be installed, "+
+			"so kernel-side management filtering stays off. Enabling it with an empty allowlist would "+
+			"drop every packet to the management port at the NIC and lock you out, and detaching the "+
+			"program needs the access it just refused. mgmt_whitelist_ips takes bare IPv4 addresses; "+
+			"CIDRs and IPv6 cannot be expressed by this map.",
+			"setting", "enable_mgmt_whitelist", "configured", len(m.config.MgmtWhitelistIps))
+	}
+	return installed
+}

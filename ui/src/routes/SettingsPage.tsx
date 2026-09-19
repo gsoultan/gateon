@@ -2230,6 +2230,31 @@ export default function SettingsPage() {
                   />
                 </>
               )}
+              <Divider label="Management Allowlist" labelPosition="left" />
+              <Switch
+                label="Filter the management port in the kernel"
+                description="Drop packets to the management port at the NIC unless the source is listed below."
+                checked={config.ebpf.enableMgmtWhitelist || false}
+                onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, enableMgmtWhitelist: e.currentTarget.checked}})}
+                disabled={formDisabled}
+              />
+              {config.ebpf.enableMgmtWhitelist && (
+                <>
+                  <TagsInput
+                    label="Allowed Addresses"
+                    description="Bare IPv4 addresses only. Ranges and IPv6 cannot be expressed here and are ignored."
+                    placeholder="203.0.113.7"
+                    value={config.ebpf.mgmtWhitelistIps || []}
+                    onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, mgmtWhitelistIps: val}})}
+                    disabled={formDisabled}
+                  />
+                  <Alert color="yellow" variant="light">
+                    This is enforced before the packet reaches Gateon, so an address that is
+                    not listed cannot reach the dashboard or the API at all. If the list ends
+                    up empty, kernel filtering stays off rather than locking everyone out.
+                  </Alert>
+                </>
+              )}
               {canEditGlobal && (
                 <Group justify="flex-end" mt="md">
                   <Button onClick={saveGatewayConfig} loading={saving} size="sm">
