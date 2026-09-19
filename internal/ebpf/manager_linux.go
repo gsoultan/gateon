@@ -284,6 +284,11 @@ func (m *EbpfManager) commit(ctx context.Context, coll *ebpf.Collection, l io.Cl
 // applyRuntimeConfig writes the manager's configuration into the kernel maps
 // the XDP program reads at runtime (global_ebpf_config and the knock sequence).
 func (m *EbpfManager) applyRuntimeConfig() {
+	// Install the allowlist before the flag that makes the kernel enforce it.
+	// The other order leaves a window in which the branch is live against an
+	// empty map, and that window drops every packet to the management port.
+	whitelisted := m.seedManagementWhitelist()
+
 	m.mu.RLock()
 	gcfg := m.maps["global_ebpf_config"]
 	m.mu.RUnlock()
@@ -292,6 +297,11 @@ func (m *EbpfManager) applyRuntimeConfig() {
 		val := ebpfConfigVal{MgmtPort: uint32(m.config.MgmtPort)}
 		if m.config.EnableKnocking {
 			val.EnableKnocking = 1
+		}
+		// Only with something in the map; seedManagementWhitelist has already
+		// said why if the operator asked for this and it is staying off.
+		if m.config.EnableMgmtWhitelist && whitelisted > 0 {
+			val.EnableMgmtWhitelist = 1
 		}
 		// The flag used to decide only whether XDP loaded; the program limited
 		// every source regardless, so "IP shunning only" silently rate limited.

@@ -464,6 +464,25 @@ message EbpfConfig {
   // jumbo-MTU AWS ENA interface that is two extra allocations and two memcpys
   // per packet for no earlier drop. Prefer tc_filtering on such NICs.
   bool allow_generic_xdp = 13;
+
+  // EnableMgmtWhitelist gates the kernel-side management-port allowlist. Both
+  // programs already carry the branch; without this it is never switched on,
+  // so the map is only ever populated by a completed port knock.
+  //
+  // It is refused unless MgmtWhitelistIps resolves to at least one address.
+  // The map is an exact-match IPv4 hash, so an enable with nothing in it means
+  // "drop every packet to the management port" -- an operator would lock
+  // themselves out at the NIC with no way back except detaching the program.
+  bool enable_mgmt_whitelist = 14;
+
+  // MgmtWhitelistIps are the addresses allowed to reach MgmtPort, enforced in
+  // the kernel before the packet reaches the stack.
+  //
+  // Bare IPv4 addresses only, deliberately not ManagementConfig.AllowedIps:
+  // that list is CIDR-capable and defaults to 0.0.0.0/0, neither of which an
+  // exact-match __u32 hash can express. Anything unencodable is skipped with a
+  // log line rather than silently widening or narrowing the rule.
+  repeated string mgmt_whitelist_ips = 15;
 }
 
 message AuthConfig {
