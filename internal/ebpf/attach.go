@@ -48,6 +48,20 @@ func allowGenericXDP(cfg *gateonv1.EbpfConfig) bool {
 	return cfg != nil && cfg.GetAllowGenericXdp()
 }
 
+// xdpLoadBalancingUnimplemented reports whether the operator has turned on a
+// setting that cannot do what its name says.
+//
+// xdp_load_balancing has no way to resolve a backend's destination MAC, and the
+// XDP path it feeds rewrites the destination MAC and returns XDP_TX. Installing
+// a backend would therefore put the redirected traffic on the wire addressed to
+// nobody — see UpdateLoadBalancerBackends, which refuses for that reason. The
+// refusal happens where backends are installed, which is a path an operator may
+// never reach; saying so at attach time is what turns "my traffic vanished"
+// into "the gateway told me this setting does nothing".
+func xdpLoadBalancingUnimplemented(cfg *gateonv1.EbpfConfig) bool {
+	return cfg != nil && cfg.GetXdpLoadBalancing()
+}
+
 // tcUnsupported lists configured features the TC ingress hook cannot enforce.
 //
 // The hook decides on the IP header alone: port knocking mutates per-source

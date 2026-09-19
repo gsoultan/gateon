@@ -49,6 +49,9 @@ type ebpfConfigVal struct {
 	MgmtPort            uint32
 	EnableKnocking      uint32
 	EnableMgmtWhitelist uint32
+	// EnableRateLimit turns on the default per-source limiter. Per-source
+	// entries written by SetAdaptiveRateLimit apply whether or not it is set.
+	EnableRateLimit uint32
 }
 
 // closerFunc adapts a plain teardown function to io.Closer. Used to wrap
@@ -74,6 +77,14 @@ func (m *EbpfManager) Start(ctx context.Context) {
 		"xdp_ip_shunning", m.config.XdpIpShunning,
 		"xdp_load_balancing", m.config.XdpLoadBalancing,
 		"tc_filtering", m.config.TcFiltering)
+
+	if xdpLoadBalancingUnimplemented(m.config) {
+		logger.L.LogError("xdp_load_balancing is enabled but not implemented: no destination MAC can "+
+			"be resolved for a backend, so no backend will be installed and no packet will be "+
+			"redirected. Nothing is silently dropped -- traffic keeps taking the normal path -- but "+
+			"this setting is doing nothing. Turn it off and balance in the proxy instead.",
+			"setting", "xdp_load_balancing")
+	}
 
 	if m.config.XdpRateLimit || m.config.XdpIpShunning || m.config.XdpLoadBalancing {
 		m.loadXDP(ctx)
@@ -281,6 +292,11 @@ func (m *EbpfManager) applyRuntimeConfig() {
 		val := ebpfConfigVal{MgmtPort: uint32(m.config.MgmtPort)}
 		if m.config.EnableKnocking {
 			val.EnableKnocking = 1
+		}
+		// The flag used to decide only whether XDP loaded; the program limited
+		// every source regardless, so "IP shunning only" silently rate limited.
+		if m.config.XdpRateLimit {
+			val.EnableRateLimit = 1
 		}
 		if err := gcfg.Update(uint32(0), val, ebpf.UpdateAny); err != nil {
 			logger.L.LogError("failed to write global_ebpf_config", "error", err)

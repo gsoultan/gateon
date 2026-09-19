@@ -173,7 +173,7 @@ jobs:
           # Built into RUNNER_TEMP, never the checkout, so the working-tree
           # check below stays meaningful.
           go test -c -o "$RUNNER_TEMP/ebpf.test" ./internal/ebpf/
-          sudo "$RUNNER_TEMP/ebpf.test" -test.run 'TestAttachTC|TestAttachClsact' -test.v
+          sudo "$RUNNER_TEMP/ebpf.test" -test.run 'TestAttachTC|TestAttachClsact|TestXDP' -test.v
 
       - name: Working tree clean after tests
         run: |
