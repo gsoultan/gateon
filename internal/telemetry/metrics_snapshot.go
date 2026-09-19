@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,105 +59,7 @@ var (
 	globalGovernor    atomic.Value // stores *governorProviderContainer
 	globalVersion     atomic.Value // stores string
 	lastSnapshot      atomic.Pointer[MetricsSnapshot]
-
-	snapshotPool = sync.Pool{
-		New: func() any {
-			return &MetricsSnapshot{}
-		},
-	}
 )
-
-func (s *MetricsSnapshot) Reset() {
-	if s == nil {
-		return
-	}
-
-	// Clear slices and their underlying arrays to allow GC of pointers/maps
-	// while preserving capacity for reuse.
-	clearSlice(s.RouteMetrics)
-	s.RouteMetrics = s.RouteMetrics[:0]
-
-	clearSlice(s.TLSCertificates)
-	s.TLSCertificates = s.TLSCertificates[:0]
-
-	clearSlice(s.Targets)
-	s.Targets = s.Targets[:0]
-
-	clearSlice(s.IPMetrics)
-	s.IPMetrics = s.IPMetrics[:0]
-
-	clearSlice(s.CountryMetrics)
-	s.CountryMetrics = s.CountryMetrics[:0]
-
-	clearSlice(s.ProtocolMetrics)
-	s.ProtocolMetrics = s.ProtocolMetrics[:0]
-
-	clearSlice(s.DomainMetrics)
-	s.DomainMetrics = s.DomainMetrics[:0]
-
-	clearSlice(s.HourlyDomainMetrics)
-	s.HourlyDomainMetrics = s.HourlyDomainMetrics[:0]
-
-	clearSlice(s.DomainStatsRolling24h)
-	s.DomainStatsRolling24h = s.DomainStatsRolling24h[:0]
-
-	clearSlice(s.TrafficHistory)
-	s.TrafficHistory = s.TrafficHistory[:0]
-
-	clearSlice(s.ActiveShunnedEntities)
-	s.ActiveShunnedEntities = s.ActiveShunnedEntities[:0]
-
-	// Reset nested structs
-	s.GoldenSignals = GoldenSignals{}
-	s.System = SystemMetrics{}
-	s.MitigationFunnel = MitigationFunnel{}
-
-	// Reset Middleware metrics
-	clearSlice(s.Middleware.RateLimitRejected)
-	s.Middleware.RateLimitRejected = s.Middleware.RateLimitRejected[:0]
-	clearSlice(s.Middleware.WAFBlocked)
-	s.Middleware.WAFBlocked = s.Middleware.WAFBlocked[:0]
-	clearSlice(s.Middleware.FastPathBlocked)
-	s.Middleware.FastPathBlocked = s.Middleware.FastPathBlocked[:0]
-	clearSlice(s.Middleware.AuthFailures)
-	s.Middleware.AuthFailures = s.Middleware.AuthFailures[:0]
-	clearSlice(s.Middleware.GeoIPBlocked)
-	s.Middleware.GeoIPBlocked = s.Middleware.GeoIPBlocked[:0]
-	clearSlice(s.Middleware.MitigatedThreats)
-	s.Middleware.MitigatedThreats = s.Middleware.MitigatedThreats[:0]
-	clearSlice(s.Middleware.BotMitigations)
-	s.Middleware.BotMitigations = s.Middleware.BotMitigations[:0]
-	clearSlice(s.Middleware.EbpfDroppedPackets)
-	s.Middleware.EbpfDroppedPackets = s.Middleware.EbpfDroppedPackets[:0]
-
-	// Reset Security insights
-	clearSlice(s.Security.TopThreatSources)
-	s.Security.TopThreatSources = s.Security.TopThreatSources[:0]
-	clearSlice(s.Security.TopThreatTypes)
-	s.Security.TopThreatTypes = s.Security.TopThreatTypes[:0]
-	clearSlice(s.Security.ThreatsByCountry)
-	s.Security.ThreatsByCountry = s.Security.ThreatsByCountry[:0]
-	clearSlice(s.Security.AttackTrend)
-	s.Security.AttackTrend = s.Security.AttackTrend[:0]
-	clearSlice(s.Security.RecentAnomalies)
-	s.Security.RecentAnomalies = s.Security.RecentAnomalies[:0]
-	clearSlice(s.Security.HeavyHitters)
-	s.Security.HeavyHitters = s.Security.HeavyHitters[:0]
-	clearSlice(s.Security.EbpfTopIPs)
-	s.Security.EbpfTopIPs = s.Security.EbpfTopIPs[:0]
-
-	s.Security.TotalAnomalies = 0
-	s.Security.ActiveThreats = 0
-	s.Security.MitigatedToday = 0
-	s.Security.GlobalThreatScore = 0
-}
-
-func clearSlice[T any](s []T) {
-	for i := range s {
-		var zero T
-		s[i] = zero
-	}
-}
 
 func SetEbpfManager(m EbpfProvider) {
 	globalEbpfManager.Store(&ebpfProviderContainer{p: m})
@@ -206,14 +107,7 @@ func StartSnapshotLoop(ctx context.Context) {
 				heavyCounter = 0
 			}
 
-			snap, err := collectMetricsSnapshot(ctx, 50, 0, isHeavy)
-			if err == nil {
-				old := lastSnapshot.Swap(snap)
-				if old != nil {
-					snapshotPool.Put(old)
-				}
-				MetricsBroadcaster.Broadcast(snap)
-			}
+			refreshSnapshot(ctx, isHeavy)
 
 			interval := time.Duration(td.TelemetryIntervalSeconds) * time.Second
 			if interval <= 0 {
@@ -222,6 +116,28 @@ func StartSnapshotLoop(ctx context.Context) {
 			timer.Reset(interval)
 		}
 	}
+}
+
+// refreshSnapshot collects a snapshot, publishes it and pushes it to live
+// subscribers.
+//
+// The snapshot it replaces is left to the garbage collector. It used to go back
+// into a sync.Pool at this point, while the pointer had already been handed to
+// whoever called GetLastSnapshot or CollectMetricsSnapshot and sat in every
+// /v1/watch subscriber's channel -- and light refreshes alias the previous
+// snapshot's slices into the new one. The next Get()+Reset() then zeroed and
+// refilled an object that readers were still encoding: the race detector flags
+// the encoder, a slow SSE client serialises someone else's numbers, and on the
+// minimal tier the live snapshot's traffic history and security insights were
+// zeroed in place. One allocation per telemetry interval is the price of a
+// snapshot that is immutable once published.
+func refreshSnapshot(ctx context.Context, heavy bool) {
+	snap, err := collectMetricsSnapshot(ctx, 50, 0, heavy)
+	if err != nil {
+		return
+	}
+	lastSnapshot.Store(snap)
+	MetricsBroadcaster.Broadcast(snap)
 }
 
 // MetricsSnapshot holds a structured view of all Prometheus metrics for the UI.
@@ -498,8 +414,7 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 		idx[f.GetName()] = f
 	}
 
-	snap := snapshotPool.Get().(*MetricsSnapshot)
-	snap.Reset()
+	snap := &MetricsSnapshot{}
 
 	// Capture previous snapshot to preserve heavy data during light refreshes
 	prev := lastSnapshot.Load()

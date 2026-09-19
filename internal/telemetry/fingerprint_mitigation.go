@@ -146,6 +146,38 @@ func FingerprintBlastRadius(fingerprint string) (count int, atLeast bool) {
 	return len(s.ips), s.ipOverflow
 }
 
+// fingerprintKeySeparator joins a JA4 to a JA4H when a threat carries no
+// fingerprint of its own and the two halves have to stand in for one.
+const fingerprintKeySeparator = "_"
+
+// FindUserMitigationKey reports the key an in-force mitigation for this source
+// is actually stored under, or false when no mitigation is in force.
+//
+// MarkUserMitigated writes the fingerprint string it is handed verbatim into
+// user_mitigations.fingerprint and leaves the ja4h column empty, and its
+// callers hand it two different shapes: the fingerprint on its own, and the
+// legacy ja4 + "_" + ja4h composite used when a threat carries no fingerprint.
+// A caller that cannot name the key must therefore ask which shape the row is
+// under. Rebuilding the composite and hoping is a guess, and a wrong guess
+// deletes nothing while looking exactly like a successful release.
+//
+// ja4h may be empty, in which case only the plain source is considered.
+func FindUserMitigationKey(source, ja4h string) (string, bool) {
+	if source == "" {
+		return "", false
+	}
+	if IsUserMitigated(source) {
+		return source, true
+	}
+	if ja4h == "" {
+		return "", false
+	}
+	if composite := source + fingerprintKeySeparator + ja4h; IsUserMitigated(composite) {
+		return composite, true
+	}
+	return "", false
+}
+
 // ResetFingerprintSightings clears the sighting table. Tests only.
 func ResetFingerprintSightings() {
 	fingerprintMu.Lock()

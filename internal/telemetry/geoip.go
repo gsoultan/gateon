@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -520,15 +521,27 @@ func DownloadGeoIP(licenseKey string) error {
 	return errors.Join(optionalErrs...)
 }
 
+// geoIPDownloadURL is MaxMind's download endpoint. A variable so a test can
+// point the downloader at a local address.
+var geoIPDownloadURL = "https://download.maxmind.com/app/geoip_download"
+
 // downloadGeoIPEdition downloads a single MaxMind edition, extracts the embedded
 // .mmdb file to its destination and reloads the associated reader.
 func downloadGeoIPEdition(licenseKey string, edition geoIPEdition) error {
-	url := fmt.Sprintf("https://download.maxmind.com/app/geoip_download?edition_id=%s&license_key=%s&suffix=tar.gz", edition.id, licenseKey)
+	downloadURL := fmt.Sprintf("%s?edition_id=%s&license_key=%s&suffix=tar.gz", geoIPDownloadURL, edition.id, licenseKey)
 
 	// #nosec G107 -- url is built from MaxMind's fixed download endpoint plus
 	// the operator's licence key; no request input reaches it.
-	resp, err := http.Get(url)
+	resp, err := http.Get(downloadURL)
 	if err != nil {
+		// A transport failure is a *url.Error whose message embeds the full
+		// URL, and the URL carries the licence key. The worker logs this error
+		// and /v1/geoip/update writes it to the response, so the key was
+		// reaching the system log stream. Keep the underlying cause only.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
 		return fmt.Errorf("failed to download %s database: %w", edition.id, err)
 	}
 	defer resp.Body.Close()

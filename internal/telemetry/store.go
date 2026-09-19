@@ -93,7 +93,8 @@ func RedactHeaders(headers string) string {
 				(len(line) >= 10 && strings.EqualFold(line[:10], "x-api-key:")) ||
 				(len(line) >= 7 && strings.EqualFold(line[:7], "cookie:")) ||
 				(len(line) >= 11 && strings.EqualFold(line[:11], "set-cookie:")) ||
-				(len(line) >= 13 && strings.EqualFold(line[:13], "x-auth-token:")) {
+				(len(line) >= 13 && strings.EqualFold(line[:13], "x-auth-token:")) ||
+				(len(line) >= 20 && strings.EqualFold(line[:20], "proxy-authorization:")) {
 				isSensitive = true
 			}
 		}
@@ -1920,16 +1921,25 @@ check_db:
 	return mitigated
 }
 
+// unmitigationHoldWindow is how long a manual release of a fingerprint holds
+// before escalateMitigation may block it again.
+const unmitigationHoldWindow = 24 * time.Hour
+
 // IsUserUnmitigated returns true if the JA4+ fingerprint is currently explicitly unmitigated.
 func IsUserUnmitigated(ja4plus string) bool {
 	s := getStore()
 	if s == nil || ja4plus == "" {
 		return false
 	}
-	// Check DB for status 'unmitigated' within the last 24 hours to prevent immediate re-mitigation.
-	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'unmitigated' AND (fingerprint = ? OR ja4h = ?) AND updated_at > datetime('now', '-1 day')")
+	// The cutoff is bound as a parameter, the way IsUserMitigated binds its
+	// own, rather than computed in SQL: the previous datetime('now', '-1 day')
+	// is SQLite's and does not exist on Postgres, where the query errored and
+	// the error read as "not released" -- so a fingerprint an operator had just
+	// released was blocked again by the next threat it produced.
+	cutoff := time.Now().UTC().Add(-unmitigationHoldWindow).Format(threatTimestampLayout)
+	query := s.dialect.Rebind("SELECT status FROM user_mitigations WHERE status = 'unmitigated' AND (fingerprint = ? OR ja4h = ?) AND updated_at > ?")
 	var status string
-	err := s.db.QueryRow(query, ja4plus, ja4plus).Scan(&status)
+	err := s.db.QueryRow(query, ja4plus, ja4plus, cutoff).Scan(&status)
 	return err == nil && status == statusUnmitigated
 }
 
@@ -2059,12 +2069,25 @@ func MarkUserMitigated(ja4plus string, fpType string, reason string, category st
 	}
 }
 
-// MarkUserUnmitigated records that a fingerprint has been manually unmitigated.
-func MarkUserUnmitigated(ja4plus string) {
+// MarkUserUnmitigated records that a fingerprint has been manually unmitigated
+// and reports whether an in-force mitigation was actually released.
+//
+// The release itself is idempotent and still applies its 24h hold even when
+// nothing was blocked, but "released a block" and "released nothing" are
+// different answers to give an operator: the caller that reports the second as
+// the first leaves a client blocked behind a success message.
+func MarkUserUnmitigated(ja4plus string) bool {
 	s := getStore()
 	if s == nil || ja4plus == "" {
-		return
+		return false
 	}
+
+	// Ask before clearing. Rows-affected on the DELETE below cannot answer this:
+	// that statement also removes the UNMITIGATED_MARKER rows a previous release
+	// inserted under the same key, so a second release would report itself a
+	// success for deleting its own marker.
+	released := s.countInForceUserMitigations(ja4plus) > 0
+
 	// 1. Populate high-priority override cache (Bypass all security for 24h)
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ja4plus, true)
@@ -2084,6 +2107,21 @@ func MarkUserUnmitigated(ja4plus string) {
 	if err != nil {
 		logger.Default().LogError("failed to mark user as unmitigated", "ja4plus", ja4plus, "error", err)
 	}
+	return released
+}
+
+// countInForceUserMitigations reports how many mitigation rows are stored under
+// this exact key and are still inside the TTL IsUserMitigated enforces. An
+// expired row blocks nobody, so releasing one has released nothing.
+func (s *pathStatsStore) countInForceUserMitigations(ja4plus string) int {
+	query := s.dialect.Rebind(`SELECT COUNT(*) FROM user_mitigations
+		WHERE (fingerprint = ? OR ja4h = ?) AND status = ? AND updated_at > ?`)
+	var n int
+	if err := s.db.QueryRow(query, ja4plus, ja4plus, statusMitigated, mitigationCutoff()).Scan(&n); err != nil {
+		logger.Default().LogError("failed to count user mitigations", "ja4plus", ja4plus, "error", err)
+		return 0
+	}
+	return n
 }
 
 // GetTrace returns a single trace record by timestamp and ID.

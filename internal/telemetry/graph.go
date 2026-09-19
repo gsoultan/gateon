@@ -4,7 +4,9 @@
 package telemetry
 
 import (
+	"cmp"
 	"hash/fnv"
+	"slices"
 	"sync"
 )
 
@@ -62,16 +64,40 @@ func AddGraphEdge(u, v string, weight float64) {
 	}
 	s.edges[u][v] += weight
 
-	// Basic LRU-like pruning: if a node has too many neighbors, trim the weakest ones
-	if len(s.edges[u]) > 1000 {
-		for k := range s.edges[u] {
-			if s.edges[u][k] < 2.0 {
-				delete(s.edges[u], k)
-			}
-			if len(s.edges[u]) <= 800 {
-				break
-			}
-		}
+	// A node's neighbor set is bounded by dropping its weakest edges. The
+	// previous trim only deleted edges below 2.0, and both kinds of edge the
+	// detector adds reach that weight -- fingerprint edges start there, path
+	// edges get there on their second pass -- so a node whose neighbors were all
+	// "strong" was never trimmed at all and grew with every pass.
+	if len(s.edges[u]) > maxGraphNeighbors {
+		trimWeakestNeighbors(s.edges[u], graphNeighborsKeep)
+	}
+}
+
+const (
+	// maxGraphNeighbors is the most neighbors one node may hold before it is
+	// trimmed; graphNeighborsKeep is what a trim leaves, so trimming is not
+	// repeated on every insert once the cap is reached.
+	maxGraphNeighbors  = 1000
+	graphNeighborsKeep = 800
+)
+
+// trimWeakestNeighbors deletes the lowest-weight neighbors until keep remain.
+func trimWeakestNeighbors(neighbors map[string]float64, keep int) {
+	if keep < 0 || len(neighbors) <= keep {
+		return
+	}
+	type edge struct {
+		id     string
+		weight float64
+	}
+	all := make([]edge, 0, len(neighbors))
+	for id, w := range neighbors {
+		all = append(all, edge{id: id, weight: w})
+	}
+	slices.SortFunc(all, func(a, b edge) int { return cmp.Compare(a.weight, b.weight) })
+	for _, e := range all[:len(all)-keep] {
+		delete(neighbors, e.id)
 	}
 }
 

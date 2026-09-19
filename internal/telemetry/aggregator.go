@@ -65,6 +65,14 @@ type IPStats struct {
 	WafBlocks  float64
 }
 
+// maxAggregatorIPs bounds the per-IP anomaly window. It is keyed by the client
+// address, which is the attacker's to choose -- an IPv6 /64 alone holds 2^64 of
+// them -- and used to grow by one entry per distinct address for the ten
+// minutes pruneIPs waits before dropping an idle one. When it is full, about a
+// quarter of the entries are dropped, the bulk policy the bandwidth tracker in
+// ipstats.go and the path map in stats.go already use.
+const maxAggregatorIPs = 10000
+
 // LocalMetricsAggregator collects and stores metrics in memory for anomaly detection.
 type LocalMetricsAggregator struct {
 	mu sync.RWMutex
@@ -74,6 +82,10 @@ type LocalMetricsAggregator struct {
 
 	// IP tracking: Map of IP to a simple sliding window (last 5 minutes)
 	ipStats *sync.Map // map[string]*IPStats
+	// ipCount is how many addresses ipStats holds, since sync.Map has no
+	// length; evictMu lets one goroutine at a time do the bulk eviction.
+	ipCount atomic.Int64
+	evictMu sync.Mutex
 
 	maxBuckets int
 	cachedQPS  atomic.Uint64
@@ -159,8 +171,15 @@ func (a *LocalMetricsAggregator) pruneIPs() {
 	now := time.Now()
 	a.ipStats.Range(func(key, value any) bool {
 		s := value.(*IPStats)
-		if now.Sub(s.LastUpdate) > 10*time.Minute {
-			a.ipStats.Delete(key)
+		// LastUpdate is written under the entry's own lock by RecordRequest and
+		// RecordWAFBlock, both on the request path, so it has to be read under
+		// it too: this loop ran every five minutes against live traffic and the
+		// race detector reports the pair.
+		s.mu.Lock()
+		idle := now.Sub(s.LastUpdate)
+		s.mu.Unlock()
+		if idle > 10*time.Minute {
+			a.deleteIP(key)
 		}
 		return true
 	})
@@ -189,9 +208,41 @@ func (a *LocalMetricsAggregator) getIPStats(ip string) *IPStats {
 	if val, ok := a.ipStats.Load(ip); ok {
 		return val.(*IPStats)
 	}
+	if a.ipCount.Load() >= maxAggregatorIPs {
+		a.evictIPStats()
+	}
 	s := &IPStats{LastUpdate: time.Now()}
-	actual, _ := a.ipStats.LoadOrStore(ip, s)
+	actual, loaded := a.ipStats.LoadOrStore(ip, s)
+	if !loaded {
+		a.ipCount.Add(1)
+	}
 	return actual.(*IPStats)
+}
+
+// evictIPStats drops about a quarter of the tracked addresses so new ones can
+// be admitted. One goroutine evicts at a time; the others carry on and insert,
+// so under contention the bound is overshot by at most the number of
+// concurrent inserters rather than the request path queueing behind the
+// eviction.
+func (a *LocalMetricsAggregator) evictIPStats() {
+	if !a.evictMu.TryLock() {
+		return
+	}
+	defer a.evictMu.Unlock()
+	toEvict := maxAggregatorIPs / 4
+	a.ipStats.Range(func(key, _ any) bool {
+		a.deleteIP(key)
+		toEvict--
+		return toEvict > 0
+	})
+}
+
+// deleteIP removes an address and keeps ipCount exact when the prune loop and
+// an eviction race to remove the same key.
+func (a *LocalMetricsAggregator) deleteIP(key any) {
+	if _, loaded := a.ipStats.LoadAndDelete(key); loaded {
+		a.ipCount.Add(-1)
+	}
 }
 
 type IPResult struct {
