@@ -161,3 +161,32 @@ func TestLoadBalancerFactory(t *testing.T) {
 		t.Fatal("expected non-nil LoadBalancer for least_conn")
 	}
 }
+
+// TestLoadBalancerFactoryKeepsProxyProtocolSettings pins the PROXY-protocol
+// flags through construction. A target's proxy_protocol_enabled was read only by
+// UpdateWeightedTargets, which discovery calls; the factory built the initial
+// target set from bare URLs, so a service without discovery never sent the
+// header no matter what the operator configured.
+func TestLoadBalancerFactoryKeepsProxyProtocolSettings(t *testing.T) {
+	factory := NewDefaultLoadBalancerFactory()
+	targets := []*gateonv1.Target{{
+		Url:                  "http://a",
+		Weight:               1,
+		ProxyProtocolEnabled: true,
+		ProxyProtocolVersion: gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_V2,
+	}}
+	for _, policy := range []string{"round_robin", "least_conn", "weighted_round_robin", "ai_predictive"} {
+		t.Run(policy, func(t *testing.T) {
+			s := factory.Create(policy, targets).NextState()
+			if s == nil {
+				t.Fatal("no target selected")
+			}
+			if !s.proxyProtocolEnabled {
+				t.Fatalf("%s: proxy_protocol_enabled was dropped when the balancer was built", policy)
+			}
+			if s.proxyProtocolVersion != gateonv1.ProxyProtocolVersion_PROXY_PROTOCOL_VERSION_V2 {
+				t.Fatalf("%s: proxy_protocol_version = %v, want V2", policy, s.proxyProtocolVersion)
+			}
+		})
+	}
+}

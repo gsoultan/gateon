@@ -368,12 +368,17 @@ func cloneTLSConfigWithIdentity(base *tls.Config, selectedIdentity *tlsClientIde
 	return cfg
 }
 
+// withClientRemoteAddr carries the peer address (with its port) to the
+// PROXY-protocol dialer on the outbound request's context only.
+//
+// It used to write the address into the shared RequestState instead, to save
+// the context allocation. That field is the one the entrypoint middleware
+// memoises the trust-resolved client IP in and the one request.GetClientIP
+// returns first, so every reader after the proxy -- WAF telemetry, tracing --
+// saw "ip:port" for the rest of the request. The allocation is confined to
+// PROXY-protocol targets, which already dial per request.
 func withClientRemoteAddr(ctx context.Context, remoteAddr string) context.Context {
 	if remoteAddr == "" {
-		return ctx
-	}
-	if rs, ok := ctx.Value(request.RequestStateContextKey{}).(*request.RequestState); ok {
-		rs.ClientRemoteAddr = remoteAddr
 		return ctx
 	}
 	return context.WithValue(ctx, clientRemoteAddrContextKey, remoteAddr)
@@ -383,11 +388,13 @@ func clientRemoteAddrFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
+	if v, ok := ctx.Value(clientRemoteAddrContextKey).(string); ok && v != "" {
+		return v
+	}
 	if rs, ok := ctx.Value(request.RequestStateContextKey{}).(*request.RequestState); ok {
 		return rs.ClientRemoteAddr
 	}
-	v, _ := ctx.Value(clientRemoteAddrContextKey).(string)
-	return v
+	return ""
 }
 
 type proxyBuffer struct {

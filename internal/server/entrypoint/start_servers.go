@@ -199,7 +199,12 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 	logger.L.Info().Str("addr", addr).Str("ep", ep.Id).Msg("starting TCP entrypoint")
 	var l net.Listener
 	var err error
-	if ep.Tls != nil && ep.Tls.Enabled && deps.TLSConfig != nil {
+	// terminatesTLS decides both how to listen and whether to inspect. The
+	// inspection decision used to key off deps.TLSConfig alone, which is the
+	// gateway-wide config that any HTTPS entrypoint creates, so a plaintext TCP
+	// entrypoint next to an HTTPS one silently lost SSH, RDP and HTTP detection.
+	terminatesTLS := ep.Tls != nil && ep.Tls.Enabled && deps.TLSConfig != nil
+	if terminatesTLS {
 		l, err = tls.Listen("tcp", addr, deps.TLSConfig)
 	} else {
 		l, err = net.Listen("tcp", addr)
@@ -215,7 +220,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 	}
 	wg.Go(func() {
 		defer l.Close()
-		plaintext := deps.TLSConfig == nil
+		plaintext := !terminatesTLS
 		for {
 			conn, err := l.Accept()
 			if err != nil {

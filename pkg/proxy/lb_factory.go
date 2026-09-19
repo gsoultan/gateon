@@ -29,18 +29,22 @@ func (f *DefaultLoadBalancerFactory) Create(policy string, targets []*gateonv1.T
 	if targets == nil {
 		targets = []*gateonv1.Target{}
 	}
-	urls := make([]string, len(targets))
-	for i, t := range targets {
-		urls[i] = t.Url
-	}
+	// Built from the whole Target, not from its URL. The URL-only constructors
+	// drop proxy_protocol_enabled and proxy_protocol_version, and only
+	// discovery ever replaced that first target set, so a service without a
+	// discovery URL never sent the PROXY header however it was configured.
 	switch strings.ToLower(policy) {
 	case "least_conn":
-		return NewLeastConnLB(urls)
+		lb := NewLeastConnLB(nil)
+		lb.UpdateWeightedTargets(targets)
+		return lb
 	case "weighted_round_robin":
 		return NewWeightedRoundRobinLB(targets)
 	case "ai_predictive", "intelligent":
 		return NewAIPredictiveLB(targets)
 	default:
-		return NewRoundRobinLB(urls)
+		lb := NewRoundRobinLB(nil)
+		lb.UpdateWeightedTargets(targets)
+		return lb
 	}
 }

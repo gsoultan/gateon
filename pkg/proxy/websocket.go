@@ -143,12 +143,14 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	backendReq = backendReq.WithContext(r.Context())
 	maps.Copy(backendReq.Header, r.Header)
 
-	// X-Forwarded-*: preserve the inbound host, but always normalize the scheme
-	// through request.Scheme so an untrusted client cannot spoof X-Forwarded-Proto
-	// (consistent with the HTTP proxy path in serve_http.go).
-	if backendReq.Header.Get("X-Forwarded-Host") == "" {
-		backendReq.Header.Set("X-Forwarded-Host", r.Host)
-	}
+	// Identity headers: the same set rewriteRequest normalises on the HTTP path.
+	// maps.Copy above carried every inbound header across, and a backend reads
+	// these for who the client is and what name it was reached by, so none of
+	// them may reach it as the client wrote them. Forwarded (RFC 7239) is
+	// dropped rather than rewritten, which is what the HTTP path does too.
+	backendReq.Header.Set("X-Real-IP", request.GetClientIP(r, false))
+	backendReq.Header.Set("X-Forwarded-Host", r.Host)
+	backendReq.Header.Del("Forwarded")
 	backendReq.Header.Set("X-Forwarded-Proto", request.Scheme(r))
 	if request.Scheme(r) == "https" {
 		backendReq.Header.Set("X-Forwarded-Ssl", "on")
@@ -223,6 +225,13 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 
 	// Bidirectional tunnel: backendBuf has any bytes after response headers,
 	// then backendConn streams the rest. Client writes go to backend.
+	//
+	// Each direction half-closes its destination when its source ends, so the
+	// peer sees EOF and can hang up. The client side used to be left open
+	// after the backend closed: the client was never told, and this goroutine
+	// waited on the client->backend copy for as long as the client cared to
+	// keep an apparently live connection -- a goroutine and two sockets per
+	// backend-initiated close, held until the client gave up on its own.
 	backendReader := io.MultiReader(backendBuf, backendConn)
 
 	done := make(chan struct{})
@@ -232,6 +241,7 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 		close(done)
 	}()
 	copyWithPooledBuffer(clientConn, backendReader)
+	closeWrite(clientConn)
 	<-done
 }
 
