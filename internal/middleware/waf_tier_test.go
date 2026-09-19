@@ -30,8 +30,10 @@ func buildTierWAF(t *testing.T, waf *gateonv1.WafConfig) http.Handler {
 func doGet(t *testing.T, h http.Handler, url string, reputation int) int {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, url, strings.NewReader(""))
-	// Use explicit reputation to control reputation block rule (910002)
-	req.Header.Set("X-Gateon-Test-Reputation", strconv.Itoa(reputation))
+	// Use explicit reputation to control reputation block rule (910002). The
+	// header is only an input when the test hook is switched on.
+	t.Setenv(testReputationEnv, "1")
+	req.Header.Set(testReputationHeader, strconv.Itoa(reputation))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	return rr.Code

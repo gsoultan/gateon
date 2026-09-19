@@ -13,6 +13,7 @@ import (
 )
 
 func TestWAF_AdvancedSecurityRules(t *testing.T) {
+	t.Setenv(testReputationEnv, "1")
 	// Initialize a test store with the new rules
 	d, dialect, _ := db.Open("sqlite::memory:")
 	_ = db.Migrate(d, dialect)

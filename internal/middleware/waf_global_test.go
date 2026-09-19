@@ -26,6 +26,7 @@ func init() {
 // fall into that trap — with WAF enabled and all category flags at their zero
 // value, the gateway-wide WAF must still load CRS and block a SQLi attack.
 func TestCreateGlobalWAF_LoadsCRSWithDefaultFlags(t *testing.T) {
+	t.Setenv(testReputationEnv, "1")
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
 		Waf: &gateonv1.WafConfig{
 			Enabled:       true,
@@ -141,6 +142,7 @@ func TestCreateGlobalWAF_AllowsGRPC(t *testing.T) {
 // that spoofs "Content-Type: application/grpc" must still be fully inspected, so a
 // SQLi payload in the body is blocked rather than waved through.
 func TestCreateGlobalWAF_GRPCRelaxationNotBypassableByHeader(t *testing.T) {
+	t.Setenv(testReputationEnv, "1")
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
 		Waf: &gateonv1.WafConfig{
 			Enabled: true, UseCrs: true, ParanoiaLevel: 1,
@@ -197,6 +199,7 @@ func TestCreateGlobalWAF_DisabledReturnsNil(t *testing.T) {
 }
 
 func TestWAF_JWTFastCheck(t *testing.T) {
+	t.Setenv(testReputationEnv, "1")
 	// Initialize store for WAF rules
 	_ = waf.InitStore("sqlite::memory:")
 

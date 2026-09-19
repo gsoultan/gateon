@@ -246,7 +246,30 @@ func wafSeverityAndCategory(matches []gwaf.Match, d gwaf.Decision) (severity, ca
 			category = c
 		}
 	}
-	return worst.String(), category
+	return threatSeverity(worst), category
+}
+
+// threatSeverity maps the engine's severity onto the vocabulary the rest of
+// gateon speaks.
+//
+// gwaf grades a rule notice, warning, error or critical. Only the last of those
+// is a word the dashboard filters, the SIEM formatter, the confidence score and
+// the correlation engine recognise; the engine's own String() was being written
+// straight into the threat record, so every WAF block below critical carried a
+// severity nothing downstream could rank. The correlation engine read "error"
+// as the lowest tier there is, and the responder — which restricts on high and
+// degrades on medium — flagged those incidents and did nothing else.
+func threatSeverity(s types.Severity) string {
+	switch s {
+	case types.SeverityCritical:
+		return severityCritical
+	case types.SeverityError:
+		return severityHigh
+	case types.SeverityWarning:
+		return severityMedium
+	default:
+		return severityLow
+	}
 }
 
 // categoryFromTags looks the rule up in gateon's corpus.
