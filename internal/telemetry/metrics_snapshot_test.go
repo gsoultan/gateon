@@ -6,6 +6,7 @@ package telemetry
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -214,5 +215,51 @@ func TestPublishedSnapshotSurvivesLaterRefreshes(t *testing.T) {
 			t.Fatalf("round %d: a snapshot handed to a reader was rewritten by later refreshes: route %q read %v when handed out and reads %v now",
 				round, route, want, got)
 		}
+	}
+}
+
+// TestSnapshotLoopPublishesUntilItsContextEnds covers the production entry
+// point for the whole snapshot subsystem.
+//
+// cmd/gateon/main.go starts this goroutine and nothing else calls it, yet it
+// had no test: the snapshot rewrite replaced the transitive coverage the loop
+// used to get with a direct refreshSnapshot call, which exercises the work but
+// not the schedule around it. The loop went to 0%, taking the store getters it
+// drives down with it, and the coverage ratchet caught the hole.
+//
+// Two properties, and the second is the one that matters under `conc`: a
+// goroutine handed a context must end when that context does, or every config
+// reload leaks one.
+func TestSnapshotLoopPublishesUntilItsContextEnds(t *testing.T) {
+	ch := MetricsBroadcaster.Subscribe()
+	defer MetricsBroadcaster.Unsubscribe(ch)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		StartSnapshotLoop(ctx)
+	}()
+
+	select {
+	case snap := <-ch:
+		if snap == nil {
+			t.Fatal("the loop broadcast a nil snapshot")
+		}
+	case <-time.After(30 * time.Second):
+		cancel()
+		t.Fatal("the loop published nothing in 30s; its first tick is at 100ms")
+	}
+
+	if GetLastSnapshot() == nil {
+		t.Error("the loop broadcast a snapshot without publishing it for readers, " +
+			"so GetLastSnapshot callers see nothing the live subscribers saw")
+	}
+
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("StartSnapshotLoop did not return after its context was cancelled")
 	}
 }

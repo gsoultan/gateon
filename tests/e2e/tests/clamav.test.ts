@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { execSync } from 'child_process';
 import fs from 'fs';
 
@@ -20,11 +20,27 @@ test.describe('ClamAV Security E2E', () => {
     await expect(page.getByText(/Security Hub/i).first()).toBeVisible({ timeout: 20000 });
   });
 
+
+// confirmUninstall clicks through the confirmation the Security Hub shows
+// before removing ClamAV. It used to go straight to the sudo prompt, which
+// meant that in Docker mode -- where no password is needed -- one click
+// removed the antivirus outright. The prompt was doing duty as a confirmation
+// on the one path that happened to need a password.
+//
+// Scoped to the dialog: the header button behind it carries the same name, so
+// an unscoped locator matches two elements and Playwright refuses it.
+async function confirmUninstall(page: Page) {
+  const dialog = page.getByRole('dialog').filter({ hasText: 'Uninstall ClamAV?' });
+  await expect(dialog).toBeVisible({ timeout: 10000 });
+  await dialog.getByRole('button', { name: 'Uninstall ClamAV' }).click();
+}
+
   test('ClamAV Installation and Uninstallation', async ({ page }) => {
     // 1. Initial cleanup if needed
-    const uninstallBtn = page.getByRole('button', { name: 'Uninstall ClamAV' });
+    const uninstallBtn = page.getByRole('button', { name: 'Uninstall ClamAV' }).first();
     if (await uninstallBtn.isVisible()) {
         await uninstallBtn.click();
+        await confirmUninstall(page);
         const sudoDialog = page.getByRole('heading', { name: 'Administrative Privileges Required' });
         if (await sudoDialog.isVisible({ timeout: 5000 })) {
             await page.getByPlaceholder('Your password').fill('password123');
@@ -45,12 +61,13 @@ test.describe('ClamAV Security E2E', () => {
     await page.getByRole('dialog').getByRole('button', { name: /Confirm|Install/i, exact: true }).click();
     
     // Wait for Uninstall button to appear (meaning installed)
-    await expect(page.getByRole('button', { name: 'Uninstall ClamAV' })).toBeVisible({ timeout: 60000 });
+    await expect(page.getByRole('button', { name: 'Uninstall ClamAV' }).first()).toBeVisible({ timeout: 60000 });
     expect(fs.existsSync('/tmp/clamav_apt_installed')).toBe(true);
 
     // 3. Uninstall
-    await page.getByRole('button', { name: 'Uninstall ClamAV' }).click();
-    
+    await page.getByRole('button', { name: 'Uninstall ClamAV' }).first().click();
+    await confirmUninstall(page);
+
     // Sudo dialog should appear for uninstallation now
     const sudoDialogUninstall = page.getByRole('heading', { name: 'Administrative Privileges Required' });
     await expect(sudoDialogUninstall).toBeVisible({ timeout: 10000 });
@@ -64,7 +81,7 @@ test.describe('ClamAV Security E2E', () => {
 
   test('ClamAV Scanning', async ({ page }) => {
     // Ensure installed
-    if (!await page.getByRole('button', { name: 'Uninstall ClamAV' }).isVisible()) {
+    if (!await page.getByRole('button', { name: 'Uninstall ClamAV' }).first().isVisible()) {
         const installNow = page.getByRole('button', { name: 'Install Now' });
         if (await installNow.isVisible()) {
             await installNow.click();
@@ -74,7 +91,7 @@ test.describe('ClamAV Security E2E', () => {
                 await page.getByPlaceholder('Your password').fill('password123');
                 await page.getByRole('dialog').getByRole('button', { name: /Confirm|Install/i, exact: true }).click();
             }
-            await expect(page.getByRole('button', { name: 'Uninstall ClamAV' })).toBeVisible({ timeout: 60000 });
+            await expect(page.getByRole('button', { name: 'Uninstall ClamAV' }).first()).toBeVisible({ timeout: 60000 });
         }
     }
 
