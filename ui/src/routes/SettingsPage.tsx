@@ -1922,8 +1922,8 @@ export default function SettingsPage() {
               )}
 
               <Textarea
-                label="Custom Global Directives"
-                description="Coraza/ModSecurity compatible directives applied globally."
+                label="Custom Global Directives (not executed)"
+                description="Kept so an upgrade does not lose them. The current engine does not parse SecLang, so nothing here is enforced — re-author these as rules under WAF Rules."
                 placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
                 value={config.waf.customDirectives || ""}
                 onChange={(e) =>
