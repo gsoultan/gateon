@@ -13,6 +13,9 @@ import (
 	"strings"
 )
 
+// transformMaxBodyBytes bounds what BodyTransform holds in memory per side.
+const transformMaxBodyBytes = 10 << 20
+
 // BodyTransformConfig configures the body transformation middleware.
 type BodyTransformConfig struct {
 	RequestSearch     string
@@ -37,14 +40,7 @@ func BodyTransform(cfg BodyTransformConfig) Middleware {
 
 			// Request transformation
 			if cfg.RequestSearch != "" && r.Body != nil {
-				body, err := io.ReadAll(r.Body)
-				if err == nil {
-					_ = r.Body.Close()
-					newBody := strings.ReplaceAll(string(body), cfg.RequestSearch, cfg.RequestReplace)
-					r.Body = io.NopCloser(bytes.NewBufferString(newBody))
-					r.ContentLength = int64(len(newBody))
-					r.Header.Set("Content-Length", strconv.Itoa(len(newBody)))
-				}
+				transformRequestBody(r, cfg)
 			}
 
 			if cfg.ResponseSearch == "" {
@@ -53,40 +49,101 @@ func BodyTransform(cfg BodyTransformConfig) Middleware {
 			}
 
 			// Response transformation
-			bw := &transformResponseWriter{ResponseWriter: w, body: &bytes.Buffer{}}
+			bw := &transformResponseWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(bw, r)
-
-			// Only transform if status is 200 OK or similar
-			if bw.status >= 400 {
-				_, _ = w.Write(bw.body.Bytes())
-				return
-			}
-
-			respBody := bw.body.String()
-			newRespBody := strings.ReplaceAll(respBody, cfg.ResponseSearch, cfg.ResponseReplace)
-			w.Header().Set("Content-Length", strconv.Itoa(len(newRespBody)))
-
-			// Remove ETag if present, as body has changed
-			w.Header().Del("ETag")
-
-			_, _ = w.Write([]byte(newRespBody))
+			bw.finish(cfg.ResponseSearch, cfg.ResponseReplace)
 		})
 	}
 }
 
-type transformResponseWriter struct {
-	http.ResponseWriter
-	body   *bytes.Buffer
-	status int
+// transformRequestBody rewrites the request body in place, up to the buffer
+// bound. A body over the bound is forwarded as it arrived: the alternative is
+// holding an attacker-chosen number of bytes per in-flight request.
+func transformRequestBody(r *http.Request, cfg BodyTransformConfig) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, transformMaxBodyBytes+1))
+	if err != nil {
+		return
+	}
+	if len(body) > transformMaxBodyBytes {
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
+		return
+	}
+	_ = r.Body.Close()
+	newBody := strings.ReplaceAll(string(body), cfg.RequestSearch, cfg.RequestReplace)
+	r.Body = io.NopCloser(bytes.NewBufferString(newBody))
+	r.ContentLength = int64(len(newBody))
+	r.Header.Set("Content-Length", strconv.Itoa(len(newBody)))
 }
 
+type transformResponseWriter struct {
+	http.ResponseWriter
+	body        bytes.Buffer
+	status      int
+	wroteHeader bool
+	// passthrough records that the held-back header has already gone out
+	// unchanged, so nothing may be rewritten from here on.
+	passthrough bool
+}
+
+// Write buffers the body so the rewritten length can be declared. The status
+// line is held back with it: the old writer forwarded WriteHeader immediately,
+// which put the origin's Content-Length on the wire before the body was
+// rewritten, and the client then read a truncated response.
 func (bw *transformResponseWriter) Write(b []byte) (int, error) {
+	if !bw.wroteHeader {
+		bw.WriteHeader(http.StatusOK)
+	}
+	if bw.passthrough {
+		return bw.ResponseWriter.Write(b)
+	}
+	if bw.body.Len()+len(b) > transformMaxBodyBytes {
+		bw.startPassthrough()
+		return bw.ResponseWriter.Write(b)
+	}
 	return bw.body.Write(b)
 }
 
 func (bw *transformResponseWriter) WriteHeader(code int) {
+	if bw.wroteHeader {
+		return
+	}
+	bw.wroteHeader = true
 	bw.status = code
-	bw.ResponseWriter.WriteHeader(code)
+}
+
+// startPassthrough gives up on transforming this response and releases what is
+// held, with the origin's own headers, which still describe those bytes.
+func (bw *transformResponseWriter) startPassthrough() {
+	bw.passthrough = true
+	bw.ResponseWriter.WriteHeader(bw.status)
+	if bw.body.Len() > 0 {
+		// #nosec G705 -- origin bytes forwarded verbatim, nothing interpolated.
+		_, _ = bw.ResponseWriter.Write(bw.body.Bytes())
+		bw.body.Reset()
+	}
+}
+
+// finish emits the held-back response, with a Content-Length that matches the
+// bytes actually sent.
+func (bw *transformResponseWriter) finish(search, replace string) {
+	if bw.passthrough {
+		return
+	}
+	if !bw.wroteHeader {
+		bw.WriteHeader(http.StatusOK)
+	}
+	out := bw.body.Bytes()
+	if bw.status < 400 {
+		out = []byte(strings.ReplaceAll(bw.body.String(), search, replace))
+		// The body no longer matches the origin's validator.
+		bw.ResponseWriter.Header().Del("ETag")
+	}
+	bw.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	bw.ResponseWriter.WriteHeader(bw.status)
+	if len(out) > 0 {
+		// #nosec G705 -- origin bytes with the operator's configured replacement.
+		_, _ = bw.ResponseWriter.Write(out)
+	}
 }
 
 // Hijack forwards to the underlying writer so a WebSocket upgrade behind this
@@ -103,7 +160,16 @@ func (bw *transformResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error)
 	return hj.Hijack()
 }
 
+// Flush means the handler wants bytes on the wire now, which is incompatible
+// with holding them back to rewrite them. Release what is held and stream the
+// rest untransformed rather than buffering a stream that may never end.
 func (bw *transformResponseWriter) Flush() {
+	if !bw.passthrough {
+		if !bw.wroteHeader {
+			bw.WriteHeader(http.StatusOK)
+		}
+		bw.startPassthrough()
+	}
 	if f, ok := bw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}

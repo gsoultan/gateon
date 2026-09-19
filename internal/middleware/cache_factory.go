@@ -15,11 +15,15 @@ func (f *Factory) createCache(cfg map[string]string) (Middleware, error) {
 	if storage == "" {
 		storage = CacheStorageMemory
 	}
-	return Cache(CacheConfig{
+	// The route reaches the middleware through cfg["route_id"], set by
+	// Factory.Create. Cache() hardcodes an empty route, which left every
+	// factory-built cache reporting its hit/miss metrics under the empty label
+	// and, on the shared Redis backend, keying entries with no route at all.
+	return CacheWithRoute(CacheConfig{
 		TTLSeconds:  ttl,
 		MaxEntries:  maxEntries,
 		MaxBodyKB:   int64(maxBodyKB),
 		Storage:     storage,
 		RedisClient: f.redisClient,
-	}), nil
+	}, cfg["route_id"]), nil
 }
