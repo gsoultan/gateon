@@ -25,12 +25,14 @@ import (
 func TestResolveWafStoresSurvivesATypedNilStore(t *testing.T) {
 	t.Parallel()
 
-	var missing *waf.Store // what GetStore() returns when InitStore failed
+	// What GetStore() returns when InitStore failed, boxed the way
+	// WithWafRules boxes it. The interface is non-nil -- it carries the type
+	// *waf.Store with a nil value -- which is the whole reason the `!= nil`
+	// guard this replaced let a nil receiver through. staticcheck rejects
+	// asserting that in code (SA4023, "this comparison is never true"), which
+	// is a fair point: it is a property of the language, not of this package.
+	var missing *waf.Store
 	var held any = missing
-
-	if held == nil {
-		t.Fatal("precondition: an interface holding a nil *waf.Store must not compare equal to nil")
-	}
 
 	rules, exceptions := resolveWafStores(context.Background(), held, nil)
 

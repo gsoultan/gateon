@@ -33,28 +33,18 @@ func SchemaValidation(cfg SchemaValidationConfig) (Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Only validate for methods that typically have a body
-			if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
+			if !bodyIsValidatable(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Don't validate if content type is not JSON
-			contentType := r.Header.Get("Content-Type")
-			if contentType != "" && !jsonContentType(contentType) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Read body
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				http.Error(w, "Error reading request body", http.StatusBadRequest)
 				return
 			}
-			// Restore body for next handlers
+			// Restore the body for the handlers downstream.
 			r.Body = io.NopCloser(bytes.NewBuffer(body))
-
 			if len(body) == 0 {
 				next.ServeHTTP(w, r)
 				return
@@ -67,30 +57,45 @@ func SchemaValidation(cfg SchemaValidationConfig) (Middleware, error) {
 				return
 			}
 
-			result := schema.Validate(input)
-			if !result.IsValid() {
-				errMsg := "Schema validation failed"
-				if len(result.Errors) > 0 {
-					// Get first error from map
-					for _, err := range result.Errors {
-						errMsg += ": " + err.Message
-						break
-					}
-				}
-				logger.SecurityEvent("schema_validation_failed", r, errMsg)
-
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error":   "Schema validation failed",
-					"details": result.Errors,
-				})
+			if result := schema.Validate(input); !result.IsValid() {
+				writeSchemaFailure(w, r, result)
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+// bodyIsValidatable reports whether this request carries a JSON body worth
+// checking: a method that normally has one, and either no declared content
+// type or a JSON one.
+func bodyIsValidatable(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+	default:
+		return false
+	}
+	ct := r.Header.Get("Content-Type")
+	return ct == "" || jsonContentType(ct)
+}
+
+// writeSchemaFailure records the refusal and answers the client. The message
+// logged carries the first validation error; the body carries them all.
+func writeSchemaFailure(w http.ResponseWriter, r *http.Request, result *jsonschema.EvaluationResult) {
+	errMsg := "Schema validation failed"
+	for _, err := range result.Errors {
+		errMsg += ": " + err.Message
+		break
+	}
+	logger.SecurityEvent("schema_validation_failed", r, errMsg)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":   "Schema validation failed",
+		"details": result.Errors,
+	})
 }
 
 func jsonContentType(ct string) bool {

@@ -396,31 +396,39 @@ func claimValues(v any) []string {
 
 func (fa *fieldAuth) check(ss ast.SelectionSet) error {
 	for _, sel := range ss {
-		switch s := sel.(type) {
-		case *ast.Field:
-			if requiredClaim, ok := fa.need[s.Name]; ok && !fa.have[requiredClaim] {
-				return fmt.Errorf("access denied for field: %s (requires claim: %s)", s.Name, requiredClaim)
-			}
-			if len(s.SelectionSet) > 0 {
-				if err := fa.check(s.SelectionSet); err != nil {
-					return err
-				}
-			}
-		case *ast.InlineFragment:
-			if err := fa.check(s.SelectionSet); err != nil {
-				return err
-			}
-		case *ast.FragmentSpread:
-			inner, release := fa.frags.enter(s.Name)
-			if release == nil {
-				continue
-			}
-			err := fa.check(inner)
-			release()
-			if err != nil {
-				return err
-			}
+		if err := fa.checkSelection(sel); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// checkSelection applies the claim rule to one selection and descends. Split
+// out of check so the loop stays a loop: the three cases each recurse, and
+// inlined together they put this function over the complexity limit.
+func (fa *fieldAuth) checkSelection(sel ast.Selection) error {
+	switch s := sel.(type) {
+	case *ast.Field:
+		if requiredClaim, ok := fa.need[s.Name]; ok && !fa.have[requiredClaim] {
+			return fmt.Errorf("access denied for field: %s (requires claim: %s)", s.Name, requiredClaim)
+		}
+		return fa.check(s.SelectionSet)
+	case *ast.InlineFragment:
+		return fa.check(s.SelectionSet)
+	case *ast.FragmentSpread:
+		return fa.checkSpread(s.Name)
+	}
+	return nil
+}
+
+// checkSpread follows a fragment spread, with the cycle guard the index owns.
+// A release of nil means the fragment is already open on this path, so the
+// document is cyclic and descending again would not terminate.
+func (fa *fieldAuth) checkSpread(name string) error {
+	inner, release := fa.frags.enter(name)
+	if release == nil {
+		return nil
+	}
+	defer release()
+	return fa.check(inner)
 }

@@ -29,7 +29,7 @@ var corsPresets = map[string]CORSPreset{
 	"standard": {
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Content-Type", "Authorization", "Accept"},
+		AllowedHeaders:   []string{"Content-Type", headerAuthorization, headerAccept},
 		ExposedHeaders:   []string{"Content-Length", "Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           3600,
@@ -45,7 +45,7 @@ var corsPresets = map[string]CORSPreset{
 	"restricted": {
 		AllowedOrigins:   []string{},
 		AllowedMethods:   []string{"GET"},
-		AllowedHeaders:   []string{"Accept"},
+		AllowedHeaders:   []string{headerAccept},
 		ExposedHeaders:   []string{},
 		AllowCredentials: false,
 		MaxAge:           600,
