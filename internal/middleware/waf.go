@@ -267,6 +267,29 @@ func init() {
 	}
 }
 
+// testReputationHeader lets a test suite hand the engine the reputation score
+// it should evaluate under, so the reputation rules and the adaptive thresholds
+// can be exercised without a stateful blocker in front of the WAF.
+//
+// It is only an input when testReputationEnv is set. Read unconditionally it
+// was the header X-Gateon-Reputation used to be — a value the client writes
+// that the engine then trusts — and a client the gateway had scored hostile
+// could assert a clean score, leave the bucket rule 1910002 refuses, and relax
+// the entropy threshold on the way. GATEON_ENABLE_TEST_REPUTATION is the
+// switch the reputation store already uses to mean "reputation is under test",
+// so it is reused rather than adding a second one.
+const (
+	testReputationHeader = "X-Gateon-Test-Reputation"
+	testReputationEnv    = "GATEON_ENABLE_TEST_REPUTATION"
+)
+
+// testReputationOverrideEnabled reports whether the test header is honoured.
+// The environment is consulted only when the header is present, so ordinary
+// traffic pays nothing for the check.
+func testReputationOverrideEnabled() bool {
+	return os.Getenv(testReputationEnv) != ""
+}
+
 // getReputationString returns a cached string for reputation scores 0-100.
 func getReputationString(score float64) string {
 	s := int(score)
@@ -299,6 +322,12 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 		redactor = newDLPRedactor(cfg.ParanoiaLevel)
 	}
 
+	// The policy fingerprint the per-request deduplication compares against.
+	// Computed once here: it is a sha256 over a dozen formatted fields of a
+	// configuration that cannot change after this point, and it was being
+	// recomputed on every request — nine allocations for a route-constant value.
+	fp := cfg.Fingerprint()
+
 	return func(next http.Handler) http.Handler {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. Deduplication: Avoid double-checking if an identical WAF setup has already run.
@@ -308,7 +337,6 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 					next.ServeHTTP(w, r)
 					return
 				}
-				fp := cfg.Fingerprint()
 				for _, executed := range rs.ExecutedWAFs {
 					if executed == fp {
 						next.ServeHTTP(w, r)
@@ -330,8 +358,8 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			// Security Header Spoofing Prevention
 			h := r.Header
 			h.Del("X-Gateon-Reputation")
-			testRep := h.Get("X-Gateon-Test-Reputation")
-			h.Del("X-Gateon-Test-Reputation")
+			testRep := h.Get(testReputationHeader)
+			h.Del(testReputationHeader)
 			h.Del("X-Gateon-Anomaly-Score")
 			h.Del("X-Gateon-Threat-Type")
 			h.Del("X-Gateon-WAF-Matched")
@@ -373,7 +401,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				repScore = rs.Reputation
 			}
 
-			if testRep != "" {
+			if testRep != "" && testReputationOverrideEnabled() {
 				if f, err := strconv.ParseFloat(testRep, 64); err == nil {
 					repScore = f
 				}
@@ -381,10 +409,17 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			r.Header.Set("X-Gateon-Reputation", getReputationString(repScore))
 			r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
 
-			if repScore > 90 && isGitTraffic(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
+			// git's smart-HTTP bodies are packfiles: binary, routinely larger
+			// than the body limit, and refusing one as uninspectable would break
+			// every git host behind the gateway. So the *body* of a request that
+			// looks like git traffic from a client in good standing is not read
+			// into the engine. Nothing else is exempt. This used to skip the whole
+			// middleware — engine, entropy checks, response inspection — on a
+			// Content-Type and a path suffix, both of which the client writes, and
+			// every client the gateway has not seen carries the neutral score the
+			// skip was gated on. A WAF a request can opt out of by naming a
+			// protocol is not a WAF.
+			inspectBody := !(repScore > 90 && isGitTraffic(r))
 
 			// The Aho-Corasick signature prefilter that used to run here was
 			// retired. It blocked on a substring hit before the engine ran,
@@ -438,7 +473,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 			}
 
 			// 2. Body Entropy Check (Fast-Path)
-			if cfg.EnableBodyEntropy && r.ContentLength > 0 && r.ContentLength < maxBodyEntropyScan {
+			if cfg.EnableBodyEntropy && inspectBody && r.ContentLength > 0 && r.ContentLength < maxBodyEntropyScan {
 				if detail, found := suspiciousBodyEntropy(r, rs, cfg, repScore); found {
 					recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", detail)
 					http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
@@ -485,7 +520,7 @@ func WAF(cfg WAFConfig) (Middleware, error) {
 				}
 			}
 
-			tx, decision, err := engine.inspectRequest(r, repScore)
+			tx, decision, err := engine.inspectRequest(r, repScore, inspectBody)
 			// inspectRequest returns a live transaction on every path, error
 			// included, so the audit trail survives a failed inspection. Guard
 			// the nil case anyway: this defer runs on the request path, and a
@@ -999,6 +1034,13 @@ type wafResponseWriter struct {
 	auditOnly     bool
 	onDecision    func(gwaf.Decision)
 
+	// hijacked records that the handler took the connection away through
+	// Hijack. From then on net/http owns nothing about the response, and a
+	// WriteHeader on it is logged by the server as a programming error — which
+	// finish used to trigger once per WebSocket upgrade by committing a status
+	// line for a response that had already left.
+	hijacked bool
+
 	// buf holds the response while it is inspectable. It comes from a pool: at
 	// enterprise tier this grows to the ceiling on every response, and
 	// allocating a megabyte per request is the regression the hot-path budget
@@ -1277,7 +1319,7 @@ func (w *wafResponseWriter) noteUninspectable(reason string) {
 // finish runs the response-body phase and releases whatever is still buffered.
 // It must be called once the upstream handler has returned.
 func (w *wafResponseWriter) finish() {
-	if w.blocked {
+	if w.blocked || w.hijacked {
 		return
 	}
 	w.inspectHeld()
@@ -1432,7 +1474,11 @@ func (w *wafResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if !ok {
 		return nil, nil, http.ErrNotSupported
 	}
-	return hj.Hijack()
+	conn, rw, err := hj.Hijack()
+	if err == nil {
+		w.hijacked = true
+	}
+	return conn, rw, err
 }
 
 func splitAddr(addr string) (string, int) {

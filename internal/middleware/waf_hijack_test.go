@@ -86,6 +86,65 @@ func TestWAF_PreservesHijackerForWebSocketUpgrade(t *testing.T) {
 	}
 }
 
+// countingHijacker records what the WAF's response writer does to the
+// underlying connection after the handler has hijacked it.
+type countingHijacker struct {
+	*httptest.ResponseRecorder
+	writeHeaderAfterHijack int
+	hijacked               bool
+}
+
+func (h *countingHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h.hijacked = true
+	client, server := net.Pipe()
+	go func() { _ = server.Close() }()
+	return client, bufio.NewReadWriter(bufio.NewReader(client), bufio.NewWriter(client)), nil
+}
+
+func (h *countingHijacker) WriteHeader(status int) {
+	if h.hijacked {
+		h.writeHeaderAfterHijack++
+		return
+	}
+	h.ResponseRecorder.WriteHeader(status)
+}
+
+// TestWAF_NoWriteHeaderAfterHijack: once the connection is hijacked net/http
+// owns nothing about it any more, and a WriteHeader on it is logged by the
+// server as a programming error — one line per WebSocket upgrade on every
+// route with response inspection on. finish() has to know the response left
+// through Hijack and stand down.
+func TestWAF_NoWriteHeaderAfterHijack(t *testing.T) {
+	mw, err := WAF(WAFConfig{ParanoiaLevel: 1, EnableResponseInspection: true})
+	if err != nil {
+		t.Fatalf("create WAF: %v", err)
+	}
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("no Hijacker behind the WAF")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		_ = conn.Close()
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	rec := &countingHijacker{ResponseRecorder: httptest.NewRecorder()}
+	handler.ServeHTTP(rec, req)
+
+	if !rec.hijacked {
+		t.Fatal("Hijack did not reach the underlying writer")
+	}
+	if rec.writeHeaderAfterHijack != 0 {
+		t.Fatalf("WriteHeader called %d time(s) on a hijacked connection", rec.writeHeaderAfterHijack)
+	}
+}
+
 // TestResponseWriterWrappersPreserveHijacker covers every body-rewriting
 // middleware, not just the WAF. Each wraps http.ResponseWriter to inspect or
 // modify the response body, and any that forgets to forward Hijack silently

@@ -195,7 +195,12 @@ func wafLimits(cfg WAFConfig) gwaf.Limits {
 //
 // It returns the transaction so the caller can run the response phases, and a
 // decision that is non-nil only when the request must be refused.
-func (e *wafEngine) inspectRequest(r *http.Request, reputation float64) (*gwaf.Transaction, *gwaf.Decision, error) {
+//
+// inspectBody false leaves the body on the wire unread: the request line,
+// query arguments and headers are still evaluated, and the body phase still
+// runs over the arguments. It exists for git's packfiles (see the middleware)
+// and must stay the narrowest exemption there is.
+func (e *wafEngine) inspectRequest(r *http.Request, reputation float64, inspectBody bool) (*gwaf.Transaction, *gwaf.Decision, error) {
 	tx := e.waf.NewTransaction()
 
 	e.addResolvers(tx, r, reputation)
@@ -217,8 +222,10 @@ func (e *wafEngine) inspectRequest(r *http.Request, reputation float64) (*gwaf.T
 	// arguments are recorded during SetRequestLine and stay visible here, and
 	// most of the corpus inspects arguments, so skipping this phase on a GET
 	// would silently disable those rules.
-	if err := e.readRequestBody(tx, r); err != nil {
-		return tx, nil, err
+	if inspectBody {
+		if err := e.readRequestBody(tx, r); err != nil {
+			return tx, nil, err
+		}
 	}
 	if d := tx.ProcessRequestBody(); d.Blocked() {
 		return tx, &d, nil
