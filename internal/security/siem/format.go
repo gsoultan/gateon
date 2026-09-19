@@ -119,8 +119,24 @@ func (s syslogFormatter) format(e Event) []byte {
 	sd.WriteByte(']')
 
 	msg := fmt.Sprintf("<%d>1 %s %s %s - - %s %s\n",
-		pri, ts, s.hostname, product, sd.String(), e.Message)
+		pri, ts, s.hostname, product, sd.String(), escapeLineBreaks(e.Message))
 	return []byte(msg)
+}
+
+// escapeLineBreaks rewrites CR and LF as their two-character escapes.
+//
+// A syslog record over TCP ends at the newline, and the threat pipeline puts
+// the decoded request path into both the message and the request_uri field. A
+// request for "/.env%0a<134>1 ..." therefore tripped the honeypot and shipped
+// two records: the real one and one the attacker wrote. CEF already escaped
+// these; syslog appended the message raw, and its SD-PARAM escaping covered
+// only the three characters RFC 5424 names.
+func escapeLineBreaks(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	return strings.ReplaceAll(s, "\n", `\n`)
 }
 
 // cefSeverity maps a textual severity to the CEF 0-10 scale.
@@ -196,7 +212,9 @@ func sdName(s string) string {
 }
 
 // sdValue escapes an RFC 5424 SD-PARAM value (", \, ]) and wraps in quotes.
+// Line breaks are escaped too, for the reason escapeLineBreaks gives.
 func sdValue(s string) string {
+	s = escapeLineBreaks(s)
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
 	s = strings.ReplaceAll(s, "]", `\]`)

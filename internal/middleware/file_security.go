@@ -246,6 +246,14 @@ func bufferBodyInto(body io.Reader, maxBytes int64, buf *bytes.Buffer) (data []b
 }
 
 // scanMultipart inspects every file part of the buffered body.
+//
+// A body the parser cannot read is refused, not forwarded. The body was
+// buffered precisely so the backend only ever receives what was inspected, and
+// Go's mime/multipart is stricter than the parsers behind most backends (PHP's
+// rfc1867, Django, busboy): a body it rejects is one they may well accept, so
+// "unparseable here" is not "harmless there". This used to break out of the
+// loop on any error and report the body clean, which forwarded every part
+// after the malformed one unscanned.
 func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity, allowedMap, blockedMap map[string]bool) scanResult {
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)
 	for {
@@ -254,9 +262,9 @@ func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecuri
 			break
 		}
 		if err != nil {
-			break
+			return malformedMultipart(r, err)
 		}
-		if p.FileName() == "" {
+		if !isFilePart(p) {
 			continue
 		}
 		if res := inspectPart(r, p, cfg, engine, blockSev, allowedMap, blockedMap); res.blocked || res.scannerErr != nil {
@@ -264,6 +272,32 @@ func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecuri
 		}
 	}
 	return scanResult{}
+}
+
+// isFilePart reports whether a part carries an upload.
+//
+// FileName is empty both for an ordinary form field and for a part whose
+// Content-Disposition mime.ParseMediaType rejected -- a parameter repeated with
+// a different value, a bad RFC 2231 encoding -- and the second kind still names
+// a file to a backend that keeps the last filename= it sees. Skipping it
+// forwarded an upload no check had looked at. A disposition that parses
+// cleanly with no filename is a field (or an empty file input) and is skipped
+// as before.
+func isFilePart(p *multipart.Part) bool {
+	if p.FileName() != "" {
+		return true
+	}
+	cd := p.Header.Get("Content-Disposition")
+	if _, _, err := mime.ParseMediaType(cd); err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(cd), "filename")
+}
+
+// malformedMultipart refuses a body the parser could not read.
+func malformedMultipart(r *http.Request, err error) scanResult {
+	logger.L.LogWarn("File upload blocked: malformed multipart body", "error", err, "client_ip", r.RemoteAddr)
+	return scanResult{blocked: true, status: http.StatusBadRequest, message: "Malformed multipart body"}
 }
 
 // inspectPart validates a single file part: size, MIME/magic, and ClamAV.
@@ -276,8 +310,10 @@ func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, eng
 	// Use io.Copy to avoid io.ReadAll's internal allocations
 	_, err := io.Copy(buf, p)
 	if err != nil {
-		logger.L.LogError("Failed to read upload part", "error", err)
-		return scanResult{}
+		// A part that ends without its boundary (a truncated body) reads back
+		// its content together with io.ErrUnexpectedEOF. This used to log and
+		// allow, so the truncated upload was forwarded without being scanned.
+		return malformedMultipart(r, err)
 	}
 	content := buf.Bytes()
 

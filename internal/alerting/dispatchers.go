@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -25,13 +27,27 @@ func NewSlackDispatcher(webhookURL, channel string) *SlackDispatcher {
 
 func (d *SlackDispatcher) Send(ctx context.Context, threat telemetry.SecurityThreat) error {
 	payload := map[string]any{
-		"text": fmt.Sprintf("🚨 *Gateon Security Alert*\n*Type:* %s\n*Source IP:* %s\n*Score:* %.2f\n*Details:* %s\n*Route:* %s\n*URI:* %s",
-			threat.Type, threat.SourceIP, threat.Score, threat.Details, threat.RouteID, threat.RequestURI),
+		"text": slackText(threat),
 	}
 	if d.channel != "" {
 		payload["channel"] = d.channel
 	}
 	return sendWebhook(ctx, d.webhookURL, payload)
+}
+
+// slackEscaper neutralises the three characters Slack parses in message text:
+// "<...>" is a link, mention or command, so a request path carrying
+// "<!channel>" pinged the whole alert channel. Slack only unescapes these
+// three entities, which is why html.EscapeString (which also rewrites quotes)
+// is not used here.
+var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// slackText renders the alert as Slack message text. Every field that came
+// from the request is escaped; the markup is the alert's own.
+func slackText(threat telemetry.SecurityThreat) string {
+	return fmt.Sprintf("🚨 *Gateon Security Alert*\n*Type:* %s\n*Source IP:* %s\n*Score:* %.2f\n*Details:* %s\n*Route:* %s\n*URI:* %s",
+		slackEscaper.Replace(threat.Type), slackEscaper.Replace(threat.SourceIP), threat.Score,
+		slackEscaper.Replace(threat.Details), slackEscaper.Replace(threat.RouteID), slackEscaper.Replace(threat.RequestURI))
 }
 
 type DiscordDispatcher struct {
@@ -86,22 +102,32 @@ func NewTelegramDispatcher(botToken, chatID string) *TelegramDispatcher {
 
 func (d *TelegramDispatcher) Send(ctx context.Context, threat telemetry.SecurityThreat) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", d.botToken)
-	text := fmt.Sprintf("<b>🚨 Gateon Security Alert</b>\n"+
+	payload := map[string]any{
+		"chat_id":    d.chatID,
+		"text":       telegramText(threat),
+		"parse_mode": "HTML",
+	}
+
+	return sendWebhook(ctx, url, payload)
+}
+
+// telegramText renders the alert for Telegram's parse_mode=HTML.
+//
+// Telegram rejects a message whose text contains a "<" that does not open one
+// of the tags it supports, or a stray "&". Details and RequestURI come from
+// the request that triggered the alert -- an XSS detection quotes the matched
+// "<script" -- so the alerts most worth delivering were exactly the ones the
+// API refused, and the error was logged where nobody was looking for it.
+func telegramText(threat telemetry.SecurityThreat) string {
+	return fmt.Sprintf("<b>🚨 Gateon Security Alert</b>\n"+
 		"<b>Type:</b> %s\n"+
 		"<b>Source IP:</b> %s\n"+
 		"<b>Score:</b> %.2f\n"+
 		"<b>Details:</b> %s\n"+
 		"<b>Route:</b> %s\n"+
 		"<b>URI:</b> %s",
-		threat.Type, threat.SourceIP, threat.Score, threat.Details, threat.RouteID, threat.RequestURI)
-
-	payload := map[string]any{
-		"chat_id":    d.chatID,
-		"text":       text,
-		"parse_mode": "HTML",
-	}
-
-	return sendWebhook(ctx, url, payload)
+		html.EscapeString(threat.Type), html.EscapeString(threat.SourceIP), threat.Score,
+		html.EscapeString(threat.Details), html.EscapeString(threat.RouteID), html.EscapeString(threat.RequestURI))
 }
 
 func sendWebhook(ctx context.Context, url string, payload any) error {

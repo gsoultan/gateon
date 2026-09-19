@@ -5,6 +5,7 @@ package alerting
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,24 +148,47 @@ func (m *AlertingManager) process(threat *telemetry.SecurityThreat) {
 	}
 }
 
+// matchPlaybook reports whether a playbook's trigger and threshold select the
+// threat.
 func (m *AlertingManager) matchPlaybook(pb *gateonv1.AlertPlaybook, threat telemetry.SecurityThreat) bool {
-	// Match event type
-	if pb.EventType != "all" && pb.EventType != threat.Type {
-		// Special cases for generic event types
-		if pb.EventType == "high_anomaly" && threat.Score < pb.Threshold {
-			return false
-		}
-		if pb.EventType != threat.Type {
-			return false
-		}
-	}
-
-	// Match threshold
-	if threat.Score < pb.Threshold {
+	if !triggerMatches(pb.EventType, threat) {
 		return false
 	}
+	return threat.Score >= pb.Threshold
+}
 
-	return true
+// triggerMatches maps a playbook trigger onto the detections it names.
+//
+// The dashboard stores its "Trigger Event" choices as camelCase ("wafThreat",
+// "highAnomaly", "impossibleTravel", "authFailure"), the proto documents the
+// same four as snake_case, and neither spelling is a value any detector puts
+// in SecurityThreat.Type -- those are "waf_block", "brute_force_attempt" and
+// so on. This used to compare the trigger to the type directly, with a
+// "high_anomaly" special case that a second, unconditional comparison made
+// unreachable, so every playbook except "All Threats" was configured,
+// displayed, and silent.
+func triggerMatches(trigger string, t telemetry.SecurityThreat) bool {
+	switch normalizeTrigger(trigger) {
+	case "", "all", "highanomaly":
+		// A high anomaly is any detection whose score clears the threshold,
+		// which matchPlaybook applies after this.
+		return true
+	case "wafthreat":
+		return t.Category == "waf" || strings.HasPrefix(t.Type, "waf_")
+	case "impossibletravel":
+		return t.Type == "impossible_travel"
+	case "authfailure":
+		return t.Type == "brute_force_attempt" || t.Type == "auth_failure" ||
+			t.Category == "brute_force" || t.Category == "auth"
+	default:
+		return normalizeTrigger(t.Type) == normalizeTrigger(trigger)
+	}
+}
+
+// normalizeTrigger folds the camelCase and snake_case spellings of a trigger
+// onto one form.
+func normalizeTrigger(s string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), "_", ""))
 }
 
 func (m *AlertingManager) executePlaybook(pb *gateonv1.AlertPlaybook, threat telemetry.SecurityThreat) {
