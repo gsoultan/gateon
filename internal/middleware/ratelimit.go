@@ -65,19 +65,22 @@ const rateLimiterEvictInterval = 60 * time.Second
 const rateLimiterEntryTTL = 5 * time.Minute
 const rateLimiterShards = 16
 
+// rateLimiterMaxEntriesPerShard bounds the keys one shard tracks.
+const rateLimiterMaxEntriesPerShard = 4096
+
 type rateLimiterShard struct {
-	limiters map[string]*rateLimiterEntry
-	mu       sync.RWMutex
+	limiters  map[string]*rateLimiterEntry
+	mu        sync.RWMutex
+	nextSweep int64 // unix seconds; guarded by mu
 }
 
 // LocalRateLimiter implements a flexible local rate limiter with automatic TTL eviction.
 // It uses sharding to reduce lock contention under heavy traffic.
 type LocalRateLimiter struct {
-	shards    []*rateLimiterShard
-	rate      rate.Limit
-	burst     int
-	stopEvict chan struct{}
-	ebpf      ebpf.Manager
+	shards []*rateLimiterShard
+	rate   rate.Limit
+	burst  int
+	ebpf   ebpf.Manager
 }
 
 // NewRateLimiter creates a new LocalRateLimiter with rate (requests per second) and burst.
@@ -88,18 +91,16 @@ func NewRateLimiter(r rate.Limit, b int) *LocalRateLimiter {
 
 func NewRateLimiterWithEbpf(r rate.Limit, b int, e ebpf.Manager) *LocalRateLimiter {
 	rl := &LocalRateLimiter{
-		shards:    make([]*rateLimiterShard, rateLimiterShards),
-		rate:      r,
-		burst:     b,
-		stopEvict: make(chan struct{}),
-		ebpf:      e,
+		shards: make([]*rateLimiterShard, rateLimiterShards),
+		rate:   r,
+		burst:  b,
+		ebpf:   e,
 	}
 	for i := range rateLimiterShards {
 		rl.shards[i] = &rateLimiterShard{
 			limiters: make(map[string]*rateLimiterEntry),
 		}
 	}
-	go rl.evictLoop()
 	return rl
 }
 
@@ -112,34 +113,40 @@ func (rl *LocalRateLimiter) getShard(key string) *rateLimiterShard {
 	return rl.shards[hash%rateLimiterShards]
 }
 
-// evictLoop periodically removes stale rate limiter entries from all shards.
-func (rl *LocalRateLimiter) evictLoop() {
-	ticker := time.NewTicker(rateLimiterEvictInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			now := time.Now().Unix()
-			ttl := int64(rateLimiterEntryTTL.Seconds())
-			for _, s := range rl.shards {
-				s.mu.Lock()
-				for k, e := range s.limiters {
-					if now-e.lastAccess.Load() > ttl {
-						delete(s.limiters, k)
-					}
-				}
-				s.mu.Unlock()
-			}
-		case <-rl.stopEvict:
-			return
+// sweepLocked drops entries this shard no longer needs. The caller holds mu.
+//
+// Eviction runs here rather than on a ticker goroutine because a limiter is
+// built per route on every chain rebuild and nothing ever closes the old one:
+// each rebuild used to leave a goroutine, and the map it swept, alive for the
+// life of the process.
+func (s *rateLimiterShard) sweepLocked(now int64) {
+	s.nextSweep = now + int64(rateLimiterEvictInterval.Seconds())
+	ttl := int64(rateLimiterEntryTTL.Seconds())
+	for k, e := range s.limiters {
+		if now-e.lastAccess.Load() > ttl {
+			delete(s.limiters, k)
 		}
+	}
+	if len(s.limiters) < rateLimiterMaxEntriesPerShard {
+		return
+	}
+	// Every entry is young, which is what a flood of distinct keys looks like.
+	// Keys come from the client IP, JA4H or fingerprint, so the set is chosen
+	// by the caller and TTL alone is not a bound. Go randomises map iteration,
+	// so this drops an arbitrary slice of the shard down to a low-water mark.
+	target := rateLimiterMaxEntriesPerShard - rateLimiterMaxEntriesPerShard/8
+	for k := range s.limiters {
+		if len(s.limiters) <= target {
+			break
+		}
+		delete(s.limiters, k)
 	}
 }
 
-// Close stops the background eviction goroutine.
-func (rl *LocalRateLimiter) Close() {
-	close(rl.stopEvict)
-}
+// Close releases the limiter. Eviction is inline (see sweepLocked), so there is
+// no background goroutine to stop; the method stays for callers that own a
+// limiter's lifetime and is safe to call more than once.
+func (rl *LocalRateLimiter) Close() {}
 
 // NewQPSRateLimiter creates a LocalRateLimiter for the given requests per second and burst.
 // Use this when you have integer QPS values (e.g. 10 req/s, 20 burst).
@@ -190,6 +197,9 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 	// Double-check after acquiring write lock
 	entry, exists = s.limiters[key]
 	if !exists {
+		if len(s.limiters) >= rateLimiterMaxEntriesPerShard || now >= s.nextSweep {
+			s.sweepLocked(now)
+		}
 		entry = &rateLimiterEntry{limiter: rate.NewLimiter(adjRate, int(adjBurst))}
 		entry.lastRate.Store(math.Float64bits(float64(adjRate)))
 		entry.lastBurst.Store(adjBurst)

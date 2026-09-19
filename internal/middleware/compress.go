@@ -144,6 +144,13 @@ type compressWriter struct {
 }
 
 func (w *compressWriter) WriteHeader(status int) {
+	// 1xx is informational: it is forwarded and the real status is still to
+	// come. Recording it as the final status meant an origin that sent 103
+	// Early Hints had its actual status silently replaced.
+	if status < 200 {
+		w.ResponseWriter.WriteHeader(status)
+		return
+	}
 	if w.wroteHeader {
 		return
 	}

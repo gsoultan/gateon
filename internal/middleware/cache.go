@@ -9,6 +9,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,11 +70,11 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 				activeRouteID = routeID
 			}
 
-			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead || cacheBypass(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			key := r.URL.String()
+			key := cacheKey(activeRouteID, r)
 			status, headers, body, ok := backend.Get(r.Context(), key)
 			if ok {
 				telemetry.MiddlewareCacheHitsTotal.WithLabelValues(activeRouteID).Inc()
@@ -101,12 +102,74 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 				maxBody:        maxBody,
 			}
 			next.ServeHTTP(rec, r)
+			rec.commitHeader()
 
-			if rec.status >= 200 && rec.status < 300 && buf.Len() > 0 && int64(buf.Len()) <= maxBody {
+			if rec.cacheable() {
 				backend.Set(r.Context(), key, rec.status, rec.header, bytes.Clone(buf.Bytes()), ttl)
 			}
 		})
 	}
+}
+
+// cacheBypass reports whether a response to this request is too specific to the
+// caller, or too partial, to be shared with anyone else.
+//
+// A request carrying credentials gets a response computed for that identity, so
+// storing it under a key that does not mention the identity hands the next
+// caller someone else's data. Range requests are excluded because the reply is
+// a fragment: caching it would serve five bytes to a client that asked for the
+// whole resource.
+func cacheBypass(r *http.Request) bool {
+	return r.Header.Get("Authorization") != "" ||
+		r.Header.Get("Proxy-Authorization") != "" ||
+		r.Header.Get("Cookie") != "" ||
+		r.Header.Get("Range") != ""
+}
+
+// cacheKey identifies a cached response by everything that selects it.
+//
+// The route is included because the Redis backend is shared by every route in
+// every instance of the cluster, and the method because a HEAD must not answer
+// a GET. Host is included because one gateway fronts many virtual hosts and the
+// origin-form request line a real client sends carries only the path.
+func cacheKey(routeID string, r *http.Request) string {
+	uri := r.URL.RequestURI()
+	var sb strings.Builder
+	sb.Grow(len(routeID) + len(r.Method) + len(r.Host) + len(uri) + 3)
+	sb.WriteString(routeID)
+	sb.WriteByte(0)
+	sb.WriteString(r.Method)
+	sb.WriteByte(0)
+	sb.WriteString(r.Host)
+	sb.WriteByte(0)
+	sb.WriteString(uri)
+	return sb.String()
+}
+
+// responseAllowsCaching applies the response-side rules the origin states in
+// headers. Anything that says "this reply belongs to one caller" (Set-Cookie,
+// Cache-Control private/no-store/no-cache) or "the right reply depends on a
+// request header" (Vary on anything this key does not carry) is not storable.
+// Content-Encoding is refused for the same reason: the key does not include
+// Accept-Encoding, so a stored gzip body would reach a client that cannot
+// decode it.
+func responseAllowsCaching(h http.Header) bool {
+	if h.Get("Set-Cookie") != "" || h.Get("Content-Encoding") != "" {
+		return false
+	}
+	cc := strings.ToLower(h.Get("Cache-Control"))
+	if strings.Contains(cc, "no-store") || strings.Contains(cc, "no-cache") || strings.Contains(cc, "private") {
+		return false
+	}
+	for _, v := range h.Values("Vary") {
+		for field := range strings.SplitSeq(v, ",") {
+			f := strings.ToLower(strings.TrimSpace(field))
+			if f != "" && f != "accept-encoding" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type cacheEntry struct {
@@ -117,6 +180,9 @@ type cacheEntry struct {
 }
 
 const cacheShards = 16
+
+// cacheOrderSlack bounds the FIFO index relative to the entry cap.
+const cacheOrderSlack = 2
 
 // memoryCacheBackend implements CacheBackend with in-memory storage and sharding.
 type memoryCacheBackend struct {
@@ -182,11 +248,33 @@ func (m *memoryCacheBackend) Set(ctx context.Context, key string, status int, he
 
 type responseRecorder struct {
 	http.ResponseWriter
-	status  int
-	header  http.Header
-	body    *bytes.Buffer
-	maxBody int64
-	wrote   int64
+	status      int
+	header      http.Header
+	body        *bytes.Buffer
+	maxBody     int64
+	wrote       int64
+	wroteHeader bool
+	truncated   bool
+}
+
+// commitHeader copies the handler's headers to the real writer if the handler
+// never wrote any bytes and never called WriteHeader.
+func (r *responseRecorder) commitHeader() {
+	if !r.wroteHeader {
+		r.WriteHeader(r.status)
+	}
+}
+
+// cacheable reports whether what was just recorded may be stored.
+//
+// Only 200 qualifies: 204 and 304 have no body to replay, and 206 is a
+// fragment of one. A body cut off at maxBody is refused outright -- storing the
+// prefix would serve a truncated response to every later caller.
+func (r *responseRecorder) cacheable() bool {
+	if r.status != http.StatusOK || r.truncated || r.body == nil || r.body.Len() == 0 {
+		return false
+	}
+	return responseAllowsCaching(r.header)
 }
 
 func (r *responseRecorder) Header() http.Header {
@@ -197,6 +285,10 @@ func (r *responseRecorder) Header() http.Header {
 }
 
 func (r *responseRecorder) WriteHeader(code int) {
+	if r.wroteHeader {
+		return
+	}
+	r.wroteHeader = true
 	r.status = code
 	for k, vv := range r.header {
 		for _, v := range vv {
@@ -207,17 +299,21 @@ func (r *responseRecorder) WriteHeader(code int) {
 }
 
 func (r *responseRecorder) Write(p []byte) (n int, err error) {
-	n, err = r.ResponseWriter.Write(p)
-	if r.body != nil && r.wrote < r.maxBody {
-		remain := r.maxBody - r.wrote
-		if int64(len(p)) <= remain {
-			r.body.Write(p)
-			r.wrote += int64(len(p))
-		} else {
-			r.body.Write(p[:remain])
-			r.wrote = r.maxBody
-		}
+	// net/http sends 200 on the first Write; do the same here so the handler's
+	// headers reach the real writer instead of being dropped.
+	if !r.wroteHeader {
+		r.WriteHeader(r.status)
 	}
+	n, err = r.ResponseWriter.Write(p)
+	if r.body == nil {
+		return n, err
+	}
+	if r.wrote+int64(len(p)) > r.maxBody {
+		r.truncated = true
+		return n, err
+	}
+	r.body.Write(p)
+	r.wrote += int64(len(p))
 	return n, err
 }
 
@@ -272,7 +368,37 @@ func (s *cacheStore) set(key string, ent *cacheEntry) {
 				}
 			}
 		}
+		if len(s.order) >= cacheOrderSlack*s.max {
+			s.compactOrder()
+		}
 		s.order = append(s.order, key)
 	}
 	s.entries[key] = ent
+}
+
+// compactOrder drops the eviction index down to one slot per live entry.
+//
+// A key is appended whenever it is absent from the map, so a key that expires
+// and is requested again is appended again while its old slot is still in the
+// slice. Under a steady stream of expiring keys the index grew without bound
+// even though the map itself stayed at its cap. Walking backwards keeps each
+// key's most recent slot, which is the one eviction order should use.
+func (s *cacheStore) compactOrder() {
+	seen := make(map[string]struct{}, len(s.entries))
+	kept := make([]string, 0, len(s.entries))
+	for i := len(s.order) - 1; i >= 0; i-- {
+		k := s.order[i]
+		if _, live := s.entries[k]; !live {
+			continue
+		}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		kept = append(kept, k)
+	}
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+	s.order = kept
 }
