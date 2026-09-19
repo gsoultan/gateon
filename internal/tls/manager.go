@@ -64,6 +64,16 @@ func (m *Manager) ClearCache() {
 func (m *Manager) UpdateConfig(cfg Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// HostPolicy and Cache are runtime wiring installed by the server through
+	// SetHostPolicy and SetCache, not store-derived configuration. A Config
+	// rebuilt from the store carries neither; letting it replace them would
+	// leave ACME with autocert's default policy, which issues for every host.
+	if cfg.HostPolicy == nil {
+		cfg.HostPolicy = m.config.HostPolicy
+	}
+	if cfg.Cache == nil {
+		cfg.Cache = m.config.Cache
+	}
 	m.config = cfg
 }
 
@@ -399,16 +409,27 @@ func (m *Manager) applyExtraTLSConfig(tlsConfig *tls.Config) error {
 
 	for _, ca := range m.config.ClientAuthorities {
 		caData, err := m.LoadCAData(ca.CaFile)
-		if err == nil {
-			if tlsConfig.ClientCAs == nil {
-				tlsConfig.ClientCAs = x509.NewCertPool()
-			}
-			tlsConfig.ClientCAs.AppendCertsFromPEM(caData)
+		if err != nil {
+			logger.L.LogError("failed to load client authority; it will not be trusted",
+				"id", ca.ID, "name", ca.Name, "file", ca.CaFile, "error", err)
+			continue
 		}
+		if tlsConfig.ClientCAs == nil {
+			tlsConfig.ClientCAs = x509.NewCertPool()
+		}
+		tlsConfig.ClientCAs.AppendCertsFromPEM(caData)
 	}
 
 	if tlsConfig.ClientAuth == tls.RequireAndVerifyClientCert && tlsConfig.ClientCAs == nil {
 		return fmt.Errorf("ClientAuth is set to RequireAndVerifyClientCert, but no ClientCAs are provided")
+	}
+	if tlsConfig.ClientAuth == tls.VerifyClientCertIfGiven && tlsConfig.ClientCAs == nil {
+		// A nil ClientCAs makes crypto/tls verify presented client certificates
+		// against the system roots. An empty pool rejects them all, which is
+		// the only honest outcome when no configured authority loaded.
+		logger.L.LogError("ClientAuth is VerifyClientCertIfGiven but no client authority could be loaded; " +
+			"presented client certificates will be rejected rather than verified against the system roots")
+		tlsConfig.ClientCAs = x509.NewCertPool()
 	}
 
 	if len(m.config.CipherSuites) > 0 {

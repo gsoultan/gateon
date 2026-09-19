@@ -110,7 +110,10 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		// #nosec G304 -- filename is filepath.Base of the client value with an
 		// extension allow-list, and the containment check above proves destPath
 		// resolves inside certsDir.
-		dst, err := os.Create(destPath)
+		// 0600 for the same reason the paste endpoint below uses it: this path
+		// accepts .key files, and os.Create's 0666 left every uploaded private
+		// key readable by every user on the host under the default umask.
+		dst, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if err != nil {
 			logger.L.LogError("failed to create certificate file", "error", err, "path", destPath)
 			w.WriteHeader(http.StatusInternalServerError)
