@@ -54,30 +54,83 @@ func NewController(client kubernetes.Interface, gatewayClient gatewayclient.Inte
 	}
 
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			c.syncIngress(obj.(*networkingv1.Ingress))
+		AddFunc: func(obj any) { c.onIngressUpsert(obj) },
+		UpdateFunc: func(_, newObj any) {
+			c.onIngressUpsert(newObj)
 		},
-		UpdateFunc: func(oldObj, newObj any) {
-			c.syncIngress(newObj.(*networkingv1.Ingress))
-		},
-		DeleteFunc: func(obj any) {
-			c.deleteIngress(obj.(*networkingv1.Ingress))
-		},
+		DeleteFunc: c.onIngressDelete,
 	})
 
 	_, _ = gwInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			c.syncHTTPRoute(obj.(*gatewayv1.HTTPRoute))
+		AddFunc: func(obj any) { c.onHTTPRouteUpsert(obj) },
+		UpdateFunc: func(_, newObj any) {
+			c.onHTTPRouteUpsert(newObj)
 		},
-		UpdateFunc: func(oldObj, newObj any) {
-			c.syncHTTPRoute(newObj.(*gatewayv1.HTTPRoute))
-		},
-		DeleteFunc: func(obj any) {
-			c.deleteHTTPRoute(obj.(*gatewayv1.HTTPRoute))
-		},
+		DeleteFunc: c.onHTTPRouteDelete,
 	})
 
 	return c
+}
+
+// unwrapTombstone returns the object a delete notification is really about.
+//
+// client-go's ResourceEventHandler contract says OnDelete receives either the
+// final state of the object or a cache.DeletedFinalStateUnknown wrapping it,
+// the latter whenever the watch was closed and the deletion was only noticed on
+// the next relist — an ordinary consequence of an API-server restart, a rolled
+// connection or a watch timeout, not an exotic condition. Asserting the typed
+// object directly panicked on that shape, and the panic happens inside the
+// informer's own goroutine, where utilruntime.HandleCrash re-panics by default
+// (ReallyCrash is true), so it takes the gateway process down rather than being
+// contained.
+func unwrapTombstone(obj any) any {
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		return tombstone.Obj
+	}
+	return obj
+}
+
+// onIngressUpsert handles an add or update. The assertion is comma-ok because a
+// handler that cannot recognise its object must skip it, not crash the process:
+// an informer callback panic is not contained.
+func (c *Controller) onIngressUpsert(obj any) {
+	ing, ok := obj.(*networkingv1.Ingress)
+	if !ok {
+		logger.L.LogWarn("ignoring ingress event carrying an unexpected object",
+			"type", fmt.Sprintf("%T", obj))
+		return
+	}
+	c.syncIngress(ing)
+}
+
+func (c *Controller) onIngressDelete(obj any) {
+	ing, ok := unwrapTombstone(obj).(*networkingv1.Ingress)
+	if !ok {
+		logger.L.LogWarn("ignoring ingress delete carrying an unexpected object",
+			"type", fmt.Sprintf("%T", obj))
+		return
+	}
+	c.deleteIngress(ing)
+}
+
+func (c *Controller) onHTTPRouteUpsert(obj any) {
+	hr, ok := obj.(*gatewayv1.HTTPRoute)
+	if !ok {
+		logger.L.LogWarn("ignoring httproute event carrying an unexpected object",
+			"type", fmt.Sprintf("%T", obj))
+		return
+	}
+	c.syncHTTPRoute(hr)
+}
+
+func (c *Controller) onHTTPRouteDelete(obj any) {
+	hr, ok := unwrapTombstone(obj).(*gatewayv1.HTTPRoute)
+	if !ok {
+		logger.L.LogWarn("ignoring httproute delete carrying an unexpected object",
+			"type", fmt.Sprintf("%T", obj))
+		return
+	}
+	c.deleteHTTPRoute(hr)
 }
 
 // Run starts the controller sync loop.
