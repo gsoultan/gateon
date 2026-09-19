@@ -33,6 +33,15 @@ func InvalidateTLSCache() {
 	tlsConfigCache.Clear()
 }
 
+// InvalidateRouteTLSConfig drops the cached per-route tls.Config so the next
+// handshake for that route rebuilds it from the current route, option and
+// certificate state. Route edits reach the server through
+// Invalidator.InvalidateRoute, which did not touch this cache, so a route
+// switched to mTLS kept serving the config it was first seen with.
+func InvalidateRouteTLSConfig(routeID string) {
+	tlsConfigCache.Delete(routeID)
+}
+
 // CreateTLSManager builds the TLS manager from global config.
 func CreateTLSManager(s *Server) *gtls.Manager {
 	cfg := BuildGtlsConfig(s)
@@ -303,7 +312,31 @@ func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base
 			}
 		}
 	}
+	failClosedClientCAs(cfg, rt.Id)
 	return cfg
+}
+
+// failClosedClientCAs closes the gap crypto/tls leaves when a verifying
+// ClientAuth is paired with a nil ClientCAs: x509 then verifies the client's
+// chain against the system roots, so a route that asked for mTLS against its
+// own authority would accept any certificate a public CA has issued. An empty
+// pool verifies nothing, which is the only correct answer when the configured
+// authority could not be loaded.
+func failClosedClientCAs(cfg *tls.Config, routeID string) {
+	// Named rather than compared ordinally: these are exactly the two modes in
+	// which crypto/tls verifies a presented chain.
+	switch cfg.ClientAuth {
+	case tls.VerifyClientCertIfGiven, tls.RequireAndVerifyClientCert:
+	default:
+		return
+	}
+	if cfg.ClientCAs != nil {
+		return
+	}
+	logger.L.LogError("client certificate verification requested but no client authority could be loaded; "+
+		"rejecting every client certificate rather than falling back to the system roots",
+		"route", routeID, "client_auth", cfg.ClientAuth.String())
+	cfg.ClientCAs = x509.NewCertPool()
 }
 
 func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfig, base *tls.Config, manager gtls.TLSManager, getFp func() middleware.Fingerprints) *tls.Config {

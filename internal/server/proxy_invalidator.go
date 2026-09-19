@@ -33,6 +33,7 @@ func NewServerProxyInvalidator(s *Server, l4Resolver l4Invalidator, routeStore c
 // InvalidateRoute implements proxy.Invalidator.
 func (p *serverProxyInvalidator) InvalidateRoute(id string) {
 	p.server.InvalidateRouteProxy(id)
+	InvalidateRouteTLSConfig(id)
 	if p.l4Resolver != nil && p.routeStore != nil {
 		if rt, ok := p.routeStore.Get(context.Background(), id); ok && rt != nil {
 			p.l4Resolver.InvalidateForRoute(rt)

@@ -4,6 +4,7 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -43,8 +44,11 @@ func XFCC(cfg XFCCConfig) Middleware {
 
 			// Hash is always useful
 			if cfg.ForwardHash {
-				// Envoy uses SHA256 of the DER
-				parts = append(parts, fmt.Sprintf("Hash=%s", hex.EncodeToString(cert.Signature)))
+				// Envoy defines Hash as the SHA-256 of the DER certificate, which
+				// is what upstreams pin against. cert.Signature is the issuer's
+				// signature over the certificate — a different value entirely.
+				sum := sha256.Sum256(cert.Raw)
+				parts = append(parts, fmt.Sprintf("Hash=%s", hex.EncodeToString(sum[:])))
 			}
 
 			if cfg.ForwardSubject {
