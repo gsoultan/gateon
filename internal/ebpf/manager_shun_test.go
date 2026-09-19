@@ -4,6 +4,7 @@
 package ebpf
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/cilium/ebpf"
@@ -14,36 +15,40 @@ import (
 // and are exercised by the _linux tests; what is here is the arithmetic those
 // operations depend on and the bookkeeping around them.
 
-// TestIPToUint32IsNetworkByteOrder pins the conversion that decides which
+// TestIPToUint32MarshalsToTheHeaderBytes pins the conversion that decides which
 // address gets blocked.
 //
-// The value becomes the key in the shunned_ips map, and the XDP program looks it
-// up against the source address it reads straight out of the packet header,
-// which is big-endian. Get the order wrong and 1.2.3.4 is stored as 4.3.2.1:
-// every shun blocks an unrelated host and the attacker is never touched, with
-// nothing in any log to say so.
-func TestIPToUint32IsNetworkByteOrder(t *testing.T) {
+// The value becomes the key in the shunned_ips map, and the program looks it up
+// with the source address exactly as it sits in the IPv4 header: four bytes in
+// network order. cilium/ebpf marshals a uint32 key in the host's byte order
+// (sysenc.Marshal uses binary.NativeEndian), so the property that matters is
+// not the integer's value but the bytes it becomes on the way into the kernel.
+// A big-endian integer on a little-endian host -- every EC2 instance -- goes in
+// reversed: 1.2.3.4 is stored as 4.3.2.1, every shun blocks an unrelated host
+// and the attacker is never touched, with nothing in any log to say so.
+func TestIPToUint32MarshalsToTheHeaderBytes(t *testing.T) {
 	for _, tc := range []struct {
 		ip   string
-		want uint32
+		want [4]byte
 	}{
-		{"0.0.0.0", 0x00000000},
-		{"1.2.3.4", 0x01020304},
-		{"127.0.0.1", 0x7f000001},
-		{"192.168.1.1", 0xc0a80101},
-		{"255.255.255.255", 0xffffffff},
-		{"203.0.113.10", 0xcb00710a},
+		{"0.0.0.0", [4]byte{0, 0, 0, 0}},
+		{"1.2.3.4", [4]byte{1, 2, 3, 4}},
+		{"127.0.0.1", [4]byte{127, 0, 0, 1}},
+		{"192.168.1.1", [4]byte{192, 168, 1, 1}},
+		{"255.255.255.255", [4]byte{255, 255, 255, 255}},
+		{"203.0.113.10", [4]byte{203, 0, 113, 10}},
 	} {
 		got, err := ipToUint32(tc.ip)
 		if err != nil {
 			t.Errorf("ipToUint32(%q): %v", tc.ip, err)
 			continue
 		}
-		if got != tc.want {
-			t.Errorf("ipToUint32(%q) = %#08x, want %#08x. The XDP program compares "+
-				"this against the source address in the packet header, which is "+
-				"big-endian; a byte-swapped key blocks a different host entirely.",
-				tc.ip, got, tc.want)
+		// Exactly what cilium/ebpf writes for a uint32 key.
+		wire := binary.NativeEndian.AppendUint32(nil, got)
+		if [4]byte(wire) != tc.want {
+			t.Errorf("ipToUint32(%q) reaches the kernel as % x, want % x: the map key must "+
+				"be the header bytes of the source address, or the shun blocks a "+
+				"different host entirely.", tc.ip, wire, tc.want[:])
 		}
 	}
 }

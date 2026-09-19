@@ -24,11 +24,19 @@ struct backend {
     __u8 eth_addr[ETH_ALEN];
 };
 
+// Per-source token bucket. LRU rather than a plain hash: a plain hash fills
+// under a spoofed-source flood and then rejects every new key (E2BIG) for the
+// life of the program, so no new source could be tracked at all.
+struct rl_state {
+    __u64 last_ns; // when the bucket was last refilled
+    __u64 tokens;  // packets that may still pass before the next refill
+};
+
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 10240);
     __type(key, __u32);   // IPv4 address
-    __type(value, __u64); // Last seen timestamp
+    __type(value, struct rl_state);
 } rate_limit_map SEC(".maps");
 
 struct {
@@ -53,10 +61,10 @@ struct {
 } ja3_blocklist SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 65536);
     __type(key, __u32);   // IPv4 address
-    __type(value, __u32); // State: 0=None, 1=SYN_SENT, 2=ESTABLISHED
+    __type(value, __u32); // SYNs seen since the source last sent anything else
 } tcp_conntrack SEC(".maps");
 
 struct {
@@ -87,11 +95,17 @@ struct {
     __type(value, __u64); // Packet count
 } ip_telemetry SEC(".maps");
 
+struct knock_state {
+    __u32 step;    // next index into knocking_config this source has to hit
+    __u32 _pad;
+    __u64 last_ns; // time of the previous knock, for the timeout
+};
+
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 10240);
     __type(key, __u32);   // IP
-    __type(value, __u32); // Current step in sequence
+    __type(value, struct knock_state);
 } knocking_state SEC(".maps");
 
 struct {
@@ -119,6 +133,7 @@ struct ebpf_config {
     __u32 mgmt_port;
     __u32 enable_knocking;
     __u32 enable_mgmt_whitelist;
+    __u32 enable_rate_limit; // the default per-source limit; adaptive_limits entries apply regardless
 };
 
 struct {
@@ -139,6 +154,7 @@ struct {
 #define DROP_REASON_BLOCKED_COUNTRY 2
 #define DROP_REASON_INVALID_PORT_KNOCK 3
 #define DROP_REASON_RATE_LIMITED 4
+#define DROP_REASON_SYN_FLOOD 5
 
 static __always_inline void count_drop(__u32 reason) {
     __u64 *count = bpf_map_lookup_elem(&drop_stats, &reason);
@@ -147,69 +163,118 @@ static __always_inline void count_drop(__u32 reason) {
     }
 }
 
-#define MAX_KNOCK_STEPS 8
-#define KNOCK_TIMEOUT_NS 10000000000LL // 10 seconds
+// Default sustained rate when ebpf_config.enable_rate_limit is set: one packet
+// per millisecond, 1000 pps. An adaptive_limits entry overrides it per source.
+#define RL_DEFAULT_INTERVAL_NS 1000000ULL
+// Packets a source may send at once before the sustained rate applies. A TCP
+// window is a burst: a limiter with no burst allowance drops the second segment
+// of every window and stalls every connection it touches.
+#define RL_BURST_PACKETS 64ULL
+// Consecutive SYNs, with nothing else from the source in between, before it is
+// treated as a SYN flood. A browser opens six connections at once; a flood
+// opens thousands.
+#define SYN_BURST_LIMIT 64
 
-static __always_inline int handle_port_knocking(struct xdp_md *ctx, struct iphdr *iph, struct tcphdr *tcph, struct ebpf_config *cfg) {
-    void *data_end = (void *)(long)ctx->data_end;
+// rate_limit_exceeded is the per-source token bucket shared by the XDP and TC
+// hooks: one token per interval up to RL_BURST_PACKETS, one token per packet.
+// Returns 1 when the packet must be dropped. Without an adaptive_limits entry
+// nothing is limited unless the operator turned the default limiter on; the
+// adaptive entries are explicit user-space decisions and always apply.
+static __always_inline int rate_limit_exceeded(__u32 src_ip, int default_enabled) {
+    __u64 interval = RL_DEFAULT_INTERVAL_NS;
+    __u64 *custom = bpf_map_lookup_elem(&adaptive_limits, &src_ip);
+    if (custom) {
+        interval = *custom;
+    } else if (!default_enabled) {
+        return 0;
+    }
+    if (interval == 0) return 0;
+
+    __u64 now = bpf_ktime_get_ns();
+    struct rl_state *st = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
+    if (!st) {
+        struct rl_state fresh = { .last_ns = now, .tokens = RL_BURST_PACKETS - 1 };
+        bpf_map_update_elem(&rate_limit_map, &src_ip, &fresh, BPF_ANY);
+        return 0;
+    }
+
+    __u64 refill = (now - st->last_ns) / interval;
+    if (refill > 0) {
+        __u64 tokens = st->tokens + refill;
+        st->tokens = tokens > RL_BURST_PACKETS ? RL_BURST_PACKETS : tokens;
+        st->last_ns += refill * interval; // carry the remainder forward
+    }
+    if (st->tokens == 0) return 1;
+    st->tokens -= 1;
+    return 0;
+}
+
+#define MAX_KNOCK_STEPS 8
+#define KNOCK_TIMEOUT_NS 10000000000LL // 10 seconds between consecutive knocks
+// Returned when the packet is neither a knock nor aimed at the management port,
+// so the caller carries on with the rest of the pipeline.
+#define KNOCK_NOT_HANDLED -1
+
+// handle_port_knocking runs for every TCP packet while knocking is enabled: it
+// has to see the knocks, and a knock is by definition not addressed to the
+// management port. It used to be reached only for management-port packets, so
+// the sequence loop below was dead and the port could never be opened.
+//
+// A knock is always consumed (dropped) -- whether it advanced the sequence,
+// restarted it or broke it -- so the knock ports never answer.
+static __always_inline int handle_port_knocking(struct iphdr *iph, struct tcphdr *tcph, struct ebpf_config *cfg) {
     __u32 src_ip = iph->saddr;
     __u16 dest_port = bpf_ntohs(tcph->dest);
 
-    // If knocking is disabled, pass
-    if (!cfg->enable_knocking) return XDP_PASS;
-
-    // Check if accessing target port (mgmt_port)
     if (dest_port == cfg->mgmt_port) {
-        // If IP is already allowed (whitelisted or solved knock), pass
+        // Whitelisted, or completed the sequence: pass. Anyone else: drop.
         if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return XDP_PASS;
-        
         count_drop(DROP_REASON_INVALID_PORT_KNOCK);
         return XDP_DROP;
     }
 
-    // Check if this port is part of the sequence
     int i;
     for (i = 0; i < MAX_KNOCK_STEPS; i++) {
         __u32 step_idx = i;
         __u32 *expected_port = bpf_map_lookup_elem(&knocking_config, &step_idx);
         if (!expected_port || *expected_port == 0) break;
+        if (dest_port != *expected_port) continue;
 
-        if (dest_port == *expected_port) {
-            __u32 *current_step = bpf_map_lookup_elem(&knocking_state, &src_ip);
-            __u64 now = bpf_ktime_get_ns();
-            
-            // We use rate_limit_map to track last knock time for timeout (reuse map or use a new one)
-            // For now, just focus on the sequence.
-            
-            if (!current_step) {
-                if (i == 0) {
-                    __u32 initial_step = 1;
-                    bpf_map_update_elem(&knocking_state, &src_ip, &initial_step, BPF_ANY);
-                    return XDP_DROP; // Consume knock
-                }
-            } else {
-                if (i == *current_step) {
-                    *current_step += 1;
-                    
-                    // Check if sequence complete
-                    __u32 next_step_idx = *current_step;
-                    __u32 *next_port = bpf_map_lookup_elem(&knocking_config, &next_step_idx);
-                    if (!next_port || *next_port == 0) {
-                        // Sequence complete! Add to whitelist for a limited time (or until manual removal)
-                        __u32 val = 1;
-                        bpf_map_update_elem(&mgmt_whitelist, &src_ip, &val, BPF_ANY);
-                        bpf_map_delete_elem(&knocking_state, &src_ip);
-                    }
-                    return XDP_DROP; // Consume knock
-                } else {
-                    // Wrong port in sequence, reset
-                    bpf_map_delete_elem(&knocking_state, &src_ip);
-                }
-            }
+        __u64 now = bpf_ktime_get_ns();
+        struct knock_state *st = bpf_map_lookup_elem(&knocking_state, &src_ip);
+        if (st && now - st->last_ns > KNOCK_TIMEOUT_NS) {
+            // Too slow: a half-finished sequence does not stay open forever.
+            bpf_map_delete_elem(&knocking_state, &src_ip);
+            st = NULL;
         }
+        if (!st) {
+            if (i == 0) {
+                struct knock_state fresh = { .step = 1, .last_ns = now };
+                bpf_map_update_elem(&knocking_state, &src_ip, &fresh, BPF_ANY);
+            }
+            return XDP_DROP;
+        }
+        if (i != st->step) {
+            // Out of order: start over from nothing.
+            bpf_map_delete_elem(&knocking_state, &src_ip);
+            return XDP_DROP;
+        }
+        st->step += 1;
+        st->last_ns = now;
+        __u32 next_idx = st->step;
+        __u32 *next_port = NULL;
+        if (next_idx < MAX_KNOCK_STEPS)
+            next_port = bpf_map_lookup_elem(&knocking_config, &next_idx);
+        if (!next_port || *next_port == 0) {
+            // Sequence complete: open the management port for this source.
+            __u32 val = 1;
+            bpf_map_update_elem(&mgmt_whitelist, &src_ip, &val, BPF_ANY);
+            bpf_map_delete_elem(&knocking_state, &src_ip);
+        }
+        return XDP_DROP;
     }
 
-    return XDP_PASS;
+    return KNOCK_NOT_HANDLED;
 }
 
 static __always_inline int handle_tls_packet(struct xdp_md *ctx, struct iphdr *iph, struct tcphdr *tcph) {
@@ -285,14 +350,21 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
             }
 
             if (tcph->syn && !tcph->ack) {
-                // Tracking SYN starts. If already has a SYN state without ACK, could be a flood.
-                __u32 *state = bpf_map_lookup_elem(&tcp_conntrack, &src_ip);
-                if (state && *state == 1) {
-                    // Possible SYN flood from this IP
-                    return XDP_DROP;
+                // Count SYNs since this source last sent anything else. It used
+                // to drop on the second one, which is what a browser opening its
+                // parallel connections looks like; only a source that keeps
+                // opening connections and never completes one is a flood.
+                __u32 *pending = bpf_map_lookup_elem(&tcp_conntrack, &src_ip);
+                if (pending) {
+                    if (*pending >= SYN_BURST_LIMIT) {
+                        count_drop(DROP_REASON_SYN_FLOOD);
+                        return XDP_DROP;
+                    }
+                    __sync_fetch_and_add(pending, 1);
+                } else {
+                    __u32 one = 1;
+                    bpf_map_update_elem(&tcp_conntrack, &src_ip, &one, BPF_ANY);
                 }
-                __u32 syn_state = 1;
-                bpf_map_update_elem(&tcp_conntrack, &src_ip, &syn_state, BPF_ANY);
             } else {
                 // On any other packet from this IP, we clear the SYN state for simplicity
                 // In a full conntrack we'd track ESTABLISHED
@@ -304,28 +376,21 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
     // 2. Management Protection
     __u32 config_key = 0;
     struct ebpf_config *cfg = bpf_map_lookup_elem(&global_ebpf_config, &config_key);
-    if (cfg && cfg->mgmt_port > 0) {
-        if (iph->protocol == IPPROTO_TCP) {
-            struct tcphdr *tcph = (void *)(iph + 1);
-            if ((void *)(tcph + 1) <= data_end) {
-                if (bpf_ntohs(tcph->dest) == cfg->mgmt_port) {
-                    // Check whitelist
-                    if (cfg->enable_mgmt_whitelist) {
-                        __u32 *allowed = bpf_map_lookup_elem(&mgmt_whitelist, &src_ip);
-                        if (!allowed) {
-                            return handle_port_knocking(ctx, iph, tcph, cfg);
-                        }
-                    } else if (cfg->enable_knocking) {
-                         return handle_port_knocking(ctx, iph, tcph, cfg);
-                    }
-                }
+    if (cfg && cfg->mgmt_port > 0 && iph->protocol == IPPROTO_TCP) {
+        struct tcphdr *tcph = (void *)(iph + 1);
+        if ((void *)(tcph + 1) <= data_end) {
+            if (cfg->enable_knocking) {
+                // Every TCP packet, not only those for the management port:
+                // the knocks are precisely the packets that are not for it.
+                int v = handle_port_knocking(iph, tcph, cfg);
+                if (v != KNOCK_NOT_HANDLED) return v;
+            } else if (cfg->enable_mgmt_whitelist && bpf_ntohs(tcph->dest) == cfg->mgmt_port) {
+                if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return XDP_PASS;
+                count_drop(DROP_REASON_INVALID_PORT_KNOCK);
+                return XDP_DROP;
             }
         }
     }
-
-    // 3. Rate Limiting (Adaptive)
-    __u64 now = bpf_ktime_get_ns();
-    __u64 min_interval = 1000000; // 1ms default (1000 pps)
 
     // TITAN: Phantom Redirection (AF_XDP)
     if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
@@ -346,34 +411,42 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
         }
     }
 
-    __u64 *custom_limit = bpf_map_lookup_elem(&adaptive_limits, &src_ip);
-    if (custom_limit) {
-        min_interval = *custom_limit;
+    // 3. Rate Limiting (Adaptive)
+    if (rate_limit_exceeded(src_ip, cfg && cfg->enable_rate_limit)) {
+        count_drop(DROP_REASON_RATE_LIMITED);
+        return XDP_DROP;
     }
-
-    __u64 *last_seen = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
-    if (last_seen) {
-        if (now - *last_seen < min_interval) {
-            count_drop(DROP_REASON_RATE_LIMITED);
-            return XDP_DROP;
-        }
-    }
-    bpf_map_update_elem(&rate_limit_map, &src_ip, &now, BPF_ANY);
 
     // 3. Basic Load Balancing (L3/L4)
     // For simplicity, we only balance TCP/UDP traffic and if backends are configured.
+    //
+    // An entry is only usable if it carries a destination MAC. Rewriting
+    // eth->h_dest to 00:00:00:00:00:00 and returning XDP_TX puts the frame back
+    // on the wire addressed to nobody, and it is gone -- XDP_TX has no fallback
+    // and nothing upstack ever sees the packet. That is what the Go side used
+    // to install for every backend, because it has no ARP and no static MAC
+    // table to resolve one from; UpdateLoadBalancerBackends now refuses rather
+    // than write an unaddressable entry, and this is the same refusal on the
+    // kernel side, for an entry written by anything else. Pass the packet up
+    // the normal path instead of destroying it.
     __u32 key = 0;
     __u32 *count = bpf_map_lookup_elem(&lb_backends_count, &key);
     if (count && *count > 0) {
         __u32 index = src_ip % (*count);
         struct backend *be = bpf_map_lookup_elem(&lb_backends, &index);
+        __u8 mac_bits = 0;
         if (be) {
-            // Rewrite destination IP and MAC
-            // In a real scenario, we'd also need to update the checksums or use hardware offload.
-            // and potentially handle the source MAC (setting it to the interface MAC).
+            for (int i = 0; i < ETH_ALEN; i++) {
+                mac_bits |= be->eth_addr[i];
+            }
+        }
+        if (be && mac_bits) {
+            // NOTE: this still does not recompute the IPv4 header checksum or
+            // the TCP/UDP checksum, both of which cover the destination address
+            // being rewritten here. It is reachable only for an entry with a
+            // resolved MAC, which nothing installs today; whoever adds MAC
+            // resolution has to add both checksum fixups in the same change.
             iph->daddr = be->ip;
-            // eth->h_dest would be be->eth_addr
-            // This is a simplified L3 redirect.
             for (int i = 0; i < ETH_ALEN; i++) {
                 eth->h_dest[i] = be->eth_addr[i];
             }
@@ -460,21 +533,10 @@ static __always_inline int tc_filter_ipv4(struct iphdr *iph) {
         return TC_ACT_SHOT;
     }
 
-    __u64 now = bpf_ktime_get_ns();
-    __u64 min_interval = 1000000; // 1ms default (1000 pps), as in the XDP path
-    __u64 *custom_limit = bpf_map_lookup_elem(&adaptive_limits, &src_ip);
-    if (custom_limit) {
-        min_interval = *custom_limit;
+    if (rate_limit_exceeded(src_ip, cfg && cfg->enable_rate_limit)) {
+        count_drop(DROP_REASON_RATE_LIMITED);
+        return TC_ACT_SHOT;
     }
-
-    __u64 *last_seen = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
-    if (last_seen) {
-        if (now - *last_seen < min_interval) {
-            count_drop(DROP_REASON_RATE_LIMITED);
-            return TC_ACT_SHOT;
-        }
-    }
-    bpf_map_update_elem(&rate_limit_map, &src_ip, &now, BPF_ANY);
 
     return TC_ACT_OK;
 }

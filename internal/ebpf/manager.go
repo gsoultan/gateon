@@ -56,7 +56,24 @@ type EbpfManager struct {
 	// only mode that pays for itself), "generic" (SKB-level, opt-in only — see
 	// allow_generic_xdp), or "tcx"/"clsact" for the TC ingress path.
 	attachMode string
+	// mgmtWhitelist is the set of mgmt_whitelist keys this manager last
+	// installed *from configuration*, so UpdateManagementWhitelist can delete
+	// the ones an operator removed. It deliberately excludes the entries the
+	// XDP program writes itself when a source completes the port-knock
+	// sequence: those are not config, and clearing the map wholesale would
+	// revoke a live operator's knock every time unrelated settings were saved.
+	// Bounded by mgmtWhitelistMax, which is the kernel map's own capacity.
+	mgmtWhitelist map[uint32]struct{}
 }
+
+// mgmtWhitelistMax mirrors max_entries on the mgmt_whitelist map in
+// bpf/xdp_rate_limit.c. Entries past it cannot be installed, so tracking them
+// would only grow the Go-side set without matching anything in the kernel.
+const mgmtWhitelistMax = 1024
+
+// lbBackendsMax mirrors max_entries on the lb_backends array in
+// bpf/xdp_rate_limit.c.
+const lbBackendsMax = 64
 
 type MapStats struct {
 	ShunnedIPsCount int
@@ -147,6 +164,10 @@ func (m *EbpfManager) close() {
 	m.attached = false
 	m.loadErr = ""
 	m.attachMode = ""
+	// The mgmt_whitelist map went with the collection, so nothing this manager
+	// installed from config is in the kernel any more. Keeping the set would
+	// make the next update issue deletes for keys a fresh map never had.
+	m.mgmtWhitelist = nil
 
 	// The shunned map is gone with the objects above, so the count of what is in
 	// it is zero. Leaving the counter alone survived a detach and reattach and
@@ -158,6 +179,14 @@ func (m *EbpfManager) close() {
 	m.shunnedCount.Store(0)
 }
 
+// ipToUint32 encodes an IPv4 address as the key the programs look it up under:
+// the source address exactly as it sits in the IPv4 header, four bytes in
+// network order. cilium/ebpf marshals a uint32 key in the host's byte order, so
+// the integer must be read from those bytes in the host's order too for them to
+// reach the kernel unchanged. Reading them big-endian, as this used to, gave the
+// address's numeric value -- which on a little-endian host (every EC2 instance)
+// marshals reversed, so 1.2.3.4 was stored under 4.3.2.1 and every shun blocked
+// an unrelated host while the attacker was never touched.
 func ipToUint32(ipStr string) (uint32, error) {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
@@ -167,13 +196,14 @@ func ipToUint32(ipStr string) (uint32, error) {
 	if ipv4 == nil {
 		return 0, fmt.Errorf("only IPv4 is supported in eBPF for now: %s", ipStr)
 	}
-	// XDP/IP headers are in network byte order (Big Endian)
-	return binary.BigEndian.Uint32(ipv4), nil
+	return binary.NativeEndian.Uint32(ipv4), nil
 }
 
+// uint32ToIP is the inverse: a key read back from a map, in host order, is the
+// header bytes again.
 func uint32ToIP(nn uint32) net.IP {
 	ip := make(net.IP, 4)
-	binary.BigEndian.PutUint32(ip, nn)
+	binary.NativeEndian.PutUint32(ip, nn)
 	return ip
 }
 
@@ -237,26 +267,94 @@ func (m *EbpfManager) UnshunIP(ip string) error {
 	return err
 }
 
-// UpdateManagementWhitelist updates the list of IPs allowed to access management port.
+// whitelistKeys turns the configured addresses into map keys, dropping the ones
+// that cannot be encoded and stopping at the kernel map's capacity. Returned as
+// a set because the same address may legitimately appear twice in config.
+func whitelistKeys(ips []string) map[uint32]struct{} {
+	keys := make(map[uint32]struct{}, len(ips))
+	for _, ip := range ips {
+		if len(keys) >= mgmtWhitelistMax {
+			logger.L.LogWarn("management whitelist truncated at the kernel map's capacity",
+				"max_entries", mgmtWhitelistMax, "configured", len(ips))
+			break
+		}
+		ipUint, err := ipToUint32(ip)
+		if err != nil {
+			logger.L.LogWarn("skipping an unusable management-whitelist entry", "ip", ip, "error", err)
+			continue
+		}
+		keys[ipUint] = struct{}{}
+	}
+	return keys
+}
+
+// revokedWhitelistKeys is the set difference prev\next, sorted so the caller's
+// behaviour does not depend on Go's randomised map iteration order.
+func revokedWhitelistKeys(prev, next map[uint32]struct{}) []uint32 {
+	var revoked []uint32
+	for key := range prev {
+		if _, keep := next[key]; !keep {
+			revoked = append(revoked, key)
+		}
+	}
+	slices.Sort(revoked)
+	return revoked
+}
+
+// UpdateManagementWhitelist installs the configured set of IPs allowed to reach
+// the management port, and removes the ones configuration no longer names.
+//
+// It used to only ever add. Deleting an address in the dashboard left it in the
+// kernel map until the program was torn down, so a revoked administrator kept
+// kernel-level access to the management port across every reload — the one
+// place where "the config no longer says so" has to mean something.
+//
+// Clearing the map and refilling it would be wrong: the XDP program writes into
+// the same map itself when a source completes the port-knock sequence, and that
+// entry is what is holding the operator's own session open. So the manager
+// remembers exactly what it installed from config and deletes only from that
+// set; a knock-granted entry was never in it and survives. An address that is
+// both configured and knock-granted is revoked when config drops it, which is
+// the conservative reading of an operator deleting it.
 func (m *EbpfManager) UpdateManagementWhitelist(ips []string) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	next := whitelistKeys(ips)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	whitelistMap, ok := m.maps["mgmt_whitelist"]
 	if !ok {
 		return fmt.Errorf("mgmt_whitelist map not loaded")
 	}
 
-	// For a real production implementation, we'd diff and only update changes,
-	// or clear and refill if the list is small.
-	for _, ip := range ips {
-		ipUint, err := ipToUint32(ip)
-		if err != nil {
+	var firstErr error
+	for _, key := range revokedWhitelistKeys(m.mgmtWhitelist, next) {
+		// ErrKeyNotExist is not a failure: the entry may have been evicted with
+		// the previous collection, or never made it in.
+		if err := whitelistMap.Delete(key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			logger.L.LogError("failed to revoke a management-whitelist entry; that address still "+
+				"reaches the management port at XDP level",
+				"ip", uint32ToIP(key).String(), "error", err)
+			firstErr = cmp.Or(firstErr, err)
 			continue
 		}
-		_ = whitelistMap.Update(ipUint, uint32(1), ebpf.UpdateAny)
+		logger.L.LogInfo("Revoked management whitelist entry at XDP level", "ip", uint32ToIP(key).String())
 	}
-	return nil
+
+	installed := make(map[uint32]struct{}, len(next))
+	for key := range next {
+		if err := whitelistMap.Update(key, uint32(1), ebpf.UpdateAny); err != nil {
+			logger.L.LogError("failed to install a management-whitelist entry",
+				"ip", uint32ToIP(key).String(), "error", err)
+			firstErr = cmp.Or(firstErr, err)
+			continue
+		}
+		installed[key] = struct{}{}
+	}
+	// Track only what actually reached the kernel, so a later removal does not
+	// try to delete a key that was never written.
+	m.mgmtWhitelist = installed
+	return firstErr
 }
 
 // SetPortKnockingSequence sets the required port sequence for management access.
@@ -289,48 +387,49 @@ func (m *EbpfManager) SetPortKnockingSequence(seq []int32) error {
 	return nil
 }
 
-// UpdateLoadBalancerBackends updates the list of backends for XDP load balancing.
+// UpdateLoadBalancerBackends refuses to install backends for XDP load
+// balancing, and forces the kernel-side backend count to zero.
+//
+// It used to accept them and write an all-zero destination MAC, because nothing
+// in the tree resolves a backend's MAC — there is no ARP and no static MAC
+// table. The XDP path then rewrote eth->h_dest to 00:00:00:00:00:00, rewrote
+// iph->daddr without recomputing either the IPv4 or the L4 checksum, and
+// returned XDP_TX: the redirected traffic went onto the wire addressed to
+// nobody, and every request an operator pointed at this feature was silently
+// destroyed. Accepting a setting and blackholing the traffic it names is worse
+// than not having the setting, so this refuses instead, loudly and by name.
+//
+// The count is cleared *before* the refusal so a previously installed set stops
+// being balanced even when this call goes on to fail: the XDP path reads
+// lb_backends_count and does nothing at all while it is zero.
 func (m *EbpfManager) UpdateLoadBalancerBackends(ips []string) error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	countMap, loaded := m.maps["lb_backends_count"]
+	m.mu.RUnlock()
 
-	backendsMap, ok := m.maps["lb_backends"]
-	countMap, ok2 := m.maps["lb_backends_count"]
-	if !ok || !ok2 {
-		return fmt.Errorf("load balancer maps not loaded")
-	}
-
-	logger.L.LogInfo("Updating XDP load balancer backends", "count", len(ips))
-
-	type backend struct {
-		IP      uint32
-		EthAddr [6]uint8
-	}
-
-	for i, ipStr := range ips {
-		if i >= 64 { // max_entries in C
-			break
+	if loaded {
+		if err := countMap.Update(uint32(0), uint32(0), ebpf.UpdateAny); err != nil {
+			return fmt.Errorf("clearing the XDP load balancer backend count: %w", err)
 		}
-		ipUint, err := ipToUint32(ipStr)
-		if err != nil {
-			continue
-		}
-
-		be := backend{
-			IP: ipUint,
-			// In a real scenario, we'd need the MAC address of the backend.
-			// This might involve ARP or static config.
-			EthAddr: [6]uint8{0, 0, 0, 0, 0, 0},
-		}
-
-		_ = backendsMap.Update(uint32(i), be, ebpf.UpdateAny)
 	}
 
-	count := uint32(len(ips))
-	if count > 64 {
-		count = 64
+	if len(ips) == 0 {
+		return nil
 	}
-	return countMap.Update(uint32(0), count, ebpf.UpdateAny)
+
+	// Every backend offered here is unaddressable: the caller supplies IPs only,
+	// and a destination MAC is not derivable from one. If MAC resolution ever
+	// lands, this is the check it has to satisfy — refuse the entries it could
+	// not resolve, install the rest, and only then set the count.
+	refused := min(len(ips), lbBackendsMax)
+	logger.L.LogError("refusing to enable XDP load balancing: no destination MAC can be resolved for "+
+		"these backends, and the XDP path rewrites the destination MAC and returns XDP_TX, so the "+
+		"redirected traffic would go onto the wire addressed to 00:00:00:00:00:00 with stale IPv4 "+
+		"and L4 checksums and be silently lost. The kernel backend count is now 0, so nothing is "+
+		"being redirected; turn this setting off and balance in the proxy instead.",
+		"setting", "xdp_load_balancing", "backends", refused)
+	return fmt.Errorf("xdp_load_balancing: refusing %d backend(s) with no resolved destination MAC; "+
+		"XDP load balancing is not implemented and would blackhole the redirected traffic", refused)
 }
 
 // SetAdaptiveRateLimit sets a per-IP rate limit in nanoseconds.
@@ -453,6 +552,7 @@ var dropReasons = map[uint32]string{
 	2: "blocked_country",
 	3: "invalid_port_knock",
 	4: "rate_limited",
+	5: "syn_flood",
 }
 
 // GetMapStats returns statistics from eBPF maps along with the current load
