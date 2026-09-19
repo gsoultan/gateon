@@ -6,6 +6,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -343,5 +344,125 @@ func TestGetTopThreatSources(t *testing.T) {
 	}
 	if top[0].Subtext != asn {
 		t.Errorf("Expected subtext %s, got %s", asn, top[0].Subtext)
+	}
+}
+
+// flushUntilTraceVisible drives the store's writer until the trace can be read
+// back. The writer takes its intake channel and its flush request from one
+// select, so a single flush may run before the trace has been taken off the
+// channel; each FlushThreats round trip is one full pass of that loop, and a
+// bounded number of them is a deterministic wait with no sleep in it.
+func flushUntilTraceVisible(t *testing.T, id string) *TraceRecord {
+	t.Helper()
+	for range 64 {
+		FlushThreats()
+		for _, tr := range GetTraces(t.Context(), 100) {
+			if tr.ID == id {
+				return tr
+			}
+		}
+	}
+	t.Fatalf("trace %s never became visible in the store", id)
+	return nil
+}
+
+// TestRecordedTraceRedactsCredentialHeaders records a trace carrying every
+// credential-bearing header a client or origin can send and reads it back from
+// the trace store, the way the dashboard's trace view does.
+//
+// Redaction happens in the store's background loop, after the request has been
+// answered, so this is the only place it can be checked: a header that reaches
+// Pebble in the clear is on disk and in every trace listing and export from
+// then on. Proxy-Authorization was missing from the list -- it carries a
+// credential exactly as Authorization does, and a gateway is the kind of
+// intermediary it is addressed to.
+func TestRecordedTraceRedactsCredentialHeaders(t *testing.T) {
+	_ = ClosePathStatsStore(context.Background())
+	dbPath := filepath.Join(t.TempDir(), "redact.db")
+	if err := InitPathStatsStore("sqlite://"+dbPath, 1); err != nil {
+		t.Fatalf("init store: %v", err)
+	}
+	defer func() { _ = ClosePathStatsStore(context.Background()) }()
+
+	const secret = "s3cr3t-credential"
+	reqHeaders := map[string][]string{
+		"Authorization":       {"Bearer " + secret},
+		"Proxy-Authorization": {"Basic " + secret},
+		"Cookie":              {"session=" + secret},
+		"X-Api-Key":           {secret},
+		"Accept":              {"text/html"},
+	}
+	respHeaders := map[string][]string{
+		"Set-Cookie":   {"session=" + secret + "; HttpOnly"},
+		"Content-Type": {"text/html"},
+	}
+	const traceID = "trace-with-credentials"
+	RecordTrace(traceID, "GET /login", "svc", "route-1", 1.5, time.Now(), "success", "/login",
+		"203.0.113.9", "", "", "ua", "GET", "", "example.com/login", "", "",
+		reqHeaders, respHeaders, "", 100, 0, 0, 0, 0)
+
+	tr := flushUntilTraceVisible(t, traceID)
+	stored := tr.RequestHeaders + "\n" + tr.ResponseHeaders
+	if strings.Contains(stored, secret) {
+		t.Fatalf("a credential reached the trace store in the clear:\n%s", stored)
+	}
+	for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie", "X-Api-Key", "Set-Cookie"} {
+		if !strings.Contains(stored, name+": [REDACTED]") {
+			t.Errorf("%s was not redacted:\n%s", name, stored)
+		}
+	}
+	if !strings.Contains(tr.RequestHeaders, "Accept: text/html") {
+		t.Errorf("a harmless header was lost with the redaction:\n%s", tr.RequestHeaders)
+	}
+}
+
+// TestManualUnmitigationIsVisible covers the release half of fingerprint
+// mitigation on both engines gateon ships.
+//
+// escalateMitigation consults IsUserUnmitigated before blocking a fingerprint
+// again, so that an operator's Remove Mitigation holds for a day rather than
+// being undone by the next threat the same client produces. The query behind it
+// used SQLite's datetime('now', '-1 day'), which Postgres does not have: there
+// the query errored, the error was read as "not released", and the release was
+// undone the moment the client tripped anything again. The sibling query in
+// IsUserMitigated already bound a Go-side cutoff instead, and this test runs
+// against Postgres whenever GATEON_TEST_POSTGRES_DSN is set, the way the
+// migration suite does.
+func TestManualUnmitigationIsVisible(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) {
+		assertManualUnmitigationVisible(t, "sqlite://"+filepath.Join(t.TempDir(), "unmitigate.db"))
+	})
+	t.Run("postgres", func(t *testing.T) {
+		dsn := os.Getenv("GATEON_TEST_POSTGRES_DSN")
+		if dsn == "" {
+			t.Skip("GATEON_TEST_POSTGRES_DSN not set; skipping the Postgres run")
+		}
+		assertManualUnmitigationVisible(t, dsn)
+	})
+}
+
+func assertManualUnmitigationVisible(t *testing.T, databaseURL string) {
+	t.Helper()
+	// A non-SQLite store would otherwise put its Pebble directory under
+	// config.DataDir, which in a test process is the package directory.
+	t.Setenv("GATEON_TRACE_DIR", t.TempDir())
+	_ = ClosePathStatsStore(context.Background())
+	if err := InitPathStatsStore(databaseURL, 1); err != nil {
+		t.Fatalf("init store: %v", err)
+	}
+	defer func() { _ = ClosePathStatsStore(context.Background()) }()
+
+	s := getStore()
+	fp := fmt.Sprintf("t13d1516h2_review_%d|203.0.113", time.Now().UnixNano())
+	// Runs before the deferred Close above: a shared Postgres must not keep the
+	// row.
+	defer func() {
+		_, _ = s.db.Exec(s.dialect.Rebind("DELETE FROM user_mitigations WHERE fingerprint = ?"), fp)
+	}()
+
+	MarkUserUnmitigated(fp)
+	if !IsUserUnmitigated(fp) {
+		t.Fatalf("on %s a fingerprint released a moment ago is not reported as unmitigated, "+
+			"so escalateMitigation will block it again on the next threat it produces", s.dialect.Driver)
 	}
 }

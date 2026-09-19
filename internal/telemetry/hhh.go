@@ -9,6 +9,14 @@ import (
 	"sync"
 )
 
+// maxHHHPrefixes bounds the prefix table. Every recorded threat adds the
+// attacker's address at four widths, and a reputation shun records a threat
+// per blocked request, so a shunned client rotating through an IPv6 /64 added
+// entries until the daily reset with nothing in between. Once full, prefixes
+// already present keep counting and new ones are not opened: the wider levels
+// an attacker's range falls under are the ones that are already there.
+const maxHHHPrefixes = 50000
+
 // HHHCounter implements a Hierarchical Heavy Hitters algorithm.
 // It tracks request counts at different CIDR levels (/8, /16, /24, /32 for IPv4)
 // to identify malicious subnets.
@@ -43,16 +51,16 @@ func (c *HHHCounter) Add(ipStr string) {
 
 	c.total++
 
-	if addr.Is4() {
-		for _, p := range []int{8, 16, 24, 32} {
-			prefix := netip.PrefixFrom(addr, p).Masked()
-			c.counts[prefix]++
+	levels := ipv4PrefixLevels
+	if addr.Is6() {
+		levels = ipv6PrefixLevels
+	}
+	for _, p := range levels {
+		prefix := netip.PrefixFrom(addr, p).Masked()
+		if _, present := c.counts[prefix]; !present && len(c.counts) >= maxHHHPrefixes {
+			continue
 		}
-	} else if addr.Is6() {
-		for _, p := range []int{32, 48, 64, 128} {
-			prefix := netip.PrefixFrom(addr, p).Masked()
-			c.counts[prefix]++
-		}
+		c.counts[prefix]++
 	}
 }
 

@@ -186,6 +186,62 @@ func TestUserMitigationExpiresAfterTTL(t *testing.T) {
 	}
 }
 
+// A release has to say whether it released anything, and it has to say it
+// about mitigations rather than about its own bookkeeping: the DELETE inside
+// MarkUserUnmitigated also removes the UNMITIGATED_MARKER row a previous
+// release inserted under the same key, so rows-affected would call a second
+// release a success.
+func TestMarkUserUnmitigatedReportsWhatItReleased(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "gateon_release_report_test.db")
+	_ = InitPathStatsStore(dbPath, 1)
+	defer ClosePathStatsStore(context.Background())
+
+	const fp = "release-report-ja4plus"
+
+	if MarkUserUnmitigated(fp) {
+		t.Error("reported a release for a fingerprint that was never mitigated")
+	}
+
+	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
+	if !MarkUserUnmitigated(fp) {
+		t.Error("an in-force mitigation was released but not reported as one")
+	}
+	if MarkUserUnmitigated(fp) {
+		t.Error("a repeat release reported success for deleting its own marker row")
+	}
+}
+
+// The removal path must not rebuild a key: MarkUserMitigated files a row under
+// whichever string its caller chose, and the two shapes in the tree are the
+// fingerprint alone and the ja4+"_"+ja4h composite.
+func TestFindUserMitigationKeyResolvesTheStoredShape(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "gateon_find_key_test.db")
+	_ = InitPathStatsStore(dbPath, 1)
+	defer ClosePathStatsStore(context.Background())
+
+	const (
+		plain = "find-key-ja4"
+		ja4h  = "find-key-ja4h"
+	)
+
+	if key, ok := FindUserMitigationKey(plain, ja4h); ok {
+		t.Errorf("resolved %q with nothing mitigated", key)
+	}
+
+	MarkUserMitigated(plain, "JA4+", "blocked", "waf")
+	if key, ok := FindUserMitigationKey(plain, ja4h); !ok || key != plain {
+		t.Errorf("got (%q, %v), want (%q, true): a block filed under the plain "+
+			"fingerprint is invisible to a caller that only guesses the composite",
+			key, ok, plain)
+	}
+
+	composite := "find-key-other-ja4" + fingerprintKeySeparator + ja4h
+	MarkUserMitigated(composite, "JA4+", "blocked", "waf")
+	if key, ok := FindUserMitigationKey("find-key-other-ja4", ja4h); !ok || key != composite {
+		t.Errorf("got (%q, %v), want (%q, true)", key, ok, composite)
+	}
+}
+
 // The TTL must not resurrect an explicit release, and must not be so eager that
 // a fresh block is useless.
 func TestUserMitigationHoldsWithinTTL(t *testing.T) {

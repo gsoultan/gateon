@@ -4,6 +4,7 @@
 package telemetry
 
 import (
+	"context"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -161,4 +162,57 @@ func gatherFamily(name string) (*dto.MetricFamily, error) {
 		}
 	}
 	return nil, nil
+}
+
+// routeRequests reports the request count snap holds for route, or -1 when the
+// route is absent.
+func routeRequests(snap *MetricsSnapshot, route string) float64 {
+	for _, rm := range snap.RouteMetrics {
+		if rm.Route == route {
+			return rm.Requests
+		}
+	}
+	return -1
+}
+
+// TestPublishedSnapshotSurvivesLaterRefreshes pins down that a snapshot handed
+// out by GetLastSnapshot stays what it was when it was handed out.
+//
+// The snapshot loop used to return the previous snapshot to a sync.Pool the
+// moment it swapped in a new one, while that pointer was still held by every
+// /v1/watch and /v1/diag/metrics/watch subscriber's channel, by whoever had
+// just called CollectMetricsSnapshot, and by the aggregator. Two refreshes
+// later the pool handed the same object back, Reset zeroed it and the collector
+// refilled it in place -- so a slow SSE client serialised a snapshot that was
+// being rewritten underneath it, and on the minimal tier, where light refreshes
+// alias the previous snapshot's slices, the live snapshot's traffic history and
+// security insights were zeroed while the dashboard was reading them.
+func TestPublishedSnapshotSurvivesLaterRefreshes(t *testing.T) {
+	// Own the store singleton: a store left open by an earlier test would put
+	// SQL round-trips into every refresh and blur what this test measures.
+	_ = ClosePathStatsStore(context.Background())
+
+	const route = "snapshot-recycle-route"
+	counter := RequestsTotal.WithLabelValues(route, "svc", "GET", "200")
+	counter.Add(7)
+
+	for round := range 5 {
+		refreshSnapshot(t.Context(), true)
+		held := GetLastSnapshot()
+		want := routeRequests(held, route)
+		if want < 0 {
+			t.Fatalf("round %d: route %q missing from a fresh snapshot", round, route)
+		}
+
+		// The metrics move on and the loop refreshes twice more, as it does
+		// every few seconds in production while a reader still holds `held`.
+		counter.Add(1000)
+		refreshSnapshot(t.Context(), true)
+		refreshSnapshot(t.Context(), true)
+
+		if got := routeRequests(held, route); got != want {
+			t.Fatalf("round %d: a snapshot handed to a reader was rewritten by later refreshes: route %q read %v when handed out and reads %v now",
+				round, route, want, got)
+		}
+	}
 }

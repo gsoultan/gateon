@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -18,6 +19,69 @@ import (
 type WatchEvent struct {
 	Type string `json:"type"`
 	Data any    `json:"data"`
+}
+
+// watchSources bundles the live feeds one /v1/watch connection multiplexes.
+type watchSources struct {
+	audit   <-chan audit.AuditEntry
+	threat  <-chan telemetry.SecurityThreat
+	metrics <-chan *telemetry.MetricsSnapshot
+	initial *telemetry.MetricsSnapshot
+}
+
+// forwardWatchEvents multiplexes src onto out until ctx is done.
+//
+// Every send selects on ctx as well as on out. The reader is the handler's
+// write loop, which returns the moment the client goes away, and nothing drains
+// out after that; a bare send that was blocked on a full buffer at that point
+// blocked forever, leaking this goroutine and up to twenty buffered events for
+// every dropped connection. A source that has been closed -- the handler
+// unsubscribes on its way out -- ends the loop for the same reason.
+func forwardWatchEvents(ctx context.Context, src watchSources, out chan<- WatchEvent) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	send := func(ev WatchEvent) bool {
+		select {
+		case out <- ev:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	// Send initial metrics if available
+	if src.initial != nil && !send(WatchEvent{Type: "metrics", Data: src.initial}) {
+		return
+	}
+
+	for {
+		var ev WatchEvent
+		select {
+		case <-ctx.Done():
+			return
+		case log, ok := <-src.audit:
+			if !ok {
+				return
+			}
+			ev = WatchEvent{Type: "audit", Data: log}
+		case threat, ok := <-src.threat:
+			if !ok {
+				return
+			}
+			ev = WatchEvent{Type: "threat", Data: threat}
+		case snap, ok := <-src.metrics:
+			if !ok {
+				return
+			}
+			ev = WatchEvent{Type: "metrics", Data: snap}
+		case <-ticker.C:
+			ev = WatchEvent{Type: "heartbeat", Data: time.Now().Unix()}
+		}
+		if !send(ev) {
+			return
+		}
+	}
 }
 
 // RegisterWatchHandler wires the multiplexed real-time event stream.
@@ -48,30 +112,12 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 		// Create a common channel for all events
 		eventCh := make(chan WatchEvent, 20)
 
-		go func() {
-			ticker := time.NewTicker(15 * time.Second)
-			defer ticker.Stop()
-
-			// Send initial metrics if available
-			if snap := telemetry.GetLastSnapshot(); snap != nil {
-				eventCh <- WatchEvent{Type: "metrics", Data: snap}
-			}
-
-			for {
-				select {
-				case <-r.Context().Done():
-					return
-				case log := <-auditCh:
-					eventCh <- WatchEvent{Type: "audit", Data: log}
-				case threat := <-threatCh:
-					eventCh <- WatchEvent{Type: "threat", Data: threat}
-				case snap := <-metricsCh:
-					eventCh <- WatchEvent{Type: "metrics", Data: snap}
-				case <-ticker.C:
-					eventCh <- WatchEvent{Type: "heartbeat", Data: time.Now().Unix()}
-				}
-			}
-		}()
+		go forwardWatchEvents(r.Context(), watchSources{
+			audit:   auditCh,
+			threat:  threatCh,
+			metrics: metricsCh,
+			initial: telemetry.GetLastSnapshot(),
+		}, eventCh)
 
 		for {
 			select {
