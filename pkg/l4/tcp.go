@@ -217,6 +217,11 @@ func (p *TCPBackendPool) Release(addr string) {
 
 // ProxyTCP proxies a client connection to a backend from the pool.
 func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
+	// The client socket belongs to this call: the error paths below close it
+	// explicitly, and the normal path only half-closed it, leaving the
+	// descriptor to the garbage collector. The plaintext entrypoint that hands
+	// connections here does not close them either, so this is the only close.
+	defer client.Close()
 	addr := p.Pick()
 	if addr == "" {
 		_ = client.Close()

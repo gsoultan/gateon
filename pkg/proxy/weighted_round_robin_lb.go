@@ -21,7 +21,7 @@ type WeightedRoundRobinLB struct {
 func NewWeightedRoundRobinLB(targets []*gateonv1.Target) *WeightedRoundRobinLB {
 	lbTargets := make([]*targetState, len(targets))
 	for i, t := range targets {
-		lbTargets[i] = newTargetState(t.Url, t.Weight)
+		lbTargets[i] = newTargetStateFromTarget(t)
 	}
 	lb := &WeightedRoundRobinLB{}
 	lb.targetsPtr.Store(&lbTargets)
