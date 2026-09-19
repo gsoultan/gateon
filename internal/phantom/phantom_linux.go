@@ -116,7 +116,12 @@ func (c *linuxCore) proxyWithSplice(ctx context.Context, client net.Conn, target
 	dialer := net.Dialer{}
 	backend, err := dialer.DialContext(ctx, "tcp", targetAddr)
 	if err != nil {
-		_ = client.Close()
+		// Not closed here. The caller checks this error and falls through to
+		// its own handling -- protocol inspection, then a resolved proxy -- so
+		// closing the client would leave that fall-through working on a dead
+		// socket. The entrypoint reaches this with an empty target, which never
+		// dials, so every connection on that path was reset before the
+		// inspector saw it. Report the refusal; leave the connection alone.
 		return err
 	}
 	// Whichever direction finishes first closes both sides.
