@@ -8,14 +8,12 @@ import (
 	"fmt"
 
 	"github.com/gsoultan/gateon/internal/auth"
-	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 func (s *ApiService) ListUsers(ctx context.Context, req *gateonv1.ListUsersRequest) (*gateonv1.ListUsersResponse, error) {
-	fmt.Printf("DEBUG: ListUsers req=%+v\n", req)
 	if req == nil {
 		return &gateonv1.ListUsersResponse{}, nil
 	}
@@ -85,8 +83,15 @@ func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePas
 	}
 
 	// Security: Verify user identity. Only Admins can change other users' passwords.
-	claims, _ := ctx.Value(middleware.UserContextKey).(*auth.Claims)
-	if claims != nil && claims.Role != auth.RoleAdmin && claims.ID != req.Id {
+	//
+	// This used to read the context key with a discarded ok and then test
+	// `claims != nil && ...`, so a claims value that could not be asserted left
+	// claims nil, made the whole condition false, and fell through to change
+	// the password for whatever id the request named -- the check skipped by
+	// exactly the caller it could not identify. requireAdmin, ten lines below,
+	// denies on that same condition.
+	if claims, present := callerClaims(ctx); present &&
+		(claims == nil || (claims.Role != auth.RoleAdmin && claims.ID != req.Id)) {
 		return nil, status.Error(codes.PermissionDenied, "cannot change password for another user")
 	}
 
@@ -98,7 +103,7 @@ func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePas
 }
 
 func (s *ApiService) requireAdmin(ctx context.Context) error {
-	claims, _ := ctx.Value(middleware.UserContextKey).(*auth.Claims)
+	claims, _ := callerClaims(ctx)
 	if claims == nil || claims.Role != auth.RoleAdmin {
 		return status.Error(codes.PermissionDenied, "admin role required")
 	}

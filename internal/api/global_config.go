@@ -6,8 +6,11 @@ package api
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
+	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -16,7 +19,105 @@ func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalC
 	if s.Globals == nil {
 		return &gateonv1.GetGlobalConfigResponse{Config: &gateonv1.GlobalConfig{}}, nil
 	}
-	return &gateonv1.GetGlobalConfigResponse{Config: s.Globals.Get(ctx)}, nil
+	conf := s.Globals.Get(ctx)
+	if !callerMayWrite(ctx, auth.ResourceGlobal) {
+		conf = RedactGlobalSecrets(conf)
+	}
+	return &gateonv1.GetGlobalConfigResponse{Config: conf}, nil
+}
+
+// callerMayWrite reports whether the caller in ctx holds ActionWrite on
+// resource. No claims value at all means PasetoAuth never ran, i.e. auth is
+// disabled, which every other check on this service and handlers.RequirePermission
+// treat as permitted. A claims value that cannot be read establishes nothing
+// and is treated as no permission -- never as "there is nobody to check".
+func callerMayWrite(ctx context.Context, resource auth.Resource) bool {
+	claims, present := callerClaims(ctx)
+	if !present {
+		return true
+	}
+	if claims == nil {
+		return false
+	}
+	return auth.Allowed(ctx, claims.Role, auth.ActionWrite, resource)
+}
+
+// RedactGlobalSecrets returns a copy of gc with every credential blanked.
+//
+// It is applied to a read by a caller who may not write the global
+// configuration. The viewer role -- read-only by definition -- holds ActionRead
+// on ResourceGlobal so the dashboard can render settings, and that read used
+// to return the PASETO session key, the audit chain's HMAC signing key, the
+// database and Redis passwords and every third-party API token verbatim. A
+// role that cannot change a credential has no use for its value, and a role
+// that can still receives it, so the settings editor round-trips unchanged.
+//
+// The copy is what makes this safe on the live config: the registry hands
+// out its stored pointer, and blanking fields on that would erase the secrets
+// from the running gateway.
+func RedactGlobalSecrets(gc *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
+	if gc == nil {
+		return nil
+	}
+	out, ok := proto.Clone(gc).(*gateonv1.GlobalConfig)
+	if !ok {
+		return &gateonv1.GlobalConfig{}
+	}
+	redactStorageSecrets(out)
+	redactSecuritySecrets(out)
+	return out
+}
+
+func redactStorageSecrets(out *gateonv1.GlobalConfig) {
+	if a := out.Auth; a != nil {
+		a.PasetoSecret, a.DatabaseUrl = "", ""
+		if a.DatabaseConfig != nil {
+			a.DatabaseConfig.Password = ""
+		}
+	}
+	if a := out.Audit; a != nil {
+		a.SignatureKey, a.DatabaseUrl = "", ""
+		if a.DatabaseConfig != nil {
+			a.DatabaseConfig.Password = ""
+		}
+	}
+	if r := out.Redis; r != nil {
+		r.Password = ""
+	}
+	if h := out.Ha; h != nil {
+		h.AuthPass = ""
+	}
+	if g := out.Geoip; g != nil {
+		g.MaxmindLicenseKey = ""
+	}
+	if m := out.Management; m != nil && m.Gitops != nil {
+		m.Gitops.AuthToken = ""
+	}
+}
+
+func redactSecuritySecrets(out *gateonv1.GlobalConfig) {
+	if w := out.Waf; w != nil && w.BotManagement != nil {
+		w.BotManagement.SecretKey = ""
+	}
+	if s := out.SecurityAdvanced; s != nil {
+		if s.Deception != nil {
+			s.Deception.CanaryToken = ""
+		}
+		if s.Pow != nil {
+			s.Pow.Secret = ""
+		}
+		if s.IpReputation != nil {
+			for _, i := range s.IpReputation.Integrations {
+				i.ApiKey = ""
+			}
+		}
+	}
+	if al := out.Alerting; al != nil {
+		for _, d := range al.Dispatchers {
+			// A Slack or Discord incoming-webhook URL is the credential.
+			d.TelegramBotToken, d.WebhookUrl = "", ""
+		}
+	}
 }
 
 func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.UpdateGlobalConfigRequest) (*gateonv1.UpdateGlobalConfigResponse, error) {

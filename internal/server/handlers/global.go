@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/db"
@@ -75,6 +76,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			}
 		}
 
+		// A caller who cannot write the global config gets it without its
+		// credentials. RequirePermission admits viewers here so the dashboard
+		// can render settings; it must not admit them to the PASETO key, the
+		// audit signing key and every stored password and API token.
+		if !callerMayWrite(r, auth.ResourceGlobal) {
+			gc = api.RedactGlobalSecrets(gc)
+		}
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
 	})
@@ -628,6 +636,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		// No claims means no session yet, which is the login step.
 		isLoginStep := claims == nil
+		// An authenticated caller may only complete their own enrolment. The
+		// response carries a session token for whichever account req.Id names,
+		// so verifying another user's code would hand the caller that user's
+		// session.
+		if !isLoginStep && claims.ID != req.Id {
+			WriteHTTPError(w, http.StatusForbidden, "2FA can only be verified for your own account")
+			return
+		}
 
 		resp, err := svc.Verify2FA(r.Context(), &req)
 		if err != nil {

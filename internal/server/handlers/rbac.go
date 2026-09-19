@@ -70,6 +70,24 @@ func callerClaims(r *http.Request) (*auth.Claims, bool) {
 	return claims, true
 }
 
+// callerMayWrite reports whether the caller holds ActionWrite on resource,
+// without writing a response. It is for a handler that serves a read to every
+// caller RequirePermission admits but shapes the payload by what the caller
+// could change: a role that cannot write a configuration has no use for the
+// credentials in it. The three states follow callerClaims -- no claims means
+// auth is disabled and the read is unrestricted; an unreadable claims value
+// establishes nothing and gets the restricted view.
+func callerMayWrite(r *http.Request, resource auth.Resource) bool {
+	claims, ok := callerClaims(r)
+	if !ok {
+		return false
+	}
+	if claims == nil {
+		return true
+	}
+	return auth.Allowed(r.Context(), claims.Role, auth.ActionWrite, resource)
+}
+
 // auditUser names the caller for an audit entry, or "system" when there is
 // nobody to name.
 //
