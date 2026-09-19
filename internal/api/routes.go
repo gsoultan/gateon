@@ -21,11 +21,13 @@ func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteR
 	if s.Routes == nil || req == nil || req.Route == nil {
 		return &gateonv1.UpdateRouteResponse{Success: false}, nil
 	}
-	if err := s.Routes.Update(ctx, req.Route); err != nil {
+	// Through the domain service, as the REST handler: a route needs a service
+	// and, unless it is L4, a rule, and is given an id if it arrived without
+	// one. Written to the store directly, a route with no id was stored under
+	// "" -- which neither transport will delete -- and one with no service was
+	// matched and had no backend to reach. See domain_services.go.
+	if err := s.routeService().SaveRoute(ctx, req.Route); err != nil {
 		return &gateonv1.UpdateRouteResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoute(req.Route.Id)
 	}
 	s.logAudit(ctx, "update", "route", fmt.Sprintf("Updated route %s", req.Route.Id))
 	return &gateonv1.UpdateRouteResponse{Success: true}, nil
@@ -35,11 +37,8 @@ func (s *ApiService) DeleteRoute(ctx context.Context, req *gateonv1.DeleteRouteR
 	if s.Routes == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteRouteResponse{Success: false}, nil
 	}
-	if err := s.Routes.Delete(ctx, req.Id); err != nil {
+	if err := s.routeService().DeleteRoute(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteRouteResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoute(req.Id)
 	}
 	s.logAudit(ctx, "delete", "route", fmt.Sprintf("Deleted route %s", req.Id))
 	return &gateonv1.DeleteRouteResponse{Success: true}, nil

@@ -111,20 +111,16 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		ipReputation = s.IPReputation.(*reputation.IPReputationStore)
 	}
 
-	var wafRules *waf.Store
-	var wafExceptions *waf.ExceptionStore
-	if s.WafRules != nil {
-		wafRules = s.WafRules.(*waf.Store)
-		wafRules.SetInvalidator(&WafToProxyInvalidator{proxyInvalidator})
-		wafExceptions = wafRules.Exceptions(ctx)
-		wafExceptions.SetInvalidator(&WafToProxyInvalidator{proxyInvalidator})
-	}
+	wafRules, wafExceptions := resolveWafStores(ctx, s.WafRules, &WafToProxyInvalidator{proxyInvalidator})
 
 	var phantomCore phantom.PhantomCore
 	if s.Phantom != nil {
 		phantomCore = s.Phantom
 	}
 
+	// One factory validates middleware config on every transport: the REST
+	// handler's domain service below, and the Connect/gRPC service here.
+	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ipReputation, ".")
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Lifetime:           ctx,
 		Version:            s.Version,
@@ -146,6 +142,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		WafExceptions:      wafExceptions,
 		PhantomCore:        phantomCore,
 		Governor:           gov,
+
+		MiddlewareValidator: mwFactory,
 	})
 	if gov != nil {
 		gov.RegisterCPUHook("ml_engine", func() {
@@ -155,7 +153,6 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)
 	epService := dentrypoint.NewService(s.EpStore, proxyInvalidator, s.Logger)
-	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ipReputation, ".")
 
 	// Tell the WAF which hostnames this gateway answers on, so the off-origin
 	// redirect and SSRF rules have something trustworthy to compare a
@@ -389,4 +386,27 @@ func anyEntrypointTLS(ctx context.Context, epStore config.EntryPointStore) bool 
 		}
 	}
 	return false
+}
+
+// resolveWafStores returns the WAF rule and exception stores to wire into the
+// server, or nil when no usable store was supplied.
+//
+// The parameter is `any` and arrives from WithWafRules, which main.go calls
+// with waf.GetStore() whether or not the store opened. When the management
+// database is unreachable that is a *waf.Store holding nil, and an interface
+// holding a nil pointer is not equal to nil -- so the `!= nil` guard this
+// replaces read "a store is present" at exactly the moment it was not, and the
+// first method call dereferenced the nil receiver on its own mutex. A bad
+// database URL killed the process at boot instead of starting it without WAF
+// rule persistence. Comma-ok plus an explicit nil check covers both that shape
+// and a value of some entirely different type.
+func resolveWafStores(ctx context.Context, v any, inv *WafToProxyInvalidator) (*waf.Store, *waf.ExceptionStore) {
+	rules, ok := v.(*waf.Store)
+	if !ok || rules == nil {
+		return nil, nil
+	}
+	rules.SetInvalidator(inv)
+	exceptions := rules.Exceptions(ctx)
+	exceptions.SetInvalidator(inv)
+	return rules, exceptions
 }

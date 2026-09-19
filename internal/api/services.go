@@ -6,7 +6,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/gsoultan/gateon/internal/domain/service"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -22,36 +21,28 @@ func (s *ApiService) UpdateService(ctx context.Context, req *gateonv1.UpdateServ
 	if s.Services == nil || req == nil || req.Service == nil {
 		return &gateonv1.UpdateServiceResponse{Success: false}, nil
 	}
-	if err := s.Services.Update(ctx, req.Service); err != nil {
+	// Through the domain service, as the REST handler: a service that arrived
+	// without an id is given one, where stored directly it sat under "" and
+	// neither transport could delete it. See domain_services.go.
+	if err := s.serviceService().SaveService(ctx, req.Service); err != nil {
 		return &gateonv1.UpdateServiceResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
-			return r.ServiceId == req.Service.Id
-		})
 	}
 	s.logAudit(ctx, "update", "service", fmt.Sprintf("Updated service %s", req.Service.Id))
 	return &gateonv1.UpdateServiceResponse{Success: true}, nil
 }
 
 func (s *ApiService) DeleteService(ctx context.Context, req *gateonv1.DeleteServiceRequest) (*gateonv1.DeleteServiceResponse, error) {
-	if s.Services == nil || req == nil || req.Id == "" {
+	if s.Services == nil || s.Routes == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteServiceResponse{Success: false}, nil
 	}
-	// Clear the service id from every route naming it, using the same helper the
-	// REST path does. Deleting a service is reachable from two transports; when
-	// each maintained its own copy of the cascade, only one of them cleared the
-	// references and the persisted state depended on how the caller arrived.
-	if s.Routes != nil {
-		service.ClearRouteReferences(ctx, s.Routes, req.Id)
-	}
-	if err := s.Services.Delete(ctx, req.Id); err != nil {
+	// Through the domain service, as the REST handler. This used to clear the
+	// service id from every route naming it and then invalidate with the
+	// predicate `r.ServiceId == id` -- evaluated against routes that no longer
+	// carried the id, so nothing was invalidated and each route's cached proxy
+	// kept forwarding to the deleted service's backends. The domain service
+	// invalidates the routes it changed, by id.
+	if err := s.serviceService().DeleteService(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteServiceResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool {
-			return r.ServiceId == req.Id
-		})
 	}
 	s.logAudit(ctx, "delete", "service", fmt.Sprintf("Deleted service %s", req.Id))
 	return &gateonv1.DeleteServiceResponse{Success: true}, nil
