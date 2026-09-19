@@ -477,17 +477,17 @@ export default function MiddlewaresPage() {
                 <IconInfoCircle size={14} color="blue" />
                 <Text size="xs" c="dimmed">
                   {editingMW?.type === "ratelimit" &&
-                    "Keys: requestsPerMinute, burst, perIp (true/false), storage (local/redis)"}
+                    "Keys: requests_per_minute, burst, per_tenant (true/false), storage (local/redis), strategy (ip/tenant/ja4h/fingerprint), trust_cloudflare_headers"}
                   {editingMW?.type === "inflightreq" &&
-                    "Keys: amount (required), perIp (true/false)"}
+                    "Keys: amount (required), per_ip (true/false)"}
                   {editingMW?.type === "buffering" &&
-                    "Keys: maxRequestBodyBytes (required)"}
+                    "Keys: max_request_body_bytes (required)"}
                   {editingMW?.type === "auth" &&
-                    "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwksUrl, secret; oidc: issuer, audience; oauth2: introspectionUrl, clientId, clientSecret; paseto: secret; apikey: header, key_X=value; basic: username, password, users (user:pass,), realm"}
+                    "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret, enable_revocation; oidc: issuer, audience; oauth2: introspection_url, client_id, client_secret, token_type_hint; paseto: secret; apikey: header, query_param, hashed, key_X=value; basic: username, password, users (user:pass,), realm; all: dry_run, required_scopes, required_roles, error_template, map_claim_X"}
                   {editingMW?.type === "headers" &&
-                    "Keys: stsSeconds, stsIncludeSubdomains, stsPreload, forceStsHeader; addRequest_X, setRequest_X, addResponse_X, setResponse_X, delRequest_X, delResponse_X"}
+                    "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, del_request_X, add_response_X, set_response_X, del_response_X"}
                   {editingMW?.type === "forwardedheaders" &&
-                    "Keys: proto (http/https — force X-Forwarded-Proto), trustForwardHeader (true/false — honor inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES)"}
+                    "Keys: proto (http/https — force X-Forwarded-Proto), trust_forward_header (true/false — honor inbound X-Forwarded-Proto on this route even when the peer is outside GATEON_TRUSTED_PROXIES)"}
                   {editingMW?.type === "rewrite" &&
                     "Keys: path, pattern, replacement, query_X"}
                   {editingMW?.type === "addprefix" && "Keys: prefix"}
@@ -498,17 +498,17 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "replacepathregex" &&
                     "Keys: pattern, replacement"}
                   {editingMW?.type === "cors" &&
-                    "Keys: allowedOrigins, allowedMethods, allowedHeaders, exposedHeaders, allowCredentials (true/false), maxAge"}
+                    "Keys: preset (permissive/standard/grpc-web/restricted), allowed_origins, allowed_methods, allowed_headers, exposed_headers, allow_credentials (true/false), max_age"}
                   {editingMW?.type === "compress" &&
-                    "Keys: algorithm (auto/gzip/br), minResponseBodyBytes (1024), excludedContentTypes, includedContentTypes, maxBufferBytes"}
+                    "Keys: algorithm (auto/gzip/br), min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes"}
                   {editingMW?.type === "geoip" &&
-                    "Keys: dbPath (required), header (default X-Forwarded-For), allowCountries, denyCountries, blockStatusCode"}
+                    "Keys: db_path (required), allow_countries, deny_countries, trust_cloudflare_headers"}
                   {editingMW?.type === "forwardauth" &&
-                    "Keys: address (required), authResponseHeaders, authRequestHeaders, trustForwardHeader, forwardBody, preserveRequestMethod, maxBodySize, tlsInsecureSkipVerify"}
+                    "Keys: address (required), auth_response_headers, auth_request_headers, trust_forward_header, forward_body, preserve_request_method, max_body_size, tls_insecure_skip_verify"}
                   {editingMW?.type === "grpcweb" &&
-                    "Required for grpc routes called from browsers. No config. Add to route and attach this middleware."}
+                    "Required for grpc routes called from browsers. Keys: preset (grpc-web/permissive), allowed_origins, allow_credentials, max_age."}
                   {editingMW?.type === "errors" &&
-                    "Keys: statusCodes (comma separated), page_404, page_500, etc."}
+                    "Keys: status_codes (comma separated), page_404, page_500, etc."}
                   {editingMW?.type === "retry" && "Keys: attempts"}
                 </Text>
               </Group>

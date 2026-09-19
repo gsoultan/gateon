@@ -79,7 +79,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Add Request Headers"
-        prefix="addRequest_"
+        prefix="add_request_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />
@@ -88,7 +88,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Set Request Headers"
-        prefix="setRequest_"
+        prefix="set_request_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />
@@ -97,7 +97,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Add Response Headers"
-        prefix="addResponse_"
+        prefix="add_response_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />
@@ -105,7 +105,7 @@ export function HeadersConfigEditor({ config, onChange }: HeadersConfigEditorPro
         config={config}
         onChange={onChange}
         title="Set Response Headers"
-        prefix="setResponse_"
+        prefix="set_response_"
         placeholderKey="X-Header"
         placeholderValue="Value"
       />

@@ -82,6 +82,11 @@ export default function SecurityCommandCenter() {
   const [sudoOpened, setSudoOpened] = React.useState(false);
   const [pendingMode, setPendingMode] = React.useState<number | null>(null);
   const [sudoPassword, setSudoPassword] = React.useState("");
+  // The header's "Uninstall ClamAV" used to call handleUninstall directly. In
+  // local mode that at least stopped at the sudo prompt; in Docker mode (or
+  // before /v1/global had loaded, when the mode is unknown) one click removed
+  // the antivirus with no confirmation at all. /clamav has always asked first.
+  const [confirmUninstallOpened, setConfirmUninstallOpened] = React.useState(false);
 
   // Reads scan state. Deliberately the GET endpoint, not the POST that starts a
   // scan: this used to poll RunDeepScan, which answers "is a scan running?" by
@@ -379,7 +384,7 @@ export default function SecurityCommandCenter() {
                     variant="subtle"
                     color="red"
                     leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
-                    onClick={() => handleUninstall()}
+                    onClick={() => setConfirmUninstallOpened(true)}
                     disabled={uninstalling || !canWrite}
                   >
                     Uninstall ClamAV
@@ -475,6 +480,35 @@ export default function SecurityCommandCenter() {
           </Tabs.Panel>
         </Tabs>
       </Stack>
+
+      <Modal
+        opened={confirmUninstallOpened}
+        onClose={() => setConfirmUninstallOpened(false)}
+        title="Uninstall ClamAV?"
+        centered
+        radius="md"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            This removes the ClamAV daemon from this host. Uploaded files stop being scanned for malware
+            immediately, and any WAF rule relying on malware detection stops matching.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmUninstallOpened(false)}>
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={() => {
+                setConfirmUninstallOpened(false);
+                void handleUninstall();
+              }}
+            >
+              Uninstall ClamAV
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal
         opened={sudoOpened}

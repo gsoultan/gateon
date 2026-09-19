@@ -118,7 +118,20 @@ export async function restoreSessionFromCookie(): Promise<boolean> {
 }
 
 export async function setupGateon(req: SetupRequest): Promise<SetupResponse> {
-  return api.setup(req);
+  const res = await api.setup(req);
+  if (res.success) {
+    // The root route decides "setup still required?" from this cache entry
+    // with ensureQueryData, which never refetches while an entry exists. The
+    // entry was written before the operator was sent to /setup, so leaving it
+    // would bounce the post-setup navigation to /login straight back to /setup.
+    //
+    // Imported lazily: a static import here puts queryClient on the entry
+    // module's static graph, which drags the realtime store out of its own
+    // lazy chunk and into the initial bundle (+151 kB, measured).
+    const { queryClient } = await import("../queryClient");
+    queryClient.removeQueries({ queryKey: ["setup-required"] });
+  }
+  return res;
 }
 
 export async function testDbConnection(payload: {

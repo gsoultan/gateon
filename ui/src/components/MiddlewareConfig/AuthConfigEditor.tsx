@@ -28,8 +28,8 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
           <Switch
             label="Enable Revocation"
             description="Check Redis for revoked tokens (JTI)"
-            checked={config.revocationEnabled === "true"}
-            onChange={(e) => updateConfig("revocationEnabled", e.currentTarget.checked ? "true" : "false")}
+            checked={config.enable_revocation === "true"}
+            onChange={(e) => updateConfig("enable_revocation", e.currentTarget.checked ? "true" : "false")}
           />
         )}
       </Group>
@@ -63,7 +63,7 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
         config={config}
         onChange={onChange}
         title="Claim-to-Header Mapping"
-        prefix="claim_"
+        prefix="map_claim_"
         placeholderKey="email"
         placeholderValue="X-User-Email"
         keyLabel="JWT/Token Claim"
@@ -100,8 +100,8 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             <Switch
               label="Hashed Keys"
               description="Store and compare SHA-256 hashes (secure)"
-              checked={config.hashedKeys === "true"}
-              onChange={(e) => updateConfig("hashedKeys", e.currentTarget.checked ? "true" : "false")}
+              checked={config.hashed === "true"}
+              onChange={(e) => updateConfig("hashed", e.currentTarget.checked ? "true" : "false")}
               mb="xs"
             />
           </Group>

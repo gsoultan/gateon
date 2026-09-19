@@ -58,13 +58,21 @@ export function AIAdvisoryTab() {
         body: JSON.stringify({ focus: 'security' }),
       });
       if (!res.ok) {
-        throw new Error(await res.text());
+        // The response body used to be thrown and rendered verbatim in the
+        // alert below. It is whatever the server or a proxy in front of it
+        // wrote — a JSON error envelope, an HTML error page — none of which
+        // belongs in front of the operator.
+        setError(
+          res.status === 403
+            ? 'Insufficient permissions. You do not have access to run the analysis.'
+            : 'The analysis could not be completed. Try again in a moment.',
+        );
+        return;
       }
       const response = await res.json();
       setData(response);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch AI insights';
-      setError(message);
+    } catch {
+      setError('The analysis could not be completed. Try again in a moment.');
     } finally {
       setLoading(false);
     }

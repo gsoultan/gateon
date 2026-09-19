@@ -415,24 +415,31 @@ export function MiddlewareConfigEditor({
     case "waf":
       return <WAFConfigEditor config={config} updateConfig={updateConfig} />;
 
+    // The gateway's factory switches on the snake_case spellings; the camelCase
+    // ones are kept for any middleware already saved under them.
+    case "file_security":
     case "fileSecurity":
       return <FileSecurityConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "oidc":
       return <OIDCConfigEditor config={config} updateConfig={updateConfig} />;
 
+    case "security_headers":
     case "securityHeaders":
       return <SecurityHeadersConfigEditor config={config} updateConfig={updateConfig} />;
 
+    case "bot_management":
     case "botManagement":
       return <BotManagementConfigEditor config={config} updateConfig={updateConfig} />;
 
+    case "schema_validation":
     case "schemaValidation":
       return <SchemaValidationConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "honeypot":
       return <HoneypotConfigEditor config={config} updateConfig={updateConfig} />;
 
+    case "request_id":
     case "requestId":
       return <RequestIDConfigEditor />;
 
