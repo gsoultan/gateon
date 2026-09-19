@@ -4,14 +4,20 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -20,10 +26,59 @@ const (
 	PowHeaderChallenge = "X-Gateon-Pow-Challenge"
 	PowHeaderSolution  = "X-Gateon-Pow-Solution"
 	PowNonceHeader     = "X-Gateon-Pow-Nonce"
+	// PowHeaderID carries the challenge identifier a solution answers.
+	PowHeaderID = "X-Gateon-Pow-ID"
+
+	// powChallengeTTL is how long an issued challenge stays answerable. There
+	// is no per-challenge store, so a solution can be replayed within this
+	// window; the window is what bounds the replay.
+	powChallengeTTL = 5 * time.Minute
+	// powClockSkew is how far ahead of this instance's clock an ID may be dated
+	// before it is refused. Slightly ahead is another instance's clock; a year
+	// ahead is a client choosing a timestamp the expiry check can never reach.
+	powClockSkew = time.Minute
+	// powMACLen is the hex length the challenge MAC is truncated to (128 bits).
+	powMACLen = 32
 )
+
+// generatedPowKey is the per-process key for routes that configure no secret.
+//
+// The router refuses to install the middleware without a secret, but the
+// route-level factory does not, and a challenge signed with an empty key is
+// one anyone can sign. As with the bot-management fallback, the cost is that
+// challenges do not survive a restart and are not shared between instances.
+var (
+	generatedPowKeyOnce sync.Once
+	generatedPowKey     []byte
+)
+
+func powKey(secret string) []byte {
+	if secret != "" {
+		return []byte(secret)
+	}
+	generatedPowKeyOnce.Do(func() {
+		b := make([]byte, 32)
+		if _, err := cryptorand.Read(b); err != nil {
+			logger.L.LogError("cannot generate a proof-of-work key; routes without a secret will "+
+				"challenge every request and accept no solution", "error", err)
+			return
+		}
+		generatedPowKey = b
+		logger.L.LogWarn("proof-of-work route has no secret; generated a random key for this process. " +
+			"Challenges will not survive a restart and are not shared between instances.")
+	})
+	return generatedPowKey
+}
+
+// powChallenge issues and verifies proof-of-work challenges for one route.
+type powChallenge struct {
+	key        []byte
+	difficulty int
+}
 
 // Pow checks if a client needs to solve a cryptographic challenge.
 func Pow(difficulty int, threshold float64, secret string, routeID string) Middleware {
+	pc := powChallenge{key: powKey(secret), difficulty: difficulty}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip for internal paths, if difficulty is 0, or for an allowlisted
@@ -44,12 +99,8 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 
 			// If reputation is below threshold, require PoW.
 			if score < threshold {
-				solution := r.Header.Get(PowHeaderSolution)
-				nonce := r.Header.Get(PowNonceHeader)
-				challengeID := r.Header.Get("X-Gateon-Pow-ID")
-
-				if solution != "" && nonce != "" {
-					if verifyPoW(challengeID, nonce, solution, difficulty) {
+				if r.Header.Get(PowHeaderSolution) != "" && r.Header.Get(PowNonceHeader) != "" {
+					if pc.verify(r) {
 						// Solution correct, proceed.
 						next.ServeHTTP(w, r)
 						return
@@ -60,7 +111,7 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 
 				// Otherwise, serve challenge.
 				recordAdvancedThreat(r, "pow_challenge_issued", 1.0, "PoW challenge issued due to low reputation", routeID, "bot", "LOW", "challenged")
-				serveChallenge(w, r, difficulty)
+				pc.serve(w, r)
 				return
 			}
 
@@ -69,27 +120,71 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) Middl
 	}
 }
 
-func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
+// id builds the challenge identifier: unix seconds, a hash of the requesting
+// client's identity, and a MAC over both under the route key.
+//
+// The MAC is what makes the ID the server's. Without it, verification
+// recomputed the hash over whatever ID the client sent, so a bot could mint
+// its own, solve it once offline and present it on every request -- and dated
+// a year ahead, past any expiry check, forever. The secret the router insists
+// on before installing the middleware was never read.
+//
+// The identity is the resolved client address plus User-Agent, the same pair
+// the bot-management token binds to, and deliberately not the reputation ID:
+// that is JA4+ when available, and JA4H is shaped by the request headers, so
+// the page's fetch() that answers the challenge would carry a different one
+// from the navigation that received it and every legitimate answer would be
+// refused. The identity is hashed rather than interpolated because the ID
+// reaches a response header, a JSON body and a nonce'd <script>; hex by
+// construction is safe in all three. Truncating to 8 bytes keeps the ID short;
+// it identifies a challenge, it is not a secret.
+func (c powChallenge) id(ts int64, r *http.Request) string {
+	fpSum := sha256.Sum256([]byte(telemetry.ClientIPOf(r) + "\x00" + r.UserAgent()))
+	prefix := strconv.FormatInt(ts, 10) + "-" + hex.EncodeToString(fpSum[:8])
+	mac := hmac.New(sha256.New, c.key)
+	_, _ = io.WriteString(mac, prefix)
+	return prefix + "-" + hex.EncodeToString(mac.Sum(nil))[:powMACLen]
+}
+
+// verify reports whether the request carries a solution to a challenge this
+// route issued to this client within powChallengeTTL.
+func (c powChallenge) verify(r *http.Request) bool {
+	if len(c.key) == 0 {
+		return false
+	}
+	id := r.Header.Get(PowHeaderID)
+	parts := strings.Split(id, "-")
+	if len(parts) != 3 {
+		return false
+	}
+	ts, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return false
+	}
+	if age := time.Since(time.Unix(ts, 0)); age > powChallengeTTL || age < -powClockSkew {
+		return false
+	}
+	// Recomputed for the presenting client under this route's key, so an ID
+	// issued to another client, under another secret, or by the client itself
+	// fails here before any hashing.
+	if subtle.ConstantTimeCompare([]byte(c.id(ts, r)), []byte(id)) != 1 {
+		return false
+	}
+	sum := sha256.Sum256([]byte(id + r.Header.Get(PowNonceHeader)))
+	hashHex := hex.EncodeToString(sum[:])
+	return strings.HasPrefix(hashHex, strings.Repeat("0", c.difficulty)) &&
+		hashHex == r.Header.Get(PowHeaderSolution)
+}
+
+// serve issues a challenge: headers plus a JSON body for XHR callers, or a
+// page whose script solves it for browsers.
+func (c powChallenge) serve(w http.ResponseWriter, r *http.Request) {
 	nonce := GenerateNonce()
 	salt := strconv.FormatInt(time.Now().UnixNano(), 36)
+	challengeID := c.id(time.Now().Unix(), r)
+	difficulty := c.difficulty
 
-	// Hash the fingerprint rather than interpolating it. GetIPFingerprint falls
-	// back to the raw X-Forwarded-For header when no JA4 is available, and reads
-	// it without any trusted-proxy check, so its value is attacker-controlled in
-	// the general case. challengeID reaches three sinks below — a response
-	// header, a JSON body, and the nonce'd <script> — and the script is the
-	// dangerous one: input that closes the string literal executes with a valid
-	// CSP nonce, so the CSP does nothing to stop it. Hashing makes the value hex
-	// by construction, which is safe in all three contexts at once, and stops
-	// echoing a client's own fingerprint back to it. Truncating to 8 bytes keeps
-	// the ID short; it identifies a challenge, it is not a secret.
-	// Scoped rather than the bare fingerprint: the challenge id binds a challenge
-	// to a client, and a value every user of one browser shares binds it to all of
-	// them at once.
-	fpSum := sha256.Sum256([]byte(telemetry.GetReputationID(r)))
-	challengeID := fmt.Sprintf("%d-%s-%s", time.Now().Unix(), hex.EncodeToString(fpSum[:8]), salt)
-
-	w.Header().Set("X-Gateon-Pow-ID", challengeID)
+	w.Header().Set(PowHeaderID, challengeID)
 	w.Header().Set(PowHeaderChallenge, salt)
 	w.Header().Set("X-Gateon-Pow-Difficulty", strconv.Itoa(difficulty))
 
@@ -99,8 +194,8 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		// #nosec G705 -- every interpolated value is a constrained alphabet, not
 		// free text: salt is base36 of UnixNano ([0-9a-z]), challengeID is
-		// unix-hex-salt ([0-9a-z-]) precisely because it is hashed above, and
-		// difficulty is an int. None can carry a quote or an angle bracket.
+		// unix-hex-hex ([0-9a-f-]) by construction in id, and difficulty is an
+		// int. None can carry a quote or an angle bracket.
 		fmt.Fprintf(w, `{"error":"proof_of_work_required","challenge_id":"%s","salt":"%s","difficulty":%d}`, challengeID, salt, difficulty)
 		return
 	}
@@ -111,8 +206,8 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	w.WriteHeader(http.StatusTooManyRequests)
 	// #nosec G705 -- the three sinks in this page (CSP nonce attribute, JS
 	// string literal, body text) all receive constrained alphabets: nonce is
-	// standard base64, challengeID is [0-9a-z-] by construction, difficulty is
-	// an int. See the comment above challengeID for why it is hashed.
+	// standard base64, challengeID is [0-9a-f-] by construction, difficulty is
+	// an int. See id for why the fingerprint is hashed.
 	fmt.Fprintf(w, `
 <html>
 <head><title>Security Check - Gateon</title></head>
@@ -155,31 +250,4 @@ func serveChallenge(w http.ResponseWriter, r *http.Request, difficulty int) {
 	</div>
 </body>
 </html>`, nonce, challengeID, difficulty)
-}
-
-func verifyPoW(id, nonce, solution string, difficulty int) bool {
-	// 1. Check if ID is not too old (e.g. 5 mins)
-	parts := strings.Split(id, "-")
-	if len(parts) == 0 {
-		return false
-	}
-	ts, _ := strconv.ParseInt(parts[0], 10, 64)
-	if time.Since(time.Unix(ts, 0)) > 5*time.Minute {
-		return false
-	}
-
-	// 2. Re-calculate hash
-	// Use a salt (here we'd need to store the salt or derive it, but for simplicity we assume it's part of verification logic)
-	// In production, we'd sign the challenge ID or store it in Redis.
-	// For this impl, we just trust the provided solution hash matches the nonce+id if we want to be stateless.
-	// BETTER: Recalculate it ourselves.
-
-	// Since we don't store the salt per ID here (to stay stateless), let's use a simpler variant:
-	// val = id + nonce
-	val := id + nonce
-	h := sha256.Sum256([]byte(val))
-	hashHex := hex.EncodeToString(h[:])
-
-	target := strings.Repeat("0", difficulty)
-	return strings.HasPrefix(hashHex, target) && hashHex == solution
 }

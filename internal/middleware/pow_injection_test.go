@@ -50,7 +50,7 @@ func TestServeChallengeDoesNotReflectFingerprint(t *testing.T) {
 			req.RemoteAddr = "203.0.113.9:4444"
 			rec := httptest.NewRecorder()
 
-			serveChallenge(rec, req, 3)
+			testPowChallenge().serve(rec, req)
 
 			body := rec.Body.String()
 			// The marker each payload would produce if it survived. Checking for
@@ -86,7 +86,7 @@ func TestChallengeIDIsHexByConstruction(t *testing.T) {
 	req.Header.Set("X-JA4-Fingerprint", `";alert(1);//`)
 	rec := httptest.NewRecorder()
 
-	serveChallenge(rec, req, 3)
+	testPowChallenge().serve(rec, req)
 
 	id := rec.Header().Get("X-Gateon-Pow-ID")
 	if !shape.MatchString(id) {
@@ -102,7 +102,7 @@ func TestServeChallengeJSONStaysValid(t *testing.T) {
 	req.Header.Set("Accept", "application/json")
 	rec := httptest.NewRecorder()
 
-	serveChallenge(rec, req, 3)
+	testPowChallenge().serve(rec, req)
 
 	if body := rec.Body.String(); strings.Contains(body, `"admin":true`) {
 		t.Errorf("JSON injection succeeded: %s", body)
