@@ -283,12 +283,13 @@ const defaultHeader = `# Per-package coverage floors, enforced by scripts/checkc
 // real regression from an artefact -- and all of it one -update away from
 // gone, with nothing to notice, because the numbers it protects would still
 // look right.
-func existingHeader(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-
+// Takes the file contents rather than a path on purpose. A path parameter put
+// an os.ReadFile on a variable in a package that otherwise only reads one
+// constant location, which is a G304 gosec cannot see through and would have
+// needed a #nosec to silence. Passing bytes keeps the read at the constant,
+// leaves this a pure function of its input, and makes the test a string
+// comparison instead of a filesystem one.
+func existingHeader(data []byte) string {
 	var b strings.Builder
 	for _, line := range strings.Split(string(data), "\n") {
 		t := strings.TrimSpace(line)
@@ -310,7 +311,10 @@ func existingHeader(path string) string {
 
 func writeBaseline(got []result) error {
 	var b strings.Builder
-	header := existingHeader(baselinePath)
+	var header string
+	if data, err := os.ReadFile(baselinePath); err == nil {
+		header = existingHeader(data)
+	}
 	if header == "" {
 		header = defaultHeader
 	}

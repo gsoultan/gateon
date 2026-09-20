@@ -141,19 +141,12 @@ func TestGreenRunParsesUnchanged(t *testing.T) {
 // from an artefact, and a single -update would have taken all of it with
 // nothing to notice -- the numbers it protects would still have looked right.
 func TestUpdatePreservesTheBaselineHeader(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "baseline.txt")
-
 	const header = `# Why internal/telemetry sits at 51.5%: the pooled metrics
 # snapshot was removed because readers still held it.
 #
 # Do not raise this without reading that first.
 `
-	if err := os.WriteFile(path, []byte(header+"\ngithub.com/x/y 12.3%\n"), 0o600); err != nil {
-		t.Fatalf("seed baseline: %v", err)
-	}
-
-	got := existingHeader(path)
+	got := existingHeader([]byte(header + "\ngithub.com/x/y 12.3%\n"))
 	for _, want := range []string{"pooled metrics", "Do not raise this"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("header lost %q; -update would discard the reasoning that\n"+
@@ -169,11 +162,12 @@ func TestUpdatePreservesTheBaselineHeader(t *testing.T) {
 }
 
 // TestUpdateFallsBackToTheDefaultHeader covers a baseline that does not exist
-// yet, which must still be born explaining itself.
+// yet -- the caller passes nil when the read fails -- which must still be born
+// explaining itself.
 func TestUpdateFallsBackToTheDefaultHeader(t *testing.T) {
-	if got := existingHeader(filepath.Join(t.TempDir(), "absent.txt")); got != "" {
-		t.Errorf("existingHeader on a missing file = %q, want empty so the caller "+
-			"writes the default", got)
+	if got := existingHeader(nil); got != "" {
+		t.Errorf("existingHeader on an absent baseline = %q, want empty so the "+
+			"caller writes the default", got)
 	}
 	if !strings.Contains(defaultHeader, "may not fall more than") {
 		t.Error("defaultHeader no longer states the rule it enforces")
