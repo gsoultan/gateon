@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
+
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
@@ -94,9 +96,9 @@ func unconditionalChain(t *testing.T, routeID string) http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 	return kind.Chain(
-		IPMitigation(),
-		UserMitigation(),
-		ReputationBlocker(routeID),
+		identity.IPMitigation(),
+		identity.UserMitigation(),
+		identity.ReputationBlocker(routeID),
 	)(backend)
 }
 

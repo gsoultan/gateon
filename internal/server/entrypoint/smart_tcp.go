@@ -14,7 +14,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
-	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -90,8 +90,8 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 	chain := []middleware.Middleware{
 		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
 		middleware.Metrics("gateon-" + epLabel),
-		security.IPMitigation(),
-		security.UserMitigation(),
+		identity.IPMitigation(),
+		identity.UserMitigation(),
 		middleware.Recovery(),
 	}
 	if ep.AccessLogEnabled {

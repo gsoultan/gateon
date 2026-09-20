@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -114,8 +115,8 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		transform.GlobalCORS(),
 		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
 		middleware.Metrics("gateon-" + epLabel),
-		security.IPMitigation(),
-		security.UserMitigation(),
+		identity.IPMitigation(),
+		identity.UserMitigation(),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		security.HoneypotGlobal(deps.GlobalStore),
@@ -197,7 +198,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		IdleTimeout:       1 * time.Minute,
 		MaxHeaderBytes:    1 << 20, // 1MB
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-			return context.WithValue(ctx, security.ConnContextKey, c)
+			return context.WithValue(ctx, identity.ConnContextKey, c)
 		},
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			switch state {
@@ -206,7 +207,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 			case http.StateClosed, http.StateHijacked:
 				telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
 				// Clean up fingerprints when connection is closed
-				security.RemoveFingerprints(conn)
+				identity.RemoveFingerprints(conn)
 			}
 		},
 	}

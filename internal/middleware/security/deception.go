@@ -97,8 +97,15 @@ func (cfg DeceptionConfig) trapFor(r *http.Request) (threatType, details string,
 // compares lower-case, so "CRITICAL" ranked below "low" and was counted by
 // nothing. Same bug the reputation blocker had.
 func (cfg DeceptionConfig) refuse(w http.ResponseWriter, r *http.Request, threatType, details string) {
-	recordAdvancedThreat(r, threatType, 100, details, cfg.RouteID, "deception",
-		kind.SeverityCritical, kind.ActionBlocked)
+	kind.RecordThreat(r, kind.Threat{
+		Type:        threatType,
+		Score:       100,
+		Details:     details,
+		RouteID:     cfg.RouteID,
+		Category:    "deception",
+		Severity:    kind.SeverityCritical,
+		ActionTaken: kind.ActionBlocked,
+	})
 
 	if cfg.EnableTrollResponse &&
 		telemetry.GetReputationScore(telemetry.GetReputationID(r)) < trollReputationThreshold {

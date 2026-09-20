@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package security
+package identity
 
 import (
 	"crypto/hmac"
@@ -53,7 +53,15 @@ func TlsBinding(cookieName string) kind.Middleware {
 
 			if bindingCookie.Value != expectedBinding {
 				// Potential session hijacking or cookie replay from a different TLS connection.
-				recordAdvancedThreat(r, "tls_binding_mismatch", 80, "Session cookie presented from a different TLS connection (binding mismatch)", "", "auth", kind.SeverityHigh, kind.ActionBlocked)
+				kind.RecordThreat(r, kind.Threat{
+					Type:        "tls_binding_mismatch",
+					Score:       80,
+					Details:     "Session cookie presented from a different TLS connection (binding mismatch)",
+					RouteID:     "",
+					Category:    "auth",
+					Severity:    kind.SeverityHigh,
+					ActionTaken: kind.ActionBlocked,
+				})
 				http.Error(w, "Security Check Failed: Session binding mismatch", http.StatusForbidden)
 				return
 			}

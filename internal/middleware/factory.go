@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
@@ -223,7 +224,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		if cookieName == "" {
 			cookieName = "session"
 		}
-		return security.TlsBinding(cookieName), nil
+		return identity.TlsBinding(cookieName), nil
 	case "security_headers":
 		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
 	case "circuit_breaker":

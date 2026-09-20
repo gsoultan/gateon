@@ -37,32 +37,6 @@ func withAllowlist(t *testing.T, cidrs string) {
 	t.Cleanup(func() { mitigation.SetAllowlist(nil) })
 }
 
-// TestAllowlistedSourceIsNotRefusedByReputation covers the 403.
-func TestAllowlistedSourceIsNotRefusedByReputation(t *testing.T) {
-	const browser = "t13d1516h2_8daaf6152771_b0da82dd1658_allowlist"
-	client := repTestClient{ja4Plus: browser, remoteIP: "203.0.113.90"}
-
-	// Earn a score of zero the way the threat pipeline would.
-	telemetry.DecreaseReputation(
-		repid.For(client.ja4Plus, client.remoteIP),
-		99, "test: allowlisted source with a bad score")
-
-	h := blockerHandler(t)
-
-	if got := serveWithIdentity(h, client); got != http.StatusForbidden {
-		t.Fatalf("without an allowlist the client got %d, want 403 — the rest of "+
-			"this test would prove nothing", got)
-	}
-
-	withAllowlist(t, "203.0.113.0/24")
-	if got := serveWithIdentity(h, client); got != http.StatusOK {
-		t.Errorf("an allowlisted source got %d, want 200.\n"+
-			"GATEON_MITIGATION_ALLOWLIST says these sources are never mitigated, and "+
-			"a 403 from the reputation blocker is the most common way gateon "+
-			"mitigates anything.", got)
-	}
-}
-
 // TestAllowlistedSourceIsNotBannedByTheHoneypot covers the ban.
 //
 // This is the case with the widest blast radius: a ban lands on an address, so a

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/httputil"
-	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
@@ -135,9 +134,15 @@ func checkEntropy(next http.Handler, w http.ResponseWriter, r *http.Request, thr
 		}
 
 		if e := entropy.Calculate(peeked); e > threshold {
-			recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20,
-				fmt.Sprintf("High entropy payload detected: %.2f", e),
-				routeID, "advanced", kind.SeverityHigh, kind.ActionDetected)
+			kind.RecordThreat(r, kind.Threat{
+				Type:        "high_entropy_payload",
+				Score:       (e - threshold) * 20,
+				Details:     fmt.Sprintf("High entropy payload detected: %.2f", e),
+				RouteID:     routeID,
+				Category:    "advanced",
+				Severity:    kind.SeverityHigh,
+				ActionTaken: kind.ActionDetected,
+			})
 		}
 	}
 
@@ -168,29 +173,6 @@ func serveTrollResponse(w http.ResponseWriter) {
 		}
 		time.Sleep(100 * time.Millisecond) // Slow it down a bit to "hang" the tool longer
 	}
-}
-
-func recordAdvancedThreat(r *http.Request, ttype string, score float64, details string, routeID string, category string, severity string, actionTaken string) {
-	ip := request.GetClientIP(r, true)
-	if httputil.IsLoopback(ip) {
-		return
-	}
-	logger.SecurityEvent(ttype, r, details)
-	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-		ID:          fmt.Sprintf("adv-%s-%d", ttype, time.Now().UnixNano()),
-		Type:        ttype,
-		SourceIP:    request.GetClientIP(r, true),
-		Score:       score,
-		Details:     details,
-		Time:        time.Now(),
-		RouteID:     routeID,
-		RequestURI:  r.RequestURI,
-		Category:    category,
-		Severity:    severity,
-		ActionTaken: actionTaken,
-		Method:      r.Method,
-		UserAgent:   r.UserAgent(),
-	}))
 }
 
 // XSSRecognition middleware scans request for common XSS patterns.
@@ -298,8 +280,15 @@ func (rc recognition) serve(next http.Handler, w http.ResponseWriter, r *http.Re
 	})
 
 	if details != "" {
-		recordAdvancedThreat(r, rc.threatType, rc.score, details, rc.routeID,
-			rc.category, rc.severity, kind.ActionDetected)
+		kind.RecordThreat(r, kind.Threat{
+			Type:        rc.threatType,
+			Score:       rc.score,
+			Details:     details,
+			RouteID:     rc.routeID,
+			Category:    rc.category,
+			Severity:    rc.severity,
+			ActionTaken: kind.ActionDetected,
+		})
 	}
 
 	if rs != nil && rc.markDone != nil {
@@ -377,7 +366,15 @@ func ThreatRecognition(routeID string) kind.Middleware {
 			})
 
 			if details != "" {
-				recordAdvancedThreat(r, threatType, 70, details, routeID, "advanced", severity, kind.ActionDetected)
+				kind.RecordThreat(r, kind.Threat{
+					Type:        threatType,
+					Score:       70,
+					Details:     details,
+					RouteID:     routeID,
+					Category:    "advanced",
+					Severity:    severity,
+					ActionTaken: kind.ActionDetected,
+				})
 			}
 
 			next.ServeHTTP(w, r)
