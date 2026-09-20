@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"fmt"
@@ -16,6 +16,8 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/middleware/auth"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -221,7 +223,7 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
+			if kind.IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -250,8 +252,8 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					}
 					_ = rl.ebpf.SetAdaptiveRateLimit(key, interval)
 				}
-				if !ShouldSkipMetrics(r) {
-					routeID := GetRouteName(r)
+				if !kind.ShouldSkipMetrics(r) {
+					routeID := kind.GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("local").Inc()
 
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:local").Inc()
@@ -262,10 +264,10 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 						SourceIP:    key,
 						Type:        "rate_limit",
 						Category:    "abuse",
-						Severity:    severityMedium,
+						Severity:    kind.SeverityMedium,
 						Score:       10, // Default score for rate limit violation
 						Details:     fmt.Sprintf("Rate limit exceeded for key: %s", key),
-						ActionTaken: actionBlocked,
+						ActionTaken: kind.ActionBlocked,
 						Time:        time.Now(),
 						RouteID:     routeID,
 						RequestURI:  r.RequestURI,
@@ -299,7 +301,7 @@ func NewRedisRateLimiter(client redis.Client, r int, b int) *RedisRateLimiter {
 func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
+			if kind.IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -369,8 +371,8 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			}
 
 			if int(count.Val()) > adjLimit {
-				if !ShouldSkipMetrics(r) {
-					routeID := GetRouteName(r)
+				if !kind.ShouldSkipMetrics(r) {
+					routeID := kind.GetRouteName(r)
 					rateLimitRejectedTotal.WithLabelValues("redis").Inc()
 
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:redis").Inc()
@@ -381,10 +383,10 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 						SourceIP:    key,
 						Type:        "rate_limit",
 						Category:    "abuse",
-						Severity:    severityMedium,
+						Severity:    kind.SeverityMedium,
 						Score:       10,
 						Details:     fmt.Sprintf("Rate limit exceeded for key: %s (distributed)", key),
-						ActionTaken: actionBlocked,
+						ActionTaken: kind.ActionBlocked,
 						Time:        time.Now(),
 						RouteID:     routeID,
 						RequestURI:  r.RequestURI,
@@ -415,7 +417,7 @@ func PerIPWithTrust(trustCloudflare bool) func(*http.Request) string {
 
 // PerTenant returns the tenant ID from context.
 func PerTenant(r *http.Request) string {
-	if tid, ok := r.Context().Value(TenantIDContextKey).(string); ok {
+	if tid, ok := r.Context().Value(auth.TenantIDContextKey).(string); ok {
 		return tid
 	}
 	return ""

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -26,7 +26,7 @@ func mockDepsForInspection(t *testing.T) *Deps {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("inspected-http"))
 	})
-	noopLimiter := middleware.NoopRateLimiter{}
+	noopLimiter := traffic.NoopRateLimiter{}
 	tlsMgr := gtls.NewManager(gtls.Config{})
 	return &Deps{
 		BaseHandler:      baseHandler,

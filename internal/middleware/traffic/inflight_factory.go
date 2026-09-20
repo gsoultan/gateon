@@ -1,19 +1,21 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
-func (f *Factory) createInflightReq(cfg map[string]string) (Middleware, error) {
-	amount, _ := strconvParseInt(cfg["amount"], 0)
+func NewInflightReq(cfg map[string]string) (kind.Middleware, error) {
+	amount, _ := kind.ParseIntStrict(cfg["amount"], 0)
 	if amount <= 0 {
 		return nil, fmt.Errorf("inflightreq requires amount > 0")
 	}
-	perIP := parseBoolStrict(cfg["per_ip"], true)
+	perIP := kind.ParseBoolStrict(cfg["per_ip"], true)
 	keyFunc := PerIP
 	if !perIP {
 		keyFunc = func(r *http.Request) string { return r.Host }

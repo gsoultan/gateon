@@ -13,6 +13,8 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/yara"
@@ -66,7 +68,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 
 	switch m.Type {
 	case "ratelimit":
-		return f.createRateLimit(cfg)
+		return traffic.NewRateLimit(cfg, f.redisClient, f.ebpfManager)
 	case "auth":
 		return f.createAuth(cfg)
 	case "headers":
@@ -94,7 +96,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "metrics":
 		return Metrics(cmp.Or(cfg["route"], cfg["route_id"])), nil
 	case "compress":
-		return f.createCompress(cfg)
+		return traffic.NewCompress(cfg)
 	case "errors":
 		intCodes := make([]int, 0)
 		pages := make(map[int]string)
@@ -109,7 +111,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return Errors(ErrorsConfig{StatusCodes: intCodes, CustomPages: pages}), nil
 	case "retry":
 		attempts, _ := strconv.Atoi(cfg["attempts"])
-		return Retry(RetryConfig{Attempts: attempts}), nil
+		return traffic.Retry(traffic.RetryConfig{Attempts: attempts}), nil
 	case "cors":
 		return f.createCORS(cfg)
 	case "grpcweb":
@@ -119,11 +121,11 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "request_id":
 		return RequestID(), nil
 	case "cache":
-		return f.createCache(cfg)
+		return traffic.NewCache(cfg, f.redisClient)
 	case "inflightreq":
-		return f.createInflightReq(cfg)
+		return traffic.NewInflightReq(cfg)
 	case "buffering":
-		return f.createBuffering(cfg)
+		return traffic.NewBuffering(cfg)
 	case "forwardauth":
 		return f.createForwardAuth(cfg)
 	case "waf":
@@ -152,10 +154,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return f.createHMAC(cfg)
 	case "deception":
 		return Deception(DeceptionConfig{
-			HoneypotPaths:        parseListStrict(cmp.Or(cfg["honeypot_paths"], cfg["paths"])),
+			HoneypotPaths:        kind.ParseListStrict(cmp.Or(cfg["honeypot_paths"], cfg["paths"])),
 			InjectInvisibleLinks: parseBoolStrict(cmp.Or(cfg["inject_invisible_links"], "true"), true),
-			InvisibleLinkPaths:   parseListStrict(cmp.Or(cfg["invisible_link_paths"], cfg["honey_links"])),
-			HoneyForms:           parseListStrict(cfg["honey_forms"]),
+			InvisibleLinkPaths:   kind.ParseListStrict(cmp.Or(cfg["invisible_link_paths"], cfg["honey_links"])),
+			HoneyForms:           kind.ParseListStrict(cfg["honey_forms"]),
 			RouteID:              routeID,
 			EnableTrollResponse:  parseBoolStrict(cfg["enable_troll_response"], false),
 			CanaryHeader:         cfg["canary_header"],
@@ -221,7 +223,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 }
 
 func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
-	origins := parseListStrict(cfg["allowed_origins"])
+	origins := kind.ParseListStrict(cfg["allowed_origins"])
 	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
 	maxAge, _ := strconv.Atoi(cfg["max_age"])
 
@@ -248,7 +250,7 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 }
 
 func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
-	scopes := parseListStrict(cfg["scopes"])
+	scopes := kind.ParseListStrict(cfg["scopes"])
 	return OIDCProxy(OIDCProxyConfig{
 		Issuer:       cfg["issuer"],
 		ClientID:     cfg["client_id"],
@@ -279,8 +281,8 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 	return FileSecurity(FileSecurityConfig{
 		EnableClamAV:           parseBoolStrict(cfg["enable_clamav"], false),
 		ClamAVAddr:             clamavAddr,
-		BlockedMimeTypes:       parseListStrict(cfg["blocked_mime_types"]),
-		AllowedMimeTypes:       parseListStrict(cfg["allowed_mime_types"]),
+		BlockedMimeTypes:       kind.ParseListStrict(cfg["blocked_mime_types"]),
+		AllowedMimeTypes:       kind.ParseListStrict(cfg["allowed_mime_types"]),
 		MaxFileSize:            maxFileSize,
 		ScanTimeout:            scanTimeout,
 		FailOpen:               parseBoolStrict(cfg["fail_open"], false),

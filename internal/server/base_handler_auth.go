@@ -12,7 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	pkghttputil "github.com/gsoultan/gateon/pkg/httputil"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -160,7 +160,7 @@ func isHealthPath(path string) bool {
 // handleLoginWithRateLimit applies login rate limiting if configured, then serves internal.
 func handleLoginWithRateLimit(w http.ResponseWriter, r *http.Request, internal http.Handler, deps BaseHandlerDeps) {
 	if deps.LoginLimiter != nil {
-		limited := deps.LoginLimiter.Handler(middleware.PerIP)(internal)
+		limited := deps.LoginLimiter.Handler(traffic.PerIP)(internal)
 		sw := pkghttputil.GetStatusResponseWriter(w)
 		defer pkghttputil.PutStatusResponseWriter(sw)
 

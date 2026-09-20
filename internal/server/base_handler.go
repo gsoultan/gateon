@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/rs/cors"
@@ -32,7 +33,7 @@ type BaseHandlerDeps struct {
 	RouteStore   config.RouteStore
 	GlobalReg    config.GlobalConfigStore
 	Auth         auth.Service
-	LoginLimiter middleware.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
+	LoginLimiter traffic.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
 	MgmtCORS     *cors.Cors
 }
 
@@ -63,12 +64,12 @@ func CreateBaseHandler(
 	finalInternal := middleware.Chain(
 		middleware.Recovery(),
 		middleware.Nonce(),
-		middleware.Compress(),
+		traffic.Compress(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended", ExtraImgSrc: managementImgSrc}),
 		middleware.XSSRecognition("gateon-management"),
 		middleware.SQLiRecognition("gateon-management"),
 		middleware.ThreatRecognition("gateon-management"),
-		middleware.MaxConnections(500),
+		traffic.MaxConnections(500),
 	)(internalHandler)
 
 	// Built unconditionally, and deliberately not guarded on whether auth is

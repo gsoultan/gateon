@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -30,11 +31,11 @@ import (
 // GATEON_ENTRYPOINT_RATE_LIMIT_QPS: per-IP requests per second (0 = disabled).
 // GATEON_ENTRYPOINT_RATE_LIMIT_BURST: burst size (default 2x QPS).
 // Aligned with Traefik: attach ratelimit middleware to routes for per-route limits.
-func entrypointRateLimiter() middleware.RateLimiter {
+func entrypointRateLimiter() traffic.RateLimiter {
 	qpsStr := os.Getenv("GATEON_ENTRYPOINT_RATE_LIMIT_QPS")
 	qps, _ := strconv.Atoi(qpsStr)
 	if qps <= 0 {
-		return middleware.NoopRateLimiter{}
+		return traffic.NoopRateLimiter{}
 	}
 	burstStr := os.Getenv("GATEON_ENTRYPOINT_RATE_LIMIT_BURST")
 	burst, _ := strconv.Atoi(burstStr)
@@ -44,7 +45,7 @@ func entrypointRateLimiter() middleware.RateLimiter {
 			burst = 10
 		}
 	}
-	return middleware.NewQPSRateLimiter(qps, burst)
+	return traffic.NewQPSRateLimiter(qps, burst)
 }
 
 // StartServers starts all entrypoints (HTTP, TCP, UDP) in goroutines.
@@ -140,7 +141,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HostFilter(mgmtHost),
 		middleware.IPFilter(allowedIPs, nil),
-		middleware.MaxConnections(500),
+		traffic.MaxConnections(500),
 	)(deps.BaseHandler)
 
 	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.

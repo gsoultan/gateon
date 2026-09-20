@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"bufio"
@@ -13,9 +13,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
+
+// headerAuthorization is spelled out here rather than imported: the CORS
+// factory that also names it lives in package middleware, which imports this
+// package for its constructors, so reaching back for the constant would be a
+// cycle. One header name is a cheaper duplicate than a shared package for it.
+const headerAuthorization = "Authorization"
 
 // CacheConfig configures the response cache.
 type CacheConfig struct {
@@ -33,12 +40,12 @@ const (
 
 // Cache returns a middleware that caches GET/HEAD responses (memory or Redis).
 // The routeID parameter is used for Prometheus cache hit/miss metrics.
-func Cache(cfg CacheConfig) Middleware {
+func Cache(cfg CacheConfig) kind.Middleware {
 	return CacheWithRoute(cfg, "")
 }
 
 // CacheWithRoute returns a cache middleware that records metrics with the given route ID.
-func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
+func CacheWithRoute(cfg CacheConfig, routeID string) kind.Middleware {
 	if cfg.MaxBodyKB <= 0 {
 		cfg.MaxBodyKB = 256
 	}
@@ -61,11 +68,11 @@ func CacheWithRoute(cfg CacheConfig, routeID string) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ShouldSkipMetrics(r) {
+			if kind.ShouldSkipMetrics(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteName(r)
+			activeRouteID := kind.GetRouteName(r)
 			if activeRouteID == "" {
 				activeRouteID = routeID
 			}

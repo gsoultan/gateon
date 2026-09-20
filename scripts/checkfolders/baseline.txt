@@ -19,7 +19,15 @@
 # they sit on the hot path at 59.3% coverage. That is a sequenced project with
 # its own ADR (0002, with 0010 protecting it), not a cleanup to fold into an
 # unrelated change.
-67 internal/middleware
+54 internal/middleware
+
+# ADR-0002's traffic stage, landed 2026-09-20. Thirteen files rather than ten
+# because the ADR names this group as one unit -- ratelimit, connlimit, maxbody,
+# inflight, retry, cache and compress are the traffic-shaping concern, and
+# splitting it further would be a structural change the ADR does not describe.
+# If it grows, cache is the obvious next seam: cache.go, cache_factory.go,
+# cache_redis.go and cache_store.go are four files that already sit together.
+13 internal/middleware/traffic
 
 # The dashboard/control-plane API surface. Grows a file per RPC group, so it is
 # the package most likely to cross a pin during ordinary feature work; that is

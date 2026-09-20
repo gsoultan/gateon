@@ -112,6 +112,40 @@ giant switch.
   stages land. ADR-0010 adds that ratchet, so the remaining stages keep their
   ground instead of spending it.
 
+- **Stage 2 (`traffic`) is done, 2026-09-20:** ratelimit, connlimit, maxbody,
+  inflight, retry, cache and compress moved to `internal/middleware/traffic` --
+  13 files, taking `internal/middleware` from **67 to 54**. The first stage that
+  actually shrank it; the ratchet in ADR-0010 is what keeps that ground, and its
+  pin was lowered to 54 in the same commit as the move.
+
+  The coupling turned out to be far lower than feared. A scratch-package probe
+  reported only two undefined symbols across all thirteen files, and the real
+  total came to eleven: `Middleware`, `GetRouteName`, `ShouldSkipMetrics` and
+  `IsCorsPreflight` already lived in `kind`; `StatusResponseWriter` and its pool
+  are in `pkg/httputil`; and four parse helpers plus the severity/action
+  vocabulary moved into `kind` as `ParsePositiveInt`, `ParseIntStrict`,
+  `ParseBoolStrict`, `ParseListStrict` and `Severity*`/`Action*`.
+
+  Moving those last two groups is the part worth repeating for later stages.
+  `parseListStrict` was defined in `compress_factory.go` -- a file this stage
+  moved -- while `cors_factory.go`, which stays, was calling it: a shared helper
+  can sit in any file, so the compiler, not the file list, decides what a stage
+  actually owns. The severity and action constants went to `kind` rather than
+  being copied because the 2026-09-19 review traced a real defect to exactly
+  that vocabulary existing in two spellings.
+
+  Five `Factory` methods became exported constructors -- `NewRateLimit`,
+  `NewCache`, `NewCompress`, `NewBuffering`, `NewInflightReq` -- taking the
+  `redisClient` and `ebpfManager` they had been reading off the receiver.
+  `cache_test.go` stayed behind: it builds through `f.Create` on purpose, "the
+  way ApplyRouteMiddlewares does", and a subpackage cannot import the factory
+  without a cycle. Only its `cacheStore` unit test moved.
+
+  `internal/middleware/traffic` is pinned at 13 rather than split further,
+  because ADR-0002 names it as one group and splitting it again is a structural
+  change this ADR does not describe. Verified with `go build ./...`,
+  `go vet ./...` and `go test -race ./...` -- 62 packages, all green.
+
 ## Related
 
 - ADR-0001 — layered architecture and the ≤10-files rule.

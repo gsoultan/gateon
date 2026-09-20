@@ -1,13 +1,14 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"net/http"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -22,14 +23,14 @@ var (
 
 // MaxConnections returns a middleware that limits concurrent requests.
 // When the limit is reached, requests receive 503 Service Unavailable.
-func MaxConnections(max int) Middleware {
+func MaxConnections(max int) kind.Middleware {
 	if max <= 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
 	sem := make(chan struct{}, max)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
+			if kind.IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -38,7 +39,7 @@ func MaxConnections(max int) Middleware {
 				defer func() { <-sem }()
 				next.ServeHTTP(w, r)
 			default:
-				if !ShouldSkipMetrics(r) {
+				if !kind.ShouldSkipMetrics(r) {
 					inflightRejectedTotal.WithLabelValues("max_connections").Inc()
 					telemetry.IncInflightRejected("max_connections")
 				}
@@ -121,14 +122,14 @@ func (m *perIPConnMap) unref(key string, b *connBucket) {
 }
 
 // MaxConnectionsPerIP limits concurrent in-flight requests per client IP.
-func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) Middleware {
+func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) kind.Middleware {
 	if max <= 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
 	m := newPerIPConnMap()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
+			if kind.IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -145,7 +146,7 @@ func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) Middleware
 			default:
 				// Rejected: drop the ref taken by get() (no slot acquired).
 				m.unref(key, b)
-				if !ShouldSkipMetrics(r) {
+				if !kind.ShouldSkipMetrics(r) {
 					inflightRejectedTotal.WithLabelValues("max_connections_per_ip").Inc()
 					telemetry.IncInflightRejected("max_connections_per_ip")
 				}
