@@ -53,6 +53,17 @@ var (
 	generatedPowKey     []byte
 )
 
+// categoryBot is the threat category proof-of-work files under.
+//
+// A local constant rather than an addition to kind's vocabulary, which is a
+// deliberate distinction. Severity and ActionTaken live in kind because
+// consumers match on them exactly and a typo silently disappears a refusal.
+// Category is not that: recordMitigationFunnel in internal/telemetry matches
+// only "waf" and "abuse", and everything else is descriptive text the
+// dashboard shows. Naming it here removes the repetition without inventing a
+// shared vocabulary the consumers do not actually require.
+const categoryBot = "bot"
+
 func powKey(secret string) []byte {
 	if secret != "" {
 		return []byte(secret)
@@ -107,11 +118,27 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) kind.
 						return
 					}
 					// Invalid solution - record as a threat
-					recordAdvancedThreat(r, "pow_invalid_solution", 10.0, "Invalid PoW solution provided", routeID, "bot", kind.SeverityMedium, "challenged")
+					kind.RecordThreat(r, kind.Threat{
+						Type:        "pow_invalid_solution",
+						Score:       10.0,
+						Details:     "Invalid PoW solution provided",
+						RouteID:     routeID,
+						Category:    categoryBot,
+						Severity:    kind.SeverityMedium,
+						ActionTaken: kind.ActionChallenged,
+					})
 				}
 
 				// Otherwise, serve challenge.
-				recordAdvancedThreat(r, "pow_challenge_issued", 1.0, "PoW challenge issued due to low reputation", routeID, "bot", kind.SeverityLow, "challenged")
+				kind.RecordThreat(r, kind.Threat{
+					Type:        "pow_challenge_issued",
+					Score:       1.0,
+					Details:     "PoW challenge issued due to low reputation",
+					RouteID:     routeID,
+					Category:    categoryBot,
+					Severity:    kind.SeverityLow,
+					ActionTaken: kind.ActionChallenged,
+				})
 				pc.serve(w, r)
 				return
 			}

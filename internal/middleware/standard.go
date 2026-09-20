@@ -21,7 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/art"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -136,12 +136,12 @@ func populateFingerprints(r *http.Request, rs *request.RequestState) {
 	if ja4 == "" {
 		if r.TLS != nil {
 			// Try to get fingerprints from our internal map first
-			if conn, ok := r.Context().Value(security.ConnContextKey).(net.Conn); ok {
-				f := security.GetFingerprints(conn)
+			if conn, ok := r.Context().Value(identity.ConnContextKey).(net.Conn); ok {
+				f := identity.GetFingerprints(conn)
 				ja4 = f.JA4
 			}
 			if ja4 == "" {
-				f := security.GetFingerprintsByAddr(r.RemoteAddr)
+				f := identity.GetFingerprintsByAddr(r.RemoteAddr)
 				ja4 = f.JA4
 			}
 		}

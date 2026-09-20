@@ -62,8 +62,10 @@ const (
 	SeverityMedium   = "medium"
 	SeverityLow      = "low"
 
-	ActionBlocked  = "blocked"
-	ActionDetected = "detected"
+	ActionBlocked    = "blocked"
+	ActionDetected   = "detected"
+	ActionChallenged = "challenged"
+	ActionShunned    = "shunned"
 )
 
 func ParseListStrict(val string) []string {

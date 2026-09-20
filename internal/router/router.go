@@ -21,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -554,9 +555,9 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 
 	// 3. Infrastructure Blockers & Lifecycle (inner to CORS)
 	chain = append(chain,
-		security.IPMitigation(),
-		security.UserMitigation(),
-		security.ReputationBlocker(routeLabel),
+		identity.IPMitigation(),
+		identity.UserMitigation(),
+		identity.ReputationBlocker(routeLabel),
 		func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if rs := request.GetRequestState(r); rs != nil {
@@ -619,7 +620,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 				if cookieName == "" {
 					cookieName = "session"
 				}
-				chain = append(chain, security.TlsBinding(cookieName))
+				chain = append(chain, identity.TlsBinding(cookieName))
 			}
 		}
 	}

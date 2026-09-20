@@ -14,6 +14,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/stretchr/testify/assert"
@@ -76,7 +77,7 @@ func TestJA4PlusMitigationE2E(t *testing.T) {
 	handler := middleware.Chain(
 		middleware.WithRequestState("test-ep", "test", false),
 		withJA4,
-		security.UserMitigation(),
+		identity.UserMitigation(),
 	)(security.ThreatRecognition("test-route")(backend))
 
 	// 1. Initial request (Clean)

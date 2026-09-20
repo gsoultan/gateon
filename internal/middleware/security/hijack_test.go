@@ -35,9 +35,3 @@ func TestSecurityResponseWriterWrappersPreserveHijacker(t *testing.T) {
 		})
 	}
 }
-
-// okOrigin is a backend that always succeeds, so a test asserting a middleware
-// refused a request is measuring the middleware rather than the origin.
-func okOrigin() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-}
