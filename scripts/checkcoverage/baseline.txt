@@ -35,10 +35,22 @@
 #   internal/telemetry 56.3 -> 51.5. The pooled metrics snapshot was removed:
 #   it was being recycled while readers still held it, so Reset and clearSlice
 #   went with it, and they ran on every refresh, i.e. they were covered well
-#   above this package's average. Deleting well-covered code lowers the mean
-#   without leaving anything new unchecked. Every function added here in the
-#   same change sits above the package average -- MarkUserUnmitigated 90.9%,
-#   evictIPStats 87.5%, FindUserMitigationKey 77.8%, countInForce 66.7%.
+#   above this package's average. Deleting well-covered code lowers the mean,
+#   and every function added in the same change sits above the package average
+#   -- MarkUserUnmitigated 90.9%, evictIPStats 87.5%, FindUserMitigationKey
+#   77.8%, countInForce 66.7%.
+#
+#   That is not the whole of it, though, and the rest is worth stating because
+#   "nothing new is unchecked" is the claim a later reader leans on. Measured
+#   against main under identical conditions, code that was *not* deleted went
+#   from well covered to nothing: StartSnapshotLoop 100 -> 0, PingStore
+#   100 -> 0, GetServiceGoldenSignals 95.6 -> 0, GetSecurityThreats 87.8 -> 0,
+#   GetPathStatsWindow 77.4 -> 0, GetTrace 63.2 -> 0. They still exist and are
+#   still called from internal/api, internal/server/handlers and
+#   internal/domain/canary; they simply lost the path that used to exercise
+#   them, because the snapshot loop was the thing reaching them and no test
+#   drove it directly. StartSnapshotLoop now has one. The rest do not, and are
+#   the honest reason this floor is where it is.
 #
 # That gap is wide enough to mislead. The upgrade tests added on 2026-09-13
 # rehearse a populated database on both engines, so skipping Postgres skips
