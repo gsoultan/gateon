@@ -98,7 +98,7 @@ function sudoPrompt(page: Page) {
             const sudoDialog = page.getByRole('heading', { name: 'Administrative Privileges Required' });
             if (await sudoDialog.isVisible({ timeout: 5000 })) {
                 await page.getByPlaceholder('Your password').fill('password123');
-                await page.getByRole('dialog').getByRole('button', { name: /Confirm|Install/i, exact: true }).click();
+                await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Install)$/ }).click();
             }
             await expect(page.getByRole('button', { name: 'Uninstall ClamAV' }).first()).toBeVisible({ timeout: 60000 });
         }
