@@ -125,14 +125,17 @@ telemetry_pebble/
 /output.txt
 /.kiro/
 /audit/
-/internal/middleware/audit/
 
 # Dev runtime state (scripts/dev.sh)
 /dev/.data/
 
-# Runtime WAF audit logs (written under package dirs at runtime)
-/internal/router/audit/
-/internal/server/audit/
+# Runtime WAF audit logs. gateon resolves its data directory from
+# GATEON_DATA_DIR, GATEON_STATE_DIR or, failing both, the working
+# directory -- so a gateway run from a source checkout writes here. The
+# per-package lines that used to sit below this one were test droppings
+# rather than runtime output, and are gone: internal/middleware,
+# internal/router and the e2e harness now point the variable at a scratch
+# directory instead of being hidden here.
 # Stray build artifacts and backups
 /mock_backend
 *.bak

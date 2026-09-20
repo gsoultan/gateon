@@ -56,15 +56,13 @@ func startGateon(t *testing.T, projectRoot string, env *TestEnv, extraEnv ...str
 	pprofPort = getFreePort(t)
 	cmd = exec.Command(binary)
 	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(),
+	cmd.Env = env.GatewayEnv(
 		fmt.Sprintf("GLOBAL_CONFIG_FILE=%s", filepath.Join(env.Dir, "config/global.json")),
 		fmt.Sprintf("ROUTES_FILE=%s", filepath.Join(env.Dir, "config/routes.json")),
 		fmt.Sprintf("SERVICES_FILE=%s", filepath.Join(env.Dir, "config/services.json")),
 		fmt.Sprintf("ENTRYPOINTS_FILE=%s", filepath.Join(env.Dir, "config/entrypoints.json")),
 		fmt.Sprintf("MIDDLEWARES_FILE=%s", filepath.Join(env.Dir, "config/middlewares.json")),
 		fmt.Sprintf("TLS_OPTIONS_FILE=%s", filepath.Join(env.Dir, "config/tls_options.json")),
-		"GATEON_TRUSTED_PROXIES=127.0.0.1,::1",
-		"GATEON_TEST=1",
 		fmt.Sprintf("GATEON_PPROF_ADDR=127.0.0.1:%d", pprofPort),
 	)
 	cmd.Env = append(cmd.Env, extraEnv...)
