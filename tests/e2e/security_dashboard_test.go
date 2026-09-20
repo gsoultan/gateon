@@ -77,7 +77,7 @@ func TestSecurityDashboard(t *testing.T) {
 	// 3. Start Gateon
 	cmd := exec.Command(env.BinaryPath)
 	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(),
+	cmd.Env = env.GatewayEnv(
 		fmt.Sprintf("GLOBAL_CONFIG_FILE=%s", filepath.Join(env.Dir, "config/global.json")),
 		fmt.Sprintf("ROUTES_FILE=%s", filepath.Join(env.Dir, "config/routes.json")),
 		fmt.Sprintf("SERVICES_FILE=%s", filepath.Join(env.Dir, "config/services.json")),
@@ -85,9 +85,7 @@ func TestSecurityDashboard(t *testing.T) {
 		fmt.Sprintf("MIDDLEWARES_FILE=%s", filepath.Join(env.Dir, "config/middlewares.json")),
 		fmt.Sprintf("TLS_OPTIONS_FILE=%s", filepath.Join(env.Dir, "config/tls_options.json")),
 		fmt.Sprintf("GATEON_MANAGEMENT_PORT=%d", env.Ports["mgmt"]),
-		"GATEON_TEST=1",
 		"GATEON_PER_IP_METRICS=1",
-		"GATEON_TRUSTED_PROXIES=127.0.0.1,::1",
 	)
 
 	stdout, _ := cmd.StdoutPipe()

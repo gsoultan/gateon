@@ -71,7 +71,7 @@ func TestTechDiscovery(t *testing.T) {
 	// 3. Start Gateon (in API mode)
 	cmd := exec.Command(env.BinaryPath)
 	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(),
+	cmd.Env = env.GatewayEnv(
 		fmt.Sprintf("GLOBAL_CONFIG_FILE=%s", filepath.Join(env.Dir, "config/global.json")),
 		fmt.Sprintf("ROUTES_FILE=%s", filepath.Join(env.Dir, "config/routes.json")),
 		fmt.Sprintf("SERVICES_FILE=%s", filepath.Join(env.Dir, "config/services.json")),
@@ -79,7 +79,6 @@ func TestTechDiscovery(t *testing.T) {
 		fmt.Sprintf("MIDDLEWARES_FILE=%s", filepath.Join(env.Dir, "config/middlewares.json")),
 		fmt.Sprintf("TLS_OPTIONS_FILE=%s", filepath.Join(env.Dir, "config/tls_options.json")),
 		fmt.Sprintf("GATEON_MANAGEMENT_PORT=%d", env.Ports["mgmt"]),
-		"GATEON_TEST=1",
 		// The mock backend this suite probes is on 127.0.0.1, which the SSRF
 		// guard refuses by default. This used to work because the guard was
 		// wrapped in `os.Getenv("GATEON_TEST") != "1"` -- so the suite ran with

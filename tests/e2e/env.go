@@ -87,6 +87,27 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 // Cleanup is retained for callers that defer it. Both the working directory
 // and the built binary now live under t.TempDir(), which the testing package
 // removes on its own, so there is nothing left for this to do.
+// GatewayEnv is the environment for a gateon process under test.
+//
+// It exists for GATEON_DATA_DIR. Every spec starts the binary with
+// cmd.Dir = projectRoot, and gateon resolves its data directory relative to
+// the working directory when nothing names one -- so the WAF audit log wrote
+// into the checkout on every e2e run. .gitignore hid the result rather than
+// stopping it. Pointing the data dir at the per-test temp directory fixes it
+// once for every spec, and t.TempDir takes the files away afterwards.
+//
+// Anything a spec needs on top goes in extra, which wins over the defaults
+// here because a later assignment to the same variable is the one the process
+// sees.
+func (env *TestEnv) GatewayEnv(extra ...string) []string {
+	base := append(os.Environ(),
+		"GATEON_DATA_DIR="+env.Dir,
+		"GATEON_TRUSTED_PROXIES=127.0.0.1,::1",
+		"GATEON_TEST=1",
+	)
+	return append(base, extra...)
+}
+
 func (env *TestEnv) Cleanup() {}
 
 // exeSuffix returns the platform's executable extension so the built binary is
