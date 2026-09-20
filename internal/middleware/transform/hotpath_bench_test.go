@@ -20,20 +20,20 @@ import (
 // actually matched.
 func BenchmarkHeadersMiddleware(b *testing.B) {
 	cfg := map[string]string{
-		"set_request_X-Service":     "gateway",
-		"add_request_X-Trace":       "on",
-		"del_request_X-Internal":    "",
-		"set_response_X-Frame":      "DENY",
-		"add_response_X-Cache-Tag":  "v1",
-		"del_response_Server":       "",
-		"sts_seconds":               "31536000",
-		"sts_include_subdomains":    "true",
-		"force_sts_header":          "true",
-		"unrelated_knob_one":        "a",
-		"unrelated_knob_two":        "b",
-		"unrelated_knob_three":      "c",
-		"unrelated_knob_four":       "d",
-		"unrelated_knob_five":       "e",
+		"set_request_X-Service":    "gateway",
+		"add_request_X-Trace":      "on",
+		"del_request_X-Internal":   "",
+		"set_response_X-Frame":     "DENY",
+		"add_response_X-Cache-Tag": "v1",
+		"del_response_Server":      "",
+		"sts_seconds":              "31536000",
+		"sts_include_subdomains":   "true",
+		"force_sts_header":         "true",
+		"unrelated_knob_one":       "a",
+		"unrelated_knob_two":       "b",
+		"unrelated_knob_three":     "c",
+		"unrelated_knob_four":      "d",
+		"unrelated_knob_five":      "e",
 	}
 	mw, err := NewHeaders(cfg)
 	if err != nil {

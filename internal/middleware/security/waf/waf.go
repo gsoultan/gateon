@@ -329,295 +329,401 @@ func WAF(cfg WAFConfig) (kind.Middleware, error) {
 	// recomputed on every request — nine allocations for a route-constant value.
 	fp := cfg.Fingerprint()
 
+	t := wafRuntime{cfg: cfg, engine: engine, redactor: redactor, fp: fp}
 	return func(next http.Handler) http.Handler {
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 1. Deduplication: Avoid double-checking if an identical WAF setup has already run.
-			rs := request.GetRequestState(r)
-			if rs != nil {
-				if rs.IsManagement {
-					next.ServeHTTP(w, r)
-					return
-				}
-				for _, executed := range rs.ExecutedWAFs {
-					if executed == fp {
-						next.ServeHTTP(w, r)
-						return
-					}
-				}
-				rs.ExecutedWAFs = append(rs.ExecutedWAFs, fp)
-				rs.ExecutedXSS = true
-			}
-
-			// 2. Ensure Host header is correctly set for Coraza and downstream services.
-			if r.Host == "" && r.Header.Get("Host") != "" {
-				r.Host = r.Header.Get("Host")
-			}
-			if r.Host != "" {
-				r.Header["Host"] = []string{r.Host}
-			}
-
-			// Security Header Spoofing Prevention
-			h := r.Header
-			h.Del("X-Gateon-Reputation")
-			testRep := h.Get(testReputationHeader)
-			h.Del(testReputationHeader)
-			h.Del("X-Gateon-Anomaly-Score")
-			h.Del("X-Gateon-Threat-Type")
-			h.Del("X-Gateon-WAF-Matched")
-			h.Del("X-Gateon-JA4")
-
-			// 3. CORS Preflight bypass
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Protocol enforcement, ahead of everything else: a request with
-			// conflicting framing should not be inspected and forwarded, it
-			// should be refused, and doing it first keeps the cost off the
-			// path for conforming traffic.
-			if !cfg.DisableProtocolChecks {
-				if v := checkProtocol(r, cfg.AllowedMethods); v != nil {
-					recordFastPathThreat(r, cfg.RouteID, "protocol_violation", v.reason)
-					if !cfg.AuditOnly {
-						http.Error(w, "Forbidden by Security Policy ("+v.reason+")", v.status)
-						return
-					}
-				}
-			}
-
-			// 4. Cloudflare IP trust
-			if cfg.TrustCloudflare {
-				clientIP := request.GetClientIP(r, true)
-				if last := strings.LastIndexByte(r.RemoteAddr, ':'); last != -1 && !strings.HasSuffix(r.RemoteAddr, "]") {
-					r.RemoteAddr = clientIP + r.RemoteAddr[last:]
-				} else {
-					r.RemoteAddr = clientIP
-				}
-			}
-
-			// 5. Adaptive WAF reputation scoring
-			repScore := 100.0
-			if rs != nil {
-				repScore = rs.Reputation
-			}
-
-			if testRep != "" && testReputationOverrideEnabled() {
-				if f, err := strconv.ParseFloat(testRep, 64); err == nil {
-					repScore = f
-				}
-			}
-			r.Header.Set("X-Gateon-Reputation", getReputationString(repScore))
-			r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
-
-			// git's smart-HTTP bodies are packfiles: binary, routinely larger
-			// than the body limit, and refusing one as uninspectable would break
-			// every git host behind the gateway. So the *body* of a request that
-			// looks like git traffic from a client in good standing is not read
-			// into the engine. Nothing else is exempt. This used to skip the whole
-			// middleware — engine, entropy checks, response inspection — on a
-			// Content-Type and a path suffix, both of which the client writes, and
-			// every client the gateway has not seen carries the neutral score the
-			// skip was gated on. A WAF a request can opt out of by naming a
-			// protocol is not a WAF.
-			inspectBody := !(repScore > 90 && isGitTraffic(r))
-
-			// The Aho-Corasick signature prefilter that used to run here was
-			// retired. It blocked on a substring hit before the engine ran,
-			// which made every literal a standalone rule with no grammar behind
-			// it: bare SQL keywords refused "delete my account", WordPress paths
-			// broke WordPress, and everything it caught with security value the
-			// gwaf engine already catches by intent — in the URI and in the
-			// headers alike. Keeping it was a fast path that *skipped* the
-			// accurate check rather than cheapening it. The entropy,
-			// fingerprint, and token checks below stay: those are gateon-owned
-			// signals the stateless engine cannot produce.
-
-			// Check entropy of common fields to detect shellcode/obfuscation
-			if !cfg.DisableEntropy {
-				if detail, found := suspiciousHeaderEntropy(r, cfg, repScore); found {
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", detail)
-					http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
-					return
-				}
-			}
-
-			// 1. Fingerprint Consistency Check (Spoofing Prevention)
-			if cfg.EnableFingerprintValidation {
-				ua := r.Header.Get("User-Agent")
-				if isBrowserUA(ua) {
-					// TLS Check
-					if r.TLS != nil && isSuspiciousTLS(r) {
-						details := fmt.Sprintf("Fingerprint mismatch: Browser UA '%s' with suspicious TLS profile (v%x)", ua, r.TLS.Version)
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_fingerprint", details)
-						http.Error(w, "Forbidden by Security (Client Spoofing Detected)", http.StatusForbidden)
-						return
-					}
-
-					// H2/H3 Consistency Check
-					if (r.ProtoMajor == 2 || r.ProtoMajor == 3) && r.Header.Get("Connection") != "" {
-						// Connection header is forbidden in HTTP/2 and HTTP/3
-						details := fmt.Sprintf("Protocol violation: %s request from '%s' contains forbidden 'Connection' header", r.Proto, ua)
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_protocol_violation", details)
-						http.Error(w, "Forbidden by Security (Protocol Violation)", http.StatusForbidden)
-						return
-					}
-
-					// Modern browsers always send certain headers
-					if r.ProtoMajor >= 2 && r.Header.Get("Accept-Encoding") == "" {
-						details := fmt.Sprintf("Suspicious client: %s request from '%s' missing 'Accept-Encoding'", r.Proto, ua)
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_suspicious_client", details)
-						http.Error(w, "Forbidden by Security (Suspicious Client)", http.StatusForbidden)
-						return
-					}
-				}
-			}
-
-			// 2. Body Entropy Check (Fast-Path)
-			if cfg.EnableBodyEntropy && inspectBody && r.ContentLength > 0 && r.ContentLength < maxBodyEntropyScan {
-				if detail, found := suspiciousBodyEntropy(r, rs, cfg, repScore); found {
-					recordFastPathThreat(r, cfg.RouteID, "fast_path_entropy", detail)
-					http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
-					return
-				}
-			}
-
-			// 3. Security Token Fast-Check
-			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-				token := auth[7:]
-				// We enforce structure only for tokens that claim to be a known format (JWT, Paseto).
-				if len(token) > 32 && strings.Contains(token, ".") {
-					isMalformed := false
-					if isLikelyJWT(token) {
-						if !isJWT(token) {
-							isMalformed = true
-						}
-					} else if isLikelyPaseto(token) {
-						if !isPaseto(token) {
-							isMalformed = true
-						}
-					}
-
-					if isMalformed {
-						recordFastPathThreat(r, cfg.RouteID, "fast_path_malformed_token", "Malformed security token structure in Authorization header")
-						http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
-						return
-					}
-				}
-			}
-
-			// Deterministic Trace Correlation
-			traceID := telemetry.GetCachedJA4H(r) // Use JA4H as a deterministic trace correlation component if OTel is missing
-			r.Header.Set("X-Gateon-Fingerprint", traceID)
-
-			// Global IP Reputation check
-			if cfg.EnableIPReputation && cfg.Reputation != nil {
-				clientIP := request.GetClientIP(r, cfg.TrustCloudflare)
-				if bad, score := cfg.Reputation.IsBad(clientIP); bad {
-					r.Header.Set("X-Gateon-IP-Reputation-Score", strconv.FormatFloat(score, 'f', 2, 64))
-					if score >= cfg.Reputation.GetBlockThreshold() {
-						r.Header.Set("X-Gateon-IP-Reputation-Block", "1")
-					}
-				}
-			}
-
-			tx, decision, err := engine.inspectRequest(r, repScore, inspectBody)
-			// inspectRequest returns a live transaction on every path, error
-			// included, so the audit trail survives a failed inspection. Guard
-			// the nil case anyway: this defer runs on the request path, and a
-			// future early return here would otherwise panic on every request
-			// rather than honour cfg.FailOpen below.
-			if tx != nil {
-				defer tx.Close()
-			}
-
-			observePhase := func(d gwaf.Decision, phase string) {
-				matches := tx.Matches()
-				obs := wafObservation{
-					decision: d, matches: matches, request: r,
-					routeID: cfg.RouteID, cfg: cfg, repScore: repScore,
-					phase: phase,
-				}
-				recordWAFDecision(obs)
-				engine.audit.record(d, matches, obs)
-			}
-			observe := func(d gwaf.Decision) { observePhase(d, wafPhaseRequest) }
-
-			if err != nil {
-				// The engine could not finish inspecting. Whether that permits
-				// the request is a policy decision, not an accident of control
-				// flow: under Coraza this path fell through to the next handler
-				// and the gateway failed open with nothing recording that it
-				// had.
-				logger.L.LogError("WAF could not inspect the request",
-					"error", err, "route", cfg.RouteID, "fail_open", cfg.FailOpen)
-				if !cfg.FailOpen {
-					http.Error(w, "Forbidden by Security Policy (request could not be inspected)",
-						http.StatusForbidden)
-					return
-				}
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			if decision != nil {
-				observe(*decision)
-				if !cfg.AuditOnly {
-					status := decision.Status()
-					if status == 0 {
-						status = http.StatusForbidden
-					}
-					http.Error(w, "Forbidden by Security Policy (WAF)", status)
-					return
-				}
-			} else {
-				observe(tx.Decision())
-			}
-
-			if !cfg.EnableResponseInspection {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Response inspection. The response is streamed through the engine
-			// rather than buffered: the previous implementation accumulated the
-			// entire upstream response in memory before writing any of it, which
-			// is an unbounded allocation keyed on upstream behaviour and breaks
-			// server-sent events and any long-lived stream.
-			//
-			// The cost of streaming is that headers are committed before the body
-			// is seen, so a response-body match can no longer change the status
-			// code. It truncates the response instead, which is the honest
-			// trade: the leaked bytes stop either way, and a client that received
-			// a 200 with a truncated body is strictly better off than one that
-			// waited for the whole thing to be buffered.
-			// Narrow what the origin may answer in before the request goes
-			// upstream: an encoding this build cannot undo would hand the
-			// response phase an opaque stream and every data-leak rule would
-			// match nothing. The client's own value goes back afterwards, so
-			// access logs and fingerprinting still see the real request.
-			prevAE, hadAE := forceInspectableEncoding(r.Header)
-
-			ww := &wafResponseWriter{
-				ResponseWriter: w,
-				tx:             tx,
-				auditOnly:      cfg.AuditOnly,
-				onDecision:     func(d gwaf.Decision) { observePhase(d, wafPhaseResponse) },
-				bufLimit:       responseBufferLimit(cfg),
-				encDecodable:   true,
-				routeID:        cfg.RouteID,
-				dlpAction:      cfg.DLPAction,
-				redactor:       redactor,
-			}
-			next.ServeHTTP(ww, r)
-			ww.finish()
-			ww.release()
-			restoreAcceptEncoding(r.Header, prevAE, hadAE)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.serve(next, w, r)
 		})
-		return h
 	}, nil
 }
 
+// wafRuntime is one configured WAF: the engine, the optional redactor and the
+// policy fingerprint, all resolved when the route is built.
+//
+// The request path below is split into named phases rather than left as one
+// function. That is not only a readability change: the order of these phases
+// is the security property. Header stripping has to precede anything that
+// reads those headers, protocol enforcement has to precede inspection, and the
+// body-inspection decision has to be made before any check consults it. A
+// three-hundred-line function hides that; a sequence of calls states it.
+type wafRuntime struct {
+	cfg      WAFConfig
+	engine   *wafEngine
+	redactor *dlpRedactor
+	fp       string
+}
+
+func (t wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	// 1. Deduplication: Avoid double-checking if an identical WAF setup has already run.
+	rs := request.GetRequestState(r)
+	if t.alreadyInspected(rs) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	// 2. Ensure Host header is correctly set for Coraza and downstream services.
+	normalizeHost(r)
+
+	// Security Header Spoofing Prevention
+	testRep := stripGatewayHeaders(r)
+
+	// 3. CORS Preflight bypass
+	if kind.IsCorsPreflight(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	// Protocol enforcement, ahead of everything else: a request with
+	// conflicting framing should not be inspected and forwarded, it
+	// should be refused, and doing it first keeps the cost off the
+	// path for conforming traffic.
+	if !t.enforceProtocol(w, r) {
+		return
+	}
+
+	// 4. Cloudflare IP trust
+	t.applyCloudflareTrust(r)
+
+	// 5. Adaptive WAF reputation scoring
+	repScore := t.resolveReputation(rs, r, testRep)
+	r.Header.Set("X-Gateon-Reputation", getReputationString(repScore))
+	r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
+
+	// git's smart-HTTP bodies are packfiles: binary, routinely larger
+	// than the body limit, and refusing one as uninspectable would break
+	// every git host behind the gateway. So the *body* of a request that
+	// looks like git traffic from a client in good standing is not read
+	// into the engine. Nothing else is exempt. This used to skip the whole
+	// middleware — engine, entropy checks, response inspection — on a
+	// Content-Type and a path suffix, both of which the client writes, and
+	// every client the gateway has not seen carries the neutral score the
+	// skip was gated on. A WAF a request can opt out of by naming a
+	// protocol is not a WAF.
+	inspectBody := !(repScore > 90 && isGitTraffic(r))
+
+	// The Aho-Corasick signature prefilter that used to run here was
+	// retired. It blocked on a substring hit before the engine ran,
+	// which made every literal a standalone rule with no grammar behind
+	// it: bare SQL keywords refused "delete my account", WordPress paths
+	// broke WordPress, and everything it caught with security value the
+	// gwaf engine already catches by intent — in the URI and in the
+	// headers alike. Keeping it was a fast path that *skipped* the
+	// accurate check rather than cheapening it. The entropy,
+	// fingerprint, and token checks below stay: those are gateon-owned
+	// signals the stateless engine cannot produce.
+	if !t.fastPathChecks(w, r, rs, repScore, inspectBody) {
+		return
+	}
+
+	// Deterministic Trace Correlation
+	traceID := telemetry.GetCachedJA4H(r) // Use JA4H as a deterministic trace correlation component if OTel is missing
+	r.Header.Set("X-Gateon-Fingerprint", traceID)
+
+	// Global IP Reputation check
+	t.annotateIPReputation(r)
+
+	t.inspectAndForward(next, w, r, repScore, inspectBody)
+}
+
+// alreadyInspected reports whether this request has already been through an
+// identical WAF policy, or is management traffic that never goes through one.
+// It marks the request on the way past, so a chain carrying the same policy
+// twice pays for it once.
+func (t wafRuntime) alreadyInspected(rs *request.RequestState) bool {
+	if rs == nil {
+		return false
+	}
+	if rs.IsManagement {
+		return true
+	}
+	for _, executed := range rs.ExecutedWAFs {
+		if executed == t.fp {
+			return true
+		}
+	}
+	rs.ExecutedWAFs = append(rs.ExecutedWAFs, t.fp)
+	rs.ExecutedXSS = true
+	return false
+}
+
+func normalizeHost(r *http.Request) {
+	if r.Host == "" && r.Header.Get("Host") != "" {
+		r.Host = r.Header.Get("Host")
+	}
+	if r.Host != "" {
+		r.Header["Host"] = []string{r.Host}
+	}
+}
+
+// stripGatewayHeaders removes every header the gateway itself writes, so a
+// client cannot arrive claiming a reputation, an anomaly score or a WAF
+// verdict it did not earn. It returns the test-reputation header's value
+// because that one is an input under an env guard -- read here and deleted in
+// the same breath, so no downstream reader can see a client-written copy.
+func stripGatewayHeaders(r *http.Request) string {
+	h := r.Header
+	h.Del("X-Gateon-Reputation")
+	testRep := h.Get(testReputationHeader)
+	h.Del(testReputationHeader)
+	h.Del("X-Gateon-Anomaly-Score")
+	h.Del("X-Gateon-Threat-Type")
+	h.Del("X-Gateon-WAF-Matched")
+	h.Del("X-Gateon-JA4")
+	return testRep
+}
+
+// enforceProtocol reports whether the request may continue.
+func (t wafRuntime) enforceProtocol(w http.ResponseWriter, r *http.Request) bool {
+	if t.cfg.DisableProtocolChecks {
+		return true
+	}
+	v := checkProtocol(r, t.cfg.AllowedMethods)
+	if v == nil {
+		return true
+	}
+
+	recordFastPathThreat(r, t.cfg.RouteID, "protocol_violation", v.reason)
+	if !t.cfg.AuditOnly {
+		http.Error(w, "Forbidden by Security Policy ("+v.reason+")", v.status)
+		return false
+	}
+	return true
+}
+
+func (t wafRuntime) applyCloudflareTrust(r *http.Request) {
+	if !t.cfg.TrustCloudflare {
+		return
+	}
+	clientIP := request.GetClientIP(r, true)
+	if last := strings.LastIndexByte(r.RemoteAddr, ':'); last != -1 && !strings.HasSuffix(r.RemoteAddr, "]") {
+		r.RemoteAddr = clientIP + r.RemoteAddr[last:]
+	} else {
+		r.RemoteAddr = clientIP
+	}
+}
+
+// resolveReputation returns the score the adaptive rules evaluate under. The
+// test header is honoured only when the environment switch is set; see
+// testReputationHeader for why reading it unconditionally was a bypass.
+func (t wafRuntime) resolveReputation(rs *request.RequestState, r *http.Request, testRep string) float64 {
+	repScore := 100.0
+	if rs != nil {
+		repScore = rs.Reputation
+	}
+	if testRep != "" && testReputationOverrideEnabled() {
+		if f, err := strconv.ParseFloat(testRep, 64); err == nil {
+			repScore = f
+		}
+	}
+	return repScore
+}
+
+// fastPathChecks runs the gateon-owned signals the stateless engine cannot
+// produce. It reports whether the request may continue, and writes its own
+// refusal when it may not.
+func (t wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *request.RequestState, repScore float64, inspectBody bool) bool {
+	// Check entropy of common fields to detect shellcode/obfuscation
+	if !t.cfg.DisableEntropy {
+		if detail, found := suspiciousHeaderEntropy(r, t.cfg, repScore); found {
+			recordFastPathThreat(r, t.cfg.RouteID, "fast_path_entropy", detail)
+			http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
+			return false
+		}
+	}
+
+	// 1. Fingerprint Consistency Check (Spoofing Prevention)
+	if t.cfg.EnableFingerprintValidation && !t.checkFingerprintConsistency(w, r) {
+		return false
+	}
+
+	// 2. Body Entropy Check (Fast-Path)
+	if t.cfg.EnableBodyEntropy && inspectBody && r.ContentLength > 0 && r.ContentLength < maxBodyEntropyScan {
+		if detail, found := suspiciousBodyEntropy(r, rs, t.cfg, repScore); found {
+			recordFastPathThreat(r, t.cfg.RouteID, "fast_path_entropy", detail)
+			http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
+			return false
+		}
+	}
+
+	// 3. Security Token Fast-Check
+	return t.checkTokenStructure(w, r)
+}
+
+// checkFingerprintConsistency catches a client claiming to be a browser while
+// behaving like something else. Only applied to browser user agents: a client
+// that does not claim to be a browser is not lying about being one.
+func (t wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.Request) bool {
+	ua := r.Header.Get("User-Agent")
+	if !isBrowserUA(ua) {
+		return true
+	}
+
+	// TLS Check
+	if r.TLS != nil && isSuspiciousTLS(r) {
+		details := fmt.Sprintf("Fingerprint mismatch: Browser UA '%s' with suspicious TLS profile (v%x)", ua, r.TLS.Version)
+		recordFastPathThreat(r, t.cfg.RouteID, "fast_path_fingerprint", details)
+		http.Error(w, "Forbidden by Security (Client Spoofing Detected)", http.StatusForbidden)
+		return false
+	}
+
+	// H2/H3 Consistency Check
+	if (r.ProtoMajor == 2 || r.ProtoMajor == 3) && r.Header.Get("Connection") != "" {
+		// Connection header is forbidden in HTTP/2 and HTTP/3
+		details := fmt.Sprintf("Protocol violation: %s request from '%s' contains forbidden 'Connection' header", r.Proto, ua)
+		recordFastPathThreat(r, t.cfg.RouteID, "fast_path_protocol_violation", details)
+		http.Error(w, "Forbidden by Security (Protocol Violation)", http.StatusForbidden)
+		return false
+	}
+
+	// Modern browsers always send certain headers
+	if r.ProtoMajor >= 2 && r.Header.Get("Accept-Encoding") == "" {
+		details := fmt.Sprintf("Suspicious client: %s request from '%s' missing 'Accept-Encoding'", r.Proto, ua)
+		recordFastPathThreat(r, t.cfg.RouteID, "fast_path_suspicious_client", details)
+		http.Error(w, "Forbidden by Security (Suspicious Client)", http.StatusForbidden)
+		return false
+	}
+
+	return true
+}
+
+// checkTokenStructure enforces structure only for tokens that claim to be a
+// known format. A bearer token in some other scheme is somebody else's
+// business; one that says it is a JWT and is not is a probe.
+func (t wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request) bool {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return true
+	}
+
+	token := auth[7:]
+	if len(token) <= 32 || !strings.Contains(token, ".") {
+		return true
+	}
+
+	malformed := (isLikelyJWT(token) && !isJWT(token)) ||
+		(isLikelyPaseto(token) && !isPaseto(token))
+	if !malformed {
+		return true
+	}
+
+	recordFastPathThreat(r, t.cfg.RouteID, "fast_path_malformed_token", "Malformed security token structure in Authorization header")
+	http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
+	return false
+}
+
+func (t wafRuntime) annotateIPReputation(r *http.Request) {
+	if !t.cfg.EnableIPReputation || t.cfg.Reputation == nil {
+		return
+	}
+	clientIP := request.GetClientIP(r, t.cfg.TrustCloudflare)
+	bad, score := t.cfg.Reputation.IsBad(clientIP)
+	if !bad {
+		return
+	}
+	r.Header.Set("X-Gateon-IP-Reputation-Score", strconv.FormatFloat(score, 'f', 2, 64))
+	if score >= t.cfg.Reputation.GetBlockThreshold() {
+		r.Header.Set("X-Gateon-IP-Reputation-Block", "1")
+	}
+}
+
+func (t wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter, r *http.Request, repScore float64, inspectBody bool) {
+	tx, decision, err := t.engine.inspectRequest(r, repScore, inspectBody)
+	// inspectRequest returns a live transaction on every path, error
+	// included, so the audit trail survives a failed inspection. Guard
+	// the nil case anyway: this defer runs on the request path, and a
+	// future early return here would otherwise panic on every request
+	// rather than honour cfg.FailOpen below.
+	if tx != nil {
+		defer tx.Close()
+	}
+
+	observePhase := func(d gwaf.Decision, phase string) {
+		matches := tx.Matches()
+		obs := wafObservation{
+			decision: d, matches: matches, request: r,
+			routeID: t.cfg.RouteID, cfg: t.cfg, repScore: repScore,
+			phase: phase,
+		}
+		recordWAFDecision(obs)
+		t.engine.audit.record(d, matches, obs)
+	}
+	observe := func(d gwaf.Decision) { observePhase(d, wafPhaseRequest) }
+
+	if err != nil {
+		// The engine could not finish inspecting. Whether that permits
+		// the request is a policy decision, not an accident of control
+		// flow: under Coraza this path fell through to the next handler
+		// and the gateway failed open with nothing recording that it
+		// had.
+		logger.L.LogError("WAF could not inspect the request",
+			"error", err, "route", t.cfg.RouteID, "fail_open", t.cfg.FailOpen)
+		if !t.cfg.FailOpen {
+			http.Error(w, "Forbidden by Security Policy (request could not be inspected)",
+				http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	if decision != nil {
+		observe(*decision)
+		if !t.cfg.AuditOnly {
+			status := decision.Status()
+			if status == 0 {
+				status = http.StatusForbidden
+			}
+			http.Error(w, "Forbidden by Security Policy (WAF)", status)
+			return
+		}
+	} else {
+		observe(tx.Decision())
+	}
+
+	if !t.cfg.EnableResponseInspection {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	t.inspectResponse(next, w, r, tx, observePhase)
+}
+
+// inspectResponse streams the upstream response through the engine.
+//
+// The response is streamed rather than buffered: the previous implementation
+// accumulated the entire upstream response in memory before writing any of it,
+// which is an unbounded allocation keyed on upstream behaviour and breaks
+// server-sent events and any long-lived stream.
+//
+// The cost of streaming is that headers are committed before the body is seen,
+// so a response-body match can no longer change the status code. It truncates
+// the response instead, which is the honest trade: the leaked bytes stop
+// either way, and a client that received a 200 with a truncated body is
+// strictly better off than one that waited for the whole thing to be buffered.
+func (t wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r *http.Request, tx *gwaf.Transaction, observePhase func(gwaf.Decision, string)) {
+	// Narrow what the origin may answer in before the request goes
+	// upstream: an encoding this build cannot undo would hand the
+	// response phase an opaque stream and every data-leak rule would
+	// match nothing. The client's own value goes back afterwards, so
+	// access logs and fingerprinting still see the real request.
+	prevAE, hadAE := forceInspectableEncoding(r.Header)
+
+	ww := &wafResponseWriter{
+		ResponseWriter: w,
+		tx:             tx,
+		auditOnly:      t.cfg.AuditOnly,
+		onDecision:     func(d gwaf.Decision) { observePhase(d, wafPhaseResponse) },
+		bufLimit:       responseBufferLimit(t.cfg),
+		encDecodable:   true,
+		routeID:        t.cfg.RouteID,
+		dlpAction:      t.cfg.DLPAction,
+		redactor:       t.redactor,
+	}
+	next.ServeHTTP(ww, r)
+	ww.finish()
+	ww.release()
+	restoreAcceptEncoding(r.Header, prevAE, hadAE)
+}
 func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	clientIP := request.GetClientIP(r, true)
 	category := "general"

@@ -26,6 +26,15 @@ type PolicyConfig struct {
 }
 
 // Policy returns a middleware that evaluates CEL expressions against the request and auth context.
+// compiledRule is one policy expression, compiled once when the route is
+// built. Package-scoped rather than local to Policy so the evaluation of a
+// single rule can be a function of its own.
+type compiledRule struct {
+	ast     *cel.Ast
+	program cel.Program
+	msg     string
+}
+
 func Policy(cfg PolicyConfig) (kind.Middleware, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("request", cel.MapType(cel.StringType, cel.DynType)),
@@ -33,12 +42,6 @@ func Policy(cfg PolicyConfig) (kind.Middleware, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CEL env: %w", err)
-	}
-
-	type compiledRule struct {
-		ast     *cel.Ast
-		program cel.Program
-		msg     string
 	}
 
 	var compiledRules []compiledRule
@@ -60,48 +63,73 @@ func Policy(cfg PolicyConfig) (kind.Middleware, error) {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			data := map[string]any{
-				"request": map[string]any{
-					"method": r.Method,
-					"path":   r.URL.Path,
-					"host":   r.Host,
-					"query":  r.URL.Query(),
-					// Headers could be large, maybe just a few?
-					// For now, include them all for "production ready" completeness.
-					"header": r.Header,
-				},
-				"auth": getAuthClaims(r),
-			}
-
-			for _, cr := range compiledRules {
-				out, _, err := cr.program.Eval(data)
-				if err != nil {
-					httputil.WriteJSONError(w, http.StatusInternalServerError, "Policy evaluation error", err.Error())
-					return
-				}
-
-				if out.Type() != types.BoolType {
-					httputil.WriteJSONError(w, http.StatusInternalServerError, "Policy must return boolean", "")
-					return
-				}
-
-				if !out.Value().(bool) {
-					msg := cr.msg
-					if msg == "" {
-						msg = "Access denied by policy"
-					}
-					httputil.WriteJSONError(w, http.StatusForbidden, msg, "")
-					return
-				}
-			}
-
-			next.ServeHTTP(w, r)
+			servePolicy(compiledRules, next, w, r)
 		})
 	}, nil
+}
+
+// policyInput builds the CEL activation for one request.
+func policyInput(r *http.Request) map[string]any {
+	return map[string]any{
+		"request": map[string]any{
+			"method": r.Method,
+			"path":   r.URL.Path,
+			"host":   r.Host,
+			"query":  r.URL.Query(),
+			// Headers could be large, maybe just a few?
+			// For now, include them all for "production ready" completeness.
+			"header": r.Header,
+		},
+		"auth": getAuthClaims(r),
+	}
+}
+
+func servePolicy(rules []compiledRule, next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if kind.IsCorsPreflight(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	data := policyInput(r)
+	for _, cr := range rules {
+		if !evalPolicyRule(cr, data, w) {
+			return
+		}
+	}
+
+	next.ServeHTTP(w, r)
+}
+
+// evalPolicyRule reports whether the request may continue past this rule. It
+// writes its own refusal, so every path that is not a clear allow denies: an
+// expression that fails to evaluate is a policy whose verdict is unknown, and
+// unknown is not permission.
+func evalPolicyRule(cr compiledRule, data map[string]any, w http.ResponseWriter) bool {
+	out, _, err := cr.program.Eval(data)
+	if err != nil {
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "Policy evaluation error", err.Error())
+		return false
+	}
+
+	// Comma-ok rather than a bare assertion: a rule whose result is not a bool
+	// must refuse, and a bare assertion would panic on the request goroutine
+	// instead -- the CEL type check above is a second opinion, not a guarantee
+	// about the concrete Go value behind it.
+	allowed, ok := out.Value().(bool)
+	if out.Type() != types.BoolType || !ok {
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "Policy must return boolean", "")
+		return false
+	}
+
+	if !allowed {
+		msg := cr.msg
+		if msg == "" {
+			msg = "Access denied by policy"
+		}
+		httputil.WriteJSONError(w, http.StatusForbidden, msg, "")
+		return false
+	}
+	return true
 }
 
 // getAuthClaims returns the verified claims the auth middleware stored, as a

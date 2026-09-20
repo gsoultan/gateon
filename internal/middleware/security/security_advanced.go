@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/httputil"
@@ -57,12 +56,6 @@ var fileUploadScanner = scanner.NewScanner([]string{
 	".php", ".phtml", ".php3", ".php4", ".php5", ".phps", ".asp", ".aspx", ".jsp", ".jspx", ".sh", ".py", ".pl", ".exe", ".cgi", ".htaccess",
 })
 
-var securityBufferPool = sync.Pool{
-	New: func() any {
-		return bytes.NewBuffer(make([]byte, 0, 64*1024))
-	},
-}
-
 // Tarpit middleware introduces progressive delays for suspicious clients based on fingerprint reputation.
 func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) kind.Middleware {
 	return func(next http.Handler) http.Handler {
@@ -96,49 +89,62 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) kind.Midd
 
 // Entropy middleware calculates Shannon entropy of the request body.
 // It uses a non-destructive read to avoid interfering with proxying.
+// entropyPeekLimit is how much of a body the entropy check reads. Larger than
+// bodyPeekLimit because a Shannon estimate over 64KB of a large upload is not
+// a useful signal, and bounded because "measure the body" would otherwise mean
+// "hold whatever arrives".
+const entropyPeekLimit = 1024 * 1024
+
 func Entropy(threshold float64, routeID string) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := request.GetClientIP(r, true)
-			if httputil.IsLoopback(ip) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			rs := request.GetRequestState(r)
-			if rs != nil && rs.ExecutedEntropy {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			if r.Body != nil && r.Body != http.NoBody {
-				// We limit entropy check to 1MB to avoid memory issues and latency
-				limit := int64(1024 * 1024)
-				// Use a TeeReader-like approach but we need the data before next.ServeHTTP
-				// if we want to block, but here we only record threats.
-				// To keep it non-destructive and simple:
-				peeked, err := io.ReadAll(io.LimitReader(r.Body, limit))
-				if err == nil && len(peeked) > 0 {
-					// Restore body for downstream
-					r.Body = struct {
-						io.Reader
-						io.Closer
-					}{
-						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
-						Closer: r.Body,
-					}
-
-					e := entropy.Calculate(peeked)
-					if e > threshold {
-						recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20, fmt.Sprintf("High entropy payload detected: %.2f", e), routeID, "advanced", "HIGH", kind.ActionDetected)
-					}
-				}
-				if rs != nil {
-					rs.ExecutedEntropy = true
-				}
-			}
-			next.ServeHTTP(w, r)
+			checkEntropy(next, w, r, threshold, routeID)
 		})
 	}
+}
+
+func checkEntropy(next http.Handler, w http.ResponseWriter, r *http.Request, threshold float64, routeID string) {
+	if httputil.IsLoopback(request.GetClientIP(r, true)) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	rs := request.GetRequestState(r)
+	if rs != nil && rs.ExecutedEntropy {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	// A request with no body is not marked executed, which is deliberate
+	// rather than an oversight: there was nothing to measure, so a later
+	// instance of this middleware in the same chain has lost nothing.
+	if r.Body == nil || r.Body == http.NoBody {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	peeked, err := io.ReadAll(io.LimitReader(r.Body, entropyPeekLimit))
+	if err == nil && len(peeked) > 0 {
+		// Restore body for downstream.
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+			Closer: r.Body,
+		}
+
+		if e := entropy.Calculate(peeked); e > threshold {
+			recordAdvancedThreat(r, "high_entropy_payload", (e-threshold)*20,
+				fmt.Sprintf("High entropy payload detected: %.2f", e),
+				routeID, "advanced", kind.SeverityHigh, kind.ActionDetected)
+		}
+	}
+
+	if rs != nil {
+		rs.ExecutedEntropy = true
+	}
+	next.ServeHTTP(w, r)
 }
 
 func serveTrollResponse(w http.ResponseWriter) {
@@ -188,227 +194,207 @@ func recordAdvancedThreat(r *http.Request, ttype string, score float64, details 
 }
 
 // XSSRecognition middleware scans request for common XSS patterns.
-// This provides lightweight recognition without full WAF overhead.
-func XSSRecognition(routeID string) kind.Middleware {
+// scanRequestSources feeds the attacker-controlled parts of a request to match,
+// cheapest first, and stops at the first hit. It is shared by the three
+// recognition middlewares below, which used to carry a copy of this traversal
+// each -- three copies that had already drifted, since only two of them looked
+// at headers.
+//
+// The body is peeked under a cap and then put back, so the upstream still
+// receives a complete body. bodyPeekLimit bounds what an attacker can make the
+// gateway hold: without it, "scan the body" means "buffer whatever arrives".
+func scanRequestSources(r *http.Request, includeHeaders bool, match func(data, source string) bool) {
+	if r.URL.RawQuery != "" {
+		query, _ := url.QueryUnescape(r.URL.RawQuery)
+		if match(query, "query string") {
+			return
+		}
+	}
+
+	if includeHeaders {
+		for _, h := range recognitionHeaders {
+			val := r.Header.Get(h)
+			if val == "" {
+				continue
+			}
+			if match(val, "header "+h) {
+				return
+			}
+		}
+	}
+
+	if r.Body == nil || r.Body == http.NoBody {
+		return
+	}
+	peeked, err := io.ReadAll(io.LimitReader(r.Body, bodyPeekLimit))
+	if err != nil || len(peeked) == 0 {
+		return
+	}
+	// Restore the body for downstream.
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+		Closer: r.Body,
+	}
+	match(string(peeked), "request body")
+}
+
+// recognitionHeaders are the headers worth scanning: client-written, routinely
+// reflected into logs and dashboards, and not otherwise validated.
+var recognitionHeaders = [...]string{"User-Agent", "Referer", "X-Forwarded-For"}
+
+// bodyPeekLimit caps how much of a request body a recognition middleware will
+// read before deciding. Named rather than repeated at each call site, because
+// three copies of a resource bound is three chances to raise one of them.
+const bodyPeekLimit = 64 * 1024
+
+// recognition is one pattern-recognition middleware: the corpus it scans for,
+// what it calls a hit, and the RequestState flag that stops it running twice
+// in a chain that lists it more than once.
+type recognition struct {
+	routeID    string
+	label      string
+	threatType string
+	category   string
+	severity   string
+	score      float64
+	headers    bool
+	find       func(string) []string
+	done       func(*request.RequestState) bool
+	markDone   func(*request.RequestState)
+}
+
+func (rc recognition) middleware() kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := request.GetClientIP(r, true)
-			if httputil.IsLoopback(ip) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			rs := request.GetRequestState(r)
-			if rs != nil && rs.ExecutedXSS {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			var details string
-			found := false
-
-			// Check query parameters (unescaped)
-			if r.URL.RawQuery != "" {
-				query, _ := url.QueryUnescape(r.URL.RawQuery)
-				if matches := xssScanner.FindAll(query); len(matches) > 0 {
-					found = true
-					details = fmt.Sprintf("XSS pattern(s) '%s' found in query string", strings.Join(matches, ", "))
-				}
-			}
-
-			// Check common headers
-			if !found {
-				for _, h := range []string{"User-Agent", "Referer", "X-Forwarded-For"} {
-					val := r.Header.Get(h)
-					if val == "" {
-						continue
-					}
-					if matches := xssScanner.FindAll(val); len(matches) > 0 {
-						found = true
-						details = fmt.Sprintf("XSS pattern(s) '%s' found in header %s", strings.Join(matches, ", "), h)
-						break
-					}
-				}
-			}
-
-			// Check body if small or if we can peek it safely
-			if !found && r.Body != nil && r.Body != http.NoBody {
-				buf := securityBufferPool.Get().(*bytes.Buffer)
-				buf.Reset()
-				defer securityBufferPool.Put(buf)
-
-				// Peek up to 64KB
-				peeked, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
-				if err == nil && len(peeked) > 0 {
-					// Restore body for downstream
-					r.Body = struct {
-						io.Reader
-						io.Closer
-					}{
-						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
-						Closer: r.Body,
-					}
-
-					if matches := xssScanner.FindAll(string(peeked)); len(matches) > 0 {
-						found = true
-						details = fmt.Sprintf("XSS pattern(s) '%s' found in request body", strings.Join(matches, ", "))
-					}
-				}
-			}
-
-			if found {
-				recordAdvancedThreat(r, "xss_detected", 50, details, routeID, "xss", "CRITICAL", kind.ActionDetected)
-			}
-
-			if rs != nil {
-				rs.ExecutedXSS = true
-			}
-
-			next.ServeHTTP(w, r)
+			rc.serve(next, w, r)
 		})
 	}
 }
 
-// SQLiRecognition middleware scans request for common SQLi patterns.
-func SQLiRecognition(routeID string) kind.Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := request.GetClientIP(r, true)
-			if httputil.IsLoopback(ip) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			rs := request.GetRequestState(r)
-			if rs != nil && rs.ExecutedSQLI {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			var details string
-			found := false
-
-			if r.URL.RawQuery != "" {
-				query, _ := url.QueryUnescape(r.URL.RawQuery)
-				if matches := sqliScanner.FindAll(query); len(matches) > 0 {
-					found = true
-					details = fmt.Sprintf("SQLi pattern(s) '%s' found in query string", strings.Join(matches, ", "))
-				}
-			}
-
-			if !found && r.Body != nil && r.Body != http.NoBody {
-				peeked, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
-				if err == nil && len(peeked) > 0 {
-					r.Body = struct {
-						io.Reader
-						io.Closer
-					}{
-						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
-						Closer: r.Body,
-					}
-
-					if matches := sqliScanner.FindAll(string(peeked)); len(matches) > 0 {
-						found = true
-						details = fmt.Sprintf("SQLi pattern(s) '%s' found in request body", strings.Join(matches, ", "))
-					}
-				}
-			}
-
-			if found {
-				recordAdvancedThreat(r, "sqli_detected", 60, details, routeID, "sqli", "CRITICAL", kind.ActionDetected)
-			}
-
-			if rs != nil {
-				rs.ExecutedSQLI = true
-			}
-
-			next.ServeHTTP(w, r)
-		})
+func (rc recognition) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if httputil.IsLoopback(request.GetClientIP(r, true)) {
+		next.ServeHTTP(w, r)
+		return
 	}
+
+	rs := request.GetRequestState(r)
+	if rs != nil && rc.done != nil && rc.done(rs) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	var details string
+	scanRequestSources(r, rc.headers, func(data, source string) bool {
+		matches := rc.find(data)
+		if len(matches) == 0 {
+			return false
+		}
+		details = fmt.Sprintf("%s pattern(s) '%s' found in %s",
+			rc.label, strings.Join(matches, ", "), source)
+		return true
+	})
+
+	if details != "" {
+		recordAdvancedThreat(r, rc.threatType, rc.score, details, rc.routeID,
+			rc.category, rc.severity, kind.ActionDetected)
+	}
+
+	if rs != nil && rc.markDone != nil {
+		rc.markDone(rs)
+	}
+
+	next.ServeHTTP(w, r)
+}
+
+// XSSRecognition middleware scans request for common XSS patterns.
+func XSSRecognition(routeID string) kind.Middleware {
+	return recognition{
+		routeID: routeID, label: "XSS", threatType: "xss_detected",
+		category: "xss", severity: kind.SeverityCritical, score: 50, headers: true,
+		find:     xssScanner.FindAll,
+		done:     func(rs *request.RequestState) bool { return rs.ExecutedXSS },
+		markDone: func(rs *request.RequestState) { rs.ExecutedXSS = true },
+	}.middleware()
+}
+
+// SQLiRecognition middleware scans request for common SQLi patterns.
+//
+// Headers are deliberately not scanned here, matching the behaviour this
+// middleware has always had: a User-Agent carrying `' OR 1=1` is noise on
+// nearly every gateway, and the WAF covers the case that is not.
+func SQLiRecognition(routeID string) kind.Middleware {
+	return recognition{
+		routeID: routeID, label: "SQLi", threatType: "sqli_detected",
+		category: "sqli", severity: kind.SeverityCritical, score: 60, headers: false,
+		find:     sqliScanner.FindAll,
+		done:     func(rs *request.RequestState) bool { return rs.ExecutedSQLI },
+		markDone: func(rs *request.RequestState) { rs.ExecutedSQLI = true },
+	}.middleware()
+}
+
+// threatCorpus is one scanner in ThreatRecognition's battery, with the verdict
+// a hit produces. Ordered: the first match wins, so the more specific corpora
+// have to precede the generic one.
+type threatCorpus struct {
+	find            func(string) []string
+	noun            string
+	threatType      string
+	severity        string
+	queryOrBodyOnly bool
+}
+
+var threatCorpora = []threatCorpus{
+	{find: genericAttackScanner.FindAll, noun: "Attack", threatType: "generic_attack", severity: kind.SeverityHigh},
+	{find: gamblingScanner.FindAll, noun: "Gambling related", threatType: "gambling_detected", severity: kind.SeverityMedium},
+	{find: phpScanner.FindAll, noun: "PHP vulnerability", threatType: "php_vulnerability", severity: kind.SeverityCritical},
+	// A filename is only suspicious where a filename can do something. In a
+	// User-Agent it is a string; in a query or a body it is an upload attempt.
+	{find: fileUploadScanner.FindAll, noun: "Malicious file extension", threatType: "file_upload_attempt", severity: kind.SeverityCritical, queryOrBodyOnly: true},
 }
 
 // ThreatRecognition middleware scans request for various common attack patterns (RCE, Prototype Pollution, Gambling, PHP vuln, etc.)
 func ThreatRecognition(routeID string) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := request.GetClientIP(r, true)
-			if httputil.IsLoopback(ip) {
+			if httputil.IsLoopback(request.GetClientIP(r, true)) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			var details string
-			found := false
-			attackType := "generic_attack"
-			severity := "HIGH"
 
-			// Check common patterns in Query, Headers, and Body
-			check := func(data string, source string) bool {
-				if matches := genericAttackScanner.FindAll(data); len(matches) > 0 {
-					found = true
-					attackType = "generic_attack"
-					severity = "HIGH"
-					details = fmt.Sprintf("Attack pattern(s) '%s' found in %s", strings.Join(matches, ", "), source)
-					return true
+			var details, threatType, severity string
+			scanRequestSources(r, true, func(data, source string) bool {
+				c, matches, ok := matchThreatCorpora(data, source)
+				if !ok {
+					return false
 				}
-				if matches := gamblingScanner.FindAll(data); len(matches) > 0 {
-					found = true
-					attackType = "gambling_detected"
-					severity = "MEDIUM"
-					details = fmt.Sprintf("Gambling related pattern(s) '%s' found in %s", strings.Join(matches, ", "), source)
-					return true
-				}
-				if matches := phpScanner.FindAll(data); len(matches) > 0 {
-					found = true
-					attackType = "php_vulnerability"
-					severity = "CRITICAL"
-					details = fmt.Sprintf("PHP vulnerability pattern(s) '%s' found in %s", strings.Join(matches, ", "), source)
-					return true
-				}
-				if matches := fileUploadScanner.FindAll(data); len(matches) > 0 {
-					// Only flag if it looks like a filename in a relevant place
-					if strings.Contains(source, "query string") || strings.Contains(source, "body") {
-						found = true
-						attackType = "file_upload_attempt"
-						severity = "CRITICAL"
-						details = fmt.Sprintf("Malicious file extension(s) '%s' found in %s", strings.Join(matches, ", "), source)
-						return true
-					}
-				}
-				return false
-			}
+				threatType, severity = c.threatType, c.severity
+				details = fmt.Sprintf("%s pattern(s) '%s' found in %s",
+					c.noun, strings.Join(matches, ", "), source)
+				return true
+			})
 
-			if r.URL.RawQuery != "" {
-				query, _ := url.QueryUnescape(r.URL.RawQuery)
-				check(query, "query string")
-			}
-
-			if !found {
-				for _, h := range []string{"User-Agent", "Referer", "X-Forwarded-For"} {
-					if val := r.Header.Get(h); val != "" {
-						if check(val, "header "+h) {
-							break
-						}
-					}
-				}
-			}
-
-			if !found && r.Body != nil && r.Body != http.NoBody {
-				peeked, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
-				if err == nil && len(peeked) > 0 {
-					r.Body = struct {
-						io.Reader
-						io.Closer
-					}{
-						Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
-						Closer: r.Body,
-					}
-					check(string(peeked), "request body")
-				}
-			}
-
-			if found {
-				recordAdvancedThreat(r, attackType, 70, details, routeID, "advanced", severity, kind.ActionDetected)
+			if details != "" {
+				recordAdvancedThreat(r, threatType, 70, details, routeID, "advanced", severity, kind.ActionDetected)
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// matchThreatCorpora returns the first corpus that fires on data.
+func matchThreatCorpora(data, source string) (threatCorpus, []string, bool) {
+	fromQueryOrBody := strings.Contains(source, "query string") || strings.Contains(source, "body")
+	for _, c := range threatCorpora {
+		if c.queryOrBodyOnly && !fromQueryOrBody {
+			continue
+		}
+		if matches := c.find(data); len(matches) > 0 {
+			return c, matches, true
+		}
+	}
+	return threatCorpus{}, nil, false
 }

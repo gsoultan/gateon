@@ -119,7 +119,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		security.HoneypotGlobal(deps.GlobalStore),
-		security.GeoIPGlobal(deps.GlobalStore),
+		security.GeoIPGlobal(ctx, deps.GlobalStore),
 	}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))

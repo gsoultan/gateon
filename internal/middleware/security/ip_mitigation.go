@@ -56,56 +56,59 @@ func IPMitigation() kind.Middleware {
 }
 
 // UserMitigation returns a middleware that blocks requests from mitigated JA4+ fingerprints.
+// unmitigatedPaths are fetched by browsers and crawlers without a user ever
+// asking, so a mitigated fingerprint refusing them produces phantom requests
+// that break security isolation in e2e tests and confuse production triage.
+var unmitigatedPaths = map[string]bool{
+	"/favicon.ico": true,
+	"/robots.txt":  true,
+	"/sitemap.xml": true,
+}
+
 func UserMitigation() kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			// Skip mitigation checks for non-functional assets (favicon, robots.txt, etc.)
-			// to avoid phantom requests breaking security isolation in E2E tests and production.
-			path := r.URL.Path
-			if path == "/favicon.ico" || path == "/robots.txt" || path == "/sitemap.xml" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			rs := request.GetRequestState(r)
-			var ja4plus string
-			if rs != nil {
-				ja4plus = rs.JA4Plus
-			}
-
-			if ja4plus != "" {
-				if telemetry.IsUserMitigated(ja4plus) {
-					w.WriteHeader(http.StatusForbidden)
-					_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
-
-					// Use resolved client IP from RequestState if available.
-					clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-					if rs != nil && rs.ClientRemoteAddr != "" {
-						clientIP = rs.ClientRemoteAddr
-					}
-
-					// Record threat for visibility in dashboard
-					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-						Type:        "user_mitigation",
-						SourceIP:    clientIP,
-						Category:    "threat_intel",
-						Severity:    kind.SeverityHigh,
-						ActionTaken: kind.ActionBlocked,
-						Details:     "Request blocked due to mitigated user fingerprint (JA4+)",
-						Fingerprint: ja4plus,
-						RequestURI:  r.URL.RequestURI(),
-						Method:      r.Method,
-						UserAgent:   r.UserAgent(),
-					}))
-					return
-				}
-			}
-
-			next.ServeHTTP(w, r)
+			serveUserMitigation(next, w, r)
 		})
 	}
+}
+
+func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if kind.IsCorsPreflight(r) || unmitigatedPaths[r.URL.Path] {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	rs := request.GetRequestState(r)
+	var ja4plus string
+	if rs != nil {
+		ja4plus = rs.JA4Plus
+	}
+	if ja4plus == "" || !telemetry.IsUserMitigated(ja4plus) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
+
+	// Use resolved client IP from RequestState if available.
+	clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+	if rs != nil && rs.ClientRemoteAddr != "" {
+		clientIP = rs.ClientRemoteAddr
+	}
+
+	// Record threat for visibility in dashboard
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+		Type:        "user_mitigation",
+		SourceIP:    clientIP,
+		Category:    "threat_intel",
+		Severity:    kind.SeverityHigh,
+		ActionTaken: kind.ActionBlocked,
+		Details:     "Request blocked due to mitigated user fingerprint (JA4+)",
+		Fingerprint: ja4plus,
+		RequestURI:  r.URL.RequestURI(),
+		Method:      r.Method,
+		UserAgent:   r.UserAgent(),
+	}))
 }

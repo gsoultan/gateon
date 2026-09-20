@@ -15,17 +15,17 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
+// withState attaches a RequestState the way the chain would.
+func withState(req *http.Request, rs *request.RequestState) *http.Request {
+	return req.WithContext(request.WithState(req.Context(), rs))
+}
+
 // TestReputationBlockRecordsDashboardSeverity: the blocker wrote "HIGH" into
 // the threat record. Every consumer compares lower-case — the correlation
 // engine ranked it below "low", the SIEM formatter mapped it to informational,
 // the dashboard's "critical or high" tile never counted it — so the most widely
 // applied refusal in the gateway was invisible to everything that acts on
 // severity.
-// withState attaches a RequestState the way the chain would.
-func withState(req *http.Request, rs *request.RequestState) *http.Request {
-	return req.WithContext(request.WithState(req.Context(), rs))
-}
-
 func TestReputationBlockRecordsDashboardSeverity(t *testing.T) {
 	// A threat only reaches the alerting handler through the store's consumer,
 	// so a store is needed; it lives in the test's own directory.
