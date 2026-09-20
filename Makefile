@@ -103,7 +103,7 @@ test-race:
 	go test -race ./...
 
 ## test-fp: measure the WAF's false-positive rate against the benign corpus.
-##          Replays internal/middleware/security/testdata/benign/*.jsonl — traffic ordinary
+##          Replays internal/middleware/security/waf/testdata/benign/*.jsonl — traffic ordinary
 ##          applications serve — at paranoia 1 and 2 and fails on any refusal that
 ##          is not recorded.
 ##
@@ -134,11 +134,17 @@ test-race:
 ##          before anything filters the output.
 test-fp:
 	@mkdir -p dist
-	@go test ./internal/middleware/security/ \
+#          Both packages: the corpus lives with the engine in .../security/waf,
+#          the chain harness with the middleware chain in .../security. Naming
+#          only one is how this gate goes green without running.
+	@go test ./internal/middleware/security/ ./internal/middleware/security/waf/ \
 		-run 'TestWAFFalsePositives|TestBenignCorpus|TestChain' -v \
 		> dist/fp.txt 2>&1; \
 		status=$$?; \
 		grep -E 'corpus at PL|chain false-positive|FALSE POSITIVE|RECORDED FALSE|^(ok|FAIL)' dist/fp.txt || true; \
+		grep -q 'chain false-positive' dist/fp.txt || { \
+			echo "test-fp: the chain false-positive harness did not run — check the package list above"; \
+			exit 1; }; \
 		exit $$status
 
 ## bench: run benchmarks with allocation tracking, sampled for benchstat.

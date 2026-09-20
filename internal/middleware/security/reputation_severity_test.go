@@ -21,6 +21,11 @@ import (
 // the dashboard's "critical or high" tile never counted it — so the most widely
 // applied refusal in the gateway was invisible to everything that acts on
 // severity.
+// withState attaches a RequestState the way the chain would.
+func withState(req *http.Request, rs *request.RequestState) *http.Request {
+	return req.WithContext(request.WithState(req.Context(), rs))
+}
+
 func TestReputationBlockRecordsDashboardSeverity(t *testing.T) {
 	// A threat only reaches the alerting handler through the store's consumer,
 	// so a store is needed; it lives in the test's own directory.

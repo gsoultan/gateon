@@ -220,6 +220,52 @@ giant switch.
   builds all ten against nothing but the shared `Deps` type -- which the WAF
   reads all five fields of, against three for the rest of the package.
 
+- **Stage 4a (`security/waf`) is done, 2026-09-20:** the ten `waf_*.go` files
+  and their twenty-nine test files moved to `internal/middleware/security/waf`,
+  taking `security` from 34 to 24 and landing `waf` exactly at the ten-file
+  limit with no pin at all. This is the follow-on the Stage 4 pin promised, in
+  the commit after it, on the evidence the pin cited.
+
+  `Deps` stayed in `security` and `waf` imports its parent for it. The two are
+  siblings otherwise -- `security` references nothing in `waf` -- so there is no
+  cycle, and the alternative was worse: `Deps` carries `config.GlobalConfigStore`,
+  `ebpf.Manager` and `*reputation.IPReputationStore`, and putting it in `kind`
+  would have turned the shared vocabulary package, which today imports only
+  logger, request and httputil, into a dependency hub. `isGRPCRoute` had to be
+  exported to cross the boundary and gained the doc comment it always needed:
+  the route type comes from gateon's own route config, never from a request
+  header, because a client that could name its own transport could ask for the
+  WAF's gRPC relaxations.
+
+  The split found a duplicate vocabulary that had been invisible while it sat
+  in one package. `waf_telemetry.go` defined `severityCritical/High/Medium/Low`
+  and `actionBlocked/Detected` as unexported constants used across the whole
+  security group, while `kind` already exported the same six strings. The local
+  copy's own doc comment made the argument against itself -- "a typo in one of
+  them is a threat that silently stops matching rather than a compile error" is
+  a reason to have one definition, not two. Deleted; eleven files now read
+  `kind.SeverityHigh`.
+
+  `request.WithState` is new for the same reason. `internal/request` owns
+  `RequestStateContextKey` and exports `WithCountry` and `WithID` for the other
+  two values it owns, but the state key had a reader and no writer -- so the
+  test helper that injected one spelled out `context.WithValue` against the raw
+  key, and the split would have duplicated that into a second package. The
+  writer belongs next to the reader.
+
+  Three test-helper splits, all named in both halves so neither can be quietly
+  dropped: `TestResponseWriterWrappersPreserveHijacker` has now been divided
+  twice and its three halves cross-reference each other; `security_test.go`'s
+  two WAF tests moved and `TestBotManagement_Challenge` stayed; `okOrigin` and
+  `withState` are three-line helpers now written once per package.
+
+  `make test-fp` is the part worth remembering. Repointing it at the moved
+  corpus quietly stopped it running the chain harness, which lives with the
+  middleware chain rather than the engine -- the target went green having run
+  half of what it claims to. It now names both packages and fails if the chain
+  line is absent from its own output, because a gate that can pass without
+  running is worse than no gate.
+
 ## Related
 
 - ADR-0001 — layered architecture and the ≤10-files rule.

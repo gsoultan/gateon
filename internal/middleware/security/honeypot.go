@@ -383,8 +383,8 @@ func recordHoneypotThreat(r *http.Request, trapPath string) {
 		RouteID:     routeID,
 		RequestURI:  r.URL.Path,
 		Category:    "deception",
-		Severity:    severityHigh,
-		ActionTaken: actionBlocked,
+		Severity:    kind.SeverityHigh,
+		ActionTaken: kind.ActionBlocked,
 	}))
 }
 

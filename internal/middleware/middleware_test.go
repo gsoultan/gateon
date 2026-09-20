@@ -17,6 +17,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gwaf/rules"
@@ -532,7 +533,7 @@ func TestIPFilter_WithXForwardedFor(t *testing.T) {
 }
 
 func TestWAF_PassesNormalRequest(t *testing.T) {
-	mw, err := security.WAF(security.WAFConfig{})
+	mw, err := wafmw.WAF(wafmw.WAFConfig{})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
 	}
@@ -550,7 +551,7 @@ func TestWAF_PassesNormalRequest(t *testing.T) {
 }
 
 func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
-	mw, err := security.WAF(security.WAFConfig{
+	mw, err := wafmw.WAF(wafmw.WAFConfig{
 		ExtraRules: rules.Set{{
 			ID:       1000001,
 			Phase:    types.PhaseRequestBody,

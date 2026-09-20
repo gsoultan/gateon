@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/redis"
@@ -46,7 +47,7 @@ func (f *Factory) SetRouteType(t string) {
 	f.routeType = t
 }
 
-// isGRPCRoute reports whether this factory builds for a gRPC-typed route.
+// IsGRPCRoute reports whether this factory builds for a gRPC-typed route.
 // securityDeps gathers what the security middlewares used to read off the
 // factory directly. Built here rather than at each call site so the field list
 // exists once: the WAF needs four of them and a mistake in one literal would be
@@ -64,10 +65,10 @@ func (f *Factory) securityDeps() security.Deps {
 // CreateGlobalWAF stays a factory method because the router calls it, and the
 // router has no business assembling the security package's dependencies.
 func (f *Factory) CreateGlobalWAF() (kind.Middleware, error) {
-	return security.NewGlobalWAF(f.securityDeps())
+	return waf.NewGlobalWAF(f.securityDeps())
 }
 
-func (f *Factory) isGRPCRoute() bool {
+func (f *Factory) IsGRPCRoute() bool {
 	return strings.EqualFold(strings.TrimSpace(f.routeType), "grpc")
 }
 
@@ -151,7 +152,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "forwardauth":
 		return f.createForwardAuth(cfg)
 	case "waf":
-		return security.NewWAF(cfg, f.securityDeps())
+		return waf.NewWAF(cfg, f.securityDeps())
 	case "oidc":
 		return f.createOIDCProxy(cfg)
 	case "graphql_firewall":
