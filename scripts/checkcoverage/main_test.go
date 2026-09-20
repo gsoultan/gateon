@@ -130,3 +130,46 @@ func TestGreenRunParsesUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// TestUpdatePreservesTheBaselineHeader guards the reasoning, not the numbers.
+//
+// -update used to overwrite the file with an eight-line default, discarding
+// everything else. By the time this was noticed the baseline carried a hundred
+// and thirteen lines of it: why four packages were mislabelled "-" while CI was
+// covering them, and a per-package account of every recorded drop and the
+// change that caused it. A later reader leans on that to tell a real regression
+// from an artefact, and a single -update would have taken all of it with
+// nothing to notice -- the numbers it protects would still have looked right.
+func TestUpdatePreservesTheBaselineHeader(t *testing.T) {
+	const header = `# Why internal/telemetry sits at 51.5%: the pooled metrics
+# snapshot was removed because readers still held it.
+#
+# Do not raise this without reading that first.
+`
+	got := existingHeader([]byte(header + "\ngithub.com/x/y 12.3%\n"))
+	for _, want := range []string{"pooled metrics", "Do not raise this"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("header lost %q; -update would discard the reasoning that\n"+
+				"explains every recorded figure, and the file would still look correct", want)
+		}
+	}
+	if strings.Contains(got, "github.com/x/y") {
+		t.Error("header captured an entry; the block ends at the first non-comment line")
+	}
+	if !strings.HasSuffix(got, "\n\n") {
+		t.Errorf("header = %q, want it to end with one blank line before the entries", got)
+	}
+}
+
+// TestUpdateFallsBackToTheDefaultHeader covers a baseline that does not exist
+// yet -- the caller passes nil when the read fails -- which must still be born
+// explaining itself.
+func TestUpdateFallsBackToTheDefaultHeader(t *testing.T) {
+	if got := existingHeader(nil); got != "" {
+		t.Errorf("existingHeader on an absent baseline = %q, want empty so the "+
+			"caller writes the default", got)
+	}
+	if !strings.Contains(defaultHeader, "may not fall more than") {
+		t.Error("defaultHeader no longer states the rule it enforces")
+	}
+}

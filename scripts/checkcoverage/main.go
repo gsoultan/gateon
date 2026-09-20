@@ -261,16 +261,64 @@ func readBaseline() (map[string]result, error) {
 	return out, sc.Err()
 }
 
+// defaultHeader is written only when the baseline does not exist yet.
+const defaultHeader = `# Per-package coverage floors, enforced by scripts/checkcoverage.
+# A package may not lose its tests, and may not fall more than
+# 1.0 percentage point below the figure recorded here.
+#
+# "-" means the package has no tests. That is a debt, not a
+# licence: it is recorded so the count cannot quietly grow.
+# Regenerate with:
+#   go test -cover ./... | go run ./scripts/checkcoverage -update
+
+`
+
+// existingHeader returns the leading comment block of the current baseline.
+//
+// It exists because -update used to overwrite the file with the eight-line
+// default above, discarding everything else. By 2026-09-20 that was a hundred
+// and thirteen lines: why four packages were mislabelled "-" while CI was
+// covering them, and a per-package account of every recorded drop and the
+// change that caused it. All of it reasoning a later reader leans on to tell a
+// real regression from an artefact -- and all of it one -update away from
+// gone, with nothing to notice, because the numbers it protects would still
+// look right.
+// Takes the file contents rather than a path on purpose. A path parameter put
+// an os.ReadFile on a variable in a package that otherwise only reads one
+// constant location, which is a G304 gosec cannot see through and would have
+// needed a #nosec to silence. Passing bytes keeps the read at the constant,
+// leaves this a pure function of its input, and makes the test a string
+// comparison instead of a filesystem one.
+func existingHeader(data []byte) string {
+	var b strings.Builder
+	for _, line := range strings.Split(string(data), "\n") {
+		t := strings.TrimSpace(line)
+		if t != "" && !strings.HasPrefix(t, "#") {
+			break
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	header := b.String()
+	if strings.TrimSpace(header) == "" {
+		return ""
+	}
+	// One blank line between the block and the first entry, however the
+	// existing file happened to be spaced.
+	return strings.TrimRight(header, "\n") + "\n\n"
+}
+
 func writeBaseline(got []result) error {
 	var b strings.Builder
-	b.WriteString("# Per-package coverage floors, enforced by scripts/checkcoverage.\n")
-	b.WriteString("# A package may not lose its tests, and may not fall more than\n")
-	b.WriteString("# 1.0 percentage point below the figure recorded here.\n")
-	b.WriteString("#\n")
-	b.WriteString("# \"-\" means the package has no tests. That is a debt, not a\n")
-	b.WriteString("# licence: it is recorded so the count cannot quietly grow.\n")
-	b.WriteString("# Regenerate with:\n")
-	b.WriteString("#   go test -cover ./... | go run ./scripts/checkcoverage -update\n\n")
+	var header string
+	if data, err := os.ReadFile(baselinePath); err == nil {
+		header = existingHeader(data)
+	}
+	if header == "" {
+		header = defaultHeader
+	}
+	b.WriteString(header)
 
 	for _, r := range got {
 		if r.hasTests {
