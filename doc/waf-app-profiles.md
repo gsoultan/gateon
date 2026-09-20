@@ -121,7 +121,7 @@ false positives the corpus records at paranoia 1, taking the measured rate from
 **2.96% to 1.23%**. Two gwaf rule narrowings (v0.6.1) took it to **0.49%**.
 
 At paranoia 2 the same scoping plus the two exemption halves above took it from
-**4.94% to 1.98%**. See `internal/middleware/testdata/benign/` and
+**4.94% to 1.98%**. See `internal/middleware/security/waf/testdata/benign/` and
 `make test-fp`.
 
 The cases it does not close are recorded with reasons in that corpus. One is

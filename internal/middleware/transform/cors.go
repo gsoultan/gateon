@@ -1,0 +1,216 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package transform
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/alerting"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/rs/cors"
+	"go.opentelemetry.io/otel/trace"
+)
+
+// CORSConfig defines the configuration for the CORS middleware.
+type CORSConfig struct {
+	AllowedOrigins   []string
+	AllowedMethods   []string
+	AllowedHeaders   []string
+	ExposedHeaders   []string
+	AllowCredentials bool
+	MaxAge           int
+	Debug            bool
+}
+
+// corsOptions maps a CORSConfig onto the rs/cors options struct. Extracted so
+// that EvaluateCORS judges a request with exactly the options the served
+// middleware is built from: a second mapping is how the Diagnostics validator
+// drifted away from what the proxy enforces in the first place.
+func corsOptions(cfg CORSConfig) cors.Options {
+	return cors.Options{
+		AllowedOrigins:   cfg.AllowedOrigins,
+		AllowedMethods:   cfg.AllowedMethods,
+		AllowedHeaders:   cfg.AllowedHeaders,
+		ExposedHeaders:   cfg.ExposedHeaders,
+		AllowCredentials: cfg.AllowCredentials,
+		MaxAge:           cfg.MaxAge,
+		Debug:            cfg.Debug,
+	}
+}
+
+// CORS returns a middleware that handles Cross-Origin Resource Sharing (CORS).
+func CORS(cfg CORSConfig) kind.Middleware {
+	opts := corsOptions(cfg)
+	// Built once. cors.New normalises the origin, method and header lists,
+	// and doing that on every request allocated route-derivable state on the
+	// hot path. A recording span still gets its own instance, because its
+	// logger is bound to the span.
+	base := cors.New(opts)
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Context().Value(kind.CORSHandledContextKey) != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			c := base
+			if span := trace.SpanFromContext(r.Context()); span.IsRecording() {
+				traced := opts
+				traced.Debug = true
+				traced.Logger = &spanLogger{span: span, rs: request.GetRequestState(r)}
+				c = cors.New(traced)
+			}
+
+			// Detect invalid CORS request. The library's own matcher decides,
+			// so a wildcard pattern such as https://*.example.com is judged
+			// here the same way it is on the response; the exact-match helper
+			// this used reported every request from such an origin as a
+			// violation while the response allowed it.
+			if origin := r.Header.Get("Origin"); origin != "" && !c.OriginAllowed(r) {
+				reportCORSViolation(r, origin, cfg)
+			}
+
+			// Mark as handled for downstream middlewares
+			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r = r.WithContext(context.WithValue(r.Context(), kind.CORSHandledContextKey, true))
+				next.ServeHTTP(w, r)
+			})
+
+			c.Handler(wrappedNext).ServeHTTP(w, r)
+		})
+	}
+}
+
+// BypassCORS returns a middleware that automatically handles CORS preflight requests
+// by allowing all origins, methods, and headers. It is intended to be used as a
+// fallback when no specific CORS middleware is configured, restoring v1.5.0 behavior.
+//
+// Credentials are deliberately NOT allowed here. Reflecting an arbitrary Origin
+// and setting Access-Control-Allow-Credentials: true is the one CORS
+// combination that is always unsafe — it lets any page on the internet issue
+// credentialed requests to every backend behind the gateway and read the
+// replies. A route that genuinely needs credentials must declare an explicit
+// origin allowlist through CORS(CORSConfig), where the operator names the
+// origins being trusted.
+func BypassCORS() kind.Middleware {
+	c := cors.New(cors.Options{
+		AllowOriginFunc:  func(origin string) bool { return true },
+		AllowedMethods:   defaultCORSMethods(),
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: false,
+		MaxAge:           86400,
+	})
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Context().Value(kind.CORSHandledContextKey) != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Mark as handled for downstream middlewares
+			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r = r.WithContext(context.WithValue(r.Context(), kind.CORSHandledContextKey, true))
+				next.ServeHTTP(w, r)
+			})
+
+			c.Handler(wrappedNext).ServeHTTP(w, r)
+		})
+	}
+}
+
+// GlobalCORS returns a middleware that handles CORS preflight requests
+// permissively for the entire entrypoint. It ensures that even early
+// security blocks (like IP shunning) include the necessary CORS headers
+// to avoid confusing browser-level errors. Unlike BypassCORS, it does
+// not set kind.CORSHandledContextKey, allowing route-specific CORS middlewares
+// to override its settings for the actual request.
+//
+// This runs on every HTTP entrypoint, so it is the widest-reach CORS policy in
+// the gateway and must stay credential-free. Its job is to make browser errors
+// legible on paths that never reach a route — not to grant cross-origin access
+// to authenticated data. Reflecting an arbitrary Origin with
+// Access-Control-Allow-Credentials: true would do exactly that, for every
+// backend at once, and browsers honour the reflected form even though they
+// reject the equivalent `*`. Credentials belong to CORS(CORSConfig), where an
+// operator has named the origins.
+func GlobalCORS() kind.Middleware {
+	c := cors.New(cors.Options{
+		AllowOriginFunc: func(origin string) bool { return true },
+		AllowedMethods:  defaultCORSMethods(),
+		AllowedHeaders:  []string{"*"},
+		ExposedHeaders: []string{
+			"Grpc-Status", "Grpc-Message", "Grpc-Encoding",
+			"Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding",
+			"X-Accept-Response-Streaming", kind.HeaderAuthorization, "Content-Type",
+		},
+		AllowCredentials: false,
+		MaxAge:           86400,
+	})
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// For preflights, handle them here permissively and return immediately.
+			if kind.IsCorsPreflight(r) {
+				c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(w, r)
+				return
+			}
+
+			// For actual requests, apply permissive headers but let downstream handlers override.
+			c.Handler(next).ServeHTTP(w, r)
+		})
+	}
+}
+
+// corsRouteID resolves the identifier of the route that handled the request.
+// The matched route's ID is preferred because it is what the remediation API
+// looks up; RouteName is only a display label and may hold the entrypoint
+// fallback when the route has no name.
+func corsRouteID(rs *request.RequestState) string {
+	if rs == nil {
+		return ""
+	}
+	if route, ok := rs.MatchedRoute.(interface{ GetId() string }); ok && route.GetId() != "" {
+		return route.GetId()
+	}
+	return rs.RouteName
+}
+
+func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
+	routeID := corsRouteID(request.GetRequestState(r))
+
+	threat := telemetry.SecurityThreat{
+		ID:             uuid.New().String(),
+		Type:           "cors_violation",
+		Category:       "security",
+		Severity:       kind.SeverityMedium,
+		SourceIP:       request.GetClientIP(r, false),
+		RequestURI:     r.RequestURI,
+		RouteID:        routeID,
+		Details:        fmt.Sprintf("Invalid CORS request from origin: %s. Allowed origins: %v", origin, cfg.AllowedOrigins),
+		Time:           time.Now(),
+		UserAgent:      r.UserAgent(),
+		Method:         r.Method,
+		Recommendation: "Verify if this origin should be allowed in the CORS configuration for this route.",
+	}
+
+	threat = telemetry.RecordSecurityThreatWithJA4(r, threat)
+	telemetry.RecordSecurityThreat(threat)
+	alerting.HandleThreat(&threat)
+}
+
+// defaultCORSMethods returns the method list used by every built-in CORS
+// preset. A function rather than a package-level slice: the value is handed to
+// per-route configs that may append to it, and a shared backing array would let
+// one route's edit surface on another.
+func defaultCORSMethods() []string {
+	return []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"}
+}

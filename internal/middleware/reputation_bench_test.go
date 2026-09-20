@@ -9,12 +9,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/request"
 )
 
 // BenchmarkReputationBlocker measures the middleware that runs on every route.
 //
-// router.go appends ReputationBlocker to every chain unconditionally, so
+// router.go appends security.ReputationBlocker to every chain unconditionally, so
 // whatever this costs is paid by every proxied request whether or not the
 // deployment has ever seen an attack. Scoping the identity to the client's
 // network added work here — an address parse and a string build where there used
@@ -26,7 +27,7 @@ import (
 // 4KB bufio.Reader per iteration, which is how the infrastructure-chain
 // benchmark in this package came to be 94% harness (see bench_test.go).
 func BenchmarkReputationBlocker(b *testing.B) {
-	h := ReputationBlocker("bench-route")(
+	h := security.ReputationBlocker("bench-route")(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -60,7 +61,7 @@ func BenchmarkReputationBlocker(b *testing.B) {
 // blocker, proof-of-work, the tarpit, deception — so this is what all but the
 // first of them pay.
 func BenchmarkReputationBlocker_Cached(b *testing.B) {
-	h := ReputationBlocker("bench-route-cached")(
+	h := security.ReputationBlocker("bench-route-cached")(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))

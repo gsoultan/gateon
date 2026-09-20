@@ -21,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/art"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -31,100 +32,6 @@ func Fingerprinting() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = telemetry.WithFingerprint(r)
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// IPMitigation returns a middleware that blocks requests from mitigated IPs.
-func IPMitigation() Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			rs := GetRequestState(r)
-			trustCloudflare := config.EffectiveTrustCloudflare()
-			ip := request.GetClientIP(r, trustCloudflare)
-			if rs != nil && rs.ClientRemoteAddr != "" {
-				ip = rs.ClientRemoteAddr
-			}
-
-			if ip != "" && telemetry.IsIPMitigated(ip) {
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte("Forbidden: IP Shunned by Security Policy"))
-
-				// Record threat for visibility in dashboard
-				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-					Type:        "ip_mitigation",
-					SourceIP:    ip,
-					Category:    "threat_intel",
-					Severity:    severityHigh,
-					ActionTaken: actionBlocked,
-					Details:     "Request blocked due to mitigated IP (IP Shunning)",
-					RequestURI:  r.URL.RequestURI(),
-					Method:      r.Method,
-					UserAgent:   r.UserAgent(),
-				}))
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// UserMitigation returns a middleware that blocks requests from mitigated JA4+ fingerprints.
-func UserMitigation() Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			// Skip mitigation checks for non-functional assets (favicon, robots.txt, etc.)
-			// to avoid phantom requests breaking security isolation in E2E tests and production.
-			path := r.URL.Path
-			if path == "/favicon.ico" || path == "/robots.txt" || path == "/sitemap.xml" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			rs := GetRequestState(r)
-			var ja4plus string
-			if rs != nil {
-				ja4plus = rs.JA4Plus
-			}
-
-			if ja4plus != "" {
-				if telemetry.IsUserMitigated(ja4plus) {
-					w.WriteHeader(http.StatusForbidden)
-					_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
-
-					// Use resolved client IP from RequestState if available.
-					clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-					if rs != nil && rs.ClientRemoteAddr != "" {
-						clientIP = rs.ClientRemoteAddr
-					}
-
-					// Record threat for visibility in dashboard
-					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-						Type:        "user_mitigation",
-						SourceIP:    clientIP,
-						Category:    "threat_intel",
-						Severity:    severityHigh,
-						ActionTaken: actionBlocked,
-						Details:     "Request blocked due to mitigated user fingerprint (JA4+)",
-						Fingerprint: ja4plus,
-						RequestURI:  r.URL.RequestURI(),
-						Method:      r.Method,
-						UserAgent:   r.UserAgent(),
-					}))
-					return
-				}
-			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -229,12 +136,12 @@ func populateFingerprints(r *http.Request, rs *request.RequestState) {
 	if ja4 == "" {
 		if r.TLS != nil {
 			// Try to get fingerprints from our internal map first
-			if conn, ok := r.Context().Value(ConnContextKey).(net.Conn); ok {
-				f := GetFingerprints(conn)
+			if conn, ok := r.Context().Value(security.ConnContextKey).(net.Conn); ok {
+				f := security.GetFingerprints(conn)
 				ja4 = f.JA4
 			}
 			if ja4 == "" {
-				f := GetFingerprintsByAddr(r.RemoteAddr)
+				f := security.GetFingerprintsByAddr(r.RemoteAddr)
 				ja4 = f.JA4
 			}
 		}

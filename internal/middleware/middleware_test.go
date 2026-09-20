@@ -16,7 +16,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/time/rate"
 
+	"github.com/gsoultan/gateon/internal/middleware/security"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gwaf/rules"
 	"github.com/gsoultan/gwaf/rules/op"
 	"github.com/gsoultan/gwaf/types"
@@ -325,13 +328,13 @@ func TestRateLimiter(t *testing.T) {
 }
 
 func TestRewrite(t *testing.T) {
-	cfg := RewriteConfig{
+	cfg := transform.RewriteConfig{
 		Path: "/new-path",
 		AddQuery: map[string]string{
 			"foo": "bar",
 		},
 	}
-	mw := Rewrite(cfg)
+	mw := transform.Rewrite(cfg)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/new-path" {
 			t.Errorf("expected /new-path, got %s", r.URL.Path)
@@ -411,7 +414,7 @@ func TestCompress_AlgorithmGzipSkipsWhenUnavailable(t *testing.T) {
 }
 
 func TestAddPrefix(t *testing.T) {
-	mw := AddPrefix("/api")
+	mw := transform.AddPrefix("/api")
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/users" {
 			t.Errorf("expected /api/users, got %s", r.URL.Path)
@@ -469,7 +472,7 @@ func TestForwardAuth(t *testing.T) {
 }
 
 func TestStripPrefix(t *testing.T) {
-	mw := StripPrefix([]string{"/api"})
+	mw := transform.StripPrefix([]string{"/api"})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/users" {
 			t.Errorf("expected /users, got %s", r.URL.Path)
@@ -530,7 +533,7 @@ func TestIPFilter_WithXForwardedFor(t *testing.T) {
 }
 
 func TestWAF_PassesNormalRequest(t *testing.T) {
-	mw, err := WAF(WAFConfig{})
+	mw, err := wafmw.WAF(wafmw.WAFConfig{})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
 	}
@@ -548,7 +551,7 @@ func TestWAF_PassesNormalRequest(t *testing.T) {
 }
 
 func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
-	mw, err := WAF(WAFConfig{
+	mw, err := wafmw.WAF(wafmw.WAFConfig{
 		ExtraRules: rules.Set{{
 			ID:       1000001,
 			Phase:    types.PhaseRequestBody,
@@ -582,7 +585,7 @@ func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
 }
 
 func TestTurnstile_MissingTokenReturns400(t *testing.T) {
-	mw := Turnstile(TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	mw := security.Turnstile(security.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -596,7 +599,7 @@ func TestTurnstile_MissingTokenReturns400(t *testing.T) {
 }
 
 func TestTurnstile_SkipsGet(t *testing.T) {
-	mw := Turnstile(TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	mw := security.Turnstile(security.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -610,7 +613,7 @@ func TestTurnstile_SkipsGet(t *testing.T) {
 }
 
 func TestGeoIP_RequiresDBPath(t *testing.T) {
-	_, err := GeoIP(GeoIPConfig{})
+	_, err := security.GeoIP(security.GeoIPConfig{})
 	if err == nil {
 		t.Error("expected error when db_path is empty")
 	}
@@ -691,7 +694,7 @@ func hmacSHA256Hex(secret, body []byte) string {
 }
 
 func TestWasm_EmptyBlob(t *testing.T) {
-	_, err := Wasm(t.Context(), nil)
+	_, err := transform.Wasm(t.Context(), nil)
 	if err == nil {
 		t.Error("expected error for empty wasm blob")
 	}
@@ -700,7 +703,7 @@ func TestWasm_EmptyBlob(t *testing.T) {
 func TestWasm_MinimalValid(t *testing.T) {
 	// Minimal WASM module header: \x00asm\x01\x00\x00\x00
 	minimalWasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
-	mw, err := Wasm(t.Context(), minimalWasm)
+	mw, err := transform.Wasm(t.Context(), minimalWasm)
 	if err != nil {
 		t.Fatalf("failed to create wasm middleware: %v", err)
 	}

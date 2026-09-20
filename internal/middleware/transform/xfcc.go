@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package transform
+
+import (
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
+)
+
+// XFCCConfig configures the X-Forwarded-Client-Cert middleware.
+type XFCCConfig struct {
+	ForwardBy      bool `json:"forward_by"`
+	ForwardHash    bool `json:"forward_hash"`
+	ForwardSubject bool `json:"forward_subject"`
+	ForwardURI     bool `json:"forward_uri"`
+	ForwardDNS     bool `json:"forward_dns"`
+}
+
+// XFCC returns a middleware that extracts client certificate details and propagates them via X-Forwarded-Client-Cert header.
+func XFCC(cfg XFCCConfig) kind.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Never trust a client-supplied X-Forwarded-Client-Cert: the gateway
+			// is the sole authority for this header. Strip any inbound value
+			// unconditionally before doing anything else, so a request that
+			// arrives without a verified client cert can never inject identity.
+			r.Header.Del("X-Forwarded-Client-Cert")
+
+			// No verified peer certificate means there is no identity to
+			// forward -- and the inbound header is already gone, so the
+			// upstream sees absence rather than a claim.
+			if kind.IsCorsPreflight(r) || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if v := xfccHeader(cfg, r.TLS.PeerCertificates[0]); v != "" {
+				// Set only the gateway-derived value; do not concatenate any
+				// (already-stripped) inbound header.
+				r.Header.Set("X-Forwarded-Client-Cert", v)
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// xfccHeader builds the Envoy-format X-Forwarded-Client-Cert value for a
+// verified peer certificate, or "" if the config asks for nothing this
+// certificate can supply.
+//
+// It is a pure function of (config, certificate) so the branches below sit at
+// one level instead of three: gocognit charges a branch by its depth, and a
+// middleware is two closures deep before it reads a single field.
+func xfccHeader(cfg XFCCConfig, cert *x509.Certificate) string {
+	var parts []string
+
+	if cfg.ForwardHash {
+		// Envoy defines Hash as the SHA-256 of the DER certificate, which
+		// is what upstreams pin against. cert.Signature is the issuer's
+		// signature over the certificate — a different value entirely.
+		sum := sha256.Sum256(cert.Raw)
+		parts = append(parts, fmt.Sprintf("Hash=%s", hex.EncodeToString(sum[:])))
+	}
+
+	if cfg.ForwardSubject {
+		parts = append(parts, fmt.Sprintf("Subject=%q", cert.Subject.String()))
+	}
+
+	if cfg.ForwardURI && len(cert.URIs) > 0 {
+		parts = append(parts, fmt.Sprintf("URI=%s", cert.URIs[0].String()))
+	}
+
+	if cfg.ForwardDNS && len(cert.DNSNames) > 0 {
+		parts = append(parts, fmt.Sprintf("DNS=%s", cert.DNSNames[0]))
+	}
+
+	return strings.Join(parts, ";")
+}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -29,7 +30,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 	telemetry.MarkUserMitigated(ja4_2, "JA4", "Test mitigation JA4", "TestCategory")
 	telemetry.MarkUserMitigated(ja4_2+"_"+ja4h, "JA4", "Test mitigation JA4+JA4H", "TestCategory")
 
-	mw := UserMitigation()
+	mw := security.UserMitigation()
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -118,7 +119,7 @@ func TestIPMitigationMiddleware(t *testing.T) {
 	ip := "1.2.3.4"
 	telemetry.MarkIPMitigated(ip, "Test mitigation")
 
-	mw := IPMitigation()
+	mw := security.IPMitigation()
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

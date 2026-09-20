@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -81,7 +83,7 @@ func TestHeadersMiddlewareEmitsHSTSOnAWrittenResponse(t *testing.T) {
 }
 
 func TestPolicySeesJWTClaims(t *testing.T) {
-	mw, err := Policy(PolicyConfig{Rules: []PolicyRule{{Expression: `auth.sub == "alice"`, Message: "not alice"}}})
+	mw, err := security.Policy(security.PolicyConfig{Rules: []security.PolicyRule{{Expression: `auth.sub == "alice"`, Message: "not alice"}}})
 	if err != nil {
 		t.Fatalf("build policy: %v", err)
 	}
@@ -103,7 +105,7 @@ func TestSchemaValidationRejectsAnUncompilableSchemaAtConfigTime(t *testing.T) {
 }
 
 func BenchmarkCORSActualRequest(b *testing.B) {
-	h := CORS(CORSConfig{
+	h := transform.CORS(transform.CORSConfig{
 		AllowedOrigins: []string{"https://app.example.com"},
 		AllowedMethods: []string{"GET", "POST"},
 		AllowedHeaders: []string{"Content-Type", "Authorization"},

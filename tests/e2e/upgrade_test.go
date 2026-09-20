@@ -71,14 +71,13 @@ func TestUpgradeWarnsAboutConfigThatUsedToWork(t *testing.T) {
 
 	cmd := exec.Command(binary)
 	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(),
+	cmd.Env = env.GatewayEnv(
 		"GLOBAL_CONFIG_FILE="+filepath.Join(env.Dir, "config/global.json"),
 		"ROUTES_FILE="+filepath.Join(env.Dir, "config/routes.json"),
 		"SERVICES_FILE="+filepath.Join(env.Dir, "config/services.json"),
 		"ENTRYPOINTS_FILE="+filepath.Join(env.Dir, "config/entrypoints.json"),
 		"MIDDLEWARES_FILE="+filepath.Join(env.Dir, "config/middlewares.json"),
 		"TLS_OPTIONS_FILE="+filepath.Join(env.Dir, "config/tls_options.json"),
-		"GATEON_TEST=1",
 	)
 
 	// The warning goes to the log, so the log is what has to be inspected. An
@@ -148,14 +147,13 @@ func TestUpgradeIsSilentForAConfigThatSetsTheFlags(t *testing.T) {
 
 	cmd := exec.Command(binary)
 	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(),
+	cmd.Env = env.GatewayEnv(
 		"GLOBAL_CONFIG_FILE="+path,
 		"ROUTES_FILE="+filepath.Join(env.Dir, "config/routes.json"),
 		"SERVICES_FILE="+filepath.Join(env.Dir, "config/services.json"),
 		"ENTRYPOINTS_FILE="+filepath.Join(env.Dir, "config/entrypoints.json"),
 		"MIDDLEWARES_FILE="+filepath.Join(env.Dir, "config/middlewares.json"),
 		"TLS_OPTIONS_FILE="+filepath.Join(env.Dir, "config/tls_options.json"),
-		"GATEON_TEST=1",
 	)
 	var out2 strings.Builder
 	cmd.Stdout = &out2

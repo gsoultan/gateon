@@ -182,7 +182,7 @@ different reasons and one number cannot cover both.
 
 **Request content — the WAF.** 405 samples of traffic ordinary applications
 serve, replayed at paranoia 1 and 2
-(`internal/middleware/testdata/benign/*.jsonl`). Refusals that exist today carry
+(`internal/middleware/security/waf/testdata/benign/*.jsonl`). Refusals that exist today carry
 a written reason; the build fails on any new one, and also when a recorded one
 starts passing, so a fix is promoted rather than left in the file.
 

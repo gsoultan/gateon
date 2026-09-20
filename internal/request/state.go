@@ -84,6 +84,15 @@ func GetRequestStateFromContext(ctx context.Context) *RequestState {
 	return nil
 }
 
+// WithState returns ctx carrying rs, the writer half of
+// GetRequestStateFromContext. This package owns RequestStateContextKey and
+// already exports WithCountry and WithID for the other two values it owns; the
+// state key had a reader and no writer, so every caller that needed to inject
+// one spelled out context.WithValue against the raw key itself.
+func WithState(ctx context.Context, rs *RequestState) context.Context {
+	return context.WithValue(ctx, RequestStateContextKey{}, rs)
+}
+
 // Reset clears the state for reuse.
 func (rs *RequestState) Reset() {
 	rs.EntryPointID = ""

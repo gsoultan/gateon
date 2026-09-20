@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/router"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -257,7 +257,7 @@ func (s *ApiService) simulateCORS(r *http.Request, mw *gateonv1.Middleware, rout
 		}, nil
 	}
 
-	decision := middleware.EvaluateCORS(mw.Config, r)
+	decision := transform.EvaluateCORS(mw.Config, r)
 	outcome := describeCORS(decision, r)
 	outcome.suggestions = append(outcome.suggestions, corsCredentialWarnings(decision)...)
 
@@ -294,7 +294,7 @@ func (o *corsOutcome) deny(check, message, suggestion string) {
 // describeCORS narrates a decision in the order rs/cors evaluates it -- origin,
 // then method, then requested headers -- and stops at the check that refused,
 // because that is where the gateway stops too.
-func describeCORS(d middleware.CORSDecision, r *http.Request) corsOutcome {
+func describeCORS(d transform.CORSDecision, r *http.Request) corsOutcome {
 	out := corsOutcome{message: "CORS validation successful"}
 	origin := r.Header.Get(corsRequestOrigin)
 
@@ -327,7 +327,7 @@ func describeCORS(d middleware.CORSDecision, r *http.Request) corsOutcome {
 // describeCORSHeaders reports the preflight header check and the extras the
 // gateway would answer with. The reported values are read back off the response
 // the proxy would send, so they cannot drift from it.
-func describeCORSHeaders(out *corsOutcome, d middleware.CORSDecision, r *http.Request) {
+func describeCORSHeaders(out *corsOutcome, d transform.CORSDecision, r *http.Request) {
 	requested := r.Header.Get(corsRequestHeaders)
 	switch {
 	case !d.IsPreflight || requested == "":
@@ -361,7 +361,7 @@ func describeCORSHeaders(out *corsOutcome, d middleware.CORSDecision, r *http.Re
 // gateway honestly -- but the credentialed fetch still fails in the browser,
 // which is worth saying out loud. An empty origin list is the same trap: it
 // means every origin, which is the wildcard by another name.
-func corsCredentialWarnings(d middleware.CORSDecision) []string {
+func corsCredentialWarnings(d transform.CORSDecision) []string {
 	if !d.Policy.AllowCredentials || !slices.Contains(d.Policy.AllowedOrigins, "*") {
 		return nil
 	}

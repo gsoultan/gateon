@@ -372,7 +372,7 @@ else
 	echo "  ok - the browser-class identity stays inside internal/telemetry"
 fi
 
-note "9/9  handlers resolve the caller in one place"
+note "9/10 handlers resolve the caller in one place"
 # The management plane makes some authorization decisions itself rather than
 # through RequirePermission -- "admin or self" on the password change, "self
 # only" on 2FA setup. Those were written as:
@@ -416,6 +416,34 @@ if [ -n "$claims_hits" ]; then
 	printf '  type expected -- and continues to the privileged operation.\n'
 else
 	echo "  ok - handlers go through callerClaims/auditUser, not the raw key"
+fi
+
+note "10/10 threat severities use the vocabulary consumers read"
+# Every consumer of a SecurityThreat compares severity in lower case:
+# severityRank in internal/api lower-cases before it switches, the SIEM
+# formatter maps anything it does not recognise to informational, and the
+# dashboard's critical-or-high tile counts exact matches. So a middleware that
+# writes "HIGH" produces a threat that ranks below "low" and is counted by
+# nothing -- a refusal that happened and that no part of the product can see.
+#
+# This has now been found three separate times: the reputation blocker, then
+# the three recognition middlewares, then deception, pow and tls_binding. Each
+# was a live defect for months and each was silent, because a severity nothing
+# recognises produces no error anywhere. The constants live in
+# internal/middleware/kind; the check is that nobody writes the literal.
+sev_hits=$( (find internal cmd pkg -name '*.go' -not -name '*_test.go' -print0 |
+	xargs -0 grep -nE '"(CRITICAL|HIGH|MEDIUM|LOW)"' 2>/dev/null |
+	drop_comment_hits) || true)
+
+if [ -n "$sev_hits" ]; then
+	err "an upper-case severity literal reached a threat record"
+	printf '%s\n' "$sev_hits"
+	printf '  Use kind.SeverityCritical / SeverityHigh / SeverityMedium /\n'
+	printf '  SeverityLow. Consumers compare lower-case, so an upper-case\n'
+	printf '  severity ranks below "low" and the dashboard never counts it.\n'
+	printf '  Nothing errors; the refusal simply becomes invisible.\n'
+else
+	echo "  ok - severities come from kind, not from an upper-case literal"
 fi
 
 printf '\n'

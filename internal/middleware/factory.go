@@ -14,7 +14,10 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/yara"
@@ -44,8 +47,28 @@ func (f *Factory) SetRouteType(t string) {
 	f.routeType = t
 }
 
-// isGRPCRoute reports whether this factory builds for a gRPC-typed route.
-func (f *Factory) isGRPCRoute() bool {
+// IsGRPCRoute reports whether this factory builds for a gRPC-typed route.
+// securityDeps gathers what the security middlewares used to read off the
+// factory directly. Built here rather than at each call site so the field list
+// exists once: the WAF needs four of them and a mistake in one literal would be
+// invisible.
+func (f *Factory) securityDeps() security.Deps {
+	return security.Deps{
+		GlobalStore: f.globalStore,
+		EbpfManager: f.ebpfManager,
+		Reputation:  f.reputation,
+		DataDir:     f.dataDir,
+		RouteType:   f.routeType,
+	}
+}
+
+// CreateGlobalWAF stays a factory method because the router calls it, and the
+// router has no business assembling the security package's dependencies.
+func (f *Factory) CreateGlobalWAF() (kind.Middleware, error) {
+	return waf.NewGlobalWAF(f.securityDeps())
+}
+
+func (f *Factory) IsGRPCRoute() bool {
 	return strings.EqualFold(strings.TrimSpace(f.routeType), "grpc")
 }
 
@@ -72,25 +95,25 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "auth":
 		return f.createAuth(cfg)
 	case "headers":
-		return f.createHeaders(cfg)
+		return transform.NewHeaders(cfg)
 	case "forwardedheaders":
 		return ForwardedHeaders(ForwardedHeadersConfig{
 			Proto:              cfg["proto"],
 			TrustForwardHeader: parseBoolStrict(cfg["trust_forward_header"], false),
 		}), nil
 	case "rewrite":
-		return f.createRewrite(cfg)
+		return transform.NewRewrite(cfg)
 	case "addprefix":
-		return AddPrefix(cfg["prefix"]), nil
+		return transform.AddPrefix(cfg["prefix"]), nil
 	case "stripprefix":
 		prefixes := strings.Split(cfg["prefixes"], ",")
-		return StripPrefix(prefixes), nil
+		return transform.StripPrefix(prefixes), nil
 	case "stripprefixregex":
-		return StripPrefixRegex(cfg["regex"])
+		return transform.StripPrefixRegex(cfg["regex"])
 	case "replacepath":
-		return ReplacePath(cfg["path"]), nil
+		return transform.ReplacePath(cfg["path"]), nil
 	case "replacepathregex":
-		return ReplacePathRegex(cfg["pattern"], cfg["replacement"])
+		return transform.ReplacePathRegex(cfg["pattern"], cfg["replacement"])
 	case "accesslog":
 		return AccessLog(cmp.Or(cfg["route"], cfg["route_id"])), nil
 	case "metrics":
@@ -113,11 +136,11 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		attempts, _ := strconv.Atoi(cfg["attempts"])
 		return traffic.Retry(traffic.RetryConfig{Attempts: attempts}), nil
 	case "cors":
-		return f.createCORS(cfg)
+		return transform.NewCORS(cfg)
 	case "grpcweb":
 		return f.createGRPCWeb(cfg)
 	case "ipfilter":
-		return f.createIPFilter(cfg)
+		return security.NewIPFilter(cfg)
 	case "request_id":
 		return RequestID(), nil
 	case "cache":
@@ -129,31 +152,31 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "forwardauth":
 		return f.createForwardAuth(cfg)
 	case "waf":
-		return f.createWAF(cfg)
+		return waf.NewWAF(cfg, f.securityDeps())
 	case "oidc":
 		return f.createOIDCProxy(cfg)
 	case "graphql_firewall":
-		return f.createGraphQLFirewall(cfg)
+		return security.NewGraphQLFirewall(cfg)
 	case "bot_management":
-		return f.createBotManagement(cfg)
+		return security.NewBotManagement(cfg, f.securityDeps())
 	case "xss_recognition":
-		return XSSRecognition(routeID), nil
+		return security.XSSRecognition(routeID), nil
 	case "sqli_recognition":
-		return SQLiRecognition(routeID), nil
+		return security.SQLiRecognition(routeID), nil
 	case "threat_recognition":
-		return ThreatRecognition(routeID), nil
+		return security.ThreatRecognition(routeID), nil
 	case "schema_validation":
-		return SchemaValidation(SchemaValidationConfig{Schema: cfg["schema"]})
+		return security.SchemaValidation(security.SchemaValidationConfig{Schema: cfg["schema"]})
 	case "honeypot":
-		return Honeypot(parseHoneypotConfig(cfg)), nil
+		return security.NewHoneypot(cfg), nil
 	case "turnstile":
-		return f.createTurnstile(cfg)
+		return security.NewTurnstile(cfg)
 	case "geoip":
-		return f.createGeoIP(cfg)
+		return security.NewGeoIP(cfg)
 	case "hmac":
 		return f.createHMAC(cfg)
 	case "deception":
-		return Deception(DeceptionConfig{
+		return security.Deception(security.DeceptionConfig{
 			HoneypotPaths:        kind.ParseListStrict(cmp.Or(cfg["honeypot_paths"], cfg["paths"])),
 			InjectInvisibleLinks: parseBoolStrict(cmp.Or(cfg["inject_invisible_links"], "true"), true),
 			InvisibleLinkPaths:   kind.ParseListStrict(cmp.Or(cfg["invisible_link_paths"], cfg["honey_links"])),
@@ -167,10 +190,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		baseDelay, _ := time.ParseDuration(cfg["base_delay"])
 		maxDelay, _ := time.ParseDuration(cfg["max_delay"])
 		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
-		return Tarpit(baseDelay, maxDelay, threshold), nil
+		return security.Tarpit(baseDelay, maxDelay, threshold), nil
 	case "entropy":
 		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
-		return Entropy(threshold, routeID), nil
+		return security.Entropy(threshold, routeID), nil
 	case "pow":
 		difficulty, _ := strconv.Atoi(cfg["difficulty"])
 		if difficulty == 0 {
@@ -180,13 +203,13 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		if threshold == 0 {
 			threshold = 20.0
 		}
-		return Pow(difficulty, threshold, cfg["secret"], routeID), nil
+		return security.Pow(difficulty, threshold, cfg["secret"], routeID), nil
 	case "policy":
-		return f.createPolicy(cfg)
+		return security.NewPolicy(cfg)
 	case "xfcc":
-		return f.createXFCC(cfg)
+		return transform.NewXFCC(cfg)
 	case "transform":
-		return BodyTransform(BodyTransformConfig{
+		return transform.BodyTransform(transform.BodyTransformConfig{
 			RequestSearch:     cfg["request_search"],
 			RequestReplace:    cfg["request_replace"],
 			ResponseSearch:    cfg["response_search"],
@@ -200,7 +223,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		if cookieName == "" {
 			cookieName = "session"
 		}
-		return TlsBinding(cookieName), nil
+		return security.TlsBinding(cookieName), nil
 	case "security_headers":
 		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
 	case "circuit_breaker":
@@ -216,7 +239,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 			RouteID:        routeID,
 		}), nil
 	case "wasm":
-		return Wasm(context.Background(), m.WasmBlob)
+		return transform.Wasm(context.Background(), m.WasmBlob)
 	default:
 		return nil, fmt.Errorf("unknown middleware type: %s", m.Type)
 	}
@@ -227,7 +250,7 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
 	maxAge, _ := strconv.Atoi(cfg["max_age"])
 
-	corsCfg := CORSConfig{
+	corsCfg := transform.CORSConfig{
 		AllowedOrigins:   origins,
 		AllowCredentials: allowCredentials,
 		MaxAge:           maxAge,
@@ -239,14 +262,14 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 		cfg["preset"] = "grpc-web"
 	}
 
-	corsCfg = ApplyCORSPreset(cfg, corsCfg)
+	corsCfg = transform.ApplyCORSPreset(cfg, corsCfg)
 
 	// If after applying presets and config we still have no origins, return default permissive
 	if len(corsCfg.AllowedOrigins) == 0 && cfg["preset"] == "" {
-		return GRPCWeb(), nil
+		return transform.GRPCWeb(), nil
 	}
 
-	return GRPCWeb(corsCfg), nil
+	return transform.GRPCWeb(corsCfg), nil
 }
 
 func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
@@ -278,7 +301,7 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 	maxConcurrentScans, _ := strconv.Atoi(cfg["max_concurrent_scans"])
 	maxScanBytes, _ := strconv.ParseInt(cfg["max_scan_bytes"], 10, 64)
 
-	return FileSecurity(FileSecurityConfig{
+	return security.FileSecurity(security.FileSecurityConfig{
 		EnableClamAV:           parseBoolStrict(cfg["enable_clamav"], false),
 		ClamAVAddr:             clamavAddr,
 		BlockedMimeTypes:       kind.ParseListStrict(cfg["blocked_mime_types"]),

@@ -146,6 +146,126 @@ giant switch.
   change this ADR does not describe. Verified with `go build ./...`,
   `go vet ./...` and `go test -race ./...` -- 62 packages, all green.
 
+- **Stage 3 (`transform`) is done, 2026-09-20:** cors, headers, rewrite, xfcc,
+  grpcweb, wasm and the body transform moved to
+  `internal/middleware/transform` -- 11 files, taking `internal/middleware`
+  from **54 to 43**. Two stages in one day took it from 67 to 43; the pin
+  follows in the same commit, and `transform` is pinned at 12 on the same
+  reasoning as `traffic`.
+
+  The probe technique from Stage 2 is now the way to start one of these. A
+  scratch package built from the group reported two undefined symbols, and
+  resolving those revealed the next wave -- the errors arrive in layers, so the
+  probe has to be run more than once before the number means anything. Total
+  came to seven, all already solved by earlier stages except two.
+
+  Both of those were files in the wrong place, and in opposite directions.
+  `headerAccept` was defined in `cors_factory.go`, which moved, and used by
+  `pow.go`, which stayed -- the same shape as `parseListStrict` in Stage 2, so
+  it is a pattern rather than an accident. Both header constants now live in
+  `kind`, which also removes the local copy Stage 2 made. `spanLogger` was the
+  mirror image: defined in `otel.go`, which stays, used only by `cors.go` and
+  `grpcweb.go`, which move, and referenced by nothing in its own file. It moved
+  with the group it serves.
+
+  Two tests stayed in `package middleware` because they build through
+  `f.Create` -- `transform_test.go` in full, and the transform entry of
+  `TestResponseWriterWrappersPreserveHijacker`, which was split rather than
+  dropped: that guard exists because a wrapper forgetting to forward Hijack
+  broke WebSocket upgrades in production, and exporting an internal wrapper so
+  another package could name it would be a worse trade than two tests.
+
+  Verified with `go build ./...`, `go vet ./...` and `go test -race ./...` --
+  63 packages, all green.
+
+- **Stage 4 (`security`) is done, 2026-09-20:** the WAF, the challenge
+  middlewares, fingerprint identity, network access control, API-shape
+  validation and content inspection moved to `internal/middleware/security`
+  -- 34 files, taking `internal/middleware` from **43 to 12**. Sixty-seven to
+  twelve in three stages over one day.
+
+  This stage is where the ADR's own partition turned out to be wrong. Stages 2
+  and 3 named groups that were genuinely one concern each, and their pins say
+  so. "Security" is not one concern: it is six that share an adjective. The pin
+  at 34 records that rather than dressing it up, and the ratchet will not let
+  it grow while the follow-on split is outstanding.
+
+  Nine `Factory` methods became package-level constructors taking a `Deps`
+  struct -- `GlobalStore`, `EbpfManager`, `Reputation`, `DataDir`, `RouteType`,
+  the five factory fields this group actually read. `CreateGlobalWAF` is the
+  one that stayed a method, because `internal/router` calls it and the router
+  has no business assembling another package's dependencies; it is now a
+  two-line delegation.
+
+  That delegation is the stage's one real risk and it has its own test. The
+  behavioural WAF tests moved to sit against `NewGlobalWAF`, which left nothing
+  checking that the factory forwards its fields -- and a field dropped from
+  `securityDeps()` still compiles, producing a global WAF built from a zero
+  value. For `GlobalStore` that means a gateway with the WAF enabled serving
+  every route unprotected, silently. `global_waf_wiring_test.go` asserts the
+  forwarding directly, and was negative-tested by deleting each field.
+
+  Two things the move broke and the suite caught. `testdata/benign` did not
+  follow the false-positive corpus into the new package, and the FP gate
+  refused to pass vacuously -- the guard written for exactly this, working. And
+  a blanket identifier rewrite put `security.` in front of prose inside
+  comments and test-failure strings ("the security.WAF store"); scrubbing it
+  needed a parser that could tell a comment from a source position, because
+  three of the hits were genuine cross-package references and had to stay.
+
+  The next extraction is the WAF cluster, and it is already proven cheap. The
+  ratchet's original text called those ten files blocked because they "all
+  reach for Middleware, Factory, RequestState and Chain, which are defined
+  elsewhere". This ADR moved exactly those, and a scratch-package probe now
+  builds all ten against nothing but the shared `Deps` type -- which the WAF
+  reads all five fields of, against three for the rest of the package.
+
+- **Stage 4a (`security/waf`) is done, 2026-09-20:** the ten `waf_*.go` files
+  and their twenty-nine test files moved to `internal/middleware/security/waf`,
+  taking `security` from 34 to 24 and landing `waf` exactly at the ten-file
+  limit with no pin at all. This is the follow-on the Stage 4 pin promised, in
+  the commit after it, on the evidence the pin cited.
+
+  `Deps` stayed in `security` and `waf` imports its parent for it. The two are
+  siblings otherwise -- `security` references nothing in `waf` -- so there is no
+  cycle, and the alternative was worse: `Deps` carries `config.GlobalConfigStore`,
+  `ebpf.Manager` and `*reputation.IPReputationStore`, and putting it in `kind`
+  would have turned the shared vocabulary package, which today imports only
+  logger, request and httputil, into a dependency hub. `isGRPCRoute` had to be
+  exported to cross the boundary and gained the doc comment it always needed:
+  the route type comes from gateon's own route config, never from a request
+  header, because a client that could name its own transport could ask for the
+  WAF's gRPC relaxations.
+
+  The split found a duplicate vocabulary that had been invisible while it sat
+  in one package. `waf_telemetry.go` defined `severityCritical/High/Medium/Low`
+  and `actionBlocked/Detected` as unexported constants used across the whole
+  security group, while `kind` already exported the same six strings. The local
+  copy's own doc comment made the argument against itself -- "a typo in one of
+  them is a threat that silently stops matching rather than a compile error" is
+  a reason to have one definition, not two. Deleted; eleven files now read
+  `kind.SeverityHigh`.
+
+  `request.WithState` is new for the same reason. `internal/request` owns
+  `RequestStateContextKey` and exports `WithCountry` and `WithID` for the other
+  two values it owns, but the state key had a reader and no writer -- so the
+  test helper that injected one spelled out `context.WithValue` against the raw
+  key, and the split would have duplicated that into a second package. The
+  writer belongs next to the reader.
+
+  Three test-helper splits, all named in both halves so neither can be quietly
+  dropped: `TestResponseWriterWrappersPreserveHijacker` has now been divided
+  twice and its three halves cross-reference each other; `security_test.go`'s
+  two WAF tests moved and `TestBotManagement_Challenge` stayed; `okOrigin` and
+  `withState` are three-line helpers now written once per package.
+
+  `make test-fp` is the part worth remembering. Repointing it at the moved
+  corpus quietly stopped it running the chain harness, which lives with the
+  middleware chain rather than the engine -- the target went green having run
+  half of what it claims to. It now names both packages and fails if the chain
+  line is absent from its own output, because a gate that can pass without
+  running is worse than no gate.
+
 ## Related
 
 - ADR-0001 — layered architecture and the ≤10-files rule.

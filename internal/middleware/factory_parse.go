@@ -16,8 +16,6 @@ func parseBool(s string, defaultVal bool) bool {
 	return s == "true" || s == "1" || s == "yes"
 }
 
-
-
 func parseBoolStrict(s string, defaultVal bool) bool {
 	if s == "" {
 		return defaultVal

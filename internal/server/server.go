@@ -32,7 +32,7 @@ type Server struct {
 	RedisClient   redis.Client
 	TLSManager    gtls.TLSManager
 	IPReputation  any // reputation.IPReputationStore
-	WafUpdater    any // middleware.WAFUpdater (interface to avoid cyclic import)
+	WafUpdater    any // security.WAFUpdater (interface to avoid cyclic import)
 	ClamAVManager any // security.ClamAVManager
 	WafRules      any // waf.Store
 	Phantom       phantom.PhantomCore

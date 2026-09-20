@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/middleware/security"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -25,7 +27,7 @@ func TestWAF_SecurityV2(t *testing.T) {
 		t.Fatalf("failed to seed store: %v", err)
 	}
 
-	mw, err := WAF(WAFConfig{
+	mw, err := wafmw.WAF(wafmw.WAFConfig{
 		WafRules:         store,
 		RequestBodyLimit: 1024 * 1024,
 	})
@@ -150,8 +152,8 @@ func TestRecognitionMiddlewares(t *testing.T) {
 
 	handler := Chain(
 		WithRequestState("test", "test", false),
-		SQLiRecognition("test"),
-		ThreatRecognition("test"),
+		security.SQLiRecognition("test"),
+		security.ThreatRecognition("test"),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

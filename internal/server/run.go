@@ -22,7 +22,9 @@ import (
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
@@ -64,9 +66,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		})
 	}
 	s.TLSManager = CreateTLSManager(s)
-	var wafUpdater *middleware.WAFUpdater
+	var wafUpdater *wafmw.WAFUpdater
 	if s.WafUpdater != nil {
-		wafUpdater = s.WafUpdater.(*middleware.WAFUpdater)
+		wafUpdater = s.WafUpdater.(*wafmw.WAFUpdater)
 	}
 	var clamavManager *security.ClamAVManager
 	if s.ClamAVManager != nil {
@@ -165,10 +167,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// context would make every origin lookup fail the moment shutdown began, so
 	// in-flight requests would lose their CORS answers mid-drain.
 	//nolint:contextcheck // no request context reaches this callback; see above.
-	middleware.SetRouteOriginProvider(func() []string {
+	wafmw.SetRouteOriginProvider(func() []string {
 		return config.RouteOrigins(context.Background(), s.RouteStore)
 	})
-	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger)
+	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, wafmw.WAFCacheInvalidator{}, s.Logger)
 	tlsOptService := dtls.NewService(s.TLSOptStore, proxyInvalidator, s.Logger)
 	canaryService := canary.NewService(ctx, serviceService, s.Logger)
 
@@ -184,7 +186,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	// Internal API only: gRPC-Web for the dashboard.
 	// We use our modern DefaultGRPCWebDetector which supports Connect and gRPC-Web.
-	internalAPI := middleware.NewDefaultGRPCWebDetector(grpcServer)
+	internalAPI := transform.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
 
 	// Register ConnectRPC handler for the internal API.

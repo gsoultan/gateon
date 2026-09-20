@@ -19,7 +19,7 @@ import (
 )
 
 // wafAutoUpdater is the minimal surface the supervisor needs to run the WAF
-// rule auto-update loop. *middleware.WAFUpdater satisfies it; the interface
+// rule auto-update loop. *security.WAFUpdater satisfies it; the interface
 // keeps the supervisor decoupled and testable.
 type wafAutoUpdater interface {
 	Start(ctx context.Context)
