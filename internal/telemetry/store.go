@@ -2629,25 +2629,6 @@ func FlushThreats() {
 	}
 }
 
-// GetSecurityThreats returns a paged list of security threats from the store,
-// including the request/response header and body blobs its Lite sibling omits.
-//
-// Nothing in production calls it today, and that is a gap rather than a reason
-// to delete it. Every API path -- GetDiagnostics, detectAnomalies and
-// ListSecurityThreats alike -- runs the Lite query, which does not select those
-// columns, so threats read back from the store carry empty blobs.
-// SecurityAnomalyModal renders them behind `{(headers || body) && ...}`, so the
-// request-evidence section of the incident detail simply does not appear: no
-// empty state, no "not captured", nothing to tell an operator that the evidence
-// exists and was not fetched.
-//
-// Flipping ListSecurityThreats to this function is not the fix -- it would put
-// four LONGTEXT columns into every row of a page that can ask for a thousand,
-// which is the cost Lite was introduced to avoid. The fix is a per-threat
-// detail fetch that the modal calls when it opens, which is a proto RPC and a
-// UI change rather than a one-line swap. Until then this is the only query that
-// can answer it.
-
 // Bounds for a threat query. The lower bound matters as much as the upper one:
 // the result slice is sized with min(limit, 100) as its capacity, and make()
 // panics on a negative capacity rather than treating it as zero.
@@ -2674,50 +2655,6 @@ func clampThreatBounds(limit, offset int) (int, int) {
 		offset = 0
 	}
 	return limit, offset
-}
-
-func GetSecurityThreats(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
-	s := getStore()
-	// Its Lite sibling has always had this; this one dereferences s.dialect on
-	// the next line without it.
-	if s == nil {
-		return nil
-	}
-	limit, offset = clampThreatBounds(limit, offset)
-
-	where, args := buildThreatFilterQuery(s.dialect, filter, true)
-	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.request_headers, ''), COALESCE(t.request_body, ''), COALESCE(t.response_headers, ''), COALESCE(t.response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), t.confidence, t.entropy, t.cluster_size, COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, '') " +
-		"FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip " +
-		"LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " +
-		where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
-	args = append(args, limit, offset)
-
-	ex, cleanup := s.getExecutor(ctx)
-	defer cleanup()
-
-	rows, err := ex.QueryContext(ctx, query, args...)
-	if err != nil {
-		logQueryErr(ctx, "threats: query failed", err)
-		return nil
-	}
-	defer rows.Close()
-	res := make([]*SecurityThreat, 0, min(limit, 100))
-	for rows.Next() {
-		if ctx.Err() != nil {
-			break
-		}
-		th := &SecurityThreat{}
-		var mitigationStatus, fm4Status string
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm4Status); err != nil {
-			logQueryErr(ctx, "threats: scan failed", err)
-			continue
-		}
-		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
-			((isMitigatingAction(th.ActionTaken)) &&
-				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
-		res = append(res, th)
-	}
-	return res
 }
 
 // GetSecurityThreatsLite returns a paged list of recent security threats WITHOUT
