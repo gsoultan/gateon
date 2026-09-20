@@ -47,32 +47,46 @@ func MaxBodySize(max int64) kind.Middleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// A protocol upgrade carries no body to cap. The skip used to key
-			// off the Upgrade header alone, which the client controls, so any
-			// POST that also said `Upgrade: h2c` went past the limit.
-			if kind.IsCorsPreflight(r) || (r.Header.Get("Upgrade") != "" && r.ContentLength == 0) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			sw, ok := w.(*httputil.StatusResponseWriter)
-			var pooled bool
-			if !ok {
-				sw = httputil.GetStatusResponseWriter(w)
-				pooled = true
-			}
-			if pooled {
-				defer httputil.PutStatusResponseWriter(sw)
-			}
-			if r.Body != nil {
-				r.Body = http.MaxBytesReader(sw, r.Body, max)
-			}
-			next.ServeHTTP(sw, r)
-			if sw.Status == http.StatusRequestEntityTooLarge {
-				if !kind.ShouldSkipMetrics(r) {
-					bufferingRejectedTotal.WithLabelValues("max_request_body_bytes").Inc()
-					telemetry.IncBufferingRejected()
-				}
-			}
+			serveWithBodyLimit(next, w, r, max)
 		})
+	}
+}
+
+// exemptFromBodyLimit reports whether a request carries no body worth capping.
+//
+// A protocol upgrade is the only exemption. The skip used to key off the
+// Upgrade header alone, which the client controls, so any POST that also said
+// `Upgrade: h2c` went past the limit -- hence the ContentLength == 0 half,
+// which the client cannot fake without actually sending no body.
+func exemptFromBodyLimit(r *http.Request) bool {
+	return kind.IsCorsPreflight(r) ||
+		(r.Header.Get("Upgrade") != "" && r.ContentLength == 0)
+}
+
+// serveWithBodyLimit is the handler body, named rather than nested. gocognit
+// charges a branch by how deeply it sits, and a middleware is two closures
+// before it does anything, so every `if` in here used to cost triple.
+func serveWithBodyLimit(next http.Handler, w http.ResponseWriter, r *http.Request, max int64) {
+	if exemptFromBodyLimit(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	// defer inside the branch is deliberate: it runs at function return, not
+	// block exit, so the pooled writer is returned exactly when it was taken.
+	sw, ok := w.(*httputil.StatusResponseWriter)
+	if !ok {
+		sw = httputil.GetStatusResponseWriter(w)
+		defer httputil.PutStatusResponseWriter(sw)
+	}
+
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(sw, r.Body, max)
+	}
+	next.ServeHTTP(sw, r)
+
+	if sw.Status == http.StatusRequestEntityTooLarge && !kind.ShouldSkipMetrics(r) {
+		bufferingRejectedTotal.WithLabelValues("max_request_body_bytes").Inc()
+		telemetry.IncBufferingRejected()
 	}
 }
