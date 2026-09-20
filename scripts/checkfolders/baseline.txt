@@ -10,16 +10,15 @@
 # hold in their head, and the answer is to split it while it is still nine files
 # of drift rather than sixty.
 
-# The request-path middleware chain, and the largest single piece of debt in the
-# tree. Splitting it is a real refactor rather than a file move: a name-reference
-# scan puts factory.go's dependencies at 41 of its 66 siblings and finds exactly
-# one file that references nothing else in the package, while the waf cluster's
-# ten files all reach for Middleware, Factory, RequestState and Chain, which are
-# defined elsewhere. So nothing extracts until those core types move first, and
-# they sit on the hot path at 59.3% coverage. That is a sequenced project with
-# its own ADR (0002, with 0010 protecting it), not a cleanup to fold into an
-# unrelated change.
-43 internal/middleware
+# What is left of the request-path middleware chain after ADR-0002 drained it:
+# the Factory, the chain assembly in standard.go, and the handful of
+# middlewares that are neither traffic, transform nor security -- realip,
+# forwardedheaders, circuit_breaker, otel. Twelve rather than ten because the
+# remaining two seams are small and not obviously worth their own package:
+# realip.go and forwardedheaders.go are one client-identity concern, and
+# circuit_breaker.go is a resilience concern with nothing yet to join it.
+# Down from sixty-seven when the ratchet landed.
+12 internal/middleware
 
 # ADR-0002's traffic stage, landed 2026-09-20. Thirteen files rather than ten
 # because the ADR names this group as one unit -- ratelimit, connlimit, maxbody,
@@ -35,6 +34,22 @@
 # again is a structural change the ADR does not describe. cors is the seam if
 # it grows -- cors.go, cors_factory.go and cors_presets.go already sit together.
 12 internal/middleware/transform
+
+# ADR-0002's security stage, landed 2026-09-20. This is the pin that admits the
+# ADR got one thing wrong: it named "security" as a single stage, and moving it
+# showed the group is not one concern. Thirty-four files span the WAF, the
+# challenge middlewares (pow, turnstile, bot management), fingerprint identity
+# (tls_fingerprint, tls_binding, reputation, ip_mitigation), network access
+# (geoip, ipfilter, policy), API-shape validation (openapi, schema_validation,
+# graphql_firewall) and content inspection (file_security, deception, honeypot).
+#
+# The WAF cluster is the next extraction and it is already proven cheap: the
+# original text of this file called the waf files blocked because they "all
+# reach for Middleware, Factory, RequestState and Chain, which are defined
+# elsewhere". ADR-0002 moved exactly those, and a scratch-package probe now
+# builds all ten waf_*.go files against nothing but the shared Deps type. That
+# is the follow-on commit, not a future project.
+34 internal/middleware/security
 
 # The dashboard/control-plane API surface. Grows a file per RPC group, so it is
 # the package most likely to cross a pin during ordinary feature work; that is

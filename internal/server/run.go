@@ -22,6 +22,7 @@ import (
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	secmw "github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/phantom"
@@ -65,9 +66,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		})
 	}
 	s.TLSManager = CreateTLSManager(s)
-	var wafUpdater *middleware.WAFUpdater
+	var wafUpdater *secmw.WAFUpdater
 	if s.WafUpdater != nil {
-		wafUpdater = s.WafUpdater.(*middleware.WAFUpdater)
+		wafUpdater = s.WafUpdater.(*secmw.WAFUpdater)
 	}
 	var clamavManager *security.ClamAVManager
 	if s.ClamAVManager != nil {
@@ -166,10 +167,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// context would make every origin lookup fail the moment shutdown began, so
 	// in-flight requests would lose their CORS answers mid-drain.
 	//nolint:contextcheck // no request context reaches this callback; see above.
-	middleware.SetRouteOriginProvider(func() []string {
+	secmw.SetRouteOriginProvider(func() []string {
 		return config.RouteOrigins(context.Background(), s.RouteStore)
 	})
-	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger)
+	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, secmw.WAFCacheInvalidator{}, s.Logger)
 	tlsOptService := dtls.NewService(s.TLSOptStore, proxyInvalidator, s.Logger)
 	canaryService := canary.NewService(ctx, serviceService, s.Logger)
 

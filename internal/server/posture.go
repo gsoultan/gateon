@@ -12,7 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/middleware"
+	secmw "github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/fim"
 	"github.com/gsoultan/gateon/internal/security/siem"
@@ -97,7 +97,7 @@ func newPostureProvider(
 	version string,
 	globalStore config.GlobalConfigStore,
 	clamav *security.ClamAVManager,
-	waf *middleware.WAFUpdater,
+	waf *secmw.WAFUpdater,
 	fimScanner *fim.Scanner,
 	ebpfManager ebpf.Manager,
 ) handlers.SecurityPostureProvider {
@@ -123,7 +123,7 @@ func newPostureProvider(
 }
 
 // wafPosture derives WAF freshness from config + the updater's status file.
-func wafPosture(ctx context.Context, store config.GlobalConfigStore, waf *middleware.WAFUpdater) handlers.WAFPosture {
+func wafPosture(ctx context.Context, store config.GlobalConfigStore, waf *secmw.WAFUpdater) handlers.WAFPosture {
 	var p handlers.WAFPosture
 	if gc := store.Get(ctx); gc != nil && gc.Waf != nil {
 		p.Enabled = gc.Waf.GetEnabled()

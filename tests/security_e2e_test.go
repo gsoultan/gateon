@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 )
@@ -33,7 +33,7 @@ func TestSecurityE2E(t *testing.T) {
 
 	// Wrap with security middleware
 	// We'll use the AdvancedSecurity Recognition which includes our new scanners
-	handler := middleware.ThreatRecognition("test-route")(backend)
+	handler := security.ThreatRecognition("test-route")(backend)
 
 	tests := []struct {
 		name           string

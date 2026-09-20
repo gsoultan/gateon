@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	secmw "github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
@@ -46,7 +47,7 @@ type ApiService struct {
 	TLSManager         gtls.TLSManager
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager
-	WafUpdater         *middleware.WAFUpdater
+	WafUpdater         *secmw.WAFUpdater
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 	WafRules           *waf.Store
@@ -334,7 +335,7 @@ func (s *ApiService) entryPointService() entrypoint.Service {
 
 func (s *ApiService) middlewareService() dmw.Service {
 	return dmw.NewService(s.Middlewares, s.Routes, s.invalidator(), s.MiddlewareValidator,
-		middleware.WAFCacheInvalidator{}, logger.Default())
+		secmw.WAFCacheInvalidator{}, logger.Default())
 }
 
 // invalidator is the proxy invalidator, or one that does nothing when the

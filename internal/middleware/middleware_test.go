@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/time/rate"
 
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gwaf/rules"
@@ -531,7 +532,7 @@ func TestIPFilter_WithXForwardedFor(t *testing.T) {
 }
 
 func TestWAF_PassesNormalRequest(t *testing.T) {
-	mw, err := WAF(WAFConfig{})
+	mw, err := security.WAF(security.WAFConfig{})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
 	}
@@ -549,7 +550,7 @@ func TestWAF_PassesNormalRequest(t *testing.T) {
 }
 
 func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
-	mw, err := WAF(WAFConfig{
+	mw, err := security.WAF(security.WAFConfig{
 		ExtraRules: rules.Set{{
 			ID:       1000001,
 			Phase:    types.PhaseRequestBody,
@@ -583,7 +584,7 @@ func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
 }
 
 func TestTurnstile_MissingTokenReturns400(t *testing.T) {
-	mw := Turnstile(TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	mw := security.Turnstile(security.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -597,7 +598,7 @@ func TestTurnstile_MissingTokenReturns400(t *testing.T) {
 }
 
 func TestTurnstile_SkipsGet(t *testing.T) {
-	mw := Turnstile(TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	mw := security.Turnstile(security.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -611,7 +612,7 @@ func TestTurnstile_SkipsGet(t *testing.T) {
 }
 
 func TestGeoIP_RequiresDBPath(t *testing.T) {
-	_, err := GeoIP(GeoIPConfig{})
+	_, err := security.GeoIP(security.GeoIPConfig{})
 	if err == nil {
 		t.Error("expected error when db_path is empty")
 	}

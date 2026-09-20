@@ -178,6 +178,48 @@ giant switch.
   Verified with `go build ./...`, `go vet ./...` and `go test -race ./...` --
   63 packages, all green.
 
+- **Stage 4 (`security`) is done, 2026-09-20:** the WAF, the challenge
+  middlewares, fingerprint identity, network access control, API-shape
+  validation and content inspection moved to `internal/middleware/security`
+  -- 34 files, taking `internal/middleware` from **43 to 12**. Sixty-seven to
+  twelve in three stages over one day.
+
+  This stage is where the ADR's own partition turned out to be wrong. Stages 2
+  and 3 named groups that were genuinely one concern each, and their pins say
+  so. "Security" is not one concern: it is six that share an adjective. The pin
+  at 34 records that rather than dressing it up, and the ratchet will not let
+  it grow while the follow-on split is outstanding.
+
+  Nine `Factory` methods became package-level constructors taking a `Deps`
+  struct -- `GlobalStore`, `EbpfManager`, `Reputation`, `DataDir`, `RouteType`,
+  the five factory fields this group actually read. `CreateGlobalWAF` is the
+  one that stayed a method, because `internal/router` calls it and the router
+  has no business assembling another package's dependencies; it is now a
+  two-line delegation.
+
+  That delegation is the stage's one real risk and it has its own test. The
+  behavioural WAF tests moved to sit against `NewGlobalWAF`, which left nothing
+  checking that the factory forwards its fields -- and a field dropped from
+  `securityDeps()` still compiles, producing a global WAF built from a zero
+  value. For `GlobalStore` that means a gateway with the WAF enabled serving
+  every route unprotected, silently. `global_waf_wiring_test.go` asserts the
+  forwarding directly, and was negative-tested by deleting each field.
+
+  Two things the move broke and the suite caught. `testdata/benign` did not
+  follow the false-positive corpus into the new package, and the FP gate
+  refused to pass vacuously -- the guard written for exactly this, working. And
+  a blanket identifier rewrite put `security.` in front of prose inside
+  comments and test-failure strings ("the security.WAF store"); scrubbing it
+  needed a parser that could tell a comment from a source position, because
+  three of the hits were genuine cross-package references and had to stay.
+
+  The next extraction is the WAF cluster, and it is already proven cheap. The
+  ratchet's original text called those ten files blocked because they "all
+  reach for Middleware, Factory, RequestState and Chain, which are defined
+  elsewhere". This ADR moved exactly those, and a scratch-package probe now
+  builds all ten against nothing but the shared `Deps` type -- which the WAF
+  reads all five fields of, against three for the rest of the package.
+
 ## Related
 
 - ADR-0001 — layered architecture and the ≤10-files rule.
