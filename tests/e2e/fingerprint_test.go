@@ -111,24 +111,41 @@ func TestFingerprintBlocking(t *testing.T) {
 			time.Sleep(200 * time.Millisecond) // Wait for threat pipeline
 		}
 
-		// Wait for reputation update to propagate
-		time.Sleep(2 * time.Second)
+		// The reputation pipeline is asynchronous, so the mitigation lands some
+		// time after the last attack is answered. This used to sleep two
+		// seconds and check once, which is a bet that the pipeline is done --
+		// and it is a bet this test loses whenever anything else is competing
+		// for the machine. Polling asserts the same property without the bet:
+		// the client must end up refused, and ten seconds is long enough that
+		// a failure here means it never will.
+		//
+		// The status is captured rather than only counted so the failure says
+		// what the gateway actually did.
+		deadline := time.Now().Add(10 * time.Second)
+		var last int
+		for {
+			req, _ := http.NewRequest("GET", targetURL, nil)
+			req.Header.Set("User-Agent", attackerUA)
+			req.Header.Set("X-Forwarded-For", sharedIP)
 
-		// Now check if Client A is blocked even with a normal request
-		req, _ := http.NewRequest("GET", targetURL, nil)
-		req.Header.Set("User-Agent", attackerUA)
-		req.Header.Set("X-Forwarded-For", sharedIP)
+			resp, err := attackerClient.Do(req)
+			if err != nil {
+				t.Fatalf("Failed to send request: %v", err)
+			}
+			last = resp.StatusCode
+			resp.Body.Close()
 
-		resp, err := attackerClient.Do(req)
-		if err != nil {
-			t.Fatalf("Failed to send request: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("Expected attacker to be blocked (403), got %d", resp.StatusCode)
-		} else {
-			t.Log("Attacker successfully blocked by reputation")
+			if last == http.StatusForbidden {
+				t.Log("Attacker successfully blocked by reputation")
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("Expected attacker to be blocked (403), got %d after "+
+					"10s of polling; the reputation pipeline never applied a "+
+					"mitigation for a client that sent 15 LFI/RCE attempts", last)
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
 		}
 	})
 
