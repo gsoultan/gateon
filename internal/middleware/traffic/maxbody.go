@@ -1,14 +1,16 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"net/http"
 	"os"
 	"strconv"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/pkg/httputil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -39,7 +41,7 @@ func MaxBodySizeFromEnv() int64 {
 
 // MaxBodySize limits the request body size using http.MaxBytesReader.
 // Bodies exceeding max return 413 Request Entity Too Large.
-func MaxBodySize(max int64) Middleware {
+func MaxBodySize(max int64) kind.Middleware {
 	if max <= 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
@@ -48,25 +50,25 @@ func MaxBodySize(max int64) Middleware {
 			// A protocol upgrade carries no body to cap. The skip used to key
 			// off the Upgrade header alone, which the client controls, so any
 			// POST that also said `Upgrade: h2c` went past the limit.
-			if IsCorsPreflight(r) || (r.Header.Get("Upgrade") != "" && r.ContentLength == 0) {
+			if kind.IsCorsPreflight(r) || (r.Header.Get("Upgrade") != "" && r.ContentLength == 0) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			sw, ok := w.(*StatusResponseWriter)
+			sw, ok := w.(*httputil.StatusResponseWriter)
 			var pooled bool
 			if !ok {
-				sw = GetStatusResponseWriter(w)
+				sw = httputil.GetStatusResponseWriter(w)
 				pooled = true
 			}
 			if pooled {
-				defer PutStatusResponseWriter(sw)
+				defer httputil.PutStatusResponseWriter(sw)
 			}
 			if r.Body != nil {
 				r.Body = http.MaxBytesReader(sw, r.Body, max)
 			}
 			next.ServeHTTP(sw, r)
 			if sw.Status == http.StatusRequestEntityTooLarge {
-				if !ShouldSkipMetrics(r) {
+				if !kind.ShouldSkipMetrics(r) {
 					bufferingRejectedTotal.WithLabelValues("max_request_body_bytes").Inc()
 					telemetry.IncBufferingRejected()
 				}

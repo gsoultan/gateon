@@ -1,13 +1,16 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"strconv"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/redis"
 )
 
-func (f *Factory) createCache(cfg map[string]string) (Middleware, error) {
+func NewCache(cfg map[string]string, redisClient redis.Client) (kind.Middleware, error) {
 	ttl, _ := strconv.Atoi(cfg["ttl_seconds"])
 	maxEntries, _ := strconv.Atoi(cfg["max_entries"])
 	maxBodyKB, _ := strconv.Atoi(cfg["max_body_kb"])
@@ -24,6 +27,6 @@ func (f *Factory) createCache(cfg map[string]string) (Middleware, error) {
 		MaxEntries:  maxEntries,
 		MaxBodyKB:   int64(maxBodyKB),
 		Storage:     storage,
-		RedisClient: f.redisClient,
+		RedisClient: redisClient,
 	}, cfg["route_id"]), nil
 }

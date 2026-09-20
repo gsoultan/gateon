@@ -1,11 +1,13 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"net/http"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
 // RetryConfig defines the configuration for the retry middleware.
@@ -18,7 +20,7 @@ type RetryConfig struct {
 // Full retry (body buffering, response inspection, backoff) is not implemented:
 // the request is forwarded once. A full implementation would require wrapping
 // the request body and ResponseWriter to decide whether to retry on status/errors.
-func Retry(cfg RetryConfig) Middleware {
+func Retry(cfg RetryConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			attempts := cfg.Attempts

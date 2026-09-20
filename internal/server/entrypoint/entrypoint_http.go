@@ -17,6 +17,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -126,7 +127,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 
 	// Final handler: wrap with monitoring, global rate limiter.
 	// CORS is handled at the route level for proxy traffic, and in BaseHandler for internal traffic.
-	finalEPHandler := middleware.Chain(chain...)(deps.Limiter.Handler(middleware.PerIP)(epHandler))
+	finalEPHandler := middleware.Chain(chain...)(deps.Limiter.Handler(traffic.PerIP)(epHandler))
 	var epTLSConfig *tls.Config
 	if ep.Tls != nil && ep.Tls.Enabled {
 		epTLSConfig = deps.TLSConfig.Clone()
@@ -293,11 +294,11 @@ func entrypointConnLimiter() middleware.Middleware {
 	if maxStr == "" {
 		// Default to 100 concurrent requests per IP if not set.
 		// This is a safe default for most use cases but prevents basic Slowloris.
-		return middleware.MaxConnectionsPerIP(100, middleware.PerIP)
+		return traffic.MaxConnectionsPerIP(100, traffic.PerIP)
 	}
 	max, _ := strconv.Atoi(maxStr)
 	if max <= 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
-	return middleware.MaxConnectionsPerIP(max, middleware.PerIP)
+	return traffic.MaxConnectionsPerIP(max, traffic.PerIP)
 }

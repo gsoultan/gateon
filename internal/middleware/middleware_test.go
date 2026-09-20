@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/time/rate"
 
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gwaf/rules"
 	"github.com/gsoultan/gwaf/rules/op"
 	"github.com/gsoultan/gwaf/types"
@@ -293,8 +294,8 @@ func TestBasicAuthUsers(t *testing.T) {
 }
 
 func TestRateLimiter(t *testing.T) {
-	rl := NewRateLimiter(rate.Limit(1), 1) // 1 req/s, burst 1
-	handler := rl.Handler(PerIP)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rl := traffic.NewRateLimiter(rate.Limit(1), 1) // 1 req/s, burst 1
+	handler := rl.Handler(traffic.PerIP)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -347,7 +348,7 @@ func TestRewrite(t *testing.T) {
 }
 
 func TestCompress(t *testing.T) {
-	mw := Compress()
+	mw := traffic.Compress()
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -368,7 +369,7 @@ func TestCompress(t *testing.T) {
 }
 
 func TestCompress_AlgorithmBrotli(t *testing.T) {
-	mw := CompressWithConfig(CompressConfig{Algorithm: "br"})
+	mw := traffic.CompressWithConfig(traffic.CompressConfig{Algorithm: "br"})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -389,7 +390,7 @@ func TestCompress_AlgorithmBrotli(t *testing.T) {
 }
 
 func TestCompress_AlgorithmGzipSkipsWhenUnavailable(t *testing.T) {
-	mw := CompressWithConfig(CompressConfig{Algorithm: "gzip"})
+	mw := traffic.CompressWithConfig(traffic.CompressConfig{Algorithm: "gzip"})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"bufio"
@@ -13,7 +13,9 @@ import (
 	"sync"
 
 	"github.com/andybalholm/brotli"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
 const (
@@ -43,26 +45,26 @@ type CompressConfig struct {
 }
 
 // Compress returns a middleware that compresses responses (auto selects br/gzip).
-func Compress() Middleware {
+func Compress() kind.Middleware {
 	return CompressWithConfig(CompressConfig{})
 }
 
 // CompressWithRoute returns a compress middleware that records compression ratio metrics.
-func CompressWithRoute(cfg CompressConfig, routeID string) Middleware {
+func CompressWithRoute(cfg CompressConfig, routeID string) kind.Middleware {
 	inner := CompressWithConfig(cfg)
 	return func(next http.Handler) http.Handler {
 		wrapped := inner(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ShouldSkipMetrics(r) {
+			if kind.ShouldSkipMetrics(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
-			activeRouteID := GetRouteName(r)
+			activeRouteID := kind.GetRouteName(r)
 			if activeRouteID == "" {
 				activeRouteID = routeID
 			}
 
-			sw, ok := w.(*StatusResponseWriter)
+			sw, ok := w.(*httputil.StatusResponseWriter)
 			var beforeBytes int64
 			if ok {
 				beforeBytes = sw.BytesWritten
@@ -79,7 +81,7 @@ func CompressWithRoute(cfg CompressConfig, routeID string) Middleware {
 }
 
 // CompressWithConfig returns a middleware that compresses responses with optional filters.
-func CompressWithConfig(cfg CompressConfig) Middleware {
+func CompressWithConfig(cfg CompressConfig) kind.Middleware {
 	minBytes := cfg.MinResponseBodyBytes
 	if minBytes <= 0 {
 		minBytes = defaultMinResponseBodyBytes
@@ -90,7 +92,7 @@ func CompressWithConfig(cfg CompressConfig) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) || ShouldSkipMetrics(r) || r.Header.Get("Upgrade") != "" {
+			if kind.IsCorsPreflight(r) || kind.ShouldSkipMetrics(r) || r.Header.Get("Upgrade") != "" {
 				next.ServeHTTP(w, r)
 				return
 			}

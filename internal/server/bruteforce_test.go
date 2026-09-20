@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"golang.org/x/time/rate"
 )
@@ -34,7 +35,7 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 
 	// Rate limit: 2 per minute for testing, burst 2
-	loginLimiter := middleware.NewRateLimiter(rate.Every(time.Minute/2), 2)
+	loginLimiter := traffic.NewRateLimiter(rate.Every(time.Minute/2), 2)
 
 	deps := BaseHandlerDeps{
 		ProxyHandler: proxyHandler,
@@ -63,7 +64,7 @@ func TestLoginRateLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset limiter for each test case by creating a new one
-			deps.LoginLimiter = middleware.NewRateLimiter(rate.Every(time.Minute/2), 1)
+			deps.LoginLimiter = traffic.NewRateLimiter(rate.Every(time.Minute/2), 1)
 			handler = CreateBaseHandler(uiHandler, deps, nil, http.NewServeMux())
 
 			for i := range 2 {

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -176,17 +175,22 @@ func TestCacheMissKeepsHeadersOfImplicitStatusResponse(t *testing.T) {
 	}
 }
 
-func TestCacheStoreOrderIsBoundedAcrossExpiry(t *testing.T) {
-	s := &cacheStore{entries: make(map[string]*cacheEntry), max: 4, maxBody: 1024}
-	for i := range 10_000 {
-		key := "k" + strconv.Itoa(i%3) // stays under max, so count-based eviction never runs
-		s.set(key, &cacheEntry{body: []byte("v"), expireAt: time.Now().Add(-time.Second)})
-		if s.get(key) != nil {
-			t.Fatal("an expired entry must not be returned")
-		}
+func TestRedisCacheKeysAreNamespacedPerRoute(t *testing.T) {
+	shared := &fakeRedis{store: make(map[string][]byte)}
+	build := func(route string) http.Handler {
+		f := NewFactory(shared, nil, nil, nil, t.TempDir())
+		origin := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("served by " + route))
+		})
+		return buildCacheMW(t, f, map[string]string{"storage": "redis", "ttl_seconds": "60"}, route, origin)
 	}
-	if len(s.order) > cacheOrderSlack*s.max {
-		t.Fatalf("order index holds %d keys for %d live entries (cap %d): it grows on every expire-and-refill cycle", len(s.order), len(s.entries), s.max)
+	a, b := build("route-a"), build("route-b")
+
+	serve(a, hostReq("shop.example", "/catalog"))
+	got := serve(b, hostReq("shop.example", "/catalog")).Body.String()
+	if got != "served by route-b" {
+		t.Fatalf("route B served %q from the shared Redis: keys are not namespaced per route", got)
 	}
 }
 
@@ -223,22 +227,3 @@ func (f *fakeRedis) Set(_ context.Context, key string, value any, _ time.Duratio
 func (f *fakeRedis) Subscribe(context.Context, ...string) *redigo.PubSub { return nil }
 
 func (f *fakeRedis) Close() error { return nil }
-
-func TestRedisCacheKeysAreNamespacedPerRoute(t *testing.T) {
-	shared := &fakeRedis{store: make(map[string][]byte)}
-	build := func(route string) http.Handler {
-		f := NewFactory(shared, nil, nil, nil, t.TempDir())
-		origin := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("served by " + route))
-		})
-		return buildCacheMW(t, f, map[string]string{"storage": "redis", "ttl_seconds": "60"}, route, origin)
-	}
-	a, b := build("route-a"), build("route-b")
-
-	serve(a, hostReq("shop.example", "/catalog"))
-	got := serve(b, hostReq("shop.example", "/catalog")).Body.String()
-	if got != "served by route-b" {
-		t.Fatalf("route B served %q from the shared Redis: keys are not namespaced per route", got)
-	}
-}

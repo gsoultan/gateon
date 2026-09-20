@@ -6,14 +6,15 @@ package middleware
 import (
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 )
 
 func (f *Factory) createGeoIP(cfg map[string]string) (Middleware, error) {
 	return GeoIP(GeoIPConfig{
 		DBPath:          strings.TrimSpace(cfg["db_path"]),
-		AllowCountries:  parseListStrict(cfg["allow_countries"]),
-		DenyCountries:   parseListStrict(cfg["deny_countries"]),
+		AllowCountries:  kind.ParseListStrict(cfg["allow_countries"]),
+		DenyCountries:   kind.ParseListStrict(cfg["deny_countries"]),
 		TrustCloudflare: request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
 	})
 }

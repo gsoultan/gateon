@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/rs/cors"
 )
 
@@ -40,10 +41,10 @@ func CORSConfigFromMap(cfg map[string]string) CORSConfig {
 	maxAge, _ := strconv.Atoi(cfg["max_age"])
 
 	base := CORSConfig{
-		AllowedOrigins:   parseListStrict(cfg["allowed_origins"]),
-		AllowedMethods:   parseListStrict(cfg["allowed_methods"]),
-		AllowedHeaders:   parseListStrict(cfg["allowed_headers"]),
-		ExposedHeaders:   parseListStrict(cfg["exposed_headers"]),
+		AllowedOrigins:   kind.ParseListStrict(cfg["allowed_origins"]),
+		AllowedMethods:   kind.ParseListStrict(cfg["allowed_methods"]),
+		AllowedHeaders:   kind.ParseListStrict(cfg["allowed_headers"]),
+		ExposedHeaders:   kind.ParseListStrict(cfg["exposed_headers"]),
 		AllowCredentials: parseBoolStrict(cfg["allow_credentials"], false),
 		MaxAge:           maxAge,
 	}

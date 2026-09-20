@@ -1,24 +1,27 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"net/http"
 
+	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	xrate "golang.org/x/time/rate"
 )
 
-func (f *Factory) createRateLimit(cfg map[string]string) (Middleware, error) {
-	rpm, _ := strconvParseInt(cfg["requests_per_minute"], 60)
-	burst, _ := strconvParseInt(cfg["burst"], 5)
-	perTenant := parseBoolStrict(cfg["per_tenant"], false)
+func NewRateLimit(cfg map[string]string, redisClient redis.Client, ebpfManager ebpf.Manager) (kind.Middleware, error) {
+	rpm, _ := kind.ParseIntStrict(cfg["requests_per_minute"], 60)
+	burst, _ := kind.ParseIntStrict(cfg["burst"], 5)
+	perTenant := kind.ParseBoolStrict(cfg["per_tenant"], false)
 	storage := cfg["storage"]
 
 	var limiter RateLimiter
-	if storage == "redis" && f.redisClient != nil {
-		limiter = NewRedisRateLimiter(f.redisClient, rpm, burst)
+	if storage == "redis" && redisClient != nil {
+		limiter = NewRedisRateLimiter(redisClient, rpm, burst)
 	} else {
 		rateVal := float64(rpm) / 60.0
 		if rateVal <= 0 {
@@ -27,7 +30,7 @@ func (f *Factory) createRateLimit(cfg map[string]string) (Middleware, error) {
 		if burst <= 0 {
 			burst = 5
 		}
-		limiter = NewRateLimiterWithEbpf(xrate.Limit(rateVal), burst, f.ebpfManager)
+		limiter = NewRateLimiterWithEbpf(xrate.Limit(rateVal), burst, ebpfManager)
 	}
 
 	trust := request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"])

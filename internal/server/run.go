@@ -22,6 +22,7 @@ import (
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
@@ -219,7 +220,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		s.HandleProxyOrLocal(w, r, grpcServer, internalAPI, mux)
 	})
 	// Login rate limit: 5 attempts per minute per IP to mitigate brute force.
-	loginLimiter := middleware.NewRateLimiter(rate.Every(time.Minute/5), 5)
+	loginLimiter := traffic.NewRateLimiter(rate.Every(time.Minute/5), 5)
 
 	var mgmtConfig *gateonv1.ManagementConfig
 	if gc := s.GlobalStore.Get(ctx); gc != nil {

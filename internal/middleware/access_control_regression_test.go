@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -38,7 +39,7 @@ func buildRouteMiddleware(t *testing.T, typ string, cfg map[string]string) Middl
 }
 
 func TestMaxBodySizeIsNotBypassedByAnUpgradeHeader(t *testing.T) {
-	h := MaxBodySize(8)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := traffic.MaxBodySize(8)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.ReadAll(r.Body); err != nil {
 			http.Error(w, "too large", http.StatusRequestEntityTooLarge)
 			return

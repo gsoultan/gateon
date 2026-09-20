@@ -1,14 +1,16 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package traffic
 
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
-func (f *Factory) createBuffering(cfg map[string]string) (Middleware, error) {
+func NewBuffering(cfg map[string]string) (kind.Middleware, error) {
 	s := cfg["max_request_body_bytes"]
 	if s == "" {
 		return nil, fmt.Errorf("buffering requires max_request_body_bytes")
