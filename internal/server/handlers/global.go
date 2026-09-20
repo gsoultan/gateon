@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -209,7 +210,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			telemetry.ConfigureRetention(int(conf.Log.PathStatsRetentionDays))
 		}
 		if conf.Waf != nil {
-			middleware.InvalidateWAFCache()
+			security.InvalidateWAFCache()
 		}
 		// WAF and advanced-security middlewares are composed into each route's
 		// handler at build time (router.ApplyRouteMiddlewares), so toggling them

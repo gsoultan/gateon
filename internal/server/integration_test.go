@@ -21,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/service"
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/middleware"
+	secmw "github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/pkg/l4"
@@ -36,7 +37,7 @@ func handlerDeps(s *Server) *handlers.Deps {
 		RouteService:   route.NewService(s.RouteStore, proxyInvalidator, s.Logger),
 		ServiceService: service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger),
 		EpService:      entrypoint.NewService(s.EpStore, proxyInvalidator, s.Logger),
-		MwService:      dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, middleware.WAFCacheInvalidator{}, s.Logger),
+		MwService:      dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, secmw.WAFCacheInvalidator{}, s.Logger),
 		TLSOptService:  dtls.NewService(s.TLSOptStore, proxyInvalidator, s.Logger),
 		AuthManager:    s.AuthManager,
 		Version:        s.Version,

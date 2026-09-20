@@ -18,7 +18,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/request"
 )
 
@@ -109,7 +109,7 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	if state.proxyProtocolEnabled {
 		// Use r.RemoteAddr which is already resolved to the real client IP by RealIP middleware.
 		srcIP, srcPort, srcOK := parseTCPAddr(r.RemoteAddr)
-		if conn, ok := r.Context().Value(middleware.ConnContextKey).(net.Conn); ok {
+		if conn, ok := r.Context().Value(security.ConnContextKey).(net.Conn); ok {
 			if tcp, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 				srcIP, srcPort, srcOK = tcp.IP, uint16(tcp.Port), true
 			}
@@ -160,7 +160,7 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	// We use the underlying connection's remote address if available to ensure we
 	// append the actual peer, even if RealIP middleware updated r.RemoteAddr.
 	peerIP := ""
-	if conn, ok := r.Context().Value(middleware.ConnContextKey).(net.Conn); ok {
+	if conn, ok := r.Context().Value(security.ConnContextKey).(net.Conn); ok {
 		if tcp, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 			peerIP = tcp.IP.String()
 		}

@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -553,9 +554,9 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 
 	// 3. Infrastructure Blockers & Lifecycle (inner to CORS)
 	chain = append(chain,
-		middleware.IPMitigation(),
-		middleware.UserMitigation(),
-		middleware.ReputationBlocker(routeLabel),
+		security.IPMitigation(),
+		security.UserMitigation(),
+		security.ReputationBlocker(routeLabel),
 		func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if rs := request.GetRequestState(r); rs != nil {
@@ -576,7 +577,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 			adv := gcfg.SecurityAdvanced
 			// Tarpit should be early to slow down attackers before processing
 			if adv.Tarpit != nil && adv.Tarpit.Enabled {
-				chain = append(chain, middleware.Tarpit(
+				chain = append(chain, security.Tarpit(
 					time.Duration(adv.Tarpit.DelayBaseMs)*time.Millisecond,
 					time.Duration(adv.Tarpit.DelayMaxMs)*time.Millisecond,
 					adv.Tarpit.ScoreThreshold,
@@ -592,12 +593,12 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 						"refusing to install a forgeable challenge - set a unique secret to enable it",
 						"route", routeLabel)
 				} else {
-					chain = append(chain, middleware.Pow(int(adv.Pow.Difficulty), adv.Pow.ScoreThreshold, adv.Pow.Secret, routeLabel))
+					chain = append(chain, security.Pow(int(adv.Pow.Difficulty), adv.Pow.ScoreThreshold, adv.Pow.Secret, routeLabel))
 				}
 			}
 			// Deception
 			if adv.Deception != nil && adv.Deception.Enabled {
-				chain = append(chain, middleware.Deception(middleware.DeceptionConfig{
+				chain = append(chain, security.Deception(security.DeceptionConfig{
 					HoneypotPaths:        adv.Deception.HoneypotPaths,
 					InjectInvisibleLinks: adv.Deception.InjectInvisibleLinks,
 					InvisibleLinkPaths:   adv.Deception.InvisibleLinkPaths,
@@ -610,7 +611,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 			}
 			// Entropy
 			if adv.Entropy != nil && adv.Entropy.Enabled {
-				chain = append(chain, middleware.Entropy(adv.Entropy.Threshold, routeLabel))
+				chain = append(chain, security.Entropy(adv.Entropy.Threshold, routeLabel))
 			}
 			// TLS Binding
 			if adv.TlsBinding != nil && adv.TlsBinding.Enabled {
@@ -618,7 +619,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 				if cookieName == "" {
 					cookieName = "session"
 				}
-				chain = append(chain, middleware.TlsBinding(cookieName))
+				chain = append(chain, security.TlsBinding(cookieName))
 			}
 		}
 	}

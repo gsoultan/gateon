@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -140,7 +141,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HostFilter(mgmtHost),
-		middleware.IPFilter(allowedIPs, nil),
+		security.IPFilter(allowedIPs, nil),
 		traffic.MaxConnections(500),
 	)(deps.BaseHandler)
 

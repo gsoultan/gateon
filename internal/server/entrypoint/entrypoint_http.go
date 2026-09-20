@@ -17,6 +17,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -113,12 +114,12 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		transform.GlobalCORS(),
 		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
 		middleware.Metrics("gateon-" + epLabel),
-		middleware.IPMitigation(),
-		middleware.UserMitigation(),
+		security.IPMitigation(),
+		security.UserMitigation(),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
-		middleware.HoneypotGlobal(deps.GlobalStore),
-		middleware.GeoIPGlobal(deps.GlobalStore),
+		security.HoneypotGlobal(deps.GlobalStore),
+		security.GeoIPGlobal(deps.GlobalStore),
 	}
 	if ep.AccessLogEnabled {
 		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
@@ -196,7 +197,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		IdleTimeout:       1 * time.Minute,
 		MaxHeaderBytes:    1 << 20, // 1MB
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-			return context.WithValue(ctx, middleware.ConnContextKey, c)
+			return context.WithValue(ctx, security.ConnContextKey, c)
 		},
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			switch state {
@@ -205,7 +206,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 			case http.StateClosed, http.StateHijacked:
 				telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
 				// Clean up fingerprints when connection is closed
-				middleware.RemoveFingerprints(conn)
+				security.RemoveFingerprints(conn)
 			}
 		},
 	}

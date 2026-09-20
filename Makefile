@@ -103,7 +103,7 @@ test-race:
 	go test -race ./...
 
 ## test-fp: measure the WAF's false-positive rate against the benign corpus.
-##          Replays internal/middleware/testdata/benign/*.jsonl — traffic ordinary
+##          Replays internal/middleware/security/testdata/benign/*.jsonl — traffic ordinary
 ##          applications serve — at paranoia 1 and 2 and fails on any refusal that
 ##          is not recorded.
 ##
@@ -134,7 +134,7 @@ test-race:
 ##          before anything filters the output.
 test-fp:
 	@mkdir -p dist
-	@go test ./internal/middleware/ \
+	@go test ./internal/middleware/security/ \
 		-run 'TestWAFFalsePositives|TestBenignCorpus|TestChain' -v \
 		> dist/fp.txt 2>&1; \
 		status=$$?; \

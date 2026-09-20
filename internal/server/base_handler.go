@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
@@ -66,9 +67,9 @@ func CreateBaseHandler(
 		middleware.Nonce(),
 		traffic.Compress(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended", ExtraImgSrc: managementImgSrc}),
-		middleware.XSSRecognition("gateon-management"),
-		middleware.SQLiRecognition("gateon-management"),
-		middleware.ThreatRecognition("gateon-management"),
+		security.XSSRecognition("gateon-management"),
+		security.SQLiRecognition("gateon-management"),
+		security.ThreatRecognition("gateon-management"),
 		traffic.MaxConnections(500),
 	)(internalHandler)
 

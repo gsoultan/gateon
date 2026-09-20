@@ -1,0 +1,327 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package security
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"fmt"
+	"html"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
+)
+
+type BotManagementConfig struct {
+	Enabled                 bool
+	EnableJSChallenge       bool
+	EnableBrowserIntegrity  bool
+	ChallengeTimeoutSeconds int
+	SecretKey               string
+	RouteID                 string
+}
+
+const (
+	ChallengeCookieName = "gateon_bot_challenge"
+)
+
+func BotManagement(cfg BotManagementConfig) kind.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !cfg.Enabled || kind.IsCorsPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+
+			// 1. Check browser integrity
+			if cfg.EnableBrowserIntegrity {
+				if !checkBrowserIntegrity(r) {
+					logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
+
+					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+						ID:          fmt.Sprintf("bot-integrity-%s-%s", cfg.RouteID, clientIP),
+						Type:        "bot_detected",
+						SourceIP:    clientIP,
+						Score:       40,
+						Details:     "Failed browser integrity check (Sec-Fetch headers)",
+						Time:        time.Now(),
+						RouteID:     cfg.RouteID,
+						RequestURI:  r.URL.RequestURI(),
+						Category:    "bot",
+						Severity:    severityMedium,
+						ActionTaken: actionBlocked,
+					}))
+
+					http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
+					return
+				}
+			}
+
+			// 2. Check if challenge is already solved
+			cookie, err := r.Cookie(ChallengeCookieName)
+			if err == nil {
+				if verifyChallengeToken(cookie.Value, cfg.SecretKey, r.UserAgent(), clientIP) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// 2. If it's the challenge submission
+			if r.Method == http.MethodPost && r.URL.Path == "/_gateon/challenge" {
+				token := r.FormValue("token")
+				if verifyChallengeToken(token, cfg.SecretKey, r.UserAgent(), clientIP) {
+					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_solved").Inc()
+					telemetry.ActiveUnverifiedClientsTotal.Dec()
+					// This cookie is the proof that the client solved the bot
+					// challenge, so it is a bypass credential and gets the same
+					// attributes as a session cookie. Secure comes from
+					// request.IsSecure rather than r.TLS: behind a TLS-terminating
+					// proxy r.TLS is nil, and the attribute would be dropped in
+					// exactly the deployments where the token is most exposed.
+					// #nosec G124 -- Secure is set from the resolved scheme just
+					// below; gosec cannot see through the variable.
+					http.SetCookie(w, &http.Cookie{
+						Name:     ChallengeCookieName,
+						Value:    token,
+						Path:     "/",
+						HttpOnly: true,
+						Secure:   request.IsSecure(r),
+						SameSite: http.SameSiteLaxMode,
+						MaxAge:   cfg.ChallengeTimeoutSeconds,
+					})
+					// #nosec G710 -- safeRedirectTarget rejects any scheme, host or opaque form
+					// and requires a leading "/" while rejecting "//" and "/\\", testing the
+					// decoded path so a percent-encoded backslash cannot slip past.
+					http.Redirect(w, r, safeRedirectTarget(r.FormValue("redirect")), http.StatusFound)
+					return
+				}
+
+				telemetry.ActiveUnverifiedClientsTotal.Dec()
+				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+					ID:          fmt.Sprintf("bot-challenge-fail-%s-%s", cfg.RouteID, clientIP),
+					Type:        "bot_detected",
+					SourceIP:    clientIP,
+					Score:       60,
+					Details:     "Failed JavaScript challenge submission",
+					Time:        time.Now(),
+					RouteID:     cfg.RouteID,
+					RequestURI:  r.URL.RequestURI(),
+					Category:    "bot",
+					Severity:    severityHigh,
+					ActionTaken: actionBlocked,
+				}))
+			}
+
+			// 3. Handle seed request
+			if r.URL.Path == "/_gateon/seed" {
+				seed := GenerateChallengeSeed(cfg.SecretKey, r.UserAgent(), clientIP)
+				w.Header().Set("Content-Type", "text/plain")
+				_, _ = w.Write([]byte(seed))
+				return
+			}
+
+			// 4. Serve JS Challenge
+			if cfg.EnableJSChallenge {
+				telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_served").Inc()
+				telemetry.ActiveUnverifiedClientsTotal.Inc()
+				serveJSChallenge(w, r)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// safeRedirectTarget reduces a redirect target to a path that cannot leave this
+// origin, falling back to "/" for anything it cannot vouch for.
+//
+// The challenge page round-trips the original URL through the client, so by the
+// time it comes back as a form value it is attacker-controlled. Handing that
+// straight to http.Redirect turns the challenge into an open redirect that
+// borrows the gateway's own domain to launder a phishing link — worse here than
+// in most places, because the victim reaches it by passing a security check.
+//
+// A leading-slash test is not enough on its own: browsers read "//evil.com" as
+// protocol-relative, and some normalise the backslash in "/\evil.com" to a
+// second slash and do the same. Parsing and then rejecting anything carrying a
+// scheme or host covers both without guessing at browser quirks.
+func safeRedirectTarget(raw string) string {
+	if raw == "" {
+		return "/"
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.Opaque != "" {
+		return "/"
+	}
+	// Test the decoded path, not the escaped one: EscapedPath percent-encodes
+	// the backslash to %5C, which would slip past a check written against the
+	// escaped form even though the input is plainly an attempt at
+	// protocol-relative.
+	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") || strings.HasPrefix(u.Path, `/\`) {
+		return "/"
+	}
+	p := u.EscapedPath()
+	if u.RawQuery != "" {
+		return p + "?" + u.RawQuery
+	}
+	return p
+}
+
+func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
+	nonce := kind.GenerateNonce()
+
+	// Escape before interpolating: this lands in a double-quoted HTML attribute
+	// and the request URI is entirely attacker-chosen, so a path of
+	// `/"><base href="https://evil.com/">` would otherwise close the attribute
+	// and repoint every relative URL on the page — including the form action
+	// and the seed fetch — at the attacker. The CSP below blocks injected
+	// inline script, but it does not stop <base>, <meta refresh> or a
+	// substituted form, so the escape is the actual fix and the CSP is
+	// defence in depth. RequestURI() rather than String() keeps any scheme or
+	// host out of the value to begin with.
+	redirectTo := html.EscapeString(safeRedirectTarget(r.URL.RequestURI()))
+
+	// A simple stealthy JS challenge.
+	// In a real implementation, this would be more complex and obfuscated.
+	page := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Just a moment...</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f4f4f4; }
+        .container { text-align: center; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Security Challenge</h1>
+        <p>Please wait while we verify your request.</p>
+        <form id="challenge-form" method="POST" action="/_gateon/challenge">
+            <input type="hidden" name="token" id="token">
+            <input type="hidden" name="redirect" value="%s">
+        </form>
+    </div>
+    <script nonce="%s">
+        (function() {
+            // Simple proof of work or just a delay to foil simple scrapers
+            setTimeout(function() {
+                var ua = navigator.userAgent;
+                var ts = Math.floor(Date.now() / 1000);
+                // We'd normally get a seed from the server to prevent replay
+                // For now, we'll just simulate a token generation
+                // Real implementation would use an XHR to get a signed seed
+                fetch('/_gateon/seed').then(r => r.text()).then(seed => {
+                    document.getElementById('token').value = seed;
+                    document.getElementById('challenge-form').submit();
+                });
+            }, 2000);
+        })();
+    </script>
+</body>
+</html>`, redirectTo, nonce)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", nonce))
+	w.WriteHeader(http.StatusForbidden) // Or 403 to indicate challenge required
+	_, _ = w.Write([]byte(page))
+}
+
+func verifyChallengeToken(token, secret, ua, ip string) bool {
+	// Simple verification logic
+	// Token format: payload.signature
+	payload, signature, ok := strings.Cut(token, ".")
+	if !ok {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = io.WriteString(mac, payload)
+	_, _ = io.WriteString(mac, ua)
+	_, _ = io.WriteString(mac, ip)
+	expectedSignature := mac.Sum(nil)
+
+	// signature is hex encoded, let's decode it safely
+	if len(signature) != hex.EncodedLen(len(expectedSignature)) {
+		return false
+	}
+
+	var sigBuf [32]byte // sha256 is 32 bytes
+	sigBytes := sigBuf[:]
+	n, err := hex.Decode(sigBytes, []byte(signature))
+	if err != nil || n != len(expectedSignature) || subtle.ConstantTimeCompare(sigBytes, expectedSignature) != 1 {
+		return false
+	}
+
+	// Verify timestamp in payload
+	tsStr := payload
+	ts, err := strconv.ParseInt(tsStr, 10, 64)
+	if err != nil {
+		return false
+	}
+
+	// Token valid for 2 hours
+	if time.Since(time.Unix(ts, 0)) > 2*time.Hour {
+		return false
+	}
+
+	return true
+}
+
+func GenerateChallengeSeed(secret, ua, ip string) string {
+	ts := time.Now().Unix()
+	payload := strconv.FormatInt(ts, 10)
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = io.WriteString(mac, payload)
+	_, _ = io.WriteString(mac, ua)
+	_, _ = io.WriteString(mac, ip)
+	signature := hex.EncodeToString(mac.Sum(nil))
+	return payload + "." + signature
+}
+
+func checkBrowserIntegrity(r *http.Request) bool {
+	ua := r.UserAgent()
+	if ua == "" {
+		return false
+	}
+
+	lowerUA := strings.ToLower(ua)
+	isBrowser := strings.Contains(lowerUA, "mozilla") ||
+		strings.Contains(lowerUA, "chrome") ||
+		strings.Contains(lowerUA, "safari") ||
+		strings.Contains(lowerUA, "edge")
+
+	if !isBrowser {
+		return true // Skip for non-browser-like UAs (APIs)
+	}
+
+	// Modern browsers should have Sec-Fetch headers
+	// If it's a modern browser UA but missing these, it's likely a script
+	if strings.Contains(lowerUA, "chrome/") || strings.Contains(lowerUA, "edge/") || strings.Contains(lowerUA, "safari/") {
+		fetchSite := r.Header.Get("Sec-Fetch-Site")
+		fetchMode := r.Header.Get("Sec-Fetch-Mode")
+		fetchDest := r.Header.Get("Sec-Fetch-Dest")
+
+		if fetchSite == "" && fetchMode == "" && fetchDest == "" {
+			// Suspicious: claims to be a modern browser but lacks fetch metadata
+			return false
+		}
+	}
+
+	return true
+}
