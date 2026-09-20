@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"bufio"
@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/rs/cors"
 	"go.opentelemetry.io/otel/trace"
@@ -64,12 +65,12 @@ const grpcWebTrailerFlag byte = 0x80
 // Response side: translates Content-Type back to application/grpc-web, and appends
 // HTTP trailers as a gRPC trailer frame in the response body (required because
 // HTTP/1.1 browsers cannot read HTTP/2 trailers).
-func GRPCWeb(cfg ...CORSConfig) Middleware {
+func GRPCWeb(cfg ...CORSConfig) kind.Middleware {
 	detector := &DefaultGRPCWebDetector{}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Context().Value(CORSHandledContextKey) != nil {
+			if r.Context().Value(kind.CORSHandledContextKey) != nil {
 				// CORS already handled by a previous middleware.
 				if detector.IsGrpcWebRequest(r) || detector.IsGrpcWebSocketRequest(r) {
 					serveGRPCWeb(w, r, detector, next)
@@ -124,7 +125,7 @@ func GRPCWeb(cfg ...CORSConfig) Middleware {
 
 			// Mark as handled for downstream middlewares
 			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r = r.WithContext(context.WithValue(r.Context(), CORSHandledContextKey, true))
+				r = r.WithContext(context.WithValue(r.Context(), kind.CORSHandledContextKey, true))
 				if detector.IsGrpcWebRequest(r) || detector.IsGrpcWebSocketRequest(r) {
 					serveGRPCWeb(w, r, detector, next)
 				} else {

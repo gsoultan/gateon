@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"bufio"
@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
-// transformMaxBodyBytes bounds what BodyTransform holds in memory per side.
-const transformMaxBodyBytes = 10 << 20
+// MaxBodyBytes bounds what BodyTransform holds in memory per side.
+const MaxBodyBytes = 10 << 20
 
 // BodyTransformConfig configures the body transformation middleware.
 type BodyTransformConfig struct {
@@ -26,7 +28,7 @@ type BodyTransformConfig struct {
 }
 
 // BodyTransform returns a middleware that replaces strings in request and response bodies.
-func BodyTransform(cfg BodyTransformConfig) Middleware {
+func BodyTransform(cfg BodyTransformConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Content-Type check
@@ -60,11 +62,11 @@ func BodyTransform(cfg BodyTransformConfig) Middleware {
 // bound. A body over the bound is forwarded as it arrived: the alternative is
 // holding an attacker-chosen number of bytes per in-flight request.
 func transformRequestBody(r *http.Request, cfg BodyTransformConfig) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, transformMaxBodyBytes+1))
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
 	if err != nil {
 		return
 	}
-	if len(body) > transformMaxBodyBytes {
+	if len(body) > MaxBodyBytes {
 		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
 		return
 	}
@@ -96,7 +98,7 @@ func (bw *transformResponseWriter) Write(b []byte) (int, error) {
 	if bw.passthrough {
 		return bw.ResponseWriter.Write(b)
 	}
-	if bw.body.Len()+len(b) > transformMaxBodyBytes {
+	if bw.body.Len()+len(b) > MaxBodyBytes {
 		bw.startPassthrough()
 		return bw.ResponseWriter.Write(b)
 	}

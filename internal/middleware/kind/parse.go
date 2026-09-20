@@ -79,3 +79,15 @@ func ParseListStrict(val string) []string {
 	}
 	return out
 }
+
+// Header names that more than one middleware group needs.
+//
+// Both arrived the same way: defined in a file that a refactor stage moved,
+// while a file that stayed behind was still calling them -- headerAuthorization
+// in the traffic stage, headerAccept in the transform stage. Copying the string
+// into each package is how two spellings of one header start, so they live here
+// with the rest of the shared vocabulary.
+const (
+	HeaderAccept        = "Accept"
+	HeaderAuthorization = "Authorization"
+)

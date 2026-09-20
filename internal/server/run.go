@@ -23,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
@@ -184,7 +185,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	gateonv1.RegisterApiServiceServer(grpcServer, apiService)
 	// Internal API only: gRPC-Web for the dashboard.
 	// We use our modern DefaultGRPCWebDetector which supports Connect and gRPC-Web.
-	internalAPI := middleware.NewDefaultGRPCWebDetector(grpcServer)
+	internalAPI := transform.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
 
 	// Register ConnectRPC handler for the internal API.

@@ -1,15 +1,17 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
-func (f *Factory) createRewrite(cfg map[string]string) (Middleware, error) {
+func NewRewrite(cfg map[string]string) (kind.Middleware, error) {
 	rewriteCfg := RewriteConfig{
 		Path:     cfg["path"],
 		AddQuery: make(map[string]string),

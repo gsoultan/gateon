@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
 // CORSPreset represents a predefined CORS configuration.
@@ -29,7 +31,7 @@ var corsPresets = map[string]CORSPreset{
 	"standard": {
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Content-Type", headerAuthorization, headerAccept},
+		AllowedHeaders:   []string{"Content-Type", kind.HeaderAuthorization, kind.HeaderAccept},
 		ExposedHeaders:   []string{"Content-Length", "Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           3600,
@@ -45,7 +47,7 @@ var corsPresets = map[string]CORSPreset{
 	"restricted": {
 		AllowedOrigins:   []string{},
 		AllowedMethods:   []string{"GET"},
-		AllowedHeaders:   []string{headerAccept},
+		AllowedHeaders:   []string{kind.HeaderAccept},
 		ExposedHeaders:   []string{},
 		AllowCredentials: false,
 		MaxAge:           600,

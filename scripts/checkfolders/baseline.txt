@@ -19,7 +19,7 @@
 # they sit on the hot path at 59.3% coverage. That is a sequenced project with
 # its own ADR (0002, with 0010 protecting it), not a cleanup to fold into an
 # unrelated change.
-54 internal/middleware
+43 internal/middleware
 
 # ADR-0002's traffic stage, landed 2026-09-20. Thirteen files rather than ten
 # because the ADR names this group as one unit -- ratelimit, connlimit, maxbody,
@@ -28,6 +28,13 @@
 # If it grows, cache is the obvious next seam: cache.go, cache_factory.go,
 # cache_redis.go and cache_store.go are four files that already sit together.
 13 internal/middleware/traffic
+
+# ADR-0002's transform stage, landed 2026-09-20. Twelve files for the same
+# reason traffic has thirteen: the ADR names cors, headers, rewrite, xfcc,
+# grpcweb and wasm as one request/response-transform group, and splitting it
+# again is a structural change the ADR does not describe. cors is the seam if
+# it grows -- cors.go, cors_factory.go and cors_presets.go already sit together.
+12 internal/middleware/transform
 
 # The dashboard/control-plane API surface. Grows a file per RPC group, so it is
 # the package most likely to cross a pin during ordinary feature work; that is

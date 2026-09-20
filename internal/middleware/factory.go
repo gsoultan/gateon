@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/yara"
@@ -72,25 +73,25 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "auth":
 		return f.createAuth(cfg)
 	case "headers":
-		return f.createHeaders(cfg)
+		return transform.NewHeaders(cfg)
 	case "forwardedheaders":
 		return ForwardedHeaders(ForwardedHeadersConfig{
 			Proto:              cfg["proto"],
 			TrustForwardHeader: parseBoolStrict(cfg["trust_forward_header"], false),
 		}), nil
 	case "rewrite":
-		return f.createRewrite(cfg)
+		return transform.NewRewrite(cfg)
 	case "addprefix":
-		return AddPrefix(cfg["prefix"]), nil
+		return transform.AddPrefix(cfg["prefix"]), nil
 	case "stripprefix":
 		prefixes := strings.Split(cfg["prefixes"], ",")
-		return StripPrefix(prefixes), nil
+		return transform.StripPrefix(prefixes), nil
 	case "stripprefixregex":
-		return StripPrefixRegex(cfg["regex"])
+		return transform.StripPrefixRegex(cfg["regex"])
 	case "replacepath":
-		return ReplacePath(cfg["path"]), nil
+		return transform.ReplacePath(cfg["path"]), nil
 	case "replacepathregex":
-		return ReplacePathRegex(cfg["pattern"], cfg["replacement"])
+		return transform.ReplacePathRegex(cfg["pattern"], cfg["replacement"])
 	case "accesslog":
 		return AccessLog(cmp.Or(cfg["route"], cfg["route_id"])), nil
 	case "metrics":
@@ -113,7 +114,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		attempts, _ := strconv.Atoi(cfg["attempts"])
 		return traffic.Retry(traffic.RetryConfig{Attempts: attempts}), nil
 	case "cors":
-		return f.createCORS(cfg)
+		return transform.NewCORS(cfg)
 	case "grpcweb":
 		return f.createGRPCWeb(cfg)
 	case "ipfilter":
@@ -184,9 +185,9 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "policy":
 		return f.createPolicy(cfg)
 	case "xfcc":
-		return f.createXFCC(cfg)
+		return transform.NewXFCC(cfg)
 	case "transform":
-		return BodyTransform(BodyTransformConfig{
+		return transform.BodyTransform(transform.BodyTransformConfig{
 			RequestSearch:     cfg["request_search"],
 			RequestReplace:    cfg["request_replace"],
 			ResponseSearch:    cfg["response_search"],
@@ -216,7 +217,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 			RouteID:        routeID,
 		}), nil
 	case "wasm":
-		return Wasm(context.Background(), m.WasmBlob)
+		return transform.Wasm(context.Background(), m.WasmBlob)
 	default:
 		return nil, fmt.Errorf("unknown middleware type: %s", m.Type)
 	}
@@ -227,7 +228,7 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
 	maxAge, _ := strconv.Atoi(cfg["max_age"])
 
-	corsCfg := CORSConfig{
+	corsCfg := transform.CORSConfig{
 		AllowedOrigins:   origins,
 		AllowCredentials: allowCredentials,
 		MaxAge:           maxAge,
@@ -239,14 +240,14 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 		cfg["preset"] = "grpc-web"
 	}
 
-	corsCfg = ApplyCORSPreset(cfg, corsCfg)
+	corsCfg = transform.ApplyCORSPreset(cfg, corsCfg)
 
 	// If after applying presets and config we still have no origins, return default permissive
 	if len(corsCfg.AllowedOrigins) == 0 && cfg["preset"] == "" {
-		return GRPCWeb(), nil
+		return transform.GRPCWeb(), nil
 	}
 
-	return GRPCWeb(corsCfg), nil
+	return transform.GRPCWeb(corsCfg), nil
 }
 
 func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
