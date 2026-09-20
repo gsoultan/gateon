@@ -18,11 +18,10 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
-// headerAuthorization is spelled out here rather than imported: the CORS
+// kind.HeaderAuthorization is spelled out here rather than imported: the CORS
 // factory that also names it lives in package middleware, which imports this
 // package for its constructors, so reaching back for the constant would be a
 // cycle. One header name is a cheaper duplicate than a shared package for it.
-const headerAuthorization = "Authorization"
 
 // CacheConfig configures the response cache.
 type CacheConfig struct {
@@ -152,7 +151,7 @@ func replayCached(w http.ResponseWriter, r *http.Request, status int, headers ht
 // a fragment: caching it would serve five bytes to a client that asked for the
 // whole resource.
 func cacheBypass(r *http.Request) bool {
-	return r.Header.Get(headerAuthorization) != "" ||
+	return r.Header.Get(kind.HeaderAuthorization) != "" ||
 		r.Header.Get("Proxy-Authorization") != "" ||
 		r.Header.Get("Cookie") != "" ||
 		r.Header.Get("Range") != ""

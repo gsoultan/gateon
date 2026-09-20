@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/alerting"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/rs/cors"
@@ -45,7 +46,7 @@ func corsOptions(cfg CORSConfig) cors.Options {
 }
 
 // CORS returns a middleware that handles Cross-Origin Resource Sharing (CORS).
-func CORS(cfg CORSConfig) Middleware {
+func CORS(cfg CORSConfig) kind.Middleware {
 	opts := corsOptions(cfg)
 	// Built once. cors.New normalises the origin, method and header lists,
 	// and doing that on every request allocated route-derivable state on the
@@ -55,7 +56,7 @@ func CORS(cfg CORSConfig) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Context().Value(CORSHandledContextKey) != nil {
+			if r.Context().Value(kind.CORSHandledContextKey) != nil {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -79,7 +80,7 @@ func CORS(cfg CORSConfig) Middleware {
 
 			// Mark as handled for downstream middlewares
 			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r = r.WithContext(context.WithValue(r.Context(), CORSHandledContextKey, true))
+				r = r.WithContext(context.WithValue(r.Context(), kind.CORSHandledContextKey, true))
 				next.ServeHTTP(w, r)
 			})
 
@@ -99,7 +100,7 @@ func CORS(cfg CORSConfig) Middleware {
 // replies. A route that genuinely needs credentials must declare an explicit
 // origin allowlist through CORS(CORSConfig), where the operator names the
 // origins being trusted.
-func BypassCORS() Middleware {
+func BypassCORS() kind.Middleware {
 	c := cors.New(cors.Options{
 		AllowOriginFunc:  func(origin string) bool { return true },
 		AllowedMethods:   defaultCORSMethods(),
@@ -110,14 +111,14 @@ func BypassCORS() Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Context().Value(CORSHandledContextKey) != nil {
+			if r.Context().Value(kind.CORSHandledContextKey) != nil {
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Mark as handled for downstream middlewares
 			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r = r.WithContext(context.WithValue(r.Context(), CORSHandledContextKey, true))
+				r = r.WithContext(context.WithValue(r.Context(), kind.CORSHandledContextKey, true))
 				next.ServeHTTP(w, r)
 			})
 
@@ -130,7 +131,7 @@ func BypassCORS() Middleware {
 // permissively for the entire entrypoint. It ensures that even early
 // security blocks (like IP shunning) include the necessary CORS headers
 // to avoid confusing browser-level errors. Unlike BypassCORS, it does
-// not set CORSHandledContextKey, allowing route-specific CORS middlewares
+// not set kind.CORSHandledContextKey, allowing route-specific CORS middlewares
 // to override its settings for the actual request.
 //
 // This runs on every HTTP entrypoint, so it is the widest-reach CORS policy in
@@ -141,7 +142,7 @@ func BypassCORS() Middleware {
 // backend at once, and browsers honour the reflected form even though they
 // reject the equivalent `*`. Credentials belong to CORS(CORSConfig), where an
 // operator has named the origins.
-func GlobalCORS() Middleware {
+func GlobalCORS() kind.Middleware {
 	c := cors.New(cors.Options{
 		AllowOriginFunc: func(origin string) bool { return true },
 		AllowedMethods:  defaultCORSMethods(),
@@ -149,7 +150,7 @@ func GlobalCORS() Middleware {
 		ExposedHeaders: []string{
 			"Grpc-Status", "Grpc-Message", "Grpc-Encoding",
 			"Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding",
-			"X-Accept-Response-Streaming", headerAuthorization, "Content-Type",
+			"X-Accept-Response-Streaming", kind.HeaderAuthorization, "Content-Type",
 		},
 		AllowCredentials: false,
 		MaxAge:           86400,
@@ -158,7 +159,7 @@ func GlobalCORS() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// For preflights, handle them here permissively and return immediately.
-			if IsCorsPreflight(r) {
+			if kind.IsCorsPreflight(r) {
 				c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(w, r)
 				return
 			}
@@ -190,7 +191,7 @@ func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
 		ID:             uuid.New().String(),
 		Type:           "cors_violation",
 		Category:       "security",
-		Severity:       severityMedium,
+		Severity:       kind.SeverityMedium,
 		SourceIP:       request.GetClientIP(r, false),
 		RequestURI:     r.RequestURI,
 		RouteID:        routeID,

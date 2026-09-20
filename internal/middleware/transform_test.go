@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -59,7 +60,7 @@ func TestBodyTransformResponseKeepsContentLengthConsistent(t *testing.T) {
 }
 
 func TestBodyTransformPassesOversizedResponseThroughUntouched(t *testing.T) {
-	big := append(bytes.Repeat([]byte("a"), transformMaxBodyBytes+1), []byte("world")...)
+	big := append(bytes.Repeat([]byte("a"), transform.MaxBodyBytes+1), []byte("world")...)
 	origin := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(big)))
 		w.WriteHeader(http.StatusOK)
@@ -82,7 +83,7 @@ func TestBodyTransformPassesOversizedResponseThroughUntouched(t *testing.T) {
 }
 
 func TestBodyTransformPassesOversizedRequestThroughUntouched(t *testing.T) {
-	big := strings.Repeat("a", transformMaxBodyBytes+1) + "world"
+	big := strings.Repeat("a", transform.MaxBodyBytes+1) + "world"
 	var seen []byte
 	origin := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen, _ = io.ReadAll(r.Body)

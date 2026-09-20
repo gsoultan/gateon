@@ -12,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -103,7 +104,7 @@ func TestSchemaValidationRejectsAnUncompilableSchemaAtConfigTime(t *testing.T) {
 }
 
 func BenchmarkCORSActualRequest(b *testing.B) {
-	h := CORS(CORSConfig{
+	h := transform.CORS(transform.CORSConfig{
 		AllowedOrigins: []string{"https://app.example.com"},
 		AllowedMethods: []string{"GET", "POST"},
 		AllowedHeaders: []string{"Content-Type", "Authorization"},

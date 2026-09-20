@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -20,7 +21,7 @@ type wasmMiddleware struct {
 	module  wazero.CompiledModule
 }
 
-func Wasm(ctx context.Context, blob []byte) (Middleware, error) {
+func Wasm(ctx context.Context, blob []byte) (kind.Middleware, error) {
 	if len(blob) == 0 {
 		return nil, fmt.Errorf("wasm blob is empty")
 	}

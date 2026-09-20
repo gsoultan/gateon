@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -109,7 +110,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	isMgmt := IsManagementAddress(ep.Address, deps)
 	chain := []middleware.Middleware{
-		middleware.GlobalCORS(),
+		transform.GlobalCORS(),
 		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
 		middleware.Metrics("gateon-" + epLabel),
 		middleware.IPMitigation(),

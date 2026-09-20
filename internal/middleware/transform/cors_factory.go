@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"net/http"
@@ -15,18 +15,9 @@ import (
 const (
 	corsHeaderAllowOrigin    = "Access-Control-Allow-Origin"
 	corsHeaderRequestHeaders = "Access-Control-Request-Headers"
-
-	// headerAccept is named because rs/cors' own default allowlist, the
-	// presets and the display fallback all have to agree on it: a divergence
-	// between them is the bug this file was changed to stop.
-	headerAccept = "Accept"
-	// headerAuthorization is named for the same reason: it is both a CORS
-	// preset entry and the header the cache treats as "this reply belongs to
-	// one caller", and those two must not drift apart.
-	headerAuthorization = "Authorization"
 )
 
-func (f *Factory) createCORS(cfg map[string]string) (Middleware, error) {
+func NewCORS(cfg map[string]string) (kind.Middleware, error) {
 	return CORS(CORSConfigFromMap(cfg)), nil
 }
 
@@ -45,7 +36,7 @@ func CORSConfigFromMap(cfg map[string]string) CORSConfig {
 		AllowedMethods:   kind.ParseListStrict(cfg["allowed_methods"]),
 		AllowedHeaders:   kind.ParseListStrict(cfg["allowed_headers"]),
 		ExposedHeaders:   kind.ParseListStrict(cfg["exposed_headers"]),
-		AllowCredentials: parseBoolStrict(cfg["allow_credentials"], false),
+		AllowCredentials: kind.ParseBoolStrict(cfg["allow_credentials"], false),
 		MaxAge:           maxAge,
 	}
 
@@ -96,7 +87,7 @@ func EvaluateCORS(cfg map[string]string, r *http.Request) CORSDecision {
 
 	d := CORSDecision{
 		Policy:        corsEffectivePolicy(policy),
-		IsPreflight:   IsCorsPreflight(r),
+		IsPreflight:   kind.IsCorsPreflight(r),
 		OriginAllowed: c.OriginAllowed(r),
 	}
 	d.Headers = corsResponseHeaders(c, r)
@@ -127,7 +118,7 @@ func corsEffectivePolicy(cfg CORSConfig) CORSConfig {
 		cfg.AllowedMethods = []string{http.MethodGet, http.MethodPost, http.MethodHead}
 	}
 	if len(cfg.AllowedHeaders) == 0 {
-		cfg.AllowedHeaders = []string{headerAccept, "Content-Type", "X-Requested-With"}
+		cfg.AllowedHeaders = []string{kind.HeaderAccept, "Content-Type", "X-Requested-With"}
 	}
 	return cfg
 }

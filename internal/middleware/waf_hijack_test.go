@@ -153,7 +153,9 @@ func TestWAF_NoWriteHeaderAfterHijack(t *testing.T) {
 // transformation middleware stripped the Hijacker.
 func TestResponseWriterWrappersPreserveHijacker(t *testing.T) {
 	wrappers := map[string]http.ResponseWriter{
-		"transformResponseWriter": &transformResponseWriter{},
+		// transformResponseWriter moved to internal/middleware/transform with
+		// BodyTransform; its half of this guard lives there, in
+		// TestTransformResponseWriterPreservesHijacker.
 		"deceptionResponseWriter": &deceptionResponseWriter{},
 		"breadcrumbWriter":        &breadcrumbWriter{},
 		"wafResponseWriter":       &wafResponseWriter{},

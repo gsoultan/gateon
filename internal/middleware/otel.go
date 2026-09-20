@@ -4,12 +4,9 @@
 package middleware
 
 import (
-	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"go.opentelemetry.io/otel"
@@ -88,45 +85,5 @@ func Telemetry(serviceName string) Middleware {
 				span.SetAttributes(attribute.Float64("security.trust_score", reputation))
 			}
 		})
-	}
-}
-
-type spanLogger struct {
-	span trace.Span
-	rs   *request.RequestState
-}
-
-func (l *spanLogger) Printf(format string, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	l.span.AddEvent("cors_debug", trace.WithAttributes(
-		attribute.String("message", msg),
-	))
-
-	recommendation := ""
-	// Smart Recommendations based on common CORS failure messages (case-insensitive)
-	lowerMsg := strings.ToLower(msg)
-	if strings.Contains(lowerMsg, "origin") && strings.Contains(lowerMsg, "not allowed") {
-		recommendation = "The request origin is not permitted. Update the CORS 'Allowed Origins' to include it."
-		l.span.SetAttributes(
-			attribute.Bool("cors.blocked", true),
-			attribute.String("security.recommendation", recommendation),
-		)
-	} else if strings.Contains(lowerMsg, "method") && strings.Contains(lowerMsg, "not allowed") {
-		recommendation = "The HTTP method is not permitted for CORS. Update 'Allowed Methods' in your CORS configuration."
-		l.span.SetAttributes(
-			attribute.Bool("cors.blocked", true),
-			attribute.String("security.recommendation", recommendation),
-		)
-	} else if strings.Contains(lowerMsg, "header") && strings.Contains(lowerMsg, "not allowed") {
-		recommendation = "The request includes headers not permitted by CORS. Update 'Allowed Headers' in your configuration."
-		l.span.SetAttributes(
-			attribute.Bool("cors.blocked", true),
-			attribute.String("security.recommendation", recommendation),
-		)
-	}
-
-	if recommendation != "" && l.rs != nil {
-		l.rs.Recommendation = recommendation
-		logger.L.LogDebug("Captured CORS recommendation", "recommendation", recommendation, "request_id", l.rs.RequestID)
 	}
 }

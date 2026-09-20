@@ -1,19 +1,21 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
-func (f *Factory) createHeaders(cfg map[string]string) (Middleware, error) {
+func NewHeaders(cfg map[string]string) (kind.Middleware, error) {
 	stsValue := hstsValue(cfg)
-	forceSTSHeader := parseBoolStrict(cfg["force_sts_header"], false)
+	forceSTSHeader := kind.ParseBoolStrict(cfg["force_sts_header"], false)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +29,7 @@ func (f *Factory) createHeaders(cfg map[string]string) (Middleware, error) {
 				}
 			}
 
-			sw := &StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
+			sw := &httputil.StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
 			for k, v := range cfg {
 				if strings.HasPrefix(k, "add_response_") {
 					sw.Header().Add(strings.TrimPrefix(k, "add_response_"), v)
@@ -59,10 +61,10 @@ func hstsValue(cfg map[string]string) string {
 		return ""
 	}
 	val := "max-age=" + strconv.Itoa(stsSeconds)
-	if parseBoolStrict(cfg["sts_include_subdomains"], false) {
+	if kind.ParseBoolStrict(cfg["sts_include_subdomains"], false) {
 		val += "; includeSubDomains"
 	}
-	if parseBoolStrict(cfg["sts_preload"], false) {
+	if kind.ParseBoolStrict(cfg["sts_preload"], false) {
 		val += "; preload"
 	}
 	return val

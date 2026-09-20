@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
 // RewriteConfig defines the configuration for the rewrite middleware.
@@ -22,7 +24,7 @@ type RewriteConfig struct {
 }
 
 // Rewrite returns a middleware that rewrites the request URL.
-func Rewrite(cfg RewriteConfig) Middleware {
+func Rewrite(cfg RewriteConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if cfg.Path != "" {
@@ -45,7 +47,7 @@ func Rewrite(cfg RewriteConfig) Middleware {
 }
 
 // AddPrefix returns a middleware that adds a prefix to the request path.
-func AddPrefix(prefix string) Middleware {
+func AddPrefix(prefix string) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasPrefix(r.URL.Path, prefix) {
@@ -57,7 +59,7 @@ func AddPrefix(prefix string) Middleware {
 }
 
 // StripPrefix returns a middleware that strips a prefix from the request path.
-func StripPrefix(prefixes []string) Middleware {
+func StripPrefix(prefixes []string) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			for _, prefix := range prefixes {
@@ -77,7 +79,7 @@ func StripPrefix(prefixes []string) Middleware {
 }
 
 // ReplacePath returns a middleware that replaces the request path.
-func ReplacePath(path string) Middleware {
+func ReplacePath(path string) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.Header.Set("X-Replaced-Path", r.URL.Path)
@@ -88,7 +90,7 @@ func ReplacePath(path string) Middleware {
 }
 
 // StripPrefixRegex returns a middleware that strips a prefix from the request path using regex.
-func StripPrefixRegex(regex string) (Middleware, error) {
+func StripPrefixRegex(regex string) (kind.Middleware, error) {
 	re, err := regexp.Compile(regex)
 	if err != nil {
 		return nil, err
@@ -105,7 +107,7 @@ func StripPrefixRegex(regex string) (Middleware, error) {
 }
 
 // ReplacePathRegex returns a middleware that replaces the request path using regex.
-func ReplacePathRegex(pattern, replacement string) (Middleware, error) {
+func ReplacePathRegex(pattern, replacement string) (kind.Middleware, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err

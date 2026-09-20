@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc"
@@ -69,7 +69,7 @@ func setupProxyTest(t *testing.T, routeType string, withGrpcWebMiddleware bool) 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	return s, hits, middleware.NewDefaultGRPCWebDetector(grpcServer), mux
+	return s, hits, transform.NewDefaultGRPCWebDetector(grpcServer), mux
 }
 
 func TestHandleProxyOrLocal_DoesNotProxyLegacyGrpcWebRouteType(t *testing.T) {

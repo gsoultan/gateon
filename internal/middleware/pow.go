@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -241,7 +242,7 @@ const powChallengePage = `<html>
 // navigation, and so wants a machine-readable challenge.
 func wantsJSON(r *http.Request) bool {
 	return r.Header.Get("X-Requested-With") == "XMLHttpRequest" ||
-		strings.Contains(r.Header.Get(headerAccept), "application/json")
+		strings.Contains(r.Header.Get(kind.HeaderAccept), "application/json")
 }
 
 // writeJSON answers an XHR caller with the challenge as JSON.

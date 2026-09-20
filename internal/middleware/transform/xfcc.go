@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package middleware
+package transform
 
 import (
 	"crypto/sha256"
@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
 // XFCCConfig configures the X-Forwarded-Client-Cert middleware.
@@ -21,7 +23,7 @@ type XFCCConfig struct {
 }
 
 // XFCC returns a middleware that extracts client certificate details and propagates them via X-Forwarded-Client-Cert header.
-func XFCC(cfg XFCCConfig) Middleware {
+func XFCC(cfg XFCCConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Never trust a client-supplied X-Forwarded-Client-Cert: the gateway
@@ -30,7 +32,7 @@ func XFCC(cfg XFCCConfig) Middleware {
 			// arrives without a verified client cert can never inject identity.
 			r.Header.Del("X-Forwarded-Client-Cert")
 
-			if IsCorsPreflight(r) {
+			if kind.IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

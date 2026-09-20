@@ -146,6 +146,38 @@ giant switch.
   change this ADR does not describe. Verified with `go build ./...`,
   `go vet ./...` and `go test -race ./...` -- 62 packages, all green.
 
+- **Stage 3 (`transform`) is done, 2026-09-20:** cors, headers, rewrite, xfcc,
+  grpcweb, wasm and the body transform moved to
+  `internal/middleware/transform` -- 11 files, taking `internal/middleware`
+  from **54 to 43**. Two stages in one day took it from 67 to 43; the pin
+  follows in the same commit, and `transform` is pinned at 12 on the same
+  reasoning as `traffic`.
+
+  The probe technique from Stage 2 is now the way to start one of these. A
+  scratch package built from the group reported two undefined symbols, and
+  resolving those revealed the next wave -- the errors arrive in layers, so the
+  probe has to be run more than once before the number means anything. Total
+  came to seven, all already solved by earlier stages except two.
+
+  Both of those were files in the wrong place, and in opposite directions.
+  `headerAccept` was defined in `cors_factory.go`, which moved, and used by
+  `pow.go`, which stayed -- the same shape as `parseListStrict` in Stage 2, so
+  it is a pattern rather than an accident. Both header constants now live in
+  `kind`, which also removes the local copy Stage 2 made. `spanLogger` was the
+  mirror image: defined in `otel.go`, which stays, used only by `cors.go` and
+  `grpcweb.go`, which move, and referenced by nothing in its own file. It moved
+  with the group it serves.
+
+  Two tests stayed in `package middleware` because they build through
+  `f.Create` -- `transform_test.go` in full, and the transform entry of
+  `TestResponseWriterWrappersPreserveHijacker`, which was split rather than
+  dropped: that guard exists because a wrapper forgetting to forward Hijack
+  broke WebSocket upgrades in production, and exporting an internal wrapper so
+  another package could name it would be a worse trade than two tests.
+
+  Verified with `go build ./...`, `go vet ./...` and `go test -race ./...` --
+  63 packages, all green.
+
 ## Related
 
 - ADR-0001 — layered architecture and the ≤10-files rule.
