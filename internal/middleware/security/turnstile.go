@@ -46,102 +46,144 @@ func Turnstile(cfg TurnstileConfig) kind.Middleware {
 		methodSet["DELETE"] = true
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	secret := cfg.Secret
 	headerName := cfg.HeaderName
 	if headerName == "" {
 		headerName = "CF-Turnstile-Response"
 	}
 
+	rt := turnstileRuntime{
+		client:     &http.Client{Timeout: 10 * time.Second},
+		secret:     cfg.Secret,
+		headerName: headerName,
+		methods:    methodSet,
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) || kind.ShouldSkipMetrics(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			activeRouteID := kind.GetRouteName(r)
-
-			if !methodSet[r.Method] {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			token := r.Header.Get(headerName)
-			if token == "" && r.Body != nil && r.Body != http.NoBody {
-				// If not in header, we try to get it from form data.
-				// Since r.FormValue consumes the body reader for POST/PUT/PATCH,
-				// we must capture and restore it for the downstream proxy.
-				buf := &bytes.Buffer{}
-				originalBody := r.Body
-				r.Body = struct {
-					io.Reader
-					io.Closer
-				}{
-					Reader: io.TeeReader(originalBody, buf),
-					Closer: originalBody,
-				}
-
-				token = r.FormValue("cf-turnstile-response")
-
-				r.Body = struct {
-					io.Reader
-					io.Closer
-				}{
-					Reader: io.MultiReader(buf, originalBody),
-					Closer: originalBody,
-				}
-			}
-			if token == "" {
-				telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
-				http.Error(w, "Turnstile token required", http.StatusBadRequest)
-				logger.L.LogDebug("turnstile: missing token", "path", r.URL.Path)
-				return
-			}
-
-			remoteIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-			form := url.Values{}
-			form.Set("secret", secret)
-			form.Set("response", token)
-			form.Set("remoteip", remoteIP)
-
-			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, turnstileVerifyURL, bytes.NewBufferString(form.Encode()))
-			if err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				logger.L.LogError("turnstile: create request failed", "error", err)
-				return
-			}
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-			resp, err := client.Do(req)
-			if err != nil {
-				http.Error(w, "verification service unavailable", http.StatusBadGateway)
-				logger.L.LogError("turnstile: verify request failed", "error", err)
-				return
-			}
-			defer resp.Body.Close()
-
-			var result struct {
-				Success    bool     `json:"success"`
-				ErrorCodes []string `json:"error-codes,omitzero"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				http.Error(w, "verification failed", http.StatusBadRequest)
-				logger.L.LogWarn("turnstile: decode response failed", "error", err)
-				return
-			}
-
-			if !result.Success {
-				telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
-				http.Error(w, fmt.Sprintf("Turnstile verification failed: %v", result.ErrorCodes), http.StatusBadRequest)
-				logger.L.LogDebug("turnstile: verification failed",
-					"error_codes", result.ErrorCodes,
-					"path", r.URL.Path,
-					"ip", remoteIP)
-				return
-			}
-
-			telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "pass").Inc()
-			next.ServeHTTP(w, r)
+			rt.serve(next, w, r)
 		})
 	}
+}
+
+// turnstileRuntime is the config resolved once per route: the verification
+// client, the secret, the header to read and the methods that require a token.
+type turnstileRuntime struct {
+	client     *http.Client
+	secret     string
+	headerName string
+	methods    map[string]bool
+}
+
+func (t turnstileRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if kind.IsCorsPreflight(r) || kind.ShouldSkipMetrics(r) || !t.methods[r.Method] {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	activeRouteID := kind.GetRouteName(r)
+	token := t.tokenFrom(r)
+	if token == "" {
+		telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
+		http.Error(w, "Turnstile token required", http.StatusBadRequest)
+		logger.L.LogDebug("turnstile: missing token", "path", r.URL.Path)
+		return
+	}
+
+	remoteIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+	result, status, err := t.verify(r, token, remoteIP)
+	if err != nil {
+		http.Error(w, status.message, status.code)
+		logger.L.LogError("turnstile: "+status.logMsg, "error", err)
+		return
+	}
+
+	if !result.Success {
+		telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "fail").Inc()
+		http.Error(w, fmt.Sprintf("Turnstile verification failed: %v", result.ErrorCodes), http.StatusBadRequest)
+		logger.L.LogDebug("turnstile: verification failed",
+			"error_codes", result.ErrorCodes,
+			"path", r.URL.Path,
+			"ip", remoteIP)
+		return
+	}
+
+	telemetry.MiddlewareTurnstileTotal.WithLabelValues(activeRouteID, "pass").Inc()
+	next.ServeHTTP(w, r)
+}
+
+// tokenFrom reads the challenge token from the configured header, falling back
+// to the form field Cloudflare's widget posts.
+//
+// r.FormValue consumes the body on POST/PUT/PATCH, so the fallback tees the
+// body aside while parsing and then puts it back -- the upstream still gets a
+// complete request. Without that, reading the token would silently eat the
+// payload the client sent.
+func (t turnstileRuntime) tokenFrom(r *http.Request) string {
+	if token := r.Header.Get(t.headerName); token != "" {
+		return token
+	}
+	if r.Body == nil || r.Body == http.NoBody {
+		return ""
+	}
+
+	buf := &bytes.Buffer{}
+	originalBody := r.Body
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: io.TeeReader(originalBody, buf),
+		Closer: originalBody,
+	}
+
+	token := r.FormValue("cf-turnstile-response")
+
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: io.MultiReader(buf, originalBody),
+		Closer: originalBody,
+	}
+	return token
+}
+
+// turnstileFailure is how a verification error is reported to the client:
+// deliberately not the underlying error, which names an upstream the caller
+// has no business knowing about.
+type turnstileFailure struct {
+	code    int
+	message string
+	logMsg  string
+}
+
+type turnstileResult struct {
+	Success    bool     `json:"success"`
+	ErrorCodes []string `json:"error-codes,omitzero"`
+}
+
+func (t turnstileRuntime) verify(r *http.Request, token, remoteIP string) (turnstileResult, turnstileFailure, error) {
+	form := url.Values{}
+	form.Set("secret", t.secret)
+	form.Set("response", token)
+	form.Set("remoteip", remoteIP)
+
+	var result turnstileResult
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, turnstileVerifyURL, bytes.NewBufferString(form.Encode()))
+	if err != nil {
+		return result, turnstileFailure{http.StatusInternalServerError, "internal error", "create request failed"}, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return result, turnstileFailure{http.StatusBadGateway, "verification service unavailable", "verify request failed"}, err
+	}
+	defer resp.Body.Close()
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return result, turnstileFailure{http.StatusBadRequest, "verification failed", "decode response failed"}, err
+	}
+	return result, turnstileFailure{}, nil
 }

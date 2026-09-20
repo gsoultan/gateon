@@ -107,11 +107,26 @@ func NewGlobalWAF(d security.Deps) (kind.Middleware, error) {
 	}
 
 	logger.L.LogInfo("Creating Global WAF middleware")
+	cfg := globalWAFConfig(w, tier, d)
 
+	mw, err := WAF(cfg)
+	if err != nil {
+		return nil, err
+	}
+	globalWAFCache.Store(key, mw)
+	return mw, nil
+}
+
+// globalWAFConfig turns the gateway-wide WAF proto into an engine config.
+// Split out of NewGlobalWAF because the two do unrelated jobs: this one
+// translates settings, and the caller decides whether to build at all, what to
+// key the cache on, and what to do with the result.
+func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) WAFConfig {
 	pl := int(w.GetParanoiaLevel())
 	if pl < 1 {
 		pl = 1
 	}
+
 	cfg := WAFConfig{
 		ParanoiaLevel: pl,
 		// Full OWASP CRS attack coverage stays enabled (Disable*=false).
@@ -147,6 +162,7 @@ func NewGlobalWAF(d security.Deps) (kind.Middleware, error) {
 		Reputation:                  d.Reputation,
 		WafRules:                    waf.GetStore(),
 	}
+
 	// Apply the resolved tier baseline, then honour an explicit DLP opt-in as an
 	// upgrade: a user who deliberately enabled DLP gets response inspection even
 	// at the standard tier, while DLP stays off by default below enterprise.
@@ -163,12 +179,7 @@ func NewGlobalWAF(d security.Deps) (kind.Middleware, error) {
 	// possibly-different copy of. The auto_update_rules setting is kept on the
 	// wire so existing configuration still loads; it no longer does anything.
 
-	mw, err := WAF(cfg)
-	if err != nil {
-		return nil, err
-	}
-	globalWAFCache.Store(key, mw)
-	return mw, nil
+	return cfg
 }
 
 func hashWAFProto(w *gateonv1.WafConfig) string {
@@ -180,87 +191,109 @@ func hashWAFProto(w *gateonv1.WafConfig) string {
 	return hex.EncodeToString(h[:])
 }
 
-func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
-	globalDirectives := ""
-	if d.GlobalStore != nil {
-		global := d.GlobalStore.Get(context.TODO())
-		if global != nil && global.Waf != nil && global.Waf.Enabled {
-			globalDirectives = global.Waf.CustomDirectives
+// setIfMissing writes a global default only where the route did not speak. A
+// route that explicitly turned something off must stay off, so every global
+// value goes through here rather than through assignment.
+func setIfMissing(cfg map[string]string, key, val string) {
+	if _, ok := cfg[key]; !ok {
+		cfg[key] = val
+	}
+}
 
-			// Merge global settings into cfg as defaults if not explicitly set
-			setIfMissing := func(key string, val bool) {
-				if _, ok := cfg[key]; !ok {
-					cfg[key] = strconv.FormatBool(val)
-				}
-			}
-			if global.Waf.UseCrs {
-				setIfMissing("sqli", global.Waf.Sqli)
-				setIfMissing("xss", global.Waf.Xss)
-				setIfMissing("lfi", global.Waf.Lfi)
-				setIfMissing("rce", global.Waf.Rce)
-				setIfMissing("php", global.Waf.Php)
-				setIfMissing("scanner", global.Waf.Scanner)
-				setIfMissing("protocol", global.Waf.Protocol)
-				setIfMissing("java", global.Waf.Java)
-				setIfMissing("nodejs", global.Waf.Nodejs)
-				setIfMissing("wordpress", global.Waf.Wordpress)
-				setIfMissing("ip_reputation", global.Waf.IpReputation)
-				setIfMissing("dos_protection", global.Waf.DosProtection)
-				setIfMissing("malware_detection", global.Waf.MalwareDetection)
-				setIfMissing("ransomware_detection", global.Waf.RansomwareDetection)
-				setIfMissing("dlp", global.Waf.Dlp)
-				if _, ok := cfg["dlp_action"]; !ok && global.Waf.DlpAction != "" {
-					cfg["dlp_action"] = global.Waf.DlpAction
-				}
-				if _, ok := cfg["anomaly_threshold"]; !ok && global.Waf.AnomalyThreshold > 0 {
-					cfg["anomaly_threshold"] = strconv.Itoa(int(global.Waf.AnomalyThreshold))
-				}
-				if _, ok := cfg["request_body_limit"]; !ok && global.Waf.RequestBodyLimit > 0 {
-					cfg["request_body_limit"] = strconv.Itoa(int(global.Waf.RequestBodyLimit))
-				}
-				if _, ok := cfg["response_body_limit"]; !ok && global.Waf.ResponseBodyLimit > 0 {
-					cfg["response_body_limit"] = strconv.Itoa(int(global.Waf.ResponseBodyLimit))
-				}
-				if _, ok := cfg["audit_log_path"]; !ok && global.Waf.AuditLogPath != "" {
-					cfg["audit_log_path"] = global.Waf.AuditLogPath
-				}
-				if _, ok := cfg["audit_log_relevant_only"]; !ok {
-					cfg["audit_log_relevant_only"] = strconv.FormatBool(global.Waf.AuditLogRelevantOnly)
-				}
-				if _, ok := cfg["allowed_admin_ips"]; !ok && len(global.Waf.AllowedAdminIps) > 0 {
-					cfg["allowed_admin_ips"] = strings.Join(global.Waf.AllowedAdminIps, ",")
-				}
-				if _, ok := cfg["entropy_threshold"]; !ok && global.Waf.EntropyThreshold > 0 {
-					cfg["entropy_threshold"] = strconv.FormatFloat(global.Waf.EntropyThreshold, 'f', -1, 64)
-				}
-				if _, ok := cfg["disable_entropy"]; !ok {
-					cfg["disable_entropy"] = strconv.FormatBool(global.Waf.DisableEntropy)
-				}
-				if _, ok := cfg["trust_cloudflare_headers"]; !ok {
-					cfg["trust_cloudflare_headers"] = strconv.FormatBool(global.Waf.TrustCloudflareHeaders)
-				}
-				if _, ok := cfg["enable_body_entropy"]; !ok {
-					cfg["enable_body_entropy"] = strconv.FormatBool(global.Waf.EnableBodyEntropy)
-				}
-				if _, ok := cfg["enable_fingerprint_validation"]; !ok {
-					cfg["enable_fingerprint_validation"] = strconv.FormatBool(global.Waf.EnableFingerprintValidation)
-				}
-				if _, ok := cfg["enable_confidence_scoring"]; !ok {
-					cfg["enable_confidence_scoring"] = strconv.FormatBool(global.Waf.EnableConfidenceScoring)
-				}
-				if _, ok := cfg["audit_only"]; !ok {
-					cfg["audit_only"] = strconv.FormatBool(global.Waf.AuditOnly)
-				}
+// mergeGlobalWAFDefaults fills unset per-route settings from the gateway-wide
+// WAF config and returns its custom directives. Nothing happens unless the
+// global WAF is both present and enabled.
+func mergeGlobalWAFDefaults(cfg map[string]string, d security.Deps) string {
+	if d.GlobalStore == nil {
+		return ""
+	}
+	global := d.GlobalStore.Get(context.TODO())
+	if global == nil || global.Waf == nil || !global.Waf.Enabled {
+		return ""
+	}
+	if global.Waf.UseCrs {
+		applyGlobalCRSDefaults(cfg, global.Waf, d.DataDir)
+	}
+	return global.Waf.CustomDirectives
+}
 
-				if global.Waf.AutoUpdateRules {
-					rulesPath := filepath.Join(d.DataDir, "waf", "rules")
-					if _, err := os.Stat(rulesPath); err == nil {
-						cfg["rules_path"] = rulesPath
-					}
-				}
-			}
+// applyGlobalCRSDefaults copies the gateway-wide ruleset and tuning settings
+// into a route's config wherever the route left them unset.
+func applyGlobalCRSDefaults(cfg map[string]string, w *gateonv1.WafConfig, dataDir string) {
+	applyGlobalCRSToggles(cfg, w)
+	applyGlobalCRSTunables(cfg, w, dataDir)
+}
+
+// applyGlobalCRSToggles copies the on/off settings, where the proto's zero
+// value and "off" are the same thing.
+func applyGlobalCRSToggles(cfg map[string]string, w *gateonv1.WafConfig) {
+	for key, val := range map[string]bool{
+		"sqli":                          w.Sqli,
+		"xss":                           w.Xss,
+		"lfi":                           w.Lfi,
+		"rce":                           w.Rce,
+		"php":                           w.Php,
+		"scanner":                       w.Scanner,
+		"protocol":                      w.Protocol,
+		"java":                          w.Java,
+		"nodejs":                        w.Nodejs,
+		"wordpress":                     w.Wordpress,
+		"ip_reputation":                 w.IpReputation,
+		"dos_protection":                w.DosProtection,
+		"malware_detection":             w.MalwareDetection,
+		"ransomware_detection":          w.RansomwareDetection,
+		"dlp":                           w.Dlp,
+		"audit_log_relevant_only":       w.AuditLogRelevantOnly,
+		"disable_entropy":               w.DisableEntropy,
+		"trust_cloudflare_headers":      w.TrustCloudflareHeaders,
+		"enable_body_entropy":           w.EnableBodyEntropy,
+		"enable_fingerprint_validation": w.EnableFingerprintValidation,
+		"enable_confidence_scoring":     w.EnableConfidenceScoring,
+		"audit_only":                    w.AuditOnly,
+	} {
+		setIfMissing(cfg, key, strconv.FormatBool(val))
+	}
+}
+
+// applyGlobalCRSTunables copies the settings whose zero value means "not
+// configured" rather than "off", so each is copied only when the global
+// actually set it. Treating them like the toggles above would push a route's
+// body limit to zero because the gateway never named one.
+func applyGlobalCRSTunables(cfg map[string]string, w *gateonv1.WafConfig, dataDir string) {
+	if w.DlpAction != "" {
+		setIfMissing(cfg, "dlp_action", w.DlpAction)
+	}
+	if w.AnomalyThreshold > 0 {
+		setIfMissing(cfg, "anomaly_threshold", strconv.Itoa(int(w.AnomalyThreshold)))
+	}
+	if w.RequestBodyLimit > 0 {
+		setIfMissing(cfg, "request_body_limit", strconv.Itoa(int(w.RequestBodyLimit)))
+	}
+	if w.ResponseBodyLimit > 0 {
+		setIfMissing(cfg, "response_body_limit", strconv.Itoa(int(w.ResponseBodyLimit)))
+	}
+	if w.AuditLogPath != "" {
+		setIfMissing(cfg, "audit_log_path", w.AuditLogPath)
+	}
+	if len(w.AllowedAdminIps) > 0 {
+		setIfMissing(cfg, "allowed_admin_ips", strings.Join(w.AllowedAdminIps, ","))
+	}
+	if w.EntropyThreshold > 0 {
+		setIfMissing(cfg, "entropy_threshold", strconv.FormatFloat(w.EntropyThreshold, 'f', -1, 64))
+	}
+
+	// auto_update_rules no longer downloads anything, but an install that
+	// already has a rules directory on disk keeps using it.
+	if w.AutoUpdateRules {
+		rulesPath := filepath.Join(dataDir, "waf", "rules")
+		if _, err := os.Stat(rulesPath); err == nil {
+			cfg["rules_path"] = rulesPath
 		}
 	}
+}
+
+func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
+	globalDirectives := mergeGlobalWAFDefaults(cfg, d)
 
 	grpcMode := d.IsGRPCRoute()
 	key := wafConfigKey(cfg) + ":" + globalDirectives + ":grpc=" + strconv.FormatBool(grpcMode)

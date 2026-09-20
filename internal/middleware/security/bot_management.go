@@ -40,111 +40,115 @@ const (
 func BotManagement(cfg BotManagementConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !cfg.Enabled || kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-
-			// 1. Check browser integrity
-			if cfg.EnableBrowserIntegrity {
-				if !checkBrowserIntegrity(r) {
-					logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
-
-					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-						ID:          fmt.Sprintf("bot-integrity-%s-%s", cfg.RouteID, clientIP),
-						Type:        "bot_detected",
-						SourceIP:    clientIP,
-						Score:       40,
-						Details:     "Failed browser integrity check (Sec-Fetch headers)",
-						Time:        time.Now(),
-						RouteID:     cfg.RouteID,
-						RequestURI:  r.URL.RequestURI(),
-						Category:    "bot",
-						Severity:    kind.SeverityMedium,
-						ActionTaken: kind.ActionBlocked,
-					}))
-
-					http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
-					return
-				}
-			}
-
-			// 2. Check if challenge is already solved
-			cookie, err := r.Cookie(ChallengeCookieName)
-			if err == nil {
-				if verifyChallengeToken(cookie.Value, cfg.SecretKey, r.UserAgent(), clientIP) {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-
-			// 2. If it's the challenge submission
-			if r.Method == http.MethodPost && r.URL.Path == "/_gateon/challenge" {
-				token := r.FormValue("token")
-				if verifyChallengeToken(token, cfg.SecretKey, r.UserAgent(), clientIP) {
-					telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_solved").Inc()
-					telemetry.ActiveUnverifiedClientsTotal.Dec()
-					// This cookie is the proof that the client solved the bot
-					// challenge, so it is a bypass credential and gets the same
-					// attributes as a session cookie. Secure comes from
-					// request.IsSecure rather than r.TLS: behind a TLS-terminating
-					// proxy r.TLS is nil, and the attribute would be dropped in
-					// exactly the deployments where the token is most exposed.
-					// #nosec G124 -- Secure is set from the resolved scheme just
-					// below; gosec cannot see through the variable.
-					http.SetCookie(w, &http.Cookie{
-						Name:     ChallengeCookieName,
-						Value:    token,
-						Path:     "/",
-						HttpOnly: true,
-						Secure:   request.IsSecure(r),
-						SameSite: http.SameSiteLaxMode,
-						MaxAge:   cfg.ChallengeTimeoutSeconds,
-					})
-					// #nosec G710 -- safeRedirectTarget rejects any scheme, host or opaque form
-					// and requires a leading "/" while rejecting "//" and "/\\", testing the
-					// decoded path so a percent-encoded backslash cannot slip past.
-					http.Redirect(w, r, safeRedirectTarget(r.FormValue("redirect")), http.StatusFound)
-					return
-				}
-
-				telemetry.ActiveUnverifiedClientsTotal.Dec()
-				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-					ID:          fmt.Sprintf("bot-challenge-fail-%s-%s", cfg.RouteID, clientIP),
-					Type:        "bot_detected",
-					SourceIP:    clientIP,
-					Score:       60,
-					Details:     "Failed JavaScript challenge submission",
-					Time:        time.Now(),
-					RouteID:     cfg.RouteID,
-					RequestURI:  r.URL.RequestURI(),
-					Category:    "bot",
-					Severity:    kind.SeverityHigh,
-					ActionTaken: kind.ActionBlocked,
-				}))
-			}
-
-			// 3. Handle seed request
-			if r.URL.Path == "/_gateon/seed" {
-				seed := GenerateChallengeSeed(cfg.SecretKey, r.UserAgent(), clientIP)
-				w.Header().Set("Content-Type", "text/plain")
-				_, _ = w.Write([]byte(seed))
-				return
-			}
-
-			// 4. Serve JS Challenge
-			if cfg.EnableJSChallenge {
-				telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_served").Inc()
-				telemetry.ActiveUnverifiedClientsTotal.Inc()
-				serveJSChallenge(w, r)
-				return
-			}
-
-			next.ServeHTTP(w, r)
+			serveBotManagement(cfg, next, w, r)
 		})
 	}
+}
+
+func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if !cfg.Enabled || kind.IsCorsPreflight(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+
+	// 1. Check browser integrity
+	if cfg.EnableBrowserIntegrity && !checkBrowserIntegrity(r) {
+		logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
+		recordBotThreat(r, cfg, clientIP, "integrity", 40,
+			"Failed browser integrity check (Sec-Fetch headers)", kind.SeverityMedium)
+		http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
+		return
+	}
+
+	// 2. Check if challenge is already solved
+	if cookie, err := r.Cookie(ChallengeCookieName); err == nil &&
+		verifyChallengeToken(cookie.Value, cfg.SecretKey, r.UserAgent(), clientIP) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	// 3. If it's the challenge submission
+	if r.Method == http.MethodPost && r.URL.Path == "/_gateon/challenge" {
+		if handleChallengeSubmission(cfg, clientIP, w, r) {
+			return
+		}
+	}
+
+	// 4. Handle seed request
+	if r.URL.Path == "/_gateon/seed" {
+		seed := GenerateChallengeSeed(cfg.SecretKey, r.UserAgent(), clientIP)
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(seed))
+		return
+	}
+
+	// 5. Serve JS Challenge
+	if cfg.EnableJSChallenge {
+		telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_served").Inc()
+		telemetry.ActiveUnverifiedClientsTotal.Inc()
+		serveJSChallenge(w, r)
+		return
+	}
+
+	next.ServeHTTP(w, r)
+}
+
+// handleChallengeSubmission verifies a posted challenge token. It reports
+// whether it answered the request: a valid token sets the bypass cookie and
+// redirects, an invalid one is recorded and falls through to be re-challenged
+// rather than being served.
+func handleChallengeSubmission(cfg BotManagementConfig, clientIP string, w http.ResponseWriter, r *http.Request) bool {
+	token := r.FormValue("token")
+	if !verifyChallengeToken(token, cfg.SecretKey, r.UserAgent(), clientIP) {
+		telemetry.ActiveUnverifiedClientsTotal.Dec()
+		recordBotThreat(r, cfg, clientIP, "challenge-fail", 60,
+			"Failed JavaScript challenge submission", kind.SeverityHigh)
+		return false
+	}
+
+	telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_solved").Inc()
+	telemetry.ActiveUnverifiedClientsTotal.Dec()
+	// This cookie is the proof that the client solved the bot
+	// challenge, so it is a bypass credential and gets the same
+	// attributes as a session cookie. Secure comes from
+	// request.IsSecure rather than r.TLS: behind a TLS-terminating
+	// proxy r.TLS is nil, and the attribute would be dropped in
+	// exactly the deployments where the token is most exposed.
+	// #nosec G124 -- Secure is set from the resolved scheme just
+	// below; gosec cannot see through the variable.
+	http.SetCookie(w, &http.Cookie{
+		Name:     ChallengeCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   request.IsSecure(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   cfg.ChallengeTimeoutSeconds,
+	})
+	// #nosec G710 -- safeRedirectTarget rejects any scheme, host or opaque form
+	// and requires a leading "/" while rejecting "//" and "/\\", testing the
+	// decoded path so a percent-encoded backslash cannot slip past.
+	http.Redirect(w, r, safeRedirectTarget(r.FormValue("redirect")), http.StatusFound)
+	return true
+}
+
+// recordBotThreat files one bot-management refusal for the dashboard.
+func recordBotThreat(r *http.Request, cfg BotManagementConfig, clientIP, label string, score float64, details, severity string) {
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+		ID:          fmt.Sprintf("bot-%s-%s-%s", label, cfg.RouteID, clientIP),
+		Type:        "bot_detected",
+		SourceIP:    clientIP,
+		Score:       score,
+		Details:     details,
+		Time:        time.Now(),
+		RouteID:     cfg.RouteID,
+		RequestURI:  r.URL.RequestURI(),
+		Category:    "bot",
+		Severity:    severity,
+		ActionTaken: kind.ActionBlocked,
+	}))
 }
 
 // safeRedirectTarget reduces a redirect target to a path that cannot leave this

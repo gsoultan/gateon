@@ -72,7 +72,7 @@ func TestGeoIPGlobal(t *testing.T) {
 			}
 			resolver := func(ip string) string { return tt.country }
 
-			handler := GeoIPGlobalWithResolver(store, resolver)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := GeoIPGlobalWithResolver(t.Context(), store, resolver)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 

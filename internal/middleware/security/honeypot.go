@@ -176,74 +176,91 @@ type HoneypotConfig struct {
 func HoneypotGlobal(globalStore config.GlobalConfigStore) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-
-			blocklistMu.RLock()
-			until, blocked := honeypotBlocklist[clientIP]
-			blocklistMu.RUnlock()
-
-			if blocked {
-				if time.Now().Before(until) {
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-				// Expired
-				blocklistMu.Lock()
-				delete(honeypotBlocklist, clientIP)
-				blocklistMu.Unlock()
-			}
-
-			gc := globalStore.Get(r.Context())
-			var paths []string
-			deceptionEnabled := false
-			if gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.Deception != nil && gc.SecurityAdvanced.Deception.Enabled {
-				paths = gc.SecurityAdvanced.Deception.HoneypotPaths
-				deceptionEnabled = true
-			}
-
-			if len(paths) == 0 {
-				// Use defaults if none configured but middleware is active
-				paths = defaultHoneypotPaths()
-			}
-
-			path := r.URL.Path
-
-			// Check for breadcrumb triggers first
-			if strings.HasPrefix(path, "/_gateon_trap_") {
-				recordHoneypotThreat(r, "dynamic_breadcrumb")
-				blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
-				http.Error(w, "Forbidden", http.StatusForbidden)
-				return
-			}
-
-			for _, trapPath := range paths {
-				if trapPath == "" {
-					continue
-				}
-				// Exact match or prefix match for directories
-				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
-					recordHoneypotThreat(r, trapPath)
-					blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
-
-					// Return 403 Forbidden to the attacker
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-			}
-
-			// If deception is enabled, wrap ResponseWriter to inject breadcrumbs
-			if deceptionEnabled {
-				bw := &breadcrumbWriter{
-					ResponseWriter: w,
-					request:        r,
-				}
-				next.ServeHTTP(bw, r)
-				return
-			}
-
-			next.ServeHTTP(w, r)
+			serveHoneypotGlobal(globalStore, next, w, r)
 		})
 	}
+}
+
+func serveHoneypotGlobal(globalStore config.GlobalConfigStore, next http.Handler, w http.ResponseWriter, r *http.Request) {
+	clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+	if honeypotBanActive(clientIP) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	paths, deceptionEnabled := honeypotPaths(globalStore, r)
+	if trap, hit := honeypotTrapFor(r.URL.Path, paths); hit {
+		recordHoneypotThreat(r, trap)
+		blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
+		// Return 403 Forbidden to the attacker
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// If deception is enabled, wrap ResponseWriter to inject breadcrumbs
+	if deceptionEnabled {
+		next.ServeHTTP(&breadcrumbWriter{ResponseWriter: w, request: r}, r)
+		return
+	}
+
+	next.ServeHTTP(w, r)
+}
+
+// honeypotBanActive reports whether this client is still inside its ban, and
+// drops the entry when it is not. The expiry sweep happens on read because
+// there is no other pass over this map, and leaving expired entries would make
+// it a map keyed by attacker-supplied address with no eviction.
+func honeypotBanActive(clientIP string) bool {
+	blocklistMu.RLock()
+	until, blocked := honeypotBlocklist[clientIP]
+	blocklistMu.RUnlock()
+
+	if !blocked {
+		return false
+	}
+	if time.Now().Before(until) {
+		return true
+	}
+
+	blocklistMu.Lock()
+	delete(honeypotBlocklist, clientIP)
+	blocklistMu.Unlock()
+	return false
+}
+
+// honeypotPaths resolves the configured trap paths, falling back to the
+// built-in set so an enabled honeypot with no paths still traps something.
+func honeypotPaths(globalStore config.GlobalConfigStore, r *http.Request) (paths []string, deceptionEnabled bool) {
+	gc := globalStore.Get(r.Context())
+	if gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.Deception != nil &&
+		gc.SecurityAdvanced.Deception.Enabled {
+		paths = gc.SecurityAdvanced.Deception.HoneypotPaths
+		deceptionEnabled = true
+	}
+	if len(paths) == 0 {
+		paths = defaultHoneypotPaths()
+	}
+	return paths, deceptionEnabled
+}
+
+// honeypotTrapFor reports which trap a path hit, if any. A trap matches
+// exactly, or as a directory prefix so everything under it counts.
+func honeypotTrapFor(path string, paths []string) (string, bool) {
+	// Dynamic breadcrumbs are checked first: the gateway planted them, so a
+	// request for one is unambiguous rather than merely suspicious.
+	if strings.HasPrefix(path, "/_gateon_trap_") {
+		return "dynamic_breadcrumb", true
+	}
+
+	for _, trapPath := range paths {
+		if trapPath == "" {
+			continue
+		}
+		if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
+			return trapPath, true
+		}
+	}
+	return "", false
 }
 
 type breadcrumbWriter struct {

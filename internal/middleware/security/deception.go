@@ -28,82 +28,85 @@ type DeceptionConfig struct {
 }
 
 // Deception middleware provides path honeypots, invisible link injection, and canary tokens.
+// trollReputationThreshold is the score below which a client that trips a trap
+// gets the troll response rather than a plain 403. A client the gateway still
+// rates well is more likely a browser replaying a cached link than an attacker
+// probing, and deserves an ordinary error.
+const trollReputationThreshold = 50
+
 func Deception(cfg DeceptionConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
-
-			// 1. Check for Canary Token reuse
-			if cfg.CanaryHeader != "" && cfg.CanaryToken != "" {
-				if r.Header.Get(cfg.CanaryHeader) == cfg.CanaryToken {
-					recordAdvancedThreat(r, "canary_token_reused", 100, "Attacker reused injected canary header: "+cfg.CanaryHeader, cfg.RouteID, "deception", "CRITICAL", kind.ActionBlocked)
-					if cfg.EnableTrollResponse {
-						// Only troll if reputation is significantly degraded.
-						// High-reputation clients (e.g. mistaken browser reuse) should get a standard error.
-						repID := telemetry.GetReputationID(r)
-						reputation := telemetry.GetReputationScore(repID)
-						if reputation < 50 {
-							serveTrollResponse(w)
-							return
-						}
-					}
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-			}
-
-			// 2. Check for honeypot path access
-			for _, trap := range cfg.HoneypotPaths {
-				if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
-					recordAdvancedThreat(r, "honeypot_triggered", 100, "Access to trap path: "+trap, cfg.RouteID, "deception", "CRITICAL", kind.ActionBlocked)
-					if cfg.EnableTrollResponse {
-						repID := telemetry.GetReputationID(r)
-						reputation := telemetry.GetReputationScore(repID)
-						if reputation < 50 {
-							serveTrollResponse(w)
-							return
-						}
-					}
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-			}
-
-			// 3. Check for invisible link access
-			for _, link := range cfg.InvisibleLinkPaths {
-				if link != "" && path == link {
-					recordAdvancedThreat(r, "deception_link_triggered", 100, "Access to invisible deception link: "+link, cfg.RouteID, "deception", "CRITICAL", kind.ActionBlocked)
-					if cfg.EnableTrollResponse {
-						repID := telemetry.GetReputationID(r)
-						reputation := telemetry.GetReputationScore(repID)
-						if reputation < 50 {
-							serveTrollResponse(w)
-							return
-						}
-					}
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-			}
-
-			// 4. Inject Canary Header into response
-			if cfg.CanaryHeader != "" && cfg.CanaryToken != "" {
-				w.Header().Set(cfg.CanaryHeader, cfg.CanaryToken)
-			}
-
-			if (!cfg.InjectInvisibleLinks || len(cfg.InvisibleLinkPaths) == 0) && len(cfg.HoneyForms) == 0 {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Wrap response to inject tokens if it's HTML
-			drw := &deceptionResponseWriter{
-				ResponseWriter: w,
-				cfg:            cfg,
-			}
-			next.ServeHTTP(drw, r)
+			serveDeception(cfg, next, w, r)
 		})
 	}
+}
+
+func serveDeception(cfg DeceptionConfig, next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if threatType, details, tripped := cfg.trapFor(r); tripped {
+		cfg.refuse(w, r, threatType, details)
+		return
+	}
+
+	// Inject Canary Header into response
+	if cfg.CanaryHeader != "" && cfg.CanaryToken != "" {
+		w.Header().Set(cfg.CanaryHeader, cfg.CanaryToken)
+	}
+
+	if (!cfg.InjectInvisibleLinks || len(cfg.InvisibleLinkPaths) == 0) && len(cfg.HoneyForms) == 0 {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	// Wrap response to inject tokens if it's HTML
+	next.ServeHTTP(&deceptionResponseWriter{ResponseWriter: w, cfg: cfg}, r)
+}
+
+// trapFor reports which deception artefact this request touched. Each of the
+// three is something no legitimate client has a reason to reach: a canary
+// header the gateway itself planted and only an attacker would replay, a path
+// that exists solely to be trapped, and a link rendered invisible so only
+// something reading the markup would follow it.
+func (cfg DeceptionConfig) trapFor(r *http.Request) (threatType, details string, tripped bool) {
+	if cfg.CanaryHeader != "" && cfg.CanaryToken != "" &&
+		r.Header.Get(cfg.CanaryHeader) == cfg.CanaryToken {
+		return "canary_token_reused",
+			"Attacker reused injected canary header: " + cfg.CanaryHeader, true
+	}
+
+	path := r.URL.Path
+	for _, trap := range cfg.HoneypotPaths {
+		if trap != "" && (path == trap || strings.HasPrefix(path, trap+"/")) {
+			return "honeypot_triggered", "Access to trap path: " + trap, true
+		}
+	}
+
+	for _, link := range cfg.InvisibleLinkPaths {
+		if link != "" && path == link {
+			return "deception_link_triggered",
+				"Access to invisible deception link: " + link, true
+		}
+	}
+
+	return "", "", false
+}
+
+// refuse records the trap that fired and answers the request. The severity is
+// kind's, not an upper-case literal: every consumer of a threat record --
+// severityRank, the SIEM mapping, the dashboard's critical-or-high tile --
+// compares lower-case, so "CRITICAL" ranked below "low" and was counted by
+// nothing. Same bug the reputation blocker had.
+func (cfg DeceptionConfig) refuse(w http.ResponseWriter, r *http.Request, threatType, details string) {
+	recordAdvancedThreat(r, threatType, 100, details, cfg.RouteID, "deception",
+		kind.SeverityCritical, kind.ActionBlocked)
+
+	if cfg.EnableTrollResponse &&
+		telemetry.GetReputationScore(telemetry.GetReputationID(r)) < trollReputationThreshold {
+		serveTrollResponse(w)
+		return
+	}
+
+	http.Error(w, "Forbidden", http.StatusForbidden)
 }
 
 type deceptionResponseWriter struct {

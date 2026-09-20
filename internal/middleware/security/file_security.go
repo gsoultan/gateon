@@ -139,63 +139,101 @@ func FileSecurity(cfg FileSecurityConfig) kind.Middleware {
 		blockedMap[m] = true
 	}
 
+	rt := fileScanRuntime{
+		cfg:      cfg,
+		sem:      sem,
+		engine:   engine,
+		blockSev: blockSev,
+		allowed:  allowedMap,
+		blocked:  blockedMap,
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !isUploadMethod(r.Method) || !isMultipart(r.Header.Get("Content-Type")) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			boundary, err := multipartBoundary(r.Header.Get("Content-Type"))
-			if err != nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Acquire a scan slot for backpressure; bounds memory and clamd connections.
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-r.Context().Done():
-				return
-			}
-
-			buf := fileScannerBufferPool.Get().(*bytes.Buffer)
-			buf.Reset()
-			defer fileScannerBufferPool.Put(buf)
-
-			body, tooLarge, err := bufferBodyInto(r.Body, cfg.MaxScanBytes, buf)
-			if tooLarge {
-				http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			if err != nil {
-				// The body could not be fully read; there is nothing safe to forward.
-				logger.L.LogError("failed to read request body", "error", err, "client_ip", r.RemoteAddr)
-				http.Error(w, "Security scan unavailable", http.StatusServiceUnavailable)
-				return
-			}
-
-			// Reconstruct the body so any downstream path receives the intact upload.
-			restoreBody(r, body)
-
-			res := scanMultipart(r, body, boundary, cfg, engine, blockSev, allowedMap, blockedMap)
-			if res.scannerErr != nil {
-				if !cfg.FailOpen {
-					logger.L.LogError("ClamAV scan failed (fail-closed)", "error", res.scannerErr, "client_ip", r.RemoteAddr)
-					http.Error(w, "Security scan unavailable", http.StatusServiceUnavailable)
-					return
-				}
-				logger.L.LogWarn("ClamAV scan failed (fail-open), forwarding upload", "error", res.scannerErr, "client_ip", r.RemoteAddr)
-			} else if res.blocked {
-				recordFileSecurityThreat(r, cfg.RouteID, "file_security_block", res.message)
-
-				http.Error(w, res.message, res.status)
-				return
-			}
-
-			next.ServeHTTP(w, r)
+			rt.serve(next, w, r)
 		})
+	}
+}
+
+// fileScanRuntime is the upload-scanning policy resolved once per route: the
+// signature engine, the concurrency semaphore that bounds both memory and
+// clamd connections, and the MIME allow/deny sets.
+type fileScanRuntime struct {
+	cfg      FileSecurityConfig
+	sem      chan struct{}
+	engine   *yara.Engine
+	blockSev yara.Severity
+	allowed  map[string]bool
+	blocked  map[string]bool
+}
+
+func (f fileScanRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if !isUploadMethod(r.Method) || !isMultipart(r.Header.Get("Content-Type")) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	boundary, err := multipartBoundary(r.Header.Get("Content-Type"))
+	if err != nil {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	// Acquire a scan slot for backpressure; bounds memory and clamd connections.
+	select {
+	case f.sem <- struct{}{}:
+		defer func() { <-f.sem }()
+	case <-r.Context().Done():
+		return
+	}
+
+	buf := fileScannerBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer fileScannerBufferPool.Put(buf)
+
+	body, tooLarge, err := bufferBodyInto(r.Body, f.cfg.MaxScanBytes, buf)
+	if tooLarge {
+		http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if err != nil {
+		// The body could not be fully read; there is nothing safe to forward.
+		logger.L.LogError("failed to read request body", "error", err, "client_ip", r.RemoteAddr)
+		http.Error(w, "Security scan unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Reconstruct the body so any downstream path receives the intact upload.
+	restoreBody(r, body)
+
+	res := scanMultipart(r, body, boundary, f.cfg, f.engine, f.blockSev, f.allowed, f.blocked)
+	if !f.forwardAfterScan(res, w, r) {
+		return
+	}
+
+	next.ServeHTTP(w, r)
+}
+
+// forwardAfterScan reports whether the upload may continue. A scanner that
+// could not run is the interesting case: with FailOpen the upload goes through
+// unscanned and the operator gets a warning, without it the request is refused.
+// Absence of a verdict is not a clean verdict.
+func (f fileScanRuntime) forwardAfterScan(res scanResult, w http.ResponseWriter, r *http.Request) bool {
+	switch {
+	case res.scannerErr != nil:
+		if !f.cfg.FailOpen {
+			logger.L.LogError("ClamAV scan failed (fail-closed)", "error", res.scannerErr, "client_ip", r.RemoteAddr)
+			http.Error(w, "Security scan unavailable", http.StatusServiceUnavailable)
+			return false
+		}
+		logger.L.LogWarn("ClamAV scan failed (fail-open), forwarding upload", "error", res.scannerErr, "client_ip", r.RemoteAddr)
+		return true
+	case res.blocked:
+		recordFileSecurityThreat(r, f.cfg.RouteID, "file_security_block", res.message)
+		http.Error(w, res.message, res.status)
+		return false
+	default:
+		return true
 	}
 }
 
