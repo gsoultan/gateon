@@ -26,7 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/install"
 	"github.com/gsoultan/gateon/internal/k8s"
 	"github.com/gsoultan/gateon/internal/logger"
-	secmw "github.com/gsoultan/gateon/internal/middleware/security"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/repositories/stores"
@@ -138,7 +138,7 @@ func main() {
 		if err := waf.InitStore(databaseURL); err != nil {
 			logger.L.LogError("failed to init waf rules store", "error", err)
 		} else {
-			waf.GetStore().SetInvalidator(secmw.WAFCacheInvalidator{})
+			waf.GetStore().SetInvalidator(wafmw.WAFCacheInvalidator{})
 		}
 	}
 
@@ -150,7 +150,7 @@ func main() {
 	// boot-time config (privilege gating, Start, poll loop).
 	ebpfHolder := ebpf.GlobalHolder
 	telemetry.SetEbpfManager(&ebpfAdapter{ebpfHolder})
-	var wafUpdater *secmw.WAFUpdater
+	var wafUpdater *wafmw.WAFUpdater
 	var clamavManager *security.ClamAVManager
 
 	if gc := globalReg.Get(ctx); gc != nil {
@@ -167,7 +167,7 @@ func main() {
 				logger.L.LogError("failed to init gossip reputation sync", "error", err)
 			}
 		}
-		wafUpdater = secmw.NewWAFUpdater(globalReg, ".")
+		wafUpdater = wafmw.NewWAFUpdater(globalReg, ".")
 		// The WAF auto-update loop and ClamAV manager lifecycles are managed by the
 		// security supervisor below so toggling Waf.AutoUpdateRules / Waf.Clamav
 		// takes effect without a restart. The ClamAV manager is always created

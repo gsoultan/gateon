@@ -14,6 +14,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -26,7 +27,7 @@ func TestWAF_SecurityV2(t *testing.T) {
 		t.Fatalf("failed to seed store: %v", err)
 	}
 
-	mw, err := security.WAF(security.WAFConfig{
+	mw, err := wafmw.WAF(wafmw.WAFConfig{
 		WafRules:         store,
 		RequestBodyLimit: 1024 * 1024,
 	})

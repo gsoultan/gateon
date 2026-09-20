@@ -104,8 +104,8 @@ func GeoIP(cfg GeoIPConfig) (kind.Middleware, error) {
 					RouteID:     activeRouteID,
 					RequestURI:  r.URL.RequestURI(),
 					Category:    "geofencing",
-					Severity:    severityMedium,
-					ActionTaken: actionBlocked,
+					Severity:    kind.SeverityMedium,
+					ActionTaken: kind.ActionBlocked,
 				}))
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.LogDebug("geoip: request denied by country",
@@ -125,8 +125,8 @@ func GeoIP(cfg GeoIPConfig) (kind.Middleware, error) {
 					RouteID:     activeRouteID,
 					RequestURI:  r.URL.RequestURI(),
 					Category:    "geofencing",
-					Severity:    severityMedium,
-					ActionTaken: actionBlocked,
+					Severity:    kind.SeverityMedium,
+					ActionTaken: kind.ActionBlocked,
 				}))
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				logger.L.LogDebug("geoip: request not in allow list",
@@ -240,8 +240,8 @@ func recordGlobalBlock(r *http.Request, clientIP, country, reason string) {
 		RouteID:     "global",
 		RequestURI:  r.URL.RequestURI(),
 		Category:    "geofencing",
-		Severity:    severityMedium,
-		ActionTaken: actionBlocked,
+		Severity:    kind.SeverityMedium,
+		ActionTaken: kind.ActionBlocked,
 	}))
 	logger.L.LogDebug("global geoip: request blocked",
 		"ip", clientIP,

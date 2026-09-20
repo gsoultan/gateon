@@ -26,12 +26,16 @@ type Deps struct {
 	DataDir     string
 
 	// RouteType is the route's declared protocol. It stands in for the
-	// factory's isGRPCRoute method, which is one string comparison and does
+	// factory's IsGRPCRoute method, which is one string comparison and does
 	// not justify reaching back into package middleware for it.
 	RouteType string
 }
 
-func (d Deps) isGRPCRoute() bool {
+// IsGRPCRoute reports whether this route is configured as gRPC, which unlocks
+// the WAF's transport relaxations. It reads Deps.RouteType, which comes from
+// gateon's own route configuration -- never from a request header, because a
+// client that could name its own transport could ask for the relaxations.
+func (d Deps) IsGRPCRoute() bool {
 	return strings.EqualFold(strings.TrimSpace(d.RouteType), "grpc")
 }
 

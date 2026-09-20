@@ -11,7 +11,7 @@ import (
 	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/ebpf"
-	secmw "github.com/gsoultan/gateon/internal/middleware/security"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
@@ -41,7 +41,7 @@ type ApiServiceConfig struct {
 	TLSManager         tls.TLSManager
 	RouteStatsProvider RouteStatsProvider
 	EbpfManager        ebpf.Manager
-	WafUpdater         *secmw.WAFUpdater
+	WafUpdater         *wafmw.WAFUpdater
 	IPReputation       *reputation.IPReputationStore
 	ClamAVManager      *security.ClamAVManager
 	WafRules           *waf.Store
