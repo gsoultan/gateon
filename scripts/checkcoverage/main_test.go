@@ -164,6 +164,42 @@ func TestUpdatePreservesTheBaselineHeader(t *testing.T) {
 // TestUpdateFallsBackToTheDefaultHeader covers a baseline that does not exist
 // yet -- the caller passes nil when the read fails -- which must still be born
 // explaining itself.
+// TestWriteBaselinePreservesAnExistingHeader exercises the -update path
+// end to end, which the two tests above do not: they call existingHeader
+// directly, so replacing writeBaseline's header selection with the default --
+// the bug this was all written for -- left them both green.
+func TestWriteBaselinePreservesAnExistingHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "baseline.txt")
+
+	orig := baselinePath
+	baselinePath = path
+	t.Cleanup(func() { baselinePath = orig })
+
+	const header = "# Why pkg/x sits at 12.3%: read the incident first.\n"
+	if err := os.WriteFile(path, []byte(header+"\ngithub.com/x/y 12.3%\n"), 0o600); err != nil {
+		t.Fatalf("seed baseline: %v", err)
+	}
+
+	err := writeBaseline([]result{{pkg: "github.com/x/y", coverage: 45.6, hasTests: true}})
+	if err != nil {
+		t.Fatalf("writeBaseline: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !strings.Contains(string(got), "read the incident first") {
+		t.Errorf("writeBaseline dropped the existing header; every recorded "+
+			"figure loses the explanation that makes it readable, and the file "+
+			"still looks correct afterwards.\ngot:\n%s", got)
+	}
+	if !strings.Contains(string(got), "github.com/x/y 45.6%") {
+		t.Errorf("writeBaseline did not record the new figure.\ngot:\n%s", got)
+	}
+}
+
 func TestUpdateFallsBackToTheDefaultHeader(t *testing.T) {
 	if got := existingHeader(nil); got != "" {
 		t.Errorf("existingHeader on an absent baseline = %q, want empty so the "+

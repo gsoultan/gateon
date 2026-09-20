@@ -87,7 +87,9 @@ func TestEvaluateCORSSeparatesAMethodFromAHeader(t *testing.T) {
 				"nothing and leaves the header still refused")
 		}
 		if d.HeadersAllowed {
-			t.Error("HeadersAllowed = true for a header outside the policy")
+			t.Error("HeadersAllowed = true for a header outside the policy; " +
+				"the operator is told nothing is wrong with the headers that " +
+				"are in fact the reason for the refusal")
 		}
 	})
 }
@@ -115,5 +117,32 @@ func TestCORSEffectivePolicyReportsWhatIsEnforced(t *testing.T) {
 	set := corsEffectivePolicy(CORSConfig{AllowedOrigins: []string{"https://a"}})
 	if len(set.AllowedOrigins) != 1 || set.AllowedOrigins[0] != "https://a" {
 		t.Errorf("AllowedOrigins = %v, want the configured list unchanged", set.AllowedOrigins)
+	}
+}
+
+// TestEvaluateCORSDoesNotBlameHeadersForARejectedMethod covers the field that
+// used to carry no information at all. HeadersAllowed was assigned from
+// Allowed and never recomputed, so it was identically Allowed -- and
+// describeCORSHeaders in internal/api branches on it, telling an operator
+// whose METHOD was refused that their HEADERS were the problem.
+func TestEvaluateCORSDoesNotBlameHeadersForARejectedMethod(t *testing.T) {
+	cfg := map[string]string{
+		"allowed_origins": "https://app.example",
+		"allowed_methods": "GET",
+		"allowed_headers": "Content-Type",
+	}
+
+	// Method refused, headers perfectly acceptable.
+	d := EvaluateCORS(cfg, preflight("https://app.example", http.MethodDelete, "Content-Type"))
+	if d.Allowed {
+		t.Fatal("DELETE was allowed against a GET-only policy")
+	}
+	if d.MethodAllowed {
+		t.Fatal("MethodAllowed = true for DELETE against a GET-only policy")
+	}
+	if !d.HeadersAllowed {
+		t.Error("HeadersAllowed = false for Content-Type, which is in the " +
+			"policy: the dashboard tells the operator to widen the header " +
+			"list, which changes nothing, while the real problem is the method")
 	}
 }

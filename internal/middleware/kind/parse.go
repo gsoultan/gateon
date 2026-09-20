@@ -65,7 +65,6 @@ const (
 	ActionBlocked    = "blocked"
 	ActionDetected   = "detected"
 	ActionChallenged = "challenged"
-	ActionShunned    = "shunned"
 )
 
 func ParseListStrict(val string) []string {

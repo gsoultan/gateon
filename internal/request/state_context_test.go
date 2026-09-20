@@ -39,12 +39,32 @@ func TestStateIsAbsentRatherThanZeroWhenUnset(t *testing.T) {
 	}
 }
 
-// TestWithStateAcceptsNil covers the path a middleware takes when it forwards a
-// request it did not resolve state for. It must not panic, and the reader must
-// still report absence rather than handing back a typed nil that callers then
-// dereference.
+// TestWithStateAcceptsNil covers the path a middleware takes when it forwards
+// a request it did not resolve state for.
+//
+// What it does NOT claim is that the reader reports absence. WithState stores
+// whatever it is handed, so a nil goes into the context as a non-nil `any`
+// carrying a typed nil, and GetRequestStateFromContext returns it verbatim.
+// Callers see a nil *RequestState either way and the existing `rs != nil`
+// guards hold, which is why this is documented rather than fixed -- but an
+// earlier version of this test asserted the opposite and could not tell the
+// difference, because a typed nil compares equal to nil at that return type.
+//
+// The assertion here is the one that is actually load-bearing: no panic, and
+// callers can still use their nil check.
 func TestWithStateAcceptsNil(t *testing.T) {
-	if got := GetRequestStateFromContext(WithState(context.Background(), nil)); got != nil {
-		t.Errorf("round-tripping nil produced %+v, want nil", got)
+	ctx := WithState(context.Background(), nil)
+
+	if got := GetRequestStateFromContext(ctx); got != nil {
+		t.Errorf("round-tripping nil produced %+v, want a nil *RequestState", got)
+	}
+
+	// The stored value is a non-nil interface holding a typed nil. Pinned so
+	// that anyone who later adds a `ctx.Value(...) != nil` check knows it
+	// always passes and is not the absence test it looks like.
+	if v := ctx.Value(RequestStateContextKey{}); v == nil {
+		t.Error("the stored value is now an untyped nil; that is an " +
+			"improvement, but the comment above and any caller relying on " +
+			"the documented behaviour need updating with it")
 	}
 }

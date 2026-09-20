@@ -101,6 +101,21 @@ func EvaluateCORS(cfg map[string]string, r *http.Request) CORSDecision {
 		probe := r.Clone(r.Context())
 		probe.Header.Del(corsHeaderRequestHeaders)
 		d.MethodAllowed = corsResponseHeaders(c, probe)[corsHeaderAllowOrigin] != ""
+
+		// HeadersAllowed answers "were the requested headers what caused this
+		// denial", not "is everything fine" -- otherwise it is just Allowed
+		// again, which is what it used to be. It was assigned from Allowed and
+		// never recomputed, so a request refused for its *method* reported
+		// "Headers check: FAILED (X not in [...])" about headers that were
+		// perfectly acceptable, and the operator went and widened the header
+		// list for nothing. That is the same mis-attribution the probe above
+		// exists to prevent, on the other axis.
+		//
+		// If the probe passes, the method is fine and the headers are to
+		// blame. If it still fails, the method is to blame and the headers are
+		// not implicated -- we cannot tell whether they would also have been
+		// refused, and claiming they were is worse than staying quiet.
+		d.HeadersAllowed = !d.MethodAllowed
 	}
 
 	return d
