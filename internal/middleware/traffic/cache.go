@@ -66,55 +66,80 @@ func CacheWithRoute(cfg CacheConfig, routeID string) kind.Middleware {
 		backend = newMemoryCacheBackend(cfg.MaxEntries, maxBody)
 	}
 
+	rt := cacheRuntime{backend: backend, routeID: routeID, maxBody: maxBody, ttl: ttl}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.ShouldSkipMetrics(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			activeRouteID := kind.GetRouteName(r)
-			if activeRouteID == "" {
-				activeRouteID = routeID
-			}
-
-			if r.Method != http.MethodGet && r.Method != http.MethodHead || cacheBypass(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			key := cacheKey(activeRouteID, r)
-			status, headers, body, ok := backend.Get(r.Context(), key)
-			if ok {
-				telemetry.MiddlewareCacheHitsTotal.WithLabelValues(activeRouteID).Inc()
-				for k, vv := range headers {
-					for _, v := range vv {
-						w.Header().Add(k, v)
-					}
-				}
-				w.WriteHeader(status)
-				if r.Method == http.MethodGet && len(body) > 0 {
-					// #nosec G705 -- a previously cached origin response replayed
-					// verbatim, with the origin's stored Content-Type.
-					_, _ = w.Write(body)
-				}
-				return
-			}
-			telemetry.MiddlewareCacheMissesTotal.WithLabelValues(activeRouteID).Inc()
-
-			buf := &bytes.Buffer{}
-			rec := &responseRecorder{
-				ResponseWriter: w,
-				status:         http.StatusOK,
-				header:         make(http.Header),
-				body:           buf,
-				maxBody:        maxBody,
-			}
-			next.ServeHTTP(rec, r)
-			rec.commitHeader()
-
-			if rec.cacheable() {
-				backend.Set(r.Context(), key, rec.status, rec.header, bytes.Clone(buf.Bytes()), ttl)
-			}
+			rt.serve(next, w, r)
 		})
+	}
+}
+
+// cacheRuntime is CacheConfig once defaults are applied and a backend chosen.
+// Resolved per route at chain-build time, never per request.
+type cacheRuntime struct {
+	backend CacheBackend
+	routeID string
+	maxBody int64
+	ttl     time.Duration
+}
+
+// serve is the per-request path, named rather than nested inside the two
+// closures a middleware already is -- gocognit charges each branch by its
+// depth, and at depth three the branches below cost triple what they read as.
+func (c cacheRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if kind.ShouldSkipMetrics(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	activeRouteID := kind.GetRouteName(r)
+	if activeRouteID == "" {
+		activeRouteID = c.routeID
+	}
+
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || cacheBypass(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	key := cacheKey(activeRouteID, r)
+	if status, headers, body, ok := c.backend.Get(r.Context(), key); ok {
+		telemetry.MiddlewareCacheHitsTotal.WithLabelValues(activeRouteID).Inc()
+		replayCached(w, r, status, headers, body)
+		return
+	}
+	telemetry.MiddlewareCacheMissesTotal.WithLabelValues(activeRouteID).Inc()
+
+	buf := &bytes.Buffer{}
+	rec := &responseRecorder{
+		ResponseWriter: w,
+		status:         http.StatusOK,
+		header:         make(http.Header),
+		body:           buf,
+		maxBody:        c.maxBody,
+	}
+	next.ServeHTTP(rec, r)
+	rec.commitHeader()
+
+	if rec.cacheable() {
+		c.backend.Set(r.Context(), key, rec.status, rec.header, bytes.Clone(buf.Bytes()), c.ttl)
+	}
+}
+
+// replayCached writes a stored response back to the client. A HEAD gets the
+// headers and status of the GET it shares a key with, but never the body.
+func replayCached(w http.ResponseWriter, r *http.Request, status int, headers http.Header, body []byte) {
+	for k, vv := range headers {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(status)
+
+	if r.Method == http.MethodGet && len(body) > 0 {
+		// #nosec G705 -- a previously cached origin response replayed
+		// verbatim, with the origin's stored Content-Type.
+		_, _ = w.Write(body)
 	}
 }
 
