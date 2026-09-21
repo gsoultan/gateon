@@ -45,7 +45,12 @@ import (
 // the baseline reflexively -- which is how a ratchet stops ratcheting.
 const tolerance = 1.0
 
-const baselinePath = "scripts/checkcoverage/baseline.txt"
+// baselinePath is a var rather than a const so writeBaseline -- the function
+// that actually chooses between the preserved header and the default -- can be
+// exercised against a t.TempDir() file. Tests that only called existingHeader
+// passed even with the header selection replaced by the default, i.e. with the
+// exact bug they were written for.
+var baselinePath = "scripts/checkcoverage/baseline.txt"
 
 var (
 	// "ok  \tgithub.com/x/y\t0.5s\tcoverage: 42.9% of statements"

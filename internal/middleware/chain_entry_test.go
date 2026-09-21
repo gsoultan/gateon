@@ -4,6 +4,7 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -122,28 +123,118 @@ func TestFingerprintingPassesTheRequestThrough(t *testing.T) {
 	}
 }
 
-// TestRealIPGlobalResolvesWithoutTrustingTheClient covers the default posture.
-// With no global config loaded, EffectiveTrustCloudflare falls back to the
-// environment, which is unset here -- so a client-written X-Forwarded-For must
-// not become the resolved address.
-func TestRealIPGlobalResolvesWithoutTrustingTheClient(t *testing.T) {
+// RealIPGlobal picks between RealIP(true) and RealIP(false) on
+// config.EffectiveTrustCloudflare(), which is a sync.OnceValue over an
+// environment variable -- resolved once per process, so t.Setenv cannot flip it
+// from inside a test that runs after anything else has read it. The selection
+// is therefore untested here, deliberately and visibly; what is tested is the
+// resolution it selects between, which is where a mistake would actually live.
+//
+// Both directions matter. Asserting only the untrusted case is worthless: with
+// trust off, "resolve correctly" and "do nothing at all" produce the same
+// RemoteAddr, so a middleware stubbed to a bare pass-through passes. Only the
+// trusted case, where the header *must* be honoured, tells them apart.
+
+func TestRealIPDoesNotTrustAnUnverifiedHeader(t *testing.T) {
+	const peer = "198.51.100.9"
+
 	var resolved string
-	h := RealIPGlobal()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := RealIP(false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		resolved = r.RemoteAddr
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "198.51.100.9:1234"
+	req.RemoteAddr = peer + ":1234"
 	req.Header.Set("CF-Connecting-IP", "203.0.113.200")
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
-	if resolved == "" {
-		t.Fatal("RealIPGlobal left RemoteAddr empty")
+	if host := hostOf(resolved); host != peer {
+		t.Errorf("RemoteAddr = %q, want the socket peer %q: an untrusted "+
+			"CF-Connecting-IP became the client address, so any client could "+
+			"pick its own", host, peer)
 	}
-	if resolved == "203.0.113.200" || resolved == "203.0.113.200:1234" {
-		t.Errorf("RemoteAddr = %q: an untrusted CF-Connecting-IP became the "+
-			"resolved client address, so any client could pick its own", resolved)
+}
+
+// TestRealIPHonoursTheHeaderWhenTrusted pins a second condition the flag name
+// hides: trustCloudflare alone is not enough. GetClientIP requires the *peer*
+// to qualify too -- either a configured trusted proxy, or an address inside
+// Cloudflare's own ranges -- so a request arriving straight from the internet
+// with a CF-Connecting-IP is ignored even with the flag on. Loopback does not
+// qualify either unless GATEON_TRUSTED_PROXIES names it.
+//
+// I wrote this test twice expecting the flag to be sufficient, and it failed
+// both times. That is the property worth pinning: a header that names the
+// client is honoured only when the hop that added it is one we trust.
+//
+// The peer below is inside 104.16.0.0/13, one of the Cloudflare ranges
+// internal/request registers at init. That avoids GATEON_TRUSTED_PROXIES,
+// which is read once at package load and so cannot be set from a test.
+func TestRealIPHonoursTheHeaderWhenTrusted(t *testing.T) {
+	const claimed = "203.0.113.200"
+
+	var resolved string
+	h := RealIP(true)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		resolved = r.RemoteAddr
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "104.16.0.1:1234"
+	req.Header.Set("CF-Connecting-IP", claimed)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if host := hostOf(resolved); host != claimed {
+		t.Errorf("RemoteAddr = %q, want %q from a trusted peer's "+
+			"CF-Connecting-IP: behind Cloudflare every request would be "+
+			"attributed to the edge rather than to the client", host, claimed)
 	}
+}
+
+// TestRealIPGlobalRewritesRemoteAddrFromResolvedState covers RealIPGlobal
+// itself rather than the RealIP variants it selects between.
+//
+// The selection is not controllable from a test, but the rewrite is, and it is
+// observable regardless of which variant runs: GetClientIP returns
+// RequestState.ClientRemoteAddr when the chain has already resolved one, so a
+// middleware that actually calls it rewrites RemoteAddr to that address while
+// preserving the port. A pass-through leaves the socket peer untouched.
+//
+// This exists because the test it replaces asserted only "non-empty, and not
+// the header value", which a pass-through satisfies -- and deleting it in
+// favour of the RealIP tests above moved the coverage into another package and
+// left RealIPGlobal with none.
+func TestRealIPGlobalRewritesRemoteAddrFromResolvedState(t *testing.T) {
+	const resolvedByChain = "10.0.0.5"
+
+	var seen string
+	h := RealIPGlobal()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.RemoteAddr
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "198.51.100.9:1234"
+	req = req.WithContext(request.WithState(req.Context(),
+		&request.RequestState{ClientRemoteAddr: resolvedByChain}))
+
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if hostOf(seen) != resolvedByChain {
+		t.Errorf("RemoteAddr = %q, want the address the chain already resolved "+
+			"(%q): RealIPGlobal did not resolve at all, so every downstream "+
+			"middleware reading RemoteAddr sees the immediate peer instead of "+
+			"the client", seen, resolvedByChain)
+	}
+	if _, port, err := net.SplitHostPort(seen); err != nil || port != "1234" {
+		t.Errorf("RemoteAddr = %q, want the original port preserved; PROXY "+
+			"protocol generation expects host:port", seen)
+	}
+}
+
+func hostOf(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return host
 }
 
 // TestCheckBreakerOpensOnlyAfterEnoughRequests pins the guard that keeps a

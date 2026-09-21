@@ -328,8 +328,13 @@ func SQLiRecognition(routeID string) kind.Middleware {
 // a hit produces. Ordered: the first match wins, so the more specific corpora
 // have to precede the generic one.
 type threatCorpus struct {
-	find            func(string) []string
+	find func(string) []string
+	// noun is spliced into "<noun> pattern(s) '%s' found in %s". fileUpload
+	// sets nounOverride instead: its message predates that shared format and
+	// ships to the dashboard and the SIEM, so unifying the three recognition
+	// middlewares silently reworded a stored, operator-visible field.
 	noun            string
+	nounOverride    string
 	threatType      string
 	severity        string
 	queryOrBodyOnly bool
@@ -341,7 +346,7 @@ var threatCorpora = []threatCorpus{
 	{find: phpScanner.FindAll, noun: "PHP vulnerability", threatType: "php_vulnerability", severity: kind.SeverityCritical},
 	// A filename is only suspicious where a filename can do something. In a
 	// User-Agent it is a string; in a query or a body it is an upload attempt.
-	{find: fileUploadScanner.FindAll, noun: "Malicious file extension", threatType: "file_upload_attempt", severity: kind.SeverityCritical, queryOrBodyOnly: true},
+	{find: fileUploadScanner.FindAll, nounOverride: "Malicious file extension(s)", threatType: "file_upload_attempt", severity: kind.SeverityCritical, queryOrBodyOnly: true},
 }
 
 // ThreatRecognition middleware scans request for various common attack patterns (RCE, Prototype Pollution, Gambling, PHP vuln, etc.)
@@ -360,8 +365,12 @@ func ThreatRecognition(routeID string) kind.Middleware {
 					return false
 				}
 				threatType, severity = c.threatType, c.severity
-				details = fmt.Sprintf("%s pattern(s) '%s' found in %s",
-					c.noun, strings.Join(matches, ", "), source)
+				noun := c.noun + " pattern(s)"
+				if c.nounOverride != "" {
+					noun = c.nounOverride
+				}
+				details = fmt.Sprintf("%s '%s' found in %s",
+					noun, strings.Join(matches, ", "), source)
 				return true
 			})
 

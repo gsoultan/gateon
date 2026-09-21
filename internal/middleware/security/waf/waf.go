@@ -329,7 +329,7 @@ func WAF(cfg WAFConfig) (kind.Middleware, error) {
 	// recomputed on every request — nine allocations for a route-constant value.
 	fp := cfg.Fingerprint()
 
-	t := wafRuntime{cfg: cfg, engine: engine, redactor: redactor, fp: fp}
+	t := &wafRuntime{cfg: cfg, engine: engine, redactor: redactor, fp: fp}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.serve(next, w, r)
@@ -353,7 +353,7 @@ type wafRuntime struct {
 	fp       string
 }
 
-func (t wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
 	// 1. Deduplication: Avoid double-checking if an identical WAF setup has already run.
 	rs := request.GetRequestState(r)
 	if t.alreadyInspected(rs) {
@@ -385,7 +385,7 @@ func (t wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Requ
 	t.applyCloudflareTrust(r)
 
 	// 5. Adaptive WAF reputation scoring
-	repScore := t.resolveReputation(rs, r, testRep)
+	repScore := t.resolveReputation(rs, testRep)
 	r.Header.Set("X-Gateon-Reputation", getReputationString(repScore))
 	r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
 
@@ -429,7 +429,7 @@ func (t wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Requ
 // identical WAF policy, or is management traffic that never goes through one.
 // It marks the request on the way past, so a chain carrying the same policy
 // twice pays for it once.
-func (t wafRuntime) alreadyInspected(rs *request.RequestState) bool {
+func (t *wafRuntime) alreadyInspected(rs *request.RequestState) bool {
 	if rs == nil {
 		return false
 	}
@@ -473,7 +473,7 @@ func stripGatewayHeaders(r *http.Request) string {
 }
 
 // enforceProtocol reports whether the request may continue.
-func (t wafRuntime) enforceProtocol(w http.ResponseWriter, r *http.Request) bool {
+func (t *wafRuntime) enforceProtocol(w http.ResponseWriter, r *http.Request) bool {
 	if t.cfg.DisableProtocolChecks {
 		return true
 	}
@@ -490,7 +490,7 @@ func (t wafRuntime) enforceProtocol(w http.ResponseWriter, r *http.Request) bool
 	return true
 }
 
-func (t wafRuntime) applyCloudflareTrust(r *http.Request) {
+func (t *wafRuntime) applyCloudflareTrust(r *http.Request) {
 	if !t.cfg.TrustCloudflare {
 		return
 	}
@@ -505,7 +505,7 @@ func (t wafRuntime) applyCloudflareTrust(r *http.Request) {
 // resolveReputation returns the score the adaptive rules evaluate under. The
 // test header is honoured only when the environment switch is set; see
 // testReputationHeader for why reading it unconditionally was a bypass.
-func (t wafRuntime) resolveReputation(rs *request.RequestState, r *http.Request, testRep string) float64 {
+func (t *wafRuntime) resolveReputation(rs *request.RequestState, testRep string) float64 {
 	repScore := 100.0
 	if rs != nil {
 		repScore = rs.Reputation
@@ -521,7 +521,7 @@ func (t wafRuntime) resolveReputation(rs *request.RequestState, r *http.Request,
 // fastPathChecks runs the gateon-owned signals the stateless engine cannot
 // produce. It reports whether the request may continue, and writes its own
 // refusal when it may not.
-func (t wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *request.RequestState, repScore float64, inspectBody bool) bool {
+func (t *wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *request.RequestState, repScore float64, inspectBody bool) bool {
 	// Check entropy of common fields to detect shellcode/obfuscation
 	if !t.cfg.DisableEntropy {
 		if detail, found := suspiciousHeaderEntropy(r, t.cfg, repScore); found {
@@ -552,7 +552,7 @@ func (t wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *r
 // checkFingerprintConsistency catches a client claiming to be a browser while
 // behaving like something else. Only applied to browser user agents: a client
 // that does not claim to be a browser is not lying about being one.
-func (t wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.Request) bool {
+func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.Request) bool {
 	ua := r.Header.Get("User-Agent")
 	if !isBrowserUA(ua) {
 		return true
@@ -589,7 +589,7 @@ func (t wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.R
 // checkTokenStructure enforces structure only for tokens that claim to be a
 // known format. A bearer token in some other scheme is somebody else's
 // business; one that says it is a JWT and is not is a probe.
-func (t wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request) bool {
+func (t *wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
 		return true
@@ -600,8 +600,19 @@ func (t wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request) 
 		return true
 	}
 
-	malformed := (isLikelyJWT(token) && !isJWT(token)) ||
-		(isLikelyPaseto(token) && !isPaseto(token))
+	// else, not a second disjunct. The two predicates are prefix-disjoint
+	// today -- "eyJ" against "v1.".."v4." -- so an || happens to be equivalent,
+	// but it evaluates the Paseto check on a *valid* JWT and only stays correct
+	// while that disjointness holds. Widening isLikelyPaseto would start
+	// refusing valid JWTs as malformed. The else makes that impossible rather
+	// than merely unlikely.
+	var malformed bool
+	switch {
+	case isLikelyJWT(token):
+		malformed = !isJWT(token)
+	case isLikelyPaseto(token):
+		malformed = !isPaseto(token)
+	}
 	if !malformed {
 		return true
 	}
@@ -611,7 +622,7 @@ func (t wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request) 
 	return false
 }
 
-func (t wafRuntime) annotateIPReputation(r *http.Request) {
+func (t *wafRuntime) annotateIPReputation(r *http.Request) {
 	if !t.cfg.EnableIPReputation || t.cfg.Reputation == nil {
 		return
 	}
@@ -626,7 +637,7 @@ func (t wafRuntime) annotateIPReputation(r *http.Request) {
 	}
 }
 
-func (t wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter, r *http.Request, repScore float64, inspectBody bool) {
+func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter, r *http.Request, repScore float64, inspectBody bool) {
 	tx, decision, err := t.engine.inspectRequest(r, repScore, inspectBody)
 	// inspectRequest returns a live transaction on every path, error
 	// included, so the audit trail survives a failed inspection. Guard
@@ -700,7 +711,7 @@ func (t wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter, 
 // the response instead, which is the honest trade: the leaked bytes stop
 // either way, and a client that received a 200 with a truncated body is
 // strictly better off than one that waited for the whole thing to be buffered.
-func (t wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r *http.Request, tx *gwaf.Transaction, observePhase func(gwaf.Decision, string)) {
+func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r *http.Request, tx *gwaf.Transaction, observePhase func(gwaf.Decision, string)) {
 	// Narrow what the origin may answer in before the request goes
 	// upstream: an encoding this build cannot undo would hand the
 	// response phase an opaque stream and every data-leak rule would

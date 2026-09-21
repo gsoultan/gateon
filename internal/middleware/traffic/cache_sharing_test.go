@@ -92,15 +92,26 @@ func TestCacheKeySeparatesEverythingThatSelectsAResponse(t *testing.T) {
 		}
 	})
 
-	// The separator is a NUL rather than a printable character on purpose: it
-	// cannot appear in any of the parts, so no combination of route and method
-	// can be made to collide with a different combination.
-	t.Run("parts cannot be shifted across the separator", func(t *testing.T) {
-		a := cacheKey("x", base())
-		r := base()
-		if b := cacheKey("x\x00GET", r); a == b {
-			t.Error("a route id containing the separator collided with a " +
-				"different route/method pair")
+	// The parts are length-prefixed so no content can forge a different
+	// decomposition. This is the case that was actually broken: joined with a
+	// bare NUL, cacheKey("x\x00GET", POST) and cacheKey("x", "GET\x00POST")
+	// produced the identical string, which is one route being served another
+	// route's cached responses.
+	//
+	// The first version of this test compared two keys that differed only in
+	// length and passed with the separator removed entirely, so it asserted
+	// nothing. This pair collides unless the encoding is genuinely unambiguous.
+	t.Run("no content can forge a different decomposition", func(t *testing.T) {
+		shifted := httptest.NewRequest(http.MethodPost, "http://a.example/p?q=1", nil)
+		shifted.Host = "a.example"
+
+		straight := httptest.NewRequest(http.MethodGet, "http://a.example/p?q=1", nil)
+		straight.Host = "a.example"
+		straight.Method = "GET\x00POST"
+
+		if cacheKey("x\x00GET", shifted) == cacheKey("x", straight) {
+			t.Error("two different (route, method) pairs produced one cache key; " +
+				"a separator that can appear inside a part is not a separator")
 		}
 	})
 }

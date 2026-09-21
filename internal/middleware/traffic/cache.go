@@ -9,6 +9,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -166,15 +167,34 @@ func cacheBypass(r *http.Request) bool {
 func cacheKey(routeID string, r *http.Request) string {
 	uri := r.URL.RequestURI()
 	var sb strings.Builder
-	sb.Grow(len(routeID) + len(r.Method) + len(r.Host) + len(uri) + 3)
-	sb.WriteString(routeID)
-	sb.WriteByte(0)
-	sb.WriteString(r.Method)
-	sb.WriteByte(0)
-	sb.WriteString(r.Host)
-	sb.WriteByte(0)
-	sb.WriteString(uri)
+	// 4 parts, each preceded by its decimal length and a colon.
+	sb.Grow(len(routeID) + len(r.Method) + len(r.Host) + len(uri) + 24)
+	writeKeyPart(&sb, routeID)
+	writeKeyPart(&sb, r.Method)
+	writeKeyPart(&sb, r.Host)
+	writeKeyPart(&sb, uri)
 	return sb.String()
+}
+
+// writeKeyPart appends one length-prefixed component of a cache key.
+//
+// The parts used to be joined with a NUL byte, on the reasoning that a NUL
+// cannot appear in a route id or an HTTP method. That reasoning was an
+// invariant this function did not enforce and could not see: join four
+// unvalidated strings with any separator and two different decompositions can
+// produce the same key. cacheKey("x\x00GET", POST) and cacheKey("x",
+// "GET\x00POST") collided exactly, which is one route serving another route's
+// cached responses.
+//
+// Go's HTTP parser rejects a NUL in a method today, so nothing reachable
+// exploited it -- but the safety came from a layer above rather than from
+// here, and a cache key is the wrong place to depend on somebody else's
+// validation. A length prefix makes the decomposition unambiguous for any
+// input at all: "3:abc" can only ever be read one way.
+func writeKeyPart(sb *strings.Builder, part string) {
+	sb.WriteString(strconv.Itoa(len(part)))
+	sb.WriteByte(':')
+	sb.WriteString(part)
 }
 
 // responseAllowsCaching applies the response-side rules the origin states in

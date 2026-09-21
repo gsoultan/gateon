@@ -27,13 +27,18 @@ func TestHeaderOpsAreOrderStable(t *testing.T) {
 		"add_request_X-Other":     "a",
 	}
 
-	mw, err := NewHeaders(cfg)
-	if err != nil {
-		t.Fatalf("NewHeaders: %v", err)
-	}
-
 	var first string
 	for i := 0; i < 50; i++ {
+		// Rebuilt every iteration on purpose. headerOpsFor ranges and sorts the
+		// config map at construction, so hoisting this out of the loop -- which
+		// is what the first version of this test did -- replays one already
+		// resolved slice fifty times and cannot observe map-order
+		// nondeterminism at all.
+		mw, err := NewHeaders(cfg)
+		if err != nil {
+			t.Fatalf("NewHeaders: %v", err)
+		}
+
 		var seen string
 		h := mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			seen = r.Header.Get("X-Contested")
@@ -50,8 +55,11 @@ func TestHeaderOpsAreOrderStable(t *testing.T) {
 		}
 	}
 
-	// "del" sorts before "set", so the delete applies first and the set wins.
-	// Asserted so the ordering rule is written down rather than merely stable.
+	// Sorting full config keys puts the action prefixes in the order
+	// add_ < del_ < set_, so set always wins and del always beats add. That is
+	// the precedence, and it is worth stating because it is stronger than
+	// "stable": ranging the map could previously apply set and then add, which
+	// leaves the header carrying two values. That outcome is now unreachable.
 	if first != "kept" {
 		t.Errorf("X-Contested = %q, want %q: rules apply in sorted config-key "+
 			"order, so del_request_ precedes set_request_", first, "kept")
