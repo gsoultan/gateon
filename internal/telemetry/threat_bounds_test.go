@@ -5,12 +5,13 @@ package telemetry
 
 import "testing"
 
-// The two threat queries size their result slice with min(limit, 100), and
-// make() panics on a negative capacity rather than treating it as zero. They
+// The threat queries size their result slice with min(limit, 100), and make()
+// panics on a negative capacity rather than treating it as zero. Two of them
 // had drifted: the Lite variant guarded a nil store, a non-positive limit and a
-// negative offset; GetSecurityThreats guarded only the offset — so the bound
-// that can end a goroutine was the one left open, and the nil dereference was
-// one line below it.
+// negative offset; the full-blob list variant guarded only the offset — so the
+// bound that can end a goroutine was the one left open, and the nil dereference
+// was one line below it. That second query has since been deleted as dead code
+// (it had no caller); this test keeps the guard on the one that survives.
 //
 // No reachable caller passed a negative: the API service clamps first. This
 // makes the sink safe independently of its callers rather than patching a live

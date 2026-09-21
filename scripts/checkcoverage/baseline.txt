@@ -45,12 +45,21 @@
 #   against main under identical conditions, code that was *not* deleted went
 #   from well covered to nothing: StartSnapshotLoop 100 -> 0, PingStore
 #   100 -> 0, GetServiceGoldenSignals 95.6 -> 0, GetSecurityThreats 87.8 -> 0,
-#   GetPathStatsWindow 77.4 -> 0, GetTrace 63.2 -> 0. They still exist and are
-#   still called from internal/api, internal/server/handlers and
-#   internal/domain/canary; they simply lost the path that used to exercise
-#   them, because the snapshot loop was the thing reaching them and no test
-#   drove it directly. StartSnapshotLoop now has one. The rest do not, and are
-#   the honest reason this floor is where it is.
+#   GetPathStatsWindow 77.4 -> 0, GetTrace 63.2 -> 0. They lost the path that
+#   used to exercise them: the snapshot loop was the thing reaching them and no
+#   test drove it directly.
+#
+#   Two corrections, 2026-09-21, from a review of the commit that wrote the
+#   paragraph above. It originally said these were "still called from
+#   internal/api, internal/server/handlers and internal/domain/canary". That
+#   was a grep-based claim and it was wrong about GetSecurityThreats, which had
+#   no non-test caller at all -- it was deleted two commits later as dead code.
+#   The other five are genuinely production-read (diagnostics_api.go:491,
+#   handlers/diagnostics.go:589, status.go:120). And "StartSnapshotLoop now has
+#   one. The rest do not" stopped being true in the same range: PingStore,
+#   GetPathStatsWindow and GetTrace all gained tests. Left in place, corrected
+#   rather than rewritten, because a baseline that quietly edits its own
+#   history is worth less than one that shows where it was wrong.
 #
 # That gap is wide enough to mislead. The upgrade tests added on 2026-09-13
 # rehearse a populated database on both engines, so skipping Postgres skips
