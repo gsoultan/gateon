@@ -177,19 +177,29 @@ func TestSecurityDashboard(t *testing.T) {
 			resp.Body.Close()
 		}
 
-		// Give some time for metrics to aggregate
-		time.Sleep(10 * time.Second)
-
-		// Get metrics from API
+		// Metrics aggregate on a snapshot interval, so this polls for the
+		// endpoint to answer rather than sleeping ten seconds and hoping.
+		// The assertions that follow still do the real checking.
 		metricsReq, err := http.NewRequestWithContext(ctx, "GET", "http://"+mgmtAddr+"/v1/diag/metrics?limit=100", nil)
 		if err != nil {
 			t.Fatalf("Failed to create metrics request: %v", err)
 		}
 		metricsReq.Header.Set("Authorization", "Bearer "+token)
 
-		resp, err := httpClient.Do(metricsReq)
-		if err != nil {
-			t.Fatalf("Failed to get metrics: %v", err)
+		var resp *http.Response
+		if !waitFor(30*time.Second, func() bool {
+			r, err := httpClient.Do(metricsReq.Clone(ctx))
+			if err != nil {
+				return false
+			}
+			if r.StatusCode != http.StatusOK {
+				r.Body.Close()
+				return false
+			}
+			resp = r
+			return true
+		}) {
+			t.Fatal("metrics endpoint did not answer 200 within 30s")
 		}
 		defer resp.Body.Close()
 
@@ -264,19 +274,28 @@ func TestSecurityDashboard(t *testing.T) {
 		}
 		t.Logf("Mitigation removed for %s", spoofedIP)
 
-		// Wait a bit for invalidation and reputation reset
-		time.Sleep(5 * time.Second)
-
-		// 4. Verify we are immediately released on the same route
-		resp, err = sendReq("GET", "https://"+httpsAddr+"/test/echo", spoofedIP, userAgent, nil)
-		if err != nil {
-			t.Fatalf("Request failed after release: %v", err)
-		}
-		body, _ = io.ReadAll(resp.Body)
-		resp.Body.Close()
-		t.Logf("Request status after release: %d, Body: %s", resp.StatusCode, string(body))
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("Expected 200 after release, got %d", resp.StatusCode)
+		// 4. Verify we are released on the same route.
+		//
+		// Config invalidation reaches the data plane asynchronously, so this
+		// polls for the release to take effect rather than sleeping five
+		// seconds and checking once. The old form was slower when it worked
+		// and misleading when it did not: a release needing six seconds
+		// reported "Expected 200 after release, got 403", which reads as the
+		// release having failed rather than the test having asked too early.
+		var status int
+		released := waitFor(30*time.Second, func() bool {
+			r, err := sendReq("GET", "https://"+httpsAddr+"/test/echo", spoofedIP, userAgent, nil)
+			if err != nil {
+				return false
+			}
+			body, _ = io.ReadAll(r.Body)
+			r.Body.Close()
+			status = r.StatusCode
+			return status == http.StatusOK
+		})
+		t.Logf("Request status after release: %d, Body: %s", status, string(body))
+		if !released {
+			t.Errorf("still not released after 30s; last status %d", status)
 		}
 	})
 
@@ -296,15 +315,27 @@ func TestSecurityDashboard(t *testing.T) {
 		}
 		resp.Body.Close()
 
-		time.Sleep(10 * time.Second) // Wait for threat to be recorded in DB
-
-		// Look specifically for WAF violations with rule IDs
-		threatsResp, err := apiClient.ListSecurityThreats(ctx, &gateonv1.ListSecurityThreatsRequest{
-			Limit:  100,
-			Status: "all",
+		// Poll until the threat lands rather than sleeping a fixed ten
+		// seconds; recording goes through an asynchronous pipeline.
+		var threatsResp *gateonv1.ListSecurityThreatsResponse
+		ok := waitFor(30*time.Second, func() bool {
+			var err error
+			threatsResp, err = apiClient.ListSecurityThreats(ctx, &gateonv1.ListSecurityThreatsRequest{
+				Limit:  100,
+				Status: "all",
+			})
+			if err != nil {
+				return false
+			}
+			for _, th := range threatsResp.Threats {
+				if th.Source == spoofedIP && th.TriggeredRules != "" && th.TriggeredRules != "[]" {
+					return true
+				}
+			}
+			return false
 		})
-		if err != nil {
-			t.Fatalf("Failed to list threats: %v", err)
+		if !ok || threatsResp == nil {
+			t.Fatalf("no WAF threat with rule IDs recorded for %s within 30s", spoofedIP)
 		}
 
 		var threat *gateonv1.Anomaly
@@ -337,19 +368,45 @@ func TestSecurityDashboard(t *testing.T) {
 			t.Fatalf("WAF exclusion failed: %s", resolveResp.Message)
 		}
 
-		// Wait for rule to apply and invalidate
-		time.Sleep(5 * time.Second)
-
-		// 3. Verify previously blocked request now passes
-		resp, err = sendReq("GET", "https://"+httpsAddr+"/test/echo", spoofedIP, userAgent, headers)
-		if err != nil {
-			t.Fatalf("Request failed after exclusion: %v", err)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		t.Logf("Request status after exclusion: %d, Body: %s", resp.StatusCode, string(body))
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("Expected 200 after WAF exclusion, got %d", resp.StatusCode)
+		// 3. Verify the previously blocked request now passes.
+		//
+		// The exclusion has to reach the WAF before this can hold, which it
+		// does asynchronously, so this polls for the effect rather than
+		// sleeping five seconds and checking once.
+		var body []byte
+		var status int
+		excluded := waitFor(30*time.Second, func() bool {
+			r, err := sendReq("GET", "https://"+httpsAddr+"/test/echo", spoofedIP, userAgent, headers)
+			if err != nil {
+				return false
+			}
+			body, _ = io.ReadAll(r.Body)
+			r.Body.Close()
+			status = r.StatusCode
+			return status == http.StatusOK
+		})
+		t.Logf("Request status after exclusion: %d, Body: %s", status, string(body))
+		if !excluded {
+			t.Errorf("WAF exclusion had not taken effect after 30s; last status %d", status)
 		}
 	})
+}
+
+// waitFor polls until cond holds or the deadline passes, and reports whether
+// it held. It replaces a set of fixed sleeps -- 10s, 5s, 10s, 5s -- that were
+// bets on how long an asynchronous pipeline takes. A bet is slow when it wins
+// (it always waits the full duration) and misleading when it loses: the
+// failure surfaces as "the dashboard did not record the threat" rather than
+// "the test asked too early".
+func waitFor(d time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if cond() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
