@@ -100,6 +100,7 @@ func baseTLSConfig() *tls.Config {
 }
 
 func TestSetupSNI_BindsClientAuthoritiesFromTLSOption(t *testing.T) {
+	resetTLSCaches(t)
 	host := "example.com"
 	certPath, keyPath := createTempCertKey(t, host)
 	caPath := createTempCA(t)

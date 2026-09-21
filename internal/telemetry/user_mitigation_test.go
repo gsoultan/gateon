@@ -4,8 +4,6 @@
 package telemetry
 
 import (
-	"context"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -13,10 +11,7 @@ import (
 
 func TestUserMitigation(t *testing.T) {
 	// Initialize store
-	dbPath := filepath.Join(t.TempDir(), "gateon_user_mit_test.db")
-
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	ja4_1 := "test-ja4-1"
 	ja4_2 := "test-ja4-2"
@@ -65,10 +60,7 @@ func TestUserMitigation(t *testing.T) {
 
 func TestIPEscalation(t *testing.T) {
 	// Initialize store
-	dbPath := filepath.Join(t.TempDir(), "gateon_ip_esc_test.db")
-
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	ip := "1.1.1.1"
 
@@ -108,9 +100,7 @@ func TestIPEscalation(t *testing.T) {
 // Against the pre-fix query this fails whenever the tie resolves to the
 // mitigated row.
 func TestUnmitigationWinsSameSecondTie(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "gateon_tie_test.db")
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	// A fresh fingerprint each pass: MarkUserUnmitigated deliberately suppresses
 	// re-mitigation of the same fingerprint for 24h, so reusing one would test
@@ -134,22 +124,32 @@ func TestUnmitigationWinsSameSecondTie(t *testing.T) {
 // And the release must keep holding once the second rolls over, so the fix is a
 // tie-break rather than an ordering accident.
 func TestUnmitigationHoldsAcrossSecondBoundary(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "gateon_hold_test.db")
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	const fp = "hold-ja4plus"
 
 	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
 	MarkUserUnmitigated(fp)
+
+	// The sleep is the point of the test -- the release and the block must end
+	// up in different seconds, so the tie-break is exercised rather than the
+	// ordering accident. What follows it is a poll rather than a second bet:
+	// writes here are buffered and flushed on an interval (2s at the standard
+	// tier), so a single check 1.1s later is a race this test lost about one
+	// run in ten under -shuffle=on, and never in CI's declaration order.
 	time.Sleep(1100 * time.Millisecond)
 
 	if IsUserMitigated(fp) {
 		t.Error("mitigation returned after the release, once timestamps differed")
 	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !IsUserUnmitigated(fp) && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
 	if !IsUserUnmitigated(fp) {
-		t.Error("release marker not visible to processThreat; the next blocked " +
-			"request would re-apply the mitigation immediately")
+		t.Error("release marker not visible to processThreat after 10s; the " +
+			"next blocked request would re-apply the mitigation immediately")
 	}
 }
 
@@ -162,9 +162,7 @@ func TestUnmitigationHoldsAcrossSecondBoundary(t *testing.T) {
 // Against the pre-fix query, which had no time bound, this fails: the
 // mitigation is still in force long after its TTL.
 func TestUserMitigationExpiresAfterTTL(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "gateon_ttl_test.db")
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	orig := mitigationTTL
 	mitigationTTL = 1 * time.Second
@@ -192,9 +190,7 @@ func TestUserMitigationExpiresAfterTTL(t *testing.T) {
 // release inserted under the same key, so rows-affected would call a second
 // release a success.
 func TestMarkUserUnmitigatedReportsWhatItReleased(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "gateon_release_report_test.db")
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	const fp = "release-report-ja4plus"
 
@@ -215,9 +211,7 @@ func TestMarkUserUnmitigatedReportsWhatItReleased(t *testing.T) {
 // whichever string its caller chose, and the two shapes in the tree are the
 // fingerprint alone and the ja4+"_"+ja4h composite.
 func TestFindUserMitigationKeyResolvesTheStoredShape(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "gateon_find_key_test.db")
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	const (
 		plain = "find-key-ja4"
@@ -245,9 +239,7 @@ func TestFindUserMitigationKeyResolvesTheStoredShape(t *testing.T) {
 // The TTL must not resurrect an explicit release, and must not be so eager that
 // a fresh block is useless.
 func TestUserMitigationHoldsWithinTTL(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "gateon_ttl_hold_test.db")
-	_ = InitPathStatsStore(dbPath, 1)
-	defer ClosePathStatsStore(context.Background())
+	freshStore(t)
 
 	const fp = "ttl-hold-ja4plus"
 	MarkUserMitigated(fp, "JA4+", "blocked", "waf")

@@ -82,6 +82,7 @@ func (m *mockGlobalRegVerify) GetCertificate(id string) (*gateonv1.Certificate, 
 }
 
 func TestOPTIONSPreflightMatching(t *testing.T) {
+	resetTLSCaches(t)
 	routes := []*gateonv1.Route{
 		{
 			Id:   "grpc-backtick",
@@ -205,6 +206,7 @@ func TestOPTIONSPreflightMatching(t *testing.T) {
 }
 
 func TestConcurrentSNIMatchingStability(t *testing.T) {
+	resetTLSCaches(t)
 	// Setup a mock environment
 	routes := []*gateonv1.Route{
 		{

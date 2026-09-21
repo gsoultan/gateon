@@ -21,6 +21,7 @@ import (
 // mTLS switched on in the dashboard was not enforced on the wire until an
 // unrelated TLS change or a restart.
 func TestInvalidateRoute_DropsCachedRouteTLSConfig(t *testing.T) {
+	resetTLSCaches(t)
 	const host = "reload.mtls.example.com"
 	certPath, keyPath := createTempCertKey(t, host)
 	caPath := createTempCA(t)

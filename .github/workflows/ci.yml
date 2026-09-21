@@ -147,10 +147,18 @@ jobs:
       - name: Package sizes hold their ratchet
         run: go run ./scripts/checkfolders
 
+      # -shuffle=on because this suite passed in declaration order and failed
+      # in others. internal/server shared three package-level TLS caches keyed
+      # on config ids every test reuses, and internal/telemetry shared a
+      # process-global store that InitPathStatsStore silently declines to
+      # replace when one is already open -- so a test's own t.TempDir()
+      # database sat empty while it read the previous test's. Both were
+      # invisible here for as long as the order never changed. A suite that
+      # passes in one order only is not testing what it claims in any order.
       - name: Test
         env:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
-        run: go test ./...
+        run: go test -shuffle=on ./...
 
       # A ratchet on the tested surface, not a coverage target. Every serious
       # defect found in this codebase in 2026 came out of a package with no

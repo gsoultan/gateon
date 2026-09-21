@@ -21,6 +21,7 @@ import (
 // certificate issued by a public CA. The only safe pool when the configured
 // one is missing is an empty one: verification then fails for every client.
 func TestSetupSNI_VerifyingClientAuthWithUnloadableCA_FailsClosed(t *testing.T) {
+	resetTLSCaches(t)
 	const certHost = "mtls.example.com"
 	certPath, keyPath := createTempCertKey(t, certHost)
 
