@@ -47,9 +47,21 @@ func TestMitigationFunnelReconciles(t *testing.T) {
 		t.Fatalf("expected http_ingress > 0, got %f", f.HTTPIngress)
 	}
 
-	wantMitigated := f.WAFBlocked + f.RateLimited + f.GeoIPBlocked + f.AuthFailures + f.TurnstileFailures + f.HMACFailures
+	// Every contributor buildMitigationFunnel adds, not just the six this test
+	// seeds. The counters are process-global, so summing only the seeded six
+	// made this an assertion about which other tests had run first: it failed
+	// 7 of 8 runs under -shuffle=on and passed in CI's declaration order
+	// forever. If a new contributor is added to TotalMitigated and not here,
+	// this fails -- which is the point, since a contributor missing from the
+	// funnel is a mitigation the dashboard does not count.
+	wantMitigated := f.WAFBlocked + f.FastPathBlocked + f.RateLimited + f.GeoIPBlocked +
+		f.AuthFailures + f.TurnstileFailures + f.HMACFailures +
+		f.BotBlocked + f.FileSecurityBlocked + f.DeceptionBlocked +
+		f.AdvancedSecurityBlock
 	if f.TotalMitigated != wantMitigated {
-		t.Errorf("total_mitigated = %f, want sum %f", f.TotalMitigated, wantMitigated)
+		t.Errorf("total_mitigated = %f, want the sum of every contributor %f; "+
+			"either a counter was added to TotalMitigated without being added "+
+			"here, or one is being double-counted", f.TotalMitigated, wantMitigated)
 	}
 
 	// The reconciliation invariant.

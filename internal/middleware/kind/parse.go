@@ -6,6 +6,8 @@ package kind
 import (
 	"strconv"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // Middleware configuration arrives as map[string]string from the dashboard and
@@ -61,10 +63,21 @@ const (
 	SeverityHigh     = "high"
 	SeverityMedium   = "medium"
 	SeverityLow      = "low"
+)
 
-	ActionBlocked    = "blocked"
-	ActionDetected   = "detected"
-	ActionChallenged = "challenged"
+// The ActionTaken vocabulary is internal/telemetry's, because that package
+// owns SecurityThreat and this one already imports it -- the reverse would be
+// a cycle. Re-exported here so a middleware writing a threat record does not
+// need two imports for one record, and aliased rather than copied so the
+// strings cannot drift apart. A second copy is what made the severity values
+// diverge for months.
+const (
+	ActionBlocked    = telemetry.ActionBlocked
+	ActionDetected   = telemetry.ActionDetected
+	ActionChallenged = telemetry.ActionChallenged
+	ActionShunned    = telemetry.ActionShunned
+	ActionFlagged    = telemetry.ActionFlagged
+	ActionThrottled  = telemetry.ActionThrottled
 )
 
 func ParseListStrict(val string) []string {

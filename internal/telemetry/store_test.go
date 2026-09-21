@@ -275,7 +275,7 @@ func TestGetMitigatedRolling24h(t *testing.T) {
 	// Mitigating actions increment the counter; detected/observed do not.
 	RecordSecurityThreat(SecurityThreat{ID: "m-1", Type: "waf_block", SourceIP: "9.9.9.1", Category: "sqli", Severity: "high", ActionTaken: "blocked", Time: time.Now()})
 	RecordSecurityThreat(SecurityThreat{ID: "m-2", Type: "bot", SourceIP: "9.9.9.2", Category: "bot", Severity: "medium", ActionTaken: "challenged", Time: time.Now()})
-	RecordSecurityThreat(SecurityThreat{ID: "m-3", Type: "shun", SourceIP: "9.9.9.3", Category: "abuse", Severity: "high", ActionTaken: "shunned", Time: time.Now()})
+	RecordSecurityThreat(SecurityThreat{ID: "m-3", Type: "shun", SourceIP: "9.9.9.3", Category: "abuse", Severity: "high", ActionTaken: ActionShunned, Time: time.Now()})
 	// Non-mitigating: must NOT count toward "mitigated rolling 24h".
 	RecordSecurityThreat(SecurityThreat{ID: "m-4", Type: "scan", SourceIP: "9.9.9.4", Category: "recon", Severity: "low", ActionTaken: "detected", Time: time.Now()})
 

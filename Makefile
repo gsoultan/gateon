@@ -98,9 +98,16 @@ build-fips:
 test:
 	go test -v ./...
 
-## test-race: run all tests with the race detector enabled
+## test-race: run all tests with the race detector enabled, in a random order
+##             -shuffle=on is not decoration. internal/server and
+##             internal/telemetry both passed in declaration order and failed
+##             in others, because tests shared package-level caches and a
+##             process-global store that InitPathStatsStore silently declines
+##             to replace. A suite that only passes in one order is not
+##             testing what it claims in any order, and it can mask a
+##             regression as easily as it can produce a flake.
 test-race:
-	go test -race ./...
+	go test -race -shuffle=on ./...
 
 ## test-fp: measure the WAF's false-positive rate against the benign corpus.
 ##          Replays internal/middleware/security/waf/testdata/benign/*.jsonl — traffic ordinary

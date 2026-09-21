@@ -1023,6 +1023,21 @@ func peekBody(r *http.Request, n int64) ([]byte, error) {
 		return nil, nil
 	}
 	peeked, err := io.ReadAll(io.LimitReader(r.Body, n))
+
+	// Restored before the error is reported, not after. io.ReadAll hands back
+	// the bytes it did read alongside the error, so they are already off the
+	// client's stream; returning early without them forwards a body with a
+	// hole at the front. Callers treat a peek error as "nothing suspicious"
+	// and continue, so the truncated request goes upstream.
+	if len(peeked) > 0 {
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+			Closer: r.Body,
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -64,6 +64,12 @@ func BodyTransform(cfg BodyTransformConfig) kind.Middleware {
 func transformRequestBody(r *http.Request, cfg BodyTransformConfig) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
 	if err != nil {
+		// The bytes read before the failure are already off the client's
+		// stream, and the caller forwards the request regardless, so dropping
+		// them here truncates the body the upstream receives.
+		if len(body) > 0 {
+			r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
+		}
 		return
 	}
 	if len(body) > MaxBodyBytes {

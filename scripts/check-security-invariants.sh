@@ -418,7 +418,7 @@ else
 	echo "  ok - handlers go through callerClaims/auditUser, not the raw key"
 fi
 
-note "10/10 threat severities use the vocabulary consumers read"
+note "10/11 threat severities use the vocabulary consumers read"
 # Every consumer of a SecurityThreat compares severity in lower case:
 # severityRank in internal/api lower-cases before it switches, the SIEM
 # formatter maps anything it does not recognise to informational, and the
@@ -444,6 +444,34 @@ if [ -n "$sev_hits" ]; then
 	printf '  Nothing errors; the refusal simply becomes invisible.\n'
 else
 	echo "  ok - severities come from kind, not from an upper-case literal"
+fi
+
+note "11/11 threat actions use the vocabulary consumers read"
+# Same reasoning as the severity check above, one field over. ActionTaken
+# decides whether a refusal counts as mitigated: isMitigatingAction and the
+# dashboard's tile both compare against "blocked", "challenged" and "shunned"
+# exactly, and "detected", "flagged" and "throttled" are deliberately excluded.
+# A literal that does not match any of them is a threat the product cannot
+# classify, and nothing errors.
+#
+# These were spread across three places before 2026-09-21 -- private constants
+# in internal/telemetry, a second set in internal/middleware/kind, and sixteen
+# bare literals. The vocabulary now lives in internal/telemetry, which owns
+# SecurityThreat; kind aliases it, because kind imports telemetry and the
+# reverse would be a cycle.
+act_hits=$( (find internal cmd pkg -name '*.go' -not -name '*_test.go' -print0 |
+	xargs -0 grep -nE 'ActionTaken: *"' 2>/dev/null |
+	drop_comment_hits) || true)
+
+if [ -n "$act_hits" ]; then
+	err "a bare ActionTaken literal was written instead of the shared constant"
+	printf '%s\n' "$act_hits"
+	printf '  Use telemetry.ActionBlocked / ActionChallenged / ActionShunned /\n'
+	printf '  ActionDetected / ActionFlagged / ActionThrottled, or kind.Action*\n'
+	printf '  from a middleware. A value outside that set is a threat the\n'
+	printf '  dashboard cannot classify and the mitigated tile never counts.\n'
+else
+	echo "  ok - actions come from the shared vocabulary, not a literal"
 fi
 
 printf '\n'

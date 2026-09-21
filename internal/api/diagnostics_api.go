@@ -128,7 +128,9 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	}
 
 	for _, t := range threats {
-		if t.ActionTaken == "blocked" || t.ActionTaken == "challenged" || t.ActionTaken == "shunned" {
+		if t.ActionTaken == telemetry.ActionBlocked ||
+			t.ActionTaken == telemetry.ActionChallenged ||
+			t.ActionTaken == telemetry.ActionShunned {
 			if !seen[t.SourceIP+t.Type] {
 				anomalies = append(anomalies, s.threatToAnomaly(ctx, t))
 				seen[t.SourceIP+t.Type] = true
@@ -147,7 +149,7 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 				Description:    m.Reason,
 				Category:       m.Category,
 				Severity:       severityHigh,
-				ActionTaken:    "blocked",
+				ActionTaken:    telemetry.ActionBlocked,
 				Recommendation: "User/Fingerprint is mitigated based on threat intelligence.",
 			})
 			seen[m.Fingerprint+m.Type] = true
@@ -1081,7 +1083,7 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 				Description:    m.Reason,
 				Category:       m.Category,
 				Severity:       severityHigh,
-				ActionTaken:    "blocked",
+				ActionTaken:    telemetry.ActionBlocked,
 				Recommendation: "Source is mitigated based on threat intelligence.",
 				Ja4:            m.Source,
 				Ja4H:           m.JA4H,
