@@ -107,7 +107,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 					Time:        now,
 					Category:    "brute_force",
 					Severity:    "critical",
-					ActionTaken: "shunned",
+					ActionTaken: ActionShunned,
 				})
 			} else {
 				RecordSecurityThreat(SecurityThreat{
@@ -119,7 +119,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 					Time:        now,
 					Category:    "brute_force",
 					Severity:    "medium",
-					ActionTaken: "throttled",
+					ActionTaken: ActionThrottled,
 				})
 				if ad.ebpfManager != nil {
 					_ = ad.ebpfManager.SetAdaptiveRateLimit(s.IP, 1*time.Second) // Limit to 1 req/sec
@@ -160,7 +160,7 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 					Time:        now,
 					Category:    "exploit_scanning",
 					Severity:    "critical",
-					ActionTaken: "shunned",
+					ActionTaken: ActionShunned,
 				})
 			} else {
 				RecordSecurityThreat(SecurityThreat{
@@ -172,7 +172,7 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 					Time:        now,
 					Category:    "exploit_scanning",
 					Severity:    "high",
-					ActionTaken: "throttled",
+					ActionTaken: ActionThrottled,
 				})
 				if ad.ebpfManager != nil {
 					_ = ad.ebpfManager.SetAdaptiveRateLimit(s.IP, 500*time.Millisecond) // Limit to 2 req/sec
@@ -212,7 +212,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 				Time:        now,
 				Category:    "service_instability",
 				Severity:    "high",
-				ActionTaken: "flagged",
+				ActionTaken: ActionFlagged,
 			})
 		}
 	}
@@ -243,7 +243,7 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 				Time:        now,
 				Category:    "latency_spike",
 				Severity:    "medium",
-				ActionTaken: "flagged",
+				ActionTaken: ActionFlagged,
 			})
 		}
 	}

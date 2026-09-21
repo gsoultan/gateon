@@ -38,13 +38,31 @@ import (
 // SecurityThreat.Mitigated, so it is spelled once here.
 const statusMitigated = "mitigated"
 
-// ActionTaken values recorded on a SecurityThreat, and the mitigation statuses
-// derived from them. The dashboard filters on these exact strings.
+// The complete ActionTaken vocabulary for a SecurityThreat, and the mitigation
+// statuses derived from it.
+//
+// Exported and complete on purpose. These strings were previously spread
+// across three places -- private constants here, a second set in
+// internal/middleware/kind, and sixteen bare literals -- and the dashboard,
+// the SIEM mapping and isMitigatingAction all compare them exactly. That is
+// the same shape as the severity bug, where an upper-case value ranked below
+// "low" and was counted by nothing for months.
+//
+// They live here rather than in kind because internal/telemetry owns
+// SecurityThreat, and kind already imports this package: the reverse would be
+// an import cycle. The owner of a field owns its vocabulary.
+//
+// Note that only Blocked, Challenged and Shunned count as mitigated
+// (isMitigatingAction); Detected, Flagged and Throttled are observations, and
+// the dashboard's mitigated tile deliberately excludes them.
 const (
-	actionBlocked    = "blocked"
-	actionChallenged = "challenged"
-	actionShunned    = "shunned"
-	actionFlagged    = "flagged"
+	ActionBlocked    = "blocked"
+	ActionChallenged = "challenged"
+	ActionShunned    = "shunned"
+	ActionFlagged    = "flagged"
+	ActionThrottled  = "throttled"
+	// ActionDetected is recorded when a threat was observed but not stopped.
+	ActionDetected = "detected"
 
 	statusUnmitigated = "unmitigated"
 )
@@ -58,7 +76,7 @@ const (
 // and mitigated in another.
 func isMitigatingAction(action string) bool {
 	switch action {
-	case actionBlocked, actionChallenged, actionShunned:
+	case ActionBlocked, ActionChallenged, ActionShunned:
 		return true
 	default:
 		return false
@@ -1428,9 +1446,6 @@ func RecordSecurityThreat(t SecurityThreat) {
 }
 
 const (
-	// actionDetected is recorded when a threat was observed but not stopped.
-	actionDetected = "detected"
-
 	// autoMitigateScore is the threat score at which the actor is mitigated
 	// even though the request itself was allowed through.
 	autoMitigateScore = 80
@@ -1609,7 +1624,7 @@ var mitigationFunnelRules = []funnelRule{
 	{
 		matches: func(cat, _ string) bool { return cat == "bot" },
 		record: func(routeID, _ string, _ *SecurityThreat) {
-			MiddlewareBotManagementTotal.WithLabelValues(routeID, actionBlocked).Inc()
+			MiddlewareBotManagementTotal.WithLabelValues(routeID, ActionBlocked).Inc()
 		},
 	},
 	{
@@ -1637,7 +1652,7 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	normalizeThreatHeaders(st)
 
 	if st.ActionTaken == "" {
-		st.ActionTaken = actionDetected
+		st.ActionTaken = ActionDetected
 	}
 	st.Mitigated = isMitigatingAction(st.ActionTaken)
 	escalateMitigation(st)
