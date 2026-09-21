@@ -5,6 +5,7 @@ package telemetry
 
 import (
 	"context"
+	"math"
 	"testing"
 )
 
@@ -77,19 +78,36 @@ func TestGoldenSignalsErrorRateIsAPercentage(t *testing.T) {
 // compares false against every threshold -- so a service with no traffic would
 // silently pass every safety check rather than failing one.
 func TestGoldenSignalsWithNoTrafficIsZeroNotNaN(t *testing.T) {
+	// Seeded deliberately, for a *different* service. Without it this test
+	// passes against a service filter replaced by `return true`, because run
+	// on its own there is nothing in the registry to mis-attribute -- its
+	// entire signal was counts other tests happened to leak in first, which is
+	// the opposite of the isolation this file claims. Now a broken filter picks
+	// this traffic up and the assertions below fail in any run order.
+	const other = "gs-service-with-traffic"
+	RequestsTotal.WithLabelValues("route-x", other, "GET", "200").Add(7)
+	RequestDurationSeconds.WithLabelValues("route-x", other, "GET").Observe(0.25)
+
 	gs := GetServiceGoldenSignals(context.Background(), "gs-service-that-never-served")
 
+	// NaN first: it is what 0/0 produces, and `!= 0` is true for NaN, so the
+	// check below would fire first and report "ErrorRate = NaN, want 0"
+	// without ever naming the real problem. An earlier version had these the
+	// other way round, which made the NaN branch unreachable.
+	if math.IsNaN(gs.ErrorRate) {
+		t.Error("ErrorRate is NaN; it compares false against every canary " +
+			"threshold, so a rollback gate reading it never fires")
+	}
 	if gs.RequestsTotal != 0 {
-		t.Errorf("RequestsTotal = %v, want 0", gs.RequestsTotal)
+		t.Errorf("RequestsTotal = %v, want 0; traffic for another service was "+
+			"attributed to one that never served a request", gs.RequestsTotal)
 	}
 	if gs.ErrorRate != 0 {
 		t.Errorf("ErrorRate = %v, want 0", gs.ErrorRate)
 	}
-	if gs.ErrorRate != gs.ErrorRate {
-		t.Error("ErrorRate is NaN; it would compare false against every canary threshold")
-	}
 	if gs.P99LatencyMs != 0 {
-		t.Errorf("P99LatencyMs = %v, want 0", gs.P99LatencyMs)
+		t.Errorf("P99LatencyMs = %v, want 0; another service's latency was "+
+			"attributed here", gs.P99LatencyMs)
 	}
 }
 

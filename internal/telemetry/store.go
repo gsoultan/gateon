@@ -2639,11 +2639,11 @@ const (
 
 // clampThreatBounds normalises the paging bounds for a threat query.
 //
-// It exists because the two threat queries had drifted: the Lite variant
-// guarded a nil store, a non-positive limit and a negative offset, while
-// GetSecurityThreats guarded only the offset — so the one that could end a
-// goroutine was the one left open. Sharing the rule is what stops them
-// diverging again.
+// It exists because two threat queries had drifted: the Lite variant guarded a
+// nil store, a non-positive limit and a negative offset, while the full-blob
+// list variant guarded only the offset — so the one that could end a goroutine
+// was the one left open. That second query has since been deleted as dead
+// code, but sharing the rule is what stops the survivors diverging again.
 func clampThreatBounds(limit, offset int) (int, int) {
 	if limit <= 0 {
 		limit = defaultThreatQueryLimit
@@ -2662,8 +2662,11 @@ func clampThreatBounds(limit, offset int) (int, int) {
 // dashboard-snapshot path (polled every couple of seconds), where those blobs are
 // never rendered: fetching them needlessly scans four LONGTEXT columns per row,
 // which under load blows the snapshot's request deadline ("threats: scan failed:
-// context deadline exceeded") and bloats the SSE payload. The full-blob variant
-// (GetSecurityThreats) remains for the detail/Threat-Explorer endpoint.
+// context deadline exceeded") and bloats the SSE payload. The detail view goes
+// through GetSecurityThreatByID, which selects the blobs for one threat; the
+// full-blob *list* variant was deleted as dead code -- nothing ever called it,
+// and its SELECT had drifted to omit source_ips, so wiring it up would have
+// returned every threat with an empty IP cluster.
 func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *ThreatFilter) []*SecurityThreat {
 	s := getStore()
 	if s == nil {
