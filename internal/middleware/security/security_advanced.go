@@ -123,8 +123,10 @@ func checkEntropy(next http.Handler, w http.ResponseWriter, r *http.Request, thr
 	}
 
 	peeked, err := io.ReadAll(io.LimitReader(r.Body, entropyPeekLimit))
-	if err == nil && len(peeked) > 0 {
-		// Restore body for downstream.
+
+	// Restore whatever was read, error or not: those bytes are already off the
+	// client's stream, and this middleware forwards the request either way.
+	if len(peeked) > 0 {
 		r.Body = struct {
 			io.Reader
 			io.Closer
@@ -132,6 +134,9 @@ func checkEntropy(next http.Handler, w http.ResponseWriter, r *http.Request, thr
 			Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
 			Closer: r.Body,
 		}
+	}
+
+	if err == nil && len(peeked) > 0 {
 
 		if e := entropy.Calculate(peeked); e > threshold {
 			kind.RecordThreat(r, kind.Threat{
@@ -209,16 +214,26 @@ func scanRequestSources(r *http.Request, includeHeaders bool, match func(data, s
 		return
 	}
 	peeked, err := io.ReadAll(io.LimitReader(r.Body, bodyPeekLimit))
+
+	// Restore before deciding what to do about the error. io.ReadAll returns
+	// the bytes it managed to read alongside the error, so those bytes are
+	// already off the client's stream: returning early without putting them
+	// back hands the upstream a body with a hole at the front and nothing to
+	// indicate it.
+	if len(peeked) > 0 {
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
+			Closer: r.Body,
+		}
+	}
+
+	// Scan only what was read cleanly. A truncated read is not evidence of
+	// anything, and matching on a fragment invites a false positive.
 	if err != nil || len(peeked) == 0 {
 		return
-	}
-	// Restore the body for downstream.
-	r.Body = struct {
-		io.Reader
-		io.Closer
-	}{
-		Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
-		Closer: r.Body,
 	}
 	match(string(peeked), "request body")
 }
