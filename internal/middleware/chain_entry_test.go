@@ -189,6 +189,46 @@ func TestRealIPHonoursTheHeaderWhenTrusted(t *testing.T) {
 	}
 }
 
+// TestRealIPGlobalRewritesRemoteAddrFromResolvedState covers RealIPGlobal
+// itself rather than the RealIP variants it selects between.
+//
+// The selection is not controllable from a test, but the rewrite is, and it is
+// observable regardless of which variant runs: GetClientIP returns
+// RequestState.ClientRemoteAddr when the chain has already resolved one, so a
+// middleware that actually calls it rewrites RemoteAddr to that address while
+// preserving the port. A pass-through leaves the socket peer untouched.
+//
+// This exists because the test it replaces asserted only "non-empty, and not
+// the header value", which a pass-through satisfies -- and deleting it in
+// favour of the RealIP tests above moved the coverage into another package and
+// left RealIPGlobal with none.
+func TestRealIPGlobalRewritesRemoteAddrFromResolvedState(t *testing.T) {
+	const resolvedByChain = "10.0.0.5"
+
+	var seen string
+	h := RealIPGlobal()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.RemoteAddr
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "198.51.100.9:1234"
+	req = req.WithContext(request.WithState(req.Context(),
+		&request.RequestState{ClientRemoteAddr: resolvedByChain}))
+
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if hostOf(seen) != resolvedByChain {
+		t.Errorf("RemoteAddr = %q, want the address the chain already resolved "+
+			"(%q): RealIPGlobal did not resolve at all, so every downstream "+
+			"middleware reading RemoteAddr sees the immediate peer instead of "+
+			"the client", seen, resolvedByChain)
+	}
+	if _, port, err := net.SplitHostPort(seen); err != nil || port != "1234" {
+		t.Errorf("RemoteAddr = %q, want the original port preserved; PROXY "+
+			"protocol generation expects host:port", seen)
+	}
+}
+
 func hostOf(addr string) string {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
