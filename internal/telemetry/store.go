@@ -732,26 +732,77 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 
 	batch := s.pebble.NewBatch()
 	n := 0
+	// Anything that did not make it across. Non-zero means the source table
+	// stays put.
+	lost := 0
 	for rows.Next() {
 		var tr TraceRecord
 		if err := rows.Scan(&tr.ID, &tr.OperationName, &tr.ServiceName, &tr.DurationMs, &tr.Timestamp, &tr.Status, &tr.Path, &tr.SourceIP, &tr.Fingerprint, &tr.CountryCode, &tr.UserAgent, &tr.Method, &tr.Referer, &tr.RequestURI, &tr.JA4, &tr.JA4H, &tr.RequestHeaders, &tr.RequestBody, &tr.ResponseHeaders, &tr.ResponseBody, &tr.RouteID, &tr.Recommendation, &tr.Reputation, &tr.EntrypointDelay, &tr.RouteDelay, &tr.MiddlewareDelay, &tr.ServiceDelay); err != nil {
+			logger.Default().LogError("telemetry: trace row could not be read for migration", "error", err)
+			lost++
 			continue
 		}
 
 		key := makeTraceKey(tr.Timestamp, tr.ID)
-		val, _ := json.Marshal(tr)
-		_ = batch.Set(key, val, pebble.NoSync)
+		val, err := json.Marshal(tr)
+		if err != nil {
+			logger.Default().LogError("telemetry: trace could not be encoded for migration",
+				"id", tr.ID, "error", err)
+			lost++
+			continue
+		}
+		if err := batch.Set(key, val, pebble.NoSync); err != nil {
+			logger.Default().LogError("telemetry: trace could not be staged for migration",
+				"id", tr.ID, "error", err)
+			lost++
+			continue
+		}
 
 		n++
 		if n%1000 == 0 {
-			_ = batch.Commit(pebble.Sync)
+			if err := batch.Commit(pebble.Sync); err != nil {
+				logger.Default().LogError("telemetry: trace migration batch failed to commit",
+					"error", err)
+				lost += 1000
+			}
 			batch = s.pebble.NewBatch()
 		}
 	}
-	_ = batch.Commit(pebble.Sync)
+	if err := batch.Commit(pebble.Sync); err != nil {
+		logger.Default().LogError("telemetry: final trace migration batch failed to commit",
+			"error", err)
+		lost++
+	}
+	// Checked, because a connection that drops mid-iteration ends the loop
+	// with a partial count and no error anywhere else.
+	if err := rows.Err(); err != nil {
+		logger.Default().LogError("telemetry: trace migration stopped early",
+			"error", err, "migrated", n)
+		lost++
+	}
+
+	// The source table is dropped only if every row arrived. It used to be
+	// dropped unconditionally, with every failure above discarded -- so a
+	// migration that copied nothing still wiped the traces table and logged
+	// "migration complete". That table is the forensic record: source IP,
+	// JA4/JA4H, request and response headers and bodies.
+	//
+	// internal/audit/manager.go already learned this exact lesson, and says so
+	// in a comment: "a failure at flush time ... was reported nowhere,
+	// checkRetention read success, and it deleted the rows the archive was
+	// supposed to be preserving."
+	if lost > 0 {
+		logger.Default().LogError("telemetry: trace migration incomplete; keeping the SQL traces "+
+			"table so nothing is lost. It will be retried on the next start.",
+			"migrated", n, "failed", lost)
+		return
+	}
 
 	logger.Default().LogInfo("telemetry: migration complete, clearing SQL traces table", "migrated", n)
-	_, _ = s.db.Exec("DELETE FROM traces")
+	if _, err := s.db.Exec("DELETE FROM traces"); err != nil {
+		logger.Default().LogError("telemetry: could not clear the migrated traces table; "+
+			"the next start will migrate them again", "error", err)
+	}
 }
 
 func makeTraceKey(ts time.Time, id string) []byte {
@@ -1751,7 +1802,12 @@ func IsIPMitigated(ip string) bool {
 	}
 	if s.unmitigatedCache != nil {
 		if val, ok := s.unmitigatedCache.Get(ip); ok {
-			return !val.(bool)
+			// Comma-ok: a bare assertion here panics on the request path if
+			// the cache ever holds anything else, and falling through to the
+			// database is the safe answer rather than the fast one.
+			if unmitigated, isBool := val.(bool); isBool {
+				return !unmitigated
+			}
 		}
 	}
 
@@ -1778,7 +1834,17 @@ func MarkIPMitigated(ip string, reason string) {
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as mitigated", "ip", ip, "error", err)
 	}
-	if s.unmitigatedCache != nil {
+
+	// Seeded only on success. This used to run unconditionally, and
+	// IsIPMitigated reads the cache before the database -- so MitigateThreat's
+	// read-back verification, which exists precisely because these writes can
+	// fail silently, was answering from what the failed writer had just told
+	// it. The operator saw "successfully mitigated" for a block that existed
+	// nowhere but in a bounded ARC cache, and vanished on eviction or restart.
+	//
+	// On failure the cache is left alone, so IsIPMitigated falls through to
+	// the database, finds nothing, and the verification reports the truth.
+	if err == nil && s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, false)
 	}
 
@@ -1801,7 +1867,12 @@ func MarkIPUnmitigated(ip string) {
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as unmitigated", "ip", ip, "error", err)
 	}
-	if s.unmitigatedCache != nil {
+
+	// Same reasoning as MarkIPMitigated, mirrored. A release that failed to
+	// persist used to seed the cache anyway, so the API answered "removed
+	// successfully" while the row still said mitigated -- and once the cache
+	// entry was evicted the block came back on its own.
+	if err == nil && s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, true)
 	}
 

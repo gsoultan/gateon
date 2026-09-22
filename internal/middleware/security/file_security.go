@@ -175,7 +175,27 @@ func (f fileScanRuntime) serve(next http.Handler, w http.ResponseWriter, r *http
 
 	boundary, err := multipartBoundary(r.Header.Get("Content-Type"))
 	if err != nil {
-		next.ServeHTTP(w, r)
+		// A body that announces itself as multipart and then supplies no
+		// usable boundary is malformed, and it used to be forwarded unscanned
+		// on the strength of the header that made it unparseable. Content-Type
+		// is written by the client, so that was a scanner a caller could
+		// switch off -- "multipart/form-data" with no boundary= and the same
+		// bytes go straight to the origin.
+		//
+		// forwardAfterScan forty lines down already refuses to treat a missing
+		// verdict as a clean one, honouring cfg.FailOpen and saying so:
+		// "Absence of a verdict is not a clean verdict." The entry guard is
+		// held to the same standard, including the same operator opt-out.
+		if f.cfg.FailOpen {
+			logger.L.LogWarn("file security: multipart body has no usable boundary; "+
+				"forwarding unscanned because fail_open is set",
+				"content_type", r.Header.Get("Content-Type"), "client_ip", r.RemoteAddr)
+			next.ServeHTTP(w, r)
+			return
+		}
+		logger.L.LogWarn("file security: multipart body has no usable boundary; refusing",
+			"content_type", r.Header.Get("Content-Type"), "client_ip", r.RemoteAddr)
+		http.Error(w, "Malformed multipart body", http.StatusBadRequest)
 		return
 	}
 
