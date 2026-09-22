@@ -53,7 +53,7 @@ type boundedLabels struct {
 
 func (b *boundedLabels) value(v string) string {
 	if v == "" {
-		return "unknown"
+		return labelUnknown
 	}
 	if _, ok := b.seen.Load(v); ok {
 		return v

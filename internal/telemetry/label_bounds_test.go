@@ -69,8 +69,8 @@ func TestDomainLabelStopsGrowing(t *testing.T) {
 }
 
 func TestDomainLabelHandlesEmpty(t *testing.T) {
-	if got := DomainLabel(""); got != "unknown" {
-		t.Errorf("DomainLabel(\"\") = %q, want \"unknown\"", got)
+	if got := DomainLabel(""); got != labelUnknown {
+		t.Errorf("DomainLabel(\"\") = %q, want %q", got, labelUnknown)
 	}
 }
 
