@@ -519,17 +519,52 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// route, so a misconfigured override fails safe rather than open.
 	hasWAF := false
 
+	// Security middlewares that could not be built. A route with any of these
+	// serves a refusal rather than a chain missing a control it was configured
+	// to have.
+	var missingSecurity []string
+
 	if mwStore != nil {
 		for _, mid := range rt.Middlewares {
 			mid = strings.TrimSpace(mid)
 			if mid == "" {
 				continue
 			}
-			if mwConf, ok := mwStore.Get(ctx, mid); ok && mwConf != nil {
-				mw, err := mwFactory.Create(mwConf, routeLabel)
-				if err != nil {
-					continue
+			mwConf, found := mwStore.Get(ctx, mid)
+			if !found || mwConf == nil {
+				// A route naming a middleware that is not in the store used to
+				// skip silently, so a renamed or deleted middleware removed
+				// whatever it enforced with nothing to notice. Treated as a
+				// build failure of unknown type, which fails closed.
+				logger.L.LogError("route names a middleware that does not exist; "+
+					"the route will refuse requests until it is fixed",
+					"route", routeLabel, "middleware", mid)
+				missingSecurity = append(missingSecurity, mid)
+				continue
+			}
+
+			mw, err := mwFactory.Create(mwConf, routeLabel)
+			if err != nil {
+				// Previously a bare `continue`: the middleware vanished from
+				// the chain, nothing was logged, and the chain is cached until
+				// invalidated -- so a transient failure was baked in. An oidc
+				// middleware whose IdP discovery failed left the route serving
+				// with no authentication while the dashboard still listed it.
+				if isSecurityMiddleware(mwConf.Type) {
+					logger.L.LogError("security middleware failed to build; the route "+
+						"will refuse requests rather than serve without it",
+						"route", routeLabel, "middleware", mid,
+						"type", mwConf.Type, "error", err)
+					missingSecurity = append(missingSecurity, mid)
+				} else {
+					logger.L.LogWarn("middleware failed to build; the route will "+
+						"serve without it",
+						"route", routeLabel, "middleware", mid,
+						"type", mwConf.Type, "error", err)
 				}
+				continue
+			}
+			{
 				if strings.EqualFold(mwConf.Type, "cors") || strings.EqualFold(mwConf.Type, "grpcweb") {
 					if !hasCORS {
 						corsMiddleware = mw
@@ -543,6 +578,28 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 				}
 			}
 		}
+	}
+
+	// A route configured with a security middleware that could not be built
+	// serves a refusal, not a chain missing the control.
+	//
+	// The alternative is what this code used to do: drop it and serve anyway.
+	// That is worse in the direction that matters -- an oidc middleware whose
+	// IdP discovery failed left the route publicly readable while the
+	// dashboard still showed authentication attached, and route chains are
+	// cached until invalidated, so a blip at build time persisted.
+	//
+	// Cosmetic middlewares are exempt and only warn: a route that loses a
+	// header rewrite renders slightly wrong, which is not worth an outage.
+	if len(missingSecurity) > 0 {
+		refused := append([]string(nil), missingSecurity...)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logger.L.LogError("refusing request: route is missing security middleware",
+				"route", routeLabel, "missing", strings.Join(refused, ","),
+				"path", r.URL.Path)
+			http.Error(w, "Service Unavailable: route configuration incomplete",
+				http.StatusServiceUnavailable)
+		})
 	}
 
 	if hasCORS {
