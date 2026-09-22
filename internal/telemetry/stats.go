@@ -105,6 +105,19 @@ func RecordPathRequest(host, path string, latencySeconds float64, bytesTotal uin
 	// Normalize host by stripping port if present
 	host = httputil.StripPort(host)
 
+	// Both halves are bounded in length, not just in count. The map is capped
+	// at maxPathStatsMapSize entries, but nothing limits how long a URI or a
+	// Host may be -- there is no StatusRequestURITooLong anywhere in this tree
+	// and the header budget is 1 MiB -- so a 200 KB path made each entry 400 KB
+	// and the count cap alone allowed roughly 19 GiB on a 2 GB host. Count
+	// eviction could not save it either: it fires per shard at 781 entries, and
+	// a few thousand oversized entries spread over 64 shards never reach that.
+	//
+	// The retained strings are re-sliced copies, so the originals are not
+	// pinned by these.
+	host = truncateLabel(host)
+	path = truncateLabel(path)
+
 	key := host + ":" + path
 	shard := getPathShard(key)
 

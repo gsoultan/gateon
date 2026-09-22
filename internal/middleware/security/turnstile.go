@@ -75,7 +75,17 @@ type turnstileRuntime struct {
 }
 
 func (t turnstileRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
-	if kind.IsCorsPreflight(r) || kind.ShouldSkipMetrics(r) || !t.methods[r.Method] {
+	// Deliberately not gated on kind.ShouldSkipMetrics. That is a metrics
+	// predicate: EntryPoint sets RouteName to "gateon-"+epLabel on every request
+	// on every entrypoint, so its prefix test is always true and it collapses to
+	// IsInternalPath(r.URL.Path) -- the client's own path. Measured: a client
+	// resolving to a blocked country reached the origin with
+	// GET /v1/security/anything while GET /normal/page got 403.
+	//
+	// internal/middleware/auth/hmac.go already says this: "Never gate a security
+	// check on ShouldSkipMetrics -- it is a metrics predicate and using it here
+	// would let any request matching it bypass HMAC." It had not reached here.
+	if kind.IsCorsPreflight(r) || !t.methods[r.Method] {
 		next.ServeHTTP(w, r)
 		return
 	}

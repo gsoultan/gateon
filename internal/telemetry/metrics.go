@@ -723,6 +723,30 @@ const LabelOverflow = "other"
 // product targets, and the overflow bucket keeps the total correct even then.
 const maxDistinctDomains = 2000
 
+// maxLabelValueBytes caps the *length* of a retained label value, which is a
+// separate axis from how many are retained and was missed the first time this
+// was bounded.
+//
+// Go's server accepts a header set up to MaxHeaderBytes (1 MiB here), and
+// nothing in this tree limits the length of a URI, a Host or a path -- there is
+// no StatusRequestURITooLong anywhere. So a single request can carry a 200 KB
+// Host, and capping only the count left 2000 x 200 KB of permanently pinned
+// strings: about 400 MB on a 2 GB host, against the 1,446 B per value this
+// code originally claimed.
+//
+// 253 is the maximum length of a DNS name, so a real Host is never truncated
+// and only a fabricated one is.
+const maxLabelValueBytes = 253
+
+// truncateLabel bounds a label value's length, marking it so a reader can see
+// the value was cut rather than wondering why a domain looks malformed.
+func truncateLabel(v string) string {
+	if len(v) <= maxLabelValueBytes {
+		return v
+	}
+	return v[:maxLabelValueBytes] + "~"
+}
+
 // boundedLabels admits a fixed number of distinct values and folds the rest
 // into LabelOverflow.
 //
@@ -740,6 +764,9 @@ func (b *boundedLabels) value(v string) string {
 	if v == "" {
 		return labelUnknown
 	}
+	// Length first: a 200 KB value that is admitted under the count budget is
+	// 200 KB pinned for the life of the process.
+	v = truncateLabel(v)
 	if _, ok := b.seen.Load(v); ok {
 		return v
 	}
