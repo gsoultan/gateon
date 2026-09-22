@@ -42,10 +42,26 @@ type SecretResolver interface {
 type EnvSecretResolver struct{}
 
 func (r *EnvSecretResolver) Resolve(s string) (string, error) {
-	if strings.HasPrefix(s, "$env:") {
-		return os.Getenv(s[5:]), nil
+	name, ok := strings.CutPrefix(s, "$env:")
+	if !ok {
+		return s, nil
 	}
-	return s, nil
+	// An unset or misspelled variable used to resolve to "" with a nil error,
+	// and the chain accepts any resolution that differs from the input -- so
+	// "$env:GATEON_DB_URL" for a variable nobody exported became the empty
+	// string, silently. decryptSensitiveFields runs this over
+	// Auth.DatabaseUrl and Auth.PasetoSecret, and an empty database URL sends
+	// db.AuthDatabaseURL to its "gateon.db" fallback: a Postgres-backed
+	// install comes up on a local SQLite file, with a Paseto secret bootstrap
+	// regenerates on every restart.
+	//
+	// LookupEnv distinguishes unset from empty. A deliberately empty variable
+	// is still honoured; an absent one is an error the caller can see.
+	value, present := os.LookupEnv(name)
+	if !present {
+		return s, fmt.Errorf("secret reference %q names an environment variable that is not set", s)
+	}
+	return value, nil
 }
 
 // VaultSecretResolver resolves secrets from HashiCorp Vault.

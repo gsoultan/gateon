@@ -156,6 +156,17 @@ func InitGeoIP(dbPath string) error {
 
 	if geoDB != nil {
 		_ = geoDB.Close()
+		// Cleared, not just closed. Leaving the pointer at a closed reader
+		// meant every later lookup took the geoDB != nil branch and got
+		// maxminddb's "cannot call Lookup on a closed database" -- silently,
+		// because the error is discarded and the caller reads a blank result.
+		// All geo resolution went dead for the life of the process while
+		// GetGeoIPStatus still reported the database loaded at the old path.
+		//
+		// InitGeoIPASN and InitGeoIPCountry both already nil their handles on
+		// this path; only the primary City database did not.
+		geoDB = nil
+		geoDBPath = ""
 	}
 
 	db, err := geoip2.Open(dbPath)

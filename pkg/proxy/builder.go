@@ -100,7 +100,21 @@ func (b *ProxyHandlerBuilder) buildTransport() {
 	b.tlsConfig = tlsCfg
 	selector, err := newTLSClientIdentitySelector(b.tlsClientConfig)
 	if err != nil {
-		logger.L.LogWarn("failed to load one or more dynamic tls client identities", "error", err)
+		// Escalated from a warning. Eight lines above, a broken TLS config
+		// falls back to a verifying one rather than downgrading, with a
+		// comment saying a broken config "must not silently downgrade to an
+		// unverified connection". Dropping a client identity is the same
+		// downgrade seen from the other end: the backend's mTLS is what
+		// authenticates this gateway to it, and a proxy built without the
+		// identity presents no certificate at all. Where the backend treats
+		// mTLS as optional, the request simply proceeds unauthenticated.
+		//
+		// Still not fatal, because one unusable identity among several should
+		// not take every backend down -- but it is an error, it names what was
+		// lost, and it is no longer indistinguishable from a clean start.
+		logger.L.LogError("failed to load one or more backend TLS client identities; "+
+			"connections that needed them will present no client certificate",
+			"error", err)
 	}
 	b.transportFactory = newBackendTransportFactory(tlsCfg, b.transportConfig, selector)
 
