@@ -27,6 +27,20 @@ func RegisterCountryResolver(r CountryResolver) {
 
 // GetCountry returns the client country from the request context,
 // or from CF-IPCountry header if present (and trusted), or "XX" (Unknown).
+// isCountryCode reports whether s is a two-letter ISO-3166 alpha-2 code.
+func isCountryCode(s string) bool {
+	if len(s) != 2 {
+		return false
+	}
+	for i := range 2 {
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+			return false
+		}
+	}
+	return true
+}
+
 func GetCountry(r *http.Request, trustCloudflare bool) string {
 	if rs := GetRequestState(r); rs != nil {
 		if rs.ClientCountry != "" {
@@ -37,7 +51,12 @@ func GetCountry(r *http.Request, trustCloudflare bool) string {
 		return country
 	}
 	if trustCloudflare {
-		if cfCountry := r.Header.Get("CF-IPCountry"); cfCountry != "" {
+		// Validated, unlike before. This value becomes a Prometheus label, and
+		// an unvalidated one is a permanent series per distinct string with a
+		// 1 MiB header to fill it from. A country code is two ASCII letters or
+		// Cloudflare's "XX" for unknown; anything else is not a country and is
+		// treated as absent so the resolver below answers instead.
+		if cfCountry := r.Header.Get("CF-IPCountry"); isCountryCode(cfCountry) {
 			return strings.ToUpper(cfCountry)
 		}
 	}
