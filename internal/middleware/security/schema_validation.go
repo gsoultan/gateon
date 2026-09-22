@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
@@ -100,5 +101,15 @@ func writeSchemaFailure(w http.ResponseWriter, r *http.Request, result *jsonsche
 }
 
 func jsonContentType(ct string) bool {
-	return ct == "application/json" || (len(ct) > 16 && ct[:16] == "application/json;")
+	// Case-insensitive, and tolerant of space before the parameter list.
+	// A media type is case-insensitive per RFC 9110, and Express, Spring and
+	// ASP.NET all parse "Application/json" as JSON and hand it to the
+	// application -- so a byte-exact comparison here meant the body reached
+	// the origin unvalidated while the origin treated it as JSON anyway.
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	if ct == "application/json" {
+		return true
+	}
+	base, _, found := strings.Cut(ct, ";")
+	return found && strings.TrimSpace(base) == "application/json"
 }

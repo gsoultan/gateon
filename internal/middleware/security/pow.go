@@ -19,6 +19,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -93,11 +94,23 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) kind.
 	pc := powChallenge{key: powKey(secret), difficulty: difficulty}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip for internal paths, if difficulty is 0, or for an allowlisted
-			// source. A proof-of-work challenge is an active mitigation: it costs
-			// the client a round trip and CPU, and an API client or monitoring
-			// probe the operator has vouched for cannot solve one at all.
-			if kind.IsInternalPath(r.URL.Path) || difficulty <= 0 ||
+			// Skip for gateon's own traffic, if difficulty is 0, or for an
+			// allowlisted source. A proof-of-work challenge is an active
+			// mitigation: it costs the client a round trip and CPU, and an API
+			// client or monitoring probe the operator has vouched for cannot
+			// solve one at all.
+			//
+			// The first test used to be kind.IsInternalPath(r.URL.Path), which
+			// matches gateon's management paths by *prefix* -- /v1/routes,
+			// /v1/global, /v1/security and so on. On a proxy route those are
+			// not gateon's paths, they are the upstream's, so on a catch-all
+			// route a client disabled the challenge by prefixing their request
+			// path. RequestState.IsManagement is set by the entrypoint from
+			// which listener accepted the connection, which is not something a
+			// request can claim.
+			rs := request.GetRequestState(r)
+			isManagement := rs != nil && rs.IsManagement
+			if isManagement || difficulty <= 0 ||
 				mitigation.IsAllowlisted(telemetry.ClientIPOf(r)) {
 				next.ServeHTTP(w, r)
 				return
