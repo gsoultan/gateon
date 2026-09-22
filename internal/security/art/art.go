@@ -121,6 +121,14 @@ func (t *Tree) ContainsAddr(ip netip.Addr) bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	// Unmapped first. An IPv4-mapped form such as ::ffff:203.0.113.5 reports
+	// Is4In6, not Is4, so without this it searched the v6 tree and missed
+	// every IPv4 rule -- a deny list naming 203.0.113.0/24 did not match a
+	// client arriving in the mapped form. Reachable from behind a configured
+	// trusted proxy, where GetClientIP returns an X-Forwarded-For value
+	// verbatim. internal/security/mitigation/allowlist.go already unmaps,
+	// which is what makes this an omission rather than a convention.
+	ip = ip.Unmap()
 	if ip.Is4() {
 		return t.search(t.root4, ip.AsSlice())
 	}
