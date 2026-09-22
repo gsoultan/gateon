@@ -86,16 +86,25 @@ func (g geoIPRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	record, err := g.db.Country(ip)
-	if err != nil {
-		// Unknown IP or lookup error: allow by default to avoid blocking
-		next.ServeHTTP(w, r)
-		return
-	}
-
-	country := strings.ToUpper(record.Country.IsoCode)
-	if country == "" {
-		country = "XX"
+	// An unresolvable address becomes the unknown country rather than an
+	// early allow. The difference matters in one direction only: a deny list
+	// still lets it through, because "XX" is not on the list, but an allow
+	// list refuses it, because "XX" is not on that list either -- and an allow
+	// list means "only these".
+	//
+	// This used to return early and allow. The global geofence a hundred lines
+	// below has always failed closed for an allow list, so the two paths
+	// disagreed about the same question, and several of the reachable errors
+	// are not exotic: an IPv6 client against an IPv4-only database errors on
+	// every request, and so does an operator who uploads the wrong database
+	// edition -- in which case the geofence was inert with nothing logged.
+	country := "XX"
+	if record, err := g.db.Country(ip); err != nil {
+		logger.L.LogWarn("geoip: country lookup failed; treating the client as "+
+			"unknown, which an allow list refuses",
+			"ip", clientIP, "error", err)
+	} else if code := strings.ToUpper(record.Country.IsoCode); code != "" {
+		country = code
 	}
 
 	// Add country to context for other middlewares to use

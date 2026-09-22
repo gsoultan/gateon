@@ -54,11 +54,21 @@ func InitStore(databaseURL string) error {
 			return
 		}
 		globalStore = &Store{db: d, dialect: dialect}
+		// Fatal. Without the table there are no operator rules and no
+		// exceptions, and reporting success here let main.go take the happy
+		// path with a WAF store that could hold nothing.
 		if migrateErr := db.Migrate(d, dialect); migrateErr != nil {
 			logger.L.LogError("failed to migrate WAF rules table", "error", migrateErr)
+			err = migrateErr
+			return
 		}
+		// Fatal for the same reason: an empty rule cache is
+		// indistinguishable from an operator with no custom rules, so a failed
+		// load silently unloads every rule they wrote.
 		if reloadErr := globalStore.Reload(context.Background()); reloadErr != nil {
-			logger.L.LogWarn("failed to load initial WAF rules", "error", reloadErr)
+			logger.L.LogError("failed to load initial WAF rules", "error", reloadErr)
+			err = reloadErr
+			return
 		}
 		if seedErr := globalStore.Seed(context.Background()); seedErr != nil {
 			logger.L.LogWarn("failed to seed WAF rules", "error", seedErr)
@@ -67,8 +77,14 @@ func InitStore(databaseURL string) error {
 		// engine build reads both, so a rule store without an exception store
 		// is never a valid state, and making it the caller's job to remember
 		// only creates a startup ordering bug waiting to happen.
+		// Fatal, and the most consequential of the three: an exception is a
+		// false-positive suppression an operator added deliberately. Losing
+		// them silently means the WAF starts blocking traffic that was
+		// explicitly excepted, which looks like the WAF working.
 		if exErr := InitExceptionStore(context.Background()); exErr != nil {
-			logger.L.LogWarn("failed to load WAF exceptions", "error", exErr)
+			logger.L.LogError("failed to load WAF exceptions", "error", exErr)
+			err = exErr
+			return
 		}
 	})
 	return err

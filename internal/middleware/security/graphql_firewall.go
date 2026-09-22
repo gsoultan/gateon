@@ -109,7 +109,36 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) kind.Middleware {
 	}
 }
 
+// graphQLGETAllowed applies the same four limits to a query carried in the
+// URL. A GET with no query parameter is not a GraphQL request and costs
+// nothing.
+func graphQLGETAllowed(cfg GraphQLFirewallConfig, w http.ResponseWriter, r *http.Request) bool {
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		return true
+	}
+	analysis, ok := analyseGraphQLQuery(query, cfg, w)
+	if !ok {
+		return false
+	}
+	return graphQLQueryAllowed(analysis, query, cfg, r, w)
+}
+
 func serveGraphQLFirewall(cfg GraphQLFirewallConfig, next http.Handler, w http.ResponseWriter, r *http.Request) {
+	// GET carries the query in the URL, which Apollo Server, gqlgen,
+	// graphql-go and Hasura all accept. Skipping it meant
+	// `GET /graphql?query={__schema{types{name}}}` walked past the
+	// introspection block, the depth limit, the complexity limit and
+	// field-level claim auth -- every check this middleware performs, chosen
+	// by the client picking a method.
+	if r.Method == http.MethodGet {
+		if !graphQLGETAllowed(cfg, w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		next.ServeHTTP(w, r)
 		return
