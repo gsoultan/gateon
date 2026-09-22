@@ -279,7 +279,12 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// Capture original host and path before proxying mutates r.Host/r.URL.
 			origHost := cmp.Or(r.Host, r.URL.Host)
 			origPath := r.URL.Path
+			// Bounded for metrics: Go accepts any RFC 7230 token as a method,
+			// so an unbounded label lets a client mint a counter series and a
+			// twelve-bucket histogram series per request. The raw value is
+			// still used everywhere it matters; only the label is folded.
 			method := r.Method
+			methodLabel := telemetry.MethodLabel(method)
 
 			// Track request body size
 			reqInSize := r.ContentLength
@@ -461,8 +466,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 		skipTrace:
 			// Rich Prometheus metrics
-			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, method, statusStr).Inc()
-			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, method).Observe(duration.Seconds())
+			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, methodLabel, statusStr).Inc()
+			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, methodLabel).Observe(duration.Seconds())
 
 			// Bounded per-IP analytics (heavy-hitters / reputation) always run.
 			telemetry.GetAggregator().RecordRequest(clientIP, sw.Status)
@@ -487,9 +492,14 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			if origDomain == "" {
 				origDomain = "unknown"
 			}
-			telemetry.RequestsByDomainTotal.WithLabelValues(origDomain).Inc()
-			telemetry.RequestBytesByDomainTotal.WithLabelValues(origDomain, "in").Add(float64(reqInSize + 256))
-			telemetry.RequestBytesByDomainTotal.WithLabelValues(origDomain, "out").Add(float64(respOutSize + 200))
+			// Bounded: the Host header is attacker-chosen and each distinct
+			// value costs three permanent series. See telemetry.DomainLabel.
+			// RecordDomainRequest below takes the raw value; its own map is
+			// already bounded.
+			domainLabel := telemetry.DomainLabel(origDomain)
+			telemetry.RequestsByDomainTotal.WithLabelValues(domainLabel).Inc()
+			telemetry.RequestBytesByDomainTotal.WithLabelValues(domainLabel, "in").Add(float64(reqInSize + 256))
+			telemetry.RequestBytesByDomainTotal.WithLabelValues(domainLabel, "out").Add(float64(respOutSize + 200))
 			telemetry.RecordDomainRequest(origDomain, duration.Seconds(), totalBandwidthBytes)
 
 			// Protocol metrics

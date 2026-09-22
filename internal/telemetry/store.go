@@ -1627,7 +1627,13 @@ var mitigationFunnelRules = []funnelRule{
 			return cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation"
 		},
 		record: func(routeID, typ string, st *SecurityThreat) {
-			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, cmp.Or(st.TriggeredRules, typ, labelUnknown)).Inc()
+			// firstRuleID, not TriggeredRules. The label is declared rule_id
+			// and its comment says rule ids come from a fixed ruleset, which
+			// is true of one id and false of the *set*: TriggeredRules is the
+			// JSON array of every rule the request matched, and an attacker
+			// picks the combination by choosing which tokens to put in one
+			// payload. One blocked request per novel combination, forever.
+			MiddlewareWAFBlockedTotal.WithLabelValues(routeID, cmp.Or(firstRuleID(st.TriggeredRules), typ, labelUnknown)).Inc()
 		},
 	},
 	{
@@ -1646,8 +1652,12 @@ var mitigationFunnelRules = []funnelRule{
 		matches: func(cat, typ string) bool {
 			return cat == "deception" || typ == "honeypot_triggered" || typ == "honeypot_hit"
 		},
-		record: func(routeID, _ string, st *SecurityThreat) {
-			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, cmp.Or(st.RequestURI, labelUnknown)).Inc()
+		record: func(routeID, typ string, st *SecurityThreat) {
+			// The label is declared trap_type, but RequestURI is the full
+			// request path, and the honeypot matches by prefix -- so
+			// /.git/<anything> qualifies and every suffix was its own series.
+			// The trap that fired is the bounded thing worth recording.
+			MiddlewareDeceptionBlockedTotal.WithLabelValues(routeID, cmp.Or(typ, labelUnknown)).Inc()
 		},
 	},
 	{
@@ -1684,6 +1694,20 @@ var mitigationFunnelRules = []funnelRule{
 			MiddlewareFileSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
 		},
 	},
+}
+
+// firstRuleID reduces a TriggeredRules JSON array to its first element, so a
+// metric label carries one rule id rather than an attacker-chosen combination
+// of them. Anything it cannot parse becomes "" and the caller falls back.
+func firstRuleID(triggered string) string {
+	if triggered == "" {
+		return ""
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(triggered), &ids); err != nil || len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
 }
 
 func recordMitigationFunnel(st *SecurityThreat) {
