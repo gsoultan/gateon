@@ -245,6 +245,21 @@ shipped code and each failed silently:
    amount of `t.TempDir()` discipline stops `go build`. Matched by content, not by name,
    because the name is the part that keeps changing; `.gitignore` covers the ones we can
    name in advance. `go build -o` takes a destination.
+7. **A deny decision is never skipped on `kind.IsCorsPreflight`** — it reads three
+   values the *client* writes (the `OPTIONS` method, `Origin`,
+   `Access-Control-Request-Method`), so a boundary that calls `next.ServeHTTP` on it is
+   opt-out by request. Five did: `IPMitigation`, `UserMitigation`, the reputation
+   blocker, the CEL policy and the WAF, after `IPFilter` and `HostFilter` had already
+   been fixed for it. On the HTTP entrypoint it was unreachable — `transform.GlobalCORS`
+   sits at `chain[0]` and terminates preflights first — but it has exactly one call site
+   and `buildPlainHTTPHandler` does not include it, so on a plaintext smart-TCP
+   entrypoint an `OPTIONS` with two headers reached the origin while the same request as
+   a `GET` got 403. An `OPTIONS` request is a request. An allowlist in the script names
+   the files that may call it, all of which share one property the deny decisions do not:
+   the request genuinely cannot satisfy the check (a credential a browser will not send
+   on a preflight, a challenge a preflight cannot run, or the CORS middleware whose job
+   it is to answer). The `traffic/` limiters are on that list as a known gap, not an
+   endorsement.
 
 Each check is negative-tested: introduce the violation and the gate must fail. If you
 add an invariant to the roster above that a tool can check, add it here rather than
