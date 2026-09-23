@@ -54,13 +54,19 @@ func MaxBodySize(max int64) kind.Middleware {
 
 // exemptFromBodyLimit reports whether a request carries no body worth capping.
 //
-// A protocol upgrade is the only exemption. The skip used to key off the
-// Upgrade header alone, which the client controls, so any POST that also said
-// `Upgrade: h2c` went past the limit -- hence the ContentLength == 0 half,
-// which the client cannot fake without actually sending no body.
+// A protocol upgrade is the only exemption, and now actually is: the comment
+// said so while kind.IsCorsPreflight sat in the same expression. That term let
+// any request past the limit for the price of an Origin and an
+// Access-Control-Request-Method header, on a method that may carry a body like
+// any other -- and a preflight that genuinely has no body is not affected by a
+// limit on bodies, so the exemption bought nothing it did not already have.
+//
+// The upgrade skip used to key off the Upgrade header alone, which the client
+// also controls, so any POST that also said `Upgrade: h2c` went past the limit
+// -- hence the ContentLength == 0 half, which the client cannot fake without
+// actually sending no body. Same shape, same fix.
 func exemptFromBodyLimit(r *http.Request) bool {
-	return kind.IsCorsPreflight(r) ||
-		(r.Header.Get("Upgrade") != "" && r.ContentLength == 0)
+	return r.Header.Get("Upgrade") != "" && r.ContentLength == 0
 }
 
 // serveWithBodyLimit is the handler body, named rather than nested. gocognit
