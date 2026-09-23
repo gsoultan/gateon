@@ -6,6 +6,7 @@ package telemetry
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,38 @@ func TestFirstRuleIDReducesAnAttackerChosenCombination(t *testing.T) {
 	if a != b {
 		t.Errorf("two combinations of the same first rule produced %q and %q; "+
 			"an attacker still mints a series per payload shape", a, b)
+	}
+}
+
+// TestLabelValuesAreBoundedInLengthNotJustCount covers the axis the first
+// bounding pass missed.
+//
+// Capping how many distinct values are retained does nothing about how large
+// each one is, and nothing in this tree limits the length of a URI, a Host or
+// a path: there is no StatusRequestURITooLong anywhere, and the header budget
+// is 1 MiB. So a single request can carry a 200 KB Host, and 2,000 of those
+// is about 400 MB pinned for the life of the process -- against the 1,446 B
+// per value this code originally claimed, a 275x error.
+func TestLabelValuesAreBoundedInLengthNotJustCount(t *testing.T) {
+	huge := strings.Repeat("a", 200*1024) + ".example"
+
+	got := DomainLabel(huge)
+	if len(got) > maxLabelValueBytes+1 {
+		t.Errorf("DomainLabel returned %d bytes for a 200KB host; the count cap "+
+			"bounds how many values are kept, not how big each one is", len(got))
+	}
+
+	// A real hostname must survive untouched -- 253 is the DNS maximum, so
+	// only a fabricated value is ever cut.
+	real := "api.customer-tenant-seventeen.example.com"
+	if got := DomainLabel(real); got != real {
+		t.Errorf("DomainLabel(%q) = %q; a legitimate hostname was truncated", real, got)
+	}
+
+	// And the truncation is marked, so a reader can tell a cut value from a
+	// genuinely odd one.
+	if !strings.HasSuffix(DomainLabel(huge), "~") {
+		t.Error("a truncated label is not marked; it reads as a real domain that " +
+			"happens to be 253 characters long")
 	}
 }

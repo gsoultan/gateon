@@ -73,7 +73,17 @@ type geoIPRuntime struct {
 }
 
 func (g geoIPRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
-	if kind.IsCorsPreflight(r) || kind.ShouldSkipMetrics(r) {
+	// Deliberately not gated on kind.ShouldSkipMetrics. That is a metrics
+	// predicate: EntryPoint sets RouteName to "gateon-"+epLabel on every request
+	// on every entrypoint, so its prefix test is always true and it collapses to
+	// IsInternalPath(r.URL.Path) -- the client's own path. Measured: a client
+	// resolving to a blocked country reached the origin with
+	// GET /v1/security/anything while GET /normal/page got 403.
+	//
+	// internal/middleware/auth/hmac.go already says this: "Never gate a security
+	// check on ShouldSkipMetrics -- it is a metrics predicate and using it here
+	// would let any request matching it bypass HMAC." It had not reached here.
+	if kind.IsCorsPreflight(r) {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -203,8 +213,17 @@ func serveGlobalGeoIP(state *geoIPGlobalState, globalStore config.GlobalConfigSt
 	resolver func(string) string, next http.Handler, w http.ResponseWriter, r *http.Request,
 ) {
 	gc := globalStore.Get(r.Context())
-	if gc == nil || gc.Geoip == nil || !gc.Geoip.Enabled ||
-		kind.IsCorsPreflight(r) || kind.ShouldSkipMetrics(r) {
+	// Deliberately not gated on kind.ShouldSkipMetrics. That is a metrics
+	// predicate: EntryPoint sets RouteName to "gateon-"+epLabel on every request
+	// on every entrypoint, so its prefix test is always true and it collapses to
+	// IsInternalPath(r.URL.Path) -- the client's own path. Measured: a client
+	// resolving to a blocked country reached the origin with
+	// GET /v1/security/anything while GET /normal/page got 403.
+	//
+	// internal/middleware/auth/hmac.go already says this: "Never gate a security
+	// check on ShouldSkipMetrics -- it is a metrics predicate and using it here
+	// would let any request matching it bypass HMAC." It had not reached here.
+	if gc == nil || gc.Geoip == nil || !gc.Geoip.Enabled || kind.IsCorsPreflight(r) {
 		next.ServeHTTP(w, r)
 		return
 	}
