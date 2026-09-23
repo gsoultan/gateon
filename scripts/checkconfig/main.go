@@ -58,7 +58,14 @@ var (
 	// A field is "<type> <name> = <number>;". Enum values have only one token
 	// before the "=", so they do not match. map<k,v> is spelled out explicitly
 	// because the angle brackets defeat the plain identifier pattern.
-	fieldRE = regexp.MustCompile(`(?m)^\s*(?:repeated\s+|optional\s+)?(?:map<[^>]+>|[\w.]+)\s+(\w+)\s*=\s*\d+\s*;`)
+	//
+	// The trailing option group is optional but must be matched. A field
+	// written `bool x = 3 [deprecated = true];` does not end in `= <number>;`,
+	// so without this it is not seen at all -- and a field this parser cannot
+	// see is a field the check reports nothing about, which is the exact
+	// failure it exists to catch, turned on itself. No field in the schema
+	// carries options today; the first one added would have been invisible.
+	fieldRE = regexp.MustCompile(`(?m)^\s*(?:repeated\s+|optional\s+)?(?:map<[^>]+>|[\w.]+)\s+(\w+)\s*=\s*\d+\s*(?:\[[^\]]*\])?\s*;`)
 )
 
 // goName renders a proto field name the way protoc-gen-go does: split on
@@ -81,8 +88,8 @@ func (f protoField) key() string { return f.Message + "." + f.Field }
 // collectFields parses the schema. It is deliberately a regex parser rather than
 // a protobuf reflection walk: reflection would only see fields that survived
 // code generation, and the whole question is what the generated code is missing.
-func collectFields() ([]protoField, error) {
-	entries, err := os.ReadDir(protoDir)
+func collectFields(dir string) ([]protoField, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +98,11 @@ func collectFields() ([]protoField, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".proto") {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(protoDir, e.Name()))
+		// #nosec G304 -- a build-time developer command, not a server. dir is
+		// the protoDir constant in the only non-test caller, and t.TempDir() in
+		// the tests; e.Name() comes from ReadDir of that same directory. No
+		// value here crosses a trust boundary, because there is no request.
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -190,9 +201,11 @@ func protoTypeName(t types.Type) string {
 }
 
 // loadBaseline reads the accepted-debt list.
-func loadBaseline() (map[string]bool, error) {
+func loadBaseline(path string) (map[string]bool, error) {
 	out := map[string]bool{}
-	raw, err := os.ReadFile(baselinePath)
+	// #nosec G304 -- same reasoning as collectFields: baselinePath in the only
+	// non-test caller, a fixture under t.TempDir() in the tests.
+	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return out, nil
 	}
@@ -208,7 +221,7 @@ func loadBaseline() (map[string]bool, error) {
 }
 
 func main() {
-	fields, err := collectFields()
+	fields, err := collectFields(protoDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "checkconfig: reading schema: %v\n", err)
 		os.Exit(2)
@@ -218,7 +231,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "checkconfig: loading packages: %v\n", err)
 		os.Exit(2)
 	}
-	baseline, err := loadBaseline()
+	baseline, err := loadBaseline(baselinePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "checkconfig: reading baseline: %v\n", err)
 		os.Exit(2)
