@@ -15,7 +15,10 @@ import (
 )
 
 func NewHeaders(cfg map[string]string) (kind.Middleware, error) {
-	stsValue := hstsValue(cfg)
+	stsValue, err := hstsValue(cfg)
+	if err != nil {
+		return nil, err
+	}
 	forceSTSHeader := kind.ParseBoolStrict(cfg["force_sts_header"], false)
 	reqOps := headerOpsFor(cfg, "request")
 	respOps := headerOpsFor(cfg, "response")
@@ -97,10 +100,18 @@ func (ops headerOps) applyTo(h http.Header) {
 
 // hstsValue builds the Strict-Transport-Security value once, when the route is
 // built; "" when sts_seconds is unset or not positive.
-func hstsValue(cfg map[string]string) string {
-	stsSeconds, _ := strconv.Atoi(cfg["sts_seconds"])
+//
+// A malformed value is an error rather than a "". Both used to produce no
+// header at all, which meant an operator who set sts_seconds and mistyped it
+// got no HSTS and no indication of it -- the dashboard showed what they wrote
+// and the response carried nothing.
+func hstsValue(cfg map[string]string) (string, error) {
+	stsSeconds, err := kind.ParseIntStrict(cfg["sts_seconds"], 0)
+	if err != nil {
+		return "", kind.CfgError("sts_seconds", cfg["sts_seconds"], err)
+	}
 	if stsSeconds <= 0 {
-		return ""
+		return "", nil
 	}
 	val := "max-age=" + strconv.Itoa(stsSeconds)
 	if kind.ParseBoolStrict(cfg["sts_include_subdomains"], false) {
@@ -109,5 +120,5 @@ func hstsValue(cfg map[string]string) string {
 	if kind.ParseBoolStrict(cfg["sts_preload"], false) {
 		val += "; preload"
 	}
-	return val
+	return val, nil
 }

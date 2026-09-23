@@ -6,14 +6,22 @@ package security
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
 func NewGraphQLFirewall(cfg map[string]string) (kind.Middleware, error) {
-	maxDepth, _ := strconv.Atoi(cfg["max_depth"])
-	maxComplexity, _ := strconv.Atoi(cfg["max_complexity"])
+	// Honoured rather than discarded: both limits treat 0 as "no limit"
+	// (see serveGraphQLFirewall), so a typo here is the protection switched
+	// off while the dashboard still shows what the operator typed.
+	maxDepth, err := kind.ParseIntStrict(cfg["max_depth"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_depth", cfg["max_depth"], err)
+	}
+	maxComplexity, err := kind.ParseIntStrict(cfg["max_complexity"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_complexity", cfg["max_complexity"], err)
+	}
 	introspection := cfg["introspection"] == "true"
 
 	fieldCosts := make(map[string]int)

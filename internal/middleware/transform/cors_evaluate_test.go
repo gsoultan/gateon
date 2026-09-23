@@ -32,7 +32,10 @@ func TestEvaluateCORSAllowsAConfiguredOrigin(t *testing.T) {
 		"allowed_methods": "GET,POST",
 	}
 
-	d := EvaluateCORS(cfg, preflight("https://app.example", http.MethodPost, ""))
+	d, cfgErr := EvaluateCORS(cfg, preflight("https://app.example", http.MethodPost, ""))
+	if cfgErr != nil {
+		t.Fatalf("EvaluateCORS: %v", cfgErr)
+	}
 	if !d.IsPreflight {
 		t.Error("IsPreflight = false for an OPTIONS carrying Origin and " +
 			"Access-Control-Request-Method")
@@ -46,7 +49,10 @@ func TestEvaluateCORSAllowsAConfiguredOrigin(t *testing.T) {
 func TestEvaluateCORSRefusesAnUnconfiguredOrigin(t *testing.T) {
 	cfg := map[string]string{"allowed_origins": "https://app.example"}
 
-	d := EvaluateCORS(cfg, preflight("https://evil.example", http.MethodGet, ""))
+	d, cfgErr := EvaluateCORS(cfg, preflight("https://evil.example", http.MethodGet, ""))
+	if cfgErr != nil {
+		t.Fatalf("EvaluateCORS: %v", cfgErr)
+	}
 	if d.OriginAllowed || d.Allowed {
 		t.Errorf("OriginAllowed=%v Allowed=%v for an origin that is not in the "+
 			"allow list; the dashboard would report a boundary that does not hold",
@@ -67,7 +73,10 @@ func TestEvaluateCORSSeparatesAMethodFromAHeader(t *testing.T) {
 	}
 
 	t.Run("disallowed method", func(t *testing.T) {
-		d := EvaluateCORS(cfg, preflight("https://app.example", http.MethodDelete, ""))
+		d, cfgErr := EvaluateCORS(cfg, preflight("https://app.example", http.MethodDelete, ""))
+		if cfgErr != nil {
+			t.Fatalf("EvaluateCORS: %v", cfgErr)
+		}
 		if d.Allowed {
 			t.Fatal("DELETE was allowed against a GET-only policy")
 		}
@@ -77,7 +86,10 @@ func TestEvaluateCORSSeparatesAMethodFromAHeader(t *testing.T) {
 	})
 
 	t.Run("allowed method, disallowed header", func(t *testing.T) {
-		d := EvaluateCORS(cfg, preflight("https://app.example", http.MethodGet, "X-Custom"))
+		d, cfgErr := EvaluateCORS(cfg, preflight("https://app.example", http.MethodGet, "X-Custom"))
+		if cfgErr != nil {
+			t.Fatalf("EvaluateCORS: %v", cfgErr)
+		}
 		if d.Allowed {
 			t.Fatal("a request for a header outside the policy was allowed")
 		}
@@ -133,7 +145,10 @@ func TestEvaluateCORSDoesNotBlameHeadersForARejectedMethod(t *testing.T) {
 	}
 
 	// Method refused, headers perfectly acceptable.
-	d := EvaluateCORS(cfg, preflight("https://app.example", http.MethodDelete, "Content-Type"))
+	d, cfgErr := EvaluateCORS(cfg, preflight("https://app.example", http.MethodDelete, "Content-Type"))
+	if cfgErr != nil {
+		t.Fatalf("EvaluateCORS: %v", cfgErr)
+	}
 	if d.Allowed {
 		t.Fatal("DELETE was allowed against a GET-only policy")
 	}

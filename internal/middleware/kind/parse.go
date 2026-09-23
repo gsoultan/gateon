@@ -4,8 +4,10 @@
 package kind
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
@@ -48,6 +50,46 @@ func ParseBoolStrict(s string, defaultVal bool) bool {
 		return defaultVal
 	}
 	return parsed
+}
+
+// ParseFloatStrict and ParseDurationStrict complete the strict set.
+//
+// The distinction all four make is between *absent* and *malformed*, and it is
+// the whole reason they exist. An absent key means the operator did not set
+// this, so the default is correct and silent. A malformed one means they did
+// set it, and got something they did not ask for: the dashboard goes on
+// displaying "ten" while the gateway runs on 0, and for a limit whose zero
+// value means "no limit" -- GraphQL depth and complexity both do -- that is the
+// protection switched off by a typo.
+//
+// strconv returns that distinction and the call sites were discarding it.
+
+func ParseFloatStrict(s string, defaultVal float64) (float64, error) {
+	if strings.TrimSpace(s) == "" {
+		return defaultVal, nil
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return defaultVal, err
+	}
+	return f, nil
+}
+
+func ParseDurationStrict(s string, defaultVal time.Duration) (time.Duration, error) {
+	if strings.TrimSpace(s) == "" {
+		return defaultVal, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(s))
+	if err != nil {
+		return defaultVal, err
+	}
+	return d, nil
+}
+
+// CfgError wraps a parse failure with the key and the value the operator wrote,
+// so the message names what to go and fix rather than only what went wrong.
+func CfgError(key, value string, err error) error {
+	return fmt.Errorf("middleware config %q: %q is not valid: %w", key, value, err)
 }
 
 // The severity and action vocabulary every middleware reports threats in.

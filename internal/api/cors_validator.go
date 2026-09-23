@@ -257,7 +257,19 @@ func (s *ApiService) simulateCORS(r *http.Request, mw *gateonv1.Middleware, rout
 		}, nil
 	}
 
-	decision := transform.EvaluateCORS(mw.Config, r)
+	decision, err := transform.EvaluateCORS(mw.Config, r)
+	if err != nil {
+		// A middleware config the proxy would refuse to build. Reporting what
+		// it "would do" from it is the lie this validator exists to prevent,
+		// so the operator gets the key and the value instead.
+		return &gateonv1.ValidateCORSResponse{
+			IsAllowed:        false,
+			Message:          fmt.Sprintf("CORS middleware configuration is invalid: %v", err),
+			Checks:           append(checks, "Configuration check: FAILED"),
+			MiddlewareConfig: mw.Config,
+			RouteName:        routeName,
+		}, nil
+	}
 	outcome := describeCORS(decision, r)
 	outcome.suggestions = append(outcome.suggestions, corsCredentialWarnings(decision)...)
 

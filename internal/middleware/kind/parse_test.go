@@ -3,9 +3,14 @@
 
 package kind
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
 
-// These four decide whether a route runs with the limit an operator configured
+// These decide whether a route runs with the limit an operator configured
 // or with a default, and every one of them falls back silently. A typo in a
 // config value does not produce an error anywhere -- it produces a gateway
 // running on a number nobody chose. So the contract each of them actually has,
@@ -67,6 +72,67 @@ func TestParseIntStrict(t *testing.T) {
 	if got != 9 {
 		t.Errorf("ParseIntStrict(\"nope\", 9) = %d alongside its error, want the "+
 			"default 9 so a caller ignoring err still gets a usable value", got)
+	}
+}
+
+func TestParseFloatStrict(t *testing.T) {
+	if got, err := ParseFloatStrict("", 1.5); got != 1.5 || err != nil {
+		t.Errorf("ParseFloatStrict(\"\", 1.5) = (%v, %v), want (1.5, nil)", got, err)
+	}
+	if got, err := ParseFloatStrict(" 0.25 ", 1.5); got != 0.25 || err != nil {
+		t.Errorf("ParseFloatStrict(\" 0.25 \", 1.5) = (%v, %v), want (0.25, nil); "+
+			"surrounding space is not a malformed value", got, err)
+	}
+
+	got, err := ParseFloatStrict("half", 1.5)
+	if err == nil {
+		t.Error("ParseFloatStrict(\"half\", 1.5) returned no error; a caller that " +
+			"wanted to refuse a bad config would accept it")
+	}
+	if got != 1.5 {
+		t.Errorf("ParseFloatStrict(\"half\", 1.5) = %v alongside its error, want the "+
+			"default so a caller ignoring err still gets a usable value", got)
+	}
+}
+
+func TestParseDurationStrict(t *testing.T) {
+	if got, err := ParseDurationStrict("", 3*time.Second); got != 3*time.Second || err != nil {
+		t.Errorf("ParseDurationStrict(\"\", 3s) = (%v, %v), want (3s, nil)", got, err)
+	}
+	if got, err := ParseDurationStrict("750ms", 3*time.Second); got != 750*time.Millisecond || err != nil {
+		t.Errorf("ParseDurationStrict(\"750ms\", 3s) = (%v, %v), want (750ms, nil)", got, err)
+	}
+
+	// The shape an operator actually types: a bare number, which reads as a
+	// duration to a human and not to time.ParseDuration.
+	got, err := ParseDurationStrict("5", 3*time.Second)
+	if err == nil {
+		t.Error("ParseDurationStrict(\"5\", 3s) returned no error; a unitless " +
+			"number is the most likely way this field is mistyped")
+	}
+	if got != 3*time.Second {
+		t.Errorf("ParseDurationStrict(\"5\", 3s) = %v alongside its error, want the "+
+			"default so a caller ignoring err still gets a usable value", got)
+	}
+}
+
+func TestCfgErrorNamesTheKeyAndValue(t *testing.T) {
+	_, err := ParseIntStrict("ten", 0)
+	if err == nil {
+		t.Fatal("ParseIntStrict(\"ten\", 0) returned no error")
+	}
+	wrapped := CfgError("max_depth", "ten", err)
+
+	// An operator with twenty settings needs to know which one, and what they
+	// wrote, or the message costs them a search.
+	msg := wrapped.Error()
+	for _, want := range []string{"max_depth", "ten"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("CfgError message %q does not contain %q", msg, want)
+		}
+	}
+	if !errors.Is(wrapped, err) {
+		t.Error("CfgError does not wrap the cause; errors.Is cannot reach it")
 	}
 }
 
