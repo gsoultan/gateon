@@ -601,7 +601,15 @@ func (m *Manager) handleFailedLogin(username string, currentAttempts int) {
 	}
 	q := m.dialect.Rebind(QueryIncrementFailedAttempts)
 	if _, err := m.db.Exec(q, lockedUntil, username); err != nil {
-		m.logger.LogError("failed to increment failed login attempts", "error", err, "username", username)
+		// Logged at error, and named for what it costs. While this write is
+		// failing the counter never advances, so MaxFailedAttempts and
+		// LockoutDuration do not apply and the account is open to unlimited
+		// guessing -- while login keeps answering with an ordinary invalid
+		// credentials response, so nothing upstream can tell.
+		m.logger.LogError("brute-force lockout not recorded; failed attempts are "+
+			"not being counted and the account cannot lock",
+			"error", err, "username", username,
+			"max_failed_attempts", MaxFailedAttempts)
 	}
 }
 

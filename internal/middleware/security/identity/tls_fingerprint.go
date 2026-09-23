@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+
+	"github.com/gsoultan/gateon/internal/logger"
 )
 
 type tlsContextKey string
@@ -23,8 +25,29 @@ const (
 
 const numShards = 16
 
+// maxFingerprintsPerShard bounds each shard's connection map.
+//
+// The map is keyed on the client's IP:port and written from the TLS handshake
+// callback, which has no guaranteed teardown partner. RemoveFingerprints has
+// exactly one non-test caller -- the http.Server ConnState hook on the
+// HTTP/1.1-2 entrypoint -- so the HTTP/3 listener, which has no ConnState, and
+// the bare TCP accept loop in start_servers.go both write entries that are
+// never removed. A QUIC Initial packet or a TCP connect plus ClientHello is
+// enough to mint one, and ephemeral source ports make every reconnect from a
+// single address a fresh key.
+//
+// A bound rather than a third teardown hook, because the next TLS-terminating
+// path added will reintroduce the leak otherwise. 16 shards x 4096 is 65,536
+// live handshakes, well past what the 2-core target sustains, at roughly
+// 130-250 bytes each.
+const maxFingerprintsPerShard = 4096
+
 var (
 	shards [numShards]*fingerprintShard
+
+	// Logged once: the cap is hit per handshake when it is hit at all, and an
+	// operator needs to know it happened, not how often.
+	shardFullOnce sync.Once
 
 	sha256Pool = sync.Pool{
 		New: func() any {
@@ -104,8 +127,28 @@ func SetFingerprints(conn net.Conn, f Fingerprints) {
 	}
 	s := getShard(addr)
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Overwriting an existing key never grows the map, so the bound only
+	// applies to new ones.
+	if _, exists := s.conns[addr]; !exists && len(s.conns) >= maxFingerprintsPerShard {
+		// Refuse rather than evict. Evicting would let a flood of new
+		// handshakes displace the fingerprints of connections that are still
+		// open, which turns a memory bound into a correctness problem: a live
+		// request would find no fingerprint and be treated as unidentified.
+		// Refusing costs the new connection its JA3/JA4 -- it is still served,
+		// just not fingerprinted -- and that degrades under exactly the
+		// conditions where the map is already full of attacker handshakes.
+		shardFullOnce.Do(func() {
+			logger.L.LogWarn("tls fingerprint table is full; new connections will "+
+				"not be fingerprinted until existing ones close. This is a bound, "+
+				"not a failure -- but a sustained hit means handshakes are "+
+				"arriving faster than they are being torn down.",
+				"max_per_shard", maxFingerprintsPerShard, "shards", numShards)
+		})
+		return
+	}
 	s.conns[addr] = f
-	s.mu.Unlock()
 }
 
 func RemoveFingerprints(conn net.Conn) {

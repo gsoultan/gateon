@@ -150,9 +150,29 @@ func TestShipperHTTPDelivery(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
+	// Run is joined rather than abandoned. A bare `go s.Run(ctx)` with a
+	// deferred cancel leaves the shutdown path -- drain plus the deferred
+	// transport.Close -- reachable only if the runtime happens to schedule that
+	// goroutine between the cancel and process exit. It does on an idle
+	// machine and does not on a loaded CI runner, which is how this package
+	// measured 63.9% locally and 60.2% in CI with every test still passing.
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go s.Run(ctx)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		s.Run(ctx)
+	}()
+	// Registered after `defer srv.Close()` so it runs before it: the shipper
+	// must let go of its keep-alive connection before the collector is torn
+	// down, or Close waits on it.
+	defer func() {
+		cancel()
+		select {
+		case <-runDone:
+		case <-time.After(5 * time.Second):
+			t.Error("Run did not return within 5s of cancellation")
+		}
+	}()
 
 	s.Ship(sampleEvent())
 
@@ -197,5 +217,106 @@ func TestNilShipperSafe(t *testing.T) {
 	s.Ship(sampleEvent()) // must not panic
 	if got := s.Stats(); got != (Stats{}) {
 		t.Fatalf("nil shipper stats = %+v, want zero", got)
+	}
+}
+
+// recordingTransport stands in for a collector so the shutdown contract can be
+// asserted without a live server, a sleep, or a scheduling assumption.
+type recordingTransport struct {
+	mu     sync.Mutex
+	sent   [][]byte
+	closed bool
+}
+
+func (r *recordingTransport) send(_ context.Context, payload []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sent = append(r.sent, append([]byte(nil), payload...))
+	return nil
+}
+
+func (r *recordingTransport) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	return nil
+}
+
+func (r *recordingTransport) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.sent)
+}
+
+func (r *recordingTransport) isClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
+}
+
+func newRecordingShipper(t *testing.T) (*Shipper, *recordingTransport) {
+	t.Helper()
+	s, err := New(Config{Enabled: true, Endpoint: "http://collector.invalid", QueueSize: minQueueSize})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rt := &recordingTransport{}
+	s.transport = rt
+	return s, rt
+}
+
+// TestDrainFlushesQueuedEvents pins the promise in drain's own comment: events
+// still in the queue at shutdown are exported, not dropped.
+//
+// drain is called directly rather than through a cancelled Run, because Run's
+// select picks at random among ready cases -- it may service the queue through
+// the normal path first, so "the event was still queued when drain ran" is not
+// a property the Run path can promise.
+func TestDrainFlushesQueuedEvents(t *testing.T) {
+	s, rt := newRecordingShipper(t)
+
+	const queued = 3
+	for range queued {
+		s.Ship(sampleEvent())
+	}
+	s.drain()
+
+	if got := rt.count(); got != queued {
+		t.Fatalf("drain exported %d events, want %d; queued events were dropped at shutdown", got, queued)
+	}
+	if got := s.Stats().Shipped; got != int64(queued) {
+		t.Fatalf("Shipped = %d, want %d", got, queued)
+	}
+}
+
+// TestRunReturnsAndClosesTransportOnCancel pins the other half of Run's
+// documented contract: cancellation makes it return, and returning closes the
+// transport. Nothing here waits on a duration, so it cannot pass by luck.
+func TestRunReturnsAndClosesTransportOnCancel(t *testing.T) {
+	s, rt := newRecordingShipper(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.Run(ctx)
+	}()
+
+	s.Ship(sampleEvent())
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return within 5s of cancellation")
+	}
+
+	if !rt.isClosed() {
+		t.Error("Run returned without closing the transport; a real net transport would leak its connection")
+	}
+	// Exported either by the normal path before the cancel landed or by the
+	// drain after it -- exactly once, whichever case the select took.
+	if got := rt.count(); got != 1 {
+		t.Errorf("transport received %d events, want 1", got)
 	}
 }
