@@ -20,10 +20,8 @@ import (
 func IPMitigation() kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
+			// No CORS-preflight exemption; see kind.IsCorsPreflight. A shunned
+			// IP is shunned whatever it says it is about to do.
 			rs := request.GetRequestState(r)
 			trustCloudflare := config.EffectiveTrustCloudflare()
 			ip := request.GetClientIP(r, trustCloudflare)
@@ -74,7 +72,10 @@ func UserMitigation() kind.Middleware {
 }
 
 func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Request) {
-	if kind.IsCorsPreflight(r) || unmitigatedPaths[r.URL.Path] {
+	// No CORS-preflight exemption; see kind.IsCorsPreflight. unmitigatedPaths
+	// stays, because those are paths the gateway chooses to answer, not a shape
+	// the caller names to exempt itself.
+	if unmitigatedPaths[r.URL.Path] {
 		next.ServeHTTP(w, r)
 		return
 	}

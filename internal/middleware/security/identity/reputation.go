@@ -23,10 +23,7 @@ type reputationHandler struct {
 }
 
 func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if kind.IsCorsPreflight(r) {
-		h.next.ServeHTTP(w, r)
-		return
-	}
+	// No CORS-preflight exemption; see kind.IsCorsPreflight.
 	// Never block localhost or management traffic.
 	//
 	// This used to compare the *fingerprint* to "127.0.0.1", which was dead code
