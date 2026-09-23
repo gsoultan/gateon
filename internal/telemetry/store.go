@@ -765,6 +765,9 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 					"error", err)
 				lost += 1000
 			}
+			// Returned to Pebble's pool before the next one is taken; see
+			// flushTraces for why Commit alone does not.
+			_ = batch.Close()
 			batch = s.pebble.NewBatch()
 		}
 	}
@@ -773,6 +776,7 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 			"error", err)
 		lost++
 	}
+	_ = batch.Close()
 	// Checked, because a connection that drops mid-iteration ends the loop
 	// with a partial count and no error anywhere else.
 	if err := rows.Err(); err != nil {
@@ -1136,6 +1140,17 @@ func (s *pathStatsStore) flushTraces(traceBatch []*TraceRecord) []*TraceRecord {
 		return traceBatch
 	}
 	pb := s.pebble.NewBatch()
+	// Commit does not release the batch. Pebble hands these out from a
+	// sync.Pool and only Close puts one back -- Batch.release is what returns
+	// it, and the commit pipeline deliberately does not call it (see the note
+	// at commit.go where a failed batch is marked so it is *not* a candidate
+	// for reuse, which only means anything if a successful one is). Pebble's
+	// own convenience writers, DB.Set and friends, all release after
+	// committing. Without this the batch's data buffer -- which grew to hold
+	// every trace in the flush -- is garbage rather than reused, on the
+	// telemetry write path, once per flush, forever.
+	defer func() { _ = pb.Close() }()
+
 	for _, tr := range traceBatch {
 		// Timestamp is nanosecond-resolution and the ID is per-record, so the
 		// key is unique in practice; Pebble Set overwrites on the off chance it
