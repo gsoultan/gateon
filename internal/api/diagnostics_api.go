@@ -641,8 +641,15 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		}
 	}
 
-	// Record mitigation in telemetry
-	telemetry.MarkIPMitigated(sourceIP, "Manual recommendation applied via API")
+	// Record mitigation in telemetry. Reported rather than logged: announcing
+	// "blocked via middleware and shunned at XDP level" for a write that failed
+	// leaves the operator believing a security control is on.
+	if err := telemetry.MarkIPMitigated(sourceIP, "Manual recommendation applied via API"); err != nil {
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: false,
+			Message: fmt.Sprintf("IP %s was not blocked: the mitigation could not be recorded (%v)", sourceIP, err),
+		}, nil
+	}
 
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
@@ -819,7 +826,10 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 	// the request path asks before telling an operator the source is contained.
 	var mitigated bool
 	if isIP {
-		telemetry.MarkIPMitigated(source, reason)
+		// Error deliberately not returned here: the read-back on the next line
+		// is the stronger check, because it asks the same predicate the request
+		// path asks rather than trusting the writer's own account.
+		_ = telemetry.MarkIPMitigated(source, reason)
 		mitigated = telemetry.IsIPMitigated(source)
 	} else {
 		// Default to JA4+ for fingerprints if not specified
@@ -897,7 +907,13 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 
 	// 4. Mark as unmitigated in telemetry and reset reputation
 	if isIP {
-		telemetry.MarkIPUnmitigated(source)
+		if err := telemetry.MarkIPUnmitigated(source); err != nil {
+			return &gateonv1.RemoveMitigatedThreatResponse{
+				Success: false,
+				Message: fmt.Sprintf("%s was not released: the release could not be recorded (%v). "+
+					"The source is still blocked.", source, err),
+			}, nil
+		}
 		s.resetReputationForIP(ctx, source)
 	} else if !releaseFingerprintMitigation(source, req.GetJa4Plus(), req.GetJa4H()) {
 		return &gateonv1.RemoveMitigatedThreatResponse{
@@ -1331,7 +1347,13 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 
 	// Reset reputation (including all associated fingerprints) and mark as unmitigated
 	s.resetReputationForIP(ctx, threat.SourceIP)
-	telemetry.MarkIPUnmitigated(threat.SourceIP)
+	if err := telemetry.MarkIPUnmitigated(threat.SourceIP); err != nil {
+		return &gateonv1.ApplyRecommendationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Rules [%s] are now excepted for '%s', but %s was not released: "+
+				"the release could not be recorded (%v).", idsStr, scope, threat.SourceIP, err),
+		}, nil
+	}
 
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,

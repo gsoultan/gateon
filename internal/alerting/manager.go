@@ -125,7 +125,10 @@ func (m *AlertingManager) process(threat *telemetry.SecurityThreat) {
 				if threat.Severity == "critical" && threat.JA4 == "" {
 					if err := m.ebpfManager.ShunIP(threat.SourceIP); err == nil {
 						threat.ActionTaken = "Autonomous Mitigation"
-						telemetry.MarkIPMitigated(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)")
+						if err := telemetry.MarkIPMitigated(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)"); err != nil {
+							logger.L.LogError("autonomous mitigation did not persist; the source is not blocked",
+								"ip", threat.SourceIP, "error", err)
+						}
 						logger.L.LogInfo("autonomous smart mitigation: shunned high-risk IP",
 							"ip", threat.SourceIP,
 							"total_score", score,
