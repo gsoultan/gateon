@@ -67,36 +67,58 @@ func NewDistributedProxyInvalidator(local proxy.Invalidator, redis redis.Client)
 	}
 }
 
+// publish sends an invalidation to the other instances, and says so when it
+// cannot.
+//
+// Checked and logged, unlike PublishBindingRevocation below, and for the
+// opposite reason. A session binding expires at DefaultBindingTTL whatever
+// happens, so a broker that is down costs that path latency. Nothing
+// re-converges a config cache: the registries load once at construction and
+// there is no periodic reload, so invalidation is the only mechanism there is.
+// A publish that fails therefore leaves every peer serving the superseded
+// value until it restarts -- for InvalidateTLS, called after a certificate is
+// replaced, that is the old certificate.
+//
+// The four callers used to discard both errors, while the session publisher
+// twenty lines down checked them. Same file, same call, same broker.
+func (i *distributedProxyInvalidator) publish(m InvalidationMessage) {
+	if i.redis == nil {
+		return
+	}
+	msg, err := json.Marshal(m)
+	if err != nil {
+		logger.L.LogError("config invalidation could not be encoded; peers keep the superseded value",
+			"type", m.Type, "id", m.ID, "error", err)
+		return
+	}
+	if err := i.redis.Publish(context.Background(), InvalidationChannel, msg).Err(); err != nil {
+		logger.L.LogWarn("config invalidation not propagated to peers; they serve the "+
+			"superseded value until they restart, because nothing else reloads it",
+			"type", m.Type, "id", m.ID, "error", err)
+	}
+}
+
 func (i *distributedProxyInvalidator) InvalidateRoute(id string) {
 	i.local.InvalidateRoute(id)
-	if i.redis != nil {
-		msg, _ := json.Marshal(InvalidationMessage{Type: "route", ID: id, NodeID: i.nodeID})
-		i.redis.Publish(context.Background(), InvalidationChannel, msg)
-	}
+	i.publish(InvalidationMessage{Type: "route", ID: id, NodeID: i.nodeID})
 }
 
 func (i *distributedProxyInvalidator) InvalidateRoutes(strategy func(*gateonv1.Route) bool) {
 	i.local.InvalidateRoutes(strategy)
-	if i.redis != nil {
-		msg, _ := json.Marshal(InvalidationMessage{Type: "all", NodeID: i.nodeID})
-		i.redis.Publish(context.Background(), InvalidationChannel, msg)
-	}
+	// "all" rather than a per-route message: the strategy is a function and
+	// does not cross the wire, so peers invalidate everything. Over-invalidating
+	// costs a rebuild; under-invalidating serves a route the operator deleted.
+	i.publish(InvalidationMessage{Type: "all", NodeID: i.nodeID})
 }
 
 func (i *distributedProxyInvalidator) InvalidateTLS() {
 	i.local.InvalidateTLS()
-	if i.redis != nil {
-		msg, _ := json.Marshal(InvalidationMessage{Type: "tls", NodeID: i.nodeID})
-		i.redis.Publish(context.Background(), InvalidationChannel, msg)
-	}
+	i.publish(InvalidationMessage{Type: "tls", NodeID: i.nodeID})
 }
 
 func (i *distributedProxyInvalidator) InvalidateWAF() {
 	i.local.InvalidateWAF()
-	if i.redis != nil {
-		msg, _ := json.Marshal(InvalidationMessage{Type: "waf", NodeID: i.nodeID})
-		i.redis.Publish(context.Background(), InvalidationChannel, msg)
-	}
+	i.publish(InvalidationMessage{Type: "waf", NodeID: i.nodeID})
 }
 
 // SessionBindingInvalidator applies a session-binding invalidation that arrived
