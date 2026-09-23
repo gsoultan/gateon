@@ -258,8 +258,12 @@ shipped code and each failed silently:
    the files that may call it, all of which share one property the deny decisions do not:
    the request genuinely cannot satisfy the check (a credential a browser will not send
    on a preflight, a challenge a preflight cannot run, or the CORS middleware whose job
-   it is to answer). The `traffic/` limiters are on that list as a known gap, not an
-   endorsement.
+   it is to answer). The rate limiter, the connection limiters and the body cap were
+   on that list as a known gap and are not any more: a limit a caller steps out of by
+   naming a shape is not a limit, and browsers cache a preflight for `MaxAge` (86400),
+   so legitimate preflight volume is a rounding error against any cap worth setting.
+   `traffic/compress.go` stays — a preflight has no body to compress, so skipping it
+   changes the size of the caller's own response and nothing else.
 
 Each check is negative-tested: introduce the violation and the gate must fail. If you
 add an invariant to the roster above that a tool can check, add it here rather than

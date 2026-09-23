@@ -223,10 +223,9 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
+			// No CORS-preflight exemption: a rate limit a caller can step out
+			// of by adding two headers is not a rate limit. Browsers cache a
+			// preflight for MaxAge, so legitimate volume is negligible.
 			key := keyFunc(r)
 			if key == "" {
 				next.ServeHTTP(w, r)
@@ -301,10 +300,7 @@ func NewRedisRateLimiter(client redis.Client, r int, b int) *RedisRateLimiter {
 func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
+			// No CORS-preflight exemption; see LocalRateLimiter.Handler.
 			key := keyFunc(r)
 			if key == "" || rl.client == nil {
 				next.ServeHTTP(w, r)

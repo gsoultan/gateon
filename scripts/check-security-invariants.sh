@@ -503,13 +503,19 @@ note "12/12 CORS-preflight is not a way out of a deny decision"
 #                             so requiring them breaks every browser
 #   security/bot_management,  a preflight cannot run a JavaScript challenge
 #   security/turnstile        or carry a Turnstile token
-#   traffic/*.go              resource controls rather than deny decisions.
-#                             Listed, not endorsed: a client can still evade
-#                             the rate and connection limits by shaping
-#                             requests this way, and that is worth its own fix.
+#   traffic/compress.go       response compression, which a preflight has no
+#                             body to benefit from. Skipping it changes the
+#                             size of the caller's own response and nothing
+#                             else.
+#
+# The rate limiter, the connection limiters and the body cap used to be on this
+# list as a known gap. They are not exemptions any more: a limit a caller steps
+# out of by naming a shape is not a limit, and browsers cache a preflight for
+# MaxAge (GlobalCORS sets 86400), so legitimate preflight volume is a rounding
+# error against any cap worth setting.
 #
 # In every allowed case the real request that follows is still checked.
-cors_allowed='^(internal/middleware/kind/core\.go|internal/middleware/auth/(auth|forwardauth|hmac|oauth2_introspection)\.go|internal/middleware/security/(bot_management|turnstile)\.go|internal/middleware/traffic/(compress|connlimit|maxbody|ratelimit)\.go|internal/middleware/transform/(cors|cors_factory|xfcc)\.go):'
+cors_allowed='^(internal/middleware/kind/core\.go|internal/middleware/auth/(auth|forwardauth|hmac|oauth2_introspection)\.go|internal/middleware/security/(bot_management|turnstile)\.go|internal/middleware/traffic/compress\.go|internal/middleware/transform/(cors|cors_factory|xfcc)\.go):'
 cors_hits=$( (find internal cmd pkg -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '\bIsCorsPreflight\(' 2>/dev/null |
 	drop_comment_hits |

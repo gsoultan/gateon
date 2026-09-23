@@ -30,10 +30,10 @@ func MaxConnections(max int) kind.Middleware {
 	sem := make(chan struct{}, max)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
+			// No CORS-preflight exemption: a limit a caller can step out of by
+			// naming a shape is not a limit. Browsers cache a preflight for
+			// MaxAge -- GlobalCORS sets 86400 -- so legitimate preflight volume
+			// is a rounding error against any cap worth setting.
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -129,10 +129,7 @@ func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) kind.Middl
 	m := newPerIPConnMap()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if kind.IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
+			// No CORS-preflight exemption; see MaxConnections above.
 			key := keyFunc(r)
 			if key == "" {
 				next.ServeHTTP(w, r)
