@@ -282,20 +282,86 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 }
 
 // ApplyRemoteReputation updates a score from a gossip message without re-broadcasting.
+// neutralReputationScore is the score an unrecorded client reads as, and the
+// ceiling a recorded one recovers to. GetReputation returns it for an unknown
+// fingerprint, DecreaseReputation starts a new entry there, and
+// ApplyRemoteReputation treats it as "manual reset".
+const neutralReputationScore = 100.0
+
+// maxReputationHistory is the cap DecreaseReputation applies to a locally
+// grown history, named here so the remote path applies the same one.
+const maxReputationHistory = 5
+
+// maxReputationHistoryEntry bounds a single entry. The local path appends
+// gateway-generated reason strings, so length was never a question there; a
+// peer's are whatever that peer decided to send.
+const maxReputationHistoryEntry = 256
+
+// sanitiseRemoteReputation puts a peer's values back inside the domain the
+// local path maintains.
+//
+// A peer is authenticated -- memberlist encrypts and authenticates every
+// message -- but it is still a different process, possibly running a different
+// version, possibly with corrupted state. DecreaseReputation clamps the score
+// at zero and trims the history to five entries, the latter with a comment
+// saying it does so "to avoid unbounded memory growth". This path applied
+// neither, so every bound the local path maintains could be left behind by the
+// one value that arrived from somewhere else.
+//
+// A score above 100 is the one that matters: the branch below takes any score
+// >= 100 unconditionally, so a peer sending 1e308 makes that client's
+// reputation permanently unbeatable by any local penalty, and nothing blocks
+// it again. NaN is worse than either bound, because every comparison against
+// it is false -- a NaN score is a client that no threshold ever catches.
+func sanitiseRemoteReputation(score float64, violations int, history []string) (float64, int, []string) {
+	switch {
+	case math.IsNaN(score):
+		score = neutralReputationScore
+	case score < 0:
+		score = 0
+	case score > neutralReputationScore:
+		score = neutralReputationScore
+	}
+	if violations < 0 {
+		// RecoveryRate below is 1/(1 + violations/5), which divides by zero at
+		// exactly -5 and is negative below it.
+		violations = 0
+	}
+	if len(history) > maxReputationHistory {
+		history = history[len(history)-maxReputationHistory:]
+	}
+	for i, h := range history {
+		if len(h) > maxReputationHistoryEntry {
+			history[i] = h[:maxReputationHistoryEntry] + "~"
+		}
+	}
+	return score, violations, history
+}
+
 func ApplyRemoteReputation(fingerprint string, score float64, violations int, history []string) {
 	if fingerprint == "" {
 		return
 	}
+	score, violations, history = sanitiseRemoteReputation(score, violations, history)
+
 	shard := getRepShard(fingerprint)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
 	var r *Reputation
 	if val, ok := shard.cache.Get(fingerprint); ok {
-		r = val.(*Reputation)
+		// Comma-ok rather than a bare assertion: this runs on the gossip
+		// delegate's goroutine, where a panic takes the cluster listener down
+		// rather than one request.
+		existing, isRep := val.(*Reputation)
+		if !isRep {
+			shard.cache.Remove(fingerprint)
+			return
+		}
+		r = existing
 		// Only take the remote score if it's worse (lower) than ours,
 		// OR if it's a perfect score (manual reset).
-		if score < r.Score || score >= 100.0 {
+		if score < r.Score || score >= neutralReputationScore {
 			r.Score = score
 			r.ViolationCount = violations
 			r.History = history
