@@ -37,6 +37,7 @@ func (r *DBRouteRegistry) loadFromDB() {
 	query := "SELECT id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled FROM routes"
 	rows, err := r.db.Query(query)
 	if err != nil {
+		logLoadQueryFailed("routes", err)
 		return
 	}
 	defer rows.Close()
@@ -45,6 +46,7 @@ func (r *DBRouteRegistry) loadFromDB() {
 		var rt gateonv1.Route
 		var entrypoints, middlewares, tlsConfig string
 		if err := rows.Scan(&rt.Id, &rt.Name, &rt.Type, &entrypoints, &rt.Rule, &rt.Priority, &middlewares, &rt.ServiceId, &tlsConfig, &rt.Disabled); err != nil {
+			logRecordDropped("route", "", "", err)
 			continue
 		}
 		if entrypoints != "" {
@@ -55,11 +57,16 @@ func (r *DBRouteRegistry) loadFromDB() {
 		}
 		if tlsConfig != "" {
 			var tls gateonv1.RouteTLSConfig
-			if err := json.Unmarshal([]byte(tlsConfig), &tls); err == nil {
-				rt.Tls = &tls
+			if err := json.Unmarshal([]byte(tlsConfig), &tls); err != nil {
+				logRecordDropped("route", rt.Id, "tls_config", err)
+				continue
 			}
+			rt.Tls = &tls
 		}
 		r.Routes()[rt.Id] = &rt
+	}
+	if err := rows.Err(); err != nil {
+		logLoadTruncated("routes", err)
 	}
 	r.RebuildSortedLocked()
 }

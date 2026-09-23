@@ -36,6 +36,7 @@ func (r *DBServiceRegistry) loadFromDB() {
 	query := "SELECT id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol FROM services"
 	rows, err := r.db.Query(query)
 	if err != nil {
+		logLoadQueryFailed("services", err)
 		return
 	}
 	defer rows.Close()
@@ -44,16 +45,25 @@ func (r *DBServiceRegistry) loadFromDB() {
 		var s gateonv1.Service
 		var targetsStr, tlsStr string
 		if err := rows.Scan(&s.Id, &s.Name, &s.BackendType, &s.LoadBalancerPolicy, &s.HealthCheckPath, &targetsStr, &s.DiscoveryUrl, &tlsStr, &s.HealthCheckPort, &s.HealthCheckProtocol, &s.HealthCheckType, &s.L4HealthCheckIntervalMs, &s.L4HealthCheckTimeoutMs, &s.L4UdpSessionTimeoutS, &s.L4ProxyProtocol); err != nil {
+			logRecordDropped("service", "", "", err)
 			continue
 		}
 		if targetsStr != "" {
-			_ = json.Unmarshal([]byte(targetsStr), &s.WeightedTargets)
+			if err := json.Unmarshal([]byte(targetsStr), &s.WeightedTargets); err != nil {
+				logRecordDropped("service", s.Id, "weighted_targets", err)
+				continue
+			}
 		}
 		if tlsStr != "" {
 			var tlsCfg gateonv1.TlsClientConfig
-			if err := json.Unmarshal([]byte(tlsStr), &tlsCfg); err == nil {
-				s.TlsClientConfig = &tlsCfg
+			if err := json.Unmarshal([]byte(tlsStr), &tlsCfg); err != nil {
+				// The backend's mTLS identity. Registering the service without
+				// it means connecting to that backend presenting no client
+				// certificate at all.
+				logRecordDropped("service", s.Id, "tls_client_config", err)
+				continue
 			}
+			s.TlsClientConfig = &tlsCfg
 		}
 
 		r.Services()[s.Id] = &s
