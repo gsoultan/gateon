@@ -263,7 +263,7 @@ headers gets a fresh identity per request and never accumulates a score at all.
 The same identity ran the adaptive rate limiter, the proof-of-work difficulty
 gate and its challenge id, the tarpit, and deception's troll threshold.
 
-`ReputationIDFor` now pairs that client class with the client's network — /24 for
+`repid.For` now pairs that client class with the client's network — /24 for
 v4, /64 for v6, the narrowest scope that still survives a phone changing cell or
 a DHCP lease renewing.
 

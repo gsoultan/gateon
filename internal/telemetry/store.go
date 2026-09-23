@@ -1756,7 +1756,7 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// Scope the score to the network that earned it. Recording under the bare
 	// fingerprint made one browser class share one score across every client
 	// running it, which is what let a single attacker refuse everybody else --
-	// see ReputationIDFor. The recording key and the enforcement key come from
+	// see repid.For. The recording key and the enforcement key come from
 	// the same function on purpose: if they ever diverge, every lookup returns
 	// the neutral 100 and the control reports "clean" while checking nothing.
 	repID := repid.For(st.Fingerprint, st.SourceIP)

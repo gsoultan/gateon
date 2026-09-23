@@ -318,7 +318,7 @@ fi
 # with 403 below a score of 2.0, so while it keyed on the bare fingerprint a
 # single patient attacker on an unmodified browser could drive that shared score
 # to zero and lock out every other user of that browser, everywhere -- with no
-# volume and nothing unusual about the traffic. telemetry.ReputationIDFor pairs
+# volume and nothing unusual about the traffic. repid.For pairs
 # the class with the client's network so a refusal reaches one network instead of
 # one browser.
 #
@@ -331,7 +331,7 @@ fi
 # raw IP, and it only ever *relaxes*: a high score discounts an already-computed
 # threat score so that busy offices and known proxies are not flagged for minor
 # oddities. Scoping it would change nothing, because a threat recorded without a
-# fingerprint is still stored under its bare address (ReputationIDFor returns the
+# fingerprint is still stored under its bare address (repid.For returns the
 # address when the fingerprint is empty), so that lookup keeps finding exactly
 # what it found before.
 #
@@ -364,7 +364,8 @@ if [ -n "$rep_hits" ]; then
 	err "a bare browser-class fingerprint escaped internal/telemetry"
 	printf '%s\n' "$rep_hits"
 	printf '  Use telemetry.GetReputationID(r) (request path) or\n'
-	printf '  telemetry.ReputationIDFor(fingerprint, sourceIP) (recording path).\n'
+	printf '  repid.For(fingerprint, sourceIP) (recording path), from\n'
+	printf '  github.com/gsoultan/gateon/internal/telemetry/repid.\n'
 	printf '  JA4+ names a browser build, not a client: every stock-Chrome user of\n'
 	printf '  one version and language shares it, so anything that refuses,\n'
 	printf '  throttles or challenges on it hits all of them at once.\n'

@@ -170,10 +170,48 @@ func sourceKey(s Signal) string {
 
 // Observe ingests a signal and, if it crosses the correlation threshold,
 // returns the raised incident. It also invokes OnIncident (outside the lock).
+// maxSignalURIBytes and maxSignalDetailsBytes bound the two Signal fields whose
+// length a client can drive, before the signal is retained.
+//
+// The count axis is already tiered -- MaxSources x MaxSignalsPerSource is
+// 500x32 on minimal, 2000x64 on standard, 10000x256 on enterprise -- but
+// nothing bounded how large each retained signal is. Nothing in this tree
+// limits the length of a URI (there is no StatusRequestURITooLong anywhere) and
+// the header budget is 1 MiB, so a single request could contribute a 200 KB
+// RequestURI to a slot held for the whole correlation window. At standard's
+// 128,000 slots that is the difference between ~98 MB and tens of gigabytes on
+// a 2 GB host.
+//
+// This is the same mistake, on the same axis, that internal/telemetry's label
+// and path-stat bounds were added for: capping how many values are retained
+// says nothing about how large each one is.
+//
+// 512 keeps the path and the usable part of a query string, which is what this
+// field is for here -- grouping and display. The threat record that produced
+// the signal keeps its own copy, so nothing a forensic reader needs is lost.
+const (
+	maxSignalURIBytes     = 512
+	maxSignalDetailsBytes = 256
+)
+
+// truncate cuts s to at most n bytes, marking it so a reader can tell a bounded
+// value from one that happened to be short. The result is a re-sliced copy, so
+// the original is not pinned by what is retained.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "~"
+}
+
 func (e *Engine) Observe(s Signal) (Incident, bool) {
 	if s.Time.IsZero() {
 		s.Time = e.clock()
 	}
+	// Bounded before the lock, so the truncation is not paid inside the
+	// critical section every other source is waiting on.
+	s.RequestURI = truncate(s.RequestURI, maxSignalURIBytes)
+	s.Details = truncate(s.Details, maxSignalDetailsBytes)
 	key := sourceKey(s)
 	if key == "" {
 		return Incident{}, false
