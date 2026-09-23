@@ -140,7 +140,28 @@ func ShouldSkipMetrics(r *http.Request) bool {
 	return false
 }
 
-// IsCorsPreflight returns true if the request is a CORS preflight request.
+// IsCorsPreflight reports whether the request looks like a CORS preflight.
+//
+// Every value it reads is written by the client: the OPTIONS method, the Origin
+// header and the Access-Control-Request-Method header. **Never use it to skip a
+// deny decision.** A boundary that waves a request through on this predicate is
+// opt-out by request -- the caller states the shape that exempts it -- and that
+// is how a shunned IP, a mitigated fingerprint, a blocked country and the WAF
+// itself were each reachable by naming a preflight on the smart-TCP listener,
+// which does not run transform.GlobalCORS ahead of its chain.
+//
+// It has two legitimate uses, and they share a property the deny decisions do
+// not: the request genuinely cannot satisfy the check.
+//
+//   - CORS middleware, which answers the preflight -- that is its job.
+//   - A check a browser cannot satisfy in a preflight: credentials (browsers do
+//     not send them on a preflight, so requiring auth breaks every browser) and
+//     interactive challenges (a preflight cannot run JavaScript). In both cases
+//     the real request that follows is still checked.
+//
+// A deny decision has neither property. The client is refused, and it should be
+// refused whatever it says it is about to do. scripts/check-security-invariants.sh
+// holds the list of files allowed to call this.
 func IsCorsPreflight(r *http.Request) bool {
 	return r.Method == http.MethodOptions &&
 		r.Header.Get("Origin") != "" &&

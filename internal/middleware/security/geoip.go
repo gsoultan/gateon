@@ -83,11 +83,11 @@ func (g geoIPRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Re
 	// internal/middleware/auth/hmac.go already says this: "Never gate a security
 	// check on ShouldSkipMetrics -- it is a metrics predicate and using it here
 	// would let any request matching it bypass HMAC." It had not reached here.
-	if kind.IsCorsPreflight(r) {
-		next.ServeHTTP(w, r)
-		return
-	}
-
+	//
+	// Nor gated on kind.IsCorsPreflight, for the reason that predicate now
+	// documents: a geofence is a deny decision, and this one sits in the route
+	// chain, which a preflight reaches on any listener that does not run
+	// transform.GlobalCORS ahead of it.
 	clientIP := request.GetClientIP(r, g.trust)
 	ip := net.ParseIP(clientIP)
 	if ip == nil {
@@ -223,7 +223,10 @@ func serveGlobalGeoIP(state *geoIPGlobalState, globalStore config.GlobalConfigSt
 	// internal/middleware/auth/hmac.go already says this: "Never gate a security
 	// check on ShouldSkipMetrics -- it is a metrics predicate and using it here
 	// would let any request matching it bypass HMAC." It had not reached here.
-	if gc == nil || gc.Geoip == nil || !gc.Geoip.Enabled || kind.IsCorsPreflight(r) {
+	// No kind.IsCorsPreflight term, for the same reason. What is left is
+	// "geofencing is switched off", which is the gateway's own configuration
+	// rather than anything the caller states about itself.
+	if gc == nil || gc.Geoip == nil || !gc.Geoip.Enabled {
 		next.ServeHTTP(w, r)
 		return
 	}

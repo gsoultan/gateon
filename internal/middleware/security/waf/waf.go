@@ -367,11 +367,8 @@ func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Req
 	// Security Header Spoofing Prevention
 	testRep := stripGatewayHeaders(r)
 
-	// 3. CORS Preflight bypass
-	if kind.IsCorsPreflight(r) {
-		next.ServeHTTP(w, r)
-		return
-	}
+	// No CORS-preflight bypass; see kind.IsCorsPreflight. This used to be one,
+	// and it let any client skip the whole WAF by sending three headers.
 
 	// Protocol enforcement, ahead of everything else: a request with
 	// conflicting framing should not be inspected and forwarded, it

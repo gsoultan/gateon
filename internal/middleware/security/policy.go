@@ -85,11 +85,8 @@ func policyInput(r *http.Request) map[string]any {
 }
 
 func servePolicy(rules []compiledRule, next http.Handler, w http.ResponseWriter, r *http.Request) {
-	if kind.IsCorsPreflight(r) {
-		next.ServeHTTP(w, r)
-		return
-	}
-
+	// No CORS-preflight exemption; see kind.IsCorsPreflight. A policy rule that
+	// denies is a deny decision, so naming a preflight must not skip it.
 	data := policyInput(r)
 	for _, cr := range rules {
 		if !evalPolicyRule(cr, data, w) {
