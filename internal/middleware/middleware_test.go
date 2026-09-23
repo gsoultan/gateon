@@ -485,53 +485,6 @@ func TestStripPrefix(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 }
 
-func TestIPFilter_AllowDeny(t *testing.T) {
-	mw := IPFilter([]string{"192.168.1.0/24"}, []string{"192.168.1.100"})
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.RemoteAddr = "192.168.1.50:12345"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("allowed IP: expected 200, got %d", rr.Code)
-	}
-
-	req.RemoteAddr = "192.168.1.100:12345"
-	rr = httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("denied IP: expected 403, got %d", rr.Code)
-	}
-}
-
-func TestIPFilter_WithXForwardedFor(t *testing.T) {
-	mw := IPFilterWithClientIP([]string{"203.0.113.50"}, nil, func(r *http.Request) string {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			return strings.TrimSpace(strings.Split(xff, ",")[0])
-		}
-		addr := r.RemoteAddr
-		if i := strings.LastIndex(addr, ":"); i >= 0 {
-			addr = addr[:i]
-		}
-		return addr
-	})
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.RemoteAddr = "10.0.0.1:80"
-	req.Header.Set("X-Forwarded-For", "203.0.113.50")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("XFF allowed IP: expected 200, got %d", rr.Code)
-	}
-}
-
 func TestWAF_PassesNormalRequest(t *testing.T) {
 	mw, err := wafmw.WAF(wafmw.WAFConfig{})
 	if err != nil {

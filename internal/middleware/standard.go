@@ -23,7 +23,6 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/internal/security/art"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -532,117 +531,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 		})
 	}
-}
-
-// ipFilterData holds pre-parsed IP filter rules optimized for lookups.
-type ipFilterData struct {
-	exactAllow map[string]struct{}
-	treeAllow  *art.Tree
-	exactDeny  map[string]struct{}
-	treeDeny   *art.Tree
-
-	// allowConfigured records that an allow list was *asked for*, separately
-	// from whether any of it parsed. An empty allow structure means "no allow
-	// list" -- allow everyone -- so without this an allow list whose entries
-	// all failed to parse silently became no allow list at all. A single typo
-	// ("10.0.0/8" for "10.0.0.0/8") turned a restricted route into an open
-	// one, with nothing logged. Verified: such a filter answered 200 to
-	// 203.0.113.9.
-	allowConfigured bool
-}
-
-func newIPFilterData(allowList, denyList []string) *ipFilterData {
-	d := &ipFilterData{
-		exactAllow: make(map[string]struct{}),
-		treeAllow:  art.NewTree(),
-		exactDeny:  make(map[string]struct{}),
-		treeDeny:   art.NewTree(),
-	}
-	for _, r := range allowList {
-		if strings.TrimSpace(r) != "" {
-			// Recorded before the parse, because the parse is what fails.
-			d.allowConfigured = true
-		}
-		if strings.Contains(r, "/") {
-			if err := d.treeAllow.InsertCIDR(r); err != nil {
-				logger.L.LogWarn("ip filter: allow_list entry is not a valid CIDR and was dropped; "+
-					"the entry restricts nothing", "entry", r, "error", err)
-			}
-		} else {
-			d.exactAllow[r] = struct{}{}
-			// Also insert into tree for consistency
-			_ = d.treeAllow.InsertCIDR(r + "/32")
-		}
-	}
-	for _, r := range denyList {
-		if strings.Contains(r, "/") {
-			if err := d.treeDeny.InsertCIDR(r); err != nil {
-				logger.L.LogWarn("ip filter: deny_list entry is not a valid CIDR and was dropped; "+
-					"the address it names is NOT blocked", "entry", r, "error", err)
-			}
-		} else {
-			d.exactDeny[r] = struct{}{}
-			_ = d.treeDeny.InsertCIDR(r + "/32")
-		}
-	}
-	return d
-}
-
-func (d *ipFilterData) matches(clientIP string) bool {
-	// Deny list takes precedence
-	if _, ok := d.exactDeny[clientIP]; ok {
-		return true
-	}
-	return d.treeDeny.Contains(clientIP)
-}
-
-func (d *ipFilterData) allowed(clientIP string) bool {
-	if len(d.exactAllow) == 0 && d.treeAllow.IsEmpty() {
-		// Configured but unusable is not the same as unconfigured. An operator
-		// who wrote an allow list meant to restrict something, so a list that
-		// parsed to nothing denies rather than admitting everyone -- the
-		// entries are logged as they are dropped, so the cause is visible.
-		return !d.allowConfigured
-	}
-	if _, ok := d.exactAllow[clientIP]; ok {
-		return true
-	}
-	return d.treeAllow.Contains(clientIP)
-}
-
-// IPFilterWithClientIP returns a middleware that filters requests by IP address using the given clientIP resolver.
-func IPFilterWithClientIP(allowList, denyList []string, clientIP func(*http.Request) string) Middleware {
-	data := newIPFilterData(allowList, denyList)
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			remoteAddr := clientIP(r)
-
-			if data.matches(remoteAddr) {
-				httputil.WriteForbidden(w, r, "Forbidden")
-				return
-			}
-
-			if !data.allowed(remoteAddr) {
-				httputil.WriteForbidden(w, r, "Forbidden")
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// IPFilter returns a middleware that filters requests by IP address, using X-Forwarded-For and RemoteAddr.
-// For Cloudflare, use IPFilterWithClientIP with a resolver that uses CF-Connecting-IP.
-func IPFilter(allowList, denyList []string) Middleware {
-	return IPFilterWithClientIP(allowList, denyList, func(r *http.Request) string {
-		return request.GetClientIP(r, config.EffectiveTrustCloudflare())
-	})
 }
 
 // HostFilter returns a middleware that filters requests by Host header.
