@@ -8,10 +8,109 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
+	"time"
+
+	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/gsoultan/gateon/internal/logger"
 )
+
+const (
+	// externalScoreCacheSize bounds each provider's cache.
+	//
+	// The key is the client's IP, so the set of entries is exactly the set of
+	// addresses attacking the gateway: the cache grew fastest under the
+	// conditions it most needed to survive, and an attacker rotating source
+	// addresses -- trivial over IPv6 -- grew it without limit. It was a bare
+	// sync.Map with no eviction at all.
+	//
+	// 4096 per provider at roughly 64 bytes an entry is about 256 KB, which the
+	// 2-core/2 GB target can hold three times over.
+	externalScoreCacheSize = 4096
+
+	// externalScoreTTL is how long a provider's answer is reused.
+	//
+	// This is the half that mattered. The answer used to be pinned for the life
+	// of the process, so an address that was clean the first time it was seen
+	// stayed clean in this gateway's view no matter what it did afterwards --
+	// external threat intelligence reduced to a first-contact snapshot. The
+	// AbuseIPDB request even carries maxAgeInDays=90, asking the API for fresh
+	// data, and then the freshness was discarded locally.
+	//
+	// An hour is short enough that a newly-listed address is picked up within
+	// one, and long enough to stay inside AbuseIPDB's free-tier daily quota
+	// under any traffic this cache sees.
+	externalScoreTTL = time.Hour
+
+	// externalRequestTimeout bounds a provider call. http.DefaultClient has no
+	// timeout, so before this a provider that accepted a connection and never
+	// answered held the analyser for as long as the caller's context allowed.
+	externalRequestTimeout = 10 * time.Second
+)
+
+// externalHTTPClient is shared by the providers so connections are pooled
+// across lookups, and carries the timeout http.DefaultClient does not.
+var externalHTTPClient = &http.Client{Timeout: externalRequestTimeout}
+
+// cachedScore pairs a provider's answer with when it was taken, so a bounded
+// cache cannot also be a permanent one.
+type cachedScore struct {
+	score     int
+	fetchedAt time.Time
+}
+
+// scoreCache is a bounded, expiring cache of provider answers, replacing a
+// sync.Map that was neither.
+type scoreCache struct {
+	lru *lru.Cache
+	ttl time.Duration
+}
+
+func newScoreCache() *scoreCache { return newScoreCacheWithTTL(externalScoreTTL) }
+
+func newScoreCacheWithTTL(ttl time.Duration) *scoreCache {
+	// lru.New only errors on a non-positive size, and the size is a constant
+	// here. A nil cache still behaves correctly -- every lookup misses -- so
+	// this degrades to "no caching" rather than to a panic at startup.
+	c, err := lru.New(externalScoreCacheSize)
+	if err != nil {
+		logger.L.LogError("reputation: external score cache disabled", "error", err)
+		return &scoreCache{ttl: ttl}
+	}
+	return &scoreCache{lru: c, ttl: ttl}
+}
+
+// get returns a cached score that is still fresh.
+func (s *scoreCache) get(ip string) (int, bool) {
+	if s == nil || s.lru == nil {
+		return 0, false
+	}
+	v, ok := s.lru.Get(ip)
+	if !ok {
+		return 0, false
+	}
+	// Comma-ok rather than a bare assertion: two of the three providers used
+	// val.(int) directly, which panics on the analyser's goroutine if the cache
+	// ever holds anything else. Treating an unexpected value as a miss costs
+	// one lookup.
+	e, isEntry := v.(cachedScore)
+	if !isEntry {
+		s.lru.Remove(ip)
+		return 0, false
+	}
+	if time.Since(e.fetchedAt) >= s.ttl {
+		s.lru.Remove(ip)
+		return 0, false
+	}
+	return e.score, true
+}
+
+func (s *scoreCache) put(ip string, score int) {
+	if s == nil || s.lru == nil {
+		return
+	}
+	s.lru.Add(ip, cachedScore{score: score, fetchedAt: time.Now()})
+}
 
 type AbuseIPDBResponse struct {
 	Data struct {
@@ -34,12 +133,13 @@ type AbuseIPDBResponse struct {
 type AbuseIPDBClient struct {
 	APIKey  string
 	BaseURL string
-	cache   sync.Map
+	cache   *scoreCache
 }
 
 func NewAbuseIPDBClient(apiKey string) *AbuseIPDBClient {
 	return &AbuseIPDBClient{
 		APIKey:  apiKey,
+		cache:   newScoreCache(),
 		BaseURL: "https://api.abuseipdb.com/api/v2/check",
 	}
 }
@@ -49,10 +149,8 @@ func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
 		return 0, nil
 	}
 
-	if val, ok := c.cache.Load(ip); ok {
-		if score, ok := val.(int); ok {
-			return score, nil
-		}
+	if score, ok := c.cache.get(ip); ok {
+		return score, nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL, nil)
@@ -68,7 +166,7 @@ func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
 	req.Header.Set("Key", c.APIKey)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := externalHTTPClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -87,7 +185,7 @@ func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
 	}
 
 	score := result.Data.AbuseConfidenceScore
-	c.cache.Store(ip, score)
+	c.cache.put(ip, score)
 
 	return score, nil
 }
@@ -96,12 +194,13 @@ func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
 type VirusTotalClient struct {
 	APIKey  string
 	BaseURL string
-	cache   sync.Map
+	cache   *scoreCache
 }
 
 func NewVirusTotalClient(apiKey string) *VirusTotalClient {
 	return &VirusTotalClient{
 		APIKey:  apiKey,
+		cache:   newScoreCache(),
 		BaseURL: "https://www.virustotal.com/api/v3/ip_addresses/",
 	}
 }
@@ -111,8 +210,8 @@ func (c *VirusTotalClient) CheckIP(ctx context.Context, ip string) (int, error) 
 		return 0, nil
 	}
 
-	if val, ok := c.cache.Load(ip); ok {
-		return val.(int), nil
+	if score, ok := c.cache.get(ip); ok {
+		return score, nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+ip, nil)
@@ -123,7 +222,7 @@ func (c *VirusTotalClient) CheckIP(ctx context.Context, ip string) (int, error) 
 	req.Header.Set("x-apikey", c.APIKey)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := externalHTTPClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -159,7 +258,7 @@ func (c *VirusTotalClient) CheckIP(ctx context.Context, ip string) (int, error) 
 		score = 10 // Minimum score if at least one engine says malicious
 	}
 
-	c.cache.Store(ip, score)
+	c.cache.put(ip, score)
 	return score, nil
 }
 
@@ -167,12 +266,13 @@ func (c *VirusTotalClient) CheckIP(ctx context.Context, ip string) (int, error) 
 type AlienVaultClient struct {
 	APIKey  string
 	BaseURL string
-	cache   sync.Map
+	cache   *scoreCache
 }
 
 func NewAlienVaultClient(apiKey string) *AlienVaultClient {
 	return &AlienVaultClient{
 		APIKey:  apiKey,
+		cache:   newScoreCache(),
 		BaseURL: "https://otx.alienvault.com/api/v1/indicators/IPv4/",
 	}
 }
@@ -182,8 +282,8 @@ func (c *AlienVaultClient) CheckIP(ctx context.Context, ip string) (int, error) 
 		return 0, nil
 	}
 
-	if val, ok := c.cache.Load(ip); ok {
-		return val.(int), nil
+	if score, ok := c.cache.get(ip); ok {
+		return score, nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+ip+"/general", nil)
@@ -195,7 +295,7 @@ func (c *AlienVaultClient) CheckIP(ctx context.Context, ip string) (int, error) 
 		req.Header.Set("X-OTX-API-KEY", c.APIKey)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := externalHTTPClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -221,6 +321,6 @@ func (c *AlienVaultClient) CheckIP(ctx context.Context, ip string) (int, error) 
 		score = 100
 	}
 
-	c.cache.Store(ip, score)
+	c.cache.put(ip, score)
 	return score, nil
 }
