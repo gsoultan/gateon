@@ -14,8 +14,14 @@ import (
 )
 
 func NewRateLimit(cfg map[string]string, redisClient redis.Client, ebpfManager ebpf.Manager) (kind.Middleware, error) {
-	rpm, _ := kind.ParseIntStrict(cfg["requests_per_minute"], 60)
-	burst, _ := kind.ParseIntStrict(cfg["burst"], 5)
+	rpm, err := kind.ParseIntStrict(cfg["requests_per_minute"], 60)
+	if err != nil {
+		return nil, kind.CfgError("requests_per_minute", cfg["requests_per_minute"], err)
+	}
+	burst, err := kind.ParseIntStrict(cfg["burst"], 5)
+	if err != nil {
+		return nil, kind.CfgError("burst", cfg["burst"], err)
+	}
 	perTenant := kind.ParseBoolStrict(cfg["per_tenant"], false)
 	storage := cfg["storage"]
 

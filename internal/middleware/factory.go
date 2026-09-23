@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
@@ -134,7 +133,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		}
 		return Errors(ErrorsConfig{StatusCodes: intCodes, CustomPages: pages}), nil
 	case "retry":
-		attempts, _ := strconv.Atoi(cfg["attempts"])
+		attempts, err := kind.ParseIntStrict(cfg["attempts"], 0)
+		if err != nil {
+			return nil, kind.CfgError("attempts", cfg["attempts"], err)
+		}
 		return traffic.Retry(traffic.RetryConfig{Attempts: attempts}), nil
 	case "cors":
 		return transform.NewCORS(cfg)
@@ -188,19 +190,37 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 			CanaryToken:          cfg["canary_token"],
 		}), nil
 	case "tarpit":
-		baseDelay, _ := time.ParseDuration(cfg["base_delay"])
-		maxDelay, _ := time.ParseDuration(cfg["max_delay"])
-		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
+		baseDelay, err := kind.ParseDurationStrict(cfg["base_delay"], 0)
+		if err != nil {
+			return nil, kind.CfgError("base_delay", cfg["base_delay"], err)
+		}
+		maxDelay, err := kind.ParseDurationStrict(cfg["max_delay"], 0)
+		if err != nil {
+			return nil, kind.CfgError("max_delay", cfg["max_delay"], err)
+		}
+		threshold, err := kind.ParseFloatStrict(cfg["threshold"], 0)
+		if err != nil {
+			return nil, kind.CfgError("threshold", cfg["threshold"], err)
+		}
 		return security.Tarpit(baseDelay, maxDelay, threshold), nil
 	case "entropy":
-		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
+		threshold, err := kind.ParseFloatStrict(cfg["threshold"], 0)
+		if err != nil {
+			return nil, kind.CfgError("threshold", cfg["threshold"], err)
+		}
 		return security.Entropy(threshold, routeID), nil
 	case "pow":
-		difficulty, _ := strconv.Atoi(cfg["difficulty"])
+		difficulty, err := kind.ParseIntStrict(cfg["difficulty"], 4)
+		if err != nil {
+			return nil, kind.CfgError("difficulty", cfg["difficulty"], err)
+		}
 		if difficulty == 0 {
 			difficulty = 4
 		}
-		threshold, _ := strconv.ParseFloat(cfg["threshold"], 64)
+		threshold, err := kind.ParseFloatStrict(cfg["threshold"], 20.0)
+		if err != nil {
+			return nil, kind.CfgError("threshold", cfg["threshold"], err)
+		}
 		if threshold == 0 {
 			threshold = 20.0
 		}
@@ -228,10 +248,23 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "security_headers":
 		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
 	case "circuit_breaker":
-		errorThreshold, _ := strconv.ParseFloat(cfg["error_threshold"], 64)
-		minRequests, _ := strconv.ParseInt(cfg["min_requests"], 10, 64)
-		windowSize, _ := time.ParseDuration(cfg["window_size"])
-		sleepWindow, _ := time.ParseDuration(cfg["sleep_window"])
+		errorThreshold, err := kind.ParseFloatStrict(cfg["error_threshold"], 0)
+		if err != nil {
+			return nil, kind.CfgError("error_threshold", cfg["error_threshold"], err)
+		}
+		minRequestsInt, err := kind.ParseIntStrict(cfg["min_requests"], 0)
+		if err != nil {
+			return nil, kind.CfgError("min_requests", cfg["min_requests"], err)
+		}
+		minRequests := int64(minRequestsInt)
+		windowSize, err := kind.ParseDurationStrict(cfg["window_size"], 0)
+		if err != nil {
+			return nil, kind.CfgError("window_size", cfg["window_size"], err)
+		}
+		sleepWindow, err := kind.ParseDurationStrict(cfg["sleep_window"], 0)
+		if err != nil {
+			return nil, kind.CfgError("sleep_window", cfg["sleep_window"], err)
+		}
 		return CircuitBreaker(CircuitBreakerConfig{
 			ErrorThreshold: errorThreshold,
 			MinRequests:    minRequests,
@@ -249,7 +282,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 	origins := kind.ParseListStrict(cfg["allowed_origins"])
 	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
-	maxAge, _ := strconv.Atoi(cfg["max_age"])
+	maxAge, err := kind.ParseIntStrict(cfg["max_age"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_age", cfg["max_age"], err)
+	}
 
 	corsCfg := transform.CORSConfig{
 		AllowedOrigins:   origins,
@@ -286,7 +322,11 @@ func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
 }
 
 func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) {
-	maxFileSize, _ := strconv.ParseInt(cfg["max_file_size"], 10, 64)
+	maxFileSizeInt, err := kind.ParseIntStrict(cfg["max_file_size"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_file_size", cfg["max_file_size"], err)
+	}
+	maxFileSize := int64(maxFileSizeInt)
 	clamavAddr := cfg["clamav_addr"]
 	if clamavAddr == "" && f.globalStore != nil {
 		if g := f.globalStore.Get(context.Background()); g != nil && g.Waf != nil {
@@ -298,9 +338,19 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 		}
 	}
 
-	scanTimeout, _ := time.ParseDuration(cfg["scan_timeout"])
-	maxConcurrentScans, _ := strconv.Atoi(cfg["max_concurrent_scans"])
-	maxScanBytes, _ := strconv.ParseInt(cfg["max_scan_bytes"], 10, 64)
+	scanTimeout, err := kind.ParseDurationStrict(cfg["scan_timeout"], 0)
+	if err != nil {
+		return nil, kind.CfgError("scan_timeout", cfg["scan_timeout"], err)
+	}
+	maxConcurrentScans, err := kind.ParseIntStrict(cfg["max_concurrent_scans"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_concurrent_scans", cfg["max_concurrent_scans"], err)
+	}
+	maxScanBytesInt, err := kind.ParseIntStrict(cfg["max_scan_bytes"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_scan_bytes", cfg["max_scan_bytes"], err)
+	}
+	maxScanBytes := int64(maxScanBytesInt)
 
 	return security.FileSecurity(security.FileSecurityConfig{
 		EnableClamAV:           parseBoolStrict(cfg["enable_clamav"], false),

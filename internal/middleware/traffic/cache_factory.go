@@ -4,16 +4,23 @@
 package traffic
 
 import (
-	"strconv"
-
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/redis"
 )
 
 func NewCache(cfg map[string]string, redisClient redis.Client) (kind.Middleware, error) {
-	ttl, _ := strconv.Atoi(cfg["ttl_seconds"])
-	maxEntries, _ := strconv.Atoi(cfg["max_entries"])
-	maxBodyKB, _ := strconv.Atoi(cfg["max_body_kb"])
+	ttl, err := kind.ParseIntStrict(cfg["ttl_seconds"], 0)
+	if err != nil {
+		return nil, kind.CfgError("ttl_seconds", cfg["ttl_seconds"], err)
+	}
+	maxEntries, err := kind.ParseIntStrict(cfg["max_entries"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_entries", cfg["max_entries"], err)
+	}
+	maxBodyKB, err := kind.ParseIntStrict(cfg["max_body_kb"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_body_kb", cfg["max_body_kb"], err)
+	}
 	storage := cfg["storage"]
 	if storage == "" {
 		storage = CacheStorageMemory

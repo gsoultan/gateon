@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"strconv"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -94,7 +93,10 @@ func NewBotManagement(cfg map[string]string, d Deps) (kind.Middleware, error) {
 	enableJS := boolSetting(cfg, "enable_js_challenge", g.GetEnableJsChallenge())
 	enableIntegrity := boolSetting(cfg, "enable_browser_integrity", g.GetEnableBrowserIntegrity())
 
-	timeout, _ := strconv.Atoi(cfg["challenge_timeout"])
+	timeout, err := kind.ParseIntStrict(cfg["challenge_timeout"], 0)
+	if err != nil {
+		return nil, kind.CfgError("challenge_timeout", cfg["challenge_timeout"], err)
+	}
 	if timeout == 0 {
 		timeout = int(g.GetChallengeTimeoutSeconds())
 	}

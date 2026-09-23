@@ -5,7 +5,6 @@ package transform
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/middleware/kind"
@@ -18,7 +17,11 @@ const (
 )
 
 func NewCORS(cfg map[string]string) (kind.Middleware, error) {
-	return CORS(CORSConfigFromMap(cfg)), nil
+	policy, err := CORSConfigFromMap(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return CORS(policy), nil
 }
 
 // CORSConfigFromMap derives the effective CORS policy from a raw middleware
@@ -28,8 +31,15 @@ func NewCORS(cfg map[string]string) (kind.Middleware, error) {
 // actually run with instead of re-reading the config map by hand. Missing the
 // `preset` key was one of the ways that hand-rolled second reading disagreed
 // with this one.
-func CORSConfigFromMap(cfg map[string]string) CORSConfig {
-	maxAge, _ := strconv.Atoi(cfg["max_age"])
+// It reports a malformed value rather than defaulting past it. The Diagnostics
+// validator derives its answer from here too, and telling an operator what the
+// proxy "would do" from a config the proxy refuses to build is the same lie as
+// a dashboard showing a setting the gateway never read.
+func CORSConfigFromMap(cfg map[string]string) (CORSConfig, error) {
+	maxAge, err := kind.ParseIntStrict(cfg["max_age"], 0)
+	if err != nil {
+		return CORSConfig{}, kind.CfgError("max_age", cfg["max_age"], err)
+	}
 
 	base := CORSConfig{
 		AllowedOrigins:   kind.ParseListStrict(cfg["allowed_origins"]),
@@ -40,7 +50,7 @@ func CORSConfigFromMap(cfg map[string]string) CORSConfig {
 		MaxAge:           maxAge,
 	}
 
-	return ApplyCORSPreset(cfg, base)
+	return ApplyCORSPreset(cfg, base), nil
 }
 
 // CORSDecision reports what the CORS middleware built from a raw config map
@@ -81,8 +91,11 @@ type CORSDecision struct {
 // A request with no Origin is not a CORS request; the proxy answers it with no
 // CORS headers at all, so Allowed is false and the phase flags are meaningless.
 // Callers handle that case before asking.
-func EvaluateCORS(cfg map[string]string, r *http.Request) CORSDecision {
-	policy := CORSConfigFromMap(cfg)
+func EvaluateCORS(cfg map[string]string, r *http.Request) (CORSDecision, error) {
+	policy, err := CORSConfigFromMap(cfg)
+	if err != nil {
+		return CORSDecision{}, err
+	}
 	c := cors.New(corsOptions(policy))
 
 	d := CORSDecision{
@@ -118,7 +131,7 @@ func EvaluateCORS(cfg map[string]string, r *http.Request) CORSDecision {
 		d.HeadersAllowed = !d.MethodAllowed
 	}
 
-	return d
+	return d, nil
 }
 
 // corsEffectivePolicy fills in the fallbacks rs/cors applies when a list is

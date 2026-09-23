@@ -11,7 +11,10 @@ import (
 )
 
 func NewInflightReq(cfg map[string]string) (kind.Middleware, error) {
-	amount, _ := kind.ParseIntStrict(cfg["amount"], 0)
+	amount, err := kind.ParseIntStrict(cfg["amount"], 0)
+	if err != nil {
+		return nil, kind.CfgError("amount", cfg["amount"], err)
+	}
 	if amount <= 0 {
 		return nil, fmt.Errorf("inflightreq requires amount > 0")
 	}
