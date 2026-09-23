@@ -38,6 +38,7 @@ func (r *DBEntryPointRegistry) loadFromDB() {
 	query := "SELECT id, name, address, type, protocol, protocols, tls_config, read_timeout_ms, write_timeout_ms, max_connections, access_log_enabled FROM entrypoints"
 	rows, err := r.db.Query(query)
 	if err != nil {
+		logLoadQueryFailed("entrypoints", err)
 		return
 	}
 	defer rows.Close()
@@ -48,6 +49,7 @@ func (r *DBEntryPointRegistry) loadFromDB() {
 		var typeVal, protocolVal int32
 		var protocolsStr, tlsStr string
 		if err := rows.Scan(&ep.Id, &ep.Name, &ep.Address, &typeVal, &protocolVal, &protocolsStr, &tlsStr, &ep.ReadTimeoutMs, &ep.WriteTimeoutMs, &ep.MaxConnections, &ep.AccessLogEnabled); err != nil {
+			logRecordDropped("entrypoint", "", "", err)
 			continue
 		}
 		ep.Type = gateonv1.EntryPoint_Type(typeVal)
@@ -61,11 +63,23 @@ func (r *DBEntryPointRegistry) loadFromDB() {
 		}
 		if tlsStr != "" {
 			var cfg gateonv1.TlsConfig
-			if err := json.Unmarshal([]byte(tlsStr), &cfg); err == nil {
-				ep.Tls = &cfg
+			if err := json.Unmarshal([]byte(tlsStr), &cfg); err != nil {
+				// Dropped rather than registered with ep.Tls nil, which is what
+				// this used to do: entrypoint_http.go gates termination on
+				// `ep.Tls != nil`, so the listener came up plaintext on a port
+				// configured for HTTPS.
+				logRecordDropped("entrypoint", ep.Id, "tls_config", err)
+				continue
 			}
+			ep.Tls = &cfg
 		}
 		newMap[ep.Id] = &ep
+	}
+	if err := rows.Err(); err != nil {
+		// Not stored. Replacing a good map with a truncated one turns a read
+		// error into missing entrypoints that look deliberate.
+		logLoadTruncated("entrypoints", err)
+		return
 	}
 	r.EntryPoints().Store(&newMap)
 }

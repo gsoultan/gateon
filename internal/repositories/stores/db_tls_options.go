@@ -50,6 +50,7 @@ func (r *DBTLSOptionRegistry) loadFromDB() {
 		var opt gateonv1.TLSOption
 		var ciphers, alpn, caIds string
 		if err := rows.Scan(&opt.Id, &opt.Name, &opt.MinTlsVersion, &opt.MaxTlsVersion, &ciphers, &alpn, &opt.ClientAuthType, &opt.PreferServerCipherSuites, &opt.SniStrict, &caIds); err != nil {
+			logRecordDropped("TLS option", "", "", err)
 			continue
 		}
 		if ciphers != "" {
@@ -63,6 +64,9 @@ func (r *DBTLSOptionRegistry) loadFromDB() {
 		}
 
 		r.Options()[opt.Id] = &opt
+	}
+	if err := rows.Err(); err != nil {
+		logLoadTruncated("TLS options", err)
 	}
 }
 

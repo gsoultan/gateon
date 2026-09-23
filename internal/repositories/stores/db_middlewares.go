@@ -36,6 +36,7 @@ func (r *DBMiddlewareRegistry) loadFromDB() {
 	query := "SELECT id, name, type, config FROM middlewares"
 	rows, err := r.db.Query(query)
 	if err != nil {
+		logLoadQueryFailed("middlewares", err)
 		return
 	}
 	defer rows.Close()
@@ -44,15 +45,25 @@ func (r *DBMiddlewareRegistry) loadFromDB() {
 		var m gateonv1.Middleware
 		var configStr string
 		if err := rows.Scan(&m.Id, &m.Name, &m.Type, &configStr); err != nil {
+			logRecordDropped("middleware", "", "", err)
 			continue
 		}
 		if configStr != "" {
 			var cfg map[string]string
-			if err := json.Unmarshal([]byte(configStr), &cfg); err == nil {
-				m.Config = cfg
+			if err := json.Unmarshal([]byte(configStr), &cfg); err != nil {
+				// Registering it with an empty config would run the middleware
+				// on defaults -- a WAF or a rate limit that an operator
+				// configured and that is silently not the one configured.
+				// Dropping it makes router.go refuse the routes naming it.
+				logRecordDropped("middleware", m.Id, "config", err)
+				continue
 			}
+			m.Config = cfg
 		}
 		r.Middlewares()[m.Id] = &m
+	}
+	if err := rows.Err(); err != nil {
+		logLoadTruncated("middlewares", err)
 	}
 }
 
