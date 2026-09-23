@@ -129,27 +129,50 @@ func isLoginPath(path string) bool {
 	return path == "/v1/login" || path == "/gateon.v1.ApiService/Login"
 }
 
+// publicAuthPaths are the exact paths served before Paseto auth runs.
+//
+// "/v1/setup/test-db" is the wizard's connection test, and it belongs here for
+// the same reason "/v1/setup" does: it runs before an administrator exists, so
+// there is no credential to present. Without it the base handler answered 503
+// during first run while the handler itself answers 403 once setup completes --
+// no reachable state, and the wizard's button always failed.
+//
+// It is the narrowest addition that works. Membership is exact rather than
+// prefixed on purpose: HasPrefix("/v1/setup") would make every future
+// /v1/setup/* endpoint unauthenticated by accident, and the handler behind this
+// one opens a database connection to a caller-supplied DSN. That is an
+// outbound-connection primitive, so it is bounded twice -- by this list, and by
+// the handler refusing once setup is done.
+//
+// The 2FA pair is the login flow's two pre-session steps, and only those.
+// "/v1/auth/2fa/setup" is deliberately absent: it returns the TOTP secret, the
+// QR code and the recovery codes, so it authenticates and then refuses any id
+// but the caller's own.
+//
+// A set rather than a chain of ||, so the entries can be enumerated and
+// checked. Two of them named procedures that do not exist --
+// ApiService/Enroll2FA and ApiService/Verify2FA, which have REST equivalents
+// but no RPC. They matched nothing, so they were harmless; they would have
+// stopped being harmless the moment someone added those RPCs, because the
+// procedure would have arrived already exempt from authentication. That is
+// exactly the accident the exact-match rule above is written to prevent,
+// reached by name instead of by prefix.
+var publicAuthPaths = map[string]struct{}{
+	"/v1/setup":                             {},
+	"/v1/setup/required":                    {},
+	"/v1/setup/test-db":                     {},
+	"/gateon.v1.ApiService/Setup":           {},
+	"/gateon.v1.ApiService/IsSetupRequired": {},
+	"/v1/auth/2fa/enroll":                   {},
+	"/v1/auth/2fa/verify":                   {},
+}
+
 // isPublicAuthPath returns true for setup, health, status, or login — these skip Paseto auth.
 func isPublicAuthPath(path string) bool {
-	// "/v1/setup/test-db" is the wizard's connection test, and it belongs here
-	// for the same reason "/v1/setup" does: it runs before an administrator
-	// exists, so there is no credential to present. Without it the base handler
-	// answered 503 during first run while the handler itself answers 403 once
-	// setup completes -- no reachable state, and the wizard's button always
-	// failed.
-	//
-	// It is the narrowest addition that works. Comparisons here are exact
-	// rather than prefixed on purpose: HasPrefix("/v1/setup") would make every
-	// future /v1/setup/* endpoint unauthenticated by accident, and the handler
-	// behind this one opens a database connection to a caller-supplied DSN.
-	// That is an outbound-connection primitive, so it is bounded twice -- by
-	// this list, and by the handler refusing once setup is done.
-	return path == "/v1/setup" || path == "/v1/setup/required" ||
-		path == "/v1/setup/test-db" ||
-		path == "/gateon.v1.ApiService/Setup" || path == "/gateon.v1.ApiService/IsSetupRequired" ||
-		path == "/v1/auth/2fa/enroll" || path == "/v1/auth/2fa/verify" ||
-		path == "/gateon.v1.ApiService/Enroll2FA" || path == "/gateon.v1.ApiService/Verify2FA" ||
-		isHealthPath(path)
+	if _, ok := publicAuthPaths[path]; ok {
+		return true
+	}
+	return isHealthPath(path)
 }
 
 // isHealthPath returns true for /healthz, /readyz, or gRPC health check.
