@@ -577,7 +577,25 @@ func scanPartWithClamAV(r *http.Request, p *multipart.Part, content []byte, cfg 
 // scanStream performs a single bounded ClamAV stream scan.
 func scanStream(r *http.Request, cfg FileSecurityConfig, stream io.Reader) (*clamd.ScanResult, error) {
 	c := clamd.NewClamd(cfg.ClamAVAddr)
-	abort := make(chan bool, 1)
+
+	// Closed, never signalled. ScanStream spawns a watcher that is written as
+	//
+	//	for { _, allowRunning := <-abort; if !allowRunning { break } }
+	//	conn.Close()
+	//
+	// so a send of `true` reads as "keep running" and is discarded: the loop
+	// goes straight back to blocking on the channel. Only a *close* makes it
+	// break and tear the connection down. Sending, which is what this did,
+	// therefore aborted nothing -- a scan that timed out or whose client
+	// disconnected ran to completion against clamd, and the watcher blocked on
+	// <-abort for the life of the process. One per scanned part.
+	//
+	// Deferred before the call, not after it: ScanStream can fail at sendEOF,
+	// which is after the watcher is already running, and that path returns an
+	// error with the goroutine live.
+	abort := make(chan bool)
+	defer close(abort)
+
 	response, err := c.ScanStream(stream, abort)
 	if err != nil {
 		return nil, fmt.Errorf("clamd connection failed: %w", err)
@@ -590,7 +608,6 @@ func scanStream(r *http.Request, cfg FileSecurityConfig, stream io.Reader) (*cla
 		for res := range response {
 			if res.Status == clamd.RES_FOUND {
 				found = res
-				signalAbort(abort)
 				return
 			}
 		}
@@ -600,18 +617,9 @@ func scanStream(r *http.Request, cfg FileSecurityConfig, stream io.Reader) (*cla
 	case <-done:
 		return found, nil
 	case <-time.After(cfg.ScanTimeout):
-		signalAbort(abort)
 		return nil, fmt.Errorf("scan timed out after %s", cfg.ScanTimeout)
 	case <-r.Context().Done():
-		signalAbort(abort)
 		return nil, r.Context().Err()
-	}
-}
-
-func signalAbort(abort chan bool) {
-	select {
-	case abort <- true:
-	default:
 	}
 }
 
