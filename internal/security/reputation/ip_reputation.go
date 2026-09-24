@@ -286,6 +286,16 @@ func (s *IPReputationStore) update(ctx context.Context) {
 	logger.L.Info().Int("ips", len(newIPs)).Msg("IP reputation store updated with Radix Tree")
 }
 
+// feedListedScore is the score an address carries for appearing on a feed.
+//
+// A plain-text feed says one thing about an address -- refuse it -- so a listing
+// is the top of the 0-100 scale that GetBlockThreshold is expressed in. It used
+// to be 1.0, which sat below the default threshold of 80 and below the 80 the
+// dashboard recommends, so the WAF's feed rule could not fire and a feed that
+// loaded thousands of addresses blocked none of them. An operator who wants a
+// feed recorded but not enforced sets the threshold above 100.
+const feedListedScore = 100.0
+
 func (s *IPReputationStore) fetchFeed(ctx context.Context, url string, ips map[string]float64, trie *ipTrie) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -313,7 +323,7 @@ func (s *IPReputationStore) fetchFeed(ctx context.Context, url string, ips map[s
 		if strings.Contains(line, "/") {
 			prefix, err := netip.ParsePrefix(line)
 			if err == nil {
-				trie.insert(prefix, 1.0)
+				trie.insert(prefix, feedListedScore)
 			}
 		} else {
 			addr, err := netip.ParseAddr(line)
@@ -321,8 +331,8 @@ func (s *IPReputationStore) fetchFeed(ctx context.Context, url string, ips map[s
 				// We can also insert single IPs into the trie for unified fast lookup,
 				// but map is even faster for exact match. Let's do both or just trie.
 				// Trie handles both fine and is O(bits).
-				trie.insert(netip.PrefixFrom(addr, addr.BitLen()), 1.0)
-				ips[line] = 1.0
+				trie.insert(netip.PrefixFrom(addr, addr.BitLen()), feedListedScore)
+				ips[line] = feedListedScore
 			}
 		}
 	}
