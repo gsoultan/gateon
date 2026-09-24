@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
 
@@ -102,7 +103,7 @@ func TestForgedTokenFromThePublishedSecretIsRejected(t *testing.T) {
 	clientIP := request.GetClientIP(req, false)
 	req.AddCookie(&http.Cookie{
 		Name:  ChallengeCookieName,
-		Value: GenerateChallengeSeed(publishedSecret, ua, clientIP),
+		Value: passFor(publishedSecret, ua, clientIP, time.Now()),
 	})
 
 	h.ServeHTTP(httptest.NewRecorder(), req)
