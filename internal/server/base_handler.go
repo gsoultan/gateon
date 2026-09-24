@@ -159,29 +159,36 @@ func CreateBaseHandler(
 		allowPublic := isPublicManagementAllowed(r, epID, deps.GlobalReg)
 		isMgmt := epID == "management"
 
-		// Rule: Proxy routes generally take precedence over management logic.
-		// On the management entrypoint, we are more restrictive: proxy routes only win if
-		// they don't overlap with management API paths, UNLESS the route has an explicit
-		// Host() rule (indicating explicit intent to host that domain's traffic).
+		// Rule: Proxy routes take precedence over management logic, except for a
+		// request the internal management API will answer.
+		//
+		// The branch below hands the request straight to the proxy handler, which
+		// skips mgmtHandler -- and mgmtHandler is where authentication happens.
+		// HandleProxyOrLocal never proxies a management-API path in this context:
+		// it serves it from the internal mux. So a route matching one here hosted
+		// nobody's traffic; it only removed authentication from the management
+		// API. That is what an explicit Host() rule used to do on the management
+		// entrypoint, and since a Host() route matches every path on its host, one
+		// ordinary vhost route was enough to serve the whole API, the global
+		// config's signing key included, to a caller with no credential.
+		//
+		// Decided after SelectRoute, which normalises the path both checks read.
 		rt := router.SelectRoute(r, deps.RouteStore)
-		if rt != nil {
-			canShadow := !isMgmt || !isGateonManagementAPIPath(r.URL.Path) || router.RouteHasHostRule(rt.Rule)
-			if canShadow {
-				if rs := middleware.GetRequestState(r); rs != nil {
-					rs.TRoute = time.Now().UnixNano()
-					rs.MatchedRoute = rt
-					handler.ServeHTTP(w, r)
-				} else {
-					ctx := context.WithValue(r.Context(), middleware.MatchedRouteContextKey, rt)
-					handler.ServeHTTP(w, r.WithContext(ctx))
-				}
-				return
+		isMgmtAPI := (isMgmt || allowPublic) && isGateonManagementAPIPath(r.URL.Path)
+		if rt != nil && !isMgmtAPI {
+			if rs := middleware.GetRequestState(r); rs != nil {
+				rs.TRoute = time.Now().UnixNano()
+				rs.MatchedRoute = rt
+				handler.ServeHTTP(w, r)
+			} else {
+				ctx := context.WithValue(r.Context(), middleware.MatchedRouteContextKey, rt)
+				handler.ServeHTTP(w, r.WithContext(ctx))
 			}
+			return
 		}
 
 		// Security: If no user route matched on a NON-management entrypoint,
 		// block access to the internal API/UI unless explicitly allowed.
-		isMgmtAPI := (isMgmt || allowPublic) && isGateonManagementAPIPath(r.URL.Path)
 		if !isMgmt && !isMgmtAPI && !isHealthPath(r.URL.Path) && !allowPublic {
 			http.NotFound(w, r)
 			return
