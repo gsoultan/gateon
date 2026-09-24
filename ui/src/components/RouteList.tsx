@@ -463,9 +463,9 @@ export default function RouteList({
                           PAUSED
                         </Badge>
                       )}
-                      {route.entryPoints && route.entryPoints.length > 0 ? (
+                      {route.entrypoints && route.entrypoints.length > 0 ? (
                         <Group gap={4}>
-                          {route.entryPoints.map((ep) => (
+                          {route.entrypoints.map((ep) => (
                             <Badge key={ep} size="xs" variant="outline">
                               {ep}
                             </Badge>
