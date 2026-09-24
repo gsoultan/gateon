@@ -317,7 +317,7 @@ func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
 		ClientSecret: cfg["client_secret"],
 		RedirectURL:  cfg["redirect_url"],
 		Scopes:       scopes,
-		RouteID:      cfg["_route_id"],
+		RouteID:      cfg["route_id"],
 	})
 }
 
@@ -365,6 +365,6 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 		EnableSignatureScan:    parseBoolStrict(cfg["enable_signature_scan"], true),
 		SignatureRulesPath:     cfg["signature_rules_path"],
 		SignatureBlockSeverity: yara.Severity(cfg["signature_block_severity"]),
-		RouteID:                cfg["_route_id"],
+		RouteID:                cfg["route_id"],
 	}), nil
 }
