@@ -92,3 +92,43 @@ func TestFailedRefreshKeepsTheBlocklist(t *testing.T) {
 		t.Fatal("a successful refresh did not replace the list with what the feed now says")
 	}
 }
+
+// TestRemovingTheFeedsTakesTheirEntriesOutOfForce is the regression test for a
+// blocklist that outlived the configuration that asked for it.
+//
+// Reconfigure only ever started a refresh, and a refresh with no feeds to read
+// returned without touching the loaded set, while a disabled store was not
+// refreshed at all. So an operator who removed a feed that was blocking a
+// customer, or switched IP reputation off, saved successfully and the listed
+// addresses stayed refused until the gateway restarted.
+func TestRemovingTheFeedsTakesTheirEntriesOutOfForce(t *testing.T) {
+	const listed = "203.0.113.70"
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, listed)
+	}))
+	t.Cleanup(feed.Close)
+
+	for name, next := range map[string]*gateonv1.IPReputationConfig{
+		"feeds removed":         {Enabled: true},
+		"reputation turned off": {Enabled: false, FeedUrls: []string{feed.URL}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := quietStore(feed.URL)
+			store.update(context.Background())
+			if !feedBlocks(store, listed) {
+				t.Fatal("setup: the listed address is not blocked after the first load")
+			}
+
+			store.Reconfigure(next)
+			if feedBlocks(store, listed) {
+				t.Fatal("the configuration no longer asks for this feed, and its entries are still refused")
+			}
+
+			// A scheduled refresh must not bring them back either.
+			store.update(context.Background())
+			if feedBlocks(store, listed) {
+				t.Fatal("a refresh after the change put the removed entries back in force")
+			}
+		})
+	}
+}

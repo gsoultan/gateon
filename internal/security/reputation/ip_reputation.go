@@ -171,10 +171,35 @@ func (s *IPReputationStore) Reconfigure(cfg *gateonv1.IPReputationConfig) {
 	}
 	s.mu.Unlock()
 
-	if cfg != nil && cfg.Enabled {
-		// Trigger an update in background to pick up new feed URLs immediately
-		go s.update(context.Background())
+	// Nothing left to load means nothing left in force. This used to start a
+	// refresh only when enabled, and a refresh with no feeds returned without
+	// touching the loaded set, so removing the feed that was refusing a
+	// customer -- or switching IP reputation off -- saved successfully and left
+	// every listed address refused until the gateway restarted. Done here and
+	// synchronously, so the change has taken effect when the save returns.
+	if !feedsWanted(cfg) {
+		s.clearFeeds()
+		return
 	}
+	// Trigger an update in background to pick up new feed URLs immediately
+	go s.update(context.Background())
+}
+
+// feedsWanted reports whether cfg asks for any feed to be loaded.
+func feedsWanted(cfg *gateonv1.IPReputationConfig) bool {
+	return cfg != nil && cfg.Enabled && len(cfg.FeedUrls) > 0
+}
+
+// clearFeeds takes every feed entry out of force. It waits for a refresh
+// already in flight, so that refresh cannot land its result afterwards.
+func (s *IPReputationStore) clearFeeds() {
+	s.feedMu.Lock()
+	defer s.feedMu.Unlock()
+	s.lastGood = nil
+	s.mu.Lock()
+	s.badIPs = make(map[string]float64)
+	s.trie = newIPTrie()
+	s.mu.Unlock()
 }
 
 func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
@@ -282,16 +307,18 @@ func (s *IPReputationStore) Start(ctx context.Context) {
 // rate limit or a moment's outage was enough to take every listed address out
 // of force, with nothing but a log line to say so.
 func (s *IPReputationStore) update(ctx context.Context) {
-	s.mu.RLock()
-	cfg := s.config
-	s.mu.RUnlock()
-	if cfg == nil || len(cfg.FeedUrls) == 0 {
-		return
-	}
-
 	// One refresh at a time: the ticker and Reconfigure can both start one.
 	s.feedMu.Lock()
 	defer s.feedMu.Unlock()
+
+	// Read under feedMu, so a refresh cannot act on a configuration that a
+	// Reconfigure has already replaced and cleared behind it.
+	s.mu.RLock()
+	cfg := s.config
+	s.mu.RUnlock()
+	if !feedsWanted(cfg) {
+		return
+	}
 
 	current := make(map[string][]netip.Prefix, len(cfg.FeedUrls))
 	for _, url := range cfg.FeedUrls {
