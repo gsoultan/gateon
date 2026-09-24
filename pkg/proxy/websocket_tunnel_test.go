@@ -116,6 +116,43 @@ func TestProxyUpgradeTellsClientWhenBackendCloses(t *testing.T) {
 	}
 }
 
+// TestClientReaderReplaysBytesAlreadyBuffered covers the helper the upgrade
+// path reads the client side of the tunnel through. The hijack now happens
+// after the backend has answered, and net/http's background read is live on
+// the connection until then, so bytes can be sitting in the hijacked
+// bufio.Reader rather than on the socket. Reading the bare connection would
+// silently drop them; the tunnel has to see them first.
+func TestClientReaderReplaysBytesAlreadyBuffered(t *testing.T) {
+	client, server := net.Pipe()
+	defer server.Close()
+
+	writes := make(chan error, 1)
+	go func() {
+		defer client.Close()
+		if _, err := client.Write([]byte("AB")); err != nil {
+			writes <- err
+			return
+		}
+		_, err := client.Write([]byte("CD"))
+		writes <- err
+	}()
+
+	buffered := bufio.NewReader(server)
+	if _, err := buffered.Peek(2); err != nil {
+		t.Fatalf("buffer the first write: %v", err)
+	}
+	got, err := io.ReadAll(clientReader(server, buffered))
+	if err != nil {
+		t.Fatalf("read tunnel source: %v", err)
+	}
+	if werr := <-writes; werr != nil {
+		t.Fatalf("client write: %v", werr)
+	}
+	if string(got) != "ABCD" {
+		t.Fatalf("tunnel source read %q, want %q: bytes buffered before the hijack were lost", got, "ABCD")
+	}
+}
+
 // TestProxyUpgradeOverwritesClientSuppliedIdentityHeaders checks that the
 // upgrade path normalises the same forwarding headers the HTTP path does. It
 // copied every inbound header into the backend request and only set
