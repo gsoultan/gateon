@@ -959,21 +959,40 @@ func releaseFingerprintMitigation(source, ja4plus, ja4h string) bool {
 }
 
 func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityThreat) *gateonv1.Anomaly {
-	severity := strings.ToLower(t.Severity)
-	if severity == "" {
-		severity = "low"
-		if t.Score >= 100 {
-			severity = "critical"
-		} else if t.Score >= 60 {
-			severity = "high"
-		} else if t.Score >= 30 {
-			severity = "medium"
-		}
+	a := ThreatToAnomaly(t)
+	if a.CountryCode == "" || (a.Latitude == 0 && a.Longitude == 0) {
+		populateAnomalyGeo(ctx, a, t.SourceIP)
 	}
+	return a
+}
 
-	a := &gateonv1.Anomaly{
+// threatSeverity grades a threat on the dashboard's critical/high/medium/low
+// scale: the recorded severity lowercased, or one derived from the score when
+// nothing was recorded.
+func threatSeverity(t *telemetry.SecurityThreat) string {
+	if severity := strings.ToLower(t.Severity); severity != "" {
+		return severity
+	}
+	switch {
+	case t.Score >= 100:
+		return "critical"
+	case t.Score >= 60:
+		return "high"
+	case t.Score >= 30:
+		return "medium"
+	}
+	return "low"
+}
+
+// ThreatToAnomaly is the shape a recorded threat has everywhere the dashboard
+// sees one: the threat list, the threat detail and the live /v1/watch stream,
+// which the dashboard merges into that list. It does no geo lookup; the list
+// fills gaps in on its own, and a live threat was enriched before it was
+// broadcast.
+func ThreatToAnomaly(t *telemetry.SecurityThreat) *gateonv1.Anomaly {
+	return &gateonv1.Anomaly{
 		Type:            t.Type,
-		Severity:        severity,
+		Severity:        threatSeverity(t),
 		Description:     t.Details,
 		Recommendation:  t.Recommendation,
 		Timestamp:       t.Time.Format(time.RFC3339),
@@ -1004,10 +1023,6 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 		Longitude:       t.Longitude,
 		SourceIps:       t.SourceIPs,
 	}
-	if a.CountryCode == "" || (a.Latitude == 0 && a.Longitude == 0) {
-		populateAnomalyGeo(ctx, a, t.SourceIP)
-	}
-	return a
 }
 
 func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
