@@ -193,6 +193,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// A section the body does not carry keeps its stored value; see
+		// api.KeepOmittedSections for what storing the body verbatim deleted.
+		api.KeepOmittedSections(&conf, svc.GetGlobals().Get(r.Context()))
 		if err := svc.GetGlobals().Update(r.Context(), &conf); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to update global config")
 			return
