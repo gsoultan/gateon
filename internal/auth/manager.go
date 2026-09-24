@@ -73,14 +73,26 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 	return m, nil
 }
 
+// IsSetupDone reports whether an administrator account exists.
+//
+// A failed read answers true. IsSetupRequired turns this into "may Setup run",
+// and Setup -- public, served before authentication -- creates an administrator
+// and installs the caller's PASETO secret. This used to answer with rows.Next(),
+// which is false for an empty table and equally false for a query that failed,
+// so a locked SQLite file, a restarting Postgres or an exhausted pool read as
+// "no users yet" and reopened Setup on a configured gateway for as long as the
+// error lasted. Only sql.ErrNoRows means the table is empty.
 func (m *Manager) IsSetupDone() bool {
-	q := m.dialect.Rebind(QueryCountUsers)
-	rows, err := m.db.Query(q)
-	if err != nil {
+	var one int
+	err := m.db.QueryRow(m.dialect.Rebind(QueryCountUsers)).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false
 	}
-	defer rows.Close()
-	return rows.Next()
+	if err != nil {
+		m.logger.LogError("cannot tell whether an administrator exists; first-run setup "+
+			"stays closed until the user table can be read", "error", err)
+	}
+	return true
 }
 
 func (m *Manager) Authenticate(username, password string) (string, *gateonv1.User, error) {
