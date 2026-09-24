@@ -271,16 +271,7 @@ func (s *IPReputationStore) Start(ctx context.Context) {
 		return
 	}
 
-	// Checked before the ticker is built, not after: time.NewTicker panics on a
-	// non-positive interval, and zero is the default -- the stock config carries
-	// an empty IPReputationConfig and the dashboard's interval field is
-	// optional -- so switching IP reputation on crashed the gateway at its next
-	// start.
-	interval := time.Duration(s.config.UpdateIntervalHours) * time.Hour
-	if interval <= 0 {
-		interval = 24 * time.Hour
-	}
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(updateInterval(s.config.UpdateIntervalHours))
 
 	s.update(ctx)
 
@@ -295,6 +286,36 @@ func (s *IPReputationStore) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// Feed refresh period when update_interval_hours is unset, and the most it may
+// be set to: a larger value wraps time.Duration.
+const (
+	defaultUpdateInterval  = 24 * time.Hour
+	maxUpdateIntervalHours = 24 * 365
+)
+
+// updateInterval turns update_interval_hours into a ticker period.
+//
+// time.NewTicker panics on anything but a positive duration, and Start runs
+// synchronously at boot. The hours used to be converted and handed to it before
+// anything looked at them, so zero -- what an operator gets by enabling IP
+// reputation without touching the interval -- crashed the gateway on every
+// start, as did a negative value or one large enough to wrap negative.
+func updateInterval(hours int32) time.Duration {
+	switch {
+	case hours == 0:
+		return defaultUpdateInterval
+	case hours < 0:
+		logger.L.LogWarn("ip_reputation.update_interval_hours is negative; using the default",
+			"configured", hours, "default_hours", int(defaultUpdateInterval/time.Hour))
+		return defaultUpdateInterval
+	case hours > maxUpdateIntervalHours:
+		logger.L.LogWarn("ip_reputation.update_interval_hours is above the maximum; using the maximum",
+			"configured", hours, "max_hours", maxUpdateIntervalHours)
+		return maxUpdateIntervalHours * time.Hour
+	}
+	return time.Duration(hours) * time.Hour
 }
 
 // update refreshes the blocklist from every configured feed.
