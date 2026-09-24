@@ -8,6 +8,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // pkg/l4 had no tests. The UDP session table is the part that most needed them:
@@ -217,5 +219,36 @@ func TestUDPSessionProxy_BoundHoldsUnderConcurrentArrivals(t *testing.T) {
 
 	if got := p.Sessions(); got > cap {
 		t.Fatalf("session table holds %d entries under concurrency, above the cap of %d", got, cap)
+	}
+}
+
+// A UDP backend's address is commonly written with its natural scheme,
+// udp://host:port, exactly as a TCP backend is written tcp://host:port. The
+// resolver stripped tcp:// but not udp://, so net.SplitHostPort saw the scheme
+// still attached, failed, and the service resolved to zero backends: the UDP
+// listener bound with an empty pool and dropped every packet without an error.
+// This asserts udp:// is accepted on equal footing with tcp:// and a bare
+// host:port.
+func TestBackendsFromService_AcceptsUDPScheme(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"bare", "127.0.0.1:9000"},
+		{"tcp scheme", "tcp://127.0.0.1:9000"},
+		{"udp scheme", "udp://127.0.0.1:9000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &gateonv1.Service{
+				Id:              "udp-svc",
+				BackendType:     "udp",
+				WeightedTargets: []*gateonv1.Target{{Url: tc.url, Weight: 1}},
+			}
+			got := BackendsFromService(svc)
+			if len(got) != 1 || got[0] != "127.0.0.1:9000" {
+				t.Fatalf("BackendsFromService(%q) = %v; want [127.0.0.1:9000]", tc.url, got)
+			}
+		})
 	}
 }
