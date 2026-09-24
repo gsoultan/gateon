@@ -6,6 +6,7 @@ package reputation
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -22,6 +23,13 @@ type IPReputationStore struct {
 	badIPs       map[string]float64
 	config       *gateonv1.IPReputationConfig
 	integrations []reputationProvider
+
+	// feedMu serialises refreshes and guards lastGood.
+	feedMu sync.Mutex
+	// lastGood is what each configured feed said the last time it could be
+	// read, keyed by URL, so a feed that fails at refresh time keeps its
+	// entries in force. Only configured feeds are kept.
+	lastGood map[string][]netip.Prefix
 }
 
 // ReputationClient is the interface for external IP reputation providers.
@@ -264,26 +272,63 @@ func (s *IPReputationStore) Start(ctx context.Context) {
 	}()
 }
 
+// update refreshes the blocklist from every configured feed.
+//
+// A feed that cannot be read keeps the entries it gave last time. This used to
+// build the new set from whatever arrived and swap it in unconditionally, so a
+// feed that was unreachable at refresh time -- or that answered with an error
+// page, which parses as zero addresses -- replaced a full blocklist with an
+// empty one until the next refresh, 24 hours later by default. A provider's
+// rate limit or a moment's outage was enough to take every listed address out
+// of force, with nothing but a log line to say so.
 func (s *IPReputationStore) update(ctx context.Context) {
-	if s.config == nil || len(s.config.FeedUrls) == 0 {
+	s.mu.RLock()
+	cfg := s.config
+	s.mu.RUnlock()
+	if cfg == nil || len(cfg.FeedUrls) == 0 {
 		return
 	}
 
-	newIPs := make(map[string]float64)
-	newTrie := newIPTrie()
+	// One refresh at a time: the ticker and Reconfigure can both start one.
+	s.feedMu.Lock()
+	defer s.feedMu.Unlock()
 
-	for _, url := range s.config.FeedUrls {
-		if err := s.fetchFeed(ctx, url, newIPs, newTrie); err != nil {
-			logger.L.LogError("failed to fetch IP reputation feed", "error", err, "url", url)
+	current := make(map[string][]netip.Prefix, len(cfg.FeedUrls))
+	for _, url := range cfg.FeedUrls {
+		prefixes, err := fetchFeed(ctx, url)
+		if err != nil {
+			prefixes = s.lastGood[url]
+			logger.L.LogError("failed to fetch IP reputation feed; its last good copy stays in force",
+				"error", err, "url", url, "entries_kept", len(prefixes))
 		}
+		current[url] = prefixes
 	}
+	// Replacing the map also drops the copies of feeds no longer configured,
+	// which is what bounds it.
+	s.lastGood = current
 
+	newIPs, newTrie := indexFeeds(current)
 	s.mu.Lock()
 	s.badIPs = newIPs
 	s.trie = newTrie
 	s.mu.Unlock()
 
 	logger.L.Info().Int("ips", len(newIPs)).Msg("IP reputation store updated with Radix Tree")
+}
+
+// indexFeeds builds the lookup structures from every feed's entries.
+func indexFeeds(feeds map[string][]netip.Prefix) (map[string]float64, *ipTrie) {
+	ips := make(map[string]float64)
+	trie := newIPTrie()
+	for _, prefixes := range feeds {
+		for _, p := range prefixes {
+			trie.insert(p, feedListedScore)
+			if p.IsSingleIP() {
+				ips[p.Addr().String()] = feedListedScore
+			}
+		}
+	}
+	return ips, trie
 }
 
 // feedListedScore is the score an address carries for appearing on a feed.
@@ -296,46 +341,57 @@ func (s *IPReputationStore) update(ctx context.Context) {
 // feed recorded but not enforced sets the threshold above 100.
 const feedListedScore = 100.0
 
-func (s *IPReputationStore) fetchFeed(ctx context.Context, url string, ips map[string]float64, trie *ipTrie) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+// fetchFeed reads one plain-text feed: an address or CIDR per line, with "#"
+// comments.
+//
+// Anything but a 2xx answer is an error. An error page is not an empty feed:
+// its body parses as zero addresses, and taking that as the feed's answer would
+// take every entry out of force.
+func fetchFeed(ctx context.Context, url string) ([]netip.Prefix, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Handle comments at the end of the line
-		if idx := strings.Index(line, "#"); idx > 0 {
-			line = strings.TrimSpace(line[:idx])
-		}
-
-		if strings.Contains(line, "/") {
-			prefix, err := netip.ParsePrefix(line)
-			if err == nil {
-				trie.insert(prefix, feedListedScore)
-			}
-		} else {
-			addr, err := netip.ParseAddr(line)
-			if err == nil {
-				// We can also insert single IPs into the trie for unified fast lookup,
-				// but map is even faster for exact match. Let's do both or just trie.
-				// Trie handles both fine and is O(bits).
-				trie.insert(netip.PrefixFrom(addr, addr.BitLen()), feedListedScore)
-				ips[line] = feedListedScore
-			}
-		}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("feed answered with status %d", resp.StatusCode)
 	}
 
-	return scanner.Err()
+	var out []netip.Prefix
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		if p, ok := parseFeedLine(scanner.Text()); ok {
+			out = append(out, p)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// parseFeedLine turns one feed line into a prefix; a bare address becomes a
+// host prefix. Blank lines, comments and anything unparseable are skipped.
+func parseFeedLine(line string) (netip.Prefix, bool) {
+	if idx := strings.Index(line, "#"); idx >= 0 {
+		line = line[:idx]
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return netip.Prefix{}, false
+	}
+	if strings.Contains(line, "/") {
+		prefix, err := netip.ParsePrefix(line)
+		return prefix, err == nil
+	}
+	addr, err := netip.ParseAddr(line)
+	if err != nil {
+		return netip.Prefix{}, false
+	}
+	return netip.PrefixFrom(addr, addr.BitLen()), true
 }
