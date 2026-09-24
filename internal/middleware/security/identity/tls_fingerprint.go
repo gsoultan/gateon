@@ -203,12 +203,7 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 	// First ALPN
 	alpn := "00"
 	if len(hello.SupportedProtos) > 0 {
-		p := hello.SupportedProtos[0]
-		if len(p) >= 2 {
-			alpn = string([]byte{p[0], p[len(p)-1]})
-		} else if len(p) == 1 {
-			alpn = string([]byte{p[0], '0'})
-		}
+		alpn = ja4ALPN(hello.SupportedProtos[0])
 	}
 
 	var ja4a_buf [14]byte
@@ -255,6 +250,32 @@ func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 	return Fingerprints{
 		JA4: ja4_a + "_" + ja4_b + "_" + ja4_c,
 	}
+}
+
+// ja4ALPN renders the client's first ALPN value as JA4's two-character field.
+//
+// crypto/tls only requires a protocol name to be non-empty, so the value is
+// whatever bytes the client chose, and it was copied into the fingerprint
+// verbatim: an underscore added a field to a '_'-separated key, and 0xff made
+// it invalid UTF-8, which proto3 will not marshal and Postgres will not store.
+// The JA4 specification covers this: when either end of the value is not
+// alphanumeric, use the first and last characters of its hex form instead.
+func ja4ALPN(p string) string {
+	switch {
+	case p == "":
+		return "00"
+	case !isASCIIAlnum(p[0]) || !isASCIIAlnum(p[len(p)-1]):
+		const hexDigits = "0123456789abcdef"
+		return string([]byte{hexDigits[p[0]>>4], hexDigits[p[len(p)-1]&0x0f]})
+	case len(p) == 1:
+		return string([]byte{p[0], '0'})
+	default:
+		return string([]byte{p[0], p[len(p)-1]})
+	}
+}
+
+func isASCIIAlnum(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func writeTwoDigits(buf []byte, n int) {
