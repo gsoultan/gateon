@@ -17,8 +17,14 @@ import (
 )
 
 func (s *ApiService) GetCloudflareIPs(ctx context.Context, _ *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error) {
+	// Bound to the caller's request, so an operator who navigates away, or a
+	// cancelled RPC, does not leave the fetch running to its timeout.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.cloudflare.com/client/v4/ips", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build cloudflare ips request: %w", err)
+	}
 	client := http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("https://api.cloudflare.com/client/v4/ips")
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch cloudflare ips: %w", err)
 	}

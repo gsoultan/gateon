@@ -116,6 +116,55 @@ func (h *ConnectHandler) ApplyRecommendation(ctx context.Context, req *connect.R
 	return connect.NewResponse(res), nil
 }
 
+// --- Called by the dashboard over Connect ---
+//
+// These five existed on ApiService, and the dashboard's Connect client calls
+// them, but nothing here forwarded them, so the embedded
+// UnimplementedApiServiceHandler answered: the first-run setup wizard could not
+// create the administrator, and the trace visualizer, the CORS validator and
+// the Cloudflare trust-list import failed with "unimplemented". Authorization
+// is the RBAC interceptor's, which already maps each procedure.
+
+func (h *ConnectHandler) Setup(ctx context.Context, req *connect.Request[gateonv1.SetupRequest]) (*connect.Response[gateonv1.SetupResponse], error) {
+	res, err := h.s.Setup(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) TraceRoute(ctx context.Context, req *connect.Request[gateonv1.TraceRouteRequest]) (*connect.Response[gateonv1.TraceRouteResponse], error) {
+	res, err := h.s.TraceRoute(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) ValidateCORS(ctx context.Context, req *connect.Request[gateonv1.ValidateCORSRequest]) (*connect.Response[gateonv1.ValidateCORSResponse], error) {
+	res, err := h.s.ValidateCORS(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) GetCloudflareIPs(ctx context.Context, req *connect.Request[gateonv1.GetCloudflareIPsRequest]) (*connect.Response[gateonv1.GetCloudflareIPsResponse], error) {
+	res, err := h.s.GetCloudflareIPs(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) RunDeepScan(ctx context.Context, req *connect.Request[gateonv1.RunDeepScanRequest]) (*connect.Response[gateonv1.RunDeepScanResponse], error) {
+	res, err := h.s.RunDeepScan(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
 // --- Traces ---
 
 func (h *ConnectHandler) ListTraces(ctx context.Context, req *connect.Request[gateonv1.ListTracesRequest]) (*connect.Response[gateonv1.ListTracesResponse], error) {
