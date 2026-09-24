@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -54,20 +55,44 @@ func (b *bufFix) Read(p []byte) (int, error) {
 
 // sharedHTTPDispatcher implements net.Listener to feed connections into a shared http.Server.
 type sharedHTTPDispatcher struct {
-	conns chan net.Conn
-	addr  net.Addr
+	conns     chan net.Conn
+	addr      net.Addr
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func newSharedHTTPDispatcher(addr net.Addr) *sharedHTTPDispatcher {
+	return &sharedHTTPDispatcher{
+		conns: make(chan net.Conn, 4096),
+		addr:  addr,
+		done:  make(chan struct{}),
+	}
 }
 
 func (d *sharedHTTPDispatcher) Accept() (net.Conn, error) {
-	c, ok := <-d.conns
-	if !ok {
-		return nil, io.EOF
+	// A closed dispatcher wins over a queued connection, so Serve stops
+	// promptly instead of draining the queue first.
+	select {
+	case <-d.done:
+		return nil, net.ErrClosed
+	default:
 	}
-	return c, nil
+	select {
+	case c := <-d.conns:
+		return c, nil
+	case <-d.done:
+		return nil, net.ErrClosed
+	}
 }
 
+// Close unblocks Accept. It has to: http.Server.Shutdown closes its listeners
+// and then waits -- without consulting its context -- for every Serve loop to
+// return, and Serve returns only when Accept does. This used to return nil and
+// do nothing, so the first HTTP request a plaintext TCP entrypoint inspected
+// left the process unable to finish a graceful shutdown at all.
 func (d *sharedHTTPDispatcher) Close() error {
-	return nil // Server shutdown closes the dispatcher conceptually
+	d.closeOnce.Do(func() { close(d.done) })
+	return nil
 }
 
 func (d *sharedHTTPDispatcher) Addr() net.Addr {
@@ -106,10 +131,7 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps *Deps) {
 	val, ok := deps.SharedServers.Load(ep.Id)
 	if !ok {
-		d := &sharedHTTPDispatcher{
-			conns: make(chan net.Conn, 4096),
-			addr:  conn.LocalAddr(),
-		}
+		d := newSharedHTTPDispatcher(conn.LocalAddr())
 		var loaded bool
 		val, loaded = deps.SharedServers.LoadOrStore(ep.Id, d)
 		if !loaded {
@@ -139,6 +161,13 @@ func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps
 	}
 
 	d := val.(*sharedHTTPDispatcher)
+	select {
+	case <-d.done:
+		// Shut down: nothing will ever accept from the queue again.
+		_ = conn.Close()
+		return
+	default:
+	}
 	select {
 	case d.conns <- newPeekedConn(conn, peeked):
 	default:
