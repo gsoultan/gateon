@@ -1850,9 +1850,18 @@ func IsIPUnmitigated(ip string) bool {
 	if s == nil {
 		return false
 	}
+	// Only a cached "mitigated" answers without the database. The cache is
+	// shared with IsIPMitigated, which stores true for every address it looked
+	// up and found no row for -- and IPMitigation looks up every request -- so a
+	// cached true means "not blocked", not "an operator released it". Read as
+	// the second, it told escalateMitigation and the alerting shunner that every
+	// address that had ever sent a request had been released by hand, and
+	// neither ever shunned one. Both callers are off the request path.
 	if s.unmitigatedCache != nil {
 		if val, ok := s.unmitigatedCache.Get(ip); ok {
-			return val.(bool)
+			if unmitigated, isBool := val.(bool); isBool && !unmitigated {
+				return false
+			}
 		}
 	}
 
