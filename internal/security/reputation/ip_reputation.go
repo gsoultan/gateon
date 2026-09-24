@@ -238,14 +238,21 @@ func (s *IPReputationStore) Start(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(time.Duration(s.config.UpdateIntervalHours) * time.Hour)
-	if s.config.UpdateIntervalHours == 0 {
-		ticker = time.NewTicker(24 * time.Hour)
+	// Checked before the ticker is built, not after: time.NewTicker panics on a
+	// non-positive interval, and zero is the default -- the stock config carries
+	// an empty IPReputationConfig and the dashboard's interval field is
+	// optional -- so switching IP reputation on crashed the gateway at its next
+	// start.
+	interval := time.Duration(s.config.UpdateIntervalHours) * time.Hour
+	if interval <= 0 {
+		interval = 24 * time.Hour
 	}
+	ticker := time.NewTicker(interval)
 
 	s.update(ctx)
 
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
