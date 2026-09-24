@@ -958,11 +958,7 @@ func (s *pathStatsStore) execThreat(tx *sql.Tx, stmt *sql.Stmt, th *SecurityThre
 		savepointed = false
 	}
 
-	_, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time,
-		th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken,
-		th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody,
-		th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy,
-		th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs)
+	_, err := stmt.Exec(threatInsertArgs(th, sourceIPs)...)
 	if err == nil {
 		if savepointed {
 			_, _ = tx.Exec("RELEASE SAVEPOINT " + sp)
@@ -979,6 +975,25 @@ func (s *pathStatsStore) execThreat(tx *sql.Tx, stmt *sql.Stmt, th *SecurityThre
 		}
 	}
 	return false
+}
+
+// threatInsertArgs is the argument list for threatInsertStmt, with every text
+// value made storable. Most of them are copied from the request that caused
+// the threat -- user agent, headers, body, the payload quoted in Details -- and
+// Postgres refuses a row containing NUL or a byte that is not valid UTF-8, so
+// the request that carried one used to be the request that was not recorded.
+func threatInsertArgs(th *SecurityThreat, sourceIPs string) []any {
+	args := []any{th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time,
+		th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken,
+		th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody,
+		th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy,
+		th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs}
+	for i, arg := range args {
+		if text, ok := arg.(string); ok {
+			args[i] = db.SafeText(text)
+		}
+	}
+	return args
 }
 
 func (s *pathStatsStore) loop() {
