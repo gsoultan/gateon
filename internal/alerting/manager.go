@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -224,14 +225,35 @@ func (m *AlertingManager) executePlaybook(pb *gateonv1.AlertPlaybook, threat tel
 		}
 	}
 
-	// Handle actions like "block" (XDP shunning)
-	if pb.Action == "block" && threat.SourceIP != "" && m.ebpfManager != nil {
-		if err := m.ebpfManager.ShunIP(threat.SourceIP); err != nil {
-			logger.L.LogError("playbook failed to shun IP", "ip", threat.SourceIP, "error", err)
-		} else {
-			logger.L.LogInfo("playbook automatically shunned IP", "ip", threat.SourceIP, "playbook", pb.Name)
-		}
+	if pb.Action == "block" && threat.SourceIP != "" {
+		blockSource(pb, threat.SourceIP)
 	}
+}
+
+// blockSource carries out a playbook's "block" action.
+//
+// It used to call the eBPF manager's ShunIP and nothing else. That manager is
+// the eBPF Holder, whose ShunIP answers nil when eBPF is disabled -- the
+// default, and the only possibility off Linux -- so the playbook logged
+// "automatically shunned" and the source carried on; and with eBPF running the
+// shun was recorded nowhere, so it was invisible on the mitigation list, could
+// not be released from it, and vanished on restart.
+//
+// MarkIPMitigated is the block the request path reads on every entrypoint and
+// route, and it still pushes the address to the kernel when eBPF is running.
+// Loopback, the mitigation allowlist and an address the operator released are
+// left alone, as every other automatic block treats them.
+func blockSource(pb *gateonv1.AlertPlaybook, ip string) {
+	if httputil.IsLoopback(ip) || mitigation.IsAllowlisted(ip) || telemetry.IsIPUnmitigated(ip) {
+		logger.L.LogInfo("playbook block skipped: the source is exempt", "ip", ip, "playbook", pb.GetName())
+		return
+	}
+	if err := telemetry.MarkIPMitigated(ip, "Alert playbook: "+pb.GetName()); err != nil {
+		logger.L.LogError("playbook block did not persist; the source is not blocked",
+			"ip", ip, "playbook", pb.GetName(), "error", err)
+		return
+	}
+	logger.L.LogInfo("playbook blocked IP", "ip", ip, "playbook", pb.GetName())
 }
 
 // dispatch delivers one alert on its own goroutine, unless maxAlertSends are
