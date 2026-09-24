@@ -226,7 +226,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 	baselineRequests := ad.aggregator.GetRate("requests", 1*time.Hour)
 
 	if baselineRequests > 5 {
-		z := ad.aggregator.StatsErrors.ZScore(currentErrors)
+		z := ad.aggregator.errorZScore(currentErrors)
 		// If Z-Score is > 3.0 (standard statistical anomaly threshold)
 		if z > 3.0/ad.config.Sensitivity && currentErrors > 5 {
 			logger.L.LogWarn("ANOMALY DETECTED: 5xx error rate is statistically anomalous",
@@ -257,7 +257,7 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 	baselineP99 := ad.aggregator.GetP99Latency(1 * time.Hour)
 
 	if baselineP99 > 0 {
-		z := ad.aggregator.StatsLatency.ZScore(currentP99)
+		z := ad.aggregator.latencyZScore(currentP99)
 		// If Z-Score is > 3.0
 		if z > 3.0/ad.config.Sensitivity && currentP99 > 0.5 { // ignore spikes below 500ms
 			logger.L.LogWarn("ANOMALY DETECTED: P99 latency is statistically anomalous",

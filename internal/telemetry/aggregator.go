@@ -167,6 +167,23 @@ func (a *LocalMetricsAggregator) takeSnapshot(ctx context.Context) {
 	a.cachedQPS.Store(uint64(qps))
 }
 
+// errorZScore and latencyZScore score x against the running statistics under
+// the lock takeSnapshot updates them under. The anomaly detector calls them
+// from its own goroutine, and a score is only meaningful if Count, Mean and M2
+// are read as one set -- read without the lock, they could come from two
+// different updates.
+func (a *LocalMetricsAggregator) errorZScore(x float64) float64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.StatsErrors.ZScore(x)
+}
+
+func (a *LocalMetricsAggregator) latencyZScore(x float64) float64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.StatsLatency.ZScore(x)
+}
+
 func (a *LocalMetricsAggregator) pruneIPs() {
 	now := time.Now()
 	a.ipStats.Range(func(key, value any) bool {
