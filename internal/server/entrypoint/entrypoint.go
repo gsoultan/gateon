@@ -60,6 +60,77 @@ func shutdownHTTPServer(ctx context.Context, srv *http.Server) error {
 	return err
 }
 
+// openConns tracks the connections a TCP entrypoint has accepted, so its
+// shutdown can let them finish and then close whatever is still open when the
+// deadline passes.
+//
+// An L4 session has no request boundary to drain at: an idle SSH or database
+// session lasts exactly as long as its client keeps it. Closing the listener
+// alone left every such session -- and the goroutine serving it, which Run
+// waits for -- running until the process was killed.
+type openConns struct {
+	mu       sync.Mutex
+	conns    map[net.Conn]struct{}
+	closing  bool
+	drained  chan struct{}
+	signaled bool
+}
+
+func newOpenConns() *openConns {
+	return &openConns{conns: make(map[net.Conn]struct{}), drained: make(chan struct{})}
+}
+
+// add records c. It reports false once shutdown has begun, in which case the
+// caller closes c instead of serving it.
+func (o *openConns) add(c net.Conn) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closing {
+		return false
+	}
+	o.conns[c] = struct{}{}
+	return true
+}
+
+// remove forgets c once the goroutine serving it is done with it.
+func (o *openConns) remove(c net.Conn) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.conns, c)
+	if o.closing && len(o.conns) == 0 {
+		o.signalDrainedLocked()
+	}
+}
+
+func (o *openConns) signalDrainedLocked() {
+	if !o.signaled {
+		o.signaled = true
+		close(o.drained)
+	}
+}
+
+// shutdown refuses new connections, waits for the open ones to finish until
+// ctx is done, and then closes the rest.
+func (o *openConns) shutdown(ctx context.Context) {
+	o.mu.Lock()
+	o.closing = true
+	if len(o.conns) == 0 {
+		o.signalDrainedLocked()
+	}
+	o.mu.Unlock()
+
+	select {
+	case <-o.drained:
+		return
+	case <-ctx.Done():
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for c := range o.conns {
+		_ = c.Close()
+	}
+}
+
 // ShutdownAll runs every registered shutdown function against ctx at the same
 // time, and returns once all of them have.
 //

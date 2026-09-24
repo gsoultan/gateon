@@ -16,6 +16,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -117,6 +118,57 @@ func TestShutdownAllGivesEveryServerTheWholeWindow(t *testing.T) {
 	default:
 		t.Fatal("ShutdownAll returned before the first server finished shutting down")
 	}
+}
+
+// idleSession is a TCPProxy that behaves like an SSH or database session held
+// through the gateway: it stays connected until the client goes away.
+type idleSession struct{ started chan struct{} }
+
+func (s idleSession) ProxyTCP(_ context.Context, c net.Conn) {
+	defer c.Close()
+	s.started <- struct{}{}
+	_, _ = io.Copy(io.Discard, c)
+}
+
+func (s idleSession) ResolveTCP(*gateonv1.EntryPoint, string) l4.TCPProxy { return s }
+func (idleSession) ResolveUDP(*gateonv1.EntryPoint) l4.UDPProxy         { return nil }
+
+// TestTCPEntrypointShutdownEndsOpenSessions covers an L4 session in progress
+// when SIGTERM arrives.
+//
+// A TCP entrypoint's shutdown closed its listener and nothing else. Each
+// session runs on a goroutine in the WaitGroup Run waits on after ShutdownAll,
+// and an L4 session has no request boundary to stop at: an idle SSH or
+// database session lasts exactly as long as its client keeps it. So one such
+// session through the gateway kept Run from ever returning.
+func TestTCPEntrypointShutdownEndsOpenSessions(t *testing.T) {
+	deps := mockDepsForInspection(t)
+	session := idleSession{started: make(chan struct{}, 1)}
+	deps.L4Resolver = session
+	addr := freeAddr(t)
+	ep := &gateonv1.EntryPoint{
+		Id:        "tcp-ep",
+		Address:   addr,
+		Type:      gateonv1.EntryPoint_TCP,
+		Protocols: []gateonv1.EntryPoint_Protocol{gateonv1.EntryPoint_TCP_PROTO},
+	}
+	wg := &syncutil.WaitGroup{}
+	startTCPServer(addr, ep, deps, wg, deps.ShutdownRegistry)
+
+	conn := dialWhenReady(t, addr)
+	defer conn.Close()
+	// Neither HTTP nor SSH nor RDP, so the inspector hands it to the L4 route.
+	if _, err := io.WriteString(conn, "hello\n"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	select {
+	case <-session.started:
+	case <-time.After(shutdownBound):
+		t.Fatal("the session never reached the L4 proxy")
+	}
+
+	shutdownWithin(t, deps.ShutdownRegistry, 200*time.Millisecond)
+	waitWithin(t, wg)
 }
 
 // addrCapture is a PhantomCore whose only job is to report the address each
