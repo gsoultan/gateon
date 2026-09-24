@@ -609,7 +609,11 @@ func (m *Manager) setTwoFactorPending(id string, pending bool) error {
 func (m *Manager) handleFailedLogin(username string, currentAttempts int) {
 	var lockedUntil any
 	if currentAttempts+1 >= MaxFailedAttempts {
-		lockedUntil = time.Now().Add(LockoutDuration)
+		// UTC, because locked_until is TIMESTAMP without time zone on
+		// Postgres: the offset of a local time is dropped on the way in and
+		// the wall clock comes back as UTC, so on a host behind UTC the lock
+		// was already over when it was read and the account never locked.
+		lockedUntil = time.Now().UTC().Add(LockoutDuration)
 	}
 	q := m.dialect.Rebind(QueryIncrementFailedAttempts)
 	if _, err := m.db.Exec(q, lockedUntil, username); err != nil {
