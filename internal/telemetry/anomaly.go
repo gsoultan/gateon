@@ -41,8 +41,10 @@ func (ad *AnomalyDetector) Start(ctx context.Context) {
 	// Start the aggregator's collection loop
 	go ad.aggregator.Start(ctx)
 
+	// Non-positive, not just zero: the API stores a negative value as given,
+	// and time.NewTicker panics on it on a goroutine with no recover.
 	interval := time.Duration(ad.config.CheckIntervalSeconds)
-	if interval == 0 {
+	if interval <= 0 {
 		interval = 60
 	}
 
