@@ -129,6 +129,36 @@ func (c AuthBaseConfig) MapClaimsToHeaders(r *http.Request, claims any) {
 	}
 }
 
+// usesClaims reports whether anything in this configuration reads a claim, so a
+// credential type that has to assemble its claims can skip that when nothing
+// will look at them.
+func (c AuthBaseConfig) usesClaims() bool {
+	return len(c.RequiredScopes) > 0 || len(c.RequiredRoles) > 0 || len(c.ClaimMappings) > 0
+}
+
+// authorizeCredential holds a credential that is not a token -- an API key's
+// tenant, a basic-auth login's username -- to the checks a verified token goes
+// through: required scopes and roles against the claims it can offer, then the
+// claim-to-header mapping. Neither kind carries a role or a scope, so a route
+// that requires one refuses them, just as it refuses a token without the role.
+func (c AuthBaseConfig) authorizeCredential(r *http.Request, claims map[string]any) error {
+	if err := c.ValidateClaims(claims); err != nil {
+		return err
+	}
+	c.MapClaimsToHeaders(r, claims)
+	return nil
+}
+
+// stripMappedHeaders removes the client's copies of every mapped claim header.
+// A request let past authentication without a credential -- a CORS preflight,
+// which a browser sends without one -- must not carry them to the backend
+// either: a mapped header is only ever the gateway's to set.
+func (c AuthBaseConfig) stripMappedHeaders(r *http.Request) {
+	for _, header := range c.ClaimMappings {
+		r.Header.Del(header)
+	}
+}
+
 // HandleFailure handles an authentication failure based on DryRun and ErrorTemplate.
 func (c AuthBaseConfig) HandleFailure(w http.ResponseWriter, r *http.Request, next http.Handler, err error) {
 	if c.DryRun {
