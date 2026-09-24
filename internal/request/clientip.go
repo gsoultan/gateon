@@ -138,8 +138,27 @@ func GetClientIP(r *http.Request, trustCloudflare bool) string {
 		}
 	}
 
-	if xff := r.Header.Get(HeaderXForwardedFor); xff != "" {
-		// Zero-allocation right-to-left parsing of X-Forwarded-For
+	if ip, ok := clientFromForwardedFor(r.Header[HeaderXForwardedFor]); ok {
+		return ip
+	}
+	return host
+}
+
+// clientFromForwardedFor walks an X-Forwarded-For chain right to left and
+// returns the first address that is not a trusted proxy, or the leftmost one
+// when every hop is trusted.
+//
+// The chain is every X-Forwarded-For header line, in order, not only the
+// first: repeated fields are one comma-separated list (RFC 9110 section 5.3).
+// A trusted proxy that adds its own line rather than extending the one it
+// received -- HAProxy's "option forwardfor" does, and says so -- leaves the
+// client's line first and its own last, so reading only the first line
+// returned exactly the address the client chose. The walk starts at the last
+// line for the same reason it starts at the right of one.
+func clientFromForwardedFor(lines []string) (string, bool) {
+	// Zero-allocation right-to-left parsing of X-Forwarded-For
+	for i := len(lines) - 1; i >= 0; i-- {
+		xff := lines[i]
 		for {
 			lastComma := strings.LastIndexByte(xff, ',')
 			part := xff
@@ -148,36 +167,24 @@ func GetClientIP(r *http.Request, trustCloudflare bool) string {
 				xff = xff[:lastComma]
 			}
 
-			token := strings.TrimSpace(part)
-			if token == "" {
-				if lastComma == -1 {
-					break
+			// Strip port if present in XFF (sometimes happens). An empty or
+			// unparseable token is skipped.
+			if token := strings.TrimSpace(part); token != "" {
+				cleanIP := httputil.StripPort(token)
+				if parsed, err := netip.ParseAddr(cleanIP); err == nil {
+					// The first untrusted IP is the client; if every hop
+					// was trusted, the leftmost is.
+					if !isTrustedIP(parsed) || (lastComma == -1 && i == 0) {
+						return cleanIP, true
+					}
 				}
-				continue
 			}
-
-			// Strip port if present in XFF (sometimes happens)
-			cleanIP := httputil.StripPort(token)
-			parsed, err := netip.ParseAddr(cleanIP)
-			if err != nil {
-				if lastComma == -1 {
-					break
-				}
-				continue
+			if lastComma == -1 {
+				break // Keep walking left, onto the previous line
 			}
-
-			if isTrustedIP(parsed) {
-				if lastComma == -1 {
-					// Every hop was trusted, return the leftmost
-					return cleanIP
-				}
-				continue // Keep walking left
-			}
-
-			return cleanIP // Found the first untrusted IP
 		}
 	}
-	return host
+	return "", false
 }
 
 // TrustCloudflareFromEnv returns true if GATEON_TRUST_CLOUDFLARE_HEADERS is set

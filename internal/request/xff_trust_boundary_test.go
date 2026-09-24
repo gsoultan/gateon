@@ -71,6 +71,42 @@ func TestForwardedForIsHonouredFromATrustedPeer(t *testing.T) {
 	}
 }
 
+// A trusted proxy does not always extend the header it received; HAProxy's
+// "option forwardfor" appends a header line of its own, and its manual tells
+// the server to use only the last occurrence because "it is really possible
+// that the client has already brought one". The request then carries the
+// client's line first and the proxy's line last. They are one list (RFC 9110
+// section 5.3), and walking it right to left has to start at the last line:
+// reading only the first returned exactly the address the client wrote.
+func TestForwardedForAcrossHeaderLinesIsWalkedFromTheLastLine(t *testing.T) {
+	withTrustedProxies(t, "10.0.0.0/8")
+	const realClient = "198.51.100.7"
+
+	r := requestFrom(trustedPeer, nil)
+	r.Header.Add("X-Forwarded-For", spoofed)    // brought by the client
+	r.Header.Add("X-Forwarded-For", realClient) // appended by the trusted proxy
+	if got := GetClientIP(r, false); got != realClient {
+		t.Errorf("client IP = %q, want %q: with the proxy's X-Forwarded-For on its own line, "+
+			"the address the client wrote was believed", got, realClient)
+	}
+
+	// The same walk across lines still skips trusted hops, whichever line
+	// they are on, and still falls back to the leftmost when every hop is
+	// trusted.
+	r = requestFrom(trustedPeer, nil)
+	r.Header.Add("X-Forwarded-For", spoofed+", "+realClient)
+	r.Header.Add("X-Forwarded-For", "10.1.1.1")
+	if got := GetClientIP(r, false); got != realClient {
+		t.Errorf("client IP = %q, want %q: a trusted hop on the last line must be skipped", got, realClient)
+	}
+	r = requestFrom(trustedPeer, nil)
+	r.Header.Add("X-Forwarded-For", "10.9.9.9")
+	r.Header.Add("X-Forwarded-For", "10.1.1.1")
+	if got := GetClientIP(r, false); got != "10.9.9.9" {
+		t.Errorf("client IP = %q, want the leftmost hop 10.9.9.9 when every hop is trusted", got)
+	}
+}
+
 // Cloudflare's header is only meaningful when Cloudflare is trusted. Honouring
 // it otherwise is the same spoof with a different field name.
 func TestCloudflareHeaderNeedsCloudflareTrust(t *testing.T) {
