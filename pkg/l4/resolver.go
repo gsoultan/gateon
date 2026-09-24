@@ -134,10 +134,7 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 	if len(addrs) == 0 {
 		return nil
 	}
-	lb := svc.LoadBalancerPolicy
-	if lb == "" {
-		lb = "round_robin"
-	}
+	lb := config.CanonicalLBPolicy(svc.LoadBalancerPolicy)
 	interval := int(svc.L4HealthCheckIntervalMs)
 	if interval <= 0 {
 		interval = 10000

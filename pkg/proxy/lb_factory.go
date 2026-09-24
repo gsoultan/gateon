@@ -4,8 +4,7 @@
 package proxy
 
 import (
-	"strings"
-
+	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -33,7 +32,7 @@ func (f *DefaultLoadBalancerFactory) Create(policy string, targets []*gateonv1.T
 	// drop proxy_protocol_enabled and proxy_protocol_version, and only
 	// discovery ever replaced that first target set, so a service without a
 	// discovery URL never sent the PROXY header however it was configured.
-	switch strings.ToLower(policy) {
+	switch config.CanonicalLBPolicy(policy) {
 	case "least_conn":
 		lb := NewLeastConnLB(nil)
 		lb.UpdateWeightedTargets(targets)
