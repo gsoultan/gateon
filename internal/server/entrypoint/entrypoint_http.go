@@ -224,8 +224,8 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		}
 	}
 	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(func(context.Context) error {
-			return server.Shutdown(context.Background())
+		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return shutdownHTTPServer(ctx, server)
 		})
 	}
 	if hasTCP {

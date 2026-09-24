@@ -173,8 +173,8 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	}
 
 	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(func(context.Context) error {
-			return server.Shutdown(context.Background())
+		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return shutdownHTTPServer(ctx, server)
 		})
 	}
 

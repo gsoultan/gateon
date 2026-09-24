@@ -44,6 +44,22 @@ func (r *ShutdownRegistry) Register(fn func(context.Context) error) {
 	r.funcs = append(r.funcs, fn)
 }
 
+// shutdownHTTPServer drains srv until ctx expires and then closes whatever is
+// still open.
+//
+// Shutdown on its own is not a bounded operation: it waits for every active
+// connection to go idle, so one request that never ends by itself -- an SSE
+// stream, a stuck upload, a proxied backend that never answers -- holds it
+// open forever unless the context says otherwise. Close is what ends those
+// requests: closing the connection cancels the handler's context.
+func shutdownHTTPServer(ctx context.Context, srv *http.Server) error {
+	err := srv.Shutdown(ctx)
+	if err != nil {
+		_ = srv.Close()
+	}
+	return err
+}
+
 // ShutdownAll runs all registered shutdown functions with the given context.
 func (r *ShutdownRegistry) ShutdownAll(ctx context.Context) {
 	r.mu.Lock()

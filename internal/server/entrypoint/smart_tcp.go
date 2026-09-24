@@ -150,7 +150,7 @@ func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps
 				}
 				if deps.ShutdownRegistry != nil {
 					deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-						return server.Shutdown(ctx)
+						return shutdownHTTPServer(ctx, server)
 					})
 				}
 				if err := server.Serve(d); err != nil && err != http.ErrServerClosed {
