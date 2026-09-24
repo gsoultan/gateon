@@ -72,7 +72,7 @@ const CORE_LINKS = [
   { label: "Traces", to: "/traces", icon: IconTimeline },
   { label: "Routes", to: "/routes", icon: IconRoute },
   { label: "Services", to: "/services", icon: IconServer },
-  { label: "Metrics", to: "/metrics", icon: IconChartBar },
+  { label: "Metrics", to: "/metrics-dashboard", icon: IconChartBar },
   { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
   { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
   { label: "EntryPoints", to: "/entryPoints", icon: IconAccessPoint },

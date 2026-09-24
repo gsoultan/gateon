@@ -17,7 +17,7 @@ const actions = [
   { title: "Add Route", icon: IconRoute, color: "blue", to: "/routes", action: "add" },
   { title: "Add Service", icon: IconServer, color: "teal", to: "/services", action: "add" },
   { title: "Certificates", icon: IconShieldLock, color: "indigo", to: "/certificates" },
-  { title: "Real-time Metrics", icon: IconActivity, color: "orange", to: "/metrics" },
+  { title: "Real-time Metrics", icon: IconActivity, color: "orange", to: "/metrics-dashboard" },
   { title: "System Settings", icon: IconSettings, color: "gray", to: "/settings" },
 ];
 

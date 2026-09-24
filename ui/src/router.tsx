@@ -252,9 +252,12 @@ const tracesRoute = createRoute({
   component: () => <TracesPage />,
 });
 
+// Not /metrics: that is Prometheus' exposition endpoint on this same origin, so
+// a reload, a bookmark or a link opened in a new tab asked the gateway for
+// /metrics and rendered raw exposition text instead of this page.
 const metricsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
-  path: "/metrics",
+  path: "/metrics-dashboard",
   component: () => <MetricsPage />,
 });
 
