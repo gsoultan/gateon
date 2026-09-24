@@ -98,6 +98,54 @@ func TestMiddlewareListDoesNotHandCredentialsToAViewer(t *testing.T) {
 	}
 }
 
+// TestMiddlewareListDoesNotLeakApiKeysToAViewer covers the credential the value
+// masking missed.
+//
+// The apikey middleware stores each accepted key as "key_<APIKEY>=<tenant>", so
+// the credential is the map KEY, not the value. secretmask.Config masked values
+// whose key names looked like secrets, so it walked straight past this: the
+// tenant label got returned unchanged and the API key sat in plaintext in the
+// map key beside it. A viewer reading the middleware list learned every API key
+// the gateway accepts for the protected route.
+func TestMiddlewareListDoesNotLeakApiKeysToAViewer(t *testing.T) {
+	const apiKey = "ak_live_9f8e7d6c5b4a3210_SUPERSECRET"
+
+	d := &Deps{MwService: &secretsStore{mw: &gateonv1.Middleware{
+		Id:   "apikey-1",
+		Name: "partner-api",
+		Type: "apikey",
+		Config: map[string]string{
+			"auth_type":     "apikey",
+			"header":        "X-API-Key", // not a credential
+			"key_" + apiKey: "partner-tenant",
+		},
+	}}}
+
+	mux := http.NewServeMux()
+	registerMiddlewareHandlers(mux, nil, d)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/middlewares", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey,
+		&auth.Claims{ID: "v-1", Username: "viewer", Role: auth.RoleViewer}))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("a viewer got %d listing middlewares", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), apiKey) {
+		t.Errorf("a viewer read the API key %q from GET /v1/middlewares.\n"+
+			"The apikey middleware stores the key as the config map key "+
+			"(\"key_<APIKEY>\"), so value masking never touched it. Whoever has the "+
+			"key authenticates to the protected backend as that client, so a "+
+			"read-only dashboard account becomes access to the backend.", apiKey)
+	}
+	// Non-secret configuration must still be visible.
+	if !strings.Contains(rr.Body.String(), "X-API-Key") {
+		t.Error("the header name was withheld too; masking should cover the key, not the whole config")
+	}
+}
+
 // TestMiddlewareListStillShowsSecretsToSomeoneWhoCanChangeThem draws the line.
 //
 // Write permission is the boundary. Someone who can set the secret gains nothing

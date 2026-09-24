@@ -5,6 +5,7 @@ package secretmask
 
 import (
 	"maps"
+	"strings"
 	"testing"
 )
 
@@ -146,5 +147,81 @@ func TestPreserveDropsAPlaceholderWithNothingBehindIt(t *testing.T) {
 func TestPreserveHandlesNil(t *testing.T) {
 	if got := Preserve(nil, map[string]string{"secret": "x"}); got != nil {
 		t.Errorf("Preserve(nil, ...) = %v, want nil so an explicit clear still clears", got)
+	}
+}
+
+// TestConfigMasksApiKeyNames covers the credential stored as the key NAME.
+//
+// The apikey middleware keys its config by the secret itself ("key_<APIKEY>").
+// Value-only masking returned it verbatim; Config must hide the suffix while
+// still showing a key is configured and leaving non-secret config readable.
+func TestConfigMasksApiKeyNames(t *testing.T) {
+	const apiKey = "ak_live_SUPERSECRET"
+	masked := Config(map[string]string{
+		"key_" + apiKey: "tenant-a",
+		"header":        "X-API-Key",
+	})
+	for k, v := range masked {
+		if strings.Contains(k, apiKey) || strings.Contains(v, apiKey) {
+			t.Fatalf("the API key survived masking in %q=%q; the secret is the key "+
+				"name, so masking values alone leaks it", k, v)
+		}
+	}
+	if masked["header"] != "X-API-Key" {
+		t.Errorf("non-secret config was dropped: header = %q", masked["header"])
+	}
+	found := false
+	for k := range masked {
+		if strings.HasPrefix(k, "key_"+Placeholder) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no placeholder key entry remained; the dashboard cannot tell a key is set")
+	}
+}
+
+// TestConfigKeepsApiKeyCount keeps several keys from colliding into one.
+func TestConfigKeepsApiKeyCount(t *testing.T) {
+	masked := Config(map[string]string{
+		"key_AAA_secret_one": "t1",
+		"key_BBB_secret_two": "t2",
+		"key_CCC_secret_tre": "t3",
+	})
+	if len(masked) != 3 {
+		t.Fatalf("masked %d entries, want 3; several keys must not collapse to one", len(masked))
+	}
+	for k := range masked {
+		if strings.Contains(k, "secret") {
+			t.Fatalf("a raw API key leaked in a masked key name: %q", k)
+		}
+	}
+}
+
+// TestPreserveKeepsRealApiKeyNames is the writer round-trip: a caller who can
+// write is shown the real key names and sends them back unchanged.
+func TestPreserveKeepsRealApiKeyNames(t *testing.T) {
+	incoming := map[string]string{"key_ak_live_real": "tenant-a", "header": "X-API-Key"}
+	merged := Preserve(incoming, map[string]string{"key_ak_live_real": "tenant-a"})
+	if merged["key_ak_live_real"] != "tenant-a" {
+		t.Errorf("a real API key was dropped on save: %v", merged)
+	}
+}
+
+// TestPreserveDropsMaskedKeyNames stops a display marker being written literally.
+func TestPreserveDropsMaskedKeyNames(t *testing.T) {
+	incoming := map[string]string{
+		"key_" + Placeholder + "_0": "tenant-a",
+		"header":                    "X-API-Key",
+	}
+	stored := map[string]string{"key_ak_live_real": "tenant-a"}
+	merged := Preserve(incoming, stored)
+	for k := range merged {
+		if strings.HasPrefix(k, "key_"+Placeholder) {
+			t.Fatalf("a masked key name was persisted literally: %q", k)
+		}
+	}
+	if merged["header"] != "X-API-Key" {
+		t.Errorf("non-secret config was dropped on save: %v", merged)
 	}
 }
