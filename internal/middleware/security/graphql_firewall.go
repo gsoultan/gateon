@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -55,9 +56,20 @@ const maxCachedQueryBytes = 8 << 10
 // open tracks the spreads currently being walked, so a cyclic fragment --
 // invalid GraphQL that the parser still accepts -- terminates instead of
 // recursing until the stack is gone.
+//
+// The memo maps hold each fragment's result once it has been walked. Without
+// them a fragment was walked again at every spread, so fragments that each
+// spread the next one twice made every walk exponential in their number -- a
+// query of about a kilobyte held a request goroutine on the CPU for hours.
+// Memoising is exact for any acyclic document, and a cyclic one is invalid
+// GraphQL that a backend's validation refuses before it executes anything.
 type fragmentIndex struct {
 	defs map[string]*ast.FragmentDefinition
 	open map[string]bool
+
+	depths       map[string]int
+	complexities map[string]int
+	introspected map[string]bool
 }
 
 func newFragmentIndex(doc *ast.QueryDocument) *fragmentIndex {
@@ -65,7 +77,28 @@ func newFragmentIndex(doc *ast.QueryDocument) *fragmentIndex {
 	for _, f := range doc.Fragments {
 		defs[f.Name] = f
 	}
-	return &fragmentIndex{defs: defs, open: make(map[string]bool, len(defs))}
+	return &fragmentIndex{
+		defs:         defs,
+		open:         make(map[string]bool, len(defs)),
+		depths:       make(map[string]int),
+		complexities: make(map[string]int),
+		introspected: make(map[string]bool),
+	}
+}
+
+// addCost adds two costs, saturating instead of wrapping. Walking each
+// fragment once makes 2^64 reachable from a few kilobytes of query, and a
+// wrapped total would come in under MaxComplexity. field_costs is operator
+// JSON with no sign check, so both directions are handled.
+func addCost(a, b int) int {
+	sum := a + b
+	switch {
+	case a > 0 && b > 0 && sum < 0:
+		return math.MaxInt
+	case a < 0 && b < 0 && sum >= 0:
+		return math.MinInt
+	}
+	return sum
 }
 
 // enter returns the named fragment's selections and a release func, or a nil
@@ -370,18 +403,27 @@ func (fi *fragmentIndex) introspects(ss ast.SelectionSet) bool {
 				return true
 			}
 		case *ast.FragmentSpread:
-			inner, release := fi.enter(s.Name)
-			if release == nil {
-				continue
-			}
-			hit := fi.introspects(inner)
-			release()
-			if hit {
+			if fi.spreadIntrospects(s.Name) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// spreadIntrospects is introspects for one fragment, walked once per document.
+func (fi *fragmentIndex) spreadIntrospects(name string) bool {
+	if hit, ok := fi.introspected[name]; ok {
+		return hit
+	}
+	inner, release := fi.enter(name)
+	if release == nil {
+		return false
+	}
+	hit := fi.introspects(inner)
+	release()
+	fi.introspected[name] = hit
+	return hit
 }
 
 func calculateDepth(doc *ast.QueryDocument) int {
@@ -411,22 +453,35 @@ func (fi *fragmentIndex) depth(ss ast.SelectionSet) int {
 		case *ast.InlineFragment:
 			sub(s.SelectionSet)
 		case *ast.FragmentSpread:
-			inner, release := fi.enter(s.Name)
-			if release == nil {
-				continue
+			if d := fi.spreadDepth(s.Name); d > maxSubDepth {
+				maxSubDepth = d
 			}
-			sub(inner)
-			release()
 		}
 	}
 	return 1 + maxSubDepth
+}
+
+// spreadDepth is depth for one fragment, walked once per document. An unknown
+// or already-open fragment contributes nothing, as before.
+func (fi *fragmentIndex) spreadDepth(name string) int {
+	if d, ok := fi.depths[name]; ok {
+		return d
+	}
+	inner, release := fi.enter(name)
+	if release == nil {
+		return 0
+	}
+	d := fi.depth(inner)
+	release()
+	fi.depths[name] = d
+	return d
 }
 
 func calculateComplexity(doc *ast.QueryDocument, costs map[string]int) int {
 	fi := newFragmentIndex(doc)
 	totalComplexity := 0
 	for _, op := range doc.Operations {
-		totalComplexity += fi.complexity(op.SelectionSet, costs)
+		totalComplexity = addCost(totalComplexity, fi.complexity(op.SelectionSet, costs))
 	}
 	return totalComplexity
 }
@@ -441,21 +496,31 @@ func (fi *fragmentIndex) complexity(ss ast.SelectionSet, costs map[string]int) i
 				cost = c
 			}
 			if len(s.SelectionSet) > 0 {
-				cost += fi.complexity(s.SelectionSet, costs)
+				cost = addCost(cost, fi.complexity(s.SelectionSet, costs))
 			}
-			complexity += cost
+			complexity = addCost(complexity, cost)
 		case *ast.InlineFragment:
-			complexity += fi.complexity(s.SelectionSet, costs)
+			complexity = addCost(complexity, fi.complexity(s.SelectionSet, costs))
 		case *ast.FragmentSpread:
-			inner, release := fi.enter(s.Name)
-			if release == nil {
-				continue
-			}
-			complexity += fi.complexity(inner, costs)
-			release()
+			complexity = addCost(complexity, fi.spreadComplexity(s.Name, costs))
 		}
 	}
 	return complexity
+}
+
+// spreadComplexity is complexity for one fragment, walked once per document.
+func (fi *fragmentIndex) spreadComplexity(name string, costs map[string]int) int {
+	if c, ok := fi.complexities[name]; ok {
+		return c
+	}
+	inner, release := fi.enter(name)
+	if release == nil {
+		return 0
+	}
+	c := fi.complexity(inner, costs)
+	release()
+	fi.complexities[name] = c
+	return c
 }
 
 // fieldAuth checks a query's fields against the caller's verified claims.
@@ -463,10 +528,11 @@ type fieldAuth struct {
 	have  map[string]bool   // claims the caller actually presented
 	need  map[string]string // field name -> required claim
 	frags *fragmentIndex
+	clean map[string]bool // fragments already walked without a denial
 }
 
 func checkFieldAuth(doc *ast.QueryDocument, r *http.Request, fieldClaims map[string]string) error {
-	fa := &fieldAuth{have: callerClaimSet(r), need: fieldClaims, frags: newFragmentIndex(doc)}
+	fa := &fieldAuth{have: callerClaimSet(r), need: fieldClaims, frags: newFragmentIndex(doc), clean: make(map[string]bool)}
 	for _, op := range doc.Operations {
 		if err := fa.check(op.SelectionSet); err != nil {
 			return err
@@ -566,11 +632,22 @@ func (fa *fieldAuth) checkSelection(sel ast.Selection) error {
 // checkSpread follows a fragment spread, with the cycle guard the index owns.
 // A release of nil means the fragment is already open on this path, so the
 // document is cyclic and descending again would not terminate.
+//
+// A fragment that came back clean is not walked again: a denial ends the whole
+// check, so clean is the only result worth remembering, and remembering it is
+// what keeps a fragment spread many times from being walked many times.
 func (fa *fieldAuth) checkSpread(name string) error {
+	if fa.clean[name] {
+		return nil
+	}
 	inner, release := fa.frags.enter(name)
 	if release == nil {
 		return nil
 	}
 	defer release()
-	return fa.check(inner)
+	if err := fa.check(inner); err != nil {
+		return err
+	}
+	fa.clean[name] = true
+	return nil
 }
