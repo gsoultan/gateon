@@ -6,13 +6,13 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/testutil"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -433,11 +433,7 @@ func TestManualUnmitigationIsVisible(t *testing.T) {
 		assertManualUnmitigationVisible(t, "sqlite://"+filepath.Join(t.TempDir(), "unmitigate.db"))
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("GATEON_TEST_POSTGRES_DSN")
-		if dsn == "" {
-			t.Skip("GATEON_TEST_POSTGRES_DSN not set; skipping the Postgres run")
-		}
-		assertManualUnmitigationVisible(t, dsn)
+		assertManualUnmitigationVisible(t, testutil.PostgresDSN(t, "skipping the Postgres run"))
 	})
 }
 

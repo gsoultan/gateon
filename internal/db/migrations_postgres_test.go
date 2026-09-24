@@ -4,7 +4,7 @@
 package db
 
 import (
-	"os"
+	"github.com/gsoultan/gateon/internal/testutil"
 	"testing"
 )
 
@@ -22,10 +22,7 @@ import (
 //	GATEON_TEST_POSTGRES_DSN='postgres://user:pass@localhost:5432/db?sslmode=disable' \
 //	    go test ./internal/db/ -run Postgres
 func TestMigrate_AllMigrations_Postgres(t *testing.T) {
-	dsn := os.Getenv("GATEON_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("GATEON_TEST_POSTGRES_DSN not set; skipping Postgres migration test")
-	}
+	dsn := testutil.PostgresDSN(t, "skipping Postgres migration test")
 
 	pg, dialect, err := Open(dsn)
 	if err != nil {

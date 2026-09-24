@@ -6,8 +6,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"github.com/gsoultan/gateon/internal/testutil"
 	"net/url"
-	"os"
 	"testing"
 	"time"
 )
@@ -27,10 +27,7 @@ import (
 // The server's default zone is emulated here with the session parameter a DSN
 // can carry, which sets the same thing a postgresql.conf timezone does.
 func TestFingerprintMitigationTTLIgnoresTheDatabaseZone(t *testing.T) {
-	dsn := os.Getenv("GATEON_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("GATEON_TEST_POSTGRES_DSN not set; only Postgres renders CURRENT_TIMESTAMP in a session zone")
-	}
+	dsn := testutil.PostgresDSN(t, "only Postgres renders CURRENT_TIMESTAMP in a session zone")
 	// POSIX sign convention: Etc/GMT+5 is five hours behind UTC.
 	for _, zone := range []string{"Etc/GMT+5", "Etc/GMT-9"} {
 		t.Run(zone, func(t *testing.T) {

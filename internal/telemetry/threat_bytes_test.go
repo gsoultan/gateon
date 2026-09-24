@@ -6,7 +6,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"os"
+	"github.com/gsoultan/gateon/internal/testutil"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,11 +28,7 @@ func TestThreatCarryingBytesPostgresRefusesIsStillRecorded(t *testing.T) {
 		assertThreatWithHostileBytesRecorded(t, "sqlite://"+filepath.Join(t.TempDir(), "bytes.db"))
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("GATEON_TEST_POSTGRES_DSN")
-		if dsn == "" {
-			t.Skip("GATEON_TEST_POSTGRES_DSN not set; skipping the Postgres run")
-		}
-		assertThreatWithHostileBytesRecorded(t, dsn)
+		assertThreatWithHostileBytesRecorded(t, testutil.PostgresDSN(t, "skipping the Postgres run"))
 	})
 }
 

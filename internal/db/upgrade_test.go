@@ -6,6 +6,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"github.com/gsoultan/gateon/internal/testutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -70,6 +71,9 @@ func upgradeTargets() []upgradeTarget {
 func (target upgradeTarget) url(t *testing.T) string {
 	t.Helper()
 	if target.dsn != "" {
+		// This subtest resets the shared schema; hold the module's Postgres
+		// test lock so no other package's test is using it meanwhile.
+		testutil.LockPostgres(t, target.dsn)
 		return target.dsn
 	}
 	return "sqlite:" + filepath.Join(t.TempDir(), "gateon.db")

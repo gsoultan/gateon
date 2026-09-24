@@ -6,11 +6,11 @@ package audit
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/testutil"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -24,10 +24,7 @@ import (
 // attacker chose to shape. The entry must be written, and must still verify
 // against its own signature.
 func TestEntryCarryingBytesPostgresRefusesIsStillWritten(t *testing.T) {
-	dsn := os.Getenv("GATEON_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("GATEON_TEST_POSTGRES_DSN not set; SQLite stores these bytes and never refused them")
-	}
+	dsn := testutil.PostgresDSN(t, "SQLite stores these bytes and never refused them")
 	database, dialect, err := db.Open(dsn)
 	if err != nil {
 		t.Fatalf("open: %v", err)

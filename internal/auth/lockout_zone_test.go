@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/testutil"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -43,6 +44,9 @@ func TestLockoutLastsItsDurationInEveryLocalZone(t *testing.T) {
 		assertLockoutWindow(t, dsn, zone)
 		return
 	}
+	// The parent holds the module's Postgres test lock while its children run;
+	// they are part of this test, and taking it again there would wait forever.
+	testutil.LockPostgres(t, dsn)
 	for _, zone := range []string{"America/New_York", "Asia/Tokyo"} {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestLockoutLastsItsDurationInEveryLocalZone$", "-test.count=1")
 		cmd.Env = append(os.Environ(), "TZ="+zone, lockoutZoneEnv+"="+zone)
