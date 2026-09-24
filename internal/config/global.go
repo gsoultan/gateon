@@ -6,6 +6,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -169,7 +170,11 @@ func (r *GlobalRegistry) load() {
 			return
 		}
 	}
-	decryptSensitiveFields(cfg)
+	if err := decryptSensitiveFields(cfg); err != nil {
+		r.loadErr = fmt.Errorf("resolve secrets in %s: %w", r.path, err)
+		logger.L.LogError("global config holds a secret that cannot be read", "error", err, "path", r.path)
+		return
+	}
 	r.config.Store(cfg)
 	r.rebuildCertIndexLocked()
 	logger.L.LogInfo("loaded global config", "path", r.path)
@@ -231,22 +236,39 @@ func (r *GlobalRegistry) saveLocked() error {
 	return nil
 }
 
-func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
+// decryptSensitiveFields decrypts and resolves the secret fields in place. A
+// field that cannot be -- ciphertext without its key, a reference nothing can
+// resolve -- is an error rather than the unusable value it holds: an
+// unresolved database_url used to open a SQLite file named after the
+// reference, and an unresolved PASETO secret signed sessions with it.
+func decryptSensitiveFields(c *gateonv1.GlobalConfig) error {
 	if c == nil {
-		return
+		return nil
+	}
+	var errs []error
+	resolve := func(field string, v *string) {
+		if *v == "" {
+			return
+		}
+		out, err := ResolveSecretStrict(*v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", field, err))
+			return
+		}
+		*v = out
 	}
 	if c.Auth != nil {
-		c.Auth.PasetoSecret = ResolveSecret(c.Auth.PasetoSecret)
-		c.Auth.DatabaseUrl = ResolveSecret(c.Auth.DatabaseUrl)
-		if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
-			c.Auth.DatabaseConfig.Password = ResolveSecret(c.Auth.DatabaseConfig.Password)
+		resolve("auth.paseto_secret", &c.Auth.PasetoSecret)
+		resolve("auth.database_url", &c.Auth.DatabaseUrl)
+		if c.Auth.DatabaseConfig != nil {
+			resolve("auth.database_config.password", &c.Auth.DatabaseConfig.Password)
 		}
 	}
 	if c.Geoip != nil {
-		c.Geoip.MaxmindLicenseKey = ResolveSecret(c.Geoip.MaxmindLicenseKey)
+		resolve("geoip.maxmind_license_key", &c.Geoip.MaxmindLicenseKey)
 	}
 	if c.SecurityAdvanced != nil && c.SecurityAdvanced.Pow != nil {
-		c.SecurityAdvanced.Pow.Secret = ResolveSecret(c.SecurityAdvanced.Pow.Secret)
+		resolve("security_advanced.pow.secret", &c.SecurityAdvanced.Pow.Secret)
 		// Older installs persisted the shipped literal into global.json before
 		// the default became per-install. Re-key them on load rather than
 		// leaving a published HMAC key in service; an operator who never
@@ -258,6 +280,7 @@ func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
 				"action", "rotated", "reason", "placeholder_secret")
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // DefaultPowSecret is the literal that shipped as the proof-of-work secret

@@ -81,7 +81,16 @@ func (f *Factory) Validate(m *gateonv1.Middleware) error {
 func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, error) {
 	cfg := make(map[string]string)
 	for k, v := range m.Config {
-		cfg[k] = config.ResolveSecret(v)
+		// A value that cannot be resolved refuses the build rather than
+		// running on the reference's own text: with Vault down a JWT route
+		// used to accept tokens HMAC-signed with "$vault:...". The router
+		// serves a refusal for a security middleware that cannot be built,
+		// and retries it, so the route recovers when the secret is readable.
+		resolved, err := config.ResolveSecretStrict(v)
+		if err != nil {
+			return nil, fmt.Errorf("middleware %q config key %q: %w", m.Id, k, err)
+		}
+		cfg[k] = resolved
 	}
 	if routeID != "" {
 		if _, ok := cfg[kind.RouteIDKey]; !ok {
