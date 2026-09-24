@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -112,10 +113,42 @@ func parseURL(url string) (driver, dsn string) {
 
 	// postgres:// or postgresql://
 	if strings.HasPrefix(url, "postgres://") || strings.HasPrefix(url, "postgresql://") {
-		return DriverPostgres, url
+		return DriverPostgres, withPostgresSessionZone(url)
 	}
 
 	return "", ""
+}
+
+// postgresSessionZone is the TimeZone every Postgres session runs in.
+//
+// Several columns are TIMESTAMP without time zone and are written with
+// CURRENT_TIMESTAMP, which Postgres renders in the session's zone -- the
+// server's configured default unless the client names one. The code that reads
+// them compares against UTC wall clocks computed in Go (mitigationCutoff says
+// so), which is what SQLite's CURRENT_TIMESTAMP produces. On a server installed
+// in any other zone every such comparison moved by the zone's offset: behind
+// UTC a fingerprint block was expired the moment it was written and never
+// stopped a request, ahead of UTC a one-hour block lasted hours longer.
+const postgresSessionZone = "UTC"
+
+// withPostgresSessionZone sets the session TimeZone as a startup parameter,
+// replacing any spelling of it the DSN already carried, because what the
+// schema's timestamps mean depends on it. A DSN that does not parse is
+// returned unchanged for sql.Open to reject, and is never echoed.
+func withPostgresSessionZone(dsn string) string {
+	u, err := neturl.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	q := u.Query()
+	for key := range q {
+		if strings.EqualFold(key, "timezone") {
+			q.Del(key)
+		}
+	}
+	q.Set("timezone", postgresSessionZone)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // refusedEngine reports the scheme and display name when url names an engine

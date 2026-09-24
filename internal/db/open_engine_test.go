@@ -5,6 +5,7 @@ package db
 
 import (
 	"errors"
+	neturl "net/url"
 	"strings"
 	"testing"
 )
@@ -65,5 +66,32 @@ func TestOpenStillParsesSupportedEngines(t *testing.T) {
 				t.Errorf("parseURL(%q) = %q, want %q", tc.url, got, tc.want)
 			}
 		})
+	}
+}
+
+// A Postgres session always runs in UTC, whatever zone the DSN or the server
+// asked for, and the rest of the DSN survives the rewrite. What this protects
+// is tested end to end by TestFingerprintMitigationTTLIgnoresTheDatabaseZone in
+// internal/telemetry; this pins the rewrite itself, including the spellings
+// that would otherwise reach the server as a second, competing parameter.
+func TestPostgresSessionZoneIsPinnedToUTC(t *testing.T) {
+	for _, dsn := range []string{
+		"postgres://u:p%40ss@h:5432/d?sslmode=disable",
+		"postgres://u:p%40ss@h:5432/d?sslmode=disable&timezone=Asia/Jakarta",
+		"postgresql://u:p%40ss@h:5432/d?TimeZone=America%2FNew_York&sslmode=disable",
+	} {
+		_, got := parseURL(dsn)
+		u, err := neturl.Parse(got)
+		if err != nil {
+			t.Fatalf("rewritten DSN does not parse: %v", err)
+		}
+		q := u.Query()
+		if len(q) != 2 || q.Get("timezone") != "UTC" || q.Get("sslmode") != "disable" {
+			t.Errorf("%s: parameters after the rewrite are %v, want sslmode=disable and timezone=UTC only",
+				u.Redacted(), q)
+		}
+		if pw, _ := u.User.Password(); pw != "p@ss" || u.Host != "h:5432" || u.Path != "/d" {
+			t.Errorf("the rewrite changed the connection target: %s", u.Redacted())
+		}
 	}
 }
