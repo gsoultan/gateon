@@ -86,10 +86,22 @@ func resolveBotSecret(cfg map[string]string, g *gateonv1.BotManagementConfig, d 
 	return fallbackBotSecret()
 }
 
+// routeSwitchesACheckOn reports whether the route's own config turns one of the
+// checks on, which is the route saying it wants bot management.
+func routeSwitchesACheckOn(cfg map[string]string) bool {
+	return cfg["enable_js_challenge"] == "true" || cfg["enable_browser_integrity"] == "true"
+}
+
 func NewBotManagement(cfg map[string]string, d Deps) (kind.Middleware, error) {
 	g := globalBotManagement(d)
 
-	enabled := boolSetting(cfg, "enabled", g.GetEnabled())
+	// An absent "enabled" follows the global switch unless the route itself
+	// switches a check on. The dashboard's route editor writes the check
+	// switches and never "enabled", and the global switch defaults to off, so
+	// following it alone left every dashboard-built middleware passing all
+	// traffic through while its editor showed the JS challenge on. An explicit
+	// enabled=false still turns the middleware off.
+	enabled := boolSetting(cfg, "enabled", g.GetEnabled() || routeSwitchesACheckOn(cfg))
 	enableJS := boolSetting(cfg, "enable_js_challenge", g.GetEnableJsChallenge())
 	enableIntegrity := boolSetting(cfg, "enable_browser_integrity", g.GetEnableBrowserIntegrity())
 

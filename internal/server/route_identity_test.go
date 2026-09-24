@@ -236,6 +236,31 @@ func TestBotManagementCountsAgainstItsRoute(t *testing.T) {
 	}
 }
 
+// TestBotManagementAsTheDashboardSavesItChallenges builds the middleware from
+// exactly the keys the dashboard editor writes -- the two check switches and
+// the timeout, never "enabled" -- on an install with default global settings.
+// The factory read the missing "enabled" as "follow the global switch", which
+// defaults to off, so the route passed every request through while its editor
+// showed the JS challenge switched on.
+func TestBotManagementAsTheDashboardSavesItChallenges(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "origin")
+	}))
+	defer backend.Close()
+
+	gw := routeIdentityGateway(t, backend.URL,
+		&gateonv1.Route{Id: "dash-bot-route", Rule: "PathPrefix(`/`)", Type: "http"},
+		&gateonv1.Middleware{Id: "dash-bots", Name: "dash-bots", Type: "bot_management", Config: map[string]string{
+			"enable_js_challenge": "true", "challenge_timeout": "3600",
+		}})
+
+	rec := serveRecorded(gw, httptest.NewRequest(http.MethodGet, "http://bot.test/", nil))
+	if rec.Body.String() == "origin" {
+		t.Fatal("a client with no challenge cookie reached the origin: the route's bot management is " +
+			"switched on in its editor and does nothing")
+	}
+}
+
 // TestFileSecurityFilesItsBlocksAgainstItsRoute uploads a file over the size
 // cap and reads the resulting threat off the live feed the Security Hub uses.
 func TestFileSecurityFilesItsBlocksAgainstItsRoute(t *testing.T) {
