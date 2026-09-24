@@ -592,14 +592,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Cosmetic middlewares are exempt and only warn: a route that loses a
 	// header rewrite renders slightly wrong, which is not worth an outage.
 	if len(missingSecurity) > 0 {
-		refused := append([]string(nil), missingSecurity...)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logger.L.LogError("refusing request: route is missing security middleware",
-				"route", routeLabel, "missing", strings.Join(refused, ","),
-				"path", r.URL.Path)
-			http.Error(w, "Service Unavailable: route configuration incomplete",
-				http.StatusServiceUnavailable)
-		})
+		return newRefusedChain(routeLabel, missingSecurity)
 	}
 
 	if hasCORS {
