@@ -54,7 +54,10 @@ func (f *backendTransportFactory) HealthCheckTransport() http.RoundTripper {
 		return v.(http.RoundTripper)
 	}
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.TLSClientConfig = f.tlsConfig
+	// A clone, never the factory's own config: net/http edits a Transport's
+	// TLSClientConfig in place when it sets up HTTP/2, and every other backend
+	// transport is cloned from f.tlsConfig concurrently.
+	t.TLSClientConfig = f.tlsConfig.Clone()
 	if v, loaded := f.cache.LoadOrStore(healthCheckTransportKey, t); loaded {
 		return v.(http.RoundTripper)
 	}
