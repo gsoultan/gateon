@@ -4,6 +4,8 @@
 package transform
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -11,7 +13,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
 func NewHeaders(cfg map[string]string) (kind.Middleware, error) {
@@ -27,20 +28,80 @@ func NewHeaders(cfg map[string]string) (kind.Middleware, error) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reqOps.applyTo(r.Header)
 
-			sw := &httputil.StatusResponseWriter{ResponseWriter: w, Status: http.StatusOK}
-			respOps.applyTo(sw.Header())
-
-			// Before next, like the set_response_ headers above: once the
-			// response has been written the header map is on the wire, and a
-			// Set after it changes nothing. This used to run after next and so
-			// never reached a client. request.IsSecure rather than r.TLS, which
-			// is nil behind a TLS-terminating proxy.
+			// request.IsSecure rather than r.TLS, which is nil behind a
+			// TLS-terminating proxy.
+			hw := &headersWriter{ResponseWriter: w, ops: respOps}
 			if stsValue != "" && (forceSTSHeader || request.IsSecure(r)) {
-				sw.Header().Set("Strict-Transport-Security", stsValue)
+				hw.sts = stsValue
 			}
-			next.ServeHTTP(sw, r)
+			next.ServeHTTP(hw, r)
 		})
 	}, nil
+}
+
+// headersWriter applies the response rules at the moment the response is
+// committed, which is the only moment they can work.
+//
+// They used to be applied to the header map before next ran, when it held
+// nothing of the backend's; the reverse proxy then Adds every backend header
+// to that map. A del_response_ rule deleted a header that was not there yet,
+// so X-Powered-By and Server came back, and a set_response_ value was joined
+// by the backend's own as a second value -- for Referrer-Policy the last one
+// wins, and it was the backend's. Applying them in WriteHeader sees the
+// finished map, and it is still before anything is on the wire.
+type headersWriter struct {
+	http.ResponseWriter
+	ops       headerOps
+	sts       string
+	committed bool
+}
+
+func (w *headersWriter) commit() {
+	if w.committed {
+		return
+	}
+	w.committed = true
+	h := w.Header()
+	w.ops.applyTo(h)
+	if w.sts != "" {
+		h.Set("Strict-Transport-Security", w.sts)
+	}
+}
+
+func (w *headersWriter) WriteHeader(code int) {
+	// An informational response is not the response; its headers go out on
+	// their own and the final ones are still being assembled.
+	if code >= http.StatusOK {
+		w.commit()
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *headersWriter) Write(b []byte) (int, error) {
+	w.commit()
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush forwards to the underlying writer, committing the headers first,
+// since flushing is what puts them on the wire.
+func (w *headersWriter) Flush() {
+	w.commit()
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer for the
+// controls this wrapper does not forward itself, such as write deadlines.
+func (w *headersWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// Hijack forwards to the underlying writer so upgrades keep working behind
+// this middleware.
+func (w *headersWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }
 
 // headerOp is one configured mutation, with its prefix already stripped.

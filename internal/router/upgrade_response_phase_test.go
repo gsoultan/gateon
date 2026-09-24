@@ -59,10 +59,22 @@ func TestUpgradeHeaderDoesNotBypassResponseInspection(t *testing.T) {
 	}
 }
 
-// newDLPGateway serves one route to backendURL through ApplyRouteMiddlewares
-// with the global WAF's data-leak inspection on, behind the entrypoint
-// middleware, on a real listener so the proxy can hijack a connection.
+// newDLPGateway serves one route to backendURL with the global WAF's
+// data-leak inspection on.
 func newDLPGateway(t *testing.T, backendURL string) string {
+	t.Helper()
+	rt := &gateonv1.Route{Id: "r-dlp", ServiceId: "svc", Rule: "PathPrefix(`/`)", Type: "http"}
+	gStore := fakeGlobalStore{cfg: &gateonv1.GlobalConfig{
+		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, Dlp: true, ParanoiaLevel: 2},
+	}}
+	return newRouteGateway(t, backendURL, rt, fakeMWStore{}, gStore)
+}
+
+// newRouteGateway serves rt, whose service "svc" points at backendURL, through
+// ApplyRouteMiddlewares and the real ProxyHandler, behind the entrypoint
+// middleware, on a real listener so the proxy can hijack a connection. It
+// returns the listener's address.
+func newRouteGateway(t *testing.T, backendURL string, rt *gateonv1.Route, mwStore fakeMWStore, gStore fakeGlobalStore) string {
 	t.Helper()
 	services := config.NewServiceRegistry(filepath.Join(t.TempDir(), "services.json"))
 	if err := services.Update(context.Background(), &gateonv1.Service{
@@ -70,14 +82,10 @@ func newDLPGateway(t *testing.T, backendURL string) string {
 	}); err != nil {
 		t.Fatalf("update service: %v", err)
 	}
-	rt := &gateonv1.Route{Id: "r-dlp", ServiceId: "svc", Rule: "PathPrefix(`/`)", Type: "http"}
 	ph := proxy.NewProxyHandler(rt, services)
 	t.Cleanup(ph.Close)
 
-	gStore := fakeGlobalStore{cfg: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, Dlp: true, ParanoiaLevel: 2},
-	}}
-	chain := ApplyRouteMiddlewares(ph, rt, nil, fakeMWStore{}, gStore, nil, nil)
+	chain := ApplyRouteMiddlewares(ph, rt, nil, mwStore, gStore, nil, nil)
 	srv := httptest.NewServer(middleware.EntryPoint("web", "web", false)(chain))
 	t.Cleanup(srv.Close)
 	return srv.Listener.Addr().String()
