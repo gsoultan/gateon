@@ -163,6 +163,13 @@ func (s *failOpenAPI) ChangePassword(_ context.Context, req *gateonv1.ChangePass
 	return &gateonv1.ChangePasswordResponse{Success: true}, nil
 }
 
+// IsSetupRequired reports the first-run window, the only state in which
+// /v1/setup reads a body at all: once setup is done the handler refuses before
+// decoding anything.
+func (s *failOpenAPI) IsSetupRequired(context.Context, *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error) {
+	return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
+}
+
 func (s *failOpenAPI) Setup2FA(_ context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error) {
 	s.setup2FACalled = true
 	s.setup2FAID = req.Id

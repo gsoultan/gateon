@@ -486,6 +486,18 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	})
 	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		// Refuse before anything else once setup is done. This path skips
+		// authentication for the life of the process, and the database branch
+		// below writes global config: it used to persist a caller-supplied
+		// authentication and audit database before Setup's own "already
+		// completed" check ran, so on a configured gateway an unauthenticated
+		// request could repoint both at a server it controls -- and the gateway
+		// trusts that server's users on its next start. An unknown setup state
+		// is refused for the reason test-db gives.
+		if setupReq, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{}); err != nil || !setupReq.Required {
+			WriteHTTPError(w, http.StatusForbidden, "setup already completed")
+			return
+		}
 		// Accept extended payload including database settings for first-run wizard
 		type setupBody struct {
 			AdminUsername         string                   `json:"admin_username"`
