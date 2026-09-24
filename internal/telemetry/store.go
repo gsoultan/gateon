@@ -1025,6 +1025,7 @@ func (s *pathStatsStore) loop() {
 			flush()
 			timer.Reset(flushInterval())
 		case ack := <-s.flushCh:
+			batch, traceBatch, threatBatch = s.drainQueued(batch, traceBatch, threatBatch)
 			flush()
 			close(ack)
 		case <-pruneTicker.C:
@@ -1034,6 +1035,36 @@ func (s *pathStatsStore) loop() {
 			return
 		}
 	}
+}
+
+// drainQueued takes everything already waiting on the intake channels, so that
+// a flush request cannot overtake the records queued ahead of it.
+//
+// FlushThreats promises that what was enqueued before it has been processed
+// when it returns, and the release path depends on that: it flushes so that a
+// threat still in the queue cannot re-penalise a client after the operator
+// releases it. But the loop takes the intake and the flush request from one
+// select, which picks at random among ready cases, so the flush usually ran
+// with most of the queue still behind it.
+//
+// Bounded by what is queued on entry: the loop is the only receiver, so that
+// many receives cannot block, and a producer that keeps sending cannot keep
+// the flush waiting.
+func (s *pathStatsStore) drainQueued(batch []increment, traces []*TraceRecord, threats []*SecurityThreat) ([]increment, []*TraceRecord, []*SecurityThreat) {
+	for range len(s.threatInCh) {
+		th := <-s.threatInCh
+		s.processThreat(th)
+		threats = append(threats, th)
+	}
+	for range len(s.traceInCh) {
+		tr := <-s.traceInCh
+		s.processTrace(tr)
+		traces = append(traces, tr)
+	}
+	for range len(s.inCh) {
+		batch = append(batch, <-s.inCh)
+	}
+	return batch, traces, threats
 }
 
 // flushInterval is how long the writer waits between timed flushes, taken from
