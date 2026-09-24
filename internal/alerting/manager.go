@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/ebpf"
@@ -22,7 +23,29 @@ type AlertingManager struct {
 	config      *gateonv1.AlertingConfig
 	dispatchers map[string]Dispatcher
 	ebpfManager ebpf.Manager
+
+	// sending counts deliveries in flight and dropped those refused because
+	// maxAlertSends already were; see dispatch.
+	sending atomic.Int32
+	dropped atomic.Int64
 }
+
+const (
+	// alertSendTimeout bounds one delivery attempt.
+	alertSendTimeout = 10 * time.Second
+
+	// maxAlertSends caps the deliveries in flight at once, across every
+	// dispatcher.
+	//
+	// Threats arrive at whatever rate an attacker drives them -- every blocked
+	// request is one -- and each matching playbook started a goroutine per
+	// threat per dispatcher, holding an outbound connection for up to
+	// alertSendTimeout. With the endpoint stalled nothing bounded that. Past
+	// the cap a delivery is dropped and counted: an alert channel flooded at
+	// that rate is not being read anyway, and the gateway's own goroutines and
+	// file descriptors are not the place to queue it.
+	maxAlertSends = 32
+)
 
 // Dispatcher is the interface for alert delivery.
 type Dispatcher interface {
@@ -197,13 +220,7 @@ func normalizeTrigger(s string) string {
 func (m *AlertingManager) executePlaybook(pb *gateonv1.AlertPlaybook, threat telemetry.SecurityThreat) {
 	for _, dID := range pb.DispatcherIds {
 		if d, ok := m.dispatchers[dID]; ok {
-			go func(disp Dispatcher, t telemetry.SecurityThreat) {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				if err := disp.Send(ctx, t); err != nil {
-					logger.L.LogError("failed to send alert", "dispatcher", dID, "error", err)
-				}
-			}(d, threat)
+			m.dispatch(dID, d, threat)
 		}
 	}
 
@@ -215,4 +232,29 @@ func (m *AlertingManager) executePlaybook(pb *gateonv1.AlertPlaybook, threat tel
 			logger.L.LogInfo("playbook automatically shunned IP", "ip", threat.SourceIP, "playbook", pb.Name)
 		}
 	}
+}
+
+// dispatch delivers one alert on its own goroutine, unless maxAlertSends are
+// already in flight, in which case it is dropped and counted. It never blocks:
+// it runs on the telemetry writer's goroutine, which every threat passes
+// through.
+func (m *AlertingManager) dispatch(id string, d Dispatcher, threat telemetry.SecurityThreat) {
+	if m.sending.Add(1) > maxAlertSends {
+		m.sending.Add(-1)
+		// Logged on the first drop and then every thousandth, so a flood of
+		// refused alerts does not become a flood of log lines instead.
+		if n := m.dropped.Add(1); n == 1 || n%1000 == 0 {
+			logger.L.LogWarn("alert dropped: too many deliveries already in flight",
+				"dispatcher", id, "in_flight_limit", maxAlertSends, "dropped_total", n)
+		}
+		return
+	}
+	go func() {
+		defer m.sending.Add(-1)
+		ctx, cancel := context.WithTimeout(context.Background(), alertSendTimeout)
+		defer cancel()
+		if err := d.Send(ctx, threat); err != nil {
+			logger.L.LogError("failed to send alert", "dispatcher", id, "error", err)
+		}
+	}()
 }
