@@ -69,6 +69,12 @@ collected: GOMEMLIMIT bounds the heap, while the pod's limit covers the heap
 plus stacks, the allocator's own metadata and anything mmapped. The 20% is that
 gap. Explicit memoryLimit wins; with no limit at all the runtime is left alone,
 because guessing a ceiling for an unbounded pod is worse than having none.
+
+The number is parsed as a float. sprig's `int` returns 0 for "1.5", so a limit
+of 1.5Gi used to render GOMEMLIMIT="0MiB" -- which the Go runtime accepts as a
+zero-byte ceiling and answers by collecting continuously. A result below one
+MiB renders nothing for the same reason. internal/config's
+helm_memory_limit_test.go runs helm over this.
 */}}
 {{- define "gateon.memoryLimit" -}}
 {{- if .Values.memoryLimit -}}
@@ -76,10 +82,15 @@ because guessing a ceiling for an unbounded pod is worse than having none.
 {{- else if .Values.resources.limits -}}
 {{- if .Values.resources.limits.memory -}}
 {{- $mem := .Values.resources.limits.memory | toString -}}
+{{- $mib := 0.0 -}}
 {{- if hasSuffix "Gi" $mem -}}
-{{- printf "%dMiB" (div (mul (int (trimSuffix "Gi" $mem)) 1024 80) 100) -}}
+{{- $mib = mulf (float64 (trimSuffix "Gi" $mem)) 1024 -}}
 {{- else if hasSuffix "Mi" $mem -}}
-{{- printf "%dMiB" (div (mul (int (trimSuffix "Mi" $mem)) 80) 100) -}}
+{{- $mib = float64 (trimSuffix "Mi" $mem) -}}
+{{- end -}}
+{{- $limit := int (floor (divf (mulf $mib 80) 100)) -}}
+{{- if gt $limit 0 -}}
+{{- printf "%dMiB" $limit -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
