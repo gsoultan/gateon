@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -942,8 +943,10 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 func releaseFingerprintMitigation(source, ja4plus, ja4h string) bool {
 	// Reputation is reset either way: it is a separate decay, not the block, and
 	// an operator who asked for a release should get it even when the block they
-	// were looking at has already expired.
-	telemetry.ResetReputation(source)
+	// were looking at has already expired. Every network's score for the class,
+	// because that is where the scores are: the bare fingerprint is not a key the
+	// reputation blocker reads.
+	telemetry.ResetReputationClass(source)
 
 	key := ja4plus
 	if key == "" {
@@ -1008,13 +1011,20 @@ func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityT
 }
 
 func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
-	// 1. Reset reputation for the IP itself
-	telemetry.ResetReputation(ip)
+	// 1. Reset reputation for the IP itself: the identity a threat carrying no
+	// fingerprint is scored under.
+	telemetry.ResetReputation(repid.For("", ip))
 
 	// 2. Find and reset reputation for all associated fingerprints (JA4, etc.)
+	//
+	// Under the key the reputation blocker reads: the fingerprint scoped to this
+	// address's network, never the bare fingerprint (ADR 0011). Resetting the
+	// bare one cleared a key the recording path stopped writing when scores were
+	// scoped, so a release answered "removed successfully" while the client kept
+	// its score of zero and its 403 on every route.
 	fps := telemetry.GetAssociatedFingerprints(ctx, ip)
 	for _, fp := range fps {
-		telemetry.ResetReputation(fp)
+		telemetry.ResetReputation(repid.For(fp, ip))
 		// Also remove user mitigation if it exists
 		telemetry.MarkUserUnmitigated(fp)
 	}

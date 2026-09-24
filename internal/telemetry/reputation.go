@@ -408,6 +408,40 @@ func ResetReputation(fingerprint string) {
 	BroadcastReputation(fingerprint, 100, 0, []string{"Manual reset"})
 }
 
+// ResetReputationClass resets every score recorded for one fingerprint class,
+// on every network, and returns how many network-scoped scores it cleared.
+//
+// A score is stored under repid.For(fingerprint, network), never under the
+// class alone (ADR 0011), so resetting the bare class -- which is what a
+// release of a fingerprint used to do -- cleared a key nothing writes and left
+// every score the reputation blocker reads exactly where it was. The class is
+// the composite's prefix, so the scores that belong to it can be found without
+// knowing the networks in advance. The bare key is reset too, for a peer that
+// still gossips it.
+//
+// This walks every shard, which is fine for an operator's release and would not
+// be on the request path.
+func ResetReputationClass(class string) int {
+	if class == "" {
+		return 0
+	}
+	var keys []string
+	for _, shard := range repShards {
+		shard.mu.RLock()
+		for _, k := range shard.cache.Keys() {
+			if key, ok := k.(string); ok && key != class && repid.ClassOf(key) == class {
+				keys = append(keys, key)
+			}
+		}
+		shard.mu.RUnlock()
+	}
+	for _, key := range keys {
+		ResetReputation(key)
+	}
+	ResetReputation(class)
+	return len(keys)
+}
+
 type ReputationRecord struct {
 	Fingerprint    string
 	Score          float64
