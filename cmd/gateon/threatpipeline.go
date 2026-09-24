@@ -40,6 +40,10 @@ const envShipRawThreats = "GATEON_SIEM_RAW_THREATS"
 // via GATEON_SIEM_* environment variables. All goroutines exit when ctx is
 // cancelled.
 func startThreatPipeline(ctx context.Context, version string, shun mitigation.Shunner) {
+	// First, and whatever the tier decides about correlation below: the
+	// allowlist governs the request path's enforcement, not only the responder.
+	publishMitigationAllowlist()
+
 	shipper := initSIEMShipper(ctx, version)
 	shipRaw := shipper != nil && boolEnvTrue(envShipRawThreats)
 
@@ -80,6 +84,39 @@ func startThreatPipeline(ctx context.Context, version string, shun mitigation.Sh
 	// correlation engine and/or raw SIEM shipping.
 	if correlate || shipRaw {
 		go consumeThreats(ctx, signals, shipper, shipRaw, correlate)
+	}
+}
+
+// publishMitigationAllowlist installs GATEON_MITIGATION_ALLOWLIST where every
+// enforcement site reads it: the reputation blocker, the honeypot, the tarpit
+// and proof-of-work all ask mitigation.IsAllowlisted.
+//
+// The list moved to internal/security/mitigation so that it would be a property
+// of the deployment rather than a field on one component, but nothing called
+// SetAllowlist outside tests, so IsAllowlisted answered false for every address
+// and the setting reached only the responder, which parses its own copy.
+//
+// Entries that do not parse are counted in the log, because an allowlist whose
+// only entry has a typo in it is otherwise indistinguishable from no allowlist.
+func publishMitigationAllowlist() {
+	raw := os.Getenv(envMitigationAllowlist)
+	prefixes := mitigation.ParseAllowlist(raw)
+	mitigation.SetAllowlist(prefixes)
+
+	entries := 0
+	for part := range strings.SplitSeq(raw, ",") {
+		if strings.TrimSpace(part) != "" {
+			entries++
+		}
+	}
+	if entries == 0 {
+		return
+	}
+	logger.L.LogInfo("mitigation allowlist published to every enforcement site",
+		"prefixes", len(prefixes))
+	if skipped := entries - len(prefixes); skipped > 0 {
+		logger.L.LogWarn("mitigation allowlist entries could not be parsed and are not allowlisted",
+			"variable", envMitigationAllowlist, "skipped", skipped)
 	}
 }
 
