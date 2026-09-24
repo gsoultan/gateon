@@ -60,17 +60,29 @@ func shutdownHTTPServer(ctx context.Context, srv *http.Server) error {
 	return err
 }
 
-// ShutdownAll runs all registered shutdown functions with the given context.
+// ShutdownAll runs every registered shutdown function against ctx at the same
+// time, and returns once all of them have.
+//
+// At the same time, because ctx carries one deadline for the whole process.
+// Called in turn, a server with a request that never finishes by itself -- the
+// management listener with a dashboard tab open is enough -- spent that entire
+// deadline draining, while every server registered after it kept its listener
+// open and accepting for the whole window and was then handed an expired
+// context: closed with no drain at all.
 func (r *ShutdownRegistry) ShutdownAll(ctx context.Context) {
 	r.mu.Lock()
 	list := make([]func(context.Context) error, len(r.funcs))
 	copy(list, r.funcs)
 	r.mu.Unlock()
+	var wg sync.WaitGroup
 	for _, fn := range list {
-		if err := fn(ctx); err != nil {
-			logger.L.LogDebug("shutdown callback error", "error", err)
-		}
+		wg.Go(func() {
+			if err := fn(ctx); err != nil {
+				logger.L.LogDebug("shutdown callback error", "error", err)
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // L4Resolver resolves L4 backends from Route -> Service. Nil for HTTP-only setups.

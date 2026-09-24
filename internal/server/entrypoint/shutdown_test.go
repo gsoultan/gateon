@@ -77,6 +77,48 @@ func TestSharedHTTPServerShutdownReturns(t *testing.T) {
 	shutdownWithin(t, deps.ShutdownRegistry, 200*time.Millisecond)
 }
 
+// TestShutdownAllGivesEveryServerTheWholeWindow pins what the shared deadline
+// means: each registered server gets to drain against it, not whatever the
+// servers registered before it left over.
+//
+// The first function stands in for the management listener with a dashboard
+// tab open: its stream never ends on its own, so it uses the entire window.
+// ShutdownAll used to call the functions in turn, so every entrypoint
+// registered after it kept its listener open and accepting for the whole 30s
+// and was then handed an expired context -- closed with no drain at all.
+func TestShutdownAllGivesEveryServerTheWholeWindow(t *testing.T) {
+	reg := &ShutdownRegistry{}
+	firstDone := make(chan struct{})
+	reg.Register(func(ctx context.Context) error {
+		defer close(firstDone)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	secondCalled := make(chan error, 1)
+	reg.Register(func(ctx context.Context) error {
+		secondCalled <- ctx.Err()
+		return nil
+	})
+
+	shutdownWithin(t, reg, 300*time.Millisecond)
+
+	select {
+	case err := <-secondCalled:
+		if err != nil {
+			t.Fatalf("the second server was asked to shut down with a context that had "+
+				"already expired (%v): it could not drain anything, and its listener "+
+				"stayed open while the first server used the whole window", err)
+		}
+	default:
+		t.Fatal("ShutdownAll returned without shutting down the second server")
+	}
+	select {
+	case <-firstDone:
+	default:
+		t.Fatal("ShutdownAll returned before the first server finished shutting down")
+	}
+}
+
 // addrCapture is a PhantomCore whose only job is to report the address each
 // listener was bound to, so a test can start an entrypoint on port 0 and still
 // know where to connect.
