@@ -342,7 +342,18 @@ func initConfigRegistries() (*config.GlobalRegistry, string) {
 			"(WAF disabled) — set GATEON_CONFIG_DIR or GLOBAL_CONFIG_FILE if this is unintended",
 			"path", globalFile, "config_dir", config.ConfigDir())
 	}
-	return config.NewGlobalRegistry(globalFile), globalFile
+	reg := config.NewGlobalRegistry(globalFile)
+	// A file that is there and cannot be used is not a first run. Going on
+	// would serve the built-in defaults -- the WAF off, the management plane
+	// open to every address, auth on a fresh local SQLite file with no
+	// administrator, which reopens Setup -- while the file on disk says
+	// something else entirely. Refusing is noticed in minutes; that was not.
+	if err := reg.LoadErr(); err != nil {
+		logger.Fatal("global config exists but cannot be used; refusing to start on built-in defaults "+
+			"— fix the file named here, or move it aside to run first-time setup",
+			"error", err)
+	}
+	return reg, globalFile
 }
 
 func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {

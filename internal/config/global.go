@@ -39,6 +39,10 @@ type GlobalRegistry struct {
 	// proof-of-work secret, and regenerating it on each load would invalidate
 	// every challenge in flight.
 	defaults *gateonv1.GlobalConfig
+
+	// loadErr is why the file at path exists and did not become the
+	// configuration. See LoadErr.
+	loadErr error
 }
 
 var (
@@ -130,6 +134,7 @@ func (r *GlobalRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
+			r.loadErr = fmt.Errorf("read %s: %w", r.path, err)
 			logger.L.LogError("failed to read global config file", "error", err, "path", r.path)
 		}
 		return
@@ -153,11 +158,13 @@ func (r *GlobalRegistry) load() {
 
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
+			r.loadErr = fmt.Errorf("parse %s: %w", r.path, err)
 			logger.L.LogError("failed to unmarshal global config yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, cfg); err != nil {
+			r.loadErr = fmt.Errorf("parse %s: %w", r.path, err)
 			logger.L.LogError("failed to unmarshal global config json", "error", err, "path", r.path)
 			return
 		}
@@ -179,7 +186,28 @@ func (r *GlobalRegistry) rebuildCertIndexLocked() {
 	r.certIndex.Store(&idx)
 }
 
+// LoadErr reports why the global config file exists and was not loaded -- it
+// could not be read, or could not be parsed -- or nil when it was loaded or does
+// not exist. An absent file is the first run, which reaches the setup wizard
+// through it; a present one that failed is not, and the registry is then
+// serving the built-in defaults: the WAF off, the management plane open to
+// every address, no auth database. Startup refuses on it rather than run a
+// configuration nobody chose while the file on disk says otherwise.
+func (r *GlobalRegistry) LoadErr() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.loadErr
+}
+
 func (r *GlobalRegistry) saveLocked() error {
+	// The file holds the operator's configuration, and the registry holds the
+	// defaults it fell back to. Writing would replace the one with the other --
+	// which the startup bootstrap did, filling in the auth block it found
+	// missing -- so that correcting the typo afterwards had nothing left to
+	// correct. Nothing is written over a file that was never read.
+	if r.loadErr != nil {
+		return fmt.Errorf("refusing to overwrite a global config that failed to load: %w", r.loadErr)
+	}
 	cfg := r.config.Load()
 	if cfg == nil {
 		return nil
