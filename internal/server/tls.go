@@ -240,23 +240,23 @@ func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base
 	// Same reasoning as SetupSNI: this runs inside the handshake, so the TLS
 	// option lookup below belongs to the connection being negotiated.
 	ctx := hello.Context()
-	var certs []tls.Certificate
 
-	// Handle ACME if enabled for this route
+	// Where the certificate comes from is the only thing ACME changes. The
+	// ACME branch used to return here, before the route's TLS option was
+	// applied, so an ACME route configured for mTLS asked no client for a
+	// certificate and ignored the option's version and cipher floor too.
+	var cfg *tls.Config
 	if rt.Tls.AcmeEnabled && len(rt.Tls.CertificateIds) == 0 {
-		cfg := base.Clone()
+		cfg = base.Clone()
 		cfg.GetCertificate = manager.GetCertificate
-		identity.SetFingerprints(hello.Conn, getFp())
-		return cfg
+	} else {
+		certs := routeCertificates(rt, manager, deps)
+		if len(certs) == 0 {
+			return nil
+		}
+		cfg = base.Clone()
+		cfg.Certificates = certs
 	}
-
-	certs = routeCertificates(rt, manager, deps)
-	if len(certs) == 0 {
-		return nil
-	}
-
-	cfg := base.Clone()
-	cfg.Certificates = certs
 	identity.SetFingerprints(hello.Conn, getFp())
 
 	if rt.Tls.OptionId != "" {
