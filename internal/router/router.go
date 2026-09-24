@@ -68,10 +68,19 @@ func parseRule(rule string) Matcher {
 		return Matcher{}
 	}
 
-	// Basic negation support
+	// Basic negation support. The '!' chain is peeled in a loop, not by
+	// recursing once per '!': a rule is operator input as long as the API body
+	// allows, and a few hundred thousand frames exhaust the goroutine stack,
+	// which is a fatal error no recover can catch -- on the request path and
+	// inside the TLS handshake, where this is parsed.
 	if strings.HasPrefix(rule, "!") {
-		m := parseRule(strings.TrimSpace(rule[1:]))
-		m.negated = !m.negated
+		negated := false
+		for strings.HasPrefix(rule, "!") {
+			negated = !negated
+			rule = strings.TrimSpace(rule[1:])
+		}
+		m := parseRule(rule)
+		m.negated = negated
 		return m
 	}
 
