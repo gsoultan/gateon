@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -159,7 +160,6 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 		// run on behalf of a connection that no longer exists. hello.Context()
 		// is cancelled when the handshake concludes either way.
 		ctx := hello.Context()
-		sniHost := strings.TrimSpace(hello.ServerName)
 		var fingerprints *identity.Fingerprints // lazy-calc fingerprints
 
 		getFp := func() identity.Fingerprints {
@@ -170,53 +170,24 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 			return *fingerprints
 		}
 
-		if sniHost != "" {
-			// Strip port from SNI if present
-			if idx := strings.LastIndex(sniHost, ":"); idx > 0 {
-				sniHost = sniHost[:idx]
+		// Exact-host routes first (O(1) lookup), then wildcards; the first
+		// route whose configuration is cached or builds is the one served.
+		var selected *tls.Config
+		deps.eachRouteForSNI(ctx, normalizeSNI(hello.ServerName), func(rt *gateonv1.Route) bool {
+			if cached, ok := tlsConfigCache.Load(rt.Id); ok {
+				identity.SetFingerprints(hello.Conn, getFp())
+				selected = cached.(*tls.Config)
+				return false
 			}
-			sniHost = strings.ToLower(sniHost)
-
-			// Fast-path: O(1) exact host lookup
-			exactRoutes := deps.RouteStore.GetByHost(sniHost)
-			for _, rt := range exactRoutes {
-				if rt.Disabled || rt.Tls == nil {
-					continue
-				}
-
-				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
-					identity.SetFingerprints(hello.Conn, getFp())
-					return cached.(*tls.Config), nil
-				}
-
-				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
-					tlsConfigCache.Store(rt.Id, newCfg)
-					return newCfg, nil
-				}
+			if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
+				tlsConfigCache.Store(rt.Id, newCfg)
+				selected = newCfg
+				return false
 			}
-
-			for _, rt := range deps.RouteStore.ListWildcards(ctx) {
-				if rt.Disabled || rt.Tls == nil {
-					continue
-				}
-				routeHost := router.HostFromRule(rt.Rule)
-				if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
-					continue
-				}
-				if rt.Tls.OptionId != "" {
-					if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok && opt.SniStrict {
-						continue
-					}
-				}
-				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
-					identity.SetFingerprints(hello.Conn, getFp())
-					return cached.(*tls.Config), nil
-				}
-				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
-					tlsConfigCache.Store(rt.Id, newCfg)
-					return newCfg, nil
-				}
-			}
+			return true
+		})
+		if selected != nil {
+			return selected, nil
 		}
 
 		// Fallback: use global TLS config
@@ -233,6 +204,109 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 			}
 		}
 		return nil, nil
+	}
+}
+
+// normalizeSNI puts a handshake's server name into the spelling routes are
+// looked up by: trimmed, port removed, lower-cased.
+func normalizeSNI(serverName string) string {
+	sniHost := strings.TrimSpace(serverName)
+	if idx := strings.LastIndex(sniHost, ":"); idx > 0 {
+		sniHost = sniHost[:idx]
+	}
+	return strings.ToLower(sniHost)
+}
+
+// eachRouteForSNI visits, in the order a handshake tries them, the routes
+// whose TLS configuration a handshake naming sniHost may be served under:
+// enabled TLS routes for exactly that host, then wildcard TLS routes covering
+// it whose option is not sni_strict. visit returns false to stop.
+//
+// It is the one enumeration both the handshake and routeTLSPolicyHonoured use,
+// so the name a request is checked against cannot drift from the name its
+// connection was negotiated under.
+func (d SNIDeps) eachRouteForSNI(ctx context.Context, sniHost string, visit func(*gateonv1.Route) bool) {
+	if sniHost == "" {
+		return
+	}
+	for _, rt := range d.RouteStore.GetByHost(sniHost) {
+		if rt.Disabled || rt.Tls == nil {
+			continue
+		}
+		if !visit(rt) {
+			return
+		}
+	}
+	for _, rt := range d.RouteStore.ListWildcards(ctx) {
+		if rt.Disabled || rt.Tls == nil {
+			continue
+		}
+		routeHost := router.HostFromRule(rt.Rule)
+		if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
+			continue
+		}
+		if rt.Tls.OptionId != "" && d.TLSOptStore != nil {
+			if opt, ok := d.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok && opt.SniStrict {
+				continue
+			}
+		}
+		if !visit(rt) {
+			return
+		}
+	}
+}
+
+// routeTLSPolicyHonoured reports whether the TLS handshake that carried r was
+// negotiated under rt's TLS option.
+//
+// A route's option -- above all its client-certificate requirement -- is
+// enforced during the handshake, and the handshake chooses its configuration
+// from the SNI name before any HTTP is read. The route that serves the request
+// is chosen afterwards, from the Host header. The client writes both, so a
+// client could complete the handshake under a route that asks for no
+// certificate and then name an mTLS route in Host: domain fronting, and the
+// route's requirement was never applied to the request it served.
+//
+// Two checks, skipped entirely for a route without an option. The SNI name
+// must select a route carrying the same option: the policy the handshake ran
+// is the policy this route asked for. And a route whose option requires a
+// client certificate must find one on the connection, which also covers a
+// handshake that fell through to another route's configuration because this
+// route's own certificate could not be loaded.
+func (d SNIDeps) routeTLSPolicyHonoured(r *http.Request, rt *gateonv1.Route) bool {
+	optID := rt.GetTls().GetOptionId()
+	if optID == "" || r.TLS == nil {
+		return true
+	}
+	var sniRoute *gateonv1.Route
+	d.eachRouteForSNI(r.Context(), normalizeSNI(r.TLS.ServerName), func(first *gateonv1.Route) bool {
+		sniRoute = first
+		return false
+	})
+	if sniRoute.GetTls().GetOptionId() != optID {
+		return false
+	}
+	if d.TLSOptStore == nil {
+		return true
+	}
+	opt, ok := d.TLSOptStore.Get(r.Context(), optID)
+	if !ok {
+		return true
+	}
+	return clientCertRequirementMet(gtls.ParseClientAuthType(opt.ClientAuthType), r.TLS)
+}
+
+// clientCertRequirementMet reports whether a connection carries the client
+// certificate a client-auth mode demands. Modes that do not demand one are met
+// by any connection.
+func clientCertRequirementMet(mode tls.ClientAuthType, cs *tls.ConnectionState) bool {
+	switch mode {
+	case tls.RequireAndVerifyClientCert:
+		return len(cs.VerifiedChains) > 0
+	case tls.RequireAnyClientCert:
+		return len(cs.PeerCertificates) > 0
+	default:
+		return true
 	}
 }
 
