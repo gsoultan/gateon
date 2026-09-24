@@ -890,7 +890,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		return strings.TrimSpace(strings.ToLower(v)) == "false"
 	}
 
-	routeID := cmp.Or(cfg["route"], cfg["route_id"])
+	routeID := cmp.Or(cfg["route"], cfg[kind.RouteIDKey])
 	if routeID == "" {
 		routeID = "unknown"
 	}

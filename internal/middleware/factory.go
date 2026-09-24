@@ -84,8 +84,8 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		cfg[k] = config.ResolveSecret(v)
 	}
 	if routeID != "" {
-		if _, ok := cfg["route_id"]; !ok {
-			cfg["route_id"] = routeID
+		if _, ok := cfg[kind.RouteIDKey]; !ok {
+			cfg[kind.RouteIDKey] = routeID
 		}
 	}
 
@@ -115,9 +115,9 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "replacepathregex":
 		return transform.ReplacePathRegex(cfg["pattern"], cfg["replacement"])
 	case "accesslog":
-		return AccessLog(cmp.Or(cfg["route"], cfg["route_id"])), nil
+		return AccessLog(cmp.Or(cfg["route"], cfg[kind.RouteIDKey])), nil
 	case "metrics":
-		return Metrics(cmp.Or(cfg["route"], cfg["route_id"])), nil
+		return Metrics(cmp.Or(cfg["route"], cfg[kind.RouteIDKey])), nil
 	case "compress":
 		return traffic.NewCompress(cfg)
 	case "errors":
@@ -317,7 +317,7 @@ func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
 		ClientSecret: cfg["client_secret"],
 		RedirectURL:  cfg["redirect_url"],
 		Scopes:       scopes,
-		RouteID:      cfg["route_id"],
+		RouteID:      cfg[kind.RouteIDKey],
 	})
 }
 
@@ -365,6 +365,6 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 		EnableSignatureScan:    parseBoolStrict(cfg["enable_signature_scan"], true),
 		SignatureRulesPath:     cfg["signature_rules_path"],
 		SignatureBlockSeverity: yara.Severity(cfg["signature_block_severity"]),
-		RouteID:                cfg["route_id"],
+		RouteID:                cfg[kind.RouteIDKey],
 	}), nil
 }

@@ -21,6 +21,17 @@ import (
 // out as Stage 0's purpose; the traffic stage is simply the first one to need
 // them.
 
+// RouteIDKey is the config key under which Factory.Create hands a middleware
+// the route it is being built for.
+//
+// A constant rather than a literal retyped at each end, because the two ends
+// once disagreed: a rename moved the writer to "route_id" and left three
+// readers on "_route_id", so they ran with an empty route. OIDC named its state
+// cookie "gateon_state_" while its callback looked for "gateon_state_<route>",
+// so no login could complete, and bot-management and file-security threats
+// were filed against no route. Nothing could see it: both ends were strings.
+const RouteIDKey = "route_id"
+
 func ParsePositiveInt(s string, defaultVal int) int {
 	if s == "" {
 		return defaultVal

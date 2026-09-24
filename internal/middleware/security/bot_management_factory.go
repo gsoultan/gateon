@@ -112,6 +112,6 @@ func NewBotManagement(cfg map[string]string, d Deps) (kind.Middleware, error) {
 		EnableBrowserIntegrity:  enableIntegrity,
 		ChallengeTimeoutSeconds: timeout,
 		SecretKey:               secret,
-		RouteID:                 cfg["route_id"],
+		RouteID:                 cfg[kind.RouteIDKey],
 	}), nil
 }
