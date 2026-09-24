@@ -91,6 +91,12 @@ func ApplyCORSPreset(cfg map[string]string, base CORSConfig) CORSConfig {
 	if _, ok := cfg["max_age"]; !ok && base.MaxAge == 0 {
 		base.MaxAge = preset.MaxAge
 	}
+	// "Restricted" lists no origins because it means none, and rs/cors reads
+	// an empty list as every origin: the preset the dashboard offers as the
+	// locked-down choice answered any Origin with Access-Control-Allow-Origin: *.
+	if presetName == "restricted" && len(base.AllowedOrigins) == 0 {
+		base.DenyAllOrigins = true
+	}
 
 	return base
 }

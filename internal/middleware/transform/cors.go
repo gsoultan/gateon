@@ -27,6 +27,10 @@ type CORSConfig struct {
 	AllowCredentials bool
 	MaxAge           int
 	Debug            bool
+	// DenyAllOrigins grants no origin cross-origin access. rs/cors reads an
+	// empty AllowedOrigins as "every origin", so an empty list cannot say
+	// "none" on its own.
+	DenyAllOrigins bool
 }
 
 // corsOptions maps a CORSConfig onto the rs/cors options struct. Extracted so
@@ -34,7 +38,7 @@ type CORSConfig struct {
 // middleware is built from: a second mapping is how the Diagnostics validator
 // drifted away from what the proxy enforces in the first place.
 func corsOptions(cfg CORSConfig) cors.Options {
-	return cors.Options{
+	o := cors.Options{
 		AllowedOrigins:   cfg.AllowedOrigins,
 		AllowedMethods:   cfg.AllowedMethods,
 		AllowedHeaders:   cfg.AllowedHeaders,
@@ -43,6 +47,11 @@ func corsOptions(cfg CORSConfig) cors.Options {
 		MaxAge:           cfg.MaxAge,
 		Debug:            cfg.Debug,
 	}
+	if cfg.DenyAllOrigins {
+		// AllowOriginFunc takes precedence over AllowedOrigins in rs/cors.
+		o.AllowOriginFunc = func(string) bool { return false }
+	}
+	return o
 }
 
 // CORS returns a middleware that handles Cross-Origin Resource Sharing (CORS).

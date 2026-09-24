@@ -77,13 +77,20 @@ var grpcWebExposedHeaders = []string{
 // it depends on a request, so it runs when the chain is built.
 func grpcWebCORSOptions(cfg []CORSConfig) cors.Options {
 	if len(cfg) == 0 || len(cfg[0].AllowedOrigins) == 0 {
-		// Default permissive CORS for gRPC-Web and fallback (restores v1.5.0 behavior)
+		// With no origins named, any origin may call, as since v1.5.0 -- but
+		// without credentials. This echoed the caller's Origin back together
+		// with Access-Control-Allow-Credentials: true, the one combination a
+		// browser honours for a credentialed request (it refuses the same
+		// grant made with "*"), so any website could make cookie-bearing
+		// gRPC-Web calls through the gateway and read the answers, while the
+		// dashboard's credentials switch showed off. Credentials need named
+		// origins.
 		return cors.Options{
 			AllowOriginFunc:  func(string) bool { return true },
 			AllowedMethods:   defaultCORSMethods(),
 			AllowedHeaders:   []string{"*"},
 			ExposedHeaders:   grpcWebExposedHeaders,
-			AllowCredentials: true,
+			AllowCredentials: false,
 			MaxAge:           86400,
 		}
 	}
