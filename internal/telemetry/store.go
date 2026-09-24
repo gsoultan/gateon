@@ -1590,8 +1590,14 @@ func escalateMitigation(st *SecurityThreat) {
 	ipMaliciousMu.Unlock()
 
 	if uniqueUsers >= ipShunUniqueUserThreshold && !IsIPUnmitigated(st.SourceIP) {
-		MarkIPMitigated(st.SourceIP, fmt.Sprintf(
-			"IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers))
+		if err := MarkIPMitigated(st.SourceIP, fmt.Sprintf(
+			"IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers)); err != nil {
+			// Nobody is waiting on this one, so logging is all there is -- but
+			// an automatic shun that did not persist is a block the operator
+			// will never know was not applied.
+			logger.Default().LogError("automatic IP shun did not persist",
+				"ip", st.SourceIP, "unique_users", uniqueUsers, "error", err)
+		}
 	}
 }
 
@@ -1862,10 +1868,23 @@ func IsIPMitigated(ip string) bool {
 }
 
 // MarkIPMitigated records that an IP has been mitigated.
-func MarkIPMitigated(ip string, reason string) {
+// errNoTelemetryStore is returned when a mitigation is requested before the
+// store exists. It is a real failure from the caller's side -- nothing was
+// written -- and was previously indistinguishable from success.
+var errNoTelemetryStore = errors.New("telemetry: store is not initialised")
+
+// MarkIPMitigated records that an IP is blocked.
+//
+// It returns the write error rather than only logging it. MitigateThreat does
+// a read-back afterwards -- which exists, as the note below says, precisely
+// because these writes can fail silently -- but the four other call sites did
+// not, and each of them reported success to the operator regardless. A block
+// that did not persist, announced as "blocked via middleware and shunned at
+// XDP level", is a security control the operator believes is on.
+func MarkIPMitigated(ip string, reason string) error {
 	s := getStore()
 	if s == nil {
-		return
+		return errNoTelemetryStore
 	}
 	query := s.dialect.Rebind("INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, updated_at) VALUES (?, 'mitigated', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
 	now := time.Now()
@@ -1893,13 +1912,18 @@ func MarkIPMitigated(ip string, reason string) {
 			_ = container.p.ShunIP(ip)
 		}
 	}
+	return err
 }
 
 // MarkIPUnmitigated records that an IP has been manually unmitigated.
-func MarkIPUnmitigated(ip string) {
+//
+// Returns the write error for the same reason MarkIPMitigated does: the two
+// callers both answered "removed successfully" whatever happened, and the note
+// below already describes that outcome for the cache half of it.
+func MarkIPUnmitigated(ip string) error {
 	s := getStore()
 	if s == nil {
-		return
+		return errNoTelemetryStore
 	}
 	query := s.dialect.Rebind("UPDATE ip_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE ip = ?")
 	_, err := s.db.Exec(query, ip)
@@ -1924,6 +1948,7 @@ func MarkIPUnmitigated(ip string) {
 			}
 		}
 	}
+	return err
 }
 
 // GetMitigatedIPs returns a list of currently mitigated IPs (plain strings).

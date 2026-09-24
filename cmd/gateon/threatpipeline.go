@@ -129,7 +129,16 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 			telemetry.DecreaseReputation(
 				repid.For(fingerprint, sourceIP), penalty, reason)
 		},
-		Mark: telemetry.MarkIPMitigated,
+		// Wrapped rather than passed directly, for the same reason Degrade is:
+		// the responder stays free of a telemetry dependency. A correlated
+		// incident whose shun did not persist is a block nobody applied and
+		// nobody is waiting on, so the log is the only place it can surface.
+		Mark: func(ip, reason string) {
+			if err := telemetry.MarkIPMitigated(ip, reason); err != nil {
+				logger.L.LogError("correlated-incident shun did not persist; the source is not blocked",
+					"ip", ip, "reason", reason, "error", err)
+			}
+		},
 		Log: func(action mitigation.Action, inc correlation.Incident, reason string) {
 			if action == mitigation.ActionNone || action == mitigation.ActionFlag {
 				return // avoid log spam for no-op/flag-only outcomes

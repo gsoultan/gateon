@@ -381,6 +381,16 @@ func TestApplyRecommendation(t *testing.T) {
 	})
 
 	t.Run("Block IP", func(t *testing.T) {
+		// A telemetry store, because blocking an IP writes one row and this
+		// test is named for that outcome. Without it the write failed, the
+		// failure was swallowed, and the handler reported "blocked via
+		// middleware and shunned at XDP level" for an IP it had not recorded
+		// anywhere -- which this assertion accepted.
+		if err := telemetry.InitPathStatsStore(filepath.Join(tmpDir, "block-ip.db"), 1); err != nil {
+			t.Fatalf("init telemetry store: %v", err)
+		}
+		defer telemetry.ClosePathStatsStore(ctx)
+
 		resp, err := apiSvc.ApplyRecommendation(ctx, &gateonv1.ApplyRecommendationRequest{
 			AnomalyType: "security_scan",
 			Source:      "1.2.3.4",
@@ -457,6 +467,16 @@ func TestRemoveMitigatedThreat(t *testing.T) {
 		Middlewares: []string{mwID, "other-mw"},
 	})
 
+	// A telemetry store, because releasing a mitigation writes one row and this
+	// test asserts the release succeeded. Without it the write failed, the
+	// failure was swallowed, and the handler answered "removed successfully"
+	// for a row that still said mitigated -- which is the outcome
+	// MarkIPUnmitigated's own comment describes.
+	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "release.db"), 1); err != nil {
+		t.Fatalf("init telemetry store: %v", err)
+	}
+	defer telemetry.ClosePathStatsStore(ctx)
+
 	// Perform removal
 	res, err := s.RemoveMitigatedThreat(ctx, &gateonv1.RemoveMitigatedThreatRequest{
 		Source: ip,
@@ -530,4 +550,55 @@ func TestShadowedRouteDetection(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "Should detect shadowed route")
+}
+
+// TestMitigationFailureIsReported closes the gap between "we called it" and
+// "it happened".
+//
+// MarkIPMitigated logged its write failure and returned nothing, so
+// applyIPBlockRecommendation announced "blocked via middleware and shunned at
+// XDP level" whether or not a row was written. An operator reading that has
+// been told a security control is on. The release direction was the mirror:
+// "removed successfully" while the row still said mitigated, which is the
+// outcome MarkIPUnmitigated's own comment already describes.
+//
+// With no telemetry store there is nowhere to write, which is the simplest
+// reproducible failure; a database that rejects the write reaches the same
+// branch.
+func TestMitigationFailureIsReported(t *testing.T) {
+	ctx := t.Context()
+	tmpDir := t.TempDir()
+	apiSvc := NewApiService(ApiServiceConfig{
+		EntryPoints: config.NewEntryPointRegistry(filepath.Join(tmpDir, "entrypoints.json")),
+		Routes:      config.NewRouteRegistry(filepath.Join(tmpDir, "routes.json")),
+		Services:    config.NewServiceRegistry(filepath.Join(tmpDir, "services.json")),
+		Middlewares: config.NewMiddlewareRegistry(filepath.Join(tmpDir, "middlewares.json")),
+		Globals:     config.NewGlobalRegistry(filepath.Join(tmpDir, "global.json")),
+	})
+
+	// Make sure nothing is left initialised by another test in this package:
+	// the store is global, and with one present these writes would succeed.
+	telemetry.ClosePathStatsStore(ctx)
+
+	t.Run("block reports failure", func(t *testing.T) {
+		resp, err := apiSvc.ApplyRecommendation(ctx, &gateonv1.ApplyRecommendationRequest{
+			AnomalyType: "security_scan",
+			Source:      "203.0.113.77",
+		})
+		assert.NoError(t, err)
+		assert.False(t, resp.Success,
+			"a block whose mitigation could not be recorded was reported as applied")
+		assert.Contains(t, resp.Message, "was not blocked")
+	})
+
+	t.Run("release reports failure", func(t *testing.T) {
+		resp, err := apiSvc.RemoveMitigatedThreat(ctx, &gateonv1.RemoveMitigatedThreatRequest{
+			Source: "203.0.113.78",
+		})
+		assert.NoError(t, err)
+		assert.False(t, resp.Success,
+			"a release whose record could not be written was reported as removed; "+
+				"the source stays blocked and the operator is told otherwise")
+		assert.Contains(t, resp.Message, "was not released")
+	})
 }
