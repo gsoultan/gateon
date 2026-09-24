@@ -100,6 +100,84 @@ func (prc *pooledReadCloser) Close() error {
 // "hold whatever arrives".
 const maxGraphQLBodyBytes = 10 * 1024 * 1024
 
+// maxGraphQLNesting bounds how deeply brackets may nest in a query before it
+// reaches the parser. gqlparser is recursive descent with no depth limit of its
+// own, and the body cap lets a client send a document nested a million levels
+// deep, which exhausts the 1 GB goroutine stack: a fatal error that no recover
+// catches, so the process exits. No real query comes near a thousand.
+const maxGraphQLNesting = 1000
+
+var errGraphQLTooDeep = fmt.Errorf("query nests more than %d levels deep", maxGraphQLNesting)
+
+// parseGraphQLQuery is the only way a query reaches the parser, so the nesting
+// bound cannot be skipped by a second call site.
+func parseGraphQLQuery(query string) (*ast.QueryDocument, error) {
+	if graphQLNestingExceeds(query, maxGraphQLNesting) {
+		return nil, errGraphQLTooDeep
+	}
+	doc, gerr := parser.ParseQuery(&ast.Source{Input: query})
+	if gerr != nil {
+		return nil, gerr
+	}
+	return doc, nil
+}
+
+// graphQLNestingExceeds reports whether brackets in query nest deeper than
+// limit, reading them the way the lexer does: inside a string, block string or
+// comment a bracket is content. That is what keeps closing brackets in a string
+// argument from cancelling the real nesting around it. One pass, no allocation.
+func graphQLNestingExceeds(query string, limit int) bool {
+	depth := 0
+	for i := 0; i < len(query); i++ {
+		switch query[i] {
+		case '{', '[', '(':
+			if depth++; depth > limit {
+				return true
+			}
+		case '}', ']', ')':
+			if depth > 0 {
+				depth--
+			}
+		case '#':
+			for i+1 < len(query) && query[i+1] != '\n' && query[i+1] != '\r' {
+				i++
+			}
+		case '"':
+			i = graphQLStringEnd(query, i)
+		}
+	}
+	return false
+}
+
+// graphQLStringEnd returns the index of the last byte of the string literal
+// opening at start. It may end a string earlier than the lexer would, which
+// only over-counts; it must never end one later, or structure would be read as
+// content. A line break ends an ordinary string because the lexer rejects it
+// there, and a block string ends at the first `"""` not escaped as `\"""`.
+func graphQLStringEnd(query string, start int) int {
+	if strings.HasPrefix(query[start:], `"""`) {
+		for j := start + 3; j < len(query); j++ {
+			if query[j] == '\\' && strings.HasPrefix(query[j+1:], `"""`) {
+				j += 3
+				continue
+			}
+			if strings.HasPrefix(query[j:], `"""`) {
+				return j + 2
+			}
+		}
+		return len(query) - 1
+	}
+	for j := start + 1; j < len(query); j++ {
+		switch query[j] {
+		case '\\':
+			j++
+		case '"', '\n', '\r':
+			return j
+		}
+	}
+	return len(query) - 1
+}
+
 func GraphQLFirewall(cfg GraphQLFirewallConfig) kind.Middleware {
 	initGraphQLCache()
 	return func(next http.Handler) http.Handler {
@@ -212,7 +290,7 @@ func analyseGraphQLQuery(query string, cfg GraphQLFirewallConfig, w http.Respons
 		}
 	}
 
-	doc, gerr := parser.ParseQuery(&ast.Source{Input: query})
+	doc, gerr := parseGraphQLQuery(query)
 	if gerr != nil {
 		http.Error(w, fmt.Sprintf("GraphQL parse error: %v", gerr), http.StatusBadRequest)
 		return queryAnalysis{}, false
@@ -257,7 +335,7 @@ func graphQLQueryAllowed(analysis queryAnalysis, query string, cfg GraphQLFirewa
 	// 4. Field-level Auth (This still needs the doc, but we can re-parse or cache parsed doc if needed)
 	// For now, we only re-parse if field auth is enabled to keep the common path fast.
 	if len(cfg.FieldClaims) > 0 {
-		doc, gerr := parser.ParseQuery(&ast.Source{Input: query})
+		doc, gerr := parseGraphQLQuery(query)
 		if gerr == nil {
 			if err := checkFieldAuth(doc, r, cfg.FieldClaims); err != nil {
 				http.Error(w, err.Error(), http.StatusForbidden)
