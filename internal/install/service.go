@@ -65,6 +65,14 @@ const (
 	stateDir        = "/var/lib/gateon"
 )
 
+// The modes the two directories must keep, shared by the installer, the unit
+// it writes and the tests that hold the packaged unit and scripts to the same
+// values. See installLinux for why each is what it is.
+const (
+	configDirMode os.FileMode = 0o750
+	stateDirMode  os.FileMode = 0o700
+)
+
 const systemdUnitTemplate = `[Unit]
 Description=Gateon - API Gateway and Reverse Proxy
 Documentation=https://github.com/gateon/gateon
@@ -81,9 +89,13 @@ RestartSec=5s
 WorkingDirectory=%s
 Environment=GLOBAL_CONFIG_FILE=%s/global.json
 
-# State and config directories
+# State and config directories. systemd re-applies the *DirectoryMode on
+# every start and defaults it to 0755, so without these the modes the
+# installer sets last only until the service first runs.
 StateDirectory=gateon
+StateDirectoryMode=0700
 ConfigurationDirectory=gateon
+ConfigurationDirectoryMode=0750
 
 # Security hardening
 NoNewPrivileges=true
@@ -115,7 +127,7 @@ func installLinux(binPath string) error {
 	// world bit that 0755 was granting every local account.
 	// #nosec G302 -- a directory, not a file: the execute bit is what makes it
 	// traversable, so 0750 is the tight mode here.
-	if err := secureDir(configDir, 0o750); err != nil {
+	if err := secureDir(configDir, configDirMode); err != nil {
 		return err
 	}
 	if err := secureOwner(configDir); err != nil {
@@ -124,7 +136,7 @@ func installLinux(binPath string) error {
 
 	// #nosec G302 -- 0700 on a directory is already the tightest useful mode;
 	// the execute bit is what makes it traversable by its owner.
-	if err := secureDir(stateDir, 0o700); err != nil {
+	if err := secureDir(stateDir, stateDirMode); err != nil {
 		return err
 	}
 	if err := secureOwner(stateDir); err != nil {
