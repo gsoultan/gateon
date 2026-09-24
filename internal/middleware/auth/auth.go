@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
@@ -17,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"golang.org/x/sync/singleflight"
 )
 
 type contextKey string
@@ -46,13 +48,56 @@ type JWTValidator struct {
 func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 	v := &JWTValidator{config: cfg}
 	if cfg.JWKSURL != "" {
-		kf, err := keyfunc.NewDefault([]string{cfg.JWKSURL})
+		kf, err := sharedJWKSKeyfunc(cfg.JWKSURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create keyfunc: %w", err)
 		}
 		v.kf = kf
 	}
 	return v, nil
+}
+
+// jwksKeyfuncs holds one keyfunc per JWKS URL, for the life of the process
+// (map[string]keyfunc.Keyfunc).
+//
+// keyfunc.NewDefault starts a goroutine that refreshes the key set every hour
+// and stops only when its context ends -- and NewDefault's is Background, so
+// it never does. A validator is built every time a route's chain is: on every
+// route, service or middleware change and after every memory-pressure purge,
+// and chains have no teardown that could stop one. Building a keyfunc per
+// validator therefore left another refresher running on every rebuild, and put
+// a synchronous JWKS fetch into every chain build as well.
+//
+// Validators for the same URL share one instead: a keyfunc is read-only to
+// them and safe for concurrent use. The map is bounded by the JWKS URLs an
+// operator has configured, not by anything a request can influence.
+var (
+	jwksKeyfuncs sync.Map
+	jwksFlight   singleflight.Group
+)
+
+// sharedJWKSKeyfunc returns the keyfunc for url, creating it on first use.
+// singleflight makes concurrent first uses of one URL share a single fetch
+// without a lock held across it.
+func sharedJWKSKeyfunc(url string) (keyfunc.Keyfunc, error) {
+	if kf, ok := jwksKeyfuncs.Load(url); ok {
+		return kf.(keyfunc.Keyfunc), nil
+	}
+	v, err, _ := jwksFlight.Do(url, func() (any, error) {
+		if kf, ok := jwksKeyfuncs.Load(url); ok {
+			return kf, nil
+		}
+		kf, err := keyfunc.NewDefault([]string{url})
+		if err != nil {
+			return nil, err
+		}
+		jwksKeyfuncs.Store(url, kf)
+		return kf, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(keyfunc.Keyfunc), nil
 }
 
 // Handler returns a middleware that validates JWT tokens. Supports Authorization
