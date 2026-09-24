@@ -89,3 +89,26 @@ func TestIPFilterWithClientIPUsesTheSuppliedResolver(t *testing.T) {
 		})
 	}
 }
+
+// The management listener builds its allowlist with strings.Split on
+// GATEON_MANAGEMENT_ALLOWED_IPS and hands it straight to IPFilter, so
+// "127.0.0.1, 203.0.113.5" arrives as " 203.0.113.5". That entry never matched
+// and nothing said so: the administrator it named was refused.
+func TestIPFilterMatchesAnEntryWrittenWithASpaceAfterTheComma(t *testing.T) {
+	mw := IPFilter(strings.Split("127.0.0.1, 203.0.113.5", ","), nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for addr, want := range map[string]int{
+		"203.0.113.5:40000": http.StatusOK,
+		"203.0.113.6:40000": http.StatusForbidden,
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = addr
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != want {
+			t.Errorf("peer %s: status %d, want %d", addr, rr.Code, want)
+		}
+	}
+}

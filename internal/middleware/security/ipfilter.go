@@ -5,6 +5,7 @@ package security
 
 import (
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -44,34 +45,51 @@ func newIPFilterData(allowList, denyList []string) *ipFilterData {
 		exactDeny:  make(map[string]struct{}),
 		treeDeny:   art.NewTree(),
 	}
+	// Recorded before any parse, because the parse is what fails. An allow list
+	// of nothing but blanks is still an allow list somebody wrote.
+	d.allowConfigured = len(allowList) > 0
 	for _, r := range allowList {
-		if strings.TrimSpace(r) != "" {
-			// Recorded before the parse, because the parse is what fails.
-			d.allowConfigured = true
-		}
-		if strings.Contains(r, "/") {
-			if err := d.treeAllow.InsertCIDR(r); err != nil {
-				logger.L.LogWarn("ip filter: allow_list entry is not a valid CIDR and was dropped; "+
-					"the entry restricts nothing", "entry", r, "error", err)
-			}
-		} else {
-			d.exactAllow[r] = struct{}{}
-			// Also insert into tree for consistency
-			_ = d.treeAllow.InsertCIDR(r + "/32")
+		if err := addFilterEntry(d.treeAllow, d.exactAllow, r); err != nil {
+			logger.L.LogWarn("ip filter: allow_list entry is not a valid IP or CIDR and was dropped; "+
+				"the entry restricts nothing", "entry", r, "error", err)
 		}
 	}
 	for _, r := range denyList {
-		if strings.Contains(r, "/") {
-			if err := d.treeDeny.InsertCIDR(r); err != nil {
-				logger.L.LogWarn("ip filter: deny_list entry is not a valid CIDR and was dropped; "+
-					"the address it names is NOT blocked", "entry", r, "error", err)
-			}
-		} else {
-			d.exactDeny[r] = struct{}{}
-			_ = d.treeDeny.InsertCIDR(r + "/32")
+		if err := addFilterEntry(d.treeDeny, d.exactDeny, r); err != nil {
+			logger.L.LogWarn("ip filter: deny_list entry is not a valid IP or CIDR and was dropped; "+
+				"the address it names is NOT blocked", "entry", r, "error", err)
 		}
 	}
 	return d
+}
+
+// addFilterEntry records one list entry: a CIDR as written, or a bare address
+// as exactly one host -- /32 for IPv4, /128 for IPv6.
+//
+// Bare entries used to be inserted as entry+"/32" whatever their family. For
+// IPv6 that is 2^96 addresses, so allow_list "2001:db8::1" admitted all of
+// 2001:db8::/32 and deny_list "2001:db8::1" refused all of it. The management
+// listener builds its allowlist here too, from "127.0.0.1,::1" by default, so
+// an operator who allowlisted one IPv6 administrator opened the management
+// plane to that address's whole /32.
+//
+// Entries are trimmed: GATEON_MANAGEMENT_ALLOWED_IPS is split on commas with no
+// trimming, so "127.0.0.1, 10.0.0.5" produced " 10.0.0.5", which never matched
+// and was never reported.
+func addFilterEntry(tree *art.Tree, exact map[string]struct{}, entry string) error {
+	entry = strings.TrimSpace(entry)
+	if entry == "" {
+		return nil
+	}
+	if strings.Contains(entry, "/") {
+		return tree.InsertCIDR(entry)
+	}
+	addr, err := netip.ParseAddr(entry)
+	if err != nil {
+		return err
+	}
+	exact[entry] = struct{}{}
+	return tree.InsertCIDR(netip.PrefixFrom(addr, addr.BitLen()).String())
 }
 
 func (d *ipFilterData) matches(clientIP string) bool {
