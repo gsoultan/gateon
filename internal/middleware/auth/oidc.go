@@ -461,8 +461,7 @@ func NewOIDCValidator(issuer, audience string, baseCfg AuthBaseConfig) (*JWTVali
 	if issuer == "" {
 		return nil, fmt.Errorf("oidc auth requires issuer URL")
 	}
-	issuer = strings.TrimSuffix(issuer, "/")
-	discoveryURL := issuer + "/.well-known/openid-configuration"
+	discoveryURL := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
 
 	client := &http.Client{Timeout: oidcDiscoveryTimeout}
 	resp, err := client.Get(discoveryURL)
@@ -482,7 +481,10 @@ func NewOIDCValidator(issuer, audience string, baseCfg AuthBaseConfig) (*JWTVali
 		return nil, fmt.Errorf("oidc discovery missing jwks_uri")
 	}
 
-	// Use issuer from discovery if config issuer was a base URL
+	// Compared exactly, as discovery states it: a token's iss must match the
+	// issuer string character for character (OpenID Connect Core 3.1.3.7).
+	// Trimming a trailing slash here refused every token from providers whose
+	// issuer ends in one, Auth0 among them.
 	effectiveIssuer := disc.Issuer
 	if effectiveIssuer == "" {
 		effectiveIssuer = issuer
@@ -490,7 +492,7 @@ func NewOIDCValidator(issuer, audience string, baseCfg AuthBaseConfig) (*JWTVali
 
 	jwtCfg := JWTConfig{
 		AuthBaseConfig: baseCfg,
-		Issuer:         strings.TrimSuffix(effectiveIssuer, "/"),
+		Issuer:         effectiveIssuer,
 		Audience:       strings.TrimSpace(audience),
 		JWKSURL:        disc.JWKSURI,
 	}

@@ -25,6 +25,9 @@ type FakeOIDCProvider struct {
 	Server   *httptest.Server
 	ClientID string
 	key      *rsa.PrivateKey
+	// issuerPath is appended to the server URL to form the issuer: "/" gives
+	// the trailing-slash issuers some providers (Auth0 among them) publish.
+	issuerPath string
 	// DiscoveryDown makes the discovery endpoint answer 503, standing in for a
 	// provider that is unreachable at the moment the gateway needs it.
 	DiscoveryDown atomic.Bool
@@ -36,11 +39,18 @@ type FakeOIDCProvider struct {
 // stops it when the test ends.
 func NewFakeOIDCProvider(t testing.TB, clientID string) *FakeOIDCProvider {
 	t.Helper()
+	return NewFakeOIDCProviderAt(t, clientID, "")
+}
+
+// NewFakeOIDCProviderAt is NewFakeOIDCProvider with issuerPath appended to the
+// server URL to form the issuer, which discovery reports and tokens carry.
+func NewFakeOIDCProviderAt(t testing.TB, clientID, issuerPath string) *FakeOIDCProvider {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	p := &FakeOIDCProvider{key: key, ClientID: clientID}
+	p := &FakeOIDCProvider{key: key, ClientID: clientID, issuerPath: issuerPath}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", p.discovery)
 	mux.HandleFunc("/jwks", p.jwks)
@@ -51,7 +61,7 @@ func NewFakeOIDCProvider(t testing.TB, clientID string) *FakeOIDCProvider {
 }
 
 // Issuer is the provider's issuer URL.
-func (p *FakeOIDCProvider) Issuer() string { return p.Server.URL }
+func (p *FakeOIDCProvider) Issuer() string { return p.Server.URL + p.issuerPath }
 
 func (p *FakeOIDCProvider) discovery(w http.ResponseWriter, _ *http.Request) {
 	p.DiscoveryCalls.Add(1)
@@ -61,7 +71,7 @@ func (p *FakeOIDCProvider) discovery(w http.ResponseWriter, _ *http.Request) {
 	}
 	u := p.Server.URL
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"issuer":                                u,
+		"issuer":                                p.Issuer(),
 		"authorization_endpoint":                u + "/authorize",
 		"token_endpoint":                        u + "/token",
 		"jwks_uri":                              u + "/jwks",
@@ -78,17 +88,22 @@ func (p *FakeOIDCProvider) jwks(w http.ResponseWriter, _ *http.Request) {
 	}}})
 }
 
-func (p *FakeOIDCProvider) token(w http.ResponseWriter, _ *http.Request) {
+// Mint returns an ID token for subject, issued by this provider to its client.
+func (p *FakeOIDCProvider) Mint(subject string) (string, error) {
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"iss":   p.Server.URL,
-		"sub":   "user-1",
+		"iss":   p.Issuer(),
+		"sub":   subject,
 		"aud":   p.ClientID,
-		"email": "user-1@example.com",
+		"email": subject + "@example.com",
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(time.Hour).Unix(),
 	})
 	tok.Header["kid"] = "k1"
-	signed, err := tok.SignedString(p.key)
+	return tok.SignedString(p.key)
+}
+
+func (p *FakeOIDCProvider) token(w http.ResponseWriter, _ *http.Request) {
+	signed, err := p.Mint("user-1")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
