@@ -154,7 +154,7 @@ export function MiddlewareConfigEditor({
             placeholder="404, 500, 503"
             value={splitTags(config.status_codes)}
             onChange={(val) => updateConfig("status_codes", joinTags(val))}
-            description="HTTP status codes that should trigger custom error pages."
+            description="HTTP status codes that should trigger custom error pages. Each page below is the HTML served as the response body, not a file path."
             clearable
           />
           <KeyValueList
@@ -163,9 +163,9 @@ export function MiddlewareConfigEditor({
             title="Custom Error Pages"
             prefix="page_"
             placeholderKey="404"
-            placeholderValue="/path/to/404.html"
+            placeholderValue="<h1>Page not found</h1>"
             keyLabel="Status Code"
-            valueLabel="Page Path"
+            valueLabel="Page HTML"
           />
         </Stack>
       );

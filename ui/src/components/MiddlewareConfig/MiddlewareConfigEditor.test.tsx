@@ -307,3 +307,23 @@ describe("security headers preset", () => {
     expect(values).toEqual(["legacy", "recommended", "strict", "none"]);
   });
 });
+
+describe("custom error pages", () => {
+  // The gateway serves each page value verbatim as the response body. The form
+  // asked for a "Page Path" with /path/to/404.html as its example, so an
+  // operator following it published a page reading "/path/to/404.html".
+  test("asks for the page's HTML, which is what the gateway serves", () => {
+    const html = renderToString(
+      <MantineProvider>
+        <MiddlewareConfigEditor
+          type="errors"
+          config={{ status_codes: "404", page_404: "<h1>Gone</h1>" }}
+          onChange={() => {}}
+        />
+      </MantineProvider>,
+    );
+    expect(html).toContain("Page HTML");
+    expect(html).not.toContain("Page Path");
+    expect(html).not.toContain("/path/to/404.html");
+  });
+});
