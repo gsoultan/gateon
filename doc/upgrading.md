@@ -37,8 +37,9 @@ built answers 503 and logs which one:
   *without* when they failed to build. They now fail closed with the other
   boundaries.
 - Circuit breaker `error_threshold` outside (0, 1], `min_requests` below 1
-  and non-positive windows, and a `security_headers` preset that is not one of
-  `legacy`, `recommended`, `strict` or `none`.
+  and non-positive windows, a `security_headers` preset that is not one of
+  `legacy`, `recommended`, `strict` or `none`, and `file_security` with
+  `enable_clamav` on and no ClamAV address anywhere (it scanned nothing).
 
 **Who is affected:** only configurations with such a value, which were not
 doing what they said. The log line names the middleware and key.
@@ -118,6 +119,15 @@ fingerprint and never matched. Fingerprints are enforced at L7.
   legacy set, overwriting the backend's own headers); the legacy set, which an
   unset preset means, now sends `X-XSS-Protection: 0` instead of asking for the
   browser XSS auditor; and a misspelt preset refuses the build.
+- **TCP entrypoints:** plain HTTP arriving on a TCP entrypoint now passes the
+  global honeypot, GeoIP country block and per-IP connection limit, which the
+  HTTP entrypoint always applied and this path skipped.
+- **Metrics:** a request is counted once in path, domain, country, protocol and
+  per-IP statistics — it was counted by the entrypoint and again by its route,
+  so anomaly detection saw clients at twice their rate. A `metrics` or
+  `accesslog` middleware attached with no name of its own now does nothing
+  (every route already measures and logs itself); give it a name to record a
+  separate view.
 - **Buffering:** a body over `max_request_body_bytes` is answered 413 and never
   reaches the backend. It was forwarded anyway and came back as a 502 counted
   against the backend.
