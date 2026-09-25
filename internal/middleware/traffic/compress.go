@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -143,9 +144,10 @@ type compressWriter struct {
 	compressor  io.WriteCloser
 	decided     bool
 	should      bool
-	// ended is set when the handler has returned. A body still undecided then
-	// never reached minBytes, so it goes out as it is.
-	ended bool
+	// undersized marks a body known to be under minBytes: one still
+	// undecided when the handler returns, or one whose declared length is.
+	// Either goes out as it is.
+	undersized bool
 }
 
 func (w *compressWriter) WriteHeader(status int) {
@@ -166,6 +168,16 @@ func (w *compressWriter) WriteHeader(status int) {
 	// This is critical for real-time responsiveness.
 	ct := strings.ToLower(w.ResponseWriter.Header().Get("Content-Type"))
 	if strings.Contains(ct, "text/event-stream") || strings.HasPrefix(ct, "application/grpc") {
+		w.decide()
+		return
+	}
+
+	// A declared length settles the minimum now. Left to the first flush --
+	// which the gateway's reverse proxy issues after every write -- the
+	// decision was made before the size was known, and every proxied
+	// response was compressed however small.
+	if n, err := strconv.ParseInt(w.ResponseWriter.Header().Get("Content-Length"), 10, 64); err == nil {
+		w.undersized = n < int64(w.minBytes)
 		w.decide()
 	}
 }
@@ -194,7 +206,7 @@ func (w *compressWriter) Write(b []byte) (int, error) {
 // not a success, or has an excluded, unlisted, gRPC or SSE content type.
 func (w *compressWriter) shouldCompress() bool {
 	h := w.Header()
-	if w.ended || h.Get("Content-Encoding") != "" || w.status >= 300 ||
+	if w.undersized || h.Get("Content-Encoding") != "" || w.status >= 300 ||
 		w.status == http.StatusNoContent || w.status == http.StatusNotModified {
 		return false
 	}
@@ -246,7 +258,7 @@ func (w *compressWriter) decide() {
 
 func (w *compressWriter) Close() error {
 	if !w.decided {
-		w.ended = true
+		w.undersized = true
 		w.decide()
 	}
 	if w.should && w.compressor != nil {
