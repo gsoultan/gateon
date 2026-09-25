@@ -384,7 +384,7 @@ func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Req
 	// 5. Adaptive WAF reputation scoring
 	repScore := t.resolveReputation(rs, testRep)
 	r.Header.Set("X-Gateon-Reputation", getReputationString(repScore))
-	r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
+	r.Header.Set(kind.HeaderGatewayJA4, telemetry.GetCachedJA4H(r))
 
 	// git's smart-HTTP bodies are packfiles: binary, routinely larger
 	// than the body limit, and refusing one as uninspectable would break
@@ -465,7 +465,7 @@ func stripGatewayHeaders(r *http.Request) string {
 	h.Del("X-Gateon-Anomaly-Score")
 	h.Del("X-Gateon-Threat-Type")
 	h.Del("X-Gateon-WAF-Matched")
-	h.Del("X-Gateon-JA4")
+	h.Del(kind.HeaderGatewayJA4)
 	return testRep
 }
 

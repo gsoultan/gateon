@@ -200,4 +200,9 @@ func ParseListStrict(val string) []string {
 const (
 	HeaderAccept        = "Accept"
 	HeaderAuthorization = "Authorization"
+	// HeaderGatewayJA4 carries the client's HTTP fingerprint to a backend.
+	// Spelled as net/http stores it: written "X-Gateon-JA4", every Set and
+	// Del on the request path rebuilt the canonical form, an allocation per
+	// request. The name on the wire is the same either way.
+	HeaderGatewayJA4 = "X-Gateon-Ja4"
 )

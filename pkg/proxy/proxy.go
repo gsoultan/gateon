@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy/health"
@@ -315,7 +316,7 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 
 // gatewayJA4Header is where the proxy tells a backend the client's HTTP
 // fingerprint.
-const gatewayJA4Header = "X-Gateon-JA4"
+const gatewayJA4Header = kind.HeaderGatewayJA4
 
 // setGatewayJA4 sets gatewayJA4Header from the fingerprint the gateway
 // computed, after removing any the client sent. The value is the gateway's to
