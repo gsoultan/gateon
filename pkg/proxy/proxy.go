@@ -11,7 +11,6 @@ import (
 	"net/http/httputil"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	gateonhttputil "github.com/gsoultan/gateon/internal/httputil"
@@ -166,7 +165,9 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 			status = http.StatusGatewayTimeout
 		}
 
-		atomic.AddUint64(&state.errorCount, 1)
+		// Not counted here: this answers 502 or 504, and recordMetrics counts
+		// every 5xx the target produced. Counting it in both places made each
+		// transport error two errors against one request.
 		routeID := middleware.GetRouteName(r)
 		if routeID != "" {
 			telemetry.RequestFailuresTotal.WithLabelValues(routeID, "service_down").Inc()

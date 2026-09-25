@@ -15,7 +15,10 @@ import (
 type RoundRobinLB struct {
 	targetsPtr atomic.Pointer[[]*targetState]
 	current    uint64
-	mu         sync.Mutex
+	// skipped counts the turns that fell on a dead target, and spreads them
+	// over the live ones in their own rotation.
+	skipped uint64
+	mu      sync.Mutex
 }
 
 func NewRoundRobinLB(urls []string) *RoundRobinLB {
@@ -46,17 +49,39 @@ func (lb *RoundRobinLB) NextState() *targetState {
 	if len(targets) == 0 {
 		return nil
 	}
-	// Round-robin among alive targets only (circuit breaker: skip OPEN targets)
-	n := atomic.AddUint64(&lb.current, 1)
-	start := (n - 1) % uint64(len(targets))
-	for i := uint64(0); i < uint64(len(targets)); i++ {
-		idx := (start + i) % uint64(len(targets))
-		t := targets[idx]
+	n := atomic.AddUint64(&lb.current, 1) - 1
+	if t := targets[n%uint64(len(targets))]; t.alive.Load() {
+		return t
+	}
+	return lb.nextAliveFor(targets)
+}
+
+// nextAliveFor picks a live target for a turn that fell on a dead one. It used
+// to scan forward to the next live target, which gave a dead target's whole
+// share to its neighbour: one of three down left the next one serving twice
+// what the other did, and two of four down left one serving three quarters.
+// The skipped turns take their own rotation over the live targets instead.
+func (lb *RoundRobinLB) nextAliveFor(targets []*targetState) *targetState {
+	alive := 0
+	for _, t := range targets {
 		if t.alive.Load() {
-			return t
+			alive++
 		}
 	}
-	return nil // no alive targets
+	if alive == 0 {
+		return nil
+	}
+	k := (atomic.AddUint64(&lb.skipped, 1) - 1) % uint64(alive)
+	for _, t := range targets {
+		if !t.alive.Load() {
+			continue
+		}
+		if k == 0 {
+			return t
+		}
+		k--
+	}
+	return nil // a target died between the count and the pick
 }
 
 func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {

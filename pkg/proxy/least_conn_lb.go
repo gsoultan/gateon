@@ -14,7 +14,11 @@ import (
 // LeastConnLB implements least connections load balancing.
 type LeastConnLB struct {
 	targetsPtr atomic.Pointer[[]*targetState]
-	mu         sync.Mutex
+	// ties rotates where the scan starts. Ties went to the first target, and
+	// at low concurrency every target is tied at zero, so one backend took
+	// all the traffic until requests began to overlap.
+	ties uint64
+	mu   sync.Mutex
 }
 
 func NewLeastConnLB(urls []string) *LeastConnLB {
@@ -45,7 +49,12 @@ func (lb *LeastConnLB) NextState() *targetState {
 		return nil
 	}
 	var best *targetState
-	for _, t := range targets {
+	idx := int((atomic.AddUint64(&lb.ties, 1) - 1) % uint64(len(targets)))
+	for range targets {
+		t := targets[idx]
+		if idx++; idx == len(targets) {
+			idx = 0
+		}
 		if !t.alive.Load() {
 			continue
 		}
