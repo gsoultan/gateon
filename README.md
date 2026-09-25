@@ -42,7 +42,7 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 - **Bot Management**: JS Challenges, Browser Integrity checks, and Cloudflare Turnstile integration.
 - **Identity & Access**: Comprehensive AuthN/Z via **JWT (HMAC/JWKS), PASETO, API Keys**, and Forward Auth.
 - **Traffic Deception**: Honeypots and deception layers to trap and identify malicious actors.
-- **Advanced TLS**: Automatic TLS (Let's Encrypt), **mTLS** for backends, and **JA3/JA4 Fingerprinting**.
+- **Advanced TLS**: Automatic TLS (Let's Encrypt), **mTLS** for backends, and **JA4/JA4H fingerprinting** (JA3 is no longer computed).
 
 ### 📊 Cloud-Native Observability & AI
 - **AI Anomaly Detection**: Proactive threat detection using traffic pattern analysis and Prometheus metrics.
@@ -51,8 +51,8 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 - **Management TUI**: A terminal-based dashboard (`gateon top`) for real-time monitoring.
 
 ### ⚙️ Automation & Scalability
-- **Kubernetes Native** `[experimental]`: Full support for the **Kubernetes Gateway API** (`Gateway`, `HTTPRoute`).
-- **High Availability** `[experimental]`: Active-Passive failover (VRRP) and multi-cluster configuration sync via Redis.
+- **Kubernetes Native** `[experimental]`: Watches **Ingress** and Gateway API **`HTTPRoute`** resources and turns them into routes. `Gateway` and `GatewayClass` objects are not read, so listener and class selection come from Gateon's own entrypoints.
+- **High Availability** `[experimental]`: Active-Passive failover (VRRP). Instances that share one database propagate cache invalidations over Redis; configuration itself is read from the database at startup, so another instance's route or service edits reach an instance when it restarts.
 - **Secrets Management**: Securely resolve secrets from **HashiCorp Vault, AWS Secrets Manager**, and environment variables at runtime.
 - **WASM Extensibility**: Custom traffic manipulation using WebAssembly-based middlewares.
 
@@ -181,8 +181,8 @@ make proto
 - `GATEON_GEOIP_DB_PATH`: Path to GeoLite2-Country.mmdb for GeoIP middleware (fallback when config omits db_path).
 - `GATEON_HMAC_SECRET`: HMAC secret for webhook signature verification (fallback when middleware config omits it).
 - `GATEON_ENCRYPTION_KEY`: Optional. When set (min 16 chars), `database_url`, `paseto_secret`, and database password are encrypted in global.json.
-- `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server (default `127.0.0.1`). Use `0.0.0.0` for remote access (e.g. via Cloudflare Tunnel on another machine).
-- `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated list of allowed IPs for management access (default `127.0.0.1,::1`). Use `0.0.0.0/0` with caution for initial setup via tunnel.
+- `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server. **The effective default is `0.0.0.0`** (every interface), because a loopback bind inside a container is unreachable through a published port; set `127.0.0.1` to keep the dashboard local. See [doc/management-entrypoint.md](doc/management-entrypoint.md#network-exposure).
+- `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated IPs or CIDRs allowed to reach the management server. **The effective default allows every address** (`0.0.0.0/0,::/0`); set it to your admin network.
 - `GATEON_WAF_DLP_ACTION`: What to do when a data-leak rule fires — `block` (default), `redact` (remove the finding, forward the rest) or `audit` (record it, forward untouched). Applies to data-leak rules only; an injection is still refused. Any unrecognised value means `block`. Overridden per route by the `dlp_action` middleware key, and globally by `waf.dlp_action` in the config file.
 - `GATEON_TRACE_DIR`: Directory for the Pebble request-trace store. Defaults to `telemetry_pebble` next to a file-backed SQLite database, or relative to the working directory for Postgres. Set this to place traces on a dedicated volume without changing the database URL.
 
