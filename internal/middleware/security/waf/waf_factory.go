@@ -211,10 +211,25 @@ func mergeGlobalWAFDefaults(cfg map[string]string, d security.Deps) string {
 	if global == nil || global.Waf == nil || !global.Waf.Enabled {
 		return ""
 	}
+	// A route with its own WAF skips the global one (router.go), so response
+	// DLP has to be inherited whatever use_crs says, and as the global WAF
+	// actually runs it -- its tier baseline included. Taken only with use_crs
+	// and only from the raw flag, attaching a WAF to a route switched off the
+	// response inspection the global WAF had been giving it.
+	setIfMissing(cfg, "dlp", strconv.FormatBool(globalWAFRunsDLP(global.Waf)))
+	if global.Waf.DlpAction != "" {
+		setIfMissing(cfg, "dlp_action", global.Waf.DlpAction)
+	}
 	if global.Waf.UseCrs {
 		applyGlobalCRSDefaults(cfg, global.Waf, d.DataDir)
 	}
 	return global.Waf.CustomDirectives
+}
+
+// globalWAFRunsDLP reports whether NewGlobalWAF inspects responses for data
+// leaks: when DLP is switched on, or when the tier's baseline turns it on.
+func globalWAFRunsDLP(w *gateonv1.WafConfig) bool {
+	return w.GetDlp() || resolveWAFTier(w) == config.TierEnterprise
 }
 
 // applyGlobalCRSDefaults copies the gateway-wide ruleset and tuning settings

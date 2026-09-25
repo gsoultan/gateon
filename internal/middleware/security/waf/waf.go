@@ -919,6 +919,12 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 	failOpen := strings.TrimSpace(strings.ToLower(cfg["fail_open"])) == "true" ||
 		strings.TrimSpace(strings.ToLower(cfg["fail_open"])) == "1"
 
+	// DLP runs in the response phase, so asking for it is asking for that
+	// phase -- as NewGlobalWAF already has it. The route path set EnableDLP
+	// alone, which loaded no response rules and buffered no response bodies:
+	// a route WAF configured to stop card numbers leaking passed every one.
+	enableDLP := strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true"
+
 	return WAFConfig{
 		ParanoiaLevel:               pl,
 		TrustCloudflare:             request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
@@ -937,7 +943,8 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		EnableDOSProtection:         strings.TrimSpace(strings.ToLower(cfg["dos_protection"])) == "true",
 		EnableMalwareDetection:      strings.TrimSpace(strings.ToLower(cfg["malware_detection"])) == "true",
 		EnableRansomwareDetection:   strings.TrimSpace(strings.ToLower(cfg["ransomware_detection"])) == "true",
-		EnableDLP:                   strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
+		EnableDLP:                   enableDLP,
+		EnableResponseInspection:    enableDLP,
 		EnableBodyEntropy:           strings.TrimSpace(strings.ToLower(cfg["enable_body_entropy"])) == "true",
 		EnableFingerprintValidation: strings.TrimSpace(strings.ToLower(cfg["enable_fingerprint_validation"])) == "true",
 		EnableConfidenceScoring:     strings.TrimSpace(strings.ToLower(cfg["enable_confidence_scoring"])) != "false", // Default true
