@@ -32,9 +32,9 @@ func FuzzCalcFingerprints(f *testing.F) {
 		}
 		ja4 := CalcFingerprints(hello).JA4
 
-		// ja4_a is 12 characters here, then two 12-hex-digit hashes.
+		// ja4_a is 10 characters, then two 12-hex-digit hashes.
 		parts := strings.Split(ja4, "_")
-		if len(parts) != 3 || len(parts[0]) != 12 || len(parts[1]) != 12 || len(parts[2]) != 12 {
+		if len(parts) != 3 || len(parts[0]) != 10 || len(parts[1]) != 12 || len(parts[2]) != 12 {
 			t.Fatalf("malformed JA4 %q", ja4)
 		}
 		for _, p := range parts[1:] {

@@ -11,7 +11,6 @@ import (
 	"hash"
 	"net"
 	"slices"
-	"strconv"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -162,93 +161,138 @@ func RemoveFingerprints(conn net.Conn) {
 	s.mu.Unlock()
 }
 
-// CalcFingerprints calculates a JA4 fingerprint from ClientHelloInfo.
-// JA4 (TLS Client Hello): [ja4_a]_[ja4_b]_[ja4_c]
+// CalcFingerprints computes the client's JA4 fingerprint as the specification
+// defines it (FoxIO-LLC/ja4, technical_details/JA4.md): ja4_a is protocol,
+// highest version, SNI, cipher and extension counts and ALPN; ja4_b hashes the
+// sorted ciphers; ja4_c hashes the sorted extensions other than SNI and ALPN,
+// then the signature algorithms in the order sent.
+//
+// GREASE values (RFC 8701) are left out of all of it. Chrome draws them at
+// random for every connection, and hashed in they made one client a different
+// fingerprint on nearly every connection -- so reputation, rate limits and
+// blocks keyed on it never saw the same client twice.
 func CalcFingerprints(hello *tls.ClientHelloInfo) Fingerprints {
 	h := sha256Pool.Get().(hash.Hash)
-	h.Reset()
 	defer sha256Pool.Put(h)
 
-	// --- 1. JA4_a ---
-	// Protocol: t for TCP
-	protocol := byte('t')
+	ciphers := withoutGREASE(hello.CipherSuites)
+	extensions := withoutGREASE(hello.Extensions)
 
-	// TLS Version
-	sslVersion := uint16(tls.VersionTLS12)
-	if len(hello.SupportedVersions) > 0 {
-		sslVersion = hello.SupportedVersions[0]
+	var a [10]byte
+	a[0] = 't'
+	copy(a[1:3], ja4Version(hello.SupportedVersions))
+	a[3] = 'i'
+	if slices.Contains(extensions, extServerName) {
+		a[3] = 'd'
 	}
-	version := "00"
-	switch sslVersion {
-	case tls.VersionTLS13:
-		version = "13"
-	case tls.VersionTLS12:
-		version = "12"
-	case tls.VersionTLS11:
-		version = "11"
-	case tls.VersionTLS10:
-		version = "10"
-	}
-
-	// SNI
-	sni := byte('0')
-	if hello.ServerName != "" {
-		if net.ParseIP(hello.ServerName) != nil {
-			sni = 'i'
-		} else {
-			sni = 'd'
-		}
-	}
-
-	// First ALPN
+	writeTwoDigits(a[4:6], len(ciphers))
+	writeTwoDigits(a[6:8], len(extensions))
 	alpn := "00"
 	if len(hello.SupportedProtos) > 0 {
 		alpn = ja4ALPN(hello.SupportedProtos[0])
 	}
+	copy(a[8:10], alpn)
 
-	var ja4a_buf [14]byte
-	ja4a_buf[0] = protocol
-	ja4a_buf[1] = version[0]
-	ja4a_buf[2] = version[1]
-	ja4a_buf[3] = sni
-	writeTwoDigits(ja4a_buf[4:6], len(hello.CipherSuites))
-	writeTwoDigits(ja4a_buf[6:8], len(hello.Extensions))
-	writeTwoDigits(ja4a_buf[8:10], len(hello.SupportedProtos))
-	ja4a_buf[10] = alpn[0]
-	ja4a_buf[11] = alpn[1]
-	ja4_a := string(ja4a_buf[:12])
-
-	// --- 2. JA4_b (Sorted Ciphers) ---
-	ciphers := make([]uint16, len(hello.CipherSuites))
-	copy(ciphers, hello.CipherSuites)
 	slices.Sort(ciphers)
-
-	h.Reset()
-	var buf [8]byte
-	for i, c := range ciphers {
-		if i > 0 {
-			h.Write([]byte{','})
+	hashed := slices.DeleteFunc(extensions, func(e uint16) bool {
+		return e == extServerName || e == extALPN
+	})
+	slices.Sort(hashed)
+	sigs := make([]uint16, 0, len(hello.SignatureSchemes))
+	for _, s := range hello.SignatureSchemes {
+		if !isGREASE(uint16(s)) {
+			sigs = append(sigs, uint16(s))
 		}
-		h.Write(strconv.AppendUint(buf[:0], uint64(c), 16)) // Hex lowercase
 	}
-	ja4_b := hex.EncodeToString(h.Sum(nil))[:12]
-
-	// --- 3. JA4_c (Sorted Extensions) ---
-	extensions := make([]uint16, len(hello.Extensions))
-	copy(extensions, hello.Extensions)
-	slices.Sort(extensions)
-
-	h.Reset()
-	for i, e := range extensions {
-		if i > 0 {
-			h.Write([]byte{','})
-		}
-		h.Write(strconv.AppendUint(buf[:0], uint64(e), 16)) // Hex lowercase
-	}
-	ja4_c := hex.EncodeToString(h.Sum(nil))[:12]
-
 	return Fingerprints{
-		JA4: ja4_a + "_" + ja4_b + "_" + ja4_c,
+		JA4: string(a[:]) + "_" + ja4Hash(h, ciphers, nil) + "_" + ja4Hash(h, hashed, sigs),
+	}
+}
+
+// The extensions JA4 counts but leaves out of ja4_c: their values vary with
+// the destination rather than the client.
+const (
+	extServerName uint16 = 0x0000
+	extALPN       uint16 = 0x0010
+)
+
+// isGREASE reports whether v is one of RFC 8701's reserved values, 0x0a0a
+// through 0xfafa.
+func isGREASE(v uint16) bool {
+	return v&0x0f0f == 0x0a0a && v>>8 == v&0xff
+}
+
+func withoutGREASE(values []uint16) []uint16 {
+	out := make([]uint16, 0, len(values))
+	for _, v := range values {
+		if !isGREASE(v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// ja4Version is the two-character code of the highest version the client
+// offers. The first entry is not it: Chrome lists a GREASE value first.
+func ja4Version(versions []uint16) string {
+	var highest uint16
+	for _, v := range versions {
+		if !isGREASE(v) && v > highest {
+			highest = v
+		}
+	}
+	switch highest {
+	case tls.VersionTLS13:
+		return "13"
+	case tls.VersionTLS12:
+		return "12"
+	case tls.VersionTLS11:
+		return "11"
+	case tls.VersionTLS10:
+		return "10"
+	case 0x0300:
+		return "s3"
+	case 0x0002:
+		return "s2"
+	case 0xfeff:
+		return "d1"
+	case 0xfefd:
+		return "d2"
+	case 0xfefc:
+		return "d3"
+	default:
+		return "00"
+	}
+}
+
+// ja4Hash is the first twelve hex characters of the SHA-256 of values as
+// four-digit lowercase hex, comma-separated, then "_" and tail if there is a
+// tail. An empty input is twelve zeros rather than the hash of "".
+func ja4Hash(h hash.Hash, values, tail []uint16) string {
+	if len(values) == 0 && len(tail) == 0 {
+		return "000000000000"
+	}
+	h.Reset()
+	writeHexList(h, values)
+	if len(tail) > 0 {
+		h.Write([]byte{'_'})
+		writeHexList(h, tail)
+	}
+	var sum [sha256.Size]byte
+	return hex.EncodeToString(h.Sum(sum[:0]))[:12]
+}
+
+func writeHexList(h hash.Hash, values []uint16) {
+	const digits = "0123456789abcdef"
+	var buf [5]byte
+	for i, v := range values {
+		buf[0] = ','
+		buf[1], buf[2], buf[3], buf[4] = digits[v>>12], digits[v>>8&0xf], digits[v>>4&0xf], digits[v&0xf]
+		if i == 0 {
+			h.Write(buf[1:])
+		} else {
+			h.Write(buf[:])
+		}
 	}
 }
 

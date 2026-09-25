@@ -51,10 +51,10 @@ func TestJA4ALPNFieldIsTheSpecsNotTheClientsBytes(t *testing.T) {
 				t.Fatalf("a trace carrying JA4 %q cannot be serialised: %v", ja4, err)
 			}
 			parts := strings.Split(ja4, "_")
-			if len(parts) != 3 || len(parts[0]) != 12 {
+			if len(parts) != 3 || len(parts[0]) != 10 {
 				t.Fatalf("JA4 %q does not have three '_'-separated parts", ja4)
 			}
-			if got := parts[0][10:]; got != tc.want {
+			if got := parts[0][8:]; got != tc.want {
 				t.Fatalf("ALPN field = %q, want %q (JA4 %q)", got, tc.want, ja4)
 			}
 		})
