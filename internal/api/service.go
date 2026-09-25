@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/phantom"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -118,6 +119,11 @@ func (s *ApiService) logAudit(ctx context.Context, action, resource, details str
 	ip := "0.0.0.0"
 	if p, ok := peer.FromContext(ctx); ok {
 		ip = p.Addr.String()
+	} else if rs := request.GetRequestStateFromContext(ctx); rs != nil && rs.ClientRemoteAddr != "" {
+		// Connect and the REST handlers that call into this service run over
+		// net/http, where there is no gRPC peer; the entrypoint has recorded
+		// the trust-resolved client address.
+		ip = rs.ClientRemoteAddr
 	}
 
 	audit.Log(ctx, userID, action, resource, details, ip)

@@ -77,7 +77,24 @@ func (m *Manager) UpdateConfig(cfg Config) {
 	if cfg.Cache == nil {
 		cfg.Cache = m.config.Cache
 	}
+	if m.acme != nil && acmeAccountChanged(m.config, cfg) {
+		// The switch and the domains apply at once; the account does not. The
+		// running autocert manager has registered with its CA and schedules
+		// the renewal of every certificate it issued, and autocert gives no
+		// way to stop those timers -- a replacement would leave the old one
+		// renewing from the old CA behind it. Said out loud rather than
+		// silently ignored.
+		logger.L.LogWarn("the ACME email or CA server changed; the change applies after a restart, "+
+			"and until then certificates are issued and renewed with the running account",
+			"ca_server", cfg.Acme.CAServer)
+	}
 	m.config = cfg
+}
+
+// acmeAccountChanged reports whether the settings the ACME account was
+// registered with differ between two configs.
+func acmeAccountChanged(a, b Config) bool {
+	return cmp.Or(a.Acme.Email, a.Email) != cmp.Or(b.Acme.Email, b.Email) || a.Acme.CAServer != b.Acme.CAServer
 }
 
 func (m *Manager) SetHostPolicy(policy func(ctx context.Context, host string) error) {
@@ -322,15 +339,22 @@ func (m *Manager) GetTLSConfig() (*tls.Config, error) {
 		}
 	}
 
-	if m.config.Acme.Enabled {
-		tlsConfig, err = m.applyAcmeTLSConfig(tlsConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{}
+	}
+	// Installed whether or not ACME is on now: it decides per handshake, so
+	// the global switch takes effect without a restart. ACME's own
+	// GetCertificate used to be fixed in here when ACME was on at startup,
+	// and every per-handshake config is a clone of this one, so turning ACME
+	// off left it answering until the process was restarted.
+	tlsConfig.GetCertificate = m.GlobalACMECertificate
+	if m.config.Acme.Enabled {
+		// Built now rather than on the first handshake when ACME is on from
+		// the start, so a cache directory that cannot be created stops the
+		// gateway starting instead of failing handshakes.
+		if _, err := m.acmeManager(); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := m.applyExtraTLSConfig(tlsConfig); err != nil {
@@ -351,17 +375,23 @@ func (m *Manager) prepareManualTLSConfig() (*tls.Config, error) {
 	return &tls.Config{Certificates: certs}, nil
 }
 
-func (m *Manager) applyAcmeTLSConfig(baseConfig *tls.Config) (*tls.Config, error) {
-	certManager, err := m.acmeManager()
-	if err != nil {
-		return nil, err
+// GlobalACMECertificate is the base TLS config's certificate source. While
+// ACME is on gateway-wide it answers from ACME; while it is off it answers
+// nothing, so the configured certificates do. Where ACME cannot answer for a
+// host -- one its host policy does not cover -- and certificates are
+// configured, they answer instead of the handshake failing.
+func (m *Manager) GlobalACMECertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	m.mu.RLock()
+	enabled, haveCerts := m.config.Acme.Enabled, len(m.config.Certificates) > 0
+	m.mu.RUnlock()
+	if !enabled {
+		return nil, nil
 	}
-	acmeTLSConfig := certManager.TLSConfig()
-	if baseConfig == nil {
-		return acmeTLSConfig, nil
+	cert, err := m.GetCertificate(hello)
+	if err != nil && haveCerts {
+		return nil, nil
 	}
-	baseConfig.GetCertificate = acmeTLSConfig.GetCertificate
-	return baseConfig, nil
+	return cert, err
 }
 
 // acmeManager returns the autocert manager, building it on first use.
@@ -374,16 +404,18 @@ func (m *Manager) applyAcmeTLSConfig(baseConfig *tls.Config) (*tls.Config, error
 // email and client set afterwards outside the lock, which a handshake that
 // triggers the build can now race.
 func (m *Manager) acmeManager() (*autocert.Manager, error) {
+	// The config is read under the lock: UpdateConfig replaces it while
+	// handshakes are in flight.
 	m.mu.RLock()
-	existing := m.acme
+	existing, cfg := m.acme, m.config
 	m.mu.RUnlock()
 	if existing != nil {
 		return existing, nil
 	}
 
-	cache := m.config.Cache
+	cache := cfg.Cache
 	if cache == nil {
-		cacheDir := config.ResolvePath(m.config.CacheDir)
+		cacheDir := config.ResolvePath(cfg.CacheDir)
 		if err := os.MkdirAll(cacheDir, 0700); err != nil {
 			return nil, fmt.Errorf("failed to create cert cache dir: %w", err)
 		}
@@ -393,10 +425,10 @@ func (m *Manager) acmeManager() (*autocert.Manager, error) {
 		Prompt:     autocert.AcceptTOS,
 		Cache:      cache,
 		HostPolicy: m.acmeHostPolicy(),
-		Email:      cmp.Or(m.config.Acme.Email, m.config.Email),
+		Email:      cmp.Or(cfg.Acme.Email, cfg.Email),
 	}
-	if m.config.Acme.CAServer != "" {
-		built.Client = &acme.Client{DirectoryURL: m.config.Acme.CAServer}
+	if cfg.Acme.CAServer != "" {
+		built.Client = &acme.Client{DirectoryURL: cfg.Acme.CAServer}
 	}
 
 	m.mu.Lock()
@@ -408,17 +440,17 @@ func (m *Manager) acmeManager() (*autocert.Manager, error) {
 }
 
 // acmeHostPolicy is the configured policy, or, without one, the configured
-// domains.
+// domains -- read when a host is checked, not when the ACME manager is built,
+// so a domain added at runtime is covered.
 func (m *Manager) acmeHostPolicy() autocert.HostPolicy {
-	if m.config.HostPolicy != nil {
-		return autocert.HostPolicy(m.config.HostPolicy)
-	}
-	if len(m.config.Domains) == 0 {
-		return nil
-	}
-	domains := m.config.Domains
-	return func(_ context.Context, host string) error {
-		if slices.Contains(domains, host) {
+	return func(ctx context.Context, host string) error {
+		m.mu.RLock()
+		policy, domains := m.config.HostPolicy, m.config.Domains
+		m.mu.RUnlock()
+		if policy != nil {
+			return policy(ctx, host)
+		}
+		if len(domains) == 0 || slices.Contains(domains, host) {
 			return nil
 		}
 		return fmt.Errorf("host %q not in whitelist", host)

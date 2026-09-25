@@ -190,6 +190,31 @@ chosen, with a permissive policy that never allows credentials, and added
   `k8s-hr/<ns>/<route>/<rule>/<match>[/<host>]`); they shared their rule's
   name. Metrics and dashboards keyed by the old names need updating.
 
+### TLS settings saved from the dashboard apply without a restart
+
+Saving settings from the dashboard (`PUT /v1/global`) stored them and applied
+almost nothing: it skipped what the API's `UpdateGlobalConfig` applies. It now
+runs the same code, so TLS, alerting, IP reputation, retention, eBPF port
+knocking and a generated audit signing key all apply when saved, and the audit
+entry records the caller's address.
+
+For TLS specifically:
+
+- Turning ACME **off** takes effect: the startup TLS config had ACME's
+  certificate source fixed into it, so ACME kept answering until a restart.
+- Turning ACME **on** also offers `acme-tls/1`, so TLS-ALPN-01 validation
+  works, and domains added to `tls.domains` are authorised at once.
+- The minimum and maximum TLS version, the cipher suites and the
+  client-certificate mode apply to the next handshake.
+- A route that names its own certificates is served them even where global
+  ACME covers its host; ACME answered first. With ACME on and certificates
+  configured too, a host ACME does not cover is served a configured
+  certificate instead of failing the handshake.
+- Changing the ACME **email or CA server** still applies after a restart, and
+  the gateway now logs that when it happens: the running ACME account renews
+  the certificates it issued, and replacing it at runtime would leave it
+  renewing from the old CA.
+
 ### Behaviour that now does what it was configured to do
 
 - **Load balancing:** services saved from the dashboard as least-connections

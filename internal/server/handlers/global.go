@@ -20,7 +20,6 @@ import (
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
-	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -198,38 +197,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		// A section the body does not carry keeps its stored value; see
-		// api.KeepOmittedSections for what storing the body verbatim deleted.
-		api.KeepOmittedSections(&conf, svc.GetGlobals().Get(r.Context()))
-		if err := svc.GetGlobals().Update(r.Context(), &conf); err != nil {
+		// Stored and applied by the code the API's UpdateGlobalConfig runs --
+		// omitted sections kept, the audit key generated, TLS, alerting, IP
+		// reputation, retention, eBPF and the WAF reconfigured, the change
+		// audited. This handler used to store the body and apply a few of
+		// those itself, so an ACME switch, a certificate or a client authority
+		// saved from the dashboard did nothing until a restart.
+		if _, err := svc.UpdateGlobalConfig(r.Context(), &gateonv1.UpdateGlobalConfigRequest{Config: &conf}); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to update global config")
 			return
-		}
-
-		// Audit Log
-		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "update", "global_config", "Updated global configuration", request.GetClientIP(r, true))
-
-		// Apply settings that require immediate action
-		if conf.Audit != nil {
-			audit.UpdateConfig(conf.Audit)
-		}
-		if conf.Log != nil && conf.Log.PathStatsRetentionDays > 0 {
-			telemetry.ConfigureRetention(int(conf.Log.PathStatsRetentionDays))
-		}
-		if conf.Waf != nil {
-			wafmw.InvalidateWAFCache()
-		}
-		// WAF and advanced-security middlewares are composed into each route's
-		// handler at build time (router.ApplyRouteMiddlewares), so toggling them
-		// only takes effect once the cached route proxies are rebuilt.
-		if (conf.Waf != nil || conf.SecurityAdvanced != nil) && d.InvalidateAllProxies != nil {
-			d.InvalidateAllProxies()
-		}
-		if conf.Geoip != nil && conf.Geoip.Enabled {
-			if conf.Geoip.DbPath != "" {
-				_ = telemetry.InitGeoIP(conf.Geoip.DbPath)
-			}
 		}
 
 		_ = json.NewEncoder(w).Encode(struct {

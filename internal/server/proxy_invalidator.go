@@ -59,6 +59,7 @@ func (p *serverProxyInvalidator) InvalidateTLS() {
 	if p.server.TLSManager != nil {
 		p.server.TLSManager.UpdateConfig(BuildGtlsConfig(p.server))
 		p.server.TLSManager.ClearCache()
+		refreshSNIBase(p.server.TLSManager)
 	}
 }
 

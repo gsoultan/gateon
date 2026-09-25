@@ -21,6 +21,7 @@ type GlobalAndAuthAPI interface {
 	GetTLSManager() tls.TLSManager
 	GetEbpfManager() ebpf.Manager
 	GetInvalidator() proxy.Invalidator
+	UpdateGlobalConfig(ctx context.Context, req *gateonv1.UpdateGlobalConfigRequest) (*gateonv1.UpdateGlobalConfigResponse, error)
 	IsSetupRequired(ctx context.Context, req *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error)
 	Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error)
 	Login(ctx context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error)

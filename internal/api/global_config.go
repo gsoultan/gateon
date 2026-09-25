@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -204,11 +205,17 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	}
 
 	// Invalidate cache if needed
+	if req.Config.Waf != nil {
+		wafmw.InvalidateWAFCache()
+	}
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool { return true })
 		if req.Config.Tls != nil {
 			s.Invalidator.InvalidateTLS()
 		}
+	}
+	if g := req.Config.Geoip; g != nil && g.Enabled && g.DbPath != "" {
+		_ = telemetry.InitGeoIP(g.DbPath)
 	}
 
 	// Update eBPF Port Knocking sequence

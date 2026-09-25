@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/crypto/acme"
 
@@ -27,7 +28,32 @@ var (
 	certCache      sync.Map // string (certId) -> *tls.Certificate
 	certPoolCache  sync.Map // string (joined IDs) -> *x509.CertPool
 	tlsConfigCache sync.Map // string (routeId or "fallback") -> *tls.Config
+
+	// sniBase is what every per-handshake config is cloned from: the global
+	// settings -- version floor and ceiling, cipher suites, client
+	// certificates, the certificate source. SetupSNI installs the startup
+	// base and refreshSNIBase replaces it when TLS is invalidated. It used to
+	// be the startup base for the life of the process, so those settings,
+	// saved from the dashboard, applied to nothing until a restart.
+	sniBase atomic.Pointer[tls.Config]
 )
+
+// refreshSNIBase rebuilds the base from the manager's current configuration.
+// A configuration that cannot be built -- a certificate file that will not
+// load -- keeps the base in use rather than leaving handshakes with none; so
+// does global TLS being off, where the base is the minimal one Run made for
+// entrypoint-level TLS.
+func refreshSNIBase(manager gtls.TLSManager) {
+	cfg, err := manager.GetTLSConfig()
+	if err != nil {
+		logger.L.LogError("TLS settings could not be applied; handshakes keep the previous settings",
+			"error", err)
+		return
+	}
+	if cfg != nil && sniBase.Load() != nil {
+		sniBase.Store(cfg)
+	}
+}
 
 // InvalidateTLSCache clears the certificate and pool caches.
 // This is called when TLS configuration or certificates change.
@@ -50,14 +76,20 @@ func InvalidateRouteTLSConfig(routeID string) {
 func CreateTLSManager(s *Server) *gtls.Manager {
 	cfg := BuildGtlsConfig(s)
 	m := gtls.NewManager(cfg)
+	envDomains := gtls.InitFromEnv().Domains
 
 	// Set dynamic host policy for ACME
 	m.SetHostPolicy(func(ctx context.Context, host string) error {
-		// Check global whitelist first
-		for _, d := range cfg.Domains {
-			if host == d {
-				return nil
-			}
+		// The global whitelist as it is now. It was the one the gateway
+		// started with, captured here, so a domain added from the dashboard
+		// was refused until a restart. The same precedence as
+		// BuildGtlsConfig: the stored list, else the environment's.
+		domains := envDomains
+		if gc := s.GlobalStore.Get(ctx); gc != nil && gc.Tls != nil && len(gc.Tls.Domains) > 0 {
+			domains = gc.Tls.Domains
+		}
+		if slices.Contains(domains, host) {
+			return nil
 		}
 		// Check routes for ACME enablement
 		routes := s.RouteStore.List(ctx)
@@ -156,7 +188,9 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	if tlsConfig == nil {
 		return
 	}
+	sniBase.Store(tlsConfig.Clone())
 	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		base := sniBase.Load()
 		// Per-handshake, not a Background hoisted out of the closure. These
 		// store reads happen while a client is waiting on a TLS handshake; if
 		// that client goes away, the lookups should stop with it rather than
@@ -182,7 +216,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 				selected = cached.(*tls.Config)
 				return false
 			}
-			if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
+			if newCfg := buildTLSConfigForRoute(hello, rt, base, tlsManager, deps, getFp); newCfg != nil {
 				tlsConfigCache.Store(rt.Id, newCfg)
 				selected = newCfg
 				return false
@@ -201,7 +235,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 				return cached.(*tls.Config), nil
 			}
 
-			if newCfg := buildFallbackTLSConfig(hello, gc, tlsConfig, tlsManager, getFp); newCfg != nil {
+			if newCfg := buildFallbackTLSConfig(hello, gc, base, tlsManager, getFp); newCfg != nil {
 				tlsConfigCache.Store("fallback", newCfg)
 				return newCfg, nil
 			}
@@ -340,6 +374,10 @@ func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base
 		}
 		cfg = base.Clone()
 		cfg.Certificates = certs
+		// The route's own certificates, not the base's ACME source: cloned
+		// in, it answered first for every host ACME covers, and the
+		// certificate the route names was never presented.
+		cfg.GetCertificate = nil
 	}
 	identity.SetFingerprints(hello.Conn, getFp())
 
@@ -468,10 +506,12 @@ func failClosedClientCAs(cfg *tls.Config, routeID string) {
 }
 
 func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfig, base *tls.Config, manager gtls.TLSManager, getFp func() identity.Fingerprints) *tls.Config {
+	globalACME := gc.Tls.Acme != nil && gc.Tls.Acme.Enabled
 	// Handle global ACME if enabled and no manual certificates are provided
-	if gc.Tls.Acme != nil && gc.Tls.Acme.Enabled && len(gc.Tls.Certificates) == 0 {
+	if globalACME && len(gc.Tls.Certificates) == 0 {
 		cfg := base.Clone()
 		cfg.GetCertificate = manager.GetCertificate
+		withACMEProtocol(cfg)
 		identity.SetFingerprints(hello.Conn, getFp())
 		return cfg
 	}
@@ -490,8 +530,20 @@ func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfi
 	}
 	cfg := base.Clone()
 	cfg.Certificates = certs
+	if globalACME {
+		withACMEProtocol(cfg)
+	}
 	identity.SetFingerprints(hello.Conn, getFp())
 	return cfg
+}
+
+// withACMEProtocol offers acme-tls/1, the protocol a CA's TLS-ALPN-01
+// validation negotiates. The base config carries it only when ACME was on at
+// startup, so turning ACME on later left that challenge unable to complete.
+func withACMEProtocol(cfg *tls.Config) {
+	if !slices.Contains(cfg.NextProtos, acme.ALPNProto) {
+		cfg.NextProtos = append(slices.Clone(cfg.NextProtos), acme.ALPNProto)
+	}
 }
 
 // acmeChallengeType validates the configured ACME challenge.

@@ -335,7 +335,9 @@ export default function SettingsPage() {
             variant="light"
             radius="md"
           >
-            Some settings (TLS, Redis, OTEL) may require a server restart. Transport config applies to new proxy connections.
+            Redis, OpenTelemetry and the ACME account (email, CA server) apply after a restart. Certificates, TLS
+            versions and ciphers, client-certificate settings and the ACME switch apply as soon as they are saved.
+            Transport settings apply to new proxy connections.
           </Alert>
 
           <Box>
