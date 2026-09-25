@@ -45,11 +45,14 @@ func protoOverride(ctx context.Context) string {
 // The forwarded value is validated against the {http, https} allow-list;
 // anything else falls back to "http".
 func Scheme(r *http.Request) string {
-	if rs := GetRequestState(r); rs != nil && rs.ForwardedProto != "" {
-		return rs.ForwardedProto
-	}
+	// The override first, as documented above. It came second, after the
+	// trusted proxy's X-Forwarded-Proto that RealIP records in the request
+	// state, so a scheme forced to correct that header lost to it.
 	if p := NormalizeProto(protoOverride(r.Context())); p != "" {
 		return p
+	}
+	if rs := GetRequestState(r); rs != nil && rs.ForwardedProto != "" {
+		return rs.ForwardedProto
 	}
 	if r.TLS != nil {
 		return "https"
