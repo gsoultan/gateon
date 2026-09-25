@@ -81,6 +81,9 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 	if r.URL.Path == "/_gateon/seed" {
 		seed := GenerateChallengeSeed(cfg.SecretKey, r.UserAgent(), clientIP)
 		w.Header().Set("Content-Type", "text/plain")
+		// #nosec G705 -- the User-Agent and address reach the seed only as MAC
+		// input; the seed is "<unix ms>.<hex MAC>", digits, a dot and hex,
+		// served as text/plain. Nothing the client wrote is echoed.
 		_, _ = w.Write([]byte(seed))
 		return
 	}
@@ -256,6 +259,9 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
 // timestamps were never refused.
 const (
 	seedContext = "gateon-bot-seed-v2"
+	// #nosec G101 -- a domain-separation label mixed into the MAC so a seed
+	// can never verify as a pass. It is public by design; the secret is
+	// cfg.SecretKey.
 	passContext = "gateon-bot-pass-v2"
 	// minSolveTime is how long a seed must age before it is redeemed; the
 	// challenge page waits two seconds after fetching it.
