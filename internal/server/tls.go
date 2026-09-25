@@ -9,8 +9,11 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
+
+	"golang.org/x/crypto/acme"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -344,6 +347,11 @@ func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base
 		if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
 			applyTLSOption(cfg, opt, ctx, manager, deps)
 		}
+	}
+	if rt.Tls.AcmeEnabled && !slices.Contains(cfg.NextProtos, acme.ALPNProto) {
+		// An option's own ALPN list replaces the base one; an ACME route still
+		// has to answer the CA's TLS-ALPN-01 validation on acme-tls/1.
+		cfg.NextProtos = append(slices.Clone(cfg.NextProtos), acme.ALPNProto)
 	}
 	failClosedClientCAs(cfg, rt.Id)
 	return cfg

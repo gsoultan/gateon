@@ -402,6 +402,13 @@ func (m *Manager) applyExtraTLSConfig(tlsConfig *tls.Config) error {
 	tlsConfig.MinVersion = minVer
 	tlsConfig.MaxVersion = ParseTLSVersion(m.config.MaxVersion, 0)
 	tlsConfig.NextProtos = []string{"h2", "http/1.1"}
+	if m.config.Acme.Enabled {
+		// autocert answers a TLS-ALPN-01 validation on this protocol. Setting
+		// the list above used to drop it from the list autocert's own config
+		// carried, so the CA's validation handshake failed with "no
+		// application protocol" and that challenge could never complete.
+		tlsConfig.NextProtos = append(tlsConfig.NextProtos, acme.ALPNProto)
+	}
 
 	if m.config.ClientAuthType != "" {
 		tlsConfig.ClientAuth = ParseClientAuthType(m.config.ClientAuthType)
