@@ -32,8 +32,9 @@ func MaxConnections(max int) kind.Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// No CORS-preflight exemption: a limit a caller can step out of by
 			// naming a shape is not a limit. Browsers cache a preflight for
-			// MaxAge -- GlobalCORS sets 86400 -- so legitimate preflight volume
-			// is a rounding error against any cap worth setting.
+			// its max age -- the default CORS policy sends 86400 -- so
+			// legitimate preflight volume is a rounding error against any cap
+			// worth setting.
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()

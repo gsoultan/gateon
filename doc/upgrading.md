@@ -144,6 +144,31 @@ routed on (it read `X-Forwarded-Host`); identities without an `id` no longer
 share one certificate; WebSocket and other upgrades present the selected
 certificate (they presented none). See ADR-0014.
 
+### CORS is decided per route — **a backend's own CORS headers now reach the browser**
+
+The HTTP entrypoint answered every CORS preflight itself, before a route was
+chosen, with a permissive policy that never allows credentials, and added
+`Access-Control-Allow-Origin` to every response. It no longer does (ADR-0015):
+
+- A route's `cors` middleware now receives its preflights, so a policy that
+  allows credentials works for requests that need a preflight. Origins it
+  refuses are refused on the preflight too.
+- On a route **without** a `cors` middleware, preflights and responses go to
+  the backend. Its own CORS headers are sent to the browser as it wrote them —
+  they used to go out beside the gateway's as a second
+  `Access-Control-Allow-Origin`, which browsers reject. Where its answer
+  carries no CORS headers, the gateway supplies the same permissive,
+  credential-free default as before.
+- That default cannot tell a backend that does not do CORS from one that
+  refused an origin by leaving the header off, so it grants such an origin
+  non-credentialed access, as before. **To refuse origins, attach a `cors`
+  middleware to the route.**
+- Refusals made before a route is chosen — IP or user mitigation, the global
+  GeoIP block and honeypot, the connection limit — no longer carry CORS
+  headers; browsers show them as CORS errors.
+- `management.cors` now answers preflights to the management API on every
+  entrypoint that serves it.
+
 ### Behaviour that now does what it was configured to do
 
 - **Load balancing:** services saved from the dashboard as least-connections

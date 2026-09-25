@@ -148,8 +148,9 @@ func ShouldSkipMetrics(r *http.Request) bool {
 // deny decision.** A boundary that waves a request through on this predicate is
 // opt-out by request -- the caller states the shape that exempts it -- and that
 // is how a shunned IP, a mitigated fingerprint, a blocked country and the WAF
-// itself were each reachable by naming a preflight on the smart-TCP listener,
-// which does not run transform.GlobalCORS ahead of its chain.
+// itself were each reachable by naming a preflight on the smart-TCP listener.
+// No listener answers preflights ahead of its chain any more (ADR-0015), so on
+// every one of them a preflight meets every deny decision a request does.
 //
 // It has two legitimate uses, and they share a property the deny decisions do
 // not: the request genuinely cannot satisfy the check.

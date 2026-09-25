@@ -483,12 +483,14 @@ note "12/12 CORS-preflight is not a way out of a deny decision"
 # Five did. IPMitigation, UserMitigation, the reputation blocker, the CEL policy
 # and the WAF each waved a preflight straight through, and IPFilter and
 # HostFilter had done the same before them. On the HTTP entrypoint it was
-# unreachable, because transform.GlobalCORS sits at chain[0] and terminates
-# preflights first -- but GlobalCORS has exactly one call site, and
-# buildPlainHTTPHandler does not include it, so on any plaintext smart-TCP
-# entrypoint an OPTIONS request with two headers reached the origin while the
-# same request as a GET got 403. An OPTIONS request is a request: it carries a
-# query string, it may carry a body, and the backend answers it.
+# unreachable at the time, because a CORS middleware at chain[0] answered
+# preflights first -- but buildPlainHTTPHandler did not include it, so on any
+# plaintext smart-TCP entrypoint an OPTIONS request with two headers reached the
+# origin while the same request as a GET got 403. That middleware is gone
+# (ADR-0015): every listener's preflights now meet every deny decision, which
+# makes this check the only thing between a preflight and the origin. An
+# OPTIONS request is a request: it carries a query string, it may carry a body,
+# and the backend answers it.
 #
 # The files below may call it, and they share a property the deny decisions do
 # not -- the request genuinely cannot satisfy the check:
@@ -510,8 +512,8 @@ note "12/12 CORS-preflight is not a way out of a deny decision"
 # The rate limiter, the connection limiters and the body cap used to be on this
 # list as a known gap. They are not exemptions any more: a limit a caller steps
 # out of by naming a shape is not a limit, and browsers cache a preflight for
-# MaxAge (GlobalCORS sets 86400), so legitimate preflight volume is a rounding
-# error against any cap worth setting.
+# its max age (the default CORS policy sends 86400), so legitimate preflight
+# volume is a rounding error against any cap worth setting.
 #
 # In every allowed case the real request that follows is still checked.
 cors_allowed='^(internal/middleware/kind/core\.go|internal/middleware/auth/(auth|forwardauth|hmac|oauth2_introspection)\.go|internal/middleware/security/(bot_management|turnstile)\.go|internal/middleware/traffic/compress\.go|internal/middleware/transform/(cors|cors_factory|xfcc)\.go):'

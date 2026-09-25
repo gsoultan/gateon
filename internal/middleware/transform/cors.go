@@ -4,8 +4,10 @@
 package transform
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -98,62 +100,26 @@ func CORS(cfg CORSConfig) kind.Middleware {
 	}
 }
 
-// BypassCORS returns a middleware that automatically handles CORS preflight requests
-// by allowing all origins, methods, and headers. It is intended to be used as a
-// fallback when no specific CORS middleware is configured, restoring v1.5.0 behavior.
+// DefaultCORS is the CORS policy of a route that attaches neither a cors nor a
+// grpcweb middleware: the backend's own, and a permissive, credential-free
+// default wherever the answer that comes back carries none.
 //
-// Credentials are deliberately NOT allowed here. Reflecting an arbitrary Origin
-// and setting Access-Control-Allow-Credentials: true is the one CORS
-// combination that is always unsafe — it lets any page on the internet issue
-// credentialed requests to every backend behind the gateway and read the
-// replies. A route that genuinely needs credentials must declare an explicit
-// origin allowlist through CORS(CORSConfig), where the operator names the
-// origins being trusted.
-func BypassCORS() kind.Middleware {
-	c := cors.New(cors.Options{
-		AllowOriginFunc:  func(origin string) bool { return true },
-		AllowedMethods:   defaultCORSMethods(),
-		AllowedHeaders:   []string{"*"},
-		AllowCredentials: false,
-		MaxAge:           86400,
-	})
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Context().Value(kind.CORSHandledContextKey) != nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Mark as handled for downstream middlewares
-			wrappedNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r = r.WithContext(context.WithValue(r.Context(), kind.CORSHandledContextKey, true))
-				next.ServeHTTP(w, r)
-			})
-
-			c.Handler(wrappedNext).ServeHTTP(w, r)
-		})
-	}
-}
-
-// GlobalCORS returns a middleware that handles CORS preflight requests
-// permissively for the entire entrypoint. It ensures that even early
-// security blocks (like IP shunning) include the necessary CORS headers
-// to avoid confusing browser-level errors. Unlike BypassCORS, it does
-// not set kind.CORSHandledContextKey, allowing route-specific CORS middlewares
-// to override its settings for the actual request.
+// It decides when the response is committed, from the finished headers,
+// because only then is it known whether the backend answered for itself. The
+// entrypoint used to decide first, for every route, before one was chosen: it
+// answered every preflight itself, so neither a route's cors middleware nor a
+// backend's own CORS ever saw one, and it set Access-Control-Allow-Origin
+// before proxying, so a backend's own header went out as a second value, which
+// browsers refuse. See ADR-0015.
 //
-// This runs on every HTTP entrypoint, so it is the widest-reach CORS policy in
-// the gateway and must stay credential-free. Its job is to make browser errors
-// legible on paths that never reach a route — not to grant cross-origin access
-// to authenticated data. Reflecting an arbitrary Origin with
-// Access-Control-Allow-Credentials: true would do exactly that, for every
-// backend at once, and browsers honour the reflected form even though they
-// reject the equivalent `*`. Credentials belong to CORS(CORSConfig), where an
-// operator has named the origins.
-func GlobalCORS() kind.Middleware {
-	c := cors.New(cors.Options{
-		AllowOriginFunc: func(origin string) bool { return true },
+// Credentials are never allowed here. Reflecting an arbitrary Origin together
+// with Access-Control-Allow-Credentials: true lets any page on the internet
+// issue credentialed requests to the backend and read the replies. A route
+// that needs credentials names its origins in a cors middleware; a backend that
+// answers with its own headers is left alone.
+func DefaultCORS() kind.Middleware {
+	policy := cors.New(cors.Options{
+		AllowOriginFunc: func(string) bool { return true },
 		AllowedMethods:  defaultCORSMethods(),
 		AllowedHeaders:  []string{"*"},
 		ExposedHeaders: []string{
@@ -167,17 +133,135 @@ func GlobalCORS() kind.Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// For preflights, handle them here permissively and return immediately.
-			if kind.IsCorsPreflight(r) {
-				c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(w, r)
+			if r.Header.Get("Origin") == "" {
+				// Not a CORS request, but the answer to one would differ, so a
+				// cache between here and the browser must not hand this
+				// response to one.
+				addVaryOrigin(w.Header())
+				next.ServeHTTP(w, r)
 				return
 			}
-
-			// For actual requests, apply permissive headers but let downstream handlers override.
-			c.Handler(next).ServeHTTP(w, r)
+			dw := &defaultCORSWriter{ResponseWriter: w, r: r, policy: policy, preflight: kind.IsCorsPreflight(r)}
+			next.ServeHTTP(dw, r)
+			// A handler that returns without writing gets an implicit 200 from
+			// the server, below this writer; commit it here instead.
+			if !dw.committed && !dw.hijacked {
+				dw.WriteHeader(http.StatusOK)
+			}
 		})
 	}
 }
+
+// varyOrigin is shared, like rs/cors's own: its capacity is its length, so an
+// append by anything downstream copies it rather than writing into it.
+var varyOrigin = []string{"Origin"}
+
+func addVaryOrigin(h http.Header) {
+	if vary, ok := h["Vary"]; ok {
+		h["Vary"] = append(vary, "Origin")
+		return
+	}
+	h["Vary"] = varyOrigin
+}
+
+// preflightBodyHeaders describe a body, and an answered preflight has none.
+var preflightBodyHeaders = [...]string{"Content-Length", "Content-Type", "Content-Encoding", "Transfer-Encoding"}
+
+// defaultCORSWriter applies DefaultCORS when the response is committed.
+//
+// An answer that already carries Access-Control-Allow-Origin is downstream's
+// own -- the backend's policy -- and goes out untouched. Otherwise an actual
+// response gets the default policy's headers, and a preflight is answered by
+// the default policy instead: an answer with no CORS headers is no answer to
+// the browser's question, whatever its status, and before this the gateway
+// answered every preflight without asking the backend at all.
+type defaultCORSWriter struct {
+	http.ResponseWriter
+	r         *http.Request
+	policy    *cors.Cors
+	preflight bool
+	committed bool
+	hijacked  bool
+	// answered is set once a preflight has been answered here; what
+	// downstream writes after that is discarded.
+	answered bool
+}
+
+func (w *defaultCORSWriter) commit() {
+	if w.committed {
+		return
+	}
+	w.committed = true
+	h := w.Header()
+	if h.Get("Access-Control-Allow-Origin") != "" {
+		return
+	}
+	if w.preflight {
+		for _, k := range preflightBodyHeaders {
+			h.Del(k)
+		}
+		w.answered = true
+	}
+	w.policy.HandlerFunc(headerSink{h}, w.r)
+}
+
+func (w *defaultCORSWriter) WriteHeader(code int) {
+	// An informational response is not the response; its headers go out on
+	// their own and the final ones are still being assembled.
+	if code >= http.StatusOK {
+		w.commit()
+		if w.answered {
+			code = http.StatusNoContent
+		}
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *defaultCORSWriter) Write(b []byte) (int, error) {
+	if !w.committed {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.answered {
+		return len(b), nil
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush commits first, since flushing is what puts the headers on the wire.
+func (w *defaultCORSWriter) Flush() {
+	if !w.committed {
+		w.WriteHeader(http.StatusOK)
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer for the
+// controls this wrapper does not forward itself, such as write deadlines.
+func (w *defaultCORSWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// Hijack forwards to the underlying writer. Browsers send Origin on every
+// WebSocket handshake, so every browser WebSocket on a route without a cors
+// middleware passes through this writer, and the proxy needs the connection.
+func (w *defaultCORSWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		conn, rw, err := hj.Hijack()
+		w.hijacked = err == nil
+		return conn, rw, err
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+// headerSink hands rs/cors a response whose headers are the real ones and
+// whose status and body go nowhere, so the policy can write its headers into a
+// response that is still being assembled. A single-map struct fits in an
+// interface without allocating.
+type headerSink struct{ h http.Header }
+
+func (s headerSink) Header() http.Header       { return s.h }
+func (headerSink) Write(b []byte) (int, error) { return len(b), nil }
+func (headerSink) WriteHeader(int)             {}
 
 // corsRouteID resolves the identifier of the route that handled the request.
 // The matched route's ID is preferred because it is what the remediation API

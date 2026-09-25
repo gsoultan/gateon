@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -621,6 +622,12 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		// untouched here: the security middlewares below key their metrics-skip
 		// behavior off an unset name.
 		chain = append(chain, withMatchedRoute(rt), corsMiddleware)
+	} else {
+		// No policy of the route's own: the backend's, or the permissive
+		// default where the backend sends none. Outer to the security
+		// middlewares for the same reason a route's own policy is, so a
+		// refusal made on this route stays readable by the page that caused it.
+		chain = append(chain, transform.DefaultCORS())
 	}
 
 	// 3. Infrastructure Blockers & Lifecycle (inner to CORS)

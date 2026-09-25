@@ -592,12 +592,12 @@ func HostFilter(host string) Middleware {
 			// No CORS-preflight exemption, deliberately. IsCorsPreflight is
 			// three values the client writes -- the OPTIONS method, an Origin
 			// header and an Access-Control-Request-Method header -- so
-			// skipping on it made this boundary opt-out. transform.GlobalCORS
-			// terminates preflights ahead of the HTTP entrypoint's chain, but
-			// it has one call site and neither the management listener nor the
-			// smart-TCP listener includes it: measured there, a request from
-			// an address outside the allowlist reached the backend by naming a
-			// preflight while the same request as a GET got 403.
+			// skipping on it made this boundary opt-out. Measured on the
+			// management and smart-TCP listeners, a request from an address
+			// outside the allowlist reached the backend by naming a preflight
+			// while the same request as a GET got 403. Since ADR-0015 no
+			// listener answers preflights ahead of its chain, so every one of
+			// them reaches this check.
 			//
 			// This states who may reach the gateway at all, so it answers
 			// before considering what the caller says it wants. A browser

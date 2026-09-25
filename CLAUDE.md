@@ -250,11 +250,13 @@ shipped code and each failed silently:
    `Access-Control-Request-Method`), so a boundary that calls `next.ServeHTTP` on it is
    opt-out by request. Five did: `IPMitigation`, `UserMitigation`, the reputation
    blocker, the CEL policy and the WAF, after `IPFilter` and `HostFilter` had already
-   been fixed for it. On the HTTP entrypoint it was unreachable — `transform.GlobalCORS`
-   sits at `chain[0]` and terminates preflights first — but it has exactly one call site
-   and `buildPlainHTTPHandler` does not include it, so on a plaintext smart-TCP
-   entrypoint an `OPTIONS` with two headers reached the origin while the same request as
-   a `GET` got 403. An `OPTIONS` request is a request. An allowlist in the script names
+   been fixed for it. On the HTTP entrypoint it was unreachable at the time — a CORS
+   middleware at `chain[0]` answered preflights first — but `buildPlainHTTPHandler` did
+   not include it, so on a plaintext smart-TCP entrypoint an `OPTIONS` with two headers
+   reached the origin while the same request as a `GET` got 403. That middleware is gone
+   (ADR-0015), so every listener's preflights now meet every deny decision and this
+   check is all that stands between a preflight and the origin. An `OPTIONS` request is
+   a request. An allowlist in the script names
    the files that may call it, all of which share one property the deny decisions do not:
    the request genuinely cannot satisfy the check (a credential a browser will not send
    on a preflight, a challenge a preflight cannot run, or the CORS middleware whose job

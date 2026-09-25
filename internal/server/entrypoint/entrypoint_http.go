@@ -20,7 +20,6 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
-	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -112,10 +111,13 @@ func dynamicTimeouts(ep *gateonv1.EntryPoint, deps *Deps, next http.Handler) htt
 // includeSubDomains pinning every subdomain to HTTPS for a year. The dashboard
 // and management API apply their own headers in BaseHandler; a route that wants
 // headers on its backend's responses attaches a security_headers middleware.
+//
+// It answers no CORS either. It used to, first in the chain and before a route
+// was chosen, which pre-empted every route's own policy, every backend's, and
+// the management API's; CORS is decided per route now (ADR-0015).
 func entrypointChain(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps) []middleware.Middleware {
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	chain := []middleware.Middleware{
-		transform.GlobalCORS(),
 		middleware.EntryPoint(ep.Id, epLabel, IsManagementAddress(ep.Address, deps)),
 		middleware.Metrics("gateon-" + epLabel),
 		identity.IPMitigation(),

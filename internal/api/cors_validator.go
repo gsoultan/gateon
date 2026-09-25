@@ -151,9 +151,14 @@ func (s *ApiService) ValidateCORS(ctx context.Context, req *gateonv1.ValidateCOR
 
 	if corsMW == nil {
 		return &gateonv1.ValidateCORSResponse{
-			IsAllowed: true, // If no CORS middleware, browser default applies (usually blocked unless same-origin)
-			Message:   "No CORS middleware found on the matched route. Standard browser same-origin policy applies.",
-			Checks:    []string{"Route matched: " + rt.Name, "CORS middleware: Not found"},
+			// No policy of the route's own: the backend's CORS headers go out as
+			// sent, and where it sends none the gateway's default allows any
+			// origin without credentials (transform.DefaultCORS).
+			IsAllowed: true,
+			Message: "No CORS middleware on the matched route. The backend's own CORS headers are used as " +
+				"sent; where the backend sends none, the gateway allows any origin, without credentials.",
+			Checks: []string{"Route matched: " + rt.Name,
+				"CORS middleware: none (backend's policy, or the gateway default: any origin, no credentials)"},
 			RouteName: rt.Name,
 			RouteId:   rt.Id,
 		}, nil
