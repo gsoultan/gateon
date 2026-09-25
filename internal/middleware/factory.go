@@ -261,7 +261,11 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		}
 		return identity.TlsBinding(cookieName), nil
 	case "security_headers":
-		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
+		preset, err := kind.ParseSecurityHeadersPreset(cfg["preset"])
+		if err != nil {
+			return nil, kind.CfgError("preset", cfg["preset"], err)
+		}
+		return SecurityHeaders(SecurityHeadersConfig{Preset: preset}), nil
 	case "circuit_breaker":
 		return circuitBreakerFromConfig(cfg, routeID)
 	case "wasm":

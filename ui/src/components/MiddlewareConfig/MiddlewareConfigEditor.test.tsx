@@ -18,6 +18,7 @@ const {
   BotManagementConfigEditor,
   FileSecurityConfigEditor,
   PolicyConfigEditor,
+  SecurityHeadersConfigEditor,
   WAFConfigEditor,
 } = await import("./SecurityConfigEditors");
 const { CORSConfigEditor, CORS_PRESETS, StripPrefixConfigEditor } =
@@ -290,5 +291,19 @@ describe("middleware kind names", () => {
       </MantineProvider>,
     );
     expect(html).not.toContain("Unknown middleware type");
+  });
+});
+
+describe("security headers preset", () => {
+  // An unset preset is the gateway's legacy set -- nosniff, SAMEORIGIN framing
+  // and a referrer policy, no CSP. The editor showed it as Recommended, which
+  // adds a CSP and HSTS the route did not have.
+  test("an unset preset shows what the gateway applies", () => {
+    const tree = SecurityHeadersConfigEditor({ config: {}, updateConfig: () => {} });
+    const select = findElement(tree, byLabel("Security Headers Preset"));
+    expect(select).not.toBeNull();
+    expect(select!.props.value).toBe("legacy");
+    const values = (select!.props.data as { value: string }[]).map((d) => d.value);
+    expect(values).toEqual(["legacy", "recommended", "strict", "none"]);
   });
 });

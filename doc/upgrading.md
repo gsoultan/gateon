@@ -37,7 +37,8 @@ built answers 503 and logs which one:
   *without* when they failed to build. They now fail closed with the other
   boundaries.
 - Circuit breaker `error_threshold` outside (0, 1], `min_requests` below 1
-  and non-positive windows.
+  and non-positive windows, and a `security_headers` preset that is not one of
+  `legacy`, `recommended`, `strict` or `none`.
 
 **Who is affected:** only configurations with such a value, which were not
 doing what they said. The log line names the middleware and key.
@@ -98,6 +99,13 @@ fingerprint and never matched. Fingerprints are enforced at L7.
 - **gRPC-Web** no longer grants credentials to any origin, and the
   *Restricted* CORS preset with no origins restricts instead of allowing all.
 - **IP filters:** a bare IPv6 address is one host, not a /32.
+- **Security headers:** the *None* preset sets nothing (it fell through to the
+  legacy set, overwriting the backend's own headers); the legacy set, which an
+  unset preset means, now sends `X-XSS-Protection: 0` instead of asking for the
+  browser XSS auditor; and a misspelt preset refuses the build.
+- **Buffering:** a body over `max_request_body_bytes` is answered 413 and never
+  reaches the backend. It was forwarded anyway and came back as a 502 counted
+  against the backend.
 - **Bot management:** challenge passes issued before the upgrade are not
   accepted (the seed was its own pass); visitors are challenged once more.
 - **Postgres** sessions run in UTC, so TTLs no longer drift with the host's

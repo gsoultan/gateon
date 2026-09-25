@@ -873,15 +873,16 @@ export function SecurityHeadersConfigEditor({ config, updateConfig }: EditorProp
     <Stack gap="md">
       <Select
         label="Security Headers Preset"
-        description="Recommended applies HSTS (1y), NoSniff, SameOrigin FrameOptions. Strict adds CSP and DENY FrameOptions."
+        description="Legacy: nosniff, same-origin framing and a referrer policy, with no CSP. Recommended adds a same-origin CSP, a permissions policy and, over HTTPS, one year of HSTS. Strict denies framing, sends no referrer and preloads two years of HSTS. None leaves the backend's headers alone."
         placeholder="Select preset"
         data={[
+          { value: "legacy", label: "Legacy (default)" },
           { value: "recommended", label: "Recommended" },
           { value: "strict", label: "Strict (Maximum Security)" },
           { value: "none", label: "None" },
         ]}
-        value={config.preset || "recommended"}
-        onChange={(val) => updateConfig("preset", val || "recommended")}
+        value={config.preset || "legacy"}
+        onChange={(val) => updateConfig("preset", val || "legacy")}
         allowDeselect={false}
       />
     </Stack>
