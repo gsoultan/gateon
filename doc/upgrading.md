@@ -9,7 +9,7 @@ here after the fact.
 
 ---
 
-## Unreleased
+## v2.7.0
 
 ### Routes saved from the dashboard may be serving on every entrypoint — **check each route**
 

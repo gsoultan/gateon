@@ -11,8 +11,8 @@ SPDX-License-Identifier: MIT
 > push it yourself and point `image.repository` at it:
 >
 > ```bash
-> docker build -t your-registry/gateon:2.6.0 .
-> docker push your-registry/gateon:2.6.0
+> docker build -t your-registry/gateon:2.7.0 .
+> docker push your-registry/gateon:2.7.0
 > helm install gateon ./charts/gateon --set image.repository=your-registry/gateon
 > ```
 
