@@ -5,19 +5,9 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
 import { useRealTimeStore } from "../store/useRealTimeStore";
+import { aggStatsFromWire, type AggStats } from "./aggStatsWire";
 
-export type AggStats = {
-  totalRequests: number;
-  totalBandwidthBytes: number;
-  totalErrors: number;
-  activeConnections: number;
-  openCircuits: number;
-  halfOpenCircuits: number;
-  healthyTargets: number;
-  totalTargets: number;
-  cpuUsage: number;
-  memoryUsage: number;
-};
+export type { AggStats } from "./aggStatsWire";
 
 const queryKey = ["agg-stats"];
 
@@ -30,7 +20,7 @@ export function useAggStats() {
     queryFn: async () => {
       const res = await apiFetch("/v1/diag/agg-stats");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      return aggStatsFromWire(await res.json());
     },
   });
 
