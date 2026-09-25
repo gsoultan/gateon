@@ -31,17 +31,12 @@ type BodyTransformConfig struct {
 func BodyTransform(cfg BodyTransformConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Content-Type check
-			if cfg.ContentTypeFilter != "" {
-				ct := r.Header.Get("Content-Type")
-				if !strings.Contains(ct, cfg.ContentTypeFilter) {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-
-			// Request transformation
-			if cfg.RequestSearch != "" && r.Body != nil {
+			// The filter applies to the body being rewritten: the request's
+			// Content-Type for the request body, the response's for the
+			// response. It used to be checked against the request for both, so
+			// with a filter set a GET -- which has no Content-Type -- never had
+			// its response rewritten.
+			if cfg.RequestSearch != "" && r.Body != nil && typeMatches(r.Header.Get("Content-Type"), cfg.ContentTypeFilter) {
 				transformRequestBody(r, cfg)
 			}
 
@@ -50,9 +45,17 @@ func BodyTransform(cfg BodyTransformConfig) kind.Middleware {
 				return
 			}
 
-			// Response transformation
-			bw := &transformResponseWriter{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(bw, r)
+			// The search runs over the bytes the backend sends. Asked with the
+			// client's Accept-Encoding, a backend answers in gzip, where the
+			// search never matches -- or, by chance, matches and corrupts the
+			// stream. Ask for plain bytes; a compress middleware in front still
+			// compresses what the client receives.
+			upstream := *r
+			upstream.Header = r.Header.Clone()
+			upstream.Header.Del("Accept-Encoding")
+
+			bw := &transformResponseWriter{ResponseWriter: w, status: http.StatusOK, filter: cfg.ContentTypeFilter}
+			next.ServeHTTP(bw, &upstream)
 			bw.finish(cfg.ResponseSearch, cfg.ResponseReplace)
 		})
 	}
@@ -83,8 +86,13 @@ func transformRequestBody(r *http.Request, cfg BodyTransformConfig) {
 	r.Header.Set("Content-Length", strconv.Itoa(len(newBody)))
 }
 
+func typeMatches(contentType, filter string) bool {
+	return filter == "" || strings.Contains(contentType, filter)
+}
+
 type transformResponseWriter struct {
 	http.ResponseWriter
+	filter      string
 	body        bytes.Buffer
 	status      int
 	wroteHeader bool
@@ -112,11 +120,33 @@ func (bw *transformResponseWriter) Write(b []byte) (int, error) {
 }
 
 func (bw *transformResponseWriter) WriteHeader(code int) {
+	// 1xx other than 101 is informational: forwarded, with the real status
+	// still to come.
+	if code < 200 && code != http.StatusSwitchingProtocols {
+		bw.ResponseWriter.WriteHeader(code)
+		return
+	}
 	if bw.wroteHeader {
 		return
 	}
 	bw.wroteHeader = true
 	bw.status = code
+	if !bw.rewritable() {
+		bw.startPassthrough()
+	}
+}
+
+// rewritable reports whether the response its header describes is one this
+// middleware rewrites. Anything else goes straight through, unbuffered: an
+// error, an encoded body it cannot search, a stream that must not be held
+// back, or a type the filter excludes.
+func (bw *transformResponseWriter) rewritable() bool {
+	h := bw.Header()
+	ct := h.Get("Content-Type")
+	enc := h.Get("Content-Encoding")
+	return bw.status < 400 && (enc == "" || strings.EqualFold(enc, "identity")) &&
+		!strings.HasPrefix(ct, "text/event-stream") && !strings.HasPrefix(ct, "application/grpc") &&
+		typeMatches(ct, bw.filter)
 }
 
 // startPassthrough gives up on transforming this response and releases what is
@@ -140,12 +170,9 @@ func (bw *transformResponseWriter) finish(search, replace string) {
 	if !bw.wroteHeader {
 		bw.WriteHeader(http.StatusOK)
 	}
-	out := bw.body.Bytes()
-	if bw.status < 400 {
-		out = []byte(strings.ReplaceAll(bw.body.String(), search, replace))
-		// The body no longer matches the origin's validator.
-		bw.ResponseWriter.Header().Del("ETag")
-	}
+	out := []byte(strings.ReplaceAll(bw.body.String(), search, replace))
+	// The body no longer matches the origin's validator.
+	bw.ResponseWriter.Header().Del("ETag")
 	bw.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(len(out)))
 	bw.ResponseWriter.WriteHeader(bw.status)
 	if len(out) > 0 {
@@ -168,15 +195,18 @@ func (bw *transformResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error)
 	return hj.Hijack()
 }
 
-// Flush means the handler wants bytes on the wire now, which is incompatible
-// with holding them back to rewrite them. Release what is held and stream the
-// rest untransformed rather than buffering a stream that may never end.
+// Flush is not a reason to give up on a response being rewritten. The
+// gateway's reverse proxy flushes after every write, and treating each flush as
+// a stream that must not be held back meant no response behind the proxy was
+// ever rewritten. Streams are recognised by their type when the header is
+// written and passed through then; a rewritable response is bounded by
+// MaxBodyBytes, past which it is passed through anyway.
 func (bw *transformResponseWriter) Flush() {
+	if !bw.wroteHeader {
+		bw.WriteHeader(http.StatusOK)
+	}
 	if !bw.passthrough {
-		if !bw.wroteHeader {
-			bw.WriteHeader(http.StatusOK)
-		}
-		bw.startPassthrough()
+		return
 	}
 	if f, ok := bw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
