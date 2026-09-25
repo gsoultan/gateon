@@ -72,6 +72,7 @@ import { WAF_APP_PROFILES } from "../types/gateon";
 import { generateRandomString } from "../utils/random";
 import { Link } from "@tanstack/react-router";
 import { apiFetch } from "../hooks/useGateon";
+import { ACME_CHALLENGE_NOTE, ACME_CHALLENGE_TYPES } from "../components/settings/acmeChallenges";
 
 function inferDriver(
   databaseUrl?: string,
@@ -455,13 +456,10 @@ export default function SettingsPage() {
                       />
                       <Select
                         label="Challenge Type"
+                        description={ACME_CHALLENGE_NOTE}
                         disabled={formDisabled}
-                        data={[
-                          { label: "HTTP-01", value: "http" },
-                          { label: "TLS-ALPN-01", value: "tls-alpn" },
-                          { label: "DNS-01", value: "dns" },
-                        ]}
-                        value={tls.acme.challengeType || "http"}
+                        data={ACME_CHALLENGE_TYPES}
+                        value={tls.acme.challengeType === "tls-alpn" ? "tls-alpn" : "http"}
                         onChange={(v) =>
                           setConfig({
                             ...config,
