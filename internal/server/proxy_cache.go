@@ -276,6 +276,22 @@ func (c *ProxyCache) inheritHealthLocked(id string, ph, old *proxy.ProxyHandler)
 	}
 }
 
+// retireHandlerLocked drains a handler that is leaving the cache, keeping what
+// its health checks concluded for the route's next handler to start from.
+// Purge used to drain without keeping it, so after a purge -- which comes
+// under memory pressure -- every route sent traffic to backends known to be
+// down until each new handler's first check. At most one snapshot per route;
+// Sync drops those of deleted routes. Caller holds c.mu.
+func (c *ProxyCache) retireHandlerLocked(id string, ph *proxy.ProxyHandler) {
+	if snap := ph.HealthSnapshot(); len(snap) > 0 {
+		if c.retiredHealth == nil {
+			c.retiredHealth = make(map[string]map[string]bool)
+		}
+		c.retiredHealth[id] = snap
+	}
+	go ph.DrainAndClose(drainTimeout)
+}
+
 // InvalidateRoute removes the cached proxy for the given route ID.
 func (c *ProxyCache) InvalidateRoute(routeID string) {
 	if routeID == "" {
@@ -326,13 +342,7 @@ func (c *ProxyCache) invalidateLocked(id string) {
 	c.proxyHandlers.Store(newPhMap)
 
 	if ph != nil {
-		if snap := ph.HealthSnapshot(); len(snap) > 0 {
-			if c.retiredHealth == nil {
-				c.retiredHealth = make(map[string]map[string]bool)
-			}
-			c.retiredHealth[id] = snap
-		}
-		go ph.DrainAndClose(drainTimeout)
+		c.retireHandlerLocked(id, ph)
 		return
 	}
 	type closer interface{ Close() }
@@ -381,9 +391,9 @@ func (c *ProxyCache) Purge() {
 
 	c.epoch.Add(1)
 	handlers := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
-	for _, ph := range handlers {
+	for id, ph := range handlers {
 		if ph != nil {
-			go ph.DrainAndClose(drainTimeout)
+			c.retireHandlerLocked(id, ph)
 		}
 	}
 

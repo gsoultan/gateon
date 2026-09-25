@@ -132,6 +132,35 @@ func TestRebuiltRouteKeepsItsDownTargets(t *testing.T) {
 	}
 }
 
+// TestPurgedRouteKeepsItsDownTargets is the same for Purge, which the
+// resource governor calls under memory pressure: it dropped every handler
+// without keeping what their health checks had concluded, so after a purge
+// every route sent traffic to backends known to be down until each new
+// handler's first check -- under pressure, the worst moment for it.
+func TestPurgedRouteKeepsItsDownTargets(t *testing.T) {
+	f, _ := newCacheFixture(t, "none")
+	svc, ok := f.cache.serviceStore.Get(t.Context(), "svc")
+	if !ok {
+		t.Fatal("fixture service missing")
+	}
+	svc.HealthCheckPath = "/health"
+	if err := f.cache.serviceStore.Update(t.Context(), svc); err != nil {
+		t.Fatal(err)
+	}
+	rt := f.route(t, "purged-health-route")
+	f.cache.GetOrCreate(rt)
+	target := svc.WeightedTargets[0].Url
+	f.cache.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)[rt.Id].
+		InheritHealth(map[string]bool{target: false})
+
+	f.cache.Purge()
+	f.cache.GetOrCreate(rt)
+	stats := f.cache.GetRouteStats(rt.Id)
+	if len(stats) != 1 || stats[0].Alive {
+		t.Fatalf("after a purge the route's target = %+v, want it still down", stats)
+	}
+}
+
 // Breakers are kept under their route's ID and report under its name. Sync
 // retains them by ID; handing it the names instead would forget every live
 // route whose name is not its ID -- its breaker reset, its gauge gone -- every
