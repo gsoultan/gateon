@@ -69,6 +69,17 @@ network, and `tenant` falls back to the client address for a request with no
 tenant instead of not limiting it. **What to do:** if you tuned a limit by
 observation, it may now be half what you expect.
 
+### Response body rewrites start applying — **check every `transform` middleware with a response search**
+
+The transform middleware's response rewrite never applied to proxied traffic:
+the reverse proxy flushes after every write, and the middleware took any flush
+as a stream and passed the body through untouched. With a content-type filter
+set, a GET was skipped before its response was even seen. Rewrites configured
+long ago, and never observed working, now take effect. The backend is also
+asked for plain bytes on such routes (no `Accept-Encoding`), so a compress
+middleware in front does the compressing. Error responses, streams (SSE, gRPC)
+and encodings the gateway cannot decode are still passed through untouched.
+
 ### `GATEON_TRUST_CLOUDFLARE_HEADERS` now works — **an allowlist of Cloudflare addresses stops matching**
 
 The variable was ignored whenever the config file had a WAF section, which it
@@ -148,6 +159,21 @@ fingerprint and never matched. Fingerprints are enforced at L7.
   `accesslog` middleware attached with no name of its own now does nothing
   (every route already measures and logs itself); give it a name to record a
   separate view.
+- **Forwarded scheme:** a route's `forwardedheaders` forced scheme now wins over
+  a trusted proxy's `X-Forwarded-Proto` — the case it exists for — so its
+  redirects, Secure cookies and upstream `X-Forwarded-Proto` follow it.
+- **Custom error pages** arrive whole: they kept the backend's Content-Length
+  and Content-Encoding, which cut them short or announced them as gzip. SSE and
+  websockets on routes with the errors middleware now work.
+- **Compression** leaves responses under `min_response_body_bytes` alone; the
+  minimum was ignored, most of all behind the proxy.
+- **ACME on a route** works without the global ACME switch; such routes'
+  handshakes failed with "ACME not initialized". The settings page no longer
+  offers DNS-01, which the gateway never ran.
+- **Canary API:** `POST /v1/services/canary` answers 400 with a reason for a
+  service whose policy ignores weights (anything but weighted round robin), a
+  missing service, or weights naming none of its targets. It used to report
+  success and do nothing.
 - **Buffering:** a body over `max_request_body_bytes` is answered 413 and never
   reaches the backend. It was forwarded anyway and came back as a 502 counted
   against the backend.
