@@ -4,6 +4,7 @@
 package tls
 
 import (
+	"cmp"
 	"context"
 	"crypto/rsa"
 	"crypto/tls"
@@ -12,6 +13,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -349,6 +352,35 @@ func (m *Manager) prepareManualTLSConfig() (*tls.Config, error) {
 }
 
 func (m *Manager) applyAcmeTLSConfig(baseConfig *tls.Config) (*tls.Config, error) {
+	certManager, err := m.acmeManager()
+	if err != nil {
+		return nil, err
+	}
+	acmeTLSConfig := certManager.TLSConfig()
+	if baseConfig == nil {
+		return acmeTLSConfig, nil
+	}
+	baseConfig.GetCertificate = acmeTLSConfig.GetCertificate
+	return baseConfig, nil
+}
+
+// acmeManager returns the autocert manager, building it on first use.
+//
+// It used to exist only when ACME was on gateway-wide, while a route can take
+// its certificate from ACME on its own -- the host policy authorises exactly
+// those routes' hosts -- so with the global switch off every handshake for
+// such a route failed with "ACME not initialized". It is also built whole
+// before it is published: the manager was stored first and its host policy,
+// email and client set afterwards outside the lock, which a handshake that
+// triggers the build can now race.
+func (m *Manager) acmeManager() (*autocert.Manager, error) {
+	m.mu.RLock()
+	existing := m.acme
+	m.mu.RUnlock()
+	if existing != nil {
+		return existing, nil
+	}
+
 	cache := m.config.Cache
 	if cache == nil {
 		cacheDir := config.ResolvePath(m.config.CacheDir)
@@ -357,41 +389,40 @@ func (m *Manager) applyAcmeTLSConfig(baseConfig *tls.Config) (*tls.Config, error
 		}
 		cache = autocert.DirCache(cacheDir)
 	}
+	built := &autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		Cache:      cache,
+		HostPolicy: m.acmeHostPolicy(),
+		Email:      cmp.Or(m.config.Acme.Email, m.config.Email),
+	}
+	if m.config.Acme.CAServer != "" {
+		built.Client = &acme.Client{DirectoryURL: m.config.Acme.CAServer}
+	}
 
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.acme == nil {
-		m.acme = &autocert.Manager{
-			Prompt: autocert.AcceptTOS,
-			Cache:  cache,
+		m.acme = built
+	}
+	return m.acme, nil
+}
+
+// acmeHostPolicy is the configured policy, or, without one, the configured
+// domains.
+func (m *Manager) acmeHostPolicy() autocert.HostPolicy {
+	if m.config.HostPolicy != nil {
+		return autocert.HostPolicy(m.config.HostPolicy)
+	}
+	if len(m.config.Domains) == 0 {
+		return nil
+	}
+	domains := m.config.Domains
+	return func(_ context.Context, host string) error {
+		if slices.Contains(domains, host) {
+			return nil
 		}
+		return fmt.Errorf("host %q not in whitelist", host)
 	}
-	certManager := m.acme
-	m.mu.Unlock()
-
-	hp := m.config.HostPolicy
-	if hp == nil && len(m.config.Domains) > 0 {
-		hp = func(_ context.Context, host string) error {
-			for _, d := range m.config.Domains {
-				if host == d {
-					return nil
-				}
-			}
-			return fmt.Errorf("host %q not in whitelist", host)
-		}
-	}
-
-	certManager.HostPolicy = autocert.HostPolicy(hp)
-	certManager.Email = m.config.Acme.Email
-	if m.config.Acme.CAServer != "" {
-		certManager.Client = &acme.Client{DirectoryURL: m.config.Acme.CAServer}
-	}
-
-	acmeTLSConfig := certManager.TLSConfig()
-	if baseConfig == nil {
-		return acmeTLSConfig, nil
-	}
-	baseConfig.GetCertificate = acmeTLSConfig.GetCertificate
-	return baseConfig, nil
 }
 
 func (m *Manager) applyExtraTLSConfig(tlsConfig *tls.Config) error {
@@ -445,33 +476,30 @@ func (m *Manager) applyExtraTLSConfig(tlsConfig *tls.Config) error {
 	return nil
 }
 
+// HTTPChallengeHandler answers ACME HTTP-01 validations and passes everything
+// else to fallback. Whether there is a manager to answer them is decided per
+// request rather than once when the listener starts: the manager can be built
+// later, by the first handshake for a route that takes its certificate from
+// ACME while the global switch is off.
 func (m *Manager) HTTPChallengeHandler(fallback http.Handler) http.Handler {
-	if !m.config.Enabled || !m.config.Acme.Enabled {
-		return fallback
-	}
-
-	m.mu.RLock()
-	acme := m.acme
-	m.mu.RUnlock()
-	if acme == nil {
-		// This will trigger initialization if called, but usually applyAcmeTLSConfig is called first
-		_, _ = m.GetTLSConfig()
-		m.mu.RLock()
-		acme = m.acme
-		m.mu.RUnlock()
-	}
-	if acme != nil {
-		return acme.HTTPHandler(fallback)
-	}
-	return fallback
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+			m.mu.RLock()
+			certManager := m.acme
+			m.mu.RUnlock()
+			if certManager != nil {
+				certManager.HTTPHandler(fallback).ServeHTTP(w, r)
+				return
+			}
+		}
+		fallback.ServeHTTP(w, r)
+	})
 }
 
 func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	m.mu.RLock()
-	acme := m.acme
-	m.mu.RUnlock()
-	if acme == nil {
-		return nil, fmt.Errorf("ACME not initialized")
+	certManager, err := m.acmeManager()
+	if err != nil {
+		return nil, err
 	}
-	return acme.GetCertificate(hello)
+	return certManager.GetCertificate(hello)
 }
