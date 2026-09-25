@@ -56,12 +56,20 @@ func TestTenantStrategyLimitsRequestsWithoutATenant(t *testing.T) {
 // still get through. Keyed on the browser class alone, it got 429 on its first
 // request.
 func TestFingerprintStrategyDoesNotShareABucketAcrossNetworks(t *testing.T) {
-	h := limitedRoute(t, map[string]string{"strategy": "ja4h", "requests_per_minute": "1", "burst": "1"})
-	for range 5 {
-		statusOf(h, browserRequest("198.51.100.32:4000"))
-	}
-	if got := statusOf(h, browserRequest("203.0.113.32:4000")); got != http.StatusOK {
-		t.Fatalf("a client on another network with the same browser got %d on its first request", got)
+	for _, strategy := range []string{"ja4h", "fingerprint"} {
+		t.Run(strategy, func(t *testing.T) {
+			h := limitedRoute(t, map[string]string{"strategy": strategy, "requests_per_minute": "1", "burst": "1"})
+			limited := false
+			for range 5 {
+				limited = statusOf(h, browserRequest("198.51.100.32:4000")) == http.StatusTooManyRequests || limited
+			}
+			if !limited {
+				t.Fatal("5 requests from one client at 1/min, burst 1: none was limited")
+			}
+			if got := statusOf(h, browserRequest("203.0.113.32:4000")); got != http.StatusOK {
+				t.Fatalf("a client on another network with the same browser got %d on its first request", got)
+			}
+		})
 	}
 }
 

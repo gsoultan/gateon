@@ -440,9 +440,10 @@ func PerJA4H(r *http.Request) string {
 }
 
 // PerFingerprint keys on the detailed client fingerprint within the client's
-// network, for the reason PerJA4H gives.
+// network, for the reason PerJA4H gives: the identity reputation itself is
+// keyed on (ADR 0011), already composed and cached on the request.
 func PerFingerprint(r *http.Request) string {
-	return fingerprintInNetwork(telemetry.GetFingerprintHash(r), r)
+	return telemetry.GetReputationID(r)
 }
 
 func fingerprintInNetwork(fingerprint string, r *http.Request) string {

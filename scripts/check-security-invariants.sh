@@ -357,8 +357,7 @@ note "8/12  reputation reads use a network-scoped identity"
 rep_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE 'telemetry\.(GetIPFingerprint|GetFingerprintHash)\(' 2>/dev/null |
 	drop_comment_hits |
-	grep -vE '^internal/telemetry/' |
-	grep -vE 'ratelimit\.go:[0-9]+:[[:space:]]*return telemetry\.GetFingerprintHash\(r\)$') || true)
+	grep -vE '^internal/telemetry/') || true)
 
 if [ -n "$rep_hits" ]; then
 	err "a bare browser-class fingerprint escaped internal/telemetry"
