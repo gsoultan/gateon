@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -83,6 +84,10 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		// audit signing key and every stored password and API token.
 		if !callerMayWrite(r, auth.ResourceGlobal) {
 			gc = api.RedactGlobalSecrets(gc)
+		} else {
+			// A writer sees a referenced secret as its reference, so saving
+			// the page stores the reference back rather than the secret.
+			gc = config.WithSecretReferences(svc.GetGlobals(), gc)
 		}
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)

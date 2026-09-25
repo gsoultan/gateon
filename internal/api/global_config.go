@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -23,6 +24,10 @@ func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalC
 	conf := s.Globals.Get(ctx)
 	if !callerMayWrite(ctx, auth.ResourceGlobal) {
 		conf = RedactGlobalSecrets(conf)
+	} else {
+		// A writer sees a referenced secret as its reference, so saving the
+		// settings stores the reference back rather than the secret.
+		conf = config.WithSecretReferences(s.Globals, conf)
 	}
 	return &gateonv1.GetGlobalConfigResponse{Config: conf}, nil
 }
