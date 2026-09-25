@@ -207,8 +207,7 @@ func (c *ProxyCache) compile(rt *gateonv1.Route) (http.Handler, *proxy.ProxyHand
 		}
 	}
 
-	stripCORS := router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "cors") ||
-		router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "grpcweb")
+	stripCORS := router.RouteReplacesBackendCORS(context.Background(), rt, c.mwStore)
 	pHandler := proxy.NewProxyHandlerBuilder(rt, c.serviceStore, nil).
 		SetTransportConfig(transportCfg).
 		SetStripCORS(stripCORS).

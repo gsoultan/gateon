@@ -90,6 +90,20 @@ The management API keeps `management.cors`, which now sees its preflights.
   commit-time writer (3 allocations vs 2, 113 ns vs 61 ns). Nothing changes on a
   route with its own policy.
 
+## Amendment, 2026-09-25: the backend preset
+
+The blind spot above now has an answer that does not weaken the default. A
+`cors` middleware with `preset: backend` makes the route's CORS its backend's:
+the middleware answers nothing and adds nothing, the proxy strips none of the
+backend's headers, and because the route has a CORS owner, `DefaultCORS` is
+not installed. A backend that refuses an origin by omission is then refused by
+it. Diagnostics reports such a route as the backend's call.
+
+Preset names are also checked now. One that named no preset was ignored,
+leaving the lists empty -- which rs/cors reads as every origin -- so a typo of
+`restricted` allowed anyone. `cors` and `grpcweb` refuse an unknown preset,
+and saving a middleware builds it first, so the dashboard shows why.
+
 ## Related
 
 - Invariant 7 in `CLAUDE.md` and `scripts/check-security-invariants.sh`: with

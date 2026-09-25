@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Stack, TextInput, Group, NumberInput, Switch, TagsInput, Select } from "@mantine/core";
+import { Stack, TextInput, Group, NumberInput, Switch, TagsInput, Select, Text } from "@mantine/core";
 import { KeyValueList } from "./KeyValueList";
 
 // Keyed the way the editor fields below and internal/middleware/cors_factory.go
@@ -40,6 +40,11 @@ export const CORS_PRESETS: Record<string, Record<string, string>> = {
     max_age: "600",
   },
 };
+
+// Not a policy but the absence of one: the route's CORS is its backend's. The
+// gateway answers no preflight and adds or strips no header, so there is
+// nothing to fill in (internal/middleware/transform/cors_presets.go).
+export const CORS_BACKEND_PRESET = "backend";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -83,12 +88,13 @@ export function RewriteConfigEditor({ config, updateConfig, onChange }: EditorPr
 }
 
 export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps) {
-  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const joinTags = (tags: string[]) => tags.join(", ");
-
   const applyPreset = (presetName: string) => {
     if (!presetName) {
       updateConfig("preset", "");
+      return;
+    }
+    if (presetName === CORS_BACKEND_PRESET) {
+      onChange({ preset: CORS_BACKEND_PRESET });
       return;
     }
     const preset = CORS_PRESETS[presetName];
@@ -111,12 +117,32 @@ export function CORSConfigEditor({ config, updateConfig, onChange }: EditorProps
           { value: "standard", label: "Standard HTTP" },
           { value: "grpc-web", label: "gRPC-Web Standard" },
           { value: "restricted", label: "Restricted" },
+          { value: CORS_BACKEND_PRESET, label: "Backend's own (pass through)" },
         ]}
         value={config.preset || ""}
         onChange={(val) => applyPreset(val || "")}
         clearable
         description="Choosing a preset will populate fields below with common defaults."
       />
+
+      {config.preset === CORS_BACKEND_PRESET ? (
+        <Text size="sm" c="dimmed">
+          The backend answers CORS for this route. The gateway passes preflights through and neither adds nor
+          removes CORS headers — use this when the backend enforces its own origin allowlist.
+        </Text>
+      ) : (
+        <CORSPolicyFields config={config} updateConfig={updateConfig} />
+      )}
+    </Stack>
+  );
+}
+
+function CORSPolicyFields({ config, updateConfig }: Omit<EditorProps, "onChange">) {
+  const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const joinTags = (tags: string[]) => tags.join(", ");
+
+  return (
+    <Stack gap="md">
 
       <TagsInput
         label="Allowed Origins"

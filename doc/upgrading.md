@@ -162,7 +162,12 @@ chosen, with a permissive policy that never allows credentials, and added
 - That default cannot tell a backend that does not do CORS from one that
   refused an origin by leaving the header off, so it grants such an origin
   non-credentialed access, as before. **To refuse origins, attach a `cors`
-  middleware to the route.**
+  middleware** -- with your allowlist, or, when the backend enforces its own,
+  with `preset: backend`, which leaves CORS entirely to the backend: nothing
+  answered, added or stripped.
+- A `cors` or `grpcweb` middleware whose `preset` names no preset is refused.
+  It was ignored, and the empty lists it left allowed every origin, so a
+  misspelt `restricted` allowed anyone. Check stored middlewares for typos.
 - Refusals made before a route is chosen — IP or user mitigation, the global
   GeoIP block and honeypot, the connection limit — no longer carry CORS
   headers; browsers show them as CORS errors.

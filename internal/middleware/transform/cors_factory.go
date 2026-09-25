@@ -17,6 +17,11 @@ const (
 )
 
 func NewCORS(cfg map[string]string) (kind.Middleware, error) {
+	if IsBackendCORS(cfg) {
+		// The route's CORS is its backend's. The middleware still counts as
+		// the route's CORS owner, which is what keeps DefaultCORS off it.
+		return func(next http.Handler) http.Handler { return next }, nil
+	}
 	policy, err := CORSConfigFromMap(cfg)
 	if err != nil {
 		return nil, err
@@ -36,6 +41,9 @@ func NewCORS(cfg map[string]string) (kind.Middleware, error) {
 // proxy "would do" from a config the proxy refuses to build is the same lie as
 // a dashboard showing a setting the gateway never read.
 func CORSConfigFromMap(cfg map[string]string) (CORSConfig, error) {
+	if err := CheckCORSPreset(cfg["preset"]); err != nil {
+		return CORSConfig{}, kind.CfgError("preset", cfg["preset"], err)
+	}
 	maxAge, err := kind.ParseIntStrict(cfg["max_age"], 0)
 	if err != nil {
 		return CORSConfig{}, kind.CfgError("max_age", cfg["max_age"], err)

@@ -494,6 +494,31 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 	return false
 }
 
+// RouteReplacesBackendCORS reports whether a route answers CORS itself, so
+// the proxy strips the backend's CORS headers rather than send two policies:
+// a grpcweb middleware, or a cors middleware that is not the backend preset.
+// A backend-preset route leaves CORS to the backend and must not strip it.
+func RouteReplacesBackendCORS(ctx context.Context, rt *gateonv1.Route, mwStore config.MiddlewareStore) bool {
+	if mwStore == nil {
+		return false
+	}
+	for _, mid := range rt.Middlewares {
+		mwConf, ok := mwStore.Get(ctx, strings.TrimSpace(mid))
+		if !ok || mwConf == nil {
+			continue
+		}
+		switch strings.ToLower(mwConf.Type) {
+		case "grpcweb":
+			return true
+		case "cors":
+			if !transform.IsBackendCORS(mwConf.Config) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // RouteLabel is the name a route's middlewares, metrics and per-route state
 // are keyed by: its name, or its ID when it has none.
 func RouteLabel(rt *gateonv1.Route) string {

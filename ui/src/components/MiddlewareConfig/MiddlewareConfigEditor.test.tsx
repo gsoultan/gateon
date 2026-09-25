@@ -275,6 +275,26 @@ describe("CORS presets", () => {
     expect(c.last.allowed_origins).toBe("*");
     expect(c.last.preset).toBe("standard");
   });
+
+  test("the backend preset clears the policy and says the backend answers", () => {
+    const c = capture();
+    const tree = CORSConfigEditor({
+      config: { preset: "standard", allowed_origins: "*" },
+      updateConfig: c.updateConfig,
+      onChange: c.onChange,
+    });
+    const select = findElement(tree, byLabel("CORS Preset"));
+    (select!.props.onChange as (value: string | null) => void)("backend");
+    expect(c.last).toEqual({ preset: "backend" });
+
+    const html = renderToString(
+      <MantineProvider>
+        <CORSConfigEditor config={{ preset: "backend" }} updateConfig={() => {}} onChange={() => {}} />
+      </MantineProvider>,
+    );
+    expect(html).toContain("The backend answers CORS for this route");
+    expect(html).not.toContain("Allowed Origins");
+  });
 });
 
 describe("middleware kind names", () => {

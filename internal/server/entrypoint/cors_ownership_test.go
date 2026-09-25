@@ -100,6 +100,38 @@ func TestABackendsOwnCORSPolicyReachesTheBrowser(t *testing.T) {
 	}
 }
 
+// A backend that enforces its own origin allowlist refuses an origin by
+// leaving Access-Control-Allow-Origin off -- and a route with no cors
+// middleware reads that silence as "no CORS here" and supplies the permissive
+// default, granting the refused origin. The backend preset says the route's
+// CORS is the backend's: nothing is added, nothing answered, nothing stripped.
+func TestARouteCanLeaveCORSEntirelyToItsBackend(t *testing.T) {
+	gw := corsGateway(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") == appOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", appOrigin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods", "PUT")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = io.WriteString(w, "ok")
+	}), &gateonv1.Middleware{Id: "cors", Type: "cors", Config: map[string]string{"preset": "backend"}})
+
+	for _, r := range []reply{preflight(t, gw, evilOrigin), get(t, gw, evilOrigin)} {
+		if got := r.Header.Get("Access-Control-Allow-Origin"); got != "" {
+			t.Fatalf("the backend refused %s by omission, but the gateway granted it %q", evilOrigin, got)
+		}
+	}
+	resp := get(t, gw, appOrigin)
+	if got := resp.Header.Values("Access-Control-Allow-Origin"); len(got) != 1 || got[0] != appOrigin ||
+		resp.Header.Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("the backend's own grant reached the browser as Allow-Origin %q, Allow-Credentials %q",
+			got, resp.Header.Get("Access-Control-Allow-Credentials"))
+	}
+}
+
 // A backend that does not handle CORS still gets the gateway's permissive,
 // credential-free default, on its preflights and on its responses, so moving
 // the default off the entrypoint does not break the cross-origin callers that
@@ -226,8 +258,7 @@ func corsGateway(t *testing.T, backend http.Handler, mws ...*gateonv1.Middleware
 		rt.Middlewares = append(rt.Middlewares, mw.Id)
 	}
 
-	stripCORS := router.RouteHasMiddlewareType(ctx, rt, mwStore, "cors") ||
-		router.RouteHasMiddlewareType(ctx, rt, mwStore, "grpcweb")
+	stripCORS := router.RouteReplacesBackendCORS(ctx, rt, mwStore)
 	ph := proxy.NewProxyHandlerBuilder(rt, services, nil).SetStripCORS(stripCORS).Build()
 	t.Cleanup(ph.Close)
 	global := config.NewGlobalRegistry(filepath.Join(dir, "global.json"))

@@ -262,6 +262,20 @@ func (s *ApiService) simulateCORS(r *http.Request, mw *gateonv1.Middleware, rout
 		}, nil
 	}
 
+	if transform.IsBackendCORS(mw.Config) {
+		// The gateway decides nothing here: it neither answers the preflight
+		// nor adds or strips a CORS header, so what the browser reads is the
+		// backend's answer, which Diagnostics cannot see.
+		return &gateonv1.ValidateCORSResponse{
+			IsAllowed: true,
+			Message: "This route leaves CORS to its backend (preset \"backend\"): the gateway passes the " +
+				"request through and the backend's own CORS headers decide.",
+			Checks:           append(checks, "CORS policy: the backend's"),
+			MiddlewareConfig: mw.Config,
+			RouteName:        routeName,
+		}, nil
+	}
+
 	decision, err := transform.EvaluateCORS(mw.Config, r)
 	if err != nil {
 		// A middleware config the proxy would refuse to build. Reporting what

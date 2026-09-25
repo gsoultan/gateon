@@ -331,6 +331,9 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 		cfg["preset"] = "grpc-web"
 	}
 
+	if err := transform.CheckCORSPreset(cfg["preset"]); err != nil {
+		return nil, kind.CfgError("preset", cfg["preset"], err)
+	}
 	corsCfg = transform.ApplyCORSPreset(cfg, corsCfg)
 
 	// If after applying presets and config we still have no origins, return default permissive
