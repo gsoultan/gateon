@@ -36,6 +36,7 @@ func mockDepsForInspection(t *testing.T) *Deps {
 		Limiter:          noopLimiter,
 		ShutdownRegistry: &ShutdownRegistry{},
 		L4Resolver:       nil,
+		GlobalStore:      globalStoreForTest(t),
 	}
 }
 

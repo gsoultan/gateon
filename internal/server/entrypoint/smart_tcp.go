@@ -4,7 +4,6 @@
 package entrypoint
 
 import (
-	"cmp"
 	"context"
 	"io"
 	"net"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
-	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -110,19 +108,11 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 		}
 		deps.BaseHandler.ServeHTTP(w, r)
 	})
-	isMgmt := IsManagementAddress(ep.Address, deps)
-	epLabel := cmp.Or(ep.Name, ep.Id)
-	chain := []middleware.Middleware{
-		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
-		middleware.Metrics("gateon-" + epLabel),
-		identity.IPMitigation(),
-		identity.UserMitigation(),
-		middleware.Recovery(),
-	}
-	if ep.AccessLogEnabled {
-		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
-	}
-	// CORS is handled at the route level for proxy traffic, and in BaseHandler for internal traffic.
+	// The HTTP entrypoint's chain, not a copy of it. The copy this used to be
+	// had fallen behind: no global honeypot, no global GeoIP country block and
+	// no per-IP connection limit, so plain HTTP to a TCP entrypoint skipped all
+	// three. The shared server lives as long as the process, hence Background.
+	chain := entrypointChain(context.Background(), ep, deps)
 	return middleware.Chain(chain...)(deps.Limiter.Handler(traffic.PerIP)(epHandler))
 }
 
