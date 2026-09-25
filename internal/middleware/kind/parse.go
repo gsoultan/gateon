@@ -52,6 +52,7 @@ func ParseIntStrict(s string, defaultVal int) (int, error) {
 	}
 	return int(n), nil
 }
+
 // ParseBoolStrict reads a boolean setting. Absent is defaultVal; present and
 // not a boolean strconv accepts (true, false, 1, 0, t, f, in any case) is an
 // error. It used to return defaultVal for that too, unlike its int, float and
