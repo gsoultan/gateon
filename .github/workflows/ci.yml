@@ -102,6 +102,13 @@ jobs:
           rm -f go.mod.bak go.sum.bak
           go mod verify
 
+      # The dashboard has bun:test unit tests -- the route payload contract, the
+      # service form's TLS defaults, the agg-stats wire mapping -- and nothing
+      # ran them, so each guarded a defect only on the machine that wrote it.
+      # After generation: they import the generated protobuf TypeScript.
+      - name: Test UI
+        run: (cd ui && bun test)
+
       # Lints only what this pull request changed, against its merge base.
       # Gating on the whole tree is not an option while the pre-existing debt
       # `make lint` reports is still there: every PR would fail for code it
@@ -155,10 +162,16 @@ jobs:
       # database sat empty while it read the previous test's. Both were
       # invisible here for as long as the order never changed. A suite that
       # passes in one order only is not testing what it claims in any order.
+      #
+      # -race because CLAUDE.md names `make test-race` as the proof for every
+      # concurrency change and nothing here ran it: a data race between the
+      # proxy's health-check transport and the backend transports it is cloned
+      # for (a shared tls.Config that net/http edits in place) sat in pkg/proxy
+      # until a local race run found it.
       - name: Test
         env:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
-        run: go test -shuffle=on ./...
+        run: go test -race -shuffle=on ./...
 
       # A ratchet on the tested surface, not a coverage target. Every serious
       # defect found in this codebase in 2026 came out of a package with no
