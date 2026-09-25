@@ -143,6 +143,9 @@ type compressWriter struct {
 	compressor  io.WriteCloser
 	decided     bool
 	should      bool
+	// ended is set when the handler has returned. A body still undecided then
+	// never reached minBytes, so it goes out as it is.
+	ended bool
 }
 
 func (w *compressWriter) WriteHeader(status int) {
@@ -192,8 +195,10 @@ func (w *compressWriter) decide() {
 	w.decided = true
 
 	h := w.Header()
-	// Skip if already encoded, or error, or small, or excluded type
-	if h.Get("Content-Encoding") != "" || w.status >= 300 || w.status == http.StatusNoContent || w.status == http.StatusNotModified {
+	// Skip if already encoded, or error, or small, or excluded type. "Small"
+	// used to be missing from this list: a body that ended under minBytes was
+	// decided here at Close and compressed like any other.
+	if w.ended || h.Get("Content-Encoding") != "" || w.status >= 300 || w.status == http.StatusNoContent || w.status == http.StatusNotModified {
 		w.should = false
 	} else {
 		ct := h.Get("Content-Type")
@@ -239,6 +244,7 @@ func (w *compressWriter) decide() {
 
 func (w *compressWriter) Close() error {
 	if !w.decided {
+		w.ended = true
 		w.decide()
 	}
 	if w.should && w.compressor != nil {
