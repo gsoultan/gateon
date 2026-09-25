@@ -115,18 +115,19 @@ func TestSecurityTelemetryUpdates(t *testing.T) {
 }
 
 func TestSecurityTelemetryDailyReset(t *testing.T) {
+	// A store of its own. This used to take whatever store an earlier test left
+	// behind, or initialise one with the error discarded and call a method on
+	// the result regardless: when initialisation failed -- which depended on
+	// test order -- that was a nil dereference, a panic on Linux and a silent
+	// spin on macOS, where it held the package until the ten-minute timeout.
+	freshStore(t)
+	st := getStore()
+
 	// Seed some data
 	GlobalCMS.AddWeighted("global", 100)
 	GlobalHHH.Add("1.1.1.1")
 
-	// Trigger daily reset via syncDailyBaselines (internal method, but exported if we are in telemetry package)
-	if store != nil {
-		store.syncDailyBaselines(true)
-	} else {
-		// If store is nil, we can't easily trigger it, but syncDailyBaselines is what we want to test.
-		_ = InitPathStatsStore("sqlite::memory:", 1)
-		store.syncDailyBaselines(true)
-	}
+	st.syncDailyBaselines(true)
 
 	if GlobalCMS.Estimate("global") != 0 {
 		t.Error("expected GlobalCMS to be cleared after daily reset")
