@@ -26,8 +26,11 @@ type CircuitBreakerConfig struct {
 	MinRequests    int64         // Requests a window must hold before its rate is judged (20)
 	WindowSize     time.Duration // How long counts accumulate before starting over (10s)
 	SleepWindow    time.Duration // How long the circuit stays open before one probe (30s)
-	RouteID        string
-	now            func() time.Time
+	RouteID        string        // The route's label, which the state gauge and events carry
+	// Key is what the breaker's state is kept under: the route's ID, which is
+	// unique where its label is not. RouteID when empty.
+	Key string
+	now func() time.Time
 }
 
 const (
@@ -59,6 +62,9 @@ func (c CircuitBreakerConfig) withDefaults() CircuitBreakerConfig {
 	if c.now == nil {
 		c.now = time.Now
 	}
+	if c.Key == "" {
+		c.Key = c.RouteID
+	}
 	return c
 }
 
@@ -66,7 +72,7 @@ func (c CircuitBreakerConfig) withDefaults() CircuitBreakerConfig {
 // value outside what the breaker can act on is refused rather than clamped: an
 // error_threshold of 1.5 is never reached and one of -0.1 always is, so either
 // would leave a route that reads as protected either unprotected or down.
-func circuitBreakerFromConfig(cfg map[string]string, routeID string) (Middleware, error) {
+func circuitBreakerFromConfig(cfg map[string]string, routeID, stateKey string) (Middleware, error) {
 	threshold, err := kind.ParseFloatStrict(cfg["error_threshold"], defaultCBThreshold)
 	if err == nil && !(threshold > 0 && threshold <= 1) {
 		err = errors.New("must be greater than 0 and at most 1")
@@ -98,6 +104,7 @@ func circuitBreakerFromConfig(cfg map[string]string, routeID string) (Middleware
 		WindowSize:     windows[0],
 		SleepWindow:    windows[1],
 		RouteID:        routeID,
+		Key:            stateKey,
 	}), nil
 }
 
@@ -151,32 +158,55 @@ var (
 	cbMu     sync.Mutex
 )
 
-func getCBState(routeID string, now time.Time) *circuitBreakerState {
+// getCBState returns the breaker kept under key, creating it closed.
+//
+// It was keyed by the route's label, and two routes with the same name shared
+// one breaker: a failing backend behind one opened the circuit for the other.
+// A route that is renamed starts a new breaker under its new label, as it did
+// when the label was the key.
+func getCBState(key, label string, now time.Time) *circuitBreakerState {
 	cbMu.Lock()
 	defer cbMu.Unlock()
-	if s, ok := cbStates[routeID]; ok {
-		return s
+	if s, ok := cbStates[key]; ok {
+		if s.route == label {
+			return s
+		}
+		delete(cbStates, key)
+		forgetCircuitSeriesLocked(s.route)
 	}
-	s := &circuitBreakerState{route: routeID}
+	s := &circuitBreakerState{route: label}
 	s.changed.Store(now.UnixNano())
 	s.window.Store(now.UnixNano())
-	publishCircuitState(routeID, cbClosed)
-	cbStates[routeID] = s
+	publishCircuitState(label, cbClosed)
+	cbStates[key] = s
 	return s
 }
 
-// RetainCircuitBreakers forgets the breaker of every route label not in live,
-// along with its state gauge. Without it a route deleted while its circuit
-// was open would count as an open circuit on the dashboard until restart.
+// RetainCircuitBreakers forgets every breaker whose key -- its route's ID --
+// is not in live, along with its state gauge. Without it a route deleted
+// while its circuit was open would count as an open circuit on the dashboard
+// until restart.
 func RetainCircuitBreakers(live map[string]bool) {
 	cbMu.Lock()
 	defer cbMu.Unlock()
-	for route := range cbStates {
-		if !live[route] {
-			delete(cbStates, route)
-			telemetry.CircuitBreakerState.DeletePartialMatch(map[string]string{"route": route})
+	for key, s := range cbStates {
+		if !live[key] {
+			delete(cbStates, key)
+			forgetCircuitSeriesLocked(s.route)
 		}
 	}
+}
+
+// forgetCircuitSeriesLocked deletes a label's state gauge unless a breaker
+// still in use reports under it: two routes can share a name, and the gauge is
+// by name. Callers hold cbMu.
+func forgetCircuitSeriesLocked(label string) {
+	for _, s := range cbStates {
+		if s.route == label {
+			return
+		}
+	}
+	telemetry.CircuitBreakerState.DeletePartialMatch(map[string]string{"route": label})
 }
 
 // publishCircuitState sets the route's state gauge: 1 for the state the
@@ -207,7 +237,7 @@ func circuitStateLabel(k cbPhase) string {
 // find out whether it has recovered.
 func CircuitBreaker(cfg CircuitBreakerConfig) Middleware {
 	cfg = cfg.withDefaults()
-	state := getCBState(cfg.RouteID, cfg.now())
+	state := getCBState(cfg.Key, cfg.RouteID, cfg.now())
 	return func(next http.Handler) http.Handler {
 		return &circuitBreaker{cfg: cfg, state: state, next: next}
 	}

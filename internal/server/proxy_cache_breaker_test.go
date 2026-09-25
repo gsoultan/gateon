@@ -131,3 +131,28 @@ func TestRebuiltRouteKeepsItsDownTargets(t *testing.T) {
 		t.Fatalf("after a rebuild the route's target = %+v, want it still down", stats)
 	}
 }
+
+// Breakers are kept under their route's ID and report under its name. Sync
+// retains them by ID; handing it the names instead would forget every live
+// route whose name is not its ID -- its breaker reset, its gauge gone -- every
+// thirty seconds.
+func TestSyncKeepsTheBreakerOfANamedRoute(t *testing.T) {
+	f, _ := newCacheFixture(t, "none")
+	if err := f.mws.Update(t.Context(), &gateonv1.Middleware{
+		Id: "cb", Name: "cb", Type: "circuit_breaker", Config: map[string]string{"min_requests": "1"},
+	}); err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+	rt := &gateonv1.Route{Id: "breaker-named-id", Name: "Breaker Named", ServiceId: "svc",
+		Rule: "PathPrefix(`/`)", Middlewares: []string{"cb"}}
+	if err := f.routes.Update(t.Context(), rt); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if rec := serveThrough(f.cache.GetOrCreate(rt)); rec.Code != http.StatusOK {
+		t.Fatalf("route answered %d, want 200", rec.Code)
+	}
+	f.cache.Sync()
+	if n := breakerSeries(t, rt.Name); n != 3 {
+		t.Fatalf("breaker gauge series of a live route named %q after Sync = %d, want 3", rt.Name, n)
+	}
+}

@@ -30,7 +30,9 @@ func NewRateLimit(cfg map[string]string, redisClient redis.Client, ebpfManager e
 
 	var limiter RateLimiter
 	if storage == "redis" && redisClient != nil {
-		limiter = NewRedisRateLimiter(redisClient, rpm, burst)
+		rl := NewRedisRateLimiter(redisClient, rpm, burst)
+		rl.namespace = cfg[kind.RouteStateKey] + "/" + cfg[kind.MiddlewareIDKey]
+		limiter = rl
 	} else {
 		rateVal := float64(rpm) / 60.0
 		if rateVal <= 0 {

@@ -169,6 +169,27 @@ chosen, with a permissive policy that never allows credentials, and added
 - `management.cors` now answers preflights to the management API on every
   entrypoint that serves it.
 
+### Route names are unique, and per-route state is kept per route — **rename routes that share a name**
+
+- Saving a route whose name another route already has is refused (the API
+  answers 400; config import imports the first and reports the rest). Routes
+  that already share a name keep working, and the gateway logs a warning
+  naming them once: their metrics, access logs and threat records are
+  reported together until all but one is renamed.
+- Circuit breakers and Redis cache entries were kept per route *name*, so two
+  routes with the same name shared a breaker (one failing backend opened the
+  other route's circuit) and answered from each other's cached responses.
+  They are now kept per route ID. Redis cache keys change, so the Redis cache
+  starts empty after upgrading.
+- The Redis rate limiter kept one window per client for every route and every
+  rate-limit middleware, so traffic to one route counted against another's
+  limit. Windows are now per route and middleware; each route gets its
+  configured limit, and the old windows are discarded.
+- Routes generated from Kubernetes Ingress paths and HTTPRoute matches get
+  names of their own (`k8s/<ns>/<ingress>/<rule>/<path>`,
+  `k8s-hr/<ns>/<route>/<rule>/<match>[/<host>]`); they shared their rule's
+  name. Metrics and dashboards keyed by the old names need updating.
+
 ### Behaviour that now does what it was configured to do
 
 - **Load balancing:** services saved from the dashboard as least-connections

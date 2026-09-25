@@ -140,3 +140,31 @@ func TestControllerWatchesOnlyItsNamespace(t *testing.T) {
 		t.Fatalf("a controller scoped to team-a holds %d ingresses", len(objs))
 	}
 }
+
+// A route's name is what its metrics, access logs and threat records are
+// reported under. Every path of an Ingress rule, and every match and host of
+// an HTTPRoute rule, was given the rule's name, so their numbers were summed
+// under one name -- and, while per-route state was keyed by name, they shared
+// a circuit breaker and cache entries too.
+func TestGeneratedRoutesHaveNamesOfTheirOwn(t *testing.T) {
+	c := testController(t)
+	two := httpRule("example.com", "/api", "api", 80)
+	two.HTTP.Paths = append(two.HTTP.Paths, httpRule("example.com", "/old", "old", 80).HTTP.Paths...)
+	c.syncIngress(ingress("prod", "web", []networkingv1.IngressRule{two}))
+
+	hr := httpRoute("default", "web", []string{"a.example", "b.example"}, "/api", "web-svc")
+	other := "/other"
+	hr.Spec.Rules[0].Matches = append(hr.Spec.Rules[0].Matches, gatewayv1.HTTPRouteMatch{Path: &gatewayv1.HTTPPathMatch{Value: &other}})
+	c.syncHTTPRoute(hr)
+
+	names := map[string]string{}
+	for _, r := range c.routeStore.List(context.Background()) {
+		if prev, dup := names[r.Name]; dup {
+			t.Errorf("routes %s and %s are both named %q", prev, r.Id, r.Name)
+		}
+		names[r.Name] = r.Id
+	}
+	if len(names) != 6 {
+		t.Fatalf("got %d distinctly named routes, want 6 (two Ingress paths, two matches on two hosts)", len(names))
+	}
+}

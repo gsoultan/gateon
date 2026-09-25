@@ -533,3 +533,31 @@ func TestRecoveredCircuitIsJudgedOnItsOwnRequests(t *testing.T) {
 			"want 200: failures from before the circuit opened were counted", code)
 	}
 }
+
+// A breaker is kept under its route's ID and reports under its name, so a
+// renamed route finds its breaker under the same key with a new name. The
+// gauge must follow the name: left on the old one, the dashboard would show a
+// breaker for a route that is no longer called that, and none for the route
+// that is.
+func TestRenamedRouteReportsItsBreakerUnderTheNewName(t *testing.T) {
+	key := t.Name()
+	oldName, newName := key+"-old", key+"-new"
+	t.Cleanup(func() {
+		cbMu.Lock()
+		delete(cbStates, key)
+		cbMu.Unlock()
+		telemetry.CircuitBreakerState.DeletePartialMatch(map[string]string{"route": newName})
+	})
+
+	CircuitBreaker(CircuitBreakerConfig{RouteID: oldName, Key: key})
+	if got := breakerGauge(t, oldName); len(got) != 3 {
+		t.Fatalf("control: the breaker published %v under its name", got)
+	}
+	CircuitBreaker(CircuitBreakerConfig{RouteID: newName, Key: key})
+	if got := breakerGauge(t, oldName); len(got) != 0 {
+		t.Errorf("after the rename the old name still reports %v", got)
+	}
+	if got := breakerGauge(t, newName); len(got) != 3 {
+		t.Errorf("after the rename the new name reports %v, want all three states", got)
+	}
+}

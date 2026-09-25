@@ -507,6 +507,9 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Record the trusted route type so the WAF applies gRPC transport relaxations
 	// only to operator-declared gRPC routes, not based on a spoofable request header.
 	mwFactory.SetRouteType(rt.Type)
+	// Per-route state is kept under the ID, which is unique; the label below
+	// is only what a person reads.
+	mwFactory.SetRouteKey(rt.Id)
 
 	routeLabel := RouteLabel(rt)
 	ctx := context.Background()

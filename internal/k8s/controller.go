@@ -241,7 +241,7 @@ func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 
 			route := &gateonv1.Route{
 				Id:        routeID,
-				Name:      fmt.Sprintf("k8s/%s/%s/%d", ing.Namespace, ing.Name, i),
+				Name:      fmt.Sprintf("k8s/%s/%s/%d/%d", ing.Namespace, ing.Name, i, j),
 				Rule:      ruleStr,
 				Type:      "http",
 				ServiceId: serviceID,
@@ -320,13 +320,18 @@ func (c *Controller) syncHTTPRoute(hr *gatewayv1.HTTPRoute) {
 			}
 			for k, ruleStr := range routeRules(hosts, constraints) {
 				id := fmt.Sprintf("%s-r%d-m%d", prefix, i, j)
+				// Named as uniquely as it is identified: every match and host
+				// of a rule used to share the rule's name, and a route's name
+				// is what its metrics and logs are reported under.
+				name := fmt.Sprintf("k8s-hr/%s/%s/%d/%d", hr.Namespace, hr.Name, i, j)
 				if len(hosts) > 1 {
 					id += fmt.Sprintf("-h%d", k)
+					name += fmt.Sprintf("/%d", k)
 				}
 				keep[id] = true
 				route := &gateonv1.Route{
 					Id:        id,
-					Name:      fmt.Sprintf("k8s-hr/%s/%s/%d", hr.Namespace, hr.Name, i),
+					Name:      name,
 					Rule:      ruleStr,
 					Type:      "http",
 					ServiceId: serviceID,

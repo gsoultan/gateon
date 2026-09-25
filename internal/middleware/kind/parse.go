@@ -32,6 +32,19 @@ import (
 // were filed against no route. Nothing could see it: both ends were strings.
 const RouteIDKey = "route_id"
 
+// RouteStateKey is the config key under which Factory.Create hands a
+// middleware the key to keep per-route state under: the route's ID, which is
+// unique by construction. RouteIDKey carries the route's label -- its name, or
+// its ID when it has none -- and is for what a person reads: metrics, logs,
+// threat records. Names are not unique, and while state was keyed by them two
+// routes called alike shared a circuit breaker and Redis cache entries.
+const RouteStateKey = "route_state_key"
+
+// MiddlewareIDKey is the config key under which Factory.Create hands a
+// middleware its own ID, for state that belongs to one middleware on one
+// route rather than to the route.
+const MiddlewareIDKey = "middleware_id"
+
 func ParsePositiveInt(s string, defaultVal int) int {
 	if s == "" {
 		return defaultVal

@@ -7,6 +7,8 @@ import (
 	"context"
 	"maps"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,6 +53,10 @@ type ProxyCache struct {
 	// had concluded about its targets, until the route's next build takes it.
 	// One entry per route at most; Sync drops those of deleted routes.
 	retiredHealth map[string]map[string]bool
+	// sharedLabels holds, under mu, each route name more than one route
+	// carries, with the IDs that carry it, so Sync warns when that changes
+	// rather than every thirty seconds. At most one entry per route.
+	sharedLabels map[string]string
 }
 
 // defaultRefusalRetry bounds how long a route stays refused after the
@@ -386,6 +392,35 @@ func (c *ProxyCache) Purge() {
 	logger.L.LogInfo("proxy cache purged due to resource pressure")
 }
 
+// warnSharedRouteLabelsLocked logs, once per change, each route name that more
+// than one route carries. Per-route state is kept by ID, so such routes no
+// longer share a circuit breaker or cache entries, but their metrics, access
+// logs and threat records are reported under the one name and cannot be told
+// apart. Saving a route refuses a name another route has; this is for routes
+// that got one before that, or from a config file. Caller holds c.mu.
+func (c *ProxyCache) warnSharedRouteLabelsLocked(routes []*gateonv1.Route) {
+	byLabel := make(map[string][]string, len(routes))
+	for _, rt := range routes {
+		label := router.RouteLabel(rt)
+		byLabel[label] = append(byLabel[label], rt.Id)
+	}
+	shared := make(map[string]string)
+	for label, ids := range byLabel {
+		if len(ids) < 2 {
+			continue
+		}
+		slices.Sort(ids)
+		joined := strings.Join(ids, ",")
+		shared[label] = joined
+		if c.sharedLabels[label] != joined {
+			logger.L.LogWarn("routes share a name, so their metrics, access logs and threat "+
+				"records are reported together; rename all but one",
+				"name", label, "routes", joined)
+		}
+	}
+	c.sharedLabels = shared
+}
+
 // Sync runs periodic proxy cache maintenance: pre-warms new routes and cleans up orphans.
 func (c *ProxyCache) Sync() {
 	// 1. Pre-warm: Ensure all active routes have a compiled proxy handler.
@@ -396,8 +431,8 @@ func (c *ProxyCache) Sync() {
 		}
 	}
 
-	// 2. Cleanup: Remove cached proxies for routes that no longer exist, and
-	// the circuit breakers of route labels that no longer exist.
+	// 2. Cleanup: Remove cached proxies and circuit breakers of routes that no
+	// longer exist.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -405,12 +440,12 @@ func (c *ProxyCache) Sync() {
 	handlers := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
 
 	activeRoutes := make(map[string]bool)
-	liveLabels := make(map[string]bool)
-	for _, rt := range c.routeStore.List(context.Background()) {
+	routes := c.routeStore.List(context.Background())
+	for _, rt := range routes {
 		activeRoutes[rt.Id] = true
-		liveLabels[router.RouteLabel(rt)] = true
 	}
-	middleware.RetainCircuitBreakers(liveLabels)
+	c.warnSharedRouteLabelsLocked(routes)
+	middleware.RetainCircuitBreakers(activeRoutes)
 	for id := range c.retiredHealth {
 		if !activeRoutes[id] {
 			delete(c.retiredHealth, id)

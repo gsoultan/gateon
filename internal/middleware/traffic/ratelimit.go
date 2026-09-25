@@ -292,6 +292,12 @@ type RedisRateLimiter struct {
 	client redis.Client
 	rate   int // requests per minute
 	burst  int
+	// namespace is the route and middleware this limiter belongs to. Every
+	// window lives in one Redis shared by every route and instance, and the
+	// key used to be the client alone, so requests to one route counted
+	// against every other route's limit, and a route with two limiters
+	// counted each request twice.
+	namespace string
 }
 
 func NewRedisRateLimiter(client redis.Client, r int, b int) *RedisRateLimiter {
@@ -324,7 +330,10 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			sb.Reset()
 			defer sbPool.Put(sb)
 
-			sb.WriteString("ratelimit:v2:")
+			sb.WriteString("ratelimit:v3:")
+			sb.WriteString(strconv.Itoa(len(rl.namespace)))
+			sb.WriteByte(':')
+			sb.WriteString(rl.namespace)
 			sb.WriteString(key)
 			redisKey := sb.String()
 

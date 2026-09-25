@@ -6,6 +6,7 @@ package traffic
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"net"
 	"net/http"
@@ -31,6 +32,10 @@ type CacheConfig struct {
 	MaxBodyKB   int64        // Max response body to cache in KB (0 = 256)
 	Storage     string       // "memory" or "redis"
 	RedisClient redis.Client // Required when Storage == "redis"
+	// RouteKey is the route's ID, which cache keys carry so that routes do
+	// not answer from each other's entries in the shared Redis backend. They
+	// carried the route's label, which two routes can share.
+	RouteKey string
 }
 
 const (
@@ -66,7 +71,7 @@ func CacheWithRoute(cfg CacheConfig, routeID string) kind.Middleware {
 		backend = newMemoryCacheBackend(cfg.MaxEntries, maxBody)
 	}
 
-	rt := cacheRuntime{backend: backend, routeID: routeID, maxBody: maxBody, ttl: ttl}
+	rt := cacheRuntime{backend: backend, routeID: routeID, routeKey: cfg.RouteKey, maxBody: maxBody, ttl: ttl}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rt.serve(next, w, r)
@@ -77,10 +82,11 @@ func CacheWithRoute(cfg CacheConfig, routeID string) kind.Middleware {
 // cacheRuntime is CacheConfig once defaults are applied and a backend chosen.
 // Resolved per route at chain-build time, never per request.
 type cacheRuntime struct {
-	backend CacheBackend
-	routeID string
-	maxBody int64
-	ttl     time.Duration
+	backend  CacheBackend
+	routeID  string
+	routeKey string
+	maxBody  int64
+	ttl      time.Duration
 }
 
 // serve is the per-request path, named rather than nested inside the two
@@ -102,7 +108,7 @@ func (c cacheRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	key := cacheKey(activeRouteID, r)
+	key := cacheKey(cmp.Or(c.routeKey, activeRouteID), r)
 	if status, headers, body, ok := c.backend.Get(r.Context(), key); ok {
 		telemetry.MiddlewareCacheHitsTotal.WithLabelValues(activeRouteID).Inc()
 		replayCached(w, r, status, headers, body)

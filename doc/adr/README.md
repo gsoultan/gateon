@@ -26,6 +26,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0013](./0013-fingerprint-identity-is-its-own-package.md) | Fingerprint identity is its own package | Accepted |
 | [0014](./0014-backend-client-identity-is-the-gateways-choice.md) | The backend client identity is the gateway's choice | Accepted |
 | [0015](./0015-cors-is-decided-per-route.md) | CORS is decided per route, and a backend's own policy wins | Accepted |
+| [0016](./0016-per-route-state-is-keyed-by-route-id.md) | Per-route state is keyed by the route's ID; its name is a label | Accepted |
 
 ## Conventions
 

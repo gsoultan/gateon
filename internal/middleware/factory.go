@@ -34,6 +34,7 @@ type Factory struct {
 	reputation  *reputation.IPReputationStore
 	dataDir     string
 	routeType   string // trusted route type (e.g. "grpc"); empty = treat as plain HTTP
+	routeKey    string // the route's ID, for per-route state; see kind.RouteStateKey
 }
 
 func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore, dataDir string) *Factory {
@@ -47,6 +48,13 @@ func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, 
 // so this is safe to set before building the chain.
 func (f *Factory) SetRouteType(t string) {
 	f.routeType = t
+}
+
+// SetRouteKey records the ID of the route this factory builds middlewares for,
+// which they keep per-route state under (kind.RouteStateKey). Set before the
+// chain is built, like SetRouteType.
+func (f *Factory) SetRouteKey(id string) {
+	f.routeKey = id
 }
 
 // IsGRPCRoute reports whether this factory builds for a gRPC-typed route.
@@ -99,6 +107,13 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 			cfg[kind.RouteIDKey] = routeID
 		}
 	}
+	// Set unconditionally: a middleware's own config must not be able to
+	// name the state it shares.
+	delete(cfg, kind.RouteStateKey)
+	if f.routeKey != "" {
+		cfg[kind.RouteStateKey] = f.routeKey
+	}
+	cfg[kind.MiddlewareIDKey] = m.Id
 
 	switch m.Type {
 	case "ratelimit":
@@ -269,7 +284,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		}
 		return SecurityHeaders(SecurityHeadersConfig{Preset: preset}), nil
 	case "circuit_breaker":
-		return circuitBreakerFromConfig(cfg, routeID)
+		return circuitBreakerFromConfig(cfg, routeID, cfg[kind.RouteStateKey])
 	case "wasm":
 		return transform.Wasm(context.Background(), m.WasmBlob)
 	default:

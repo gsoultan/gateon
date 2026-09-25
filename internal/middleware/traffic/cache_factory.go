@@ -35,5 +35,6 @@ func NewCache(cfg map[string]string, redisClient redis.Client) (kind.Middleware,
 		MaxBodyKB:   int64(maxBodyKB),
 		Storage:     storage,
 		RedisClient: redisClient,
+		RouteKey:    cfg[kind.RouteStateKey],
 	}, cfg[kind.RouteIDKey]), nil
 }
