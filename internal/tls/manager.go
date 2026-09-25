@@ -10,12 +10,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -32,6 +34,25 @@ type Manager struct {
 	pools  map[string]*x509.CertPool
 	caData map[string][]byte
 	acme   *autocert.Manager
+	// acmeGate is the running ACME manager's only way to its CA.
+	acmeGate *acmeGate
+}
+
+// acmeGate carries an ACME manager's requests to its CA until the manager is
+// retired. Autocert has no way to stop the renewal timers a manager has
+// scheduled, so a manager replaced for a new account or CA would go on
+// renewing from the old one; closing its gate makes those attempts fail
+// before they leave the process, while the new manager, which shares the
+// certificate cache, renews the certificates instead.
+type acmeGate struct{ retired atomic.Bool }
+
+var errACMEManagerRetired = errors.New("ACME manager retired: the ACME account or CA server changed")
+
+func (g *acmeGate) RoundTrip(r *http.Request) (*http.Response, error) {
+	if g.retired.Load() {
+		return nil, errACMEManagerRetired
+	}
+	return http.DefaultTransport.RoundTrip(r)
 }
 
 // NewManager creates a new TLS Manager.
@@ -78,15 +99,14 @@ func (m *Manager) UpdateConfig(cfg Config) {
 		cfg.Cache = m.config.Cache
 	}
 	if m.acme != nil && acmeAccountChanged(m.config, cfg) {
-		// The switch and the domains apply at once; the account does not. The
-		// running autocert manager has registered with its CA and schedules
-		// the renewal of every certificate it issued, and autocert gives no
-		// way to stop those timers -- a replacement would leave the old one
-		// renewing from the old CA behind it. Said out loud rather than
-		// silently ignored.
-		logger.L.LogWarn("the ACME email or CA server changed; the change applies after a restart, "+
-			"and until then certificates are issued and renewed with the running account",
-			"ca_server", cfg.Acme.CAServer)
+		// A new account or CA: the running manager is retired and the next
+		// handshake that needs ACME builds one with the new settings. The
+		// two share the certificate cache, so certificates already issued
+		// keep being served and are renewed by the new manager.
+		m.acmeGate.retired.Store(true)
+		m.acme, m.acmeGate = nil, nil
+		logger.L.LogInfo("the ACME email or CA server changed; certificates are now issued and renewed "+
+			"with the new settings", "ca_server", cmp.Or(cfg.Acme.CAServer, autocert.DefaultACMEDirectory))
 	}
 	m.config = cfg
 }
@@ -421,20 +441,22 @@ func (m *Manager) acmeManager() (*autocert.Manager, error) {
 		}
 		cache = autocert.DirCache(cacheDir)
 	}
+	gate := &acmeGate{}
 	built := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Cache:      cache,
 		HostPolicy: m.acmeHostPolicy(),
 		Email:      cmp.Or(cfg.Acme.Email, cfg.Email),
-	}
-	if cfg.Acme.CAServer != "" {
-		built.Client = &acme.Client{DirectoryURL: cfg.Acme.CAServer}
+		Client: &acme.Client{
+			DirectoryURL: cmp.Or(cfg.Acme.CAServer, autocert.DefaultACMEDirectory),
+			HTTPClient:   &http.Client{Transport: gate},
+		},
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.acme == nil {
-		m.acme = built
+		m.acme, m.acmeGate = built, gate
 	}
 	return m.acme, nil
 }

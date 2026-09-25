@@ -210,10 +210,12 @@ For TLS specifically:
   ACME covers its host; ACME answered first. With ACME on and certificates
   configured too, a host ACME does not cover is served a configured
   certificate instead of failing the handshake.
-- Changing the ACME **email or CA server** still applies after a restart, and
-  the gateway now logs that when it happens: the running ACME account renews
-  the certificates it issued, and replacing it at runtime would leave it
-  renewing from the old CA.
+- Changing the ACME **email or CA server** applies to the next certificate
+  ordered, and certificates already issued are renewed with the new settings.
+  The previous ACME manager is retired rather than dropped: its scheduled
+  renewals cannot be cancelled, so it is cut off from its CA instead. An
+  existing ACME account keeps the contact it registered with; the CA does not
+  update it.
 
 ### One access log line per request, with the client's address
 
