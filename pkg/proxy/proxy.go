@@ -218,9 +218,7 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 	if scheme == "https" {
 		pr.Out.Header.Set("X-Forwarded-Ssl", "on")
 	}
-	if ja4 := telemetry.GetCachedJA4H(pr.In); ja4 != "" {
-		pr.Out.Header.Set("X-Gateon-JA4", ja4)
-	}
+	setGatewayJA4(pr.Out.Header, pr.In)
 
 	// 2. Handle gRPC and HTTP/2 protocol specifics
 	origURL := state.url
@@ -257,5 +255,21 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 	// 4. Ensure User-Agent isn't automatically set by Go's default if missing
 	if _, ok := pr.In.Header["User-Agent"]; !ok {
 		pr.Out.Header.Set("User-Agent", "")
+	}
+}
+
+// gatewayJA4Header is where the proxy tells a backend the client's HTTP
+// fingerprint.
+const gatewayJA4Header = "X-Gateon-JA4"
+
+// setGatewayJA4 sets gatewayJA4Header from the fingerprint the gateway
+// computed, after removing any the client sent. The value is the gateway's to
+// set: the websocket upgrade path copied the client's headers verbatim and
+// never touched it, so a backend trusting it read the client's claim, and the
+// HTTP path only overwrote it when the gateway had a value.
+func setGatewayJA4(out http.Header, in *http.Request) {
+	out.Del(gatewayJA4Header)
+	if ja4 := telemetry.GetCachedJA4H(in); ja4 != "" {
+		out.Set(gatewayJA4Header, ja4)
 	}
 }

@@ -235,6 +235,7 @@ func newUpgradeRequest(r *http.Request, targetURL *url.URL) *http.Request {
 		backendReq.Header.Set("X-Forwarded-Ssl", "on")
 	}
 	backendReq.Header.Set("X-Forwarded-For", upgradeForwardedFor(r))
+	setGatewayJA4(backendReq.Header, r)
 
 	// Force HTTP/1.1 and Upgrade headers for the backend handshake.
 	// Many backends (like GitLab) require Connection: upgrade explicitly.
