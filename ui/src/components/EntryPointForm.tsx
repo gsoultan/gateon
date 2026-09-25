@@ -150,6 +150,20 @@ export function EntryPointForm({
       }}
     >
       <Stack gap="md">
+        <Alert
+          icon={<IconInfoCircle size={18} />}
+          color="blue"
+          variant="light"
+          radius="md"
+          title="Listener changes apply after a restart"
+        >
+          <Text size="sm" c="dimmed">
+            The gateway opens its listeners when it starts, so adding or removing an entrypoint, or changing its
+            address, type, protocols, TLS or access logging, takes effect after a restart. Read and write timeouts
+            apply as soon as you save.
+          </Text>
+        </Alert>
+
         <form.Field
           name="name"
           children={(field: any) => (
