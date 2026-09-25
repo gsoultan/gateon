@@ -168,7 +168,7 @@ make proto
 3) Services are fully implemented and registered in `internal/server` and wired from `cmd/gateon`.
 
 ## Environment Variables
-- `PORT`: API Gateway port (default 8080)
+- `PORT`: fallback management port, used only when neither `GATEON_MANAGEMENT_PORT` nor `management.port` is set. The config file fills `management.port` with `8080` by default, so in practice this does nothing; set `GATEON_MANAGEMENT_PORT` to move the dashboard, and give each entrypoint its own address for proxy traffic.
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: Endpoint for OTLP traces (e.g., http://localhost:4318). If empty, tracing is disabled.
 - `GATEON_JWT_SECRET`: Shared secret for HMAC-based JWT validation.
 - `GATEON_API_KEYS`: Comma-separated list of `key:tenant_id` pairs for static API key management (e.g., `key1:tenantA,key2:tenantB`).
