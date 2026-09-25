@@ -187,6 +187,15 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 
 			next.ServeHTTP(sw, r)
 
+			// One line per request. The route's logger sits inside the
+			// entrypoint's and finishes first, so the entrypoint's logs only
+			// what no route took; both used to log, two lines per request.
+			if rs := request.GetRequestState(r); rs != nil {
+				if rs.AccessLogged {
+					return
+				}
+				rs.AccessLogged = true
+			}
 			if sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0) {
 				statusCode := sw.Status
 				if statusCode == 0 {
@@ -198,6 +207,9 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 					"method", origMethod,
 					"path", origPath,
 					"remote_addr", remoteAddr,
+					// The client as the entrypoint resolved it: behind a load
+					// balancer remote_addr is the balancer on every line.
+					"client", request.ClientAddr(r),
 					"status", statusCode,
 					"latency", duration,
 					"route", routeID)

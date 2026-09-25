@@ -66,6 +66,11 @@ type RequestState struct {
 	// country, protocol, per-IP -- so the entrypoint's and the route's do not
 	// both count one request.
 	RecordedRequest bool
+	// AccessLogged is set by the access logger nearest the request -- the
+	// route's -- so the entrypoint's, which wraps it, does not log the same
+	// request again. Set whether or not sampling kept the line, so an outer
+	// logger does not resample what an inner one already decided.
+	AccessLogged bool
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.
@@ -129,4 +134,5 @@ func (rs *RequestState) Reset() {
 	rs.ExecutedXSS = false
 	rs.ExecutedSQLI = false
 	rs.RecordedRequest = false
+	rs.AccessLogged = false
 }

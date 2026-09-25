@@ -215,6 +215,18 @@ For TLS specifically:
   the certificates it issued, and replacing it at runtime would leave it
   renewing from the old CA.
 
+### One access log line per request, with the client's address
+
+On an entrypoint with access logging on, every routed request was logged
+twice: once by its route (`route=<route name>`) and again by the entrypoint
+(`route=gateon-<entrypoint>`). The route's line is now the only one; the
+entrypoint logs only requests no route took (404s, refusals made before
+routing). Anything counting requests from access logs counted double.
+
+Each line also carries `client`, the client's address as the entrypoint
+resolved it under your trusted-proxy settings. `remote_addr` is still the TCP
+peer, which behind a load balancer is the balancer.
+
 ### Behaviour that now does what it was configured to do
 
 - **Load balancing:** services saved from the dashboard as least-connections
