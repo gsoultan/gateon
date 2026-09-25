@@ -97,6 +97,26 @@ and age out. `ebpf.xdp_ja4_blocklist` is removed (field 12 is reserved): the
 kernel lookup compared the ClientHello's random bytes with a hash of the
 fingerprint and never matched. Fingerprints are enforced at L7.
 
+### Kubernetes routes follow their objects — **routes that lingered are removed on the first sync**
+
+- A path or match removed from an Ingress or HTTPRoute now removes its route.
+  Sync used to only add and update, so a removed path kept routing to its old
+  backend until the whole object was deleted; after upgrading, the first sync
+  of each object (within the 30-second resync) removes what it no longer asks
+  for.
+- An HTTPRoute with several hostnames now routes each of them. Its rule was
+  ``Host(`a`, `b`)``, which the router read as one literal host that no request
+  carries, so such a route served nothing.
+- HTTPRoute method and exact-header matches are now enforced. They were
+  dropped, so a route meant for requests carrying a header took every request
+  on its path — expect such routes to match less. Regular-expression header
+  and query matches, which the rule language cannot express, skip the match
+  and log it rather than widen the route. A rule with no matches routes
+  everything under `/`, as the Gateway API defines; it produced no route.
+- With the chart's `watchNamespace`, the controller now lists only that
+  namespace (`GATEON_K8S_WATCH_NAMESPACE`). It listed every namespace, which
+  the namespaced Role refused, so a namespace-scoped install synced nothing.
+
 ### Behaviour that now does what it was configured to do
 
 - **Load balancing:** services saved from the dashboard as least-connections

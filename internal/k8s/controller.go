@@ -24,6 +24,9 @@ import (
 
 // Controller watches Kubernetes Ingress and Gateway API resources and syncs them to Gateon.
 type Controller struct {
+	// ctx bounds the store writes the informer callbacks make; the callbacks
+	// themselves carry none.
+	ctx           context.Context
 	client        kubernetes.Interface
 	gatewayClient gatewayclient.Interface
 	routeStore    config.RouteStore
@@ -35,14 +38,23 @@ type Controller struct {
 }
 
 // NewController creates a new Kubernetes Ingress and Gateway API Controller.
-func NewController(client kubernetes.Interface, gatewayClient gatewayclient.Interface, routeStore config.RouteStore, serviceStore config.ServiceStore) *Controller {
-	factory := informers.NewSharedInformerFactory(client, 30*time.Second)
+// NewController watches Ingresses and HTTPRoutes in namespace, or in every
+// namespace when it is empty.
+//
+// The chart's watchNamespace grants a namespaced Role instead of a ClusterRole,
+// and the informers used to list cluster-wide regardless -- which that Role
+// forbids, so they never synced and a namespace-scoped install routed nothing
+// from Kubernetes at all. The namespace now reaches the informers through
+// GATEON_K8S_WATCH_NAMESPACE, which the chart sets from the same value.
+func NewController(ctx context.Context, client kubernetes.Interface, gatewayClient gatewayclient.Interface, routeStore config.RouteStore, serviceStore config.ServiceStore, namespace string) *Controller {
+	factory := informers.NewSharedInformerFactoryWithOptions(client, 30*time.Second, informers.WithNamespace(namespace))
 	informer := factory.Networking().V1().Ingresses().Informer()
 
-	gwFactory := gatewayinformers.NewSharedInformerFactory(gatewayClient, 30*time.Second)
+	gwFactory := gatewayinformers.NewSharedInformerFactoryWithOptions(gatewayClient, 30*time.Second, gatewayinformers.WithNamespace(namespace))
 	gwInformer := gwFactory.Gateway().V1().HTTPRoutes().Informer()
 
 	c := &Controller{
+		ctx:           ctx,
 		client:        client,
 		gatewayClient: gatewayClient,
 		routeStore:    routeStore,
@@ -162,8 +174,10 @@ func safeForRule(s string) bool {
 }
 
 func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
-	ctx := context.Background()
+	ctx := c.ctx
 	ingressID := fmt.Sprintf("k8s-%s-%s", ing.Namespace, ing.Name)
+	keep := make(map[string]bool)
+	defer func() { c.removeRoutesExcept(ctx, ingressID+"-r", keep) }()
 
 	for i, rule := range ing.Spec.Rules {
 		host := rule.Host
@@ -194,6 +208,9 @@ func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 			}
 
 			routeID := fmt.Sprintf("%s-r%d-p%d", ingressID, i, j)
+			// Kept even if a store write below fails: a transient failure must
+			// not delete the route the Ingress still asks for.
+			keep[routeID] = true
 			serviceID := fmt.Sprintf("%s-svc-%s-%d", ingressID, path.Backend.Service.Name, path.Backend.Service.Port.Number)
 
 			// 1. Create/Update Gateon Service
@@ -245,11 +262,6 @@ func (c *Controller) syncIngress(ing *networkingv1.Ingress) {
 }
 
 func (c *Controller) deleteIngress(ing *networkingv1.Ingress) {
-	ctx := context.Background()
-	ingressID := fmt.Sprintf("k8s-%s-%s", ing.Namespace, ing.Name)
-
-	// Since we don't know how many rules/paths it had, we'd need to list and filter.
-	// For simplicity, we can use a naming convention.
 	// The "-r" is what keeps this from deleting a different Ingress's routes.
 	// Route IDs are "<ingressID>-r<i>-p<j>", and matching on ingressID alone
 	// made "web" a prefix of "web-staging", so removing one Ingress silently
@@ -260,125 +272,188 @@ func (c *Controller) deleteIngress(ing *networkingv1.Ingress) {
 	// produce "k8s-prod-web-staging". Separating those needs a different ID
 	// format, which would orphan the routes of every already-running deployment,
 	// so it is left alone here.
-	prefix := ingressID + "-r"
-	routes := c.routeStore.List(ctx)
-	for _, r := range routes {
-		if strings.HasPrefix(r.Id, prefix) {
-			if err := c.routeStore.Delete(ctx, r.Id); err != nil {
-				logger.L.LogError("failed to delete k8s ingress route", "error", err, "route", r.Id)
-			}
+	c.removeRoutesExcept(c.ctx, fmt.Sprintf("k8s-%s-%s-r", ing.Namespace, ing.Name), nil)
+}
+
+// removeRoutesExcept deletes the routes under prefix that keep does not name:
+// everything the object no longer asks for, or, with keep nil, everything it
+// made. Sync used to only upsert, so a path removed from an Ingress or
+// HTTPRoute went on routing to its old backend until the whole object was
+// deleted.
+func (c *Controller) removeRoutesExcept(ctx context.Context, prefix string, keep map[string]bool) {
+	for _, r := range c.routeStore.List(ctx) {
+		if !strings.HasPrefix(r.Id, prefix) || keep[r.Id] {
+			continue
+		}
+		if err := c.routeStore.Delete(ctx, r.Id); err != nil {
+			logger.L.LogError("failed to delete k8s route", "error", err, "route", r.Id)
 		}
 	}
 }
 
 func (c *Controller) syncHTTPRoute(hr *gatewayv1.HTTPRoute) {
-	ctx := context.Background()
-	routeIDPrefix := fmt.Sprintf("k8s-hr-%s-%s", hr.Namespace, hr.Name)
+	ctx := c.ctx
+	prefix := fmt.Sprintf("k8s-hr-%s-%s", hr.Namespace, hr.Name)
+	keep := make(map[string]bool)
+	defer func() { c.removeRoutesExcept(ctx, prefix+"-r", keep) }()
 
+	hosts, ok := safeHostnames(hr)
+	if !ok {
+		return
+	}
 	for i, rule := range hr.Spec.Rules {
-		for j, match := range rule.Matches {
-			routeID := fmt.Sprintf("%s-r%d-m%d", routeIDPrefix, i, j)
-
-			// Hostnames and paths are interpolated into a backtick-quoted rule,
-			// so a backtick in either escapes the quoting. syncIngress already
-			// guards this; the Gateway API path never did, and it is reachable by
-			// anyone who can create an HTTPRoute. A hostname of
-			// "a`) || Host(`bank.example.com" is a *working* rule that captures
-			// another service's traffic.
-			var ruleParts []string
-			if len(hr.Spec.Hostnames) > 0 {
-				hosts := make([]string, 0, len(hr.Spec.Hostnames))
-				for _, h := range hr.Spec.Hostnames {
-					if !safeForRule(string(h)) {
-						logger.L.LogError("refusing k8s HTTPRoute hostname containing rule metacharacters",
-							"namespace", hr.Namespace, "httproute", hr.Name, "hostname", string(h))
-						continue
-					}
-					hosts = append(hosts, string(h))
-				}
-				// Every hostname rejected means the rule would match on path
-				// alone, which is broader than what was asked for, so the match
-				// is skipped rather than widened.
-				if len(hosts) == 0 {
-					continue
-				}
-				ruleParts = append(ruleParts, fmt.Sprintf("Host(`%s`)", strings.Join(hosts, "`, `")))
-			}
-
-			if match.Path != nil {
-				path := "/"
-				if match.Path.Value != nil {
-					path = *match.Path.Value
-				}
-				if !safeForRule(path) {
-					logger.L.LogError("refusing k8s HTTPRoute path containing rule metacharacters",
-						"namespace", hr.Namespace, "httproute", hr.Name, "path", path)
-					continue
-				}
-				if match.Path.Type == nil || *match.Path.Type == gatewayv1.PathMatchPathPrefix {
-					ruleParts = append(ruleParts, fmt.Sprintf("PathPrefix(`%s`)", path))
-				} else {
-					ruleParts = append(ruleParts, fmt.Sprintf("Path(`%s`)", path))
-				}
-			}
-
-			// A match that produced no constraints would become an empty rule,
-			// which matches everything.
-			if len(ruleParts) == 0 {
+		if len(rule.BackendRefs) == 0 {
+			continue
+		}
+		serviceID := c.syncHTTPRouteBackend(ctx, hr, prefix, rule.BackendRefs[0])
+		matches := rule.Matches
+		if len(matches) == 0 {
+			// No matches means a prefix match on "/", by the Gateway API's
+			// definition; ranging over none produced no route at all.
+			root := "/"
+			matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Value: &root}}}
+		}
+		for j, match := range matches {
+			constraints, ok := matchConstraints(hr, match)
+			if !ok {
 				continue
 			}
-
-			ruleStr := strings.Join(ruleParts, " && ")
-			if len(rule.BackendRefs) == 0 {
-				continue
-			}
-
-			// For simplicity, handle first backend
-			ref := rule.BackendRefs[0]
-			port := int32(80)
-			if ref.Port != nil {
-				port = int32(*ref.Port)
-			}
-			serviceID := fmt.Sprintf("%s-svc-%s-%d", routeIDPrefix, string(ref.Name), port)
-
-			svc := &gateonv1.Service{
-				Id:           serviceID,
-				Name:         fmt.Sprintf("k8s-hr/%s/%s", hr.Namespace, string(ref.Name)),
-				DiscoveryUrl: fmt.Sprintf("dns:%s.%s.svc.cluster.local", string(ref.Name), hr.Namespace),
-				BackendType:  "http",
-			}
-			if err := c.serviceStore.Update(ctx, svc); err != nil {
-				logger.L.LogError("failed to sync k8s HTTPRoute service", "error", err, "service", svc.Name)
-			}
-
-			route := &gateonv1.Route{
-				Id:        routeID,
-				Name:      fmt.Sprintf("k8s-hr/%s/%s/%d", hr.Namespace, hr.Name, i),
-				Rule:      ruleStr,
-				Type:      "http",
-				ServiceId: serviceID,
-			}
-			if err := c.routeStore.Update(ctx, route); err != nil {
-				logger.L.LogError("failed to sync k8s HTTPRoute route", "error", err, "route", route.Name)
+			for k, ruleStr := range routeRules(hosts, constraints) {
+				id := fmt.Sprintf("%s-r%d-m%d", prefix, i, j)
+				if len(hosts) > 1 {
+					id += fmt.Sprintf("-h%d", k)
+				}
+				keep[id] = true
+				route := &gateonv1.Route{
+					Id:        id,
+					Name:      fmt.Sprintf("k8s-hr/%s/%s/%d", hr.Namespace, hr.Name, i),
+					Rule:      ruleStr,
+					Type:      "http",
+					ServiceId: serviceID,
+				}
+				if err := c.routeStore.Update(ctx, route); err != nil {
+					logger.L.LogError("failed to sync k8s HTTPRoute route", "error", err, "route", route.Name)
+				}
 			}
 		}
 	}
 }
 
+// safeHostnames returns the HTTPRoute's hostnames that are safe to put in a
+// rule. Hostnames and paths are interpolated into a backtick-quoted rule, so
+// a backtick in either escapes the quoting: "a`) || Host(`bank.example.com"
+// is a *working* rule that captures another service's traffic, reachable by
+// anyone who can create an HTTPRoute. ok is false when every hostname was
+// refused, because the route would then match on path alone -- broader than
+// what was asked for.
+func safeHostnames(hr *gatewayv1.HTTPRoute) (hosts []string, ok bool) {
+	for _, h := range hr.Spec.Hostnames {
+		if !safeForRule(string(h)) {
+			logger.L.LogError("refusing k8s HTTPRoute hostname containing rule metacharacters",
+				"namespace", hr.Namespace, "httproute", hr.Name, "hostname", string(h))
+			continue
+		}
+		hosts = append(hosts, string(h))
+	}
+	return hosts, len(hr.Spec.Hostnames) == 0 || len(hosts) > 0
+}
+
+// matchConstraints renders one match as rule clauses. ok is false for a match
+// the rule language cannot express -- a regular-expression header, a query
+// parameter -- or that carries rule metacharacters: dropping the part it
+// cannot express would widen the route, so the match is skipped instead. The
+// method and exact headers used to be dropped that way, so a route meant only
+// for requests carrying a header took every request on its path.
+func matchConstraints(hr *gatewayv1.HTTPRoute, match gatewayv1.HTTPRouteMatch) ([]string, bool) {
+	refuse := func(why string) ([]string, bool) {
+		logger.L.LogError("skipping k8s HTTPRoute match: "+why, "namespace", hr.Namespace, "httproute", hr.Name)
+		return nil, false
+	}
+	var parts []string
+	if match.Path != nil {
+		path := "/"
+		if match.Path.Value != nil {
+			path = *match.Path.Value
+		}
+		if !safeForRule(path) {
+			return refuse("path contains rule metacharacters")
+		}
+		switch {
+		case match.Path.Type == nil || *match.Path.Type == gatewayv1.PathMatchPathPrefix:
+			parts = append(parts, fmt.Sprintf("PathPrefix(`%s`)", path))
+		case *match.Path.Type == gatewayv1.PathMatchRegularExpression:
+			parts = append(parts, fmt.Sprintf("PathRegex(`%s`)", path))
+		default:
+			parts = append(parts, fmt.Sprintf("Path(`%s`)", path))
+		}
+	}
+	if match.Method != nil {
+		parts = append(parts, fmt.Sprintf("Methods(`%s`)", string(*match.Method)))
+	}
+	for _, h := range match.Headers {
+		if h.Type != nil && *h.Type != gatewayv1.HeaderMatchExact {
+			return refuse("regular-expression header matches are not supported")
+		}
+		if !safeForRule(string(h.Name)) || !safeForRule(h.Value) {
+			return refuse("header match contains rule metacharacters")
+		}
+		parts = append(parts, fmt.Sprintf("Headers(`%s`, `%s`)", string(h.Name), h.Value))
+	}
+	if len(match.QueryParams) > 0 {
+		return refuse("query parameter matches are not supported")
+	}
+	return parts, true
+}
+
+// routeRules is one rule per hostname, each carrying the match's
+// constraints, or one rule of the constraints alone when the route names no
+// hostname. The router reads a single host per Host(), so the rule used to be
+// Host(`a`, `b`) -- read as the literal host "a`, `b", which no request
+// carries. A rule with no clause at all would match everything, so none is
+// returned for it.
+func routeRules(hosts, constraints []string) []string {
+	tail := strings.Join(constraints, " && ")
+	if len(hosts) == 0 {
+		if tail == "" {
+			return nil
+		}
+		return []string{tail}
+	}
+	out := make([]string, 0, len(hosts))
+	for _, h := range hosts {
+		r := fmt.Sprintf("Host(`%s`)", h)
+		if tail != "" {
+			r += " && " + tail
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// syncHTTPRouteBackend upserts the service for a rule's first backend and
+// returns its ID.
+func (c *Controller) syncHTTPRouteBackend(ctx context.Context, hr *gatewayv1.HTTPRoute, prefix string, ref gatewayv1.HTTPBackendRef) string {
+	port := int32(80)
+	if ref.Port != nil {
+		port = int32(*ref.Port)
+	}
+	serviceID := fmt.Sprintf("%s-svc-%s-%d", prefix, string(ref.Name), port)
+	svc := &gateonv1.Service{
+		Id:           serviceID,
+		Name:         fmt.Sprintf("k8s-hr/%s/%s", hr.Namespace, string(ref.Name)),
+		DiscoveryUrl: fmt.Sprintf("dns:%s.%s.svc.cluster.local", string(ref.Name), hr.Namespace),
+		BackendType:  "http",
+	}
+	if err := c.serviceStore.Update(ctx, svc); err != nil {
+		logger.L.LogError("failed to sync k8s HTTPRoute service", "error", err, "service", svc.Name)
+	}
+	return serviceID
+}
+
 func (c *Controller) deleteHTTPRoute(hr *gatewayv1.HTTPRoute) {
-	ctx := context.Background()
 	// The "-r" is what keeps this from deleting a different HTTPRoute's routes.
 	// Route IDs are "<prefix>-r<i>-m<j>", and matching on the prefix alone made
 	// "web" a prefix of "web-staging", so removing one HTTPRoute silently tore
-	// down another's routing — in the direction that drops traffic. deleteIngress
-	// was fixed for exactly this; the Gateway API path was left behind.
-	prefix := fmt.Sprintf("k8s-hr-%s-%s-r", hr.Namespace, hr.Name)
-	routes := c.routeStore.List(ctx)
-	for _, r := range routes {
-		if strings.HasPrefix(r.Id, prefix) {
-			if err := c.routeStore.Delete(ctx, r.Id); err != nil {
-				logger.L.LogError("failed to delete k8s HTTPRoute route", "error", err, "route", r.Id)
-			}
-		}
-	}
+	// down another's routing — in the direction that drops traffic.
+	c.removeRoutesExcept(c.ctx, fmt.Sprintf("k8s-hr-%s-%s-r", hr.Namespace, hr.Name), nil)
 }

@@ -28,6 +28,7 @@ func testController(t *testing.T) *Controller {
 	// nothing. t.TempDir keeps them out of the checkout.
 	dir := t.TempDir()
 	return &Controller{
+		ctx:          t.Context(),
 		routeStore:   config.NewRouteRegistry(filepath.Join(dir, "routes.json")),
 		serviceStore: config.NewServiceRegistry(filepath.Join(dir, "services.json")),
 	}

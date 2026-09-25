@@ -434,7 +434,7 @@ func startK8sController(ctx context.Context, s *server.Server) {
 		logger.L.LogError("failed to create gateway clientset", "error", err)
 		return
 	}
-	ctrl := k8s.NewController(clientset, gwClient, s.RouteStore, s.ServiceStore)
+	ctrl := k8s.NewController(ctx, clientset, gwClient, s.RouteStore, s.ServiceStore, os.Getenv("GATEON_K8S_WATCH_NAMESPACE"))
 	go ctrl.Run(ctx.Done())
 	logger.L.LogInfo("Kubernetes Controller (Ingress + Gateway API) started")
 }
