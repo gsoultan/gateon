@@ -106,7 +106,7 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 			return
 		}
 
-		dryRun, err := importDryRun(r.URL.Query())
+		dryRun, err := importPreviewRequested(r.URL.Query())
 		if err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
@@ -152,7 +152,7 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 	})
 }
 
-// importDryRun reports whether an import request asked only for a preview.
+// importPreviewRequested reports whether an import request asked only for a preview.
 //
 // Both spellings, because the dashboard sends "dryRun" and this used to read
 // only "dry_run": the dashboard's "Dry Run Preview" button therefore applied
@@ -164,7 +164,7 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 // false. The two readings are not symmetric -- a mistaken preview is repeated,
 // a mistaken import overwrites the live configuration -- so the one that
 // cannot be undone must not be what a typo gets.
-func importDryRun(q url.Values) (bool, error) {
+func importPreviewRequested(q url.Values) (bool, error) {
 	dryRun := false
 	for _, key := range []string{"dry_run", "dryRun"} {
 		for _, v := range q[key] {
