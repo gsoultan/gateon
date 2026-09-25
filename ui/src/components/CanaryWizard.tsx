@@ -7,6 +7,7 @@ import { IconInfoCircle, IconRocket, IconCheck } from '@tabler/icons-react'
 import { apiFetch, getApiErrorMessage } from '../hooks/useGateon'
 import { notifications } from '@mantine/notifications'
 import type { Service, Target } from '../types/gateon'
+import { honoursWeights } from './canaryPolicy'
 
 interface CanaryWizardProps {
   service: Service
@@ -63,6 +64,7 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
   }
 
   const totalWeight = targetWeights.reduce((acc, t) => acc + t.weight, 0)
+  const weighted = honoursWeights(service.loadBalancerPolicy)
 
   return (
     <Stack gap="lg">
@@ -158,6 +160,14 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
         </Group>
       </Stack>
 
+      {!weighted && (
+        <Alert color="orange" icon={<IconInfoCircle size={16} />}>
+          This service balances with {service.loadBalancerPolicy || "round robin"}, which ignores
+          target weights, so shifting them would move no traffic. Switch the service to Weighted
+          Round Robin to run a canary.
+        </Alert>
+      )}
+
       {totalWeight === 0 && (
         <Alert color="red" icon={<IconInfoCircle size={16} />}>
           Total weight cannot be zero.
@@ -171,7 +181,7 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
         leftSection={<IconRocket size={20} />}
         onClick={startCanary}
         loading={loading}
-        disabled={totalWeight === 0}
+        disabled={totalWeight === 0 || !weighted}
       >
         Start Canary Deployment
       </Button>

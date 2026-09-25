@@ -4,11 +4,13 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/domain/canary"
 	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -54,6 +56,11 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 			return
 		}
 		taskID, err := d.CanaryService.StartCanary(r.Context(), &req)
+		if errors.Is(err, canary.ErrNotRunnable) {
+			// Our own message, saying what to change -- not an internal error.
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to start canary deployment")
 			return

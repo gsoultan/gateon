@@ -5,9 +5,12 @@ package canary
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -42,8 +45,15 @@ func NewService(lifetime context.Context, svcService service.Service, l logger.L
 // without signal.
 const minCanaryInterval = time.Second
 
+// ErrNotRunnable reports a canary that cannot shift traffic as asked. Its
+// message says why, for the operator who started it.
+var ErrNotRunnable = errors.New("canary cannot run")
+
 // StartCanary starts a background task to gradually shift traffic to target weights.
 func (cs *serviceImpl) StartCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) (string, error) {
+	if err := cs.checkRunnable(ctx, req); err != nil {
+		return "", err
+	}
 	taskID := uuid.NewString()
 
 	// Detached from the request so a gradual rollout is not cancelled when this
@@ -54,6 +64,32 @@ func (cs *serviceImpl) StartCanary(ctx context.Context, req *gateonv1.StartCanar
 	go cs.runCanary(cs.lifetime, req)
 
 	return taskID, nil
+}
+
+// checkRunnable refuses, before anything starts, a canary that could not shift
+// any traffic. The rollout used to start regardless and find out in its own
+// goroutine, after the API had already answered success: a missing service or
+// weights naming none of its targets ended at once in the log, and a service
+// on a policy that ignores weights -- anything but weighted round robin --
+// logged its progress to completion while every request went where it always
+// had.
+func (cs *serviceImpl) checkRunnable(ctx context.Context, req *gateonv1.StartCanaryRequest) error {
+	svc, ok := cs.svcService.GetService(ctx, req.ServiceId)
+	if !ok {
+		return fmt.Errorf("%w: service %q not found", ErrNotRunnable, req.ServiceId)
+	}
+	if policy := config.CanonicalLBPolicy(svc.LoadBalancerPolicy); policy != "weighted_round_robin" {
+		return fmt.Errorf("%w: service %q balances with %s, which ignores target weights; "+
+			"switch it to weighted round robin to shift traffic by weight", ErrNotRunnable, svc.Id, policy)
+	}
+	for _, tw := range req.TargetWeights {
+		for _, t := range svc.WeightedTargets {
+			if t.Url == tw.Url {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%w: none of the target weights names a target of service %q", ErrNotRunnable, svc.Id)
 }
 
 func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryRequest) {
