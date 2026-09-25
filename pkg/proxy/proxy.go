@@ -193,6 +193,14 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 			w.WriteHeader(499)
 			return
 		}
+		// A body limit tripped while the body was streaming (one with no
+		// declared length). The client sent too much; the backend did nothing
+		// wrong, so this is not logged as a proxy error or answered 502.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
 
 		status := http.StatusBadGateway
 		if errors.Is(err, context.DeadlineExceeded) {

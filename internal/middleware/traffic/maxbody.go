@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 
+	jsonerror "github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/httputil"
@@ -75,6 +76,18 @@ func exemptFromBodyLimit(r *http.Request) bool {
 func serveWithBodyLimit(next http.Handler, w http.ResponseWriter, r *http.Request, max int64) {
 	if exemptFromBodyLimit(r) {
 		next.ServeHTTP(w, r)
+		return
+	}
+	// A body declared over the limit is refused here, before the backend is
+	// dialled. MaxBytesReader only fails the read: the reverse proxy saw that
+	// as a transport error and answered 502, charging the client's oversized
+	// upload to the backend's error rate.
+	if r.ContentLength > max {
+		if !kind.ShouldSkipMetrics(r) {
+			bufferingRejectedTotal.WithLabelValues("max_request_body_bytes").Inc()
+			telemetry.IncBufferingRejected()
+		}
+		jsonerror.WriteJSONError(w, http.StatusRequestEntityTooLarge, "request body too large", "")
 		return
 	}
 
