@@ -72,7 +72,7 @@ startup when the file is missing, and the running config is whatever
 | :-- | :--- | :--- | :--- |
 | 1 | Encryption key | `GATEON_ENCRYPTION_KEY` (environment) | every encrypted secret, permanently |
 | 2 | Global config | `$GLOBAL_CONFIG_FILE`, else `./global.json` | all global settings: WAF, tiers, auth, TLS, telemetry |
-| 3 | Config database | `$DATA_DIR/gateon.db` (SQLite default) or the external DSN | routes, services, entrypoints, middlewares, users, API keys, ACME certificates, audit log |
+| 3 | Config database | `$DATA_DIR/gateon.db` (SQLite default) or the external DSN | routes, services, entrypoints, middlewares, users, API keys, audit log. Not ACME certificates: those are item 4 or Redis, and the `acme_certs` table migration 6 created has never been written to |
 | 4 | Certificates | `$DATA_DIR/certs/` (or `GATEON_TLS_CACHE_DIR`) | uploaded certificates, and the ACME cache when Redis is not configured — a restore re-issues from Let's Encrypt and can hit rate limits |
 | 5 | Audit archives | `$DATA_DIR/audit/` | compliance history: WAF audit logs and the compressed archives the retention job writes |
 
