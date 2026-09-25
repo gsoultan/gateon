@@ -647,11 +647,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			switch {
 			case errors.Is(err, auth.ErrAccountLocked):
 				logger.SecurityEvent("auth_2fa_locked", r, "account_locked")
-				audit.Log(r.Context(), req.Id, "2fa_locked", "auth", "Account locked during 2FA", request.GetClientIP(r, true))
+				audit.Log(r.Context(), req.Id, "2fa_locked", "auth", "Account locked during 2FA", request.ClientAddr(r))
 				WriteHTTPError(w, http.StatusTooManyRequests, err.Error())
 			case errors.Is(err, auth.ErrInvalidTwoFactorCode):
 				logger.SecurityEvent("auth_2fa_failure", r, "invalid_2fa_code")
-				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.GetClientIP(r, true))
+				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.ClientAddr(r))
 				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
 			default:
 				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
@@ -719,13 +719,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidCredentials) {
 				logger.SecurityEvent("auth_failure", r, "invalid_credentials")
-				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.GetClientIP(r, true))
+				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.ClientAddr(r))
 			}
 			WriteHTTPError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
 
-		audit.Log(r.Context(), req.Username, "login", "auth", "User logged in", request.GetClientIP(r, true))
+		audit.Log(r.Context(), req.Username, "login", "auth", "User logged in", request.ClientAddr(r))
 
 		if !resp.TwoFactorRequired && !resp.TwoFactorSetupRequired {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
@@ -772,7 +772,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "update", "user", "Updated user: "+req.Username, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "update", "user", "Updated user: "+req.Username, request.ClientAddr(r))
 
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
@@ -829,7 +829,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "delete", "user", "Deleted user ID: "+id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "delete", "user", "Deleted user ID: "+id, request.ClientAddr(r))
 
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
@@ -837,7 +837,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("POST /v1/logout", func(w http.ResponseWriter, r *http.Request) {
 		// Audit Log
 		if claims, _ := callerClaims(r); claims != nil {
-			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.GetClientIP(r, true))
+			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.ClientAddr(r))
 		}
 		middleware.ClearSessionCookie(w, r)
 		w.Header().Set("Content-Type", "application/json")

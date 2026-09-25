@@ -98,6 +98,23 @@ func isTrustedProxy(remoteAddr string) bool {
 	return IsTrusted(remoteAddr, false)
 }
 
+// ClientAddr is the client's address for anything that reads it rather than
+// decides it: the address the entrypoint resolved, under the operator's trust
+// setting for forwarding headers. Where no entrypoint has resolved one -- a
+// handler served on its own, a test -- it is the TCP peer: nothing has
+// decided which forwarding headers to believe, so none are.
+//
+// It replaces GetClientIP(r, true) at every site that is not the resolver.
+// Those forced Cloudflare trust on whatever the operator had configured, which
+// the entrypoint's answer happened to override; the SQLi and XSS scanners,
+// which skip loopback, could be told the client was 127.0.0.1 by a header.
+func ClientAddr(r *http.Request) string {
+	if rs := GetRequestState(r); rs != nil && rs.ClientRemoteAddr != "" {
+		return rs.ClientRemoteAddr
+	}
+	return httputil.StripPort(r.RemoteAddr)
+}
+
 // GetClientIP returns the real client IP from the request.
 //
 // When the immediate peer is a trusted proxy it consults forwarding headers:

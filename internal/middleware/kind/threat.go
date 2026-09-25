@@ -45,7 +45,7 @@ type Threat struct {
 // kind for that reason, after the config parsers, the header constants and the
 // severity vocabulary.
 func RecordThreat(r *http.Request, t Threat) {
-	if httputil.IsLoopback(request.GetClientIP(r, true)) {
+	if httputil.IsLoopback(request.ClientAddr(r)) {
 		return
 	}
 
@@ -53,7 +53,7 @@ func RecordThreat(r *http.Request, t Threat) {
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		ID:          fmt.Sprintf("adv-%s-%d", t.Type, time.Now().UnixNano()),
 		Type:        t.Type,
-		SourceIP:    request.GetClientIP(r, true),
+		SourceIP:    request.ClientAddr(r),
 		Score:       t.Score,
 		Details:     t.Details,
 		Time:        time.Now(),

@@ -81,7 +81,7 @@ func Telemetry(serviceName string) Middleware {
 				}
 				repID, _ := rs.Fingerprint.(string)
 				if repID == "" {
-					repID = request.GetClientIP(r, true)
+					repID = request.ClientAddr(r)
 				}
 				reputation := telemetry.GetReputation(repID)
 				span.SetAttributes(attribute.Float64("security.trust_score", reputation))

@@ -103,7 +103,7 @@ func Entropy(threshold float64, routeID string) kind.Middleware {
 }
 
 func checkEntropy(next http.Handler, w http.ResponseWriter, r *http.Request, threshold float64, routeID string) {
-	if httputil.IsLoopback(request.GetClientIP(r, true)) {
+	if httputil.IsLoopback(request.ClientAddr(r)) {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -272,7 +272,7 @@ func (rc recognition) middleware() kind.Middleware {
 }
 
 func (rc recognition) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
-	if httputil.IsLoopback(request.GetClientIP(r, true)) {
+	if httputil.IsLoopback(request.ClientAddr(r)) {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -368,7 +368,7 @@ var threatCorpora = []threatCorpus{
 func ThreatRecognition(routeID string) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if httputil.IsLoopback(request.GetClientIP(r, true)) {
+			if httputil.IsLoopback(request.ClientAddr(r)) {
 				next.ServeHTTP(w, r)
 				return
 			}

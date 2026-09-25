@@ -491,7 +491,7 @@ func (t *wafRuntime) applyCloudflareTrust(r *http.Request) {
 	if !t.cfg.TrustCloudflare {
 		return
 	}
-	clientIP := request.GetClientIP(r, true)
+	clientIP := request.ClientAddr(r)
 	if last := strings.LastIndexByte(r.RemoteAddr, ':'); last != -1 && !strings.HasSuffix(r.RemoteAddr, "]") {
 		r.RemoteAddr = clientIP + r.RemoteAddr[last:]
 	} else {
@@ -733,7 +733,7 @@ func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r
 	restoreAcceptEncoding(r.Header, prevAE, hadAE)
 }
 func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
-	clientIP := request.GetClientIP(r, true)
+	clientIP := request.ClientAddr(r)
 	category := "general"
 	lowerDetails := strings.ToLower(details)
 	recommendation := "Review your request for suspicious patterns. If this is legitimate traffic, consider adjusting the Fast-Path sensitivity."

@@ -47,7 +47,7 @@ drop_comment_hits() { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true; 
 # needs to tolerate a not-yet-available service, make the callee deny on a nil
 # verifier (see middleware/auth.PasetoAuth) and build unconditionally.
 # ---------------------------------------------------------------------------
-note "1/12  auth.Service nil-comparisons"
+note "1/13  auth.Service nil-comparisons"
 auth_hits=$( (find internal pkg cmd -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '(\.AuthManager|deps\.Auth|s\.Auth|svc\.Auth)[[:space:]]*[!=]=[[:space:]]*nil' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -68,7 +68,7 @@ fi
 # stored-XSS bug plus a readable token equals administrator compromise. The
 # token lives only in the HttpOnly gateon_session cookie.
 # ---------------------------------------------------------------------------
-note "2/12  session token in web storage"
+note "2/13  session token in web storage"
 storage_hits=$( (grep -rnE '(localStorage|sessionStorage)\.(setItem|getItem)' ui/src \
 	--include='*.ts' --include='*.tsx' 2>/dev/null |
 	grep -viE 'token|jwt|paseto|bearer|credential|gateon-auth') || true)
@@ -105,7 +105,7 @@ fi
 # '/', which made the -o path invalid and produced a build that "succeeded"
 # and then failed at exec with a confusing error.
 # ---------------------------------------------------------------------------
-note "3/12  tests building into the repository root"
+note "3/13  tests building into the repository root"
 root_builds=$( (grep -rnE '"go",[[:space:]]*"build",[[:space:]]*"-o",[[:space:]]*[a-zA-Z]' tests/ --include='*.go' 2>/dev/null |
 	grep -vE 'filepath\.Join\((env\.Dir|tmpDir|t\.TempDir)') || true)
 # Re-check the argument actually resolves under a temp dir.
@@ -147,7 +147,7 @@ fi
 # protoc-gen-es all copy the leading comment out of the .proto, so fixing the
 # .proto fixes the generated file on the next `make proto`.
 # ---------------------------------------------------------------------------
-note "4/12  SPDX license header on every source file"
+note "4/13  SPDX license header on every source file"
 SPDX_LINE='SPDX-License-Identifier: MIT'
 missing_spdx=""
 while IFS= read -r f; do
@@ -195,7 +195,7 @@ fi
 # authentication is distinguishable from no authentication at all. Until then
 # this check holds the line. See doc/adr/0006-transport-neutral-authorization.md.
 # ---------------------------------------------------------------------------
-note "5/12  DryRun on the management auth chain"
+note "5/13  DryRun on the management auth chain"
 dryrun_hits=$( (find internal/server -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE 'DryRun' 2>/dev/null |
 	drop_comment_hits) || true)
@@ -227,7 +227,7 @@ fi
 # enforce. No compiler sees it, because both sides are string literals in
 # different languages.
 # ---------------------------------------------------------------------------
-note "6/12  Dashboard middleware config keys match the Go readers"
+note "6/13  Dashboard middleware config keys match the Go readers"
 mw_editors="ui/src/components/MiddlewareConfig"
 if [ -d "$mw_editors" ]; then
 	go_keys=$(grep -rhoE '\["[A-Za-z0-9_]+"\]' internal/middleware/ 2>/dev/null |
@@ -282,7 +282,7 @@ fi
 # Matched by content rather than by name, because the name is the part that
 # keeps changing. Executable *scripts* are text and do not match.
 # ---------------------------------------------------------------------------
-note "7/12  No compiled binaries tracked in git"
+note "7/13  No compiled binaries tracked in git"
 if ! command -v file >/dev/null 2>&1; then
 	# Without file(1) the pipeline below returns nothing and the check would
 	# report "ok" while inspecting exactly zero bytes. A gate that passes
@@ -346,7 +346,7 @@ fi
 # effective threshold for every unknown client and re-tune detection on every
 # install, so it is not being changed as a side effect of this work.
 fi
-note "8/12  reputation reads use a network-scoped identity"
+note "8/13  reputation reads use a network-scoped identity"
 # Checked by where the *class identity* is produced, not by what a variable is
 # called. An earlier version of this check allow-listed calls whose argument was
 # named repID, which a negative test defeated immediately: renaming the producer
@@ -372,7 +372,7 @@ else
 	echo "  ok - the browser-class identity stays inside internal/telemetry"
 fi
 
-note "9/12 handlers resolve the caller in one place"
+note "9/13 handlers resolve the caller in one place"
 # The management plane makes some authorization decisions itself rather than
 # through RequirePermission -- "admin or self" on the password change, "self
 # only" on 2FA setup. Those were written as:
@@ -418,7 +418,7 @@ else
 	echo "  ok - handlers go through callerClaims/auditUser, not the raw key"
 fi
 
-note "10/12 threat severities use the vocabulary consumers read"
+note "10/13 threat severities use the vocabulary consumers read"
 # Every consumer of a SecurityThreat compares severity in lower case:
 # severityRank in internal/api lower-cases before it switches, the SIEM
 # formatter maps anything it does not recognise to informational, and the
@@ -446,7 +446,7 @@ else
 	echo "  ok - severities come from kind, not from an upper-case literal"
 fi
 
-note "11/12 threat actions use the vocabulary consumers read"
+note "11/13 threat actions use the vocabulary consumers read"
 # Same reasoning as the severity check above, one field over. ActionTaken
 # decides whether a refusal counts as mitigated: isMitigatingAction and the
 # dashboard's tile both compare against "blocked", "challenged" and "shunned"
@@ -474,7 +474,7 @@ else
 	echo "  ok - actions come from the shared vocabulary, not a literal"
 fi
 
-note "12/12 CORS-preflight is not a way out of a deny decision"
+note "12/13 CORS-preflight is not a way out of a deny decision"
 # kind.IsCorsPreflight reads three values, every one of them written by the
 # client: the OPTIONS method, an Origin header and an Access-Control-Request-
 # Method header. A boundary that calls next.ServeHTTP when it is true is opt-out
@@ -533,6 +533,29 @@ if [ -n "$cors_hits" ]; then
 	printf '  preflight is a request, and the backend answers it.\n'
 else
 	echo "  ok - no deny decision is skippable by naming a preflight"
+fi
+
+note "13/13 client addresses are read under the configured trust"
+# GetClientIP(r, true) resolves the client with Cloudflare trust forced on,
+# whatever the operator configured: from any address in Cloudflare's published
+# ranges, CF-Connecting-IP names the client. Twenty-four sites read it that
+# way, among them the SQLi and XSS scanners' loopback skip, so such a request
+# could name 127.0.0.1 and go unscanned. It was latent only because every
+# listener runs the entrypoint middleware first and its answer wins.
+#
+# Only the resolver decides whom to trust; everything else reads its answer
+# with request.ClientAddr. A literal true here is never right.
+forced_trust=$( (find internal cmd pkg -name '*.go' -not -name '*_test.go' -print0 |
+	xargs -0 grep -nE 'GetClientIP\([^)]*,[[:space:]]*true\)' 2>/dev/null |
+	drop_comment_hits) || true)
+
+if [ -n "$forced_trust" ]; then
+	err "a client address is resolved with Cloudflare trust forced on"
+	printf '%s\n' "$forced_trust"
+	printf '  Read the address the entrypoint resolved with request.ClientAddr(r);\n'
+	printf '  only the resolver passes the operator trust setting to GetClientIP.\n'
+else
+	echo "  ok - no client address is resolved with trust forced on"
 fi
 
 printf '\n'

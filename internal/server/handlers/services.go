@@ -42,7 +42,7 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "save", "service", "Saved service: "+svc.Id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "save", "service", "Saved service: "+svc.Id, request.ClientAddr(r))
 
 		WriteProtoResponse(w, http.StatusOK, &svc)
 	})
@@ -83,7 +83,7 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "delete", "service", "Deleted service: "+id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "delete", "service", "Deleted service: "+id, request.ClientAddr(r))
 
 		w.WriteHeader(http.StatusNoContent)
 	})
