@@ -236,6 +236,11 @@ peer, which behind a load balancer is the balancer.
 
 ### Behaviour that now does what it was configured to do
 
+- **Plain HTTP on a TCP entrypoint:** event streams and WebSockets were cut
+  at the entrypoint's write timeout (15 seconds by default); they now run as
+  on an HTTP entrypoint, and the timeouts are read per request, so a change
+  applies without a restart. Cleartext HTTP/2 -- gRPC without TLS -- is served
+  there too; it was refused.
 - **Load balancing:** services saved from the dashboard as least-connections
   or weighted were running round robin; they now use their policy. A weighted
   service whose targets have no weights serves them equally instead of 502.

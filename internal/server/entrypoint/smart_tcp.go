@@ -10,12 +10,10 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
-	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -127,17 +125,18 @@ func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps
 		if !loaded {
 			// Start the shared server for this entrypoint
 			go func() {
-				handler := deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps))
-				readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
-				server := &http.Server{
-					ReadHeaderTimeout: 10 * time.Second,
-					ReadTimeout:       readTimeout,
-					WriteTimeout:      writeTimeout,
-					Handler:           handler,
-					ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
-						telemetry.GlobalDiagnostics.RecordTLSError(ep.Id, addr, err)
-					}),
-				}
+				// The HTTP entrypoint's server and its per-request deadlines,
+				// not a server of its own. This one set the entrypoint's
+				// timeouts on the server, where a write timeout bounds the
+				// whole response and survives a hijack -- so an event stream
+				// or a WebSocket through a TCP entrypoint was cut after
+				// fifteen seconds -- and it did not speak cleartext HTTP/2,
+				// so the gRPC branch of the handler below could not be
+				// reached. newServer also bounds HTTP/2 streams, which a
+				// server of its own would have had to repeat.
+				handler := dynamicTimeouts(ep, deps,
+					deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps)))
+				server := (&httpEntrypoint{ep: ep, deps: deps}).newServer(handler)
 				if deps.ShutdownRegistry != nil {
 					deps.ShutdownRegistry.Register(func(ctx context.Context) error {
 						return shutdownHTTPServer(ctx, server)
