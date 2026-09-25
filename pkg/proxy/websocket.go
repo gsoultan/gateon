@@ -162,12 +162,15 @@ func (h *ProxyHandler) dialUpgradeBackend(r *http.Request, targetURL *url.URL) (
 	}
 	// Reuse the route's backend TLS config (verification ON by default unless
 	// the operator set skip_verify); never hardcode InsecureSkipVerify here.
-	var tlsCfg *tls.Config
-	if h.tlsConfig != nil {
-		tlsCfg = h.tlsConfig.Clone()
-	} else {
-		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
+	// The client certificate is chosen for the upgrade exactly as the
+	// transport chooses it for any other request: this used to dial with the
+	// static config alone, so a service whose identities are selected per
+	// request presented no certificate on any upgrade.
+	var identity *tlsClientIdentity
+	if h.transportFactory != nil {
+		identity = h.transportFactory.identitySelector.Select(r)
 	}
+	tlsCfg := cloneTLSConfigWithIdentity(h.tlsConfig, identity)
 	if tlsCfg.ServerName == "" {
 		tlsCfg.ServerName = targetURL.Hostname()
 	}

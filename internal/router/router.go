@@ -517,6 +517,11 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		middleware.AccessLog(routeLabel),
 		middleware.MetricsWithService(routeLabel, rt.ServiceId),
 	)
+	// Ahead of every middleware that could set them: the headers a service
+	// chooses its backend client certificate by are the gateway's alone.
+	if guard := clientIdentityGuard(h); guard != nil {
+		chain = append(chain, guard)
+	}
 
 	// 2. Identify and resolve CORS/gRPC-Web early.
 	// We MUST place these outer to security blockers (IP shunning, WAF, etc.)

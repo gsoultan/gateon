@@ -234,6 +234,18 @@ func (h *ProxyHandler) GetStats() []TargetStats {
 	return h.lb.GetStats()
 }
 
+// ClientIdentityHeaders names the request headers this handler chooses the
+// client certificate it presents to the backend by: the match headers of a
+// service whose identities are selected BY_HEADER, and nil for any other.
+// They are the gateway's to set, so the route chain removes a client's copies
+// before the route's own middlewares run (ADR-0014).
+func (h *ProxyHandler) ClientIdentityHeaders() []string {
+	if h.transportFactory == nil || h.transportFactory.identitySelector == nil {
+		return nil
+	}
+	return h.transportFactory.identitySelector.headers
+}
+
 func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetState) {
 	targetURL := state.parsedURL
 	if targetURL == nil {

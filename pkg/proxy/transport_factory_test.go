@@ -78,8 +78,8 @@ func TestBackendTransportFactory_DynamicIdentityChangesTransportCacheKey(t *test
 	selector := &tlsClientIdentitySelector{
 		strategy: gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER,
 		identities: []tlsClientIdentity{
-			{id: "tenant-a", matchHeader: "X-Tenant", matchHeaderValue: "a"},
-			{id: "tenant-b", matchHeader: "X-Tenant", matchHeaderValue: "b"},
+			{id: "tenant-a", cacheKey: "|cert:0", matchHeader: "X-Tenant", matchHeaderValue: "a"},
+			{id: "tenant-b", cacheKey: "|cert:1", matchHeader: "X-Tenant", matchHeaderValue: "b"},
 		},
 	}
 	f := newBackendTransportFactory(&tls.Config{InsecureSkipVerify: true}, nil, selector)

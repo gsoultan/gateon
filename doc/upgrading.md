@@ -128,6 +128,22 @@ fingerprint and never matched. Fingerprints are enforced at L7.
   namespace (`GATEON_K8S_WATCH_NAMESPACE`). It listed every namespace, which
   the namespaced Role refused, so a namespace-scoped install synced nothing.
 
+### A client can no longer choose the certificate the gateway presents to a backend — **set the match header on the route**
+
+A service whose `tls_client_config` selects its client identity `BY_HEADER`
+read the header from the client's request, so a client that sent the header
+chose the identity the gateway authenticated to the backend as. The match
+headers are now the gateway's: a client's copy is removed when the route is
+entered, and only the route's own middlewares — a claim mapping, forward-auth's
+`auth_response_headers`, a `headers` rule — can set one. If something in front
+of the gateway set the header, set it on the route instead. The backend no
+longer receives the client's copy either.
+
+Also fixed in the same feature: `BY_HOST` chooses by the host the request was
+routed on (it read `X-Forwarded-Host`); identities without an `id` no longer
+share one certificate; WebSocket and other upgrades present the selected
+certificate (they presented none). See ADR-0014.
+
 ### Behaviour that now does what it was configured to do
 
 - **Load balancing:** services saved from the dashboard as least-connections

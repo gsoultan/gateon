@@ -24,6 +24,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0011](./0011-reputation-is-scoped-to-a-network.md) | A reputation score belongs to a browser on a network, not to a browser | Accepted |
 | [0012](./0012-session-revocation-propagates-but-expiry-guarantees.md) | Session revocation propagates over Redis, but expiry is what guarantees it | Accepted |
 | [0013](./0013-fingerprint-identity-is-its-own-package.md) | Fingerprint identity is its own package | Accepted |
+| [0014](./0014-backend-client-identity-is-the-gateways-choice.md) | The backend client identity is the gateway's choice | Accepted |
 
 ## Conventions
 

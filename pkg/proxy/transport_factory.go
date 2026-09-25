@@ -85,7 +85,7 @@ func (f *backendTransportFactory) TransportFor(state *targetState, req *http.Req
 
 	cacheKey := state.transportKey
 	if selectedIdentity != nil {
-		cacheKey += "|cert:" + selectedIdentity.id
+		cacheKey += selectedIdentity.cacheKey
 	}
 
 	if v, ok := f.cache.Load(cacheKey); ok {
@@ -266,7 +266,13 @@ func (t *targetBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 type tlsClientIdentity struct {
-	id               string
+	id string
+	// cacheKey tells this identity's transports apart from every other
+	// identity's. It is the identity's position, not its id: an id is the
+	// operator's to leave empty or repeat, and two identities that shared a key
+	// shared a transport, which presented whichever certificate was built
+	// first for both.
+	cacheKey         string
 	certificate      tls.Certificate
 	matchHosts       []string
 	matchHeader      string
@@ -276,6 +282,9 @@ type tlsClientIdentity struct {
 type tlsClientIdentitySelector struct {
 	strategy   gateonv1.TlsClientCertSelectionStrategy
 	identities []tlsClientIdentity
+	// headers are the distinct match headers of a BY_HEADER selector, nil for
+	// any other strategy. See ProxyHandler.ClientIdentityHeaders.
+	headers []string
 }
 
 func newTLSClientIdentitySelector(cfg *gateonv1.TlsClientConfig) (*tlsClientIdentitySelector, error) {
@@ -307,6 +316,7 @@ func newTLSClientIdentitySelector(cfg *gateonv1.TlsClientConfig) (*tlsClientIden
 
 		selector.identities = append(selector.identities, tlsClientIdentity{
 			id:               item.Id,
+			cacheKey:         "|cert:" + strconv.Itoa(len(selector.identities)),
 			certificate:      cert,
 			matchHosts:       hosts,
 			matchHeader:      http.CanonicalHeaderKey(item.MatchHeader),
@@ -317,10 +327,25 @@ func newTLSClientIdentitySelector(cfg *gateonv1.TlsClientConfig) (*tlsClientIden
 	if len(selector.identities) == 0 {
 		return nil, combinedErr
 	}
+	if selector.strategy == gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER {
+		for _, item := range selector.identities {
+			if item.matchHeader != "" && !slices.Contains(selector.headers, item.matchHeader) {
+				selector.headers = append(selector.headers, item.matchHeader)
+			}
+		}
+	}
 
 	return selector, combinedErr
 }
 
+// Select chooses the identity for req, which is either the outbound request
+// or, for a protocol upgrade, the inbound one after the route's middlewares.
+//
+// Neither source is the client's to steer. BY_HOST chooses by the host the
+// request was routed on, so the identity is the one for the route whose
+// policy the request just passed. BY_HEADER reads headers the route chain
+// has already removed the client's copies of (ADR-0014), so only the route's
+// own middlewares can have set them.
 func (s *tlsClientIdentitySelector) Select(req *http.Request) *tlsClientIdentity {
 	if s == nil || req == nil {
 		return nil
@@ -328,10 +353,7 @@ func (s *tlsClientIdentitySelector) Select(req *http.Request) *tlsClientIdentity
 
 	switch s.strategy {
 	case gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HOST:
-		host := normalizeHostForMatch(req.Header.Get("X-Forwarded-Host"))
-		if host == "" {
-			host = normalizeHostForMatch(req.Host)
-		}
+		host := normalizeHostForMatch(routedHost(req))
 		if host == "" {
 			return nil
 		}
@@ -357,6 +379,17 @@ func (s *tlsClientIdentitySelector) Select(req *http.Request) *tlsClientIdentity
 	}
 
 	return nil
+}
+
+// routedHost is the host the router matched req on, which the entrypoint
+// records port-stripped in the request state. It is not read from a header:
+// X-Forwarded-Host is the client's to write, and an outbound request's Host is
+// the backend's own address. The two used to be the source and the fallback.
+func routedHost(req *http.Request) string {
+	if rs := request.GetRequestState(req); rs != nil {
+		return rs.StrippedHost
+	}
+	return ""
 }
 
 func cloneTLSConfigWithIdentity(base *tls.Config, selectedIdentity *tlsClientIdentity) *tls.Config {
