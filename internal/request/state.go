@@ -61,6 +61,11 @@ type RequestState struct {
 	ExecutedEntropy bool     // Shannon entropy check result already recorded?
 	ExecutedXSS     bool     // XSS recognition already recorded?
 	ExecutedSQLI    bool     // SQLi recognition already recorded?
+	// RecordedRequest is set by the first Metrics middleware to record the
+	// statistics that do not depend on its route label -- path, domain,
+	// country, protocol, per-IP -- so the entrypoint's and the route's do not
+	// both count one request.
+	RecordedRequest bool
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.
@@ -123,4 +128,5 @@ func (rs *RequestState) Reset() {
 	rs.ExecutedEntropy = false
 	rs.ExecutedXSS = false
 	rs.ExecutedSQLI = false
+	rs.RecordedRequest = false
 }

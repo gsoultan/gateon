@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -125,9 +126,9 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "replacepathregex":
 		return transform.ReplacePathRegex(cfg["pattern"], cfg["replacement"])
 	case "accesslog":
-		return AccessLog(cmp.Or(cfg["route"], cfg[kind.RouteIDKey])), nil
+		return namedRouteView(m.Type, cfg["route"]), nil
 	case "metrics":
-		return Metrics(cmp.Or(cfg["route"], cfg[kind.RouteIDKey])), nil
+		return namedRouteView(m.Type, cfg["route"]), nil
 	case "compress":
 		return traffic.NewCompress(cfg)
 	case "errors":
@@ -272,6 +273,22 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		return transform.Wasm(context.Background(), m.WasmBlob)
 	default:
 		return nil, fmt.Errorf("unknown middleware type: %s", m.Type)
+	}
+}
+
+// namedRouteView is an attached "accesslog" or "metrics" middleware. Every
+// route already logs and measures itself under its own name (router.go), so
+// one attached without a name of its own only counted and logged each request
+// a second time; it passes the request through. With a name it is a separate
+// view -- a set of routes measured together, say -- and records under it.
+func namedRouteView(typ, name string) Middleware {
+	switch {
+	case name == "":
+		return func(next http.Handler) http.Handler { return next }
+	case typ == "accesslog":
+		return AccessLog(name)
+	default:
+		return Metrics(name)
 	}
 }
 

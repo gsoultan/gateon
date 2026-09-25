@@ -174,9 +174,10 @@ export function MiddlewareConfigEditor({
     case "metrics":
       return (
         <TextInput
-          label="Route Name Override (Optional)"
-          placeholder="custom-name"
-          value={config.route || config.route_id || ""}
+          label="Record Under Name"
+          description="Every route is already logged and measured under its own name, so with this empty the middleware does nothing. Set a name to also record the routes it is attached to under that name."
+          placeholder="checkout"
+          value={config.route || ""}
           onChange={(e) => updateConfig("route", e.currentTarget.value)}
         />
       );

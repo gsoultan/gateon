@@ -312,7 +312,14 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			totalBandwidthBytes := uint64(reqInSize+256) + uint64(respOutSize+200)
 
 			duration := time.Since(start)
-			telemetry.RecordPathRequest(origHost, origPath, duration.Seconds(), totalBandwidthBytes)
+			// A proxied request passes the entrypoint's metrics and then its
+			// route's; the statistics that do not depend on the label are
+			// recorded by whichever finishes first -- the route's, which knows
+			// the route -- and only once.
+			once := claimRequest(rs)
+			if once {
+				telemetry.RecordPathRequest(origHost, origPath, duration.Seconds(), totalBandwidthBytes)
+			}
 
 			// IP-based metrics
 			trust := config.EffectiveTrustCloudflare()
@@ -328,7 +335,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			if gc := config.GetGlobalConfig(); gc != nil && gc.AnomalyDetection != nil && gc.AnomalyDetection.EnableBehavioralFingerprinting {
 				fp := telemetry.GetDetailedFingerprint(r)
 				fingerprint = fp.Hash
-				telemetry.TrackBehavior(fingerprint, r, actualStatus)
+				if once {
+					telemetry.TrackBehavior(fingerprint, r, actualStatus)
+				}
 			}
 
 			statusStr := getStatusString(actualStatus)
@@ -468,58 +477,13 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, methodLabel, statusStr).Inc()
 			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, methodLabel).Observe(duration.Seconds())
 
-			// Bounded per-IP analytics (heavy-hitters / reputation) always run.
-			telemetry.GetAggregator().RecordRequest(clientIP, sw.Status)
-			// Unbounded per-IP Prometheus series is opt-in (GATEON_PER_IP_METRICS)
-			// to avoid label-cardinality memory growth under many distinct clients.
-			if telemetry.PerIPMetricsEnabled() {
-				telemetry.RequestsByIPTotal.WithLabelValues(clientIP).Inc()
-				telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "in").Add(float64(reqInSize + 256))
-				telemetry.RequestBytesByIPTotal.WithLabelValues(clientIP, "out").Add(float64(respOutSize + 200))
+			if once {
+				recordPerRequest(r, perRequestSample{
+					clientIP: clientIP, status: sw.Status, country: country, host: origHost,
+					bytesIn: uint64(reqInSize + 256), bytesOut: uint64(respOutSize + 200),
+					duration: duration, bandwidth: totalBandwidthBytes,
+				})
 			}
-			// Bounded per-IP bandwidth accumulator backs the dashboard "Bandwidth by
-			// IP" card without the unbounded-cardinality risk of the opt-in series above.
-			telemetry.RecordIPBandwidth(clientIP, uint64(reqInSize+256), uint64(respOutSize+200))
-
-			// Country-based metrics
-			telemetry.RequestsByCountryTotal.WithLabelValues(country).Inc()
-			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "in").Add(float64(reqInSize + 256))
-			telemetry.RequestBytesByCountryTotal.WithLabelValues(country, "out").Add(float64(respOutSize + 200))
-
-			// Domain-based metrics
-			origDomain := httputil.StripPort(origHost)
-			if origDomain == "" {
-				origDomain = "unknown"
-			}
-			// Bounded: the Host header is attacker-chosen and each distinct
-			// value costs three permanent series. See telemetry.DomainLabel.
-			// RecordDomainRequest below takes the raw value; its own map is
-			// already bounded.
-			domainLabel := telemetry.DomainLabel(origDomain)
-			telemetry.RequestsByDomainTotal.WithLabelValues(domainLabel).Inc()
-			telemetry.RequestBytesByDomainTotal.WithLabelValues(domainLabel, "in").Add(float64(reqInSize + 256))
-			telemetry.RequestBytesByDomainTotal.WithLabelValues(domainLabel, "out").Add(float64(respOutSize + 200))
-			telemetry.RecordDomainRequest(origDomain, duration.Seconds(), totalBandwidthBytes)
-
-			// Protocol metrics
-			protocol := "http1"
-			switch r.ProtoMajor {
-			case 2:
-				protocol = "http2"
-			case 3:
-				protocol = "http3"
-			}
-			if r.TLS != nil && protocol == "http1" {
-				// If it's TLS but not identified as h2/h3 by ProtoMajor, it might still be h2/h3 if NegotiatedProtocol is set.
-				// This happens with some server implementations where ProtoMajor might still be 1 for h2.
-				switch r.TLS.NegotiatedProtocol {
-				case "h2":
-					protocol = "http2"
-				case "h3":
-					protocol = "http3"
-				}
-			}
-			telemetry.RequestsByProtocolTotal.WithLabelValues(protocol).Inc()
 
 			// Track response body size
 			// Add a baseline of 200 bytes to account for response headers.
@@ -531,6 +495,90 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 		})
 	}
+}
+
+// claimRequest reports whether this Metrics instance records the request's
+// label-independent statistics: the first to ask does, later ones do not.
+// Without request state there is nothing to share the answer through, and
+// every instance records.
+func claimRequest(rs *RequestState) bool {
+	if rs == nil {
+		return true
+	}
+	if rs.RecordedRequest {
+		return false
+	}
+	rs.RecordedRequest = true
+	return true
+}
+
+// perRequestSample is what recordPerRequest needs from one finished request.
+type perRequestSample struct {
+	clientIP, country, host string
+	status                  int
+	bytesIn, bytesOut       uint64
+	duration                time.Duration
+	bandwidth               uint64
+}
+
+// recordPerRequest records the statistics that belong to the request rather
+// than to a route label: the per-IP aggregator anomaly detection reads,
+// bandwidth by IP, and the country, domain and protocol counts. Counted by
+// both the entrypoint's metrics and the route's, anomaly detection saw every
+// client at twice its real rate.
+func recordPerRequest(r *http.Request, s perRequestSample) {
+	// Bounded per-IP analytics (heavy-hitters / reputation) always run.
+	telemetry.GetAggregator().RecordRequest(s.clientIP, s.status)
+	// Unbounded per-IP Prometheus series is opt-in (GATEON_PER_IP_METRICS)
+	// to avoid label-cardinality memory growth under many distinct clients.
+	if telemetry.PerIPMetricsEnabled() {
+		telemetry.RequestsByIPTotal.WithLabelValues(s.clientIP).Inc()
+		telemetry.RequestBytesByIPTotal.WithLabelValues(s.clientIP, "in").Add(float64(s.bytesIn))
+		telemetry.RequestBytesByIPTotal.WithLabelValues(s.clientIP, "out").Add(float64(s.bytesOut))
+	}
+	// Bounded per-IP bandwidth accumulator backs the dashboard "Bandwidth by
+	// IP" card without the unbounded-cardinality risk of the opt-in series above.
+	telemetry.RecordIPBandwidth(s.clientIP, s.bytesIn, s.bytesOut)
+
+	telemetry.RequestsByCountryTotal.WithLabelValues(s.country).Inc()
+	telemetry.RequestBytesByCountryTotal.WithLabelValues(s.country, "in").Add(float64(s.bytesIn))
+	telemetry.RequestBytesByCountryTotal.WithLabelValues(s.country, "out").Add(float64(s.bytesOut))
+
+	origDomain := httputil.StripPort(s.host)
+	if origDomain == "" {
+		origDomain = "unknown"
+	}
+	// Bounded: the Host header is attacker-chosen and each distinct value
+	// costs three permanent series. See telemetry.DomainLabel.
+	// RecordDomainRequest takes the raw value; its own map is already bounded.
+	domainLabel := telemetry.DomainLabel(origDomain)
+	telemetry.RequestsByDomainTotal.WithLabelValues(domainLabel).Inc()
+	telemetry.RequestBytesByDomainTotal.WithLabelValues(domainLabel, "in").Add(float64(s.bytesIn))
+	telemetry.RequestBytesByDomainTotal.WithLabelValues(domainLabel, "out").Add(float64(s.bytesOut))
+	telemetry.RecordDomainRequest(origDomain, s.duration.Seconds(), s.bandwidth)
+
+	telemetry.RequestsByProtocolTotal.WithLabelValues(requestProtocol(r)).Inc()
+}
+
+// requestProtocol is the protocol label for r. ProtoMajor alone can report 1
+// for an h2 connection on some server implementations, so a TLS request
+// falls back to the negotiated ALPN.
+func requestProtocol(r *http.Request) string {
+	switch r.ProtoMajor {
+	case 2:
+		return "http2"
+	case 3:
+		return "http3"
+	}
+	if r.TLS != nil {
+		switch r.TLS.NegotiatedProtocol {
+		case "h2":
+			return "http2"
+		case "h3":
+			return "http3"
+		}
+	}
+	return "http1"
 }
 
 // HostFilter returns a middleware that filters requests by Host header.
