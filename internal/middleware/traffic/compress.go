@@ -188,6 +188,26 @@ func (w *compressWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// shouldCompress reports whether this response is compressed. Not when it
+// ended under minBytes -- which used to be missing, so a small body decided at
+// Close was compressed like any other -- nor when it is already encoded, is
+// not a success, or has an excluded, unlisted, gRPC or SSE content type.
+func (w *compressWriter) shouldCompress() bool {
+	h := w.Header()
+	if w.ended || h.Get("Content-Encoding") != "" || w.status >= 300 ||
+		w.status == http.StatusNoContent || w.status == http.StatusNotModified {
+		return false
+	}
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(h.Get("Content-Type"), ";")[0]))
+	switch {
+	case strings.HasPrefix(ct, "application/grpc"), ct == "text/event-stream", w.excluded[ct]:
+		return false
+	case len(w.included) > 0 && !w.included[ct]:
+		return false
+	}
+	return true
+}
+
 func (w *compressWriter) decide() {
 	if w.decided {
 		return
@@ -195,25 +215,7 @@ func (w *compressWriter) decide() {
 	w.decided = true
 
 	h := w.Header()
-	// Skip if already encoded, or error, or small, or excluded type. "Small"
-	// used to be missing from this list: a body that ended under minBytes was
-	// decided here at Close and compressed like any other.
-	if w.ended || h.Get("Content-Encoding") != "" || w.status >= 300 || w.status == http.StatusNoContent || w.status == http.StatusNotModified {
-		w.should = false
-	} else {
-		ct := h.Get("Content-Type")
-		contentType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
-		if strings.HasPrefix(contentType, "application/grpc") || contentType == "text/event-stream" {
-			w.should = false
-		} else if excluded := w.excluded[contentType]; excluded {
-			w.should = false
-		} else if len(w.included) > 0 && !w.included[contentType] {
-			w.should = false
-		} else {
-			w.should = true
-		}
-	}
-
+	w.should = w.shouldCompress()
 	if w.should {
 		h.Set("Content-Encoding", w.encoding)
 		h.Del("Content-Length")
