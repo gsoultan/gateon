@@ -454,7 +454,14 @@ message EbpfConfig {
   reserved 10;
   reserved "xdp_cuckoo_filter";
   bool af_xdp_phantom = 11;
-  bool xdp_ja4_blocklist = 12;
+  // 12 was xdp_ja4_blocklist, removed 2026-09-25. Nothing read it, and the
+  // blocklist could not work: the XDP program keyed its lookup on the first 32
+  // bytes of the ClientHello -- the version and the per-connection random --
+  // while ShunJA4 inserted a hash of the fingerprint string, so no entry ever
+  // matched. JA4 needs the whole ClientHello parsed, sorted and hashed, which
+  // the kernel does not do; fingerprints are enforced at L7 through reputation.
+  reserved 12;
+  reserved "xdp_ja4_blocklist";
   // Permit attaching XDP in generic/SKB mode when the driver rejects the native
   // attach. Off by default and it should stay off: generic XDP runs in
   // netif_receive_generic_xdp() *after* the skb is allocated, so it drops no

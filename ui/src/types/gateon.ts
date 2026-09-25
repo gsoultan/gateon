@@ -501,7 +501,6 @@ export type EbpfConfig = {
   mgmtPort?: number;
   knockingSequence?: number[];
   afXdpPhantom?: boolean;
-  xdpJa4Blocklist?: boolean;
   enableMgmtWhitelist?: boolean;
   mgmtWhitelistIps?: string[];
 };

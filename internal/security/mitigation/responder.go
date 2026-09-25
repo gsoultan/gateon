@@ -47,9 +47,14 @@ const (
 )
 
 // Shunner hard-blocks a source IP (satisfied by *ebpf.Holder / ebpf.Manager).
+//
+// There is no JA4 counterpart. The kernel cannot compute one -- it takes
+// parsing, sorting and hashing a whole ClientHello -- and the XDP lookup that
+// stood in for it compared the ClientHello's random bytes against a hash of
+// the fingerprint string, so it could never match. A fingerprint is enforced
+// at L7, through the reputation degradeRep lowers for it on each network.
 type Shunner interface {
 	ShunIP(ip string) error
-	ShunJA4(ja4 string) error
 }
 
 // Config tunes the responder. Zero value is usable via Normalize().
@@ -154,9 +159,6 @@ func (r *Responder) Handle(inc correlation.Incident) Action {
 		if r.cfg.AutoShun && r.shun != nil && inc.SourceIP != "" &&
 			distinct >= r.cfg.MinDistinctSignalsForShun {
 			if err := r.shun.ShunIP(inc.SourceIP); err == nil {
-				if inc.JA4 != "" {
-					_ = r.shun.ShunJA4(inc.JA4)
-				}
 				r.degradeRep(inc, r.cfg.RestrictPenalty)
 				if r.mark != nil {
 					r.mark(inc.SourceIP, "correlated critical incident: "+strings.Join(inc.SignalTypes, ","))

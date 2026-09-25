@@ -36,8 +36,6 @@ func (s *stubManager) ClearAdaptiveRateLimit(string) error {
 }
 func (s *stubManager) ApplyRLFeedback(string, float64) error      { s.callCount++; return s.err }
 func (s *stubManager) SetRLFeedbackHandler(func(string, float64)) { s.callCount++ }
-func (s *stubManager) ShunJA4(ja4Fingerprint string) error        { s.callCount++; return s.err }
-func (s *stubManager) UnshunJA4(ja4Fingerprint string) error      { s.callCount++; return s.err }
 func (s *stubManager) RegisterPhantomPort(port uint32) error      { s.callCount++; return s.err }
 func (s *stubManager) UnregisterPhantomPort(port uint32) error    { s.callCount++; return s.err }
 func (s *stubManager) GetTopIPs(int) ([]IPStat, error)            { s.callCount++; return nil, s.err }
@@ -63,7 +61,6 @@ func TestHolderNoOpWhenEmpty(t *testing.T) {
 		{"UpdateLoadBalancerBackends", func() error { return h.UpdateLoadBalancerBackends(nil) }},
 		{"SetAdaptiveRateLimit", func() error { return h.SetAdaptiveRateLimit("1.2.3.4", time.Second) }},
 		{"ClearAdaptiveRateLimit", func() error { return h.ClearAdaptiveRateLimit("1.2.3.4") }},
-		{"ShunJA4", func() error { return h.ShunJA4("ja4") }},
 	}
 	for _, tc := range calls {
 		t.Run(tc.name, func(t *testing.T) {

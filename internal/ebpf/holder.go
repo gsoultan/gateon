@@ -132,22 +132,6 @@ func (h *Holder) SetRLFeedbackHandler(f func(ip string, score float64)) {
 	}
 }
 
-// ShunJA4 delegates to the active manager, if any.
-func (h *Holder) ShunJA4(ja4Fingerprint string) error {
-	if m := h.Current(); m != nil {
-		return m.ShunJA4(ja4Fingerprint)
-	}
-	return nil
-}
-
-// UnshunJA4 delegates to the active manager, if any.
-func (h *Holder) UnshunJA4(ja4Fingerprint string) error {
-	if m := h.Current(); m != nil {
-		return m.UnshunJA4(ja4Fingerprint)
-	}
-	return nil
-}
-
 // RegisterPhantomPort delegates to the active manager, if any.
 func (h *Holder) RegisterPhantomPort(port uint32) error {
 	if m := h.Current(); m != nil {
