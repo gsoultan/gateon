@@ -69,3 +69,35 @@ func TestSyncForgetsTheBreakerOfADeletedRoute(t *testing.T) {
 		t.Errorf("breaker gauge series of a route that still exists = %d, want 3", n)
 	}
 }
+
+// TestProxyCacheCountsTargetsWithoutAHealthCheck: the realtime tiles counted
+// targets from gateon_target_health, which only a health check publishes, so
+// a route without one had no targets on the dashboard at all.
+func TestProxyCacheCountsTargetsWithoutAHealthCheck(t *testing.T) {
+	f, _ := newCacheFixture(t, "none")
+	rt := f.route(t, "counted-route")
+	if rec := serveThrough(f.cache.GetOrCreate(rt)); rec.Code != http.StatusOK {
+		t.Fatalf("route answered %d, want 200", rec.Code)
+	}
+	got := f.cache.TargetHealthCounts()
+	if want := (telemetry.TargetHealthCounts{Healthy: 1, Total: 1}); got != want {
+		t.Fatalf("TargetHealthCounts = %+v, want %+v", got, want)
+	}
+}
+
+// TestServerGivesTheSnapshotItsTargets: the realtime tiles read target health
+// from whatever provider Run registered, so the registration is the fix as
+// much as the provider is.
+func TestServerGivesTheSnapshotItsTargets(t *testing.T) {
+	f, _ := newCacheFixture(t, "none")
+	rt := f.route(t, "registered-route")
+	s := &Server{cache: f.cache}
+	s.cacheOnce.Do(func() {})
+	registerTelemetryProviders(s)
+	t.Cleanup(func() { telemetry.SetTargetHealthProvider(nil) })
+
+	serveThrough(f.cache.GetOrCreate(rt))
+	if got := telemetry.CurrentTargetHealth(); got.Total != 1 || got.Healthy != 1 {
+		t.Fatalf("snapshot's target health after Run's registration = %+v, want 1 healthy of 1", got)
+	}
+}

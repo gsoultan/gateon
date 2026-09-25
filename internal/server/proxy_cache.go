@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -306,6 +307,18 @@ func (c *ProxyCache) invalidateLocked(id string) {
 			cl.Close()
 		}
 	}
+}
+
+// TargetHealthCounts tallies the targets of every route with a built proxy,
+// for the realtime snapshot's target and circuit tiles. It reads the load
+// balancers' own state, which covers targets with no health check -- the
+// gateon_target_health gauge exists only for those that have one.
+func (c *ProxyCache) TargetHealthCounts() telemetry.TargetHealthCounts {
+	var counts telemetry.TargetHealthCounts
+	for _, ph := range c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler) {
+		proxy.TallyTargets(ph.GetStats(), &counts)
+	}
+	return counts
 }
 
 // GetRouteStats returns target stats for a route, or nil if not found.

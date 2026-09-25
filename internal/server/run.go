@@ -268,14 +268,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore)
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
-	telemetry.SetEbpfManager(s.EbpfManager)
-	telemetry.SetVersion(s.Version)
-	if s.Phantom != nil {
-		telemetry.SetTitanProvider(s.Phantom)
-	}
-	if s.Governor != nil {
-		telemetry.SetGovernorProvider(s.Governor)
-	}
+	registerTelemetryProviders(s)
 	metricsStop := make(chan struct{})
 	telemetry.StartSystemMetricsCollector(metricsStop)
 	go telemetry.StartCacheMetricsLoop(ctx)
@@ -328,6 +321,21 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	close(metricsStop)
 	wg.Wait()
 	logger.L.LogInfo("shutdown complete")
+}
+
+// registerTelemetryProviders points the metrics snapshot at the server's live
+// subsystems. The snapshot reads nothing it is not given here, so a provider
+// missing from this list is a set of dashboard tiles stuck at zero.
+func registerTelemetryProviders(s *Server) {
+	telemetry.SetEbpfManager(s.EbpfManager)
+	telemetry.SetTargetHealthProvider(s.proxyCache())
+	telemetry.SetVersion(s.Version)
+	if s.Phantom != nil {
+		telemetry.SetTitanProvider(s.Phantom)
+	}
+	if s.Governor != nil {
+		telemetry.SetGovernorProvider(s.Governor)
+	}
 }
 
 // collectCertInfos gathers TLS certificate info from global TLS config and TLS Manager for expiry monitoring.
