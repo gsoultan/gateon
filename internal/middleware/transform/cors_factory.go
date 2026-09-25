@@ -41,12 +41,16 @@ func CORSConfigFromMap(cfg map[string]string) (CORSConfig, error) {
 		return CORSConfig{}, kind.CfgError("max_age", cfg["max_age"], err)
 	}
 
+	allowCredentials, err := kind.ParseBoolStrict(cfg["allow_credentials"], false)
+	if err != nil {
+		return CORSConfig{}, kind.CfgError("allow_credentials", cfg["allow_credentials"], err)
+	}
 	base := CORSConfig{
 		AllowedOrigins:   kind.ParseListStrict(cfg["allowed_origins"]),
 		AllowedMethods:   kind.ParseListStrict(cfg["allowed_methods"]),
 		AllowedHeaders:   kind.ParseListStrict(cfg["allowed_headers"]),
 		ExposedHeaders:   kind.ParseListStrict(cfg["exposed_headers"]),
-		AllowCredentials: kind.ParseBoolStrict(cfg["allow_credentials"], false),
+		AllowCredentials: allowCredentials,
 		MaxAge:           maxAge,
 	}
 

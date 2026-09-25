@@ -22,7 +22,10 @@ func NewRateLimit(cfg map[string]string, redisClient redis.Client, ebpfManager e
 	if err != nil {
 		return nil, kind.CfgError("burst", cfg["burst"], err)
 	}
-	perTenant := kind.ParseBoolStrict(cfg["per_tenant"], false)
+	perTenant, err := kind.ParseBoolStrict(cfg["per_tenant"], false)
+	if err != nil {
+		return nil, kind.CfgError("per_tenant", cfg["per_tenant"], err)
+	}
 	storage := cfg["storage"]
 
 	var limiter RateLimiter

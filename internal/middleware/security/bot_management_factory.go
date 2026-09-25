@@ -61,19 +61,6 @@ func globalBotManagement(d Deps) *gateonv1.BotManagementConfig {
 	return global.Waf.BotManagement
 }
 
-// boolSetting reads a per-route flag, falling back to the global value only when
-// the route does not mention the key at all.
-//
-// Absence and "false" are deliberately distinguished. Treating an unset key as
-// false is what made the global toggles inert: every route omits most keys, so a
-// global setting could never apply to any of them.
-func boolSetting(cfg map[string]string, key string, global bool) bool {
-	if v, ok := cfg[key]; ok {
-		return v == "true"
-	}
-	return global
-}
-
 // resolveBotSecret picks the HMAC key for challenge tokens: the route's own, the
 // global one, or a generated fallback. It never returns a constant.
 func resolveBotSecret(cfg map[string]string, g *gateonv1.BotManagementConfig, d Deps) string {
@@ -86,24 +73,28 @@ func resolveBotSecret(cfg map[string]string, g *gateonv1.BotManagementConfig, d 
 	return fallbackBotSecret()
 }
 
-// routeSwitchesACheckOn reports whether the route's own config turns one of the
-// checks on, which is the route saying it wants bot management.
-func routeSwitchesACheckOn(cfg map[string]string) bool {
-	return cfg["enable_js_challenge"] == "true" || cfg["enable_browser_integrity"] == "true"
-}
-
 func NewBotManagement(cfg map[string]string, d Deps) (kind.Middleware, error) {
 	g := globalBotManagement(d)
 
+	// Each flag falls back to its global value only when the route does not
+	// mention the key at all: absence and "false" are different, or the global
+	// toggles could never apply to a route that omits them. A value that is
+	// present and not a boolean refuses the build; it used to read as off
+	// unless it was the literal "true", so "True" or "1" disabled a check.
+	bools := kind.NewBoolFields(cfg)
+	enableJS := bools.Get("enable_js_challenge", g.GetEnableJsChallenge())
+	enableIntegrity := bools.Get("enable_browser_integrity", g.GetEnableBrowserIntegrity())
 	// An absent "enabled" follows the global switch unless the route itself
 	// switches a check on. The dashboard's route editor writes the check
 	// switches and never "enabled", and the global switch defaults to off, so
 	// following it alone left every dashboard-built middleware passing all
 	// traffic through while its editor showed the JS challenge on. An explicit
 	// enabled=false still turns the middleware off.
-	enabled := boolSetting(cfg, "enabled", g.GetEnabled() || routeSwitchesACheckOn(cfg))
-	enableJS := boolSetting(cfg, "enable_js_challenge", g.GetEnableJsChallenge())
-	enableIntegrity := boolSetting(cfg, "enable_browser_integrity", g.GetEnableBrowserIntegrity())
+	routeOn := bools.Get("enable_js_challenge", false) || bools.Get("enable_browser_integrity", false)
+	enabled := bools.Get("enabled", g.GetEnabled() || routeOn)
+	if err := bools.Err(); err != nil {
+		return nil, err
+	}
 
 	timeout, err := kind.ParseIntStrict(cfg["challenge_timeout"], 0)
 	if err != nil {

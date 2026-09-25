@@ -20,7 +20,10 @@ func NewHeaders(cfg map[string]string) (kind.Middleware, error) {
 	if err != nil {
 		return nil, err
 	}
-	forceSTSHeader := kind.ParseBoolStrict(cfg["force_sts_header"], false)
+	forceSTSHeader, err := kind.ParseBoolStrict(cfg["force_sts_header"], false)
+	if err != nil {
+		return nil, kind.CfgError("force_sts_header", cfg["force_sts_header"], err)
+	}
 	reqOps := headerOpsFor(cfg, "request")
 	respOps := headerOpsFor(cfg, "response")
 
@@ -175,11 +178,12 @@ func hstsValue(cfg map[string]string) (string, error) {
 		return "", nil
 	}
 	val := "max-age=" + strconv.Itoa(stsSeconds)
-	if kind.ParseBoolStrict(cfg["sts_include_subdomains"], false) {
+	bools := kind.NewBoolFields(cfg)
+	if bools.Get("sts_include_subdomains", false) {
 		val += "; includeSubDomains"
 	}
-	if kind.ParseBoolStrict(cfg["sts_preload"], false) {
+	if bools.Get("sts_preload", false) {
 		val += "; preload"
 	}
-	return val, nil
+	return val, bools.Err()
 }

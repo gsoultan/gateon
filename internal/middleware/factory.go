@@ -106,10 +106,11 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "headers":
 		return transform.NewHeaders(cfg)
 	case "forwardedheaders":
-		return ForwardedHeaders(ForwardedHeadersConfig{
-			Proto:              cfg["proto"],
-			TrustForwardHeader: parseBoolStrict(cfg["trust_forward_header"], false),
-		}), nil
+		trust, err := kind.ParseBoolStrict(cfg["trust_forward_header"], false)
+		if err != nil {
+			return nil, kind.CfgError("trust_forward_header", cfg["trust_forward_header"], err)
+		}
+		return ForwardedHeaders(ForwardedHeadersConfig{Proto: cfg["proto"], TrustForwardHeader: trust}), nil
 	case "rewrite":
 		return transform.NewRewrite(cfg)
 	case "addprefix":
@@ -188,16 +189,21 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "hmac":
 		return f.createHMAC(cfg)
 	case "deception":
-		return security.Deception(security.DeceptionConfig{
+		bools := kind.NewBoolFields(cfg)
+		dc := security.DeceptionConfig{
 			HoneypotPaths:        kind.ParseListStrict(cmp.Or(cfg["honeypot_paths"], cfg["paths"])),
-			InjectInvisibleLinks: parseBoolStrict(cmp.Or(cfg["inject_invisible_links"], "true"), true),
+			InjectInvisibleLinks: bools.Get("inject_invisible_links", true),
 			InvisibleLinkPaths:   kind.ParseListStrict(cmp.Or(cfg["invisible_link_paths"], cfg["honey_links"])),
 			HoneyForms:           kind.ParseListStrict(cfg["honey_forms"]),
 			RouteID:              routeID,
-			EnableTrollResponse:  parseBoolStrict(cfg["enable_troll_response"], false),
+			EnableTrollResponse:  bools.Get("enable_troll_response", false),
 			CanaryHeader:         cfg["canary_header"],
 			CanaryToken:          cfg["canary_token"],
-		}), nil
+		}
+		if err := bools.Err(); err != nil {
+			return nil, err
+		}
+		return security.Deception(dc), nil
 	case "tarpit":
 		baseDelay, err := kind.ParseDurationStrict(cfg["base_delay"], 0)
 		if err != nil {
@@ -290,7 +296,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 
 func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 	origins := kind.ParseListStrict(cfg["allowed_origins"])
-	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
+	allowCredentials, err := kind.ParseBoolStrict(cfg["allow_credentials"], false)
+	if err != nil {
+		return nil, kind.CfgError("allow_credentials", cfg["allow_credentials"], err)
+	}
 	maxAge, err := kind.ParseIntStrict(cfg["max_age"], 0)
 	if err != nil {
 		return nil, kind.CfgError("max_age", cfg["max_age"], err)
@@ -361,19 +370,24 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 	}
 	maxScanBytes := int64(maxScanBytesInt)
 
-	return security.FileSecurity(security.FileSecurityConfig{
-		EnableClamAV:           parseBoolStrict(cfg["enable_clamav"], false),
+	bools := kind.NewBoolFields(cfg)
+	fsc := security.FileSecurityConfig{
+		EnableClamAV:           bools.Get("enable_clamav", false),
 		ClamAVAddr:             clamavAddr,
 		BlockedMimeTypes:       kind.ParseListStrict(cfg["blocked_mime_types"]),
 		AllowedMimeTypes:       kind.ParseListStrict(cfg["allowed_mime_types"]),
 		MaxFileSize:            maxFileSize,
 		ScanTimeout:            scanTimeout,
-		FailOpen:               parseBoolStrict(cfg["fail_open"], false),
+		FailOpen:               bools.Get("fail_open", false),
 		MaxConcurrentScans:     maxConcurrentScans,
 		MaxScanBytes:           maxScanBytes,
-		EnableSignatureScan:    parseBoolStrict(cfg["enable_signature_scan"], true),
+		EnableSignatureScan:    bools.Get("enable_signature_scan", true),
 		SignatureRulesPath:     cfg["signature_rules_path"],
 		SignatureBlockSeverity: yara.Severity(cfg["signature_block_severity"]),
 		RouteID:                cfg[kind.RouteIDKey],
-	}), nil
+	}
+	if err := bools.Err(); err != nil {
+		return nil, err
+	}
+	return security.FileSecurity(fsc), nil
 }

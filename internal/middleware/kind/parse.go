@@ -52,16 +52,45 @@ func ParseIntStrict(s string, defaultVal int) (int, error) {
 	}
 	return int(n), nil
 }
-func ParseBoolStrict(s string, defaultVal bool) bool {
-	if s == "" {
-		return defaultVal
+// ParseBoolStrict reads a boolean setting. Absent is defaultVal; present and
+// not a boolean strconv accepts (true, false, 1, 0, t, f, in any case) is an
+// error. It used to return defaultVal for that too, unlike its int, float and
+// duration siblings, so "yes" for fail_open read as false and a typo in a
+// security switch read as its default, while the dashboard showed what was
+// typed.
+func ParseBoolStrict(s string, defaultVal bool) (bool, error) {
+	if strings.TrimSpace(s) == "" {
+		return defaultVal, nil
 	}
 	parsed, err := strconv.ParseBool(strings.TrimSpace(s))
 	if err != nil {
-		return defaultVal
+		return defaultVal, err
 	}
-	return parsed
+	return parsed, nil
 }
+
+// BoolFields reads several boolean settings from one config and keeps the
+// first malformed one, so a factory can read them inline and check once.
+type BoolFields struct {
+	cfg map[string]string
+	err error
+}
+
+// NewBoolFields reads booleans from cfg.
+func NewBoolFields(cfg map[string]string) *BoolFields { return &BoolFields{cfg: cfg} }
+
+// Get returns key's value, or defaultVal when it is absent. A malformed value
+// also yields defaultVal and is reported by Err.
+func (b *BoolFields) Get(key string, defaultVal bool) bool {
+	v, err := ParseBoolStrict(b.cfg[key], defaultVal)
+	if err != nil && b.err == nil {
+		b.err = CfgError(key, b.cfg[key], err)
+	}
+	return v
+}
+
+// Err is the first malformed setting Get saw, naming its key and value.
+func (b *BoolFields) Err() error { return b.err }
 
 // ParseFloatStrict and ParseDurationStrict complete the strict set.
 //

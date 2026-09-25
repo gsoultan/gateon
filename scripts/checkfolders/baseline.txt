@@ -18,7 +18,7 @@
 # realip.go and forwardedheaders.go are one client-identity concern, and
 # circuit_breaker.go is a resilience concern with nothing yet to join it.
 # Down from sixty-seven when the ratchet landed.
-12 internal/middleware
+11 internal/middleware
 
 # ADR-0002's traffic stage, landed 2026-09-20. Thirteen files rather than ten
 # because the ADR names this group as one unit -- ratelimit, connlimit, maxbody,
