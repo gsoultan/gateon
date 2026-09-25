@@ -38,6 +38,7 @@ type ProxyHandler struct {
 	healthCheckProtocol string
 	healthCheckType     gateonv1.HealthCheckType
 	healthThresholds    *health.Tracker
+	healthChecked       bool
 	discoveryURL        string
 	routeName           string
 	stopDiscovery       chan struct{}
@@ -107,6 +108,39 @@ func (h *ProxyHandler) DrainAndClose(timeout time.Duration) {
 
 finish:
 	h.Close()
+}
+
+// HealthSnapshot is what this handler's health checks have concluded about its
+// targets, by URL, for the handler built to replace it. Nil when it checks no
+// health: its targets are alive by default, not by any conclusion.
+func (h *ProxyHandler) HealthSnapshot() map[string]bool {
+	if !h.healthChecked {
+		return nil
+	}
+	return h.healthThresholds.Snapshot()
+}
+
+// InheritHealth starts this handler's targets where the handler it replaces
+// left them. A rebuilt handler used to start every target alive and learn
+// otherwise at its first check, fifteen seconds later, so every configuration
+// change sent traffic back to backends already known to be down.
+//
+// Nothing is inherited unless this handler checks health itself: a target
+// marked down with nothing to check it would stay down for good.
+func (h *ProxyHandler) InheritHealth(prev map[string]bool) {
+	if !h.healthChecked || len(prev) == 0 {
+		return
+	}
+	for _, s := range h.lb.GetStats() {
+		alive, known := prev[s.URL]
+		if !known {
+			continue
+		}
+		h.healthThresholds.Seed(s.URL, alive)
+		if !alive {
+			h.lb.SetAlive(s.URL, false)
+		}
+	}
 }
 
 // RouteName returns the label of the route this handler serves.

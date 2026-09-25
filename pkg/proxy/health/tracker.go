@@ -122,6 +122,31 @@ func (h *Tracker) Record(target string, ok bool) (alive bool, changed bool) {
 	return s.alive, true
 }
 
+// Snapshot is what the tracker has concluded about each target it has checked.
+// Only Record and Seed create an entry, and both leave it seen, so a target
+// never checked has no entry and no conclusion to pass on.
+func (h *Tracker) Snapshot() map[string]bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[string]bool, len(h.state))
+	for target, s := range h.state {
+		out[target] = s.alive
+	}
+	return out
+}
+
+// Seed starts a target from a conclusion another tracker reached, so the next
+// result has to clear the threshold like any other rather than being taken as
+// a first. A target that already has history keeps it.
+func (h *Tracker) Seed(target string, alive bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s := h.state[target]; s != nil && s.seen {
+		return
+	}
+	h.state[target] = &targetHealthState{alive: alive, seen: true}
+}
+
 // Forget drops a target's history.
 //
 // Called when discovery retires a target, so the map cannot grow without bound

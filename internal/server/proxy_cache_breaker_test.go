@@ -11,6 +11,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -99,5 +100,34 @@ func TestServerGivesTheSnapshotItsTargets(t *testing.T) {
 	serveThrough(f.cache.GetOrCreate(rt))
 	if got := telemetry.CurrentTargetHealth(); got.Total != 1 || got.Healthy != 1 {
 		t.Fatalf("snapshot's target health after Run's registration = %+v, want 1 healthy of 1", got)
+	}
+}
+
+// TestRebuiltRouteKeepsItsDownTargets: invalidation deletes a route's handler
+// and the next request builds a fresh one, whose targets all started alive --
+// every configuration save sent traffic back to backends known to be down,
+// until the new handler's first check fifteen seconds later.
+func TestRebuiltRouteKeepsItsDownTargets(t *testing.T) {
+	f, _ := newCacheFixture(t, "none")
+	svc, ok := f.cache.serviceStore.Get(t.Context(), "svc")
+	if !ok {
+		t.Fatal("fixture service missing")
+	}
+	svc.HealthCheckPath = "/health"
+	if err := f.cache.serviceStore.Update(t.Context(), svc); err != nil {
+		t.Fatal(err)
+	}
+	rt := f.route(t, "health-route")
+	f.cache.GetOrCreate(rt)
+	target := svc.WeightedTargets[0].Url
+	// Stand in for the health loop concluding the target is down.
+	f.cache.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)[rt.Id].
+		InheritHealth(map[string]bool{target: false})
+
+	f.cache.InvalidateRoute(rt.Id)
+	f.cache.GetOrCreate(rt)
+	stats := f.cache.GetRouteStats(rt.Id)
+	if len(stats) != 1 || stats[0].Alive {
+		t.Fatalf("after a rebuild the route's target = %+v, want it still down", stats)
 	}
 }

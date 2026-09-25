@@ -197,6 +197,7 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 	}
 
 	if enableHC && (len(b.targets) > 0 || b.discoveryURL != "") {
+		h.healthChecked = true
 		go h.runHealthCheck()
 	}
 	return h

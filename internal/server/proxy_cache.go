@@ -47,6 +47,10 @@ type ProxyCache struct {
 	// refusalRetry is how long a refused chain is served before the next
 	// request, or the next Sync, builds the route again.
 	refusalRetry time.Duration
+	// retiredHealth holds, under mu, what an invalidated route's health checks
+	// had concluded about its targets, until the route's next build takes it.
+	// One entry per route at most; Sync drops those of deleted routes.
+	retiredHealth map[string]map[string]bool
 }
 
 // defaultRefusalRetry bounds how long a route stays refused after the
@@ -241,10 +245,28 @@ func (c *ProxyCache) storeLocked(id string, h http.Handler, ph *proxy.ProxyHandl
 	if newPhMap == nil {
 		newPhMap = make(map[string]*proxy.ProxyHandler)
 	}
+	c.inheritHealthLocked(id, ph, old)
 	newPhMap[id] = ph
 	c.proxyHandlers.Store(newPhMap)
 	if old != nil && old != ph {
 		go old.DrainAndClose(drainTimeout)
+	}
+}
+
+// inheritHealthLocked starts a newly built handler's targets where the
+// handler before it left them -- the one it replaces directly, or the one an
+// invalidation retired -- before any request can reach it.
+func (c *ProxyCache) inheritHealthLocked(id string, ph, old *proxy.ProxyHandler) {
+	if ph == nil {
+		return
+	}
+	if old != nil && old != ph {
+		ph.InheritHealth(old.HealthSnapshot())
+		return
+	}
+	if snap, ok := c.retiredHealth[id]; ok {
+		delete(c.retiredHealth, id)
+		ph.InheritHealth(snap)
 	}
 }
 
@@ -298,6 +320,12 @@ func (c *ProxyCache) invalidateLocked(id string) {
 	c.proxyHandlers.Store(newPhMap)
 
 	if ph != nil {
+		if snap := ph.HealthSnapshot(); len(snap) > 0 {
+			if c.retiredHealth == nil {
+				c.retiredHealth = make(map[string]map[string]bool)
+			}
+			c.retiredHealth[id] = snap
+		}
 		go ph.DrainAndClose(drainTimeout)
 		return
 	}
@@ -383,6 +411,11 @@ func (c *ProxyCache) Sync() {
 		liveLabels[router.RouteLabel(rt)] = true
 	}
 	middleware.RetainCircuitBreakers(liveLabels)
+	for id := range c.retiredHealth {
+		if !activeRoutes[id] {
+			delete(c.retiredHealth, id)
+		}
+	}
 
 	orphans := make([]string, 0)
 	for id := range proxies {
