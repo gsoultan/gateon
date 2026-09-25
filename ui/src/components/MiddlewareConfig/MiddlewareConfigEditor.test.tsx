@@ -327,3 +327,20 @@ describe("custom error pages", () => {
     expect(html).not.toContain("/path/to/404.html");
   });
 });
+
+describe("policy help", () => {
+  // The gateway hands CEL `auth` as the claims map itself; the help text said
+  // `auth.claims`, so a rule written from it read a key that does not exist
+  // and refused every request.
+  test("documents the variables the gateway provides", () => {
+    const html = renderToString(
+      <MantineProvider>
+        <PolicyConfigEditor config={{}} onChange={() => {}} />
+      </MantineProvider>,
+    );
+    expect(html).not.toContain("auth.claims");
+    for (const v of ["request.host", "request.query", "auth.role", "has(auth.role)"]) {
+      expect(html).toContain(v);
+    }
+  });
+});
