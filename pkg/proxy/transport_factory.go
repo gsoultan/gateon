@@ -235,10 +235,11 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 			}
 		}
 
-		if selectedIdentity != nil && f.identitySelector != nil && f.identitySelector.strategy != gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_STATIC {
-			t.DisableKeepAlives = true
-		}
-
+		// Keep-alives stay on for a per-request identity. Each identity has a
+		// transport of its own (TransportFor keys the cache by it), so a pooled
+		// connection only ever carries the certificate it was opened with.
+		// Turning them off made every request to such a backend a new TCP
+		// connection and a full mutual-TLS handshake.
 		return t
 	}
 }

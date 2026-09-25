@@ -7,9 +7,11 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -100,27 +102,7 @@ func TestUpgradePresentsTheSelectedClientIdentity(t *testing.T) {
 	backend.StartTLS()
 	defer backend.Close()
 
-	dir := t.TempDir()
-	certFile, keyFile := writeClientCert(t, dir, "admin.identity.test")
-	services := config.NewServiceRegistry(filepath.Join(dir, "services.json"))
-	if err := services.Update(context.Background(), &gateonv1.Service{
-		Id:              "svc",
-		WeightedTargets: []*gateonv1.Target{{Url: backend.URL, Weight: 1}},
-		TlsClientConfig: &gateonv1.TlsClientConfig{
-			Enabled:               true,
-			SkipVerify:            true,
-			CertSelectionStrategy: gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER,
-			CertIdentities: []*gateonv1.TlsClientIdentity{{
-				Id: "admin", CertFile: certFile, KeyFile: keyFile,
-				MatchHeader: "X-Tenant", MatchHeaderValue: "admin",
-			}},
-		},
-	}); err != nil {
-		t.Fatalf("update service: %v", err)
-	}
-	ph := NewProxyHandler(&gateonv1.Route{Id: "ws", ServiceId: "svc"}, services)
-	defer ph.Close()
-	gw := httptest.NewServer(ph)
+	gw := httptest.NewServer(newIdentityProxy(t, backend.URL))
 	defer gw.Close()
 
 	for _, upgrade := range []string{"", "websocket"} {
@@ -141,6 +123,69 @@ func TestUpgradePresentsTheSelectedClientIdentity(t *testing.T) {
 				"%q for this request", upgrade, got, "admin.identity.test")
 		}
 	}
+}
+
+// Each identity has a transport of its own, so a connection only ever carries
+// the certificate it was opened with and can safely be kept alive. It was not:
+// selecting an identity per request disabled keep-alives, so every request to
+// such a backend paid a new TCP connection and a full mutual-TLS handshake.
+func TestSelectedClientIdentityKeepsConnectionsAlive(t *testing.T) {
+	var opened atomic.Int32
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, presentedPeer(r))
+	}))
+	backend.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			opened.Add(1)
+		}
+	}
+	backend.TLS = &tls.Config{ClientAuth: tls.RequestClientCert, MinVersion: tls.VersionTLS12}
+	backend.StartTLS()
+	defer backend.Close()
+
+	ph := newIdentityProxy(t, backend.URL)
+	const requests = 3
+	for range requests {
+		req := httptest.NewRequest(http.MethodGet, "http://app.example.com/", nil)
+		req.Header.Set("X-Tenant", "admin")
+		rec := httptest.NewRecorder()
+		ph.ServeHTTP(rec, req)
+		if got := rec.Body.String(); got != "admin.identity.test" {
+			t.Fatalf("the backend saw client certificate %q, not the selected identity; the "+
+				"connection count below would say nothing about it", got)
+		}
+	}
+	if n := opened.Load(); n != 1 {
+		t.Fatalf("%d requests with one identity opened %d connections to the backend; they should "+
+			"have shared one", requests, n)
+	}
+}
+
+// newIdentityProxy is a ProxyHandler for a service at backendURL that presents
+// the certificate for admin.identity.test to requests carrying X-Tenant: admin.
+func newIdentityProxy(t *testing.T, backendURL string) *ProxyHandler {
+	t.Helper()
+	dir := t.TempDir()
+	certFile, keyFile := writeClientCert(t, dir, "admin.identity.test")
+	services := config.NewServiceRegistry(filepath.Join(dir, "services.json"))
+	if err := services.Update(context.Background(), &gateonv1.Service{
+		Id:              "svc",
+		WeightedTargets: []*gateonv1.Target{{Url: backendURL, Weight: 1}},
+		TlsClientConfig: &gateonv1.TlsClientConfig{
+			Enabled:               true,
+			SkipVerify:            true,
+			CertSelectionStrategy: gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER,
+			CertIdentities: []*gateonv1.TlsClientIdentity{{
+				Id: "admin", CertFile: certFile, KeyFile: keyFile,
+				MatchHeader: "X-Tenant", MatchHeaderValue: "admin",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("update service: %v", err)
+	}
+	ph := NewProxyHandler(&gateonv1.Route{Id: "identity", ServiceId: "svc"}, services)
+	t.Cleanup(ph.Close)
+	return ph
 }
 
 func presentedPeer(r *http.Request) string {
