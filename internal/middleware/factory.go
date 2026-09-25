@@ -6,6 +6,7 @@ package middleware
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -386,6 +387,14 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 	}
 	if err := bools.Err(); err != nil {
 		return nil, err
+	}
+	// With ClamAV on and no scanner to ask, the scan was skipped and every
+	// upload came back clean: a route that read as virus-scanned scanned
+	// nothing. Refused instead, which takes the route out of service with
+	// the key named until there is an address.
+	if fsc.EnableClamAV && fsc.ClamAVAddr == "" {
+		return nil, kind.CfgError("clamav_addr", "",
+			errors.New("enable_clamav is on, and neither this middleware nor the global WAF config names a ClamAV address"))
 	}
 	return security.FileSecurity(fsc), nil
 }
