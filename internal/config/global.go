@@ -418,12 +418,22 @@ var trustCloudflareFromEnv = sync.OnceValue(func() bool {
 	return v == "true" || v == "1" || v == "yes"
 })
 
+// EffectiveTrustCloudflare reports whether CF-Connecting-IP is trusted when a
+// request arrives from Cloudflare's own addresses. See TrustCloudflare.
 func EffectiveTrustCloudflare() bool {
-	gc := GetGlobalConfig()
-	if gc != nil && gc.Waf != nil {
-		return gc.Waf.TrustCloudflareHeaders
-	}
-	return trustCloudflareFromEnv()
+	return TrustCloudflare(GetGlobalConfig().GetWaf())
+}
+
+// TrustCloudflare reports whether GATEON_TRUST_CLOUDFLARE_HEADERS or the WAF
+// config turns Cloudflare trust on; either is enough. The variable used to be
+// read only when the global config had no WAF section, which NewGlobalRegistry
+// always creates, so the setting the README and the Cloudflare Tunnel guide
+// prescribe did nothing and every client looked like a Cloudflare edge address.
+// Trust never extends past Cloudflare's published ranges and the configured
+// trusted proxies (request.IsTrusted), so a client reaching the gateway
+// directly cannot use the header to choose its own address.
+func TrustCloudflare(w *gateonv1.WafConfig) bool {
+	return trustCloudflareFromEnv() || w.GetTrustCloudflareHeaders()
 }
 
 // secretField is one global-config field that may hold a secret. ptr finds it

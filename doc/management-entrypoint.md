@@ -81,12 +81,14 @@ If you are using Cloudflare Tunnel to access your dashboard (e.g., at `gateon.ex
 
 1. Set `GATEON_MANAGEMENT_BIND=127.0.0.1` if the tunnel runs on the same machine — this is the main reason to bother with a tunnel, and it is not the default, so you have to set it. If the tunnel is on a different machine, bind to the interface it reaches, not `0.0.0.0`.
 2. Point your Cloudflare Tunnel configuration to `http://<gateon-ip>:8080`.
-3. Set `GATEON_TRUST_CLOUDFLARE_HEADERS=true` to ensure Gateon correctly identifies the client IP through the tunnel.
-4. Set `GATEON_MANAGEMENT_ALLOWED_IPS` to the tunnel's IP. Leaving it at the unrestricted default means the tunnel is decorative — anyone who can route to the port bypasses it entirely.
+3. Decide which address the management allowlist should judge. `cloudflared` connects from your own network, not from a Cloudflare range, so by default Gateon sees the tunnel's address and never looks at `CF-Connecting-IP`.
+   - **The tunnel's address** (simplest): set `GATEON_MANAGEMENT_ALLOWED_IPS` to it, and let Cloudflare Access decide who may use the tunnel.
+   - **Your browser's address**: set `GATEON_TRUSTED_PROXIES` to the tunnel's address and `GATEON_TRUST_CLOUDFLARE_HEADERS=true`. Gateon then attributes each request to `CF-Connecting-IP`, and `GATEON_MANAGEMENT_ALLOWED_IPS` must list your admin addresses, not the tunnel's.
+4. Either way, do not leave `GATEON_MANAGEMENT_ALLOWED_IPS` at the unrestricted default. That makes the tunnel decorative: anyone who can route to the port bypasses it entirely.
 
 ## Common Issues: 502 Bad Gateway
 
 If you encounter a **502 Bad Gateway** when accessing the dashboard via Cloudflare:
-- **IP Mismatch**: If you have set `GATEON_MANAGEMENT_ALLOWED_IPS` or `management.allowed_ips` (which you should — the default restricts nothing), the tunnel's IP must be in it. Note that the address Gateon sees is the tunnel's, not your browser's, unless `GATEON_TRUST_CLOUDFLARE_HEADERS=true`.
+- **IP Mismatch**: If you have set `GATEON_MANAGEMENT_ALLOWED_IPS` or `management.allowed_ips` (which you should — the default restricts nothing), the address Gateon attributes the request to must be in it. That is the tunnel's address, unless the tunnel is in `GATEON_TRUSTED_PROXIES` and `GATEON_TRUST_CLOUDFLARE_HEADERS=true`, in which case it is your browser's.
 - **Bind Address**: Ensure `GATEON_MANAGEMENT_BIND` allows connections from the tunnel's IP.
-- **Header Trust**: If `GATEON_TRUST_CLOUDFLARE_HEADERS` is not `true`, Gateon might see the tunnel's internal IP instead of your client IP, triggering the `IPFilter` block.
+- **Header Trust**: `GATEON_TRUST_CLOUDFLARE_HEADERS=true` alone does not make Gateon believe `CF-Connecting-IP` from a tunnel, because the tunnel does not connect from a Cloudflare range. Before 2026-09-25 the variable was ignored entirely whenever the config file had a WAF section, which it always does; an allowlist written against the tunnel's address still works after the fix, for the same reason.

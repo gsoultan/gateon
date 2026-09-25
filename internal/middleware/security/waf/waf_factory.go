@@ -153,7 +153,7 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 		EnableFingerprintValidation: w.GetEnableFingerprintValidation(),
 		EnableConfidenceScoring:     w.GetEnableConfidenceScoring(),
 		AuditOnly:                   w.GetAuditOnly(),
-		TrustCloudflare:             w.GetTrustCloudflareHeaders(),
+		TrustCloudflare:             config.TrustCloudflare(w),
 		AppProfiles:                 w.GetAppProfiles(),
 		EnableSSRFProtection:        w.GetSsrfProtection(),
 		Origins:                     resolveOrigins(w.GetOrigins()),
@@ -217,6 +217,9 @@ func mergeGlobalWAFDefaults(cfg map[string]string, d security.Deps) string {
 	// and only from the raw flag, attaching a WAF to a route switched off the
 	// response inspection the global WAF had been giving it.
 	setIfMissing(cfg, "dlp", strconv.FormatBool(globalWAFRunsDLP(global.Waf)))
+	// Cloudflare trust is a fact about where the gateway sits, not a CRS
+	// setting, so it is inherited on the same terms.
+	setIfMissing(cfg, "trust_cloudflare_headers", strconv.FormatBool(config.TrustCloudflare(global.Waf)))
 	if global.Waf.DlpAction != "" {
 		setIfMissing(cfg, "dlp_action", global.Waf.DlpAction)
 	}
@@ -260,7 +263,6 @@ func applyGlobalCRSToggles(cfg map[string]string, w *gateonv1.WafConfig) {
 		"dlp":                           w.Dlp,
 		"audit_log_relevant_only":       w.AuditLogRelevantOnly,
 		"disable_entropy":               w.DisableEntropy,
-		"trust_cloudflare_headers":      w.TrustCloudflareHeaders,
 		"enable_body_entropy":           w.EnableBodyEntropy,
 		"enable_fingerprint_validation": w.EnableFingerprintValidation,
 		"enable_confidence_scoring":     w.EnableConfidenceScoring,
