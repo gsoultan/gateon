@@ -43,6 +43,21 @@ built answers 503 and logs which one:
 **Who is affected:** only configurations with such a value, which were not
 doing what they said. The log line names the middleware and key.
 
+### Proxied pages no longer get the dashboard's security headers — **attach `security_headers` where you relied on them**
+
+Every HTTP entrypoint applied the dashboard's *recommended* header preset to
+every response it served, so a proxied page that sent no CSP of its own got the
+gateway's: `script-src 'self'` (inline and CDN scripts blocked), fonts and
+images from its own origin only, `form-action 'self'` (a login form posting to
+an identity provider blocked), `frame-ancestors 'none'`, plus HSTS with
+`includeSubDomains` pinning every subdomain to HTTPS for a year. Web
+applications with any third-party asset broke behind the gateway. Proxied
+responses now carry the headers their backend sends and no others; the
+dashboard and management API keep their own. **What to do:** a route that
+wants gateway-added headers attaches a `security_headers` middleware and picks
+a preset — *legacy* for the low-risk set, *recommended* or *strict* for a CSP
+you have checked against the application.
+
 ### Rate limits apply as configured — **effective limits halve**
 
 The limit was scaled by reputation/50 on the belief that a neutral score was
