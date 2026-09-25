@@ -6,11 +6,12 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"github.com/gsoultan/gateon/internal/testutil"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/gsoultan/gateon/internal/testutil"
 )
 
 // Migrations run at startup, against whatever the operator already has. Every

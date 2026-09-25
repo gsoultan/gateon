@@ -158,31 +158,49 @@ func GetClientIP(r *http.Request, trustCloudflare bool) string {
 func clientFromForwardedFor(lines []string) (string, bool) {
 	// Zero-allocation right-to-left parsing of X-Forwarded-For
 	for i := len(lines) - 1; i >= 0; i-- {
-		xff := lines[i]
-		for {
-			lastComma := strings.LastIndexByte(xff, ',')
-			part := xff
-			if lastComma != -1 {
-				part = xff[lastComma+1:]
-				xff = xff[:lastComma]
-			}
-
-			// Strip port if present in XFF (sometimes happens). An empty or
-			// unparseable token is skipped.
-			if token := strings.TrimSpace(part); token != "" {
-				cleanIP := httputil.StripPort(token)
-				if parsed, err := netip.ParseAddr(cleanIP); err == nil {
-					// The first untrusted IP is the client; if every hop
-					// was trusted, the leftmost is.
-					if !isTrustedIP(parsed) || (lastComma == -1 && i == 0) {
-						return cleanIP, true
-					}
-				}
-			}
-			if lastComma == -1 {
-				break // Keep walking left, onto the previous line
-			}
+		if ip, ok := clientFromForwardedLine(lines[i], i == 0); ok {
+			return ip, true
 		}
+	}
+	return "", false
+}
+
+// clientFromForwardedLine walks one X-Forwarded-For line right to left.
+// firstLine says it is the first line of the chain, whose leftmost address is
+// the client when every hop is trusted.
+func clientFromForwardedLine(xff string, firstLine bool) (string, bool) {
+	for {
+		lastComma := strings.LastIndexByte(xff, ',')
+		part := xff
+		if lastComma != -1 {
+			part = xff[lastComma+1:]
+			xff = xff[:lastComma]
+		}
+		if ip, ok := forwardedClient(part, firstLine && lastComma == -1); ok {
+			return ip, true
+		}
+		if lastComma == -1 {
+			return "", false // keep walking left, onto the previous line
+		}
+	}
+}
+
+// forwardedClient returns the hop's address when it is the client: the first
+// untrusted address, or the leftmost of a chain whose every hop was trusted.
+// A port is stripped (it sometimes appears); an empty or unparseable token is
+// skipped.
+func forwardedClient(part string, chainStart bool) (string, bool) {
+	token := strings.TrimSpace(part)
+	if token == "" {
+		return "", false
+	}
+	cleanIP := httputil.StripPort(token)
+	parsed, err := netip.ParseAddr(cleanIP)
+	if err != nil {
+		return "", false
+	}
+	if !isTrustedIP(parsed) || chainStart {
+		return cleanIP, true
 	}
 	return "", false
 }

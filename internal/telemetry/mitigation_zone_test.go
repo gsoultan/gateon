@@ -6,10 +6,11 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"github.com/gsoultan/gateon/internal/testutil"
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/testutil"
 )
 
 // TestFingerprintMitigationTTLIgnoresTheDatabaseZone.

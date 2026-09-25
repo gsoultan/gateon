@@ -6,11 +6,12 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"github.com/gsoultan/gateon/internal/testutil"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/testutil"
 )
 
 // TestThreatCarryingBytesPostgresRefusesIsStillRecorded.

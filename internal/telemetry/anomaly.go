@@ -15,6 +15,14 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
+// Severities anomaly findings are filed with. They are kind.SeverityHigh and
+// kind.SeverityMedium, the vocabulary the correlation engine, SIEM and
+// dashboard read; telemetry cannot import kind, which imports it.
+const (
+	severityHigh   = "high"
+	severityMedium = "medium"
+)
+
 // AnomalyDetector monitors metrics and detects unusual patterns using ML-inspired thresholds.
 // It uses a local aggregator instead of an external Prometheus server.
 type AnomalyDetector struct {
@@ -99,7 +107,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 				"auth_failure_rate", rate)
 
 			details := fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate)
-			severity, action := "medium", ""
+			severity, action := severityMedium, ""
 			if rate > 0.8 {
 				// Shun for a critical threat.
 				severity = "critical"
@@ -143,7 +151,7 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 				"block_rate", fmt.Sprintf("%.2f%%", blockRate*100))
 
 			details := fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks)
-			severity, score, action := "high", math.Min(100, s.WafBlocks*5), ""
+			severity, score, action := severityHigh, math.Min(100, s.WafBlocks*5), ""
 			if blockRate > 0.5 && s.WafBlocks > absoluteThreshold*5 {
 				severity, score = "critical", math.Min(100, s.WafBlocks*10)
 				action = ad.shun(s.IP, details)
@@ -240,7 +248,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 				Details:     fmt.Sprintf("Error rate spike detected: Z-Score %.2f (Current %.2f eps)", z, currentErrors),
 				Time:        now,
 				Category:    "service_instability",
-				Severity:    "high",
+				Severity:    severityHigh,
 				ActionTaken: ActionFlagged,
 			})
 		}
@@ -271,7 +279,7 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 				Details:     fmt.Sprintf("High latency spike detected: Z-Score %.2f (Current %.2fs)", z, currentP99),
 				Time:        now,
 				Category:    "latency_spike",
-				Severity:    "medium",
+				Severity:    severityMedium,
 				ActionTaken: ActionFlagged,
 			})
 		}

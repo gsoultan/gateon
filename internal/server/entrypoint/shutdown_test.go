@@ -131,7 +131,7 @@ func (s idleSession) ProxyTCP(_ context.Context, c net.Conn) {
 }
 
 func (s idleSession) ResolveTCP(*gateonv1.EntryPoint, string) l4.TCPProxy { return s }
-func (idleSession) ResolveUDP(*gateonv1.EntryPoint) l4.UDPProxy         { return nil }
+func (idleSession) ResolveUDP(*gateonv1.EntryPoint) l4.UDPProxy           { return nil }
 
 // TestTCPEntrypointShutdownEndsOpenSessions covers an L4 session in progress
 // when SIGTERM arrives.

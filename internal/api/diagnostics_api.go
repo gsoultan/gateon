@@ -979,7 +979,7 @@ func threatSeverity(t *telemetry.SecurityThreat) string {
 	case t.Score >= 60:
 		return "high"
 	case t.Score >= 30:
-		return "medium"
+		return severityMedium
 	}
 	return "low"
 }

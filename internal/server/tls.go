@@ -238,22 +238,29 @@ func (d SNIDeps) eachRouteForSNI(ctx context.Context, sniHost string, visit func
 		}
 	}
 	for _, rt := range d.RouteStore.ListWildcards(ctx) {
-		if rt.Disabled || rt.Tls == nil {
-			continue
-		}
-		routeHost := router.HostFromRule(rt.Rule)
-		if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
-			continue
-		}
-		if rt.Tls.OptionId != "" && d.TLSOptStore != nil {
-			if opt, ok := d.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok && opt.SniStrict {
-				continue
-			}
-		}
-		if !visit(rt) {
+		if d.wildcardServesSNI(ctx, rt, sniHost) && !visit(rt) {
 			return
 		}
 	}
+}
+
+// wildcardServesSNI reports whether wildcard route rt may serve a handshake
+// naming sniHost: enabled, with TLS, a host pattern covering sniHost, and no
+// sni_strict option.
+func (d SNIDeps) wildcardServesSNI(ctx context.Context, rt *gateonv1.Route, sniHost string) bool {
+	if rt.Disabled || rt.Tls == nil {
+		return false
+	}
+	routeHost := router.HostFromRule(rt.Rule)
+	if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
+		return false
+	}
+	if rt.Tls.OptionId != "" && d.TLSOptStore != nil {
+		if opt, ok := d.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok && opt.SniStrict {
+			return false
+		}
+	}
+	return true
 }
 
 // routeTLSPolicyHonoured reports whether the TLS handshake that carried r was

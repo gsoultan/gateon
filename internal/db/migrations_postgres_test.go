@@ -4,8 +4,9 @@
 package db
 
 import (
-	"github.com/gsoultan/gateon/internal/testutil"
 	"testing"
+
+	"github.com/gsoultan/gateon/internal/testutil"
 )
 
 // The migration suite was only ever exercised against SQLite, which is the
