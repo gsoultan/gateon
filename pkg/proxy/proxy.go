@@ -157,6 +157,19 @@ func (h *ProxyHandler) activeConnCount() int32 {
 	return total
 }
 
+// backendCORSHeaders are the CORS headers a route with its own policy strips
+// from its backend's responses, so the browser reads one policy. The list
+// named Access-Control-Exposed-Headers, which is no header, so the backend's
+// Access-Control-Expose-Headers went out beside the route's.
+var backendCORSHeaders = [...]string{
+	"Access-Control-Allow-Origin",
+	"Access-Control-Allow-Methods",
+	"Access-Control-Allow-Headers",
+	"Access-Control-Expose-Headers",
+	"Access-Control-Allow-Credentials",
+	"Access-Control-Max-Age",
+}
+
 // getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.
 func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReverseProxy {
 	if rp := state.proxy.Load(); rp != nil {
@@ -179,12 +192,9 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 
 	if h.StripCORS {
 		rp.ModifyResponse = func(resp *http.Response) error {
-			resp.Header.Del("Access-Control-Allow-Origin")
-			resp.Header.Del("Access-Control-Allow-Methods")
-			resp.Header.Del("Access-Control-Allow-Headers")
-			resp.Header.Del("Access-Control-Exposed-Headers")
-			resp.Header.Del("Access-Control-Allow-Credentials")
-			resp.Header.Del("Access-Control-Max-Age")
+			for _, name := range backendCORSHeaders {
+				resp.Header.Del(name)
+			}
 			return nil
 		}
 	}

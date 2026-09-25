@@ -100,6 +100,25 @@ func TestABackendsOwnCORSPolicyReachesTheBrowser(t *testing.T) {
 	}
 }
 
+// A route with its own CORS policy strips the backend's CORS headers, so the
+// browser reads one policy. The strip named Access-Control-Exposed-Headers,
+// which is no header -- the real one is Access-Control-Expose-Headers -- so
+// the backend's list went out beside the route's, and a script on an allowed
+// origin could read every response header the backend chose to expose.
+func TestARouteCORSPolicyReplacesTheBackendsExposedHeaders(t *testing.T) {
+	gw := corsGateway(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Access-Control-Expose-Headers", "X-Backend-Secret")
+		_, _ = io.WriteString(w, "ok")
+	}), &gateonv1.Middleware{Id: "cors", Type: "cors", Config: map[string]string{
+		"allowed_origins": appOrigin, "exposed_headers": "X-Route-Exposed",
+	}})
+
+	got := strings.Join(get(t, gw, appOrigin).Header.Values("Access-Control-Expose-Headers"), ", ")
+	if strings.Contains(got, "X-Backend-Secret") || !strings.Contains(got, "X-Route-Exposed") {
+		t.Fatalf("the route's policy exposes X-Route-Exposed, and the browser was told %q", got)
+	}
+}
+
 // A backend that enforces its own origin allowlist refuses an origin by
 // leaving Access-Control-Allow-Origin off -- and a route with no cors
 // middleware reads that silence as "no CORS here" and supplies the permissive
