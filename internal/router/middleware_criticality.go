@@ -26,6 +26,14 @@ var securityMiddlewareTypes = map[string]struct{}{
 	"honeypot": {}, "deception": {}, "tarpit": {}, "entropy": {},
 	"xss_recognition": {}, "sqli_recognition": {}, "threat_recognition": {},
 	"security_headers": {}, "xfcc": {},
+	// What one client may consume -- requests per interval, requests in
+	// flight, bytes of body -- is a boundary under adversarial load, not a
+	// convenience, and serving without it is the unbounded case the limit was
+	// configured to prevent. A WASM module runs whatever the operator wrote,
+	// authentication included. All four fail to build only on configuration
+	// (a malformed value, an empty or invalid module), never on a transient
+	// condition, so failing closed cannot turn a blip into an outage.
+	"ratelimit": {}, "inflightreq": {}, "buffering": {}, "wasm": {},
 }
 
 // cosmeticMiddlewareTypes are the ones whose absence degrades behaviour
@@ -36,8 +44,7 @@ var cosmeticMiddlewareTypes = map[string]struct{}{
 	"stripprefix": {}, "stripprefixregex": {}, "replacepath": {},
 	"replacepathregex": {}, "accesslog": {}, "metrics": {}, "compress": {},
 	"errors": {}, "retry": {}, "cors": {}, "grpcweb": {}, "request_id": {},
-	"cache": {}, "transform": {}, "circuit_breaker": {}, "wasm": {},
-	"ratelimit": {}, "inflightreq": {}, "buffering": {},
+	"cache": {}, "transform": {}, "circuit_breaker": {},
 }
 
 // isSecurityMiddleware reports whether failing to build this type should take
