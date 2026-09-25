@@ -11,6 +11,105 @@ here after the fact.
 
 ## Unreleased
 
+### Routes saved from the dashboard may be serving on every entrypoint — **check each route**
+
+The dashboard sent a route's entrypoints as `entryPoints`; the gateway reads
+`entrypoints`. Every route saved from the dashboard was stored with no
+entrypoint restriction, and a route with none serves on **every** entrypoint —
+so a route meant only for an internal listener was reachable on the public
+one. The dashboard now sends the right key, but routes saved before this
+release still have nothing stored. **What to do:** open each route whose
+entrypoints matter and save it again, or check `entrypoints` in the API.
+
+### Settings that were silently guessed are now refused — **a route may answer 503**
+
+Several classes of configuration that used to run on a value nobody chose now
+refuse the build, and a route whose security middleware or limit cannot be
+built answers 503 and logs which one:
+
+- A secret reference (`$env:`, `$vault:`, …) that cannot be resolved used to
+  *become* the secret — an HS256 JWT secret of `$vault:…` was accepted. It now
+  refuses the middleware, or startup for global settings.
+- A boolean middleware setting strconv cannot read (`"yes"`, `"on"`, `"maybe"`)
+  used to read as its default. Accepted spellings are `true`/`false`/`1`/`0`/
+  `t`/`f` in any case; the dashboard only ever writes `true` and `false`.
+- Rate limits, in-flight limits, body-size buffering and WASM were served
+  *without* when they failed to build. They now fail closed with the other
+  boundaries.
+- Circuit breaker `error_threshold` outside (0, 1], `min_requests` below 1
+  and non-positive windows.
+
+**Who is affected:** only configurations with such a value, which were not
+doing what they said. The log line names the middleware and key.
+
+### Rate limits apply as configured — **effective limits halve**
+
+The limit was scaled by reputation/50 on the belief that a neutral score was
+50; a client with no history scores 100, so every well-behaved client got
+twice the configured rate and burst. The login limiter (5 a minute) was 10.
+The `ja4h` and `fingerprint` strategies are now scoped to the client's
+network, and `tenant` falls back to the client address for a request with no
+tenant instead of not limiting it. **What to do:** if you tuned a limit by
+observation, it may now be half what you expect.
+
+### `GATEON_TRUST_CLOUDFLARE_HEADERS` now works — **an allowlist of Cloudflare addresses stops matching**
+
+The variable was ignored whenever the config file had a WAF section, which it
+always does, so every client behind Cloudflare appeared as a Cloudflare edge
+address. Requests from Cloudflare's ranges are now attributed to
+`CF-Connecting-IP`. **Who is affected:** an install that set the variable and,
+seeing edge addresses anyway, allowlisted Cloudflare ranges in
+`GATEON_MANAGEMENT_ALLOWED_IPS` or an IP filter — list client addresses
+instead. A Cloudflare Tunnel is unaffected unless its address is in
+`GATEON_TRUSTED_PROXIES`; see [management-entrypoint.md](management-entrypoint.md).
+
+### A route's own WAF inspects responses — **may start refusing responses**
+
+A route WAF with `dlp=true` never turned on the response phase, so it passed
+every leak; and a route with its own WAF skips the global one, so it lost the
+global WAF's response DLP. Route WAFs now inspect responses when DLP is on,
+and inherit the global WAF's DLP (its flag or the enterprise tier) unless the
+route sets `dlp=false`. Expect the response-phase cost on those routes.
+
+### JA4 fingerprints are the specification's — **fingerprint-keyed state resets**
+
+GREASE values were hashed in, so Chrome's JA4 changed on nearly every
+connection, and the format matched nothing else that computes JA4. Reputation
+scores, mitigations and threat records keyed on the old values stop matching
+and age out. `ebpf.xdp_ja4_blocklist` is removed (field 12 is reserved): the
+kernel lookup compared the ClientHello's random bytes with a hash of the
+fingerprint and never matched. Fingerprints are enforced at L7.
+
+### Behaviour that now does what it was configured to do
+
+- **Load balancing:** services saved from the dashboard as least-connections
+  or weighted were running round robin; they now use their policy. A weighted
+  service whose targets have no weights serves them equally instead of 502.
+- **Retry:** the retry middleware retried nothing. It now retries idempotent
+  methods on a 502/503/504 or transport error, up to `attempts`.
+- **Circuit breaker:** half-open admits one probe instead of everything,
+  `min_requests` defaults to 20 instead of 0 (one 5xx opened it), and
+  `Retry-After` is the time left rather than 30.
+- **Headers middleware:** response rules are applied after the backend's
+  headers, so a rule now overrides the backend instead of being overwritten.
+- **API keys and basic auth** are held to the route's roles and scopes.
+- **mTLS:** a request whose `Host` names a different mTLS route than the one
+  its handshake was for is refused.
+- **gRPC-Web** no longer grants credentials to any origin, and the
+  *Restricted* CORS preset with no origins restricts instead of allowing all.
+- **IP filters:** a bare IPv6 address is one host, not a /32.
+- **Bot management:** challenge passes issued before the upgrade are not
+  accepted (the seed was its own pass); visitors are challenged once more.
+- **Postgres** sessions run in UTC, so TTLs no longer drift with the host's
+  zone.
+- **Service health-check thresholds and WASM modules** survive a restart on the
+  database-backed stores (migrations 63 and 64 add the columns).
+- **The management database** is created `0600`, and systemd keeps the state
+  and config directories private.
+- **The dashboard's Metrics page** moved to `/metrics-dashboard`, off
+  `/metrics`, which Prometheus answers — a bookmark or reload of the old path
+  showed exposition text. Update bookmarks.
+
 ### `mysql://` and `mariadb://` are refused at startup — **they never worked**
 
 `Open` accepted both schemes, and most migrations carry a `DriverMySQL` branch,
