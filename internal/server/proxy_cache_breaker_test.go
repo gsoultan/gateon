@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package server
+
+import (
+	"net/http"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
+	"github.com/gsoultan/gateon/internal/telemetry"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
+
+func breakerSeries(t *testing.T, route string) int {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 64)
+	go func() { telemetry.CircuitBreakerState.Collect(ch); close(ch) }()
+	n := 0
+	for m := range ch {
+		var d dto.Metric
+		if err := m.Write(&d); err != nil {
+			t.Fatalf("read gauge: %v", err)
+		}
+		for _, l := range d.GetLabel() {
+			if l.GetName() == "route" && l.GetValue() == route {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestSyncForgetsTheBreakerOfADeletedRoute: circuit breaker state is keyed by
+// route label in a process-wide map, and nothing removed an entry. A route
+// deleted while its circuit was open went on counting as an open circuit on
+// the dashboard until the process restarted. Sync is where the cache already
+// notices deleted routes.
+func TestSyncForgetsTheBreakerOfADeletedRoute(t *testing.T) {
+	f, _ := newCacheFixture(t, "none")
+	if err := f.mws.Update(t.Context(), &gateonv1.Middleware{
+		Id: "cb", Name: "cb", Type: "circuit_breaker", Config: map[string]string{"min_requests": "1"},
+	}); err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+	const route = "breaker-route-sync"
+	keep := f.route(t, "breaker-route-kept", "cb")
+	rt := f.route(t, route, "cb")
+	for _, r := range []*gateonv1.Route{keep, rt} {
+		if rec := serveThrough(f.cache.GetOrCreate(r)); rec.Code != http.StatusOK {
+			t.Fatalf("route %s answered %d, want 200", r.Id, rec.Code)
+		}
+	}
+	if n := breakerSeries(t, route); n != 3 {
+		t.Fatalf("breaker gauge series for the route = %d, want 3 (closed, open, half-open)", n)
+	}
+
+	if err := f.routes.Delete(t.Context(), route); err != nil {
+		t.Fatalf("delete route: %v", err)
+	}
+	f.cache.Sync()
+
+	if n := breakerSeries(t, route); n != 0 {
+		t.Errorf("breaker gauge series of a deleted route after Sync = %d, want 0", n)
+	}
+	if n := breakerSeries(t, keep.Id); n != 3 {
+		t.Errorf("breaker gauge series of a route that still exists = %d, want 3", n)
+	}
+}

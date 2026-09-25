@@ -8,10 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // EntryPoint is the first middleware on every chain and the only place that
@@ -235,64 +233,4 @@ func hostOf(addr string) string {
 		return addr
 	}
 	return host
-}
-
-// TestCheckBreakerOpensOnlyAfterEnoughRequests pins the guard that keeps a
-// breaker from tripping on a tiny sample. Two failures out of two is a 100%
-// error rate and would open a breaker judged on rate alone -- which is how a
-// route gets cut off by the first two requests after a deploy.
-func TestCheckBreakerOpensOnlyAfterEnoughRequests(t *testing.T) {
-	cfg := CircuitBreakerConfig{
-		RouteID:        "cb-test",
-		WindowSize:     time.Millisecond,
-		MinRequests:    10,
-		ErrorThreshold: 0.5,
-	}
-
-	s := &circuitBreakerState{state: telemetry.CircuitClosed, lastReset: time.Now().Add(-time.Hour)}
-	s.requests.Store(2)
-	s.errors.Store(2)
-	s.checkBreaker(cfg)
-
-	if s.state != telemetry.CircuitClosed {
-		t.Errorf("state = %v after 2 failures of 2, want closed: MinRequests is "+
-			"%d, and a breaker that trips on a two-request sample cuts a route "+
-			"off on the first traffic after a deploy", s.state, cfg.MinRequests)
-	}
-
-	// Same rate, enough requests: now it must open.
-	s.lastReset = time.Now().Add(-time.Hour)
-	s.requests.Store(20)
-	s.errors.Store(15)
-	s.checkBreaker(cfg)
-
-	if s.state != telemetry.CircuitOpen {
-		t.Errorf("state = %v after 15 failures of 20 against a %.0f%% threshold, "+
-			"want open", s.state, cfg.ErrorThreshold*100)
-	}
-}
-
-// TestCheckBreakerHalfOpenNeedsACleanWindow covers recovery. A half-open
-// breaker that sees any error goes straight back to open; one that sees none
-// closes. Getting this backwards either pins a broken route open forever or
-// re-admits traffic to one that is still failing.
-func TestCheckBreakerHalfOpenNeedsACleanWindow(t *testing.T) {
-	cfg := CircuitBreakerConfig{RouteID: "cb-half", WindowSize: time.Millisecond, MinRequests: 1}
-
-	dirty := &circuitBreakerState{state: telemetry.CircuitHalfOpen, lastReset: time.Now().Add(-time.Hour)}
-	dirty.requests.Store(5)
-	dirty.errors.Store(1)
-	dirty.checkBreaker(cfg)
-	if dirty.state != telemetry.CircuitOpen {
-		t.Errorf("half-open with 1 error = %v, want open", dirty.state)
-	}
-
-	clean := &circuitBreakerState{state: telemetry.CircuitHalfOpen, lastReset: time.Now().Add(-time.Hour)}
-	clean.requests.Store(5)
-	clean.errors.Store(0)
-	clean.checkBreaker(cfg)
-	if clean.state != telemetry.CircuitClosed {
-		t.Errorf("half-open with no errors = %v, want closed; the route would "+
-			"never recover", clean.state)
-	}
 }

@@ -4,7 +4,6 @@
 package server
 
 import (
-	"cmp"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -61,7 +60,7 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, grpc
 				logger.L.LogDebug("Route matched",
 					"flow_step", "route_match",
 					"request_id", middleware.GetRequestID(r),
-					"route", cmp.Or(rt.Name, rt.Id),
+					"route", router.RouteLabel(rt),
 					"rule", rt.Rule)
 			}
 

@@ -263,30 +263,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "security_headers":
 		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
 	case "circuit_breaker":
-		errorThreshold, err := kind.ParseFloatStrict(cfg["error_threshold"], 0)
-		if err != nil {
-			return nil, kind.CfgError("error_threshold", cfg["error_threshold"], err)
-		}
-		minRequestsInt, err := kind.ParseIntStrict(cfg["min_requests"], 0)
-		if err != nil {
-			return nil, kind.CfgError("min_requests", cfg["min_requests"], err)
-		}
-		minRequests := int64(minRequestsInt)
-		windowSize, err := kind.ParseDurationStrict(cfg["window_size"], 0)
-		if err != nil {
-			return nil, kind.CfgError("window_size", cfg["window_size"], err)
-		}
-		sleepWindow, err := kind.ParseDurationStrict(cfg["sleep_window"], 0)
-		if err != nil {
-			return nil, kind.CfgError("sleep_window", cfg["sleep_window"], err)
-		}
-		return CircuitBreaker(CircuitBreakerConfig{
-			ErrorThreshold: errorThreshold,
-			MinRequests:    minRequests,
-			WindowSize:     windowSize,
-			SleepWindow:    sleepWindow,
-			RouteID:        routeID,
-		}), nil
+		return circuitBreakerFromConfig(cfg, routeID)
 	case "wasm":
 		return transform.Wasm(context.Background(), m.WasmBlob)
 	default:

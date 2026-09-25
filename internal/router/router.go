@@ -493,6 +493,12 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 	return false
 }
 
+// RouteLabel is the name a route's middlewares, metrics and per-route state
+// are keyed by: its name, or its ID when it has none.
+func RouteLabel(rt *gateonv1.Route) string {
+	return cmp.Or(rt.Name, rt.Id)
+}
+
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
 func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore) http.Handler {
 	var chain []middleware.Middleware
@@ -501,7 +507,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// only to operator-declared gRPC routes, not based on a spoofable request header.
 	mwFactory.SetRouteType(rt.Type)
 
-	routeLabel := cmp.Or(rt.Name, rt.Id)
+	routeLabel := RouteLabel(rt)
 	ctx := context.Background()
 
 	// 1. Infrastructure Middlewares (Recovery, Logging & Monitoring)

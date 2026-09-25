@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -354,7 +355,8 @@ func (c *ProxyCache) Sync() {
 		}
 	}
 
-	// 2. Cleanup: Remove cached proxies for routes that no longer exist.
+	// 2. Cleanup: Remove cached proxies for routes that no longer exist, and
+	// the circuit breakers of route labels that no longer exist.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -362,9 +364,12 @@ func (c *ProxyCache) Sync() {
 	handlers := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
 
 	activeRoutes := make(map[string]bool)
+	liveLabels := make(map[string]bool)
 	for _, rt := range c.routeStore.List(context.Background()) {
 		activeRoutes[rt.Id] = true
+		liveLabels[router.RouteLabel(rt)] = true
 	}
+	middleware.RetainCircuitBreakers(liveLabels)
 
 	orphans := make([]string, 0)
 	for id := range proxies {
