@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/domain/route"
 	"github.com/gsoultan/gateon/internal/domain/service"
+	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -341,6 +342,10 @@ func (s *ApiService) serviceService() service.Service {
 
 func (s *ApiService) entryPointService() entrypoint.Service {
 	return entrypoint.NewService(s.EntryPoints, s.invalidator(), logger.Default())
+}
+
+func (s *ApiService) tlsOptionService() dtls.Service {
+	return dtls.NewService(s.TLSOptions, s.invalidator(), logger.Default())
 }
 
 func (s *ApiService) middlewareService() dmw.Service {
