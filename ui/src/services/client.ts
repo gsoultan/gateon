@@ -8,6 +8,7 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { ApiService } from "./gen/gateon/v1/api_pb";
 import { useAuthStore } from "../store/useAuthStore";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
+import { endSessionOnUnauthenticated, withSessionCookie } from "./connectAuth";
 
 const transport = createConnectTransport({
   baseUrl: getApiBaseUrl() || window.location.origin,
@@ -23,7 +24,12 @@ const transport = createConnectTransport({
   // varint numbers) and a parse that skips JSON entirely. Modest per call at
   // dashboard traffic, but free.
   useBinaryFormat: true,
+  // What apiFetch does on every REST call, so a call keeps its behaviour when
+  // it moves to this client: the session cookie goes cross-origin too, and a
+  // session the gateway no longer accepts signs the dashboard out.
+  fetch: withSessionCookie,
   interceptors: [
+    endSessionOnUnauthenticated,
     (next) => async (req) => {
       const token = useAuthStore.getState().token;
       if (token && token !== "__cookie__") {
