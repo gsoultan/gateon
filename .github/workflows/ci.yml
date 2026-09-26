@@ -183,18 +183,24 @@ jobs:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
         run: make check-coverage
 
-      - name: eBPF attach tests (need root)
+      - name: eBPF tests (need root)
         run: |
-          # `go test ./...` above runs unprivileged, so every test that attaches
-          # a real program to a real interface skips there. Attaching is the
-          # only part of this subsystem that compiling cannot prove: the
+          # `go test ./...` above runs unprivileged, so every test that loads or
+          # attaches a real program skips there. Loading and attaching are the
+          # only parts of this subsystem that compiling cannot prove: the
           # verifier, the clsact qdisc and the filter install either work on a
           # live kernel or they do not.
+          #
+          # The whole package rather than a -test.run list of the tests that
+          # need root. A list has to be kept in step with test names, and it was
+          # not: TestUpdateLoadBalancerBackendsForcesTheKernelCountToZero needs
+          # root, matched nothing, and so ran nowhere. The ENA tests skip here on
+          # their own; they need real hardware (.github/workflows/ena-verify.yml).
           #
           # Built into RUNNER_TEMP, never the checkout, so the working-tree
           # check below stays meaningful.
           go test -c -o "$RUNNER_TEMP/ebpf.test" ./internal/ebpf/
-          sudo "$RUNNER_TEMP/ebpf.test" -test.run 'TestAttachTC|TestAttachClsact|TestXDP' -test.v
+          sudo "$RUNNER_TEMP/ebpf.test" -test.v
 
       - name: Working tree clean after tests
         run: |
