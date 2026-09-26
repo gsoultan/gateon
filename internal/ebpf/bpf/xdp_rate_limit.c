@@ -199,6 +199,46 @@ static __always_inline int rate_limit_exceeded(__u32 src_ip, int default_enabled
     return 0;
 }
 
+// The fragment-offset bits of iphdr.frag_off (include/net/ip.h, not uapi).
+#define IP_FRAG_OFFSET_MASK 0x1FFF
+#define TCP_FLAGS_BYTE 13
+#define TCP_FLAG_BITS_SYN 0x02
+#define TCP_FLAG_BITS_ACK 0x10
+
+// l4_header returns the start of the transport header when at least need bytes
+// of it are in the packet, and NULL otherwise.
+//
+// IHL, not sizeof(struct iphdr), says where the transport header starts. It
+// used to be taken as a fixed 20 bytes in, which is right only for a header
+// without options: one option word moved every port-based decision onto bytes
+// the sender chose, and the management-port gate let the packet through.
+//
+// A later fragment carries no transport header at all, so nothing is read from
+// it; it cannot be delivered without its first fragment, which is checked.
+// Callers ask only for the bytes they read, because a first fragment may hold
+// as little as eight bytes of the header -- asking for a whole TCP header let a
+// SYN split that way skip the gate while reassembly delivered it.
+static __always_inline __u8 *l4_header(struct iphdr *iph, void *data_end, __u32 need) {
+    if (iph->frag_off & bpf_htons(IP_FRAG_OFFSET_MASK))
+        return NULL;
+    __u32 ihl = iph->ihl;
+    if (ihl < 5)
+        return NULL;
+    __u8 *l4 = (__u8 *)iph + ihl * 4;
+    if ((void *)(l4 + need) > data_end)
+        return NULL;
+    return l4;
+}
+
+// l4_dest_port returns a TCP or UDP destination port -- at offset 2 in both
+// headers -- or 0 when the packet carries none this program can read.
+static __always_inline __u16 l4_dest_port(struct iphdr *iph, void *data_end) {
+    __u8 *l4 = l4_header(iph, data_end, 4);
+    if (!l4)
+        return 0;
+    return ((__u16)l4[2] << 8) | l4[3];
+}
+
 #define MAX_KNOCK_STEPS 8
 #define KNOCK_TIMEOUT_NS 10000000000LL // 10 seconds between consecutive knocks
 // Returned when the packet is neither a knock nor aimed at the management port,
@@ -212,10 +252,7 @@ static __always_inline int rate_limit_exceeded(__u32 src_ip, int default_enabled
 //
 // A knock is always consumed (dropped) -- whether it advanced the sequence,
 // restarted it or broke it -- so the knock ports never answer.
-static __always_inline int handle_port_knocking(struct iphdr *iph, struct tcphdr *tcph, struct ebpf_config *cfg) {
-    __u32 src_ip = iph->saddr;
-    __u16 dest_port = bpf_ntohs(tcph->dest);
-
+static __always_inline int handle_port_knocking(__u32 src_ip, __u16 dest_port, struct ebpf_config *cfg) {
     if (dest_port == cfg->mgmt_port) {
         // Whitelisted, or completed the sequence: pass. Anyone else: drop.
         if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return XDP_PASS;
@@ -294,9 +331,10 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
 
     // 2. TCP State Anomaly & SYN Flood Protection
     if (iph->protocol == IPPROTO_TCP) {
-        struct tcphdr *tcph = (void *)(iph + 1);
-        if ((void *)(tcph + 1) <= data_end) {
-            if (tcph->syn && !tcph->ack) {
+        __u8 *tcp = l4_header(iph, data_end, TCP_FLAGS_BYTE + 1);
+        if (tcp) {
+            __u8 flags = tcp[TCP_FLAGS_BYTE];
+            if ((flags & TCP_FLAG_BITS_SYN) && !(flags & TCP_FLAG_BITS_ACK)) {
                 // Count SYNs since this source last sent anything else. It used
                 // to drop on the second one, which is what a browser opening its
                 // parallel connections looks like; only a source that keeps
@@ -324,14 +362,14 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
     __u32 config_key = 0;
     struct ebpf_config *cfg = bpf_map_lookup_elem(&global_ebpf_config, &config_key);
     if (cfg && cfg->mgmt_port > 0 && iph->protocol == IPPROTO_TCP) {
-        struct tcphdr *tcph = (void *)(iph + 1);
-        if ((void *)(tcph + 1) <= data_end) {
+        __u16 dport = l4_dest_port(iph, data_end);
+        if (dport) {
             if (cfg->enable_knocking) {
                 // Every TCP packet, not only those for the management port:
                 // the knocks are precisely the packets that are not for it.
-                int v = handle_port_knocking(iph, tcph, cfg);
+                int v = handle_port_knocking(src_ip, dport, cfg);
                 if (v != KNOCK_NOT_HANDLED) return v;
-            } else if (cfg->enable_mgmt_whitelist && bpf_ntohs(tcph->dest) == cfg->mgmt_port) {
+            } else if (cfg->enable_mgmt_whitelist && dport == cfg->mgmt_port) {
                 if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return XDP_PASS;
                 count_drop(DROP_REASON_INVALID_PORT_KNOCK);
                 return XDP_DROP;
@@ -341,15 +379,7 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
 
     // TITAN: Phantom Redirection (AF_XDP)
     if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
-        __u16 dport = 0;
-        if (iph->protocol == IPPROTO_TCP) {
-            struct tcphdr *tcph = (void *)(iph + 1);
-            if ((void *)(tcph + 1) <= data_end) dport = bpf_ntohs(tcph->dest);
-        } else {
-            struct udphdr *udph = (void *)(iph + 1);
-            if ((void *)(udph + 1) <= data_end) dport = bpf_ntohs(udph->dest);
-        }
-
+        __u16 dport = l4_dest_port(iph, data_end);
         if (dport > 0) {
             __u32 port_key = (__u32)dport;
             if (bpf_map_lookup_elem(&phantom_ports, &port_key)) {
@@ -450,19 +480,26 @@ int xdp_gateon_main(struct xdp_md *ctx) {
 #define TC_ACT_SHOT 2
 #endif
 
-// tc_filter_ipv4 returns TC_ACT_SHOT when the source address must be dropped.
-// Split out of the entry point to keep each function within the verifier's
-// comfort zone and to mirror handle_ip_packet's ordering exactly: whitelist
-// first, then the blocklists, then the rate limiter.
-static __always_inline int tc_filter_ipv4(struct iphdr *iph) {
+// tc_filter_ipv4 returns TC_ACT_SHOT when the packet must be dropped. Split out
+// of the entry point to keep each function within the verifier's comfort zone.
+// Order: the management allowlist, then the blocklists, then the rate limiter.
+static __always_inline int tc_filter_ipv4(struct iphdr *iph, void *data_end) {
     __u32 src_ip = iph->saddr;
 
-    // The management whitelist short-circuits before any drop check so an
-    // operator can never lock themselves out with a bad rule.
+    // A listed source short-circuits before any drop check, so an operator can
+    // never lock themselves out with a bad rule. Anyone else is held to the
+    // allowlist on the management port, as the XDP program does. That second
+    // arm used to be missing -- this program never read a port -- so on TC the
+    // setting admitted every address while the dashboard said it admitted none.
     __u32 config_key = 0;
     struct ebpf_config *cfg = bpf_map_lookup_elem(&global_ebpf_config, &config_key);
     if (cfg && cfg->enable_mgmt_whitelist) {
         if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return TC_ACT_OK;
+        if (cfg->mgmt_port > 0 && iph->protocol == IPPROTO_TCP &&
+            l4_dest_port(iph, data_end) == cfg->mgmt_port) {
+            count_drop(DROP_REASON_INVALID_PORT_KNOCK);
+            return TC_ACT_SHOT;
+        }
     }
 
     // Telemetry, LRU-backed so a spoofed-source flood cannot grow it without
@@ -504,7 +541,7 @@ int tc_gateon_ingress(struct __sk_buff *ctx) {
     if ((void *)(iph + 1) > data_end)
         return TC_ACT_OK;
 
-    return tc_filter_ipv4(iph);
+    return tc_filter_ipv4(iph, data_end);
 }
 
 char _license[] SEC("license") = "GPL";

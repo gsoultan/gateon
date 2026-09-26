@@ -9,6 +9,24 @@ here after the fact.
 
 ---
 
+## Unreleased
+
+### The TC hook enforces the kernel management allowlist — **check `mgmt_whitelist_ips`**
+
+On the TC hook, `enable_mgmt_whitelist` let every address reach the management
+port: the program let listed sources through early and never dropped anyone
+else. It now drops an unlisted source's packets to the management port, as the
+XDP program always has. Separately, both programs read the port from the wrong
+bytes of a packet that carried an IP option or was split into fragments, and
+let it through; they now find the TCP header where the IPv4 header says it is.
+
+**Who is affected:** an install on the TC hook with `enable_mgmt_whitelist` on.
+Addresses not in `mgmt_whitelist_ips` lose the management port, as the setting
+always said they would. Check the list before upgrading. The flag is still
+never switched on against an empty list.
+
+---
+
 ## v2.7.0
 
 ### Routes saved from the dashboard may be serving on every entrypoint — **check each route**

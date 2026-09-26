@@ -69,16 +69,26 @@ func loadedManager(t *testing.T, cfg *gateonv1.EbpfConfig) (*EbpfManager, *ebpf.
 // Checksums stay zero: neither program verifies them and the test runner does
 // not either.
 func ipv4TCP(src net.IP, dport uint16, flags byte) []byte {
-	pkt := make([]byte, 14+20+20)
+	return ipv4TCPWithOptions(src, dport, flags, 0)
+}
+
+// ipv4TCPWithOptions is ipv4TCP with optWords 4-byte words of IP options
+// (NOPs) between the IPv4 and TCP headers, so IHL is 5+optWords.
+func ipv4TCPWithOptions(src net.IP, dport uint16, flags byte, optWords int) []byte {
+	ihl := 5 + optWords
+	pkt := make([]byte, 14+ihl*4+20)
 	binary.BigEndian.PutUint16(pkt[12:], 0x0800) // ETH_P_IP
 	ip := pkt[14:]
-	ip[0] = 0x45 // version 4, IHL 5
-	binary.BigEndian.PutUint16(ip[2:], 40)
+	ip[0] = 0x40 | byte(ihl) // version 4
+	binary.BigEndian.PutUint16(ip[2:], uint16(ihl*4+20))
 	ip[8] = 64 // TTL
 	ip[9] = 6  // IPPROTO_TCP
 	copy(ip[12:16], src.To4())
 	copy(ip[16:20], net.IPv4(10, 0, 0, 1).To4())
-	tcp := ip[20:]
+	for i := 20; i < ihl*4; i++ {
+		ip[i] = 0x01 // IPOPT_NOOP
+	}
+	tcp := ip[ihl*4:]
 	binary.BigEndian.PutUint16(tcp[0:], 40000)
 	binary.BigEndian.PutUint16(tcp[2:], dport)
 	tcp[12] = 5 << 4 // data offset: 5 words
