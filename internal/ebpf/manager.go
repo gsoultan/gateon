@@ -63,6 +63,8 @@ type EbpfManager struct {
 	// revoke a live operator's knock every time unrelated settings were saved.
 	// Bounded by mgmtWhitelistMax, which is the kernel map's own capacity.
 	mgmtWhitelist map[uint32]struct{}
+	// mgmtWhitelist6 is the same for the IPv6 allowlist, mgmt_whitelist6.
+	mgmtWhitelist6 map[[16]byte]struct{}
 }
 
 // mgmtWhitelistMax mirrors max_entries on the mgmt_whitelist map in
@@ -165,6 +167,7 @@ func (m *EbpfManager) close() {
 	// installed from config is in the kernel any more. Keeping the set would
 	// make the next update issue deletes for keys a fresh map never had.
 	m.mgmtWhitelist = nil
+	m.mgmtWhitelist6 = nil
 
 	// The shunned map is gone with the objects above, so the count of what is in
 	// it is zero. Leaving the counter alone survived a detach and reattach and
@@ -204,22 +207,22 @@ func uint32ToIP(nn uint32) net.IP {
 	return ip
 }
 
-// ShunIP adds an IP to the XDP blocklist.
+// ShunIP adds an IP to the XDP blocklist: the address for IPv4, and for IPv6
+// the /64 it sits in (see ipv6.go).
 func (m *EbpfManager) ShunIP(ip string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	shunnedMap, ok := m.maps["shunned_ips"]
-	if !ok {
-		return fmt.Errorf("shunned_ips map not loaded")
-	}
-
-	ipUint, err := ipToUint32(ip)
+	mapName, key, err := shunKey(ip)
 	if err != nil {
 		return err
 	}
+	shunnedMap, ok := m.maps[mapName]
+	if !ok {
+		return fmt.Errorf("%s map not loaded", mapName)
+	}
 
-	logger.L.LogInfo("Shunning IP at XDP level", "ip", ip)
+	logger.L.LogInfo("Shunning IP at XDP level", "ip", ip, "map", mapName)
 	reason := uint32(1) // General reason
 
 	// UpdateNoExist rather than UpdateAny, so that "this is a new entry" and
@@ -227,7 +230,7 @@ func (m *EbpfManager) ShunIP(ip string) error {
 	// succeeded and both incremented, so shunning the same address twice --
 	// which is ordinary, since the same attacker trips the same rule again --
 	// left the counter above the number of entries in the map, permanently.
-	err = shunnedMap.Update(ipUint, reason, ebpf.UpdateNoExist)
+	err = shunnedMap.Update(key, reason, ebpf.UpdateNoExist)
 	switch {
 	case err == nil:
 		m.shunnedCount.Add(1)
@@ -241,61 +244,57 @@ func (m *EbpfManager) ShunIP(ip string) error {
 	}
 }
 
-// UnshunIP removes an IP from the XDP blocklist.
+// UnshunIP removes an IP from the XDP blocklist; for IPv6, the /64 it sits in.
 func (m *EbpfManager) UnshunIP(ip string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	shunnedMap, ok := m.maps["shunned_ips"]
-	if !ok {
-		return fmt.Errorf("shunned_ips map not loaded")
-	}
-
-	ipUint, err := ipToUint32(ip)
+	mapName, key, err := shunKey(ip)
 	if err != nil {
 		return err
 	}
+	shunnedMap, ok := m.maps[mapName]
+	if !ok {
+		return fmt.Errorf("%s map not loaded", mapName)
+	}
 
-	logger.L.LogInfo("Unshunning IP at XDP level", "ip", ip)
-	err = shunnedMap.Delete(ipUint)
+	logger.L.LogInfo("Unshunning IP at XDP level", "ip", ip, "map", mapName)
+	err = shunnedMap.Delete(key)
 	if err == nil {
 		m.shunnedCount.Add(-1)
 	}
 	return err
 }
 
-// whitelistKeys turns the configured addresses into map keys, dropping the ones
-// that cannot be encoded and stopping at the kernel map's capacity. Returned as
-// a set because the same address may legitimately appear twice in config.
-func whitelistKeys(ips []string) map[uint32]struct{} {
-	keys := make(map[uint32]struct{}, len(ips))
-	for _, ip := range ips {
-		if len(keys) >= mgmtWhitelistMax {
-			logger.L.LogWarn("management whitelist truncated at the kernel map's capacity",
-				"max_entries", mgmtWhitelistMax, "configured", len(ips))
-			break
-		}
-		ipUint, err := ipToUint32(ip)
+// whitelistKeys turns the configured addresses into map keys, one set per
+// address family, dropping the entries that cannot be encoded -- a CIDR, a
+// name -- and stopping each family at its kernel map's capacity. Sets, because
+// the same address may legitimately appear twice in config.
+func whitelistKeys(ips []string) allowlist {
+	keys := allowlist{v4: map[uint32]struct{}{}, v6: map[[16]byte]struct{}{}}
+	for _, s := range ips {
+		ip, is4, err := parseAddress(s)
 		if err != nil {
-			logger.L.LogWarn("skipping an unusable management-whitelist entry", "ip", ip, "error", err)
+			logger.L.LogWarn("skipping an unusable management-whitelist entry", "ip", s, "error", err)
 			continue
 		}
-		keys[ipUint] = struct{}{}
+		if is4 {
+			addBounded(keys.v4, binary.NativeEndian.Uint32(ip), s)
+			continue
+		}
+		addBounded(keys.v6, ipv6Key(ip), s)
 	}
 	return keys
 }
 
-// revokedWhitelistKeys is the set difference prev\next, sorted so the caller's
-// behaviour does not depend on Go's randomised map iteration order.
-func revokedWhitelistKeys(prev, next map[uint32]struct{}) []uint32 {
-	var revoked []uint32
-	for key := range prev {
-		if _, keep := next[key]; !keep {
-			revoked = append(revoked, key)
-		}
+// addBounded adds key to set unless the set is at the kernel map's capacity.
+func addBounded[K comparable](set map[K]struct{}, key K, ip string) {
+	if len(set) >= mgmtWhitelistMax {
+		logger.L.LogWarn("management whitelist entry dropped at the kernel map's capacity",
+			"max_entries", mgmtWhitelistMax, "ip", ip)
+		return
 	}
-	slices.Sort(revoked)
-	return revoked
+	set[key] = struct{}{}
 }
 
 // UpdateManagementWhitelist installs the configured set of IPs allowed to reach
@@ -319,39 +318,18 @@ func (m *EbpfManager) UpdateManagementWhitelist(ips []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	whitelistMap, ok := m.maps["mgmt_whitelist"]
-	if !ok {
-		return fmt.Errorf("mgmt_whitelist map not loaded")
+	v4Map, ok4 := m.maps["mgmt_whitelist"]
+	v6Map, ok6 := m.maps["mgmt_whitelist6"]
+	if !ok4 || !ok6 {
+		return fmt.Errorf("mgmt_whitelist maps not loaded")
 	}
 
-	var firstErr error
-	for _, key := range revokedWhitelistKeys(m.mgmtWhitelist, next) {
-		// ErrKeyNotExist is not a failure: the entry may have been evicted with
-		// the previous collection, or never made it in.
-		if err := whitelistMap.Delete(key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
-			logger.L.LogError("failed to revoke a management-whitelist entry; that address still "+
-				"reaches the management port at XDP level",
-				"ip", uint32ToIP(key).String(), "error", err)
-			firstErr = cmp.Or(firstErr, err)
-			continue
-		}
-		logger.L.LogInfo("Revoked management whitelist entry at XDP level", "ip", uint32ToIP(key).String())
-	}
-
-	installed := make(map[uint32]struct{}, len(next))
-	for key := range next {
-		if err := whitelistMap.Update(key, uint32(1), ebpf.UpdateAny); err != nil {
-			logger.L.LogError("failed to install a management-whitelist entry",
-				"ip", uint32ToIP(key).String(), "error", err)
-			firstErr = cmp.Or(firstErr, err)
-			continue
-		}
-		installed[key] = struct{}{}
-	}
 	// Track only what actually reached the kernel, so a later removal does not
 	// try to delete a key that was never written.
-	m.mgmtWhitelist = installed
-	return firstErr
+	var err4, err6 error
+	m.mgmtWhitelist, err4 = syncAllowlist(v4Map, m.mgmtWhitelist, next.v4, showIPv4Key, cmp.Compare[uint32])
+	m.mgmtWhitelist6, err6 = syncAllowlist(v6Map, m.mgmtWhitelist6, next.v6, showIPv6Key, compareIPv6Keys)
+	return cmp.Or(err4, err6)
 }
 
 // SetPortKnockingSequence sets the required port sequence for management access.
@@ -435,18 +413,17 @@ func (m *EbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) er
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	limitMap, ok := m.maps["adaptive_limits"]
-	if !ok {
-		return fmt.Errorf("adaptive_limits map not loaded")
-	}
-
-	ipUint, err := ipToUint32(ip)
+	mapName, key, err := limitKey(ip)
 	if err != nil {
 		return err
 	}
+	limitMap, ok := m.maps[mapName]
+	if !ok {
+		return fmt.Errorf("%s map not loaded", mapName)
+	}
 
 	ns := uint64(interval.Nanoseconds())
-	return limitMap.Update(ipUint, ns, ebpf.UpdateAny)
+	return limitMap.Update(key, ns, ebpf.UpdateAny)
 }
 
 // ClearAdaptiveRateLimit removes a per-IP adaptive rate limit.
@@ -465,17 +442,16 @@ func (m *EbpfManager) ClearAdaptiveRateLimit(ip string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	limitMap, ok := m.maps["adaptive_limits"]
-	if !ok {
-		return fmt.Errorf("adaptive_limits map not loaded")
-	}
-
-	ipUint, err := ipToUint32(ip)
+	mapName, key, err := limitKey(ip)
 	if err != nil {
 		return err
 	}
+	limitMap, ok := m.maps[mapName]
+	if !ok {
+		return fmt.Errorf("%s map not loaded", mapName)
+	}
 
-	if err := limitMap.Delete(ipUint); err != nil {
+	if err := limitMap.Delete(key); err != nil {
 		if errors.Is(err, ebpf.ErrKeyNotExist) {
 			return nil
 		}
@@ -528,6 +504,7 @@ var dropReasons = map[uint32]string{
 func (m *EbpfManager) GetTopIPs(limit int) ([]IPStat, error) {
 	m.mu.RLock()
 	ipMap := m.maps["ip_telemetry"]
+	ipMap6 := m.maps["ip_telemetry6"]
 	m.mu.RUnlock()
 
 	if ipMap == nil {
@@ -547,6 +524,12 @@ func (m *EbpfManager) GetTopIPs(limit int) ([]IPStat, error) {
 
 	if err := iter.Err(); err != nil {
 		return nil, err
+	}
+	if ipMap6 != nil {
+		var err error
+		if stats, err = topIPv6(ipMap6, stats); err != nil {
+			return nil, err
+		}
 	}
 
 	slices.SortFunc(stats, func(a, b IPStat) int {
@@ -613,15 +596,15 @@ func (m *EbpfManager) seedManagementWhitelist() int {
 	}
 
 	m.mu.RLock()
-	installed := len(m.mgmtWhitelist)
+	installed := len(m.mgmtWhitelist) + len(m.mgmtWhitelist6)
 	m.mu.RUnlock()
 
 	if installed == 0 {
 		logger.L.LogError("enable_mgmt_whitelist is on but no configured address could be installed, "+
 			"so kernel-side management filtering stays off. Enabling it with an empty allowlist would "+
 			"drop every packet to the management port at the NIC and lock you out, and detaching the "+
-			"program needs the access it just refused. mgmt_whitelist_ips takes bare IPv4 addresses; "+
-			"CIDRs and IPv6 cannot be expressed by this map.",
+			"program needs the access it just refused. mgmt_whitelist_ips takes bare IPv4 and IPv6 "+
+			"addresses; a CIDR cannot be expressed by these maps.",
 			"setting", "enable_mgmt_whitelist", "configured", len(m.config.MgmtWhitelistIps))
 	}
 	return installed

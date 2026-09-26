@@ -3,7 +3,9 @@
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/ipv6.h>
 #include <linux/in.h>
+#include <linux/in6.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
 #include <bpf/bpf_helpers.h>
@@ -112,6 +114,69 @@ struct {
     __type(value, __u32); // Count
 } lb_backends_count SEC(".maps");
 
+// ---------------------------------------------------------------------------
+// IPv6 state. Separate maps rather than one keyed by a mapped address, so the
+// IPv4 maps -- and the Go code, tests and dashboard that read them -- stay as
+// they are. Blocking and rate limiting are keyed by the /64 an address sits in:
+// an IPv6 client is handed a whole /64 and can send from any address in it, so
+// a shun or a limit per address is evaded by changing the last 64 bits. The
+// allowlist, telemetry, SYN tracking and knocking are per address. The hashes
+// that user space fills are allocated per entry, not up front, because on the
+// deployment target most of them stay nearly empty.
+// ---------------------------------------------------------------------------
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 16384);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, __u64);   // source /64: the prefix's eight bytes as they sit in the header
+    __type(value, __u32);
+} shunned_prefixes6 SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u64);   // source /64
+    __type(value, struct rl_state);
+} rate_limit_map6 SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, __u64);   // source /64
+    __type(value, __u64); // min interval in nanoseconds
+} adaptive_limits6 SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 16384);
+    __type(key, struct in6_addr);
+    __type(value, __u32); // SYNs seen since the source last sent anything else
+} tcp_conntrack6 SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1024);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct in6_addr);
+    __type(value, __u32);
+} mgmt_whitelist6 SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 10240);
+    __type(key, struct in6_addr);
+    __type(value, __u64); // packet count
+} ip_telemetry6 SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 1024);
+    __type(key, struct in6_addr);
+    __type(value, struct knock_state);
+} knocking_state6 SEC(".maps");
+
 struct ebpf_config {
     __u32 mgmt_port;
     __u32 enable_knocking;
@@ -158,14 +223,15 @@ static __always_inline void count_drop(__u32 reason) {
 // opens thousands.
 #define SYN_BURST_LIMIT 64
 
-// rate_limit_exceeded is the per-source token bucket shared by the XDP and TC
-// hooks: one token per interval up to RL_BURST_PACKETS, one token per packet.
-// Returns 1 when the packet must be dropped. Without an adaptive_limits entry
-// nothing is limited unless the operator turned the default limiter on; the
-// adaptive entries are explicit user-space decisions and always apply.
-static __always_inline int rate_limit_exceeded(__u32 src_ip, int default_enabled) {
+// token_bucket_exceeded is the per-source token bucket shared by both hooks and
+// both address families: one token per interval up to RL_BURST_PACKETS, one
+// token per packet. Returns 1 when the packet must be dropped. Without an entry
+// in limits nothing is limited unless the operator turned the default limiter
+// on; those entries are explicit user-space decisions and always apply.
+static __always_inline int token_bucket_exceeded(void *limits, void *states, const void *key,
+                                                 int default_enabled) {
     __u64 interval = RL_DEFAULT_INTERVAL_NS;
-    __u64 *custom = bpf_map_lookup_elem(&adaptive_limits, &src_ip);
+    __u64 *custom = bpf_map_lookup_elem(limits, key);
     if (custom) {
         interval = *custom;
     } else if (!default_enabled) {
@@ -174,10 +240,10 @@ static __always_inline int rate_limit_exceeded(__u32 src_ip, int default_enabled
     if (interval == 0) return 0;
 
     __u64 now = bpf_ktime_get_ns();
-    struct rl_state *st = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
+    struct rl_state *st = bpf_map_lookup_elem(states, key);
     if (!st) {
         struct rl_state fresh = { .last_ns = now, .tokens = RL_BURST_PACKETS - 1 };
-        bpf_map_update_elem(&rate_limit_map, &src_ip, &fresh, BPF_ANY);
+        bpf_map_update_elem(states, key, &fresh, BPF_ANY);
         return 0;
     }
 
@@ -190,6 +256,15 @@ static __always_inline int rate_limit_exceeded(__u32 src_ip, int default_enabled
     if (st->tokens == 0) return 1;
     st->tokens -= 1;
     return 0;
+}
+
+static __always_inline int rate_limit_exceeded(__u32 src_ip, int default_enabled) {
+    return token_bucket_exceeded(&adaptive_limits, &rate_limit_map, &src_ip, default_enabled);
+}
+
+// rate_limit_exceeded6 limits an IPv6 source by its /64; see shunned_prefixes6.
+static __always_inline int rate_limit_exceeded6(__u64 prefix, int default_enabled) {
+    return token_bucket_exceeded(&adaptive_limits6, &rate_limit_map6, &prefix, default_enabled);
 }
 
 // The fragment-offset bits of iphdr.frag_off (include/net/ip.h, not uapi).
@@ -264,23 +339,80 @@ static __always_inline struct l4_view read_l4(struct iphdr *iph, void *data_end)
     return v;
 }
 
+// l6_view is read_l6's answer: the fields of l4_view, the final header when it
+// was reached, and whether the packet carried a header read_l6 does not walk.
+struct l6_view {
+    __u16 dport;
+    int flags;
+    __u8 proto;  // TCP, UDP, ICMPv6, ...: the header the chain ends in
+    __u8 opaque; // a header this program does not walk: the port could be anything
+};
+
+// L6_FINAL finishes read_l6 for final header nh at literal offset OFF.
+#define L6_FINAL(v, nh, ip6, data_end, OFF)                           \
+    do {                                                              \
+        (v).proto = (nh);                                             \
+        if ((nh) == IPPROTO_TCP || (nh) == IPPROTO_UDP)               \
+            L4_READ_AT(v, ip6, data_end, OFF);                        \
+        else if ((nh) != IPPROTO_ICMPV6 && (nh) != IPPROTO_NONE)      \
+            (v).opaque = 1;                                           \
+    } while (0)
+
+// read_l6 finds an IPv6 packet's transport header as far as it can without
+// walking a header of arbitrary length, which the verifier refuses a loader
+// without CAP_PERFMON (see read_l4): straight after the fixed header, after one
+// Fragment header, or after one Hop-by-Hop header of the minimum size. That
+// last is the shape of an MLD report, which a gate must never catch: without
+// MLD, switches stop forwarding the multicast neighbour discovery rides on.
+// Anything else is opaque -- the caller knows it cannot see the port.
+static __always_inline struct l6_view read_l6(struct ipv6hdr *ip6, void *data_end) {
+    struct l6_view v = { .dport = 0, .flags = -1, .proto = 0, .opaque = 0 };
+    __u8 nh = ip6->nexthdr;
+    if (nh != IPPROTO_FRAGMENT && nh != IPPROTO_HOPOPTS) {
+        L6_FINAL(v, nh, ip6, data_end, 40);
+        return v;
+    }
+    __u8 *eh = (__u8 *)(ip6 + 1);
+    barrier_var(eh);
+    if ((void *)(eh + 8) > data_end) {
+        v.opaque = 1;
+        return v;
+    }
+    if (nh == IPPROTO_FRAGMENT) {
+        // A later fragment carries no transport header; its first fragment is
+        // the one the gates see.
+        if ((((__u16)eh[2] << 8) | eh[3]) & 0xFFF8)
+            return v;
+    } else if (eh[1] != 0) {
+        v.opaque = 1;
+        return v;
+    }
+    __u8 inner = eh[0];
+    L6_FINAL(v, inner, ip6, data_end, 48);
+    return v;
+}
+
 #define MAX_KNOCK_STEPS 8
 #define KNOCK_TIMEOUT_NS 10000000000LL // 10 seconds between consecutive knocks
 // Returned when the packet is neither a knock nor aimed at the management port,
 // so the caller carries on with the rest of the pipeline.
 #define KNOCK_NOT_HANDLED -1
 
-// handle_port_knocking runs for every TCP packet while knocking is enabled: it
+// port_knock runs for every TCP packet while knocking is enabled: it
 // has to see the knocks, and a knock is by definition not addressed to the
 // management port. It used to be reached only for management-port packets, so
 // the sequence loop below was dead and the port could never be opened.
 //
 // A knock is always consumed (dropped) -- whether it advanced the sequence,
 // restarted it or broke it -- so the knock ports never answer.
-static __always_inline int handle_port_knocking(__u32 src_ip, __u16 dest_port, struct ebpf_config *cfg) {
+//
+// states and allowed are the knock-state map and the allowlist of the source's
+// address family, and src points at the source address keying both.
+static __always_inline int port_knock(void *states, void *allowed, const void *src, __u16 dest_port,
+                                      struct ebpf_config *cfg) {
     if (dest_port == cfg->mgmt_port) {
         // Whitelisted, or completed the sequence: pass. Anyone else: drop.
-        if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return XDP_PASS;
+        if (bpf_map_lookup_elem(allowed, src)) return XDP_PASS;
         count_drop(DROP_REASON_INVALID_PORT_KNOCK);
         return XDP_DROP;
     }
@@ -293,22 +425,22 @@ static __always_inline int handle_port_knocking(__u32 src_ip, __u16 dest_port, s
         if (dest_port != *expected_port) continue;
 
         __u64 now = bpf_ktime_get_ns();
-        struct knock_state *st = bpf_map_lookup_elem(&knocking_state, &src_ip);
+        struct knock_state *st = bpf_map_lookup_elem(states, src);
         if (st && now - st->last_ns > KNOCK_TIMEOUT_NS) {
             // Too slow: a half-finished sequence does not stay open forever.
-            bpf_map_delete_elem(&knocking_state, &src_ip);
+            bpf_map_delete_elem(states, src);
             st = NULL;
         }
         if (!st) {
             if (i == 0) {
                 struct knock_state fresh = { .step = 1, .last_ns = now };
-                bpf_map_update_elem(&knocking_state, &src_ip, &fresh, BPF_ANY);
+                bpf_map_update_elem(states, src, &fresh, BPF_ANY);
             }
             return XDP_DROP;
         }
         if (i != st->step) {
             // Out of order: start over from nothing.
-            bpf_map_delete_elem(&knocking_state, &src_ip);
+            bpf_map_delete_elem(states, src);
             return XDP_DROP;
         }
         st->step += 1;
@@ -320,13 +452,17 @@ static __always_inline int handle_port_knocking(__u32 src_ip, __u16 dest_port, s
         if (!next_port || *next_port == 0) {
             // Sequence complete: open the management port for this source.
             __u32 val = 1;
-            bpf_map_update_elem(&mgmt_whitelist, &src_ip, &val, BPF_ANY);
-            bpf_map_delete_elem(&knocking_state, &src_ip);
+            bpf_map_update_elem(allowed, src, &val, BPF_ANY);
+            bpf_map_delete_elem(states, src);
         }
         return XDP_DROP;
     }
 
     return KNOCK_NOT_HANDLED;
+}
+
+static __always_inline int handle_port_knocking(__u32 src_ip, __u16 dest_port, struct ebpf_config *cfg) {
+    return port_knock(&knocking_state, &mgmt_whitelist, &src_ip, dest_port, cfg);
 }
 
 static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *eth) {
@@ -462,6 +598,106 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
     return XDP_PASS;
 }
 
+// src_prefix64 is the /64 an IPv6 source sits in, as shunned_prefixes6 and the
+// IPv6 rate limiter key it: the address's first eight bytes, unconverted.
+static __always_inline __u64 src_prefix64(const struct in6_addr *src) {
+    __u64 prefix;
+    __builtin_memcpy(&prefix, src, sizeof(prefix));
+    return prefix;
+}
+
+static __always_inline void count_source6(const struct in6_addr *src) {
+    __u64 *count = bpf_map_lookup_elem(&ip_telemetry6, src);
+    if (count) {
+        __sync_fetch_and_add(count, 1);
+        return;
+    }
+    __u64 one = 1;
+    bpf_map_update_elem(&ip_telemetry6, src, &one, BPF_ANY);
+}
+
+// syn_flood6 is the IPv4 SYN-burst guard for one IPv6 source.
+static __always_inline int syn_flood6(const struct in6_addr *src, int flags) {
+    if (!(flags & TCP_FLAG_BITS_SYN) || (flags & TCP_FLAG_BITS_ACK)) {
+        bpf_map_delete_elem(&tcp_conntrack6, src);
+        return 0;
+    }
+    __u32 *pending = bpf_map_lookup_elem(&tcp_conntrack6, src);
+    if (!pending) {
+        __u32 one = 1;
+        bpf_map_update_elem(&tcp_conntrack6, src, &one, BPF_ANY);
+        return 0;
+    }
+    if (*pending >= SYN_BURST_LIMIT)
+        return 1;
+    __sync_fetch_and_add(pending, 1);
+    return 0;
+}
+
+// mgmt_gate6 is the IPv4 management-port gate, plus a rule for a packet whose
+// port read_l6 cannot see: while a gate is on, it is dropped unless its source
+// is on the allowlist. It might be addressed to the management port, and a
+// header this program does not walk must not be a way around the gate. Returns
+// KNOCK_NOT_HANDLED when the gate has no say.
+static __always_inline int mgmt_gate6(struct ebpf_config *cfg, const struct in6_addr *src,
+                                      const struct l6_view *l6) {
+    if (!cfg || cfg->mgmt_port == 0 || !(cfg->enable_knocking || cfg->enable_mgmt_whitelist))
+        return KNOCK_NOT_HANDLED;
+    if (l6->opaque) {
+        if (bpf_map_lookup_elem(&mgmt_whitelist6, src))
+            return KNOCK_NOT_HANDLED;
+        count_drop(DROP_REASON_INVALID_PORT_KNOCK);
+        return XDP_DROP;
+    }
+    if (l6->proto != IPPROTO_TCP || !l6->dport)
+        return KNOCK_NOT_HANDLED;
+    if (cfg->enable_knocking)
+        return port_knock(&knocking_state6, &mgmt_whitelist6, src, l6->dport, cfg);
+    if (l6->dport != cfg->mgmt_port)
+        return KNOCK_NOT_HANDLED;
+    if (bpf_map_lookup_elem(&mgmt_whitelist6, src))
+        return XDP_PASS;
+    count_drop(DROP_REASON_INVALID_PORT_KNOCK);
+    return XDP_DROP;
+}
+
+// handle_ipv6_packet is handle_ip_packet for IPv6, in the same order: count the
+// source, the blocklist, the SYN-burst guard, the management gate, the rate
+// limiter. Phantom ports and load balancing stay IPv4-only.
+static __always_inline int handle_ipv6_packet(struct xdp_md *ctx, struct ethhdr *eth) {
+    void *data_end = (void *)(long)ctx->data_end;
+    struct ipv6hdr *ip6 = (void *)(eth + 1);
+    if ((void *)(ip6 + 1) > data_end)
+        return XDP_PASS;
+
+    struct in6_addr src = ip6->saddr;
+    __u64 prefix = src_prefix64(&src);
+    count_source6(&src);
+
+    if (bpf_map_lookup_elem(&shunned_prefixes6, &prefix)) {
+        count_drop(DROP_REASON_SHUNNED_IP);
+        return XDP_DROP;
+    }
+
+    struct l6_view l6 = read_l6(ip6, data_end);
+    if (l6.proto == IPPROTO_TCP && l6.flags >= 0 && syn_flood6(&src, l6.flags)) {
+        count_drop(DROP_REASON_SYN_FLOOD);
+        return XDP_DROP;
+    }
+
+    __u32 config_key = 0;
+    struct ebpf_config *cfg = bpf_map_lookup_elem(&global_ebpf_config, &config_key);
+    int gate = mgmt_gate6(cfg, &src, &l6);
+    if (gate != KNOCK_NOT_HANDLED)
+        return gate;
+
+    if (rate_limit_exceeded6(prefix, cfg && cfg->enable_rate_limit)) {
+        count_drop(DROP_REASON_RATE_LIMITED);
+        return XDP_DROP;
+    }
+    return XDP_PASS;
+}
+
 SEC("xdp")
 int xdp_gateon_main(struct xdp_md *ctx) {
     void *data_end = (void *)(long)ctx->data_end;
@@ -473,6 +709,9 @@ int xdp_gateon_main(struct xdp_md *ctx) {
 
     if (eth->h_proto == __constant_htons(ETH_P_IP)) {
         return handle_ip_packet(ctx, eth);
+    }
+    if (eth->h_proto == __constant_htons(ETH_P_IPV6)) {
+        return handle_ipv6_packet(ctx, eth);
     }
 
     return XDP_PASS;
@@ -551,6 +790,38 @@ static __always_inline int tc_filter_ipv4(struct iphdr *iph, void *data_end) {
     return TC_ACT_OK;
 }
 
+// tc_filter_ipv6 is tc_filter_ipv4 for IPv6, with mgmt_gate6's rule for a
+// header read_l6 does not walk. Like the IPv4 path it does no port knocking.
+static __always_inline int tc_filter_ipv6(struct ipv6hdr *ip6, void *data_end) {
+    struct in6_addr src = ip6->saddr;
+    __u64 prefix = src_prefix64(&src);
+
+    __u32 config_key = 0;
+    struct ebpf_config *cfg = bpf_map_lookup_elem(&global_ebpf_config, &config_key);
+    if (cfg && cfg->enable_mgmt_whitelist) {
+        if (bpf_map_lookup_elem(&mgmt_whitelist6, &src)) return TC_ACT_OK;
+        if (cfg->mgmt_port > 0) {
+            struct l6_view l6 = read_l6(ip6, data_end);
+            if (l6.opaque || (l6.proto == IPPROTO_TCP && l6.dport == cfg->mgmt_port)) {
+                count_drop(DROP_REASON_INVALID_PORT_KNOCK);
+                return TC_ACT_SHOT;
+            }
+        }
+    }
+
+    count_source6(&src);
+
+    if (bpf_map_lookup_elem(&shunned_prefixes6, &prefix)) {
+        count_drop(DROP_REASON_SHUNNED_IP);
+        return TC_ACT_SHOT;
+    }
+    if (rate_limit_exceeded6(prefix, cfg && cfg->enable_rate_limit)) {
+        count_drop(DROP_REASON_RATE_LIMITED);
+        return TC_ACT_SHOT;
+    }
+    return TC_ACT_OK;
+}
+
 SEC("tc")
 int tc_gateon_ingress(struct __sk_buff *ctx) {
     void *data_end = (void *)(long)ctx->data_end;
@@ -560,14 +831,19 @@ int tc_gateon_ingress(struct __sk_buff *ctx) {
     if ((void *)(eth + 1) > data_end)
         return TC_ACT_OK;
 
-    if (eth->h_proto != __constant_htons(ETH_P_IP))
-        return TC_ACT_OK;
-
-    struct iphdr *iph = (void *)(eth + 1);
-    if ((void *)(iph + 1) > data_end)
-        return TC_ACT_OK;
-
-    return tc_filter_ipv4(iph, data_end);
+    if (eth->h_proto == __constant_htons(ETH_P_IP)) {
+        struct iphdr *iph = (void *)(eth + 1);
+        if ((void *)(iph + 1) > data_end)
+            return TC_ACT_OK;
+        return tc_filter_ipv4(iph, data_end);
+    }
+    if (eth->h_proto == __constant_htons(ETH_P_IPV6)) {
+        struct ipv6hdr *ip6 = (void *)(eth + 1);
+        if ((void *)(ip6 + 1) > data_end)
+            return TC_ACT_OK;
+        return tc_filter_ipv6(ip6, data_end);
+    }
+    return TC_ACT_OK;
 }
 
 char _license[] SEC("license") = "GPL";

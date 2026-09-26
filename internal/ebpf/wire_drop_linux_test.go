@@ -28,12 +28,18 @@ import (
 
 const capNetRaw = 13
 
-// Addresses from the benchmarking range (RFC 2544), so nothing here can collide
-// with a network the host is really on.
+// Addresses from the benchmarking range (RFC 2544) and the documentation prefix
+// (RFC 3849), so nothing here can collide with a network the host is really on.
+// The IPv6 shunned source and sentinel sit in /64s of their own, because an
+// IPv6 shun covers the whole /64.
 var (
 	wireLocal    = net.IPv4(198, 18, 0, 2)
 	wireShunned  = net.IPv4(198, 18, 0, 10)
 	wireSentinel = net.IPv4(198, 18, 0, 11)
+
+	wireLocal6    = net.ParseIP("2001:db8:18::2")
+	wireShunned6  = net.ParseIP("2001:db8:19::10")
+	wireSentinel6 = net.ParseIP("2001:db8:20::11")
 )
 
 // requireRawSockets skips unless frames can be injected with AF_PACKET. That is
@@ -77,12 +83,17 @@ func newWirePair(t *testing.T) (sender, receiver *net.Interface) {
 	if err != nil {
 		t.Fatalf("resolve gtn-w1: %v", err)
 	}
-	addr, err := netlink.ParseAddr("198.18.0.2/24")
-	if err != nil {
-		t.Fatalf("parse address: %v", err)
-	}
-	if err := netlink.AddrAdd(peer, addr); err != nil {
-		t.Fatalf("address gtn-w1: %v", err)
+	for _, cidr := range []string{"198.18.0.2/24", "2001:db8:18::2/64"} {
+		addr, err := netlink.ParseAddr(cidr)
+		if err != nil {
+			t.Fatalf("parse address: %v", err)
+		}
+		// No duplicate address detection: a tentative IPv6 address accepts
+		// nothing for the second or so DAD takes.
+		addr.Flags = unix.IFA_F_NODAD
+		if err := netlink.AddrAdd(peer, addr); err != nil {
+			t.Fatalf("address gtn-w1 with %s: %v", cidr, err)
+		}
 	}
 	for _, l := range []netlink.Link{veth, peer} {
 		if err := netlink.LinkSetUp(l); err != nil {
@@ -110,6 +121,8 @@ func newInjector(t *testing.T, iface *net.Interface) func(frame []byte) {
 		t.Fatalf("AF_PACKET socket: %v", err)
 	}
 	t.Cleanup(func() { _ = unix.Close(fd) })
+	// The protocol here only labels the socket's own copy; the frame's
+	// EtherType is what the receiving side reads, IPv4 or IPv6.
 	sa := &unix.SockaddrLinklayer{Ifindex: iface.Index, Protocol: htons(unix.ETH_P_IP)}
 	return func(frame []byte) {
 		t.Helper()
@@ -150,14 +163,68 @@ func udpFrame(to, from *net.Interface, src net.IP, port int, payload string) []b
 }
 
 func ipv4Checksum(header []byte) uint16 {
-	var sum uint32
-	for i := 0; i+1 < len(header); i += 2 {
-		sum += uint32(header[i])<<8 | uint32(header[i+1])
+	return ^onesSum(0, header)
+}
+
+// onesSum folds b into a running one's-complement sum.
+func onesSum(sum uint32, b []byte) uint16 {
+	for i := 0; i < len(b); i += 2 {
+		word := uint32(b[i]) << 8
+		if i+1 < len(b) {
+			word |= uint32(b[i+1])
+		}
+		sum += word
 	}
 	for sum > 0xffff {
 		sum = sum&0xffff + sum>>16
 	}
-	return ^uint16(sum)
+	return uint16(sum)
+}
+
+// udpFrame6 is udpFrame for IPv6. The UDP checksum is mandatory there -- the
+// stack drops a datagram without one -- so it is computed over the pseudo-header.
+func udpFrame6(to, from *net.Interface, src net.IP, port int, payload string) []byte {
+	udpLen := 8 + len(payload)
+	frame := make([]byte, 14+40+udpLen)
+	copy(frame[0:6], to.HardwareAddr)
+	copy(frame[6:12], from.HardwareAddr)
+	binary.BigEndian.PutUint16(frame[12:], 0x86DD) // ETH_P_IPV6
+	ip6 := frame[14:54]
+	ip6[0] = 0x60
+	binary.BigEndian.PutUint16(ip6[4:], uint16(udpLen))
+	ip6[6] = 17 // IPPROTO_UDP
+	ip6[7] = 64 // hop limit
+	copy(ip6[8:24], src.To16())
+	copy(ip6[24:40], wireLocal6.To16())
+	udp := frame[54:]
+	binary.BigEndian.PutUint16(udp[0:], 40000)
+	binary.BigEndian.PutUint16(udp[2:], uint16(port))
+	binary.BigEndian.PutUint16(udp[4:], uint16(udpLen))
+	copy(udp[8:], payload)
+
+	pseudo := make([]byte, 40)
+	copy(pseudo[0:32], ip6[8:40])
+	binary.BigEndian.PutUint32(pseudo[32:], uint32(udpLen))
+	pseudo[39] = 17
+	sum := ^onesSum(uint32(onesSum(0, pseudo)), udp)
+	if sum == 0 {
+		sum = 0xffff
+	}
+	binary.BigEndian.PutUint16(udp[6:], sum)
+	return frame
+}
+
+// wireFamily is one address family's half of the wire test.
+type wireFamily struct {
+	name                     string
+	network                  string // for net.ListenUDP
+	local, shunned, sentinel net.IP
+	frame                    func(to, from *net.Interface, src net.IP, port int, payload string) []byte
+}
+
+var wireFamilies = []wireFamily{
+	{"IPv4", "udp4", wireLocal, wireShunned, wireSentinel, udpFrame},
+	{"IPv6", "udp6", wireLocal6, wireShunned6, wireSentinel6, udpFrame6},
 }
 
 // readUntil returns every payload the socket delivers up to and including
@@ -209,40 +276,48 @@ func TestWireShunDropsRealPacketsOnEachHook(t *testing.T) {
 		{"TC", &gateonv1.EbpfConfig{Enabled: true, TcFiltering: true}, []string{attachModeTCX, attachModeClsact}},
 	}
 	for _, hook := range hooks {
-		t.Run(hook.name, func(t *testing.T) {
-			sender, receiver := newWirePair(t)
-			cfg := proto.Clone(hook.cfg).(*gateonv1.EbpfConfig)
-			cfg.Interface = receiver.Name
-			m := startOn(t, cfg, hook.modes)
-
-			conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: wireLocal})
-			if err != nil {
-				t.Fatalf("listen: %v", err)
-			}
-			defer conn.Close()
-			port := conn.LocalAddr().(*net.UDPAddr).Port
-			send := newInjector(t, sender)
-
-			send(udpFrame(receiver, sender, wireShunned, port, "before"))
-			readUntil(t, conn, "before") // the control: this path delivers at all
-
-			if err := m.ShunIP(wireShunned.String()); err != nil {
-				t.Fatalf("ShunIP: %v", err)
-			}
-			send(udpFrame(receiver, sender, wireShunned, port, "shunned"))
-			waitForDrops(t, m, "shunned_ip", 1)
-			send(udpFrame(receiver, sender, wireSentinel, port, "sentinel"))
-			if got := readUntil(t, conn, "sentinel"); slices.Contains(got, "shunned") {
-				t.Errorf("a shunned source's packet reached the socket (delivered %q)", got)
-			}
-
-			if err := m.UnshunIP(wireShunned.String()); err != nil {
-				t.Fatalf("UnshunIP: %v", err)
-			}
-			send(udpFrame(receiver, sender, wireShunned, port, "after"))
-			readUntil(t, conn, "after")
-		})
+		for _, fam := range wireFamilies {
+			t.Run(hook.name+"/"+fam.name, func(t *testing.T) {
+				sender, receiver := newWirePair(t)
+				cfg := proto.Clone(hook.cfg).(*gateonv1.EbpfConfig)
+				cfg.Interface = receiver.Name
+				m := startOn(t, cfg, hook.modes)
+				wireShunCycle(t, m, fam, sender, receiver)
+			})
+		}
 	}
+}
+
+// wireShunCycle sends a source's packet, shuns it, shows its next packet is
+// dropped by the hook and never delivered, then lifts the shun.
+func wireShunCycle(t *testing.T, m *EbpfManager, fam wireFamily, sender, receiver *net.Interface) {
+	t.Helper()
+	conn, err := net.ListenUDP(fam.network, &net.UDPAddr{IP: fam.local})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer conn.Close()
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	send := newInjector(t, sender)
+
+	send(fam.frame(receiver, sender, fam.shunned, port, "before"))
+	readUntil(t, conn, "before") // the control: this path delivers at all
+
+	if err := m.ShunIP(fam.shunned.String()); err != nil {
+		t.Fatalf("ShunIP: %v", err)
+	}
+	send(fam.frame(receiver, sender, fam.shunned, port, "shunned"))
+	waitForDrops(t, m, "shunned_ip", 1)
+	send(fam.frame(receiver, sender, fam.sentinel, port, "sentinel"))
+	if got := readUntil(t, conn, "sentinel"); slices.Contains(got, "shunned") {
+		t.Errorf("a shunned source's packet reached the socket (delivered %q)", got)
+	}
+
+	if err := m.UnshunIP(fam.shunned.String()); err != nil {
+		t.Fatalf("UnshunIP: %v", err)
+	}
+	send(fam.frame(receiver, sender, fam.shunned, port, "after"))
+	readUntil(t, conn, "after")
 }
 
 // startOn starts a manager the way the supervisor does and fails unless it

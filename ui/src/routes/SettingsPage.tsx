@@ -2249,7 +2249,7 @@ export default function SettingsPage() {
                 <>
                   <TagsInput
                     label="Allowed Addresses"
-                    description="Bare IPv4 addresses only. Ranges and IPv6 cannot be expressed here and are ignored."
+                    description="Bare IPv4 or IPv6 addresses; ranges cannot be expressed here and are ignored. A family with nothing listed is closed: list only IPv4 and no IPv6 address reaches the management port."
                     placeholder="203.0.113.7"
                     value={config.ebpf.mgmtWhitelistIps || []}
                     onChange={(val) => setConfig({...config, ebpf: {...config.ebpf!, mgmtWhitelistIps: val}})}

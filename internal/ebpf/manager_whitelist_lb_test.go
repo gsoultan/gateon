@@ -4,7 +4,9 @@
 package ebpf
 
 import (
+	"cmp"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"testing"
@@ -110,7 +112,7 @@ func TestRevokedWhitelistKeysNamesOnlyWhatConfigDropped(t *testing.T) {
 		{"replaced", []string{"10.0.0.1"}, []string{"10.0.0.9"}, []string{"10.0.0.1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := revokedWhitelistKeys(set(t, tc.prev...), set(t, tc.next...))
+			got := revokedWhitelistKeys(set(t, tc.prev...), set(t, tc.next...), cmp.Compare[uint32])
 			var want []uint32
 			for _, ip := range tc.want {
 				want = append(want, key(t, ip))
@@ -135,27 +137,30 @@ func TestWhitelistKeysStopsAtTheKernelMapCapacity(t *testing.T) {
 		ips = append(ips, fmt.Sprintf("10.%d.%d.%d", i/65536, (i/256)%256, i%256))
 	}
 
-	if got := len(whitelistKeys(ips)); got != mgmtWhitelistMax {
+	if got := len(whitelistKeys(ips).v4); got != mgmtWhitelistMax {
 		t.Errorf("whitelistKeys kept %d of %d addresses, want %d: the set has to stay bounded "+
 			"by the kernel map it mirrors", got, len(ips), mgmtWhitelistMax)
 	}
 }
 
-// TestWhitelistKeysDropsWhatItCannotEncode: an address the map cannot be keyed
+// TestWhitelistKeysDropsWhatItCannotEncode: an address the maps cannot be keyed
 // by must not be tracked either, or the next update tries to delete a key that
-// was never there.
+// was never there. Each family goes to its own map.
 func TestWhitelistKeysDropsWhatItCannotEncode(t *testing.T) {
 	keys := whitelistKeys([]string{"10.0.0.1", "not-an-ip", "2001:db8::1", "10.0.0.1"})
 
-	if len(keys) != 1 {
-		t.Fatalf("whitelistKeys kept %d entries, want 1: only 10.0.0.1 is encodable, and it "+
-			"appears twice", len(keys))
+	if len(keys.v4) != 1 || len(keys.v6) != 1 {
+		t.Fatalf("whitelistKeys kept %d IPv4 and %d IPv6 entries, want 1 and 1: 10.0.0.1 appears "+
+			"twice and not-an-ip is not an address", len(keys.v4), len(keys.v6))
 	}
 	want, err := ipToUint32("10.0.0.1")
 	if err != nil {
 		t.Fatalf("ipToUint32: %v", err)
 	}
-	if _, ok := keys[want]; !ok {
-		t.Error("the one usable address was not kept")
+	if _, ok := keys.v4[want]; !ok {
+		t.Error("the usable IPv4 address was not kept")
+	}
+	if _, ok := keys.v6[ipv6Key(net.ParseIP("2001:db8::1"))]; !ok {
+		t.Error("the IPv6 address was not kept for mgmt_whitelist6")
 	}
 }

@@ -11,6 +11,27 @@ here after the fact.
 
 ## Unreleased
 
+### eBPF filters IPv6 — **an IPv4-only kernel allowlist now closes the management port to IPv6**
+
+Both eBPF programs passed every IPv6 packet: no shun, no rate limit, no SYN
+guard, and no management gate, so with the kernel allowlist on an IPv6 address
+reached the management port past it. IPv6 now gets all four. Blocking and rate
+limiting are keyed by the /64, because an IPv6 client can send from any address
+in its /64; shunning one address shuns its /64. See ADR 0020.
+
+**Who is affected:**
+
+- An install with `enable_mgmt_whitelist` on whose list holds only IPv4
+  addresses. IPv6 can no longer reach the management port, as the setting
+  always claimed. **If you reach the dashboard over IPv6, add that address to
+  `mgmt_whitelist_ips` before upgrading**, which now takes IPv6 addresses.
+- While the allowlist or port knocking is on, an IPv6 packet from an unlisted
+  source whose extension headers the parser does not walk (a routing header,
+  destination options, IPsec) is dropped, since it might be addressed to the
+  management port. MLD and neighbour discovery are never dropped.
+- A dual-stack install with eBPF on: IPv6 traffic now pays the program's cost
+  per packet, and an IPv6 source can be shunned and rate limited.
+
 ### The packaged service runs as the `gateon` account, not root — **check files it reads outside `/etc/gateon`**
 
 The .deb, the .rpm and `gateon install` ran the gateway as root. The unit now

@@ -1569,9 +1569,11 @@ export type EbpfConfig = Message<"gateon.v1.EbpfConfig"> & {
    * so the map is only ever populated by a completed port knock.
    *
    * It is refused unless MgmtWhitelistIps resolves to at least one address.
-   * The map is an exact-match IPv4 hash, so an enable with nothing in it means
+   * The maps are exact-match hashes, so an enable with nothing in them means
    * "drop every packet to the management port" -- an operator would lock
    * themselves out at the NIC with no way back except detaching the program.
+   * One switch covers both address families: with only IPv4 addresses listed,
+   * no IPv6 address can reach the management port, and the other way round.
    *
    * @generated from field: bool enable_mgmt_whitelist = 14;
    */
@@ -1581,10 +1583,10 @@ export type EbpfConfig = Message<"gateon.v1.EbpfConfig"> & {
    * MgmtWhitelistIps are the addresses allowed to reach MgmtPort, enforced in
    * the kernel before the packet reaches the stack.
    *
-   * Bare IPv4 addresses only, deliberately not ManagementConfig.AllowedIps:
-   * that list is CIDR-capable and defaults to 0.0.0.0/0, neither of which an
-   * exact-match __u32 hash can express. Anything unencodable is skipped with a
-   * log line rather than silently widening or narrowing the rule.
+   * Bare IPv4 and IPv6 addresses, deliberately not ManagementConfig.AllowedIps:
+   * that list is CIDR-capable and defaults to 0.0.0.0/0, which an exact-match
+   * hash cannot express. Anything unencodable is skipped with a log line rather
+   * than silently widening or narrowing the rule.
    *
    * @generated from field: repeated string mgmt_whitelist_ips = 15;
    */

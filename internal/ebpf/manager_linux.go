@@ -40,6 +40,10 @@ var mapNames = []string{
 	"phantom_ports",
 	"global_ebpf_config",
 	"ip_telemetry",
+	"shunned_prefixes6",
+	"adaptive_limits6",
+	"mgmt_whitelist6",
+	"ip_telemetry6",
 }
 
 // ebpfConfigVal mirrors `struct ebpf_config` in bpf/xdp_rate_limit.c. cilium/ebpf
