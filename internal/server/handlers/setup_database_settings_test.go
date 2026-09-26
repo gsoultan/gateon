@@ -135,10 +135,10 @@ func TestSetupHandsTheWizardsDatabasesToSetup(t *testing.T) {
 	// Loopback port 1: refused at once, so a handler that dials it fails fast
 	// without reaching past this host.
 	for name, body := range map[string]string{
-		"dashboard": `{"adminUsername":"admin","pasetoSecret":"` + secret + `",` +
+		"dashboard": `{"adminUsername":"admin","pasetoSecret":"` + secret + `","setupToken":"tok-1234567890abcdef",` +
 			`"databaseConfig":{"driver":"sqlite","sqlitePath":"chosen.db"},` +
 			`"loggingDatabaseConfig":{"driver":"postgres","host":"127.0.0.1","port":1,"sslMode":"require"}}`,
-		"proto names": `{"admin_username":"admin","paseto_secret":"` + secret + `",` +
+		"proto names": `{"admin_username":"admin","paseto_secret":"` + secret + `","setup_token":"tok-1234567890abcdef",` +
 			`"database_config":{"driver":"sqlite","sqlite_path":"chosen.db"},` +
 			`"logging_database_config":{"driver":"postgres","host":"127.0.0.1","port":1,"ssl_mode":"require"}}`,
 	} {
@@ -160,6 +160,11 @@ func TestSetupHandsTheWizardsDatabasesToSetup(t *testing.T) {
 			}
 			if got := svc.got.GetPasetoSecret(); got != secret {
 				t.Errorf("Setup got paseto_secret %q, want the one sent", got)
+			}
+			// Setup checks the setup token; a handler that dropped it would refuse
+			// every REST setup.
+			if got := svc.got.GetSetupToken(); got != "tok-1234567890abcdef" {
+				t.Errorf("Setup got setup_token %q, want the one sent", got)
 			}
 		})
 	}

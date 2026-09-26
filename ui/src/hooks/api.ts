@@ -10,7 +10,6 @@ import { getApiBaseUrl } from "../store/useApiConfigStore";
 import type {
   SetupRequest,
   SetupResponse,
-  DatabaseConfig,
   GetDiagnosticsResponse,
   GetCloudflareIPsResponse,
   TraceRouteResponse,
@@ -134,10 +133,9 @@ export async function setupGateon(req: SetupRequest): Promise<SetupResponse> {
   return res;
 }
 
-export async function testDbConnection(payload: {
-  databaseUrl?: string;
-  databaseConfig?: DatabaseConfig;
-}): Promise<boolean> {
+export async function testDbConnection(
+  payload: Pick<SetupRequest, "databaseUrl" | "databaseConfig" | "setupToken">,
+): Promise<boolean> {
   const res = await apiFetch("/v1/setup/test-db", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

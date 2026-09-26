@@ -31,7 +31,11 @@ test('the wizard tests the database it is given, and saves the one it submits', 
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
 
-  // Account, then Security, whose PASETO secret the wizard generates.
+  // The setup token the gateway wrote when it started: what the operator has
+  // and a passer-by on the management port does not. Then the account, then
+  // Security, whose PASETO secret the wizard generates.
+  const tokenFile = path.join(dataDir, 'setup-token');
+  await page.getByRole('textbox', { name: 'Setup token' }).fill(fs.readFileSync(tokenFile, 'utf8').trim());
   await page.getByRole('textbox', { name: 'Username' }).fill(admin);
   await page.getByRole('textbox', { name: 'Password', exact: true }).fill(password);
   await page.getByRole('textbox', { name: 'Confirm', exact: true }).fill(password);
@@ -62,6 +66,9 @@ test('the wizard tests the database it is given, and saves the one it submits', 
   await page.getByRole('button', { name: 'Complete System Setup' }).click();
   expect((await setup).status()).toBe(200);
   await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
+
+  // The token opened setup once and is gone with it.
+  expect(fs.existsSync(tokenFile), 'the setup token file outlived setup').toBe(false);
 
   // Saved where the next start reads it from.
   const global = JSON.parse(fs.readFileSync(path.join(dataDir, 'global.json'), 'utf8'));

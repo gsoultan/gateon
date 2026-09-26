@@ -104,7 +104,7 @@ export default function SetupPage() {
   const testDb = async (payload: DbPayload) => {
     setLoading(true);
     try {
-      await testDbConnection(payload);
+      await testDbConnection({ ...payload, setupToken: form.values.setupToken.trim() });
       return true;
     } catch (e) {
       // The message from the server's JSON error body, not the body itself.
@@ -142,7 +142,8 @@ export default function SetupPage() {
   });
 
   const nextStep = async () => {
-    const adminValid = form.validateField("adminUsername").hasError === false &&
+    const adminValid = form.validateField("setupToken").hasError === false &&
+      form.validateField("adminUsername").hasError === false &&
       form.validateField("adminPassword").hasError === false &&
       form.validateField("confirmPassword").hasError === false;
     const securityValid = form.validateField("pasetoSecret").hasError === false;
@@ -190,6 +191,7 @@ export default function SetupPage() {
 
   const form = useForm({
     initialValues: {
+      setupToken: "",
       adminUsername: "admin",
       adminPassword: "",
       confirmPassword: "",
@@ -221,6 +223,7 @@ export default function SetupPage() {
       logDbSslMode: "disable",
     },
     validate: {
+      setupToken: (value) => (!value.trim() ? "The setup token is required" : null),
       adminUsername: (value) => (value.length < 3 ? "Username too short" : null),
       adminPassword: (val) => (val.length < 8 ? "Password must be at least 8 characters" : null),
       confirmPassword: (val, values) => (val !== values.adminPassword ? "Passwords do not match" : null),
@@ -246,6 +249,7 @@ export default function SetupPage() {
       adminUsername: values.adminUsername,
       adminPassword: values.adminPassword,
       pasetoSecret: values.pasetoSecret,
+      setupToken: values.setupToken.trim(),
       managementBind: values.managementBind,
       managementPort: values.managementPort,
       ...db.payload,
@@ -360,6 +364,17 @@ export default function SetupPage() {
                       Administrator Account
                     </Text>
                     <Stack gap="md">
+                      {/* Proves the operator has the host or container: setup runs
+                          before any account exists, and asked for nothing else. */}
+                      <PasswordInput
+                        label="Setup token"
+                        description="Printed in the gateway's log when it started, and saved as setup-token in its data directory"
+                        placeholder="Paste the setup token"
+                        required
+                        size="md"
+                        leftSection={<IconShieldCheck size={rem(18)} stroke={1.5} />}
+                        {...form.getInputProps("setupToken")}
+                      />
                       <TextInput
                         label="Username"
                         placeholder="admin"

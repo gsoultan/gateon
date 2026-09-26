@@ -367,6 +367,9 @@ export type SetupRequest = {
   // empty keeps the logs in the management database
   loggingDatabaseUrl?: string;
   loggingDatabaseConfig?: DatabaseConfig;
+  // The one-time token first-run setup requires: printed in the gateway's log
+  // at startup and saved as setup-token in its data directory
+  setupToken?: string;
 };
 
 export type SetupResponse = {

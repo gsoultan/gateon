@@ -35,13 +35,15 @@ func TestSetupRefusesToRunAgainOnceAnAdministratorExists(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = mgr.Close() })
 	svc := &ApiService{
-		Auth:    auth.NewHolder(mgr),
-		Globals: config.NewGlobalRegistry(filepath.Join(tmp, "global.json")),
+		Auth:       auth.NewHolder(mgr),
+		Globals:    config.NewGlobalRegistry(filepath.Join(tmp, "global.json")),
+		SetupToken: newTestSetupToken(t),
 	}
 	ctx := context.Background()
 
 	first, err := svc.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "admin", AdminPassword: "first-password", PasetoSecret: strings.Repeat("a", 32),
+		SetupToken: svc.SetupToken.Value(),
 	})
 	if err != nil || !first.Success {
 		t.Fatalf("first Setup: err=%v resp=%+v", err, first)
@@ -54,8 +56,12 @@ func TestSetupRefusesToRunAgainOnceAnAdministratorExists(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
+	// A token that still matches -- Setup retired the first -- so that only the
+	// setup-required guard can refuse: this is that guard's test.
+	svc.SetupToken = newTestSetupToken(t)
 	second, err := svc.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "admin", AdminPassword: "attacker-password", PasetoSecret: strings.Repeat("b", 32),
+		SetupToken: svc.SetupToken.Value(),
 	})
 	if err != nil {
 		t.Fatalf("second Setup: %v", err)

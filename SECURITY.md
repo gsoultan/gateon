@@ -3,6 +3,7 @@
 ## Setup Flow and Secrets
 
 - **Run setup in a controlled environment.** The `/v1/setup` endpoint initializes auth and creates the admin user. By default, management endpoints (`/v1/*`, `/metrics`, and dashboard UI) are ONLY accessible via the dedicated **management entrypoint** (default port `9090` on `127.0.0.1`).
+- **Setup requires a one-time setup token.** Until an administrator exists, setup and its database connection test run before anyone can sign in, so they require a token only the operator can read: it is printed in the gateway's log at startup and written to `setup-token` in the data directory (`0600`), and it is deleted once setup completes. For automation, set `GATEON_SETUP_TOKEN` (16 characters or more) and send that. See [ADR 0021](doc/adr/0021-first-run-setup-requires-a-token.md).
 - **Restrict public access.** Management access is blocked on standard entrypoints (port 80/443) unless explicitly allowed:
     - Set `allow_public_management: true` in `GlobalConfig` or `GATEON_ALLOW_PUBLIC_MANAGEMENT=true` to allow all public traffic (risky).
     - Add specific domains to `allowed_hosts` in `ManagementConfig` to allow access only via those hostnames (e.g., `admin.example.com`).

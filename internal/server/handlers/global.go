@@ -433,6 +433,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
+		// The token Setup requires, before the probe dials anything: until
+		// setup completes this is the one database connection a caller who has
+		// not signed in can make the gateway open. See ADR 0021.
+		if !d.SetupToken.Matches(req.GetSetupToken()) {
+			WriteHTTPError(w, http.StatusForbidden, auth.ErrSetupTokenRequired.Error())
+			return
+		}
 		// Probe confines a SQLite database before opening it: see db.ConfineSQLite.
 		if err := db.Probe(req.GetDatabaseUrl(), req.GetDatabaseConfig(), config.DataDir()); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())

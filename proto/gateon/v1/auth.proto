@@ -53,6 +53,12 @@ message SetupRequest {
   // LoggingDatabaseConfig is the structured form of LoggingDatabaseUrl, used to
   // construct the DSN when LoggingDatabaseUrl is empty.
   DatabaseConfig logging_database_config = 10;
+
+  // SetupToken is the one-time token first-run setup requires: printed in the
+  // gateway's log at startup and written to setup-token in its data directory,
+  // or the value of GATEON_SETUP_TOKEN. The wizard's connection test, which
+  // decodes this message too, requires it as well. See ADR 0021.
+  string setup_token = 11;
 }
 
 message SetupResponse {

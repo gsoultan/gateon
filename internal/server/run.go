@@ -13,6 +13,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/canary"
 	dentrypoint "github.com/gsoultan/gateon/internal/domain/entrypoint"
@@ -124,6 +125,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// One factory validates middleware config on every transport: the REST
 	// handler's domain service below, and the Connect/gRPC service here.
 	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ipReputation, ".")
+	setupToken := newSetupToken()
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Lifetime:           ctx,
 		Version:            s.Version,
@@ -147,7 +149,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Governor:           gov,
 
 		MiddlewareValidator: mwFactory,
+		SetupToken:          setupToken,
 	})
+	announceSetupToken(ctx, apiService, setupToken)
 	if gov != nil {
 		gov.RegisterCPUHook("ml_engine", func() {
 			apiService.SetMLLowPower(true)
@@ -209,6 +213,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		TLSOptService:      tlsOptService,
 		CanaryService:      canaryService,
 		AuthManager:        s.AuthManager,
+		SetupToken:         setupToken,
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
@@ -420,4 +425,39 @@ func resolveWafStores(ctx context.Context, v any, inv *WafToProxyInvalidator) (*
 	exceptions := rules.Exceptions(ctx)
 	exceptions.SetInvalidator(inv)
 	return rules, exceptions
+}
+
+// newSetupToken is the token first-run setup will require: GATEON_SETUP_TOKEN
+// when the operator set a usable one, otherwise a random one. See ADR 0021.
+func newSetupToken() *auth.SetupToken {
+	t, err := auth.NewSetupToken(os.Getenv("GATEON_SETUP_TOKEN"))
+	if err == nil {
+		return t
+	}
+	logger.L.LogError("ignoring GATEON_SETUP_TOKEN; a random setup token is used instead", "error", err)
+	if t, err = auth.NewSetupToken(""); err != nil {
+		logger.Fatal("failed to generate a setup token", "error", err)
+	}
+	return t
+}
+
+// announceSetupToken tells the operator the setup token when this start needs
+// one: in this log and in the data directory, the two places someone with the
+// host or the container can read and a caller on the management port cannot.
+// A token the operator supplied is not repeated back to them.
+func announceSetupToken(ctx context.Context, svc *api.ApiService, token *auth.SetupToken) {
+	req, err := svc.IsSetupRequired(ctx, &gateonv1.IsSetupRequiredRequest{})
+	if err != nil || !req.GetRequired() {
+		return
+	}
+	if token.FromEnv() {
+		logger.L.LogWarn("first-run setup is open and requires the token in GATEON_SETUP_TOKEN")
+		return
+	}
+	path, err := token.Publish(config.DataDir())
+	if err != nil {
+		logger.L.LogError("could not write the setup token file; the token is only in this log", "error", err)
+	}
+	logger.L.LogWarn("first-run setup is open and requires this setup token",
+		"setup_token", token.Value(), "file", path)
 }

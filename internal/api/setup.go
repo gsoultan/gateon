@@ -56,6 +56,13 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	if err != nil || !setupReq.Required {
 		return &gateonv1.SetupResponse{Success: false, Error: "setup already completed"}, nil
 	}
+	// The token, before anything here acts on the request: a database probe,
+	// an account, a config write. Setup runs before any account exists, and
+	// without this whoever reached a fresh gateway first could do all of that.
+	// See ADR 0021.
+	if !s.SetupToken.Matches(req.GetSetupToken()) {
+		return &gateonv1.SetupResponse{Success: false, Error: auth.ErrSetupTokenRequired.Error()}, nil
+	}
 	// After the guard, never before it: this writes the auth and audit
 	// databases, and on a configured gateway that would let an unauthenticated
 	// caller point both at a server it controls.
@@ -110,6 +117,8 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	s.Auth.UpdateSymmetricKey(req.PasetoSecret)
 
 	s.logAudit(ctx, "setup", "system", "System initial setup completed")
+	// Nothing is left for the token to open, and its file should not outlive it.
+	s.SetupToken.Retire()
 
 	return &gateonv1.SetupResponse{Success: true}, nil
 }

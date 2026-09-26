@@ -52,4 +52,8 @@ type ApiServiceConfig struct {
 	// MiddlewareValidator is consulted before a middleware is persisted over
 	// Connect or gRPC, as the REST handler's domain service consults it.
 	MiddlewareValidator dmw.ConfigValidator
+
+	// SetupToken is the one-time token Setup requires on every transport. Nil
+	// keeps setup closed.
+	SetupToken *auth.SetupToken
 }

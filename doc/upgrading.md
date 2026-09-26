@@ -11,6 +11,23 @@ here after the fact.
 
 ## Unreleased
 
+### First-run setup requires a setup token — **scripted setup must send it**
+
+Setup runs before any account exists, and it required nothing: whoever reached
+a fresh gateway first could make themselves its administrator, or use the
+wizard's connection test to open a database connection to any address. Setup
+and the connection test now require a one-time token. At startup a gateway that
+needs setup prints the token in its log and writes it to `setup-token` in its
+data directory; the wizard asks for it on its first page, and the file is
+deleted once setup completes. See ADR 0021.
+
+**Who is affected:** anything that sets a gateway up without the dashboard --
+`POST /v1/setup`, or the `Setup` RPC over Connect or gRPC. Send the token as
+`setup_token` (`setupToken` in JSON): read it from `setup-token`, or set
+`GATEON_SETUP_TOKEN` (16 characters or more) on the gateway and send that. A
+request without it is refused with a message saying where to find it. Gateways
+that are already set up are unaffected.
+
 ### The setup wizard accepts a SQLite file in a data directory reached through a symlink
 
 The wizard only takes a SQLite database inside the data directory, and it

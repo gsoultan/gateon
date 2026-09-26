@@ -61,6 +61,9 @@ type ApiService struct {
 	// exactly as the domain service does when constructed without one.
 	MiddlewareValidator dmw.ConfigValidator
 
+	// SetupToken is the one-time token Setup requires; nil keeps setup closed.
+	SetupToken *auth.SetupToken
+
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
 	cfReachableCache atomic.Bool
@@ -294,6 +297,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		Governor:           cfg.Governor,
 
 		MiddlewareValidator: cfg.MiddlewareValidator,
+		SetupToken:          cfg.SetupToken,
 	}
 
 	if cfg.IPReputation != nil {
