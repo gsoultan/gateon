@@ -134,6 +134,18 @@ message Setup2FAResponse {
   repeated string recovery_codes = 3;
 }
 
+// Enroll2FAResponse answers POST /v1/auth/2fa/enroll, the first-time enrollment
+// an account makes at login when an administrator has required 2FA. The login
+// page reads it as the generated type, so its field names come from here.
+message Enroll2FAResponse {
+  // Id is the enrolling account's, which completes enrollment through
+  // POST /v1/auth/2fa/verify.
+  string id = 1;
+  string secret = 2;
+  string qr_code_url = 3;
+  repeated string recovery_codes = 4;
+}
+
 message Verify2FARequest {
   string id = 1;
   string code = 2;

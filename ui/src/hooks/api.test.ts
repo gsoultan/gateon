@@ -2,9 +2,42 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test, mock } from "bun:test";
-import type { DatabaseConfig, SetupRequest } from "../types/gateon";
-import type { SetupRequest as WireSetupRequest } from "../services/gen/gateon/v1/auth_pb";
+import type {
+  DatabaseConfig,
+  DeepScanStatus,
+  GetCloudflareIPsResponse,
+  MitigateThreatRequest,
+  MitigateThreatResponse,
+  RemoveMitigatedThreatRequest,
+  RemoveMitigatedThreatResponse,
+  RunDeepScanResponse,
+  SetupRequest,
+  SetupResponse,
+  TraceHop,
+  TraceRouteResponse,
+  ValidateCORSRequest,
+  ValidateCORSResponse,
+} from "../types/gateon";
+import type {
+  SetupRequest as WireSetupRequest,
+  SetupResponse as WireSetupResponse,
+} from "../services/gen/gateon/v1/auth_pb";
 import type { DatabaseConfig as WireDatabaseConfig } from "../services/gen/gateon/v1/common_pb";
+import type {
+  MitigateThreatRequest as WireMitigateThreatRequest,
+  MitigateThreatResponse as WireMitigateThreatResponse,
+  RemoveMitigatedThreatRequest as WireRemoveMitigatedThreatRequest,
+  RemoveMitigatedThreatResponse as WireRemoveMitigatedThreatResponse,
+  TraceHop as WireTraceHop,
+  TraceRouteResponse as WireTraceRouteResponse,
+  ValidateCORSRequest as WireValidateCORSRequest,
+  ValidateCORSResponse as WireValidateCORSResponse,
+} from "../services/gen/gateon/v1/diagnostics_pb";
+import type { GetCloudflareIPsResponse as WireGetCloudflareIPsResponse } from "../services/gen/gateon/v1/middleware_pb";
+import type {
+  DeepScanStatus as WireDeepScanStatus,
+  RunDeepScanResponse as WireRunDeepScanResponse,
+} from "../services/gen/gateon/v1/api_pb";
 
 // Compiles only when T is never; otherwise the type checker names what T is.
 function assertNone<T extends never>(): T[] {
@@ -42,5 +75,27 @@ describe("setupGateon", () => {
     // constraint 'never'`.
     expect(assertNone<Exclude<keyof SetupRequest, keyof WireSetupRequest>>()).toEqual([]);
     expect(assertNone<Exclude<keyof DatabaseConfig, keyof WireDatabaseConfig>>()).toEqual([]);
+  });
+});
+
+// The same hand-off for every hand-written type that crosses the generated
+// client in this file. A request built elsewhere and passed through is not an
+// object literal, so TypeScript does not check it for extra keys; a response
+// read through a hand-written type is read under names nothing may send.
+describe("hand-written types at the generated client", () => {
+  test("carry no key the proto message lacks", () => {
+    expect(assertNone<Exclude<keyof MitigateThreatRequest, keyof WireMitigateThreatRequest>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof RemoveMitigatedThreatRequest, keyof WireRemoveMitigatedThreatRequest>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof ValidateCORSRequest, keyof WireValidateCORSRequest>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof SetupResponse, keyof WireSetupResponse>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof MitigateThreatResponse, keyof WireMitigateThreatResponse>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof RemoveMitigatedThreatResponse, keyof WireRemoveMitigatedThreatResponse>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof ValidateCORSResponse, keyof WireValidateCORSResponse>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof GetCloudflareIPsResponse, keyof WireGetCloudflareIPsResponse>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof TraceRouteResponse, keyof WireTraceRouteResponse>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof RunDeepScanResponse, keyof WireRunDeepScanResponse>>()).toEqual([]);
+    // And the messages those responses carry.
+    expect(assertNone<Exclude<keyof TraceHop, keyof WireTraceHop>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof DeepScanStatus, keyof WireDeepScanStatus>>()).toEqual([]);
   });
 });

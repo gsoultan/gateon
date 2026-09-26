@@ -21,6 +21,7 @@ import { IconDatabase, IconDownload, IconAlertCircle, IconCheck, IconUpload, Ico
 import { useEffect, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import type { GeoIPConfig } from "../../types/gateon";
+import type { GeoIPConfig as WireGeoIPConfig } from "../../services/gen/gateon/v1/global_pb";
 import { apiFetch } from "../../hooks/useGateon";
 import { COUNTRIES } from "../../utils/countries";
 import { getCountryFlag } from "../../utils/format";
@@ -67,14 +68,18 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
   const handleUpdate = async () => {
     try {
       setUpdating(true);
+      // The server decodes this body as GeoIPConfig, so its names are that
+      // message's: typed from the generated one, a renamed field fails the build
+      // rather than being dropped, as a snake_case tag once dropped this key.
+      const body: Pick<WireGeoIPConfig, "maxmindLicenseKey"> = {
+        maxmindLicenseKey: config.maxmindLicenseKey ?? "",
+      };
       const resp = await apiFetch("/v1/geoip/update", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          maxmindLicenseKey: config.maxmindLicenseKey,
-        }),
+        body: JSON.stringify(body),
       });
       if (resp.ok) {
         notifications.show({

@@ -613,16 +613,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			}
 			return
 		}
-		// Keys as the login page reads them (enrollData in LoginPage.tsx). They
-		// were qr_code_url and recovery_codes, which it never read: an account
-		// made to enroll saw a broken QR image and was never shown its recovery
-		// codes, only the secret to type in by hand.
-		WriteJSON(w, http.StatusOK, struct {
-			ID            string   `json:"id"`
-			Secret        string   `json:"secret"`
-			QRCodeURL     string   `json:"qrCodeUrl"`
-			RecoveryCodes []string `json:"recoveryCodes"`
-		}{ID: id, Secret: secret, QRCodeURL: qr, RecoveryCodes: recovery})
+		// A proto message written with protojson, which the login page reads as
+		// the generated type: both ends take the field names from auth.proto. They
+		// were a map literal of qr_code_url and recovery_codes, which the page
+		// never read -- an account made to enroll saw a broken QR image and was
+		// never shown its recovery codes, only the secret to type in by hand.
+		WriteProtoResponse(w, http.StatusOK, &gateonv1.Enroll2FAResponse{
+			Id: id, Secret: secret, QrCodeUrl: qr, RecoveryCodes: recovery,
+		})
 	})
 	mux.HandleFunc("POST /v1/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
