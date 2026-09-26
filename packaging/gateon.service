@@ -6,8 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=gateon
+Group=gateon
 ExecStart=/usr/bin/gateon
 Restart=on-failure
 RestartSec=5s
@@ -28,14 +28,17 @@ StateDirectoryMode=0700
 ConfigurationDirectory=gateon
 ConfigurationDirectoryMode=0750
 
-# eBPF/XDP offloading: loading and attaching the embedded XDP program needs the
-# BPF capabilities and an unbounded locked-memory limit for BPF map allocation
-# (the loader also calls rlimit.RemoveMemlock(), but this keeps older kernels
-# happy). The service runs as root so these caps are already held; they are
-# declared explicitly so XDP keeps working if the unit is later de-rooted, and
-# so NoNewPrivileges does not strip them.
+# Its own account, holding only the capabilities it uses (ADR 0019):
+# CAP_NET_BIND_SERVICE for entrypoints below 1024, and CAP_BPF with
+# CAP_NET_ADMIN for eBPF (ADR 0018) -- CAP_NET_ADMIN also lets HA move the
+# virtual IP. Ambient, so the process holds them without being root; the
+# bounding set is the most it, or anything it runs, can ever have. CAP_PERFMON
+# and CAP_SYS_RESOURCE are gone: the programs load without either.
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
+# Kernels before 5.11 charge BPF maps to RLIMIT_MEMLOCK, which a process that
+# is not root cannot raise for itself.
 LimitMEMLOCK=infinity
-AmbientCapabilities=CAP_BPF CAP_NET_ADMIN CAP_SYS_RESOURCE CAP_PERFMON
 
 # Security hardening
 NoNewPrivileges=true

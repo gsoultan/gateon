@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -81,8 +83,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=gateon
+Group=gateon
 ExecStart=%s
 Restart=on-failure
 RestartSec=5s
@@ -96,6 +98,17 @@ StateDirectory=gateon
 StateDirectoryMode=0700
 ConfigurationDirectory=gateon
 ConfigurationDirectoryMode=0750
+
+# Its own account, holding only the capabilities it uses (ADR 0019):
+# CAP_NET_BIND_SERVICE for entrypoints below 1024, and CAP_BPF with
+# CAP_NET_ADMIN for eBPF (ADR 0018) -- CAP_NET_ADMIN also lets HA move the
+# virtual IP. Ambient, so the process holds them without being root; the
+# bounding set is the most it, or anything it runs, can ever have.
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
+# Kernels before 5.11 charge BPF maps to RLIMIT_MEMLOCK, which a process that
+# is not root cannot raise for itself.
+LimitMEMLOCK=infinity
 
 # Security hardening
 NoNewPrivileges=true
@@ -121,16 +134,21 @@ func installLinux(binPath string) error {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
 
+	uid, gid, err := ensureServiceUser()
+	if err != nil {
+		return err
+	}
+
 	// 0750: the directory holds global.json, which carries database
-	// credentials, the MaxMind licence key and SIEM tokens. The unit runs
-	// User=root and the chown below makes it root:root, so nothing needs the
-	// world bit that 0755 was granting every local account.
+	// credentials, the MaxMind licence key and SIEM tokens. The unit runs as
+	// the service account and the chown below gives the directory to it, so
+	// nothing needs the world bit that 0755 was granting every local account.
 	// #nosec G302 -- a directory, not a file: the execute bit is what makes it
 	// traversable, so 0750 is the tight mode here.
 	if err := secureDir(configDir, configDirMode); err != nil {
 		return err
 	}
-	if err := secureOwner(configDir); err != nil {
+	if err := secureOwner(configDir, uid, gid); err != nil {
 		return err
 	}
 
@@ -139,7 +157,7 @@ func installLinux(binPath string) error {
 	if err := secureDir(stateDir, stateDirMode); err != nil {
 		return err
 	}
-	if err := secureOwner(stateDir); err != nil {
+	if err := secureOwner(stateDir, uid, gid); err != nil {
 		return err
 	}
 
@@ -257,15 +275,15 @@ func secureDir(dir string, mode os.FileMode) error {
 	return nil
 }
 
-// secureOwner gives dir and everything under it to root, returning an error if
-// it cannot.
+// secureOwner gives dir and everything under it to uid:gid -- the service
+// account -- returning an error if it cannot.
 //
 // This is the other half of the argument in secureDir, and was the last piece
 // still discarding its result: `_ = exec.Command("chown", "-R", "root:root",
 // dir).Run()`. The mode alone is not enough on an upgrade. 0750 over a
 // directory still owned by an unprivileged account leaves that account with rwx
 // on global.json -- the database URL, the paseto signing secret, the MaxMind
-// licence key -- while the unit it configures runs User=root. Losing the chown
+// licence key -- while the unit it configures runs as another account. Losing the chown
 // silently turns a permissions fix into a local privilege escalation, and the
 // install prints "installed" either way.
 //
@@ -274,9 +292,7 @@ func secureDir(dir string, mode os.FileMode) error {
 // and with the error discarded that failure was indistinguishable from success.
 // os.Lchown is a syscall: it cannot be missing, and it does not follow a symlink
 // planted inside the tree.
-func secureOwner(dir string) error {
-	const rootUID, rootGID = 0, 0
-
+func secureOwner(dir string, uid, gid int) error {
 	// The traversal is scoped to an os.Root rather than done with
 	// filepath.WalkDir over absolute paths. Walking and then acting on a path
 	// is two operations on a name, and the thing the name refers to can change
@@ -298,8 +314,8 @@ func secureOwner(dir string) error {
 		}
 		// Lchown, not Chown: a symlink in the tree should have its own
 		// ownership changed, never its target's.
-		if err := root.Lchown(rel, rootUID, rootGID); err != nil {
-			return fmt.Errorf("chown %s to root:root: %w", filepath.Join(dir, rel), err)
+		if err := root.Lchown(rel, uid, gid); err != nil {
+			return fmt.Errorf("chown %s to %d:%d: %w", filepath.Join(dir, rel), uid, gid, err)
 		}
 		return nil
 	}); err != nil {
@@ -310,8 +326,56 @@ func secureOwner(dir string) error {
 	// last: doing it first would mean a failure here masked anything the walk
 	// would have reported, and a test could not tell the two apart.
 	// dir is a package constant, not anything a caller supplies.
-	if err := os.Lchown(dir, rootUID, rootGID); err != nil {
-		return fmt.Errorf("chown %s to root:root: %w", dir, err)
+	if err := os.Lchown(dir, uid, gid); err != nil {
+		return fmt.Errorf("chown %s to %d:%d: %w", dir, uid, gid, err)
 	}
 	return nil
+}
+
+// serviceUser is the account the unit runs as. Not root: the gateway terminates
+// hostile traffic, and nothing it does needs more than three capabilities.
+const serviceUser = "gateon"
+
+// ensureServiceUser creates the service account unless it exists, and returns
+// its uid and gid.
+func ensureServiceUser() (uid, gid int, err error) {
+	if _, err := user.Lookup(serviceUser); err != nil {
+		// #nosec G204 -- every argument is a constant or a fixed system path.
+		if err := runCmd(exec.Command("useradd", useraddArgs(nologinShell())...)); err != nil {
+			return 0, 0, fmt.Errorf("create the %s account: %w", serviceUser, err)
+		}
+	}
+	u, err := user.Lookup(serviceUser)
+	if err != nil {
+		return 0, 0, fmt.Errorf("look up the %s account: %w", serviceUser, err)
+	}
+	return accountIDs(u)
+}
+
+// useraddArgs creates a system account with its own group, the state directory
+// as its home but not created by useradd, and no login shell, because nobody
+// logs in as it. The same flags as scripts/postinstall.sh.
+func useraddArgs(shell string) []string {
+	return []string{"--system", "--user-group", "--no-create-home",
+		"--home-dir", stateDir, "--shell", shell, serviceUser}
+}
+
+// nologinShell is the first of the usual no-login shells this host has.
+func nologinShell() string {
+	for _, shell := range []string{"/usr/sbin/nologin", "/sbin/nologin"} {
+		if _, err := os.Stat(shell); err == nil {
+			return shell
+		}
+	}
+	return "/bin/false"
+}
+
+func accountIDs(u *user.User) (uid, gid int, err error) {
+	if uid, err = strconv.Atoi(u.Uid); err != nil {
+		return 0, 0, fmt.Errorf("uid %q of %s: %w", u.Uid, u.Username, err)
+	}
+	if gid, err = strconv.Atoi(u.Gid); err != nil {
+		return 0, 0, fmt.Errorf("gid %q of %s: %w", u.Gid, u.Username, err)
+	}
+	return uid, gid, nil
 }

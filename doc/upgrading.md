@@ -11,6 +11,20 @@ here after the fact.
 
 ## Unreleased
 
+### The packaged service runs as the `gateon` account, not root — **check files it reads outside `/etc/gateon`**
+
+The .deb, the .rpm and `gateon install` ran the gateway as root. The unit now
+runs it as a `gateon` system account holding only CAP_NET_BIND_SERVICE, CAP_BPF
+and CAP_NET_ADMIN, and the postinstall creates the account and gives it
+`/etc/gateon` and `/var/lib/gateon`. See ADR 0019.
+
+**Who is affected:** an install that reads a file outside those two directories
+that only root can read — most often a certbot private key,
+`/etc/letsencrypt/archive/*/privkey*.pem`, which is 0600 root. A route using it
+fails its TLS load with "permission denied". Give the `gateon` group read
+access, or deploy the certificates into `/etc/gateon`. To stay on root, run
+`systemctl edit gateon` and add `User=root` and `Group=root` under `[Service]`.
+
 ### `GET /v1/system/interfaces` reports `ebpf.attachMode` and `ebpf.loadError`
 
 They were `attach_mode` and `load_error`, which the dashboard's eBPF card never

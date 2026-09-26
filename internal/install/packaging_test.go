@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -144,5 +145,72 @@ func TestReleasePackageShipsTheConfigDirectoryPrivate(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf(".goreleaser.yaml has no directory entry for %s", configDir)
+	}
+}
+
+// serviceCapabilities is every capability the unit may hold (ADR 0019).
+var serviceCapabilities = []string{"CAP_NET_BIND_SERVICE", "CAP_BPF", "CAP_NET_ADMIN"}
+
+// unitDirective returns the value of every `key=` line in unit.
+func unitDirective(unit, key string) []string {
+	var values []string
+	for _, line := range strings.Split(unit, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), key+"="); ok {
+			values = append(values, v)
+		}
+	}
+	return values
+}
+
+// TestUnitsRunAsTheServiceAccount holds both units -- the one `gateon install`
+// writes and the one the packages ship -- to the account and the capabilities.
+// Either copy drifting back to User=root, or growing a capability, would undo
+// ADR 0019 for everyone who installs that way, and nothing else would say so.
+func TestUnitsRunAsTheServiceAccount(t *testing.T) {
+	t.Parallel()
+
+	units := map[string]string{
+		"the unit gateon install writes": renderSystemdUnit("/usr/local/bin/gateon"),
+		"packaging/gateon.service":       repoFile(t, "packaging", "gateon.service"),
+	}
+	for name, unit := range units {
+		for _, key := range []string{"User", "Group"} {
+			if got := unitDirective(unit, key); !slices.Equal(got, []string{serviceUser}) {
+				t.Errorf("%s: %s=%q, want only %q", name, key, got, serviceUser)
+			}
+		}
+		for _, key := range []string{"AmbientCapabilities", "CapabilityBoundingSet"} {
+			got := unitDirective(unit, key)
+			if len(got) != 1 {
+				t.Errorf("%s: %d %s= lines, want exactly one", name, len(got), key)
+				continue
+			}
+			caps := strings.Fields(got[0])
+			slices.Sort(caps)
+			want := slices.Sorted(slices.Values(serviceCapabilities))
+			if !slices.Equal(caps, want) {
+				t.Errorf("%s: %s=%s, want exactly %v", name, key, got[0], want)
+			}
+		}
+	}
+}
+
+// TestPostinstallCreatesTheInstallersAccount: the package and `gateon install`
+// create the same account and give it the same directories. On an upgrade the
+// script is what moves an install that ran as root; it used to chown both
+// directories to root:root on every upgrade.
+func TestPostinstallCreatesTheInstallersAccount(t *testing.T) {
+	t.Parallel()
+
+	script := repoFile(t, "scripts", "postinstall.sh")
+	want := "useradd " + strings.Join(useraddArgs(`"$shell"`), " ")
+	if !strings.Contains(script, want) {
+		t.Errorf("postinstall.sh does not create the account the way gateon install does; want\n  %s", want)
+	}
+	if !strings.Contains(script, "chown -R gateon:gateon /etc/gateon /var/lib/gateon") {
+		t.Error("postinstall.sh does not give /etc/gateon and /var/lib/gateon to the service account")
+	}
+	if strings.Contains(script, "root:root") {
+		t.Error("postinstall.sh still gives a directory to root:root, which locks the service out of it")
 	}
 }

@@ -29,6 +29,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0016](./0016-per-route-state-is-keyed-by-route-id.md) | Per-route state is keyed by the route's ID; its name is a label | Accepted |
 | [0017](./0017-ebpf-falls-back-to-tc-on-its-own.md) | eBPF falls back to the TC hook on its own, and the TC hook enforces what it claims | Accepted |
 | [0018](./0018-ebpf-privileges-are-capabilities.md) | eBPF privileges are capabilities, and a container gets them as uid 0 | Accepted |
+| [0019](./0019-the-service-runs-as-its-own-account.md) | The packaged service runs as its own account, not root | Accepted |
 
 ## Conventions
 
