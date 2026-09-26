@@ -220,7 +220,8 @@ shipped code and each failed silently:
 4. **Every source file carries the copyright header and `SPDX-License-Identifier: MIT`**
    — `LICENSE` does not travel with a file that gets vendored, copied into an image
    layer or pasted into an issue; the header does. `goheader` covers Go and gives the
-   better message, but **CI does not run golangci-lint**, so this check re-covers Go and
+   better message, but **CI runs golangci-lint only over changed lines** (`make
+   lint-new`), which never revisits a file nobody touched, so this check re-covers Go and
    adds `.proto` and TypeScript, which no Go linter reaches. Generated protobuf output
    is exempt — it inherits the header from the `.proto`, so `make proto` propagates it.
 5. **A handler never reads `middleware.UserContextKey` directly** — `rbac.go` owns
