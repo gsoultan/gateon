@@ -5,6 +5,8 @@ package ebpf
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -62,12 +64,26 @@ func xdpLoadBalancingUnimplemented(cfg *gateonv1.EbpfConfig) bool {
 	return cfg != nil && cfg.GetXdpLoadBalancing()
 }
 
+// wantsXDP reports whether a configured feature asks for the XDP hook.
+func wantsXDP(cfg *gateonv1.EbpfConfig) bool {
+	return cfg.GetXdpRateLimit() || cfg.GetXdpIpShunning() || cfg.GetXdpLoadBalancing()
+}
+
+// tryTC reports whether Start attaches the TC ingress hook once any XDP attempt
+// is over. It does when XDP was wanted and did not attach -- the normal case at
+// the EC2 defaults, which used to leave nothing attached unless tc_filtering
+// happened to be set -- and when tc_filtering asks for TC with no XDP feature
+// on. XDP and TC are alternatives: never both.
+func tryTC(cfg *gateonv1.EbpfConfig, xdpAttached bool) bool {
+	return !xdpAttached && (wantsXDP(cfg) || cfg.GetTcFiltering())
+}
+
 // tcUnsupported lists configured features the TC ingress hook cannot enforce.
 //
-// The hook decides on the IP header alone: port knocking mutates per-source
-// state across packets, and phantom ports and load balancing need
-// XDP_TX/redirect. Falling back from XDP to TC therefore silently narrows what
-// is being enforced. Naming the gap at attach time is the difference between a
+// The hook makes per-packet drop decisions only: port knocking mutates
+// per-source state across packets, and phantom ports and load balancing need
+// XDP_TX/redirect. Falling back from XDP to TC therefore narrows what is being
+// enforced. Naming the gap at attach time is the difference between a
 // documented trade-off and a hole.
 func tcUnsupported(cfg *gateonv1.EbpfConfig) []string {
 	if cfg == nil {
@@ -164,14 +180,19 @@ func nativeXDPBlockers(f nicFacts) (causes, remedies []string) {
 	return causes, remedies
 }
 
-// tcRemedy is offered on every failed native attach. The clsact ingress hook
-// runs at the same point in the stack as generic XDP but without its two
-// per-packet penalties: it has no headroom requirement, so no pskb_expand_head,
-// and it does not linearize. On a jumbo-MTU virtual NIC it is strictly the
-// better place to drop a packet.
-func tcRemedy() string {
-	return "or set ebpf.tc_filtering = true to run the same filtering at the clsact ingress " +
-		"hook, which has no MTU, headroom or linearization penalty on virtualized NICs"
+// tcRemedy is offered on every failed native attach. The TC ingress hook runs
+// at the same point in the stack as generic XDP but without its two per-packet
+// penalties: it has no headroom requirement, so no pskb_expand_head, and it does
+// not linearize. On a jumbo-MTU virtual NIC it is strictly the better place to
+// drop a packet, so Start falls back to it on its own -- unless generic mode was
+// opted into, which then takes the attach instead.
+func tcRemedy(allowGeneric bool) string {
+	if allowGeneric {
+		return "or unset ebpf.allow_generic_xdp: Gateon then runs the same filtering at the TC " +
+			"ingress hook, which has no MTU, headroom or linearization penalty on virtualized NICs"
+	}
+	return "or leave it: Gateon runs the same filtering at the TC ingress hook instead, which has " +
+		"no MTU, headroom or linearization penalty on virtualized NICs"
 }
 
 // diagnoseNativeXDP turns a failed native attach into something an operator can
@@ -179,7 +200,7 @@ func tcRemedy() string {
 // fall back, this explains the situation either way.
 func diagnoseNativeXDP(f nicFacts, allowGeneric bool, nativeErr error) xdpDiagnosis {
 	causes, remedies := nativeXDPBlockers(f)
-	remedies = append(remedies, tcRemedy())
+	remedies = append(remedies, tcRemedy(allowGeneric))
 
 	where := f.Name
 	if f.Driver != "" {
@@ -202,6 +223,86 @@ func diagnoseNativeXDP(f nicFacts, allowGeneric bool, nativeErr error) xdpDiagno
 		Summary:  fmt.Sprintf("native XDP unavailable on %s: %s; %s", where, why, tail),
 		Remedies: remedies,
 	}
+}
+
+// Capability numbers from include/uapi/linux/capability.h.
+const (
+	capNetAdmin = 12
+	capSysAdmin = 21
+	capBPF      = 39
+)
+
+// effectiveCapabilities reads the CapEff line of a /proc/<pid>/status file.
+func effectiveCapabilities(status string) (uint64, bool) {
+	for _, line := range strings.Split(status, "\n") {
+		if v, ok := strings.CutPrefix(line, "CapEff:"); ok {
+			eff, err := strconv.ParseUint(strings.TrimSpace(v), 16, 64)
+			return eff, err == nil
+		}
+	}
+	return 0, false
+}
+
+// missingCapabilities names what an effective capability set lacks to load and
+// attach the programs: CAP_BPF for the programs and maps, and CAP_NET_ADMIN
+// because XDP and TC are networking program types. CAP_SYS_ADMIN covers both,
+// and was the only way to load BPF before kernel 5.8 added CAP_BPF. Neither the
+// uid nor CAP_PERFMON matters: root with the capabilities dropped cannot load
+// these, and a non-root process holding the two can.
+func missingCapabilities(eff uint64) []string {
+	has := func(c uint) bool { return eff&(1<<c) != 0 }
+	var missing []string
+	if !has(capBPF) && !has(capSysAdmin) {
+		missing = append(missing, "CAP_BPF")
+	}
+	if !has(capNetAdmin) && !has(capSysAdmin) {
+		missing = append(missing, "CAP_NET_ADMIN")
+	}
+	return missing
+}
+
+// rtfUp is RTF_UP from linux/route.h: the route is usable.
+const rtfUp = 0x1
+
+// defaultRouteInterface returns the interface carrying the IPv4 default route in
+// a table in /proc/net/route's format -- the lowest-metric one if there are
+// several -- or "" when no default route is up. Columns: Iface, Destination,
+// Gateway, Flags (hex), RefCnt, Use, Metric, Mask, ...; a default route has
+// destination and mask both 00000000.
+func defaultRouteInterface(table string) string {
+	best, bestMetric := "", uint64(0)
+	for _, line := range strings.Split(table, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 8 || f[1] != "00000000" || f[7] != "00000000" {
+			continue
+		}
+		flags, err := strconv.ParseUint(f[3], 16, 32)
+		if err != nil || flags&rtfUp == 0 {
+			continue
+		}
+		metric, err := strconv.ParseUint(f[6], 10, 32)
+		if err != nil {
+			continue
+		}
+		if best == "" || metric < bestMetric {
+			best, bestMetric = f[0], metric
+		}
+	}
+	return best
+}
+
+// targetInterface is the interface Start attaches to: the configured one, else
+// the one carrying the default route, else eth0 -- what a container's network
+// namespace calls its only interface. eth0 used to be the whole rule, and no
+// interface on a current EC2 host has that name.
+func targetInterface(configured, defaultRoute string) string {
+	if configured != "" {
+		return configured
+	}
+	if defaultRoute != "" {
+		return defaultRoute
+	}
+	return "eth0"
 }
 
 // joinCauses renders causes as "a; and b" without pulling in strings.Join's

@@ -5,21 +5,12 @@ package main
 
 import (
 	"context"
-	"os"
-	"runtime"
 	"sync"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/ebpf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
-
-// ebpfCanStart reports whether reconcileEbpf would actually start the subsystem
-// on this host, mirroring the supervisor's privilege/OS gate. On Linux without
-// root the gate keeps eBPF disabled, so tests adjust their expectations.
-func ebpfCanStart() bool {
-	return runtime.GOOS != "linux" || os.Geteuid() == 0
-}
 
 // fakeWAFUpdater records how many times Start was invoked and captures the
 // context it received so a test can assert the loop's cancellation lifecycle.
@@ -184,10 +175,13 @@ func TestReconcileClamAVNilManager(t *testing.T) {
 }
 
 // newEbpfSupervisor builds a supervisor wired with a fresh eBPF holder for the
-// reconcileEbpf lifecycle tests.
+// reconcileEbpf lifecycle tests. The privilege check answers "nothing missing"
+// so the lifecycle is exercised the same way on every host: these tests used to
+// mirror the old uid-0 gate, and on a non-root Linux runner skipped half of it.
 func newEbpfSupervisor(ctx context.Context) *securitySupervisor {
 	h := ebpf.NewHolder(nil)
-	return &securitySupervisor{rootCtx: ctx, ebpfManager: h, ebpfHolder: h}
+	return &securitySupervisor{rootCtx: ctx, ebpfManager: h, ebpfHolder: h,
+		missingEbpfPrivileges: func() []string { return nil }}
 }
 
 func TestReconcileEbpf(t *testing.T) {
@@ -201,24 +195,34 @@ func TestReconcileEbpf(t *testing.T) {
 		if !s.ebpfApplied {
 			t.Fatal("reconcileEbpf must mark the config as applied")
 		}
-		if ebpfCanStart() {
-			if s.ebpfHolder.Current() == nil {
-				t.Fatal("enable must install an underlying manager into the holder")
-			}
-			if s.ebpfCancel == nil {
-				t.Fatal("enable must record a cancel func")
-			}
-		} else {
-			if s.ebpfHolder.Current() != nil {
-				t.Fatal("without privileges the holder must stay empty")
-			}
+		if s.ebpfHolder.Current() == nil {
+			t.Fatal("enable must install an underlying manager into the holder")
+		}
+		if s.ebpfCancel == nil {
+			t.Fatal("enable must record a cancel func")
+		}
+	})
+
+	// The gate asks for capabilities, and refuses when they are missing
+	// whatever the uid: root with every capability dropped used to be let
+	// through, to fail at load.
+	t.Run("MissingCapabilitiesKeepItOff", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		s := newEbpfSupervisor(ctx)
+		s.missingEbpfPrivileges = func() []string { return []string{"CAP_BPF"} }
+
+		s.reconcileEbpf(&gateonv1.EbpfConfig{Enabled: true})
+
+		if s.ebpfHolder.Current() != nil {
+			t.Fatal("with CAP_BPF missing the holder must stay empty")
+		}
+		if s.ebpfCancel != nil {
+			t.Fatal("with CAP_BPF missing no cancel func may be recorded")
 		}
 	})
 
 	t.Run("UnchangedConfigIsIdempotent", func(t *testing.T) {
-		if !ebpfCanStart() {
-			t.Skip("privilege gate prevents eBPF from starting on this host")
-		}
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		s := newEbpfSupervisor(ctx)
@@ -232,9 +236,6 @@ func TestReconcileEbpf(t *testing.T) {
 	})
 
 	t.Run("DisableTearsDown", func(t *testing.T) {
-		if !ebpfCanStart() {
-			t.Skip("privilege gate prevents eBPF from starting on this host")
-		}
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		s := newEbpfSupervisor(ctx)

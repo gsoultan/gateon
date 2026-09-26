@@ -363,6 +363,10 @@ export type SetupRequest = {
   // Optional for first-run wizard database selection
   databaseUrl?: string;
   databaseConfig?: DatabaseConfig;
+  // Optional dedicated database for audit and security logs; leaving both
+  // empty keeps the logs in the management database
+  loggingDatabaseUrl?: string;
+  loggingDatabaseConfig?: DatabaseConfig;
 };
 
 export type SetupResponse = {

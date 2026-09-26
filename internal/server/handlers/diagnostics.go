@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -217,12 +218,63 @@ type netInterfaceInfo struct {
 // ebpfStatusInfo surfaces whether XDP is configured and actually attached, plus
 // the load error if it failed — the operator's answer to "why are my eBPF drop
 // metrics zero?".
+//
+// Keys in the dashboard's lowerCamel (EbpfStatus in useNetworkInterfaces.ts).
+// They were load_error and attach_mode, which the settings card never read: an
+// attached program always rendered as native XDP, so a TC-hook fallback hid
+// that port knocking, phantom ports and load balancing were not in force, and a
+// failed attach never showed its reason.
 type ebpfStatusInfo struct {
 	Enabled    bool   `json:"enabled"`
 	Attached   bool   `json:"attached"`
 	Interface  string `json:"interface,omitempty"`
-	LoadError  string `json:"load_error,omitempty"`
-	AttachMode string `json:"attach_mode,omitempty"`
+	LoadError  string `json:"loadError,omitempty"`
+	AttachMode string `json:"attachMode,omitempty"`
+}
+
+// describeInterface is one row of the picker, and whether the interface has a
+// usable (non-loopback) IPv4 address.
+func describeInterface(ifc net.Interface) (netInterfaceInfo, bool) {
+	info := netInterfaceInfo{
+		Name:     ifc.Name,
+		MAC:      ifc.HardwareAddr.String(),
+		Up:       ifc.Flags&net.FlagUp != 0,
+		Running:  ifc.Flags&net.FlagRunning != 0,
+		Loopback: ifc.Flags&net.FlagLoopback != 0,
+		Addrs:    []string{},
+	}
+	hasIPv4 := false
+	addrs, err := ifc.Addrs()
+	if err != nil {
+		return info, false
+	}
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		info.Addrs = append(info.Addrs, ipnet.IP.String())
+		if ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+			hasIPv4 = true
+		}
+	}
+	return info, hasIPv4
+}
+
+// recommendedIndex picks the row the picker recommends: preferred -- the
+// interface eBPF attaches to when none is configured -- when it is listed, else
+// fallback, the first up, non-loopback interface with an IPv4 address. It used
+// to be fallback alone, which on a host whose default route is not on the first
+// such interface recommended one NIC while the gateway attached to another.
+func recommendedIndex(infos []netInterfaceInfo, preferred string, fallback int) int {
+	if preferred != "" {
+		for i, info := range infos {
+			if info.Name == preferred {
+				return i
+			}
+		}
+	}
+	return fallback
 }
 
 type systemInterfacesResponse struct {
@@ -231,8 +283,9 @@ type systemInterfacesResponse struct {
 }
 
 // buildSystemInterfaces enumerates host NICs and the current XDP attach status.
-// The recommended interface is the first non-loopback, up NIC with an IPv4
-// address — the same heuristic the gossip layer uses to pick a bind IP.
+// The recommended interface is the one eBPF attaches to when none is
+// configured -- the default-route interface -- so the picker recommends what
+// the gateway would do anyway. See recommendedIndex.
 func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInterfacesResponse {
 	resp := systemInterfacesResponse{Interfaces: []netInterfaceInfo{}}
 
@@ -242,40 +295,16 @@ func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInte
 		ifaces = nil
 	}
 
-	recommended := false
+	fallback := -1
 	for _, ifc := range ifaces {
-		info := netInterfaceInfo{
-			Name:     ifc.Name,
-			Up:       ifc.Flags&net.FlagUp != 0,
-			Running:  ifc.Flags&net.FlagRunning != 0,
-			Loopback: ifc.Flags&net.FlagLoopback != 0,
-			Addrs:    []string{},
+		info, hasIPv4 := describeInterface(ifc)
+		if fallback < 0 && info.Up && !info.Loopback && hasIPv4 {
+			fallback = len(resp.Interfaces)
 		}
-		if mac := ifc.HardwareAddr.String(); mac != "" {
-			info.MAC = mac
-		}
-
-		hasIPv4 := false
-		if addrs, err := ifc.Addrs(); err == nil {
-			for _, a := range addrs {
-				ipnet, ok := a.(*net.IPNet)
-				if !ok {
-					continue
-				}
-				info.Addrs = append(info.Addrs, ipnet.IP.String())
-				if ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
-					hasIPv4 = true
-				}
-			}
-		}
-
-		// Recommend the first up, non-loopback NIC that has a usable IPv4.
-		if !recommended && info.Up && !info.Loopback && hasIPv4 {
-			info.Recommended = true
-			recommended = true
-		}
-
 		resp.Interfaces = append(resp.Interfaces, info)
+	}
+	if i := recommendedIndex(resp.Interfaces, ebpf.DefaultInterface(), fallback); i >= 0 {
+		resp.Interfaces[i].Recommended = true
 	}
 
 	// eBPF / XDP runtime status.

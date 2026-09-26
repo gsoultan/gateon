@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Upload bounds for the GeoIP database endpoint. The hard ceiling must clear a
@@ -23,6 +24,11 @@ const (
 	geoIPUploadMemoryBytes = 50 << 20  // 50 MiB
 	maxGeoIPUploadBytes    = 128 << 20 // 128 MiB
 )
+
+// downloadGeoIP is the MaxMind download behind POST /v1/geoip/update. A
+// variable so a test can see which licence key the handler chose without
+// reaching MaxMind.
+var downloadGeoIP = telemetry.DownloadGeoIP
 
 // reloadGeoIPByFilename reloads the GeoIP reader that matches the uploaded
 // edition. ASN and Country databases are detected by their MaxMind filename and
@@ -136,19 +142,20 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 			return
 		}
 
-		gc := globalReg.Get(r.Context())
-		var licenseKey string
-		if r.Body != nil {
-			var body struct {
-				LicenseKey string `json:"maxmind_license_key"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.LicenseKey != "" {
-				licenseKey = body.LicenseKey
-			}
+		// The settings card posts the licence key in its form, so a key typed
+		// but not yet saved can be tried; with none, the saved key is used. The
+		// body is GeoIPConfig's field, read with protojson. It was read through
+		// an encoding/json tag of "maxmind_license_key", which the dashboard's
+		// "maxmindLicenseKey" never matched: the typed key was dropped, the
+		// update ran with the saved one, and with none saved it answered "not
+		// configured" to an operator looking at the key they had just entered.
+		var body gateonv1.GeoIPConfig
+		if !DecodeProtoRequest(w, r, &body) {
+			return
 		}
-
-		if licenseKey == "" && gc != nil && gc.Geoip != nil {
-			licenseKey = gc.Geoip.MaxmindLicenseKey
+		licenseKey := body.GetMaxmindLicenseKey()
+		if licenseKey == "" {
+			licenseKey = globalReg.Get(r.Context()).GetGeoip().GetMaxmindLicenseKey()
 		}
 
 		if licenseKey == "" {
@@ -157,7 +164,7 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 			return
 		}
 
-		err := telemetry.DownloadGeoIP(licenseKey)
+		err := downloadGeoIP(licenseKey)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(err.Error()))

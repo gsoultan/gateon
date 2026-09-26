@@ -30,6 +30,12 @@ spec:
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and .Values.ebpf.enabled .Values.ebpf.hostNetwork }}
+      # The node's own NIC -- the ENA interface on EKS -- rather than the pod's
+      # veth. Every container port is then a port on the node.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}
@@ -50,16 +56,23 @@ spec:
         - name: gateon
           image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-            {{- if .Values.ebpf.enabled }}
-            # eBPF needs to load programs and touch the interface. This is a
-            # real privilege increase on a process that terminates hostile
-            # traffic, and eBPF is marked experimental in the README.
-            capabilities:
-              drop: ["ALL"]
-              add: ["NET_ADMIN", "BPF"]
-            {{- end }}
+          {{- /*
+            eBPF needs CAP_BPF and CAP_NET_ADMIN, and a container passes added
+            capabilities only to uid 0: neither Docker nor Kubernetes sets
+            ambient capabilities for another user. So eBPF mode runs as uid 0
+            with every other capability dropped (ADR 0018). That is a real
+            privilege increase on a process that terminates hostile traffic,
+            and eBPF is marked experimental in the README. One merged map, so
+            the rendered context carries a single capabilities key.
+          */}}
+          {{- $securityContext := deepCopy .Values.securityContext }}
+          {{- if .Values.ebpf.enabled }}
+          {{- $securityContext = mustMergeOverwrite $securityContext (dict
+                "runAsUser" 0
+                "runAsNonRoot" false
+                "capabilities" (dict "drop" (list "ALL") "add" (list "NET_ADMIN" "BPF"))) }}
+          {{- end }}
+          securityContext: {{- toYaml $securityContext | nindent 12 }}
           ports:
             - name: management
               containerPort: {{ .Values.service.managementPort }}

@@ -40,9 +40,12 @@ Practical mitigations, in the order they are worth doing:
 
 - Any ENA-backed instance type — which is all current generations. The claims
   concern the driver, not the size, so the cheapest thing that boots is fine.
-- Ubuntu or Amazon Linux with a kernel new enough for the eBPF loader. CI builds
-  the BPF object on the runner, so `clang` and the libbpf headers are installed
-  by the job.
+- **arm64 (Graviton).** The job cross-compiles its test for arm64 on a
+  GitHub-hosted runner and asks for the `ARM64` label, which an arm64 runner is
+  given automatically. An x64 instance will never be picked.
+- Ubuntu or Amazon Linux with a kernel new enough for the eBPF loader. Nothing is
+  built on the instance, so it needs no Go, `clang` or libbpf headers. The job
+  installs `ethtool` if it is missing.
 - **Leave the MTU alone.** The default 9001 is the condition being tested. An
   instance with MTU already lowered to 1500 will report a different — and
   correct — verdict, which is fine, but it is not the case the claims are about.
@@ -55,15 +58,17 @@ From the instance, using a registration token from
 
 ```bash
 mkdir -p ~/actions-runner && cd ~/actions-runner
-curl -o actions-runner.tar.gz -L \
-  https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
-tar xzf actions-runner.tar.gz
+# Download and unpack with the commands GitHub shows on that page with Linux /
+# ARM64 selected. They carry the current version and its checksum; the release
+# assets are named by version (actions-runner-linux-arm64-2.337.0.tar.gz), so
+# there is no stable URL to hard-code here.
 
-# Only the labels a self-hosted Linux runner has by default. There is no `ena`
-# label on purpose: it would be a second place for the requirement to live and
-# to drift. The test checks the driver itself and fails, rather than skipping,
-# when it was asked to verify and cannot -- so a run that lands on the wrong
-# machine is loud instead of quietly green.
+# Only the labels a self-hosted Linux runner has by default; ARM64 is added
+# automatically on arm64. There is no `ena` label on purpose: it would be a
+# second place for the requirement to live and to drift. The test checks the
+# driver itself and fails, rather than skipping, when it was asked to verify and
+# cannot -- so a run that lands on the wrong machine is loud instead of quietly
+# green.
 ./config.sh --url https://github.com/gsoultan/gateon \
   --token <REGISTRATION_TOKEN> \
   --labels self-hosted,linux \

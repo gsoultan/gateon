@@ -6,6 +6,7 @@
 package ebpf
 
 import (
+	"context"
 	"net"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Everything gateon says about native XDP on EC2 -- that the ENA driver refuses
@@ -36,9 +38,7 @@ func requireENAHost(t *testing.T) *net.Interface {
 	if os.Getenv("GATEON_VERIFY_ENA") == "" {
 		t.Skip("set GATEON_VERIFY_ENA=1 to run against real ENA hardware")
 	}
-	if os.Geteuid() != 0 {
-		t.Skip("needs root for CAP_NET_ADMIN and BPF program load")
-	}
+	requireBPFCapabilities(t)
 
 	name := os.Getenv("GATEON_VERIFY_IFACE")
 	if name == "" {
@@ -148,9 +148,9 @@ func TestENADiagnosisMatchesRealHardware(t *testing.T) {
 	}
 }
 
-// TestENATCFallbackAttaches confirms the path gateon actually recommends on this
-// hardware. If native XDP is unavailable here, tc_filtering is the advice, and
-// advice that has never been run on the target is not advice.
+// TestENATCFallbackAttaches confirms the path gateon actually takes on this
+// hardware. If native XDP is unavailable here, the TC hook is where Start falls
+// back to, and a fallback that has never been run on the target is not one.
 func TestENATCFallbackAttaches(t *testing.T) {
 	iface := requireENAHost(t)
 
@@ -180,5 +180,44 @@ func TestENATCFallbackAttaches(t *testing.T) {
 
 	if err := closer.Close(); err != nil {
 		t.Errorf("detach: %v", err)
+	}
+}
+
+// TestENAStartFallsBackToTCOnTheDefaultRouteInterface is the EC2 path through
+// the manager as a default install takes it: no interface configured, an XDP
+// feature on, tc_filtering off. Start has to find the ENA interface by its
+// default route, have native XDP refused there, and end up on the TC hook --
+// where it used to look for eth0, and attach nothing even once pointed at ens5.
+func TestENAStartFallsBackToTCOnTheDefaultRouteInterface(t *testing.T) {
+	iface := requireENAHost(t)
+	if got := readDefaultRouteInterface(); got != iface.Name {
+		t.Fatalf("the default route is on %q, not on the ENA interface under test (%q)", got, iface.Name)
+	}
+
+	m := NewEbpfManager(&gateonv1.EbpfConfig{Enabled: true, XdpIpShunning: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		m.close()
+	})
+	m.Start(ctx)
+
+	stats, err := m.GetMapStats()
+	if err != nil {
+		t.Fatalf("GetMapStats: %v", err)
+	}
+	t.Logf("attached=%v interface=%q mode=%q", stats.Attached, stats.Interface, stats.AttachMode)
+	if !stats.Attached {
+		t.Fatalf("an unconfigured install attached nothing (load error %q)", stats.LoadError)
+	}
+	if stats.Interface != iface.Name {
+		t.Errorf("attached to %q, want the default-route interface %q", stats.Interface, iface.Name)
+	}
+	switch stats.AttachMode {
+	case attachModeTCX, attachModeClsact:
+	case attachModeNative:
+		t.Log("native XDP attached on this host, so the TC fallback was not needed")
+	default:
+		t.Errorf("attached in mode %q without generic mode being opted into", stats.AttachMode)
 	}
 }

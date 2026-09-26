@@ -108,13 +108,137 @@ func TestDiagnoseToleratesUnknownFacts(t *testing.T) {
 }
 
 // TC is the real answer on a virtualized NIC, so every failed native attach has
-// to point at it — that is the whole reason tc_filtering exists.
+// to point at it. Start falls back to it on its own unless generic mode was
+// opted into, so that opt-in is what the advice has to name.
 func TestDiagnoseAlwaysOffersTheTCAlternative(t *testing.T) {
 	for _, allowGeneric := range []bool{false, true} {
 		d := diagnoseNativeXDP(ec2Jumbo(), allowGeneric, errEINVAL)
-		if !hasRemedyContaining(d.Remedies, "tc_filtering") {
-			t.Errorf("allowGeneric=%v: remedies %q never mention tc_filtering", allowGeneric, d.Remedies)
+		if !hasRemedyContaining(d.Remedies, "TC ingress hook") {
+			t.Errorf("allowGeneric=%v: remedies %q never mention the TC ingress hook", allowGeneric, d.Remedies)
 		}
+	}
+	d := diagnoseNativeXDP(ec2Jumbo(), true, errEINVAL)
+	if !hasRemedyContaining(d.Remedies, "unset ebpf.allow_generic_xdp") {
+		t.Errorf("with generic mode opted into, remedies %q do not say that unsetting it is what "+
+			"brings the TC fallback back", d.Remedies)
+	}
+}
+
+// TestTryTCFallsBackWheneverXDPWasWantedAndDidNotAttach: at the EC2 defaults
+// native XDP is refused, and Start used to attach nothing unless tc_filtering
+// happened to be set. An XDP feature being on is the request to filter; the TC
+// hook is where that can happen.
+func TestTryTCFallsBackWheneverXDPWasWantedAndDidNotAttach(t *testing.T) {
+	cases := []struct {
+		name        string
+		cfg         *gateonv1.EbpfConfig
+		xdpAttached bool
+		want        bool
+	}{
+		{"XDP wanted, refused, tc_filtering off", &gateonv1.EbpfConfig{XdpIpShunning: true}, false, true},
+		{"XDP wanted, refused, tc_filtering on", &gateonv1.EbpfConfig{XdpRateLimit: true, TcFiltering: true}, false, true},
+		{"XDP attached: never both hooks", &gateonv1.EbpfConfig{XdpIpShunning: true, TcFiltering: true}, true, false},
+		{"only tc_filtering", &gateonv1.EbpfConfig{TcFiltering: true}, false, true},
+		{"nothing asked for", &gateonv1.EbpfConfig{}, false, false},
+		{"no config", nil, false, false},
+	}
+	for _, c := range cases {
+		if got := tryTC(c.cfg, c.xdpAttached); got != c.want {
+			t.Errorf("%s: tryTC = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestMissingCapabilitiesAsksForCapabilitiesNotAUid: the gateway used to start
+// eBPF only for uid 0, so a non-root process holding CAP_BPF and CAP_NET_ADMIN
+// was refused while root with every capability dropped was let through to fail
+// at load time.
+func TestMissingCapabilitiesAsksForCapabilitiesNotAUid(t *testing.T) {
+	const (
+		bpf      = uint64(1) << capBPF
+		netAdmin = uint64(1) << capNetAdmin
+		sysAdmin = uint64(1) << capSysAdmin
+	)
+	cases := []struct {
+		name string
+		eff  uint64
+		want string
+	}{
+		{"the two it needs, uid irrelevant", bpf | netAdmin, ""},
+		{"CAP_SYS_ADMIN covers both (pre-5.8 kernels)", sysAdmin, ""},
+		{"root with every capability dropped", 0, "CAP_BPF,CAP_NET_ADMIN"},
+		{"Docker's default set for root", 0x00000000a80425fb, "CAP_BPF,CAP_NET_ADMIN"},
+		{"CAP_BPF alone", bpf, "CAP_NET_ADMIN"},
+		{"CAP_NET_ADMIN alone", netAdmin, "CAP_BPF"},
+	}
+	for _, c := range cases {
+		if got := strings.Join(missingCapabilities(c.eff), ","); got != c.want {
+			t.Errorf("%s: missing %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestEffectiveCapabilitiesReadsCapEff(t *testing.T) {
+	status := "Name:\tgateon\nUid:\t65532\t65532\t65532\t65532\n" +
+		"CapInh:\t0000000000000000\nCapPrm:\t0000008000001000\n" +
+		"CapEff:\t0000008000001000\nCapBnd:\t0000008000001000\n"
+	eff, ok := effectiveCapabilities(status)
+	if !ok || eff != 0x0000008000001000 {
+		t.Errorf("effectiveCapabilities = %#x, %v; want 0x8000001000, true", eff, ok)
+	}
+	if _, ok := effectiveCapabilities("Name:\tgateon\n"); ok {
+		t.Error("a status with no CapEff line reported a capability set")
+	}
+}
+
+// Tables in /proc/net/route's own format, trailing whitespace and all.
+const (
+	routeHeader = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+	// An EC2 host: default route and subnet on ens5.
+	routesEC2 = routeHeader +
+		"ens5\t00000000\t0102000A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n" +
+		"ens5\t0002000A\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n"
+	// A Docker host: docker0's subnet is listed before the default route.
+	routesDockerHost = routeHeader +
+		"docker0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n" +
+		"ens5\t00000000\t0102000A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
+)
+
+func TestDefaultRouteInterface(t *testing.T) {
+	cases := []struct {
+		name, table, want string
+	}{
+		{"EC2 host", routesEC2, "ens5"},
+		{"a subnet route listed first is not the default", routesDockerHost, "ens5"},
+		{"container", routeHeader + "eth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n", "eth0"},
+		{"lowest metric wins, whatever the order", routeHeader +
+			"ens6\t00000000\t0103000A\t0003\t0\t0\t200\t00000000\t0\t0\t0\n" +
+			"ens5\t00000000\t0102000A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n", "ens5"},
+		{"a default route that is not up is skipped", routeHeader +
+			"ens5\t00000000\t0102000A\t0002\t0\t0\t100\t00000000\t0\t0\t0\n", ""},
+		{"no default route", routeHeader + "ens5\t0002000A\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n", ""},
+		{"header only", routeHeader, ""},
+		{"unreadable", "", ""},
+	}
+	for _, c := range cases {
+		if got := defaultRouteInterface(c.table); got != c.want {
+			t.Errorf("%s: defaultRouteInterface = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestTargetInterfacePrefersConfigThenTheDefaultRoute: eth0 used to be the
+// whole rule, and no interface on a current EC2 host has that name, so an
+// unconfigured install there failed to attach with "no such network interface".
+func TestTargetInterfacePrefersConfigThenTheDefaultRoute(t *testing.T) {
+	if got := targetInterface("", defaultRouteInterface(routesEC2)); got != "ens5" {
+		t.Errorf("unconfigured on an EC2 host: got %q, want the default-route interface ens5", got)
+	}
+	if got := targetInterface("ens6", "ens5"); got != "ens6" {
+		t.Errorf("configured: got %q, want the configured ens6", got)
+	}
+	if got := targetInterface("", ""); got != "eth0" {
+		t.Errorf("no configuration and no default route: got %q, want eth0", got)
 	}
 }
 

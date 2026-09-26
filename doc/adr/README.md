@@ -17,7 +17,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0004](./0004-waf-engine-replacement.md) | Replace the Coraza WAF engine with gwaf | Accepted |
 | [0005](./0005-session-lifecycle-and-first-run-trust.md) | Session lifecycle and first-run trust | Accepted |
 | [0006](./0006-transport-neutral-authorization.md) | Transport-neutral authorization for the management API | Accepted |
-| [0007](./0007-xdp-attach-mode-and-the-tc-ingress-hook.md) | XDP attach mode and the TC ingress hook | Accepted |
+| [0007](./0007-xdp-attach-mode-and-the-tc-ingress-hook.md) | XDP attach mode and the TC ingress hook | Accepted; TC parts superseded by 0017 |
 | [0008](./0008-response-inspection-must-control-its-own-encoding.md) | Response inspection must control its own content encoding | Accepted |
 | [0009](./0009-authenticated-ha-heartbeats.md) | Authenticated HA heartbeats and gossip | Accepted |
 | [0010](./0010-package-size-ratchet.md) | The package-size limit is a ratchet, not a wall | Accepted |
@@ -27,6 +27,10 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0014](./0014-backend-client-identity-is-the-gateways-choice.md) | The backend client identity is the gateway's choice | Accepted |
 | [0015](./0015-cors-is-decided-per-route.md) | CORS is decided per route, and a backend's own policy wins | Accepted |
 | [0016](./0016-per-route-state-is-keyed-by-route-id.md) | Per-route state is keyed by the route's ID; its name is a label | Accepted |
+| [0017](./0017-ebpf-falls-back-to-tc-on-its-own.md) | eBPF falls back to the TC hook on its own, and the TC hook enforces what it claims | Accepted |
+| [0018](./0018-ebpf-privileges-are-capabilities.md) | eBPF privileges are capabilities, and a container gets them as uid 0 | Accepted |
+| [0019](./0019-the-service-runs-as-its-own-account.md) | The packaged service runs as its own account, not root | Accepted |
+| [0020](./0020-the-kernel-filters-ipv6-too.md) | The kernel filters IPv6 too | Accepted |
 
 ## Conventions
 

@@ -9,6 +9,161 @@ here after the fact.
 
 ---
 
+## Unreleased
+
+### eBPF filters IPv6 — **an IPv4-only kernel allowlist now closes the management port to IPv6**
+
+Both eBPF programs passed every IPv6 packet: no shun, no rate limit, no SYN
+guard, and no management gate, so with the kernel allowlist on an IPv6 address
+reached the management port past it. IPv6 now gets all four. Blocking and rate
+limiting are keyed by the /64, because an IPv6 client can send from any address
+in its /64; shunning one address shuns its /64. See ADR 0020.
+
+**Who is affected:**
+
+- An install with `enable_mgmt_whitelist` on whose list holds only IPv4
+  addresses. IPv6 can no longer reach the management port, as the setting
+  always claimed. **If you reach the dashboard over IPv6, add that address to
+  `mgmt_whitelist_ips` before upgrading**, which now takes IPv6 addresses.
+- While the allowlist or port knocking is on, an IPv6 packet from an unlisted
+  source whose extension headers the parser does not walk (a routing header,
+  destination options, IPsec) is dropped, since it might be addressed to the
+  management port. MLD and neighbour discovery are never dropped.
+- A dual-stack install with eBPF on: IPv6 traffic now pays the program's cost
+  per packet, and an IPv6 source can be shunned and rate limited.
+
+### The packaged service runs as the `gateon` account, not root — **check files it reads outside `/etc/gateon`**
+
+The .deb, the .rpm and `gateon install` ran the gateway as root. The unit now
+runs it as a `gateon` system account holding only CAP_NET_BIND_SERVICE, CAP_BPF
+and CAP_NET_ADMIN, and the postinstall creates the account and gives it
+`/etc/gateon` and `/var/lib/gateon`. See ADR 0019.
+
+**Who is affected:** an install that reads a file outside those two directories
+that only root can read — most often a certbot private key,
+`/etc/letsencrypt/archive/*/privkey*.pem`, which is 0600 root. A route using it
+fails its TLS load with "permission denied". Give the `gateon` group read
+access, or deploy the certificates into `/etc/gateon`. To stay on root, run
+`systemctl edit gateon` and add `User=root` and `Group=root` under `[Service]`.
+
+### `GET /v1/system/interfaces` reports `ebpf.attachMode` and `ebpf.loadError`
+
+They were `attach_mode` and `load_error`, which the dashboard's eBPF card never
+read: an attached program always showed as "XDP attached (native mode)", and a
+failed attach never showed its reason. On a NIC that falls back to the TC hook
+the card now says so, including that port knocking, phantom ports and load
+balancing are not in force there.
+
+**Who is affected:** anything outside the dashboard that reads the two old keys
+from this endpoint. `GET /v1/security/posture` already used `attachMode`.
+
+### "Update now" in the GeoIP settings uses the licence key in the form
+
+The GeoIP card sends the licence key it shows, so a key can be tried before it
+is saved, and `POST /v1/geoip/update` read it under a name the card does not
+use. The update ran with the saved key instead, and with none saved it answered
+"maxmind license key not configured" to an operator looking at the key they had
+just entered. It now uses the key sent, and the saved one only when none is.
+
+**Who is affected:** anyone who pressed "Update now" with a key in the form
+that was not the saved one: the download used the saved key.
+
+### The setup wizard's database step takes effect — **a wizard-built install may be on `gateon.db`**
+
+The first-run wizard's "Test connection" button answered `400 missing database
+configuration` whatever was filled in, and finishing the wizard saved neither
+the management database nor the dedicated logging database it asked for: the
+administrator was created in `gateon.db` and the gateway ran there. The
+dashboard sends protojson's lowerCamel (`databaseConfig`, `sqlitePath`), which
+the connection test and the REST setup handler read through snake_case tags,
+and it submits setup over Connect, where the database fields were never read.
+Both now work, and setup saves the databases before it creates the
+administrator, so the account is created in the database that was chosen.
+
+**Who is affected:** an install set up with the wizard from v2.4.2 on that
+chose PostgreSQL, a connection string, a SQLite path other than `gateon.db`, or
+a separate logging database. It is running on `gateon.db` in its data
+directory, with its logs in the same file, and `global.json` names no database.
+Nothing moves on upgrade. The database it asked for, if it was created at all,
+is empty: pointing `auth.database_url` at it reopens first-run setup, because it
+holds no administrator, until setup is run again against it.
+
+### eBPF starts for a process holding CAP_BPF and CAP_NET_ADMIN, whatever its uid
+
+eBPF used to start only for uid 0, while the error it logged said the
+capabilities would do. It now asks for exactly those: CAP_BPF and CAP_NET_ADMIN,
+or CAP_SYS_ADMIN. CAP_PERFMON is not needed. See ADR 0018.
+
+**Who is affected:** a service run as its own user with the capabilities, which
+was refused and now starts eBPF; and root with the capabilities dropped, which
+was let through to fail at load and is now refused with the missing ones named.
+The packaged systemd unit runs as root and is unaffected. In a container, run
+eBPF as uid 0 with the rest dropped — `--user 0 --cap-drop ALL --cap-add BPF
+--cap-add NET_ADMIN`, plus `--network host` to filter on the host's NIC —
+because a container gives added capabilities to no other user.
+
+### The Helm chart's eBPF mode runs the container as uid 0 — **it never started eBPF before**
+
+`ebpf.enabled` granted NET_ADMIN and BPF to a container running as uid 65532,
+which could not use them, so eBPF never started. It now runs the container as
+uid 0 with every other capability dropped, escalation blocked and the root
+filesystem read-only. The new `ebpf.hostNetwork` (default off) attaches to the
+node's NIC instead of the pod's interface.
+
+**Who is affected:** a release with `ebpf.enabled: true`. Its pod now runs as
+uid 0, and eBPF starts once it is on in gateon's settings.
+
+### eBPF attaches at the TC hook when native XDP is refused — **it now filters where it did nothing**
+
+With eBPF on and an XDP feature on (`xdp_ip_shunning`, `xdp_rate_limit`), a
+NIC that refused native XDP ended up with nothing attached unless
+`tc_filtering` was also set — and every EC2 instance refuses it at its
+defaults. The gateway now falls back to the TC ingress hook on its own and
+enforces there what was configured: shunned addresses, the rate limiter if it
+is on, the management allowlist if it is on. See ADR 0017.
+
+**Who is affected:** an install with eBPF on, on a NIC without native XDP — on
+EC2, all of them. Its eBPF counters read zero; they now move, and every packet
+pays the TC program's cost. To keep the old behaviour, turn eBPF off. Generic
+XDP stays opt-in (`allow_generic_xdp`) and is slower than TC.
+
+### A NIC without native XDP no longer runs generic XDP labelled "native"
+
+The native attach passed no mode flag, and with none the kernel attaches in
+generic (SKB) mode whenever the driver has no native XDP — e1000, r8169,
+bridges — which the gateway and the dashboard reported as native. The attach
+now asks for driver mode by name, is refused on such a NIC, and falls back to
+TC as above. ENA was never affected.
+
+**Who is affected:** an install with eBPF on, on such a NIC. Its attach moves
+from generic XDP, mislabelled, to TC, which is cheaper.
+
+### With no interface set, eBPF attaches to the default-route interface
+
+`ebpf.interface` defaulted to `eth0`, which no current EC2 host has, so an
+unconfigured install there failed with "no such network interface". Empty now
+means the interface carrying the IPv4 default route: `ens5` on an EC2 host,
+still `eth0` inside a container. A configured interface is used as before.
+
+**Who is affected:** an install with eBPF on and no interface set, on a host
+whose default route is not on `eth0`. It now attaches where it did not.
+
+### The TC hook enforces the kernel management allowlist — **check `mgmt_whitelist_ips`**
+
+On the TC hook, `enable_mgmt_whitelist` let every address reach the management
+port: the program let listed sources through early and never dropped anyone
+else. It now drops an unlisted source's packets to the management port, as the
+XDP program always has. Separately, both programs read the port from the wrong
+bytes of a packet that carried an IP option or was split into fragments, and
+let it through; they now find the TCP header where the IPv4 header says it is.
+
+**Who is affected:** an install on the TC hook with `enable_mgmt_whitelist` on.
+Addresses not in `mgmt_whitelist_ips` lose the management port, as the setting
+always said they would. Check the list before upgrading. The flag is still
+never switched on against an empty list.
+
+---
+
 ## v2.7.0
 
 ### Routes saved from the dashboard may be serving on every entrypoint — **check each route**

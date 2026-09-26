@@ -30,14 +30,15 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 ### 🛡️ Enterprise-Grade Security & Shielding
 - **Advanced WAF**: Built-in **[gwaf](https://github.com/gsoultan/gwaf)**, an embeddable Go WAF that parses request *intent* rather than matching signatures — semantic detectors for SQLi, XSS, shell, path, template, NoSQL and PHP injection, plus prompt injection. OWASP CRS rules import through its SecLang adapter. Blocks by default with no tuning phase, and every decision carries a rule ID and the matched byte span.
 - **Data Loss Prevention**: Response- and request-phase inspection for card numbers (issuer range + Luhn, not a regex guess), cloud and SaaS credentials, private keys, database URIs with embedded passwords, and stack traces or database errors leaking from the origin. Choose **block, redact or audit** per route, so a programme can start by watching and tighten later. Outbound and inbound are separate rule sets on purpose — a card number in a response is a leak, the same number in a request is a customer paying for something. See [ADR 0008](doc/adr/0008-response-inspection-must-control-its-own-encoding.md).
-- **Kernel Offloading** `[experimental]`: eBPF rate limiting, IP shunning and packet filtering, at the earliest hook the NIC actually supports.
+- **Kernel Offloading** `[experimental]`: eBPF rate limiting, IP shunning and packet filtering, for IPv4 and IPv6, at the earliest hook the NIC actually supports.
   **Native XDP runs in the driver before the packet ever becomes an `skb`** — but most virtualized NICs cannot offer it.
   The AWS ENA driver, for one, refuses a native attach above a page-sized MTU (the EC2 VPC default is 9001) and unless
   the driver is using at most half its queues. Where native XDP is unavailable, Gateon attaches at the **TC (clsact)
   ingress** hook instead, which runs after `skb` allocation and so drops no earlier than a firewall rule, but carries
   none of generic XDP's per-packet cost. **Generic/SKB XDP is refused by default** (`ebpf.allow_generic_xdp`): it drops
   no earlier than TC while charging every packet the full program cost plus a possible re-allocation and copy, which
-  makes it slower than running no eBPF at all. See
+  makes it slower than running no eBPF at all. It needs CAP_BPF and CAP_NET_ADMIN, not root; in a
+  container that means `--user 0 --cap-drop ALL --cap-add BPF --cap-add NET_ADMIN` (ADR 0018). See
   [ADR 0007](doc/adr/0007-xdp-attach-mode-and-the-tc-ingress-hook.md).
 - **Bot Management**: JS Challenges, Browser Integrity checks, and Cloudflare Turnstile integration.
 - **Identity & Access**: Comprehensive AuthN/Z via **JWT (HMAC/JWKS), PASETO, API Keys**, and Forward Auth.

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/db"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -35,7 +37,7 @@ func TestSetupCannotPointSQLiteOutsideTheDataDirectory(t *testing.T) {
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("test-db with %q answered %d, want 400", dsn, rr.Code)
 		}
-		if err := validateDatabase(dsn, nil); err == nil {
+		if err := db.Probe(dsn, nil, config.DataDir()); err == nil {
 			t.Errorf("setup accepted %q as its database", dsn)
 		}
 	}
@@ -81,7 +83,7 @@ func TestSetupCannotReachOutsideTheDataDirectoryThroughTheRestOfTheURL(t *testin
 		if rr := postTestDB(t, &setupStateAPI{required: true}, string(body)); rr.Code != http.StatusBadRequest {
 			t.Errorf("test-db with %q answered %d, want 400", dsn, rr.Code)
 		}
-		if err := validateDatabase(dsn, nil); err == nil {
+		if err := db.Probe(dsn, nil, config.DataDir()); err == nil {
 			t.Errorf("setup accepted %q as its database", dsn)
 		}
 		if _, err := os.Stat(filepath.Join(outside, name)); err == nil {
@@ -90,7 +92,7 @@ func TestSetupCannotReachOutsideTheDataDirectoryThroughTheRestOfTheURL(t *testin
 	}
 
 	form := &gateonv1.DatabaseConfig{Driver: "sqlite", SqlitePath: inside + attach("form.db")}
-	if err := validateDatabase("", form); err == nil {
+	if err := db.Probe("", form, config.DataDir()); err == nil {
 		t.Errorf("setup accepted sqlite_path %q", form.SqlitePath)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "form.db")); err == nil {

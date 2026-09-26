@@ -7,7 +7,6 @@ package ebpf
 
 import (
 	"net"
-	"os"
 	"testing"
 
 	"github.com/cilium/ebpf"
@@ -24,17 +23,21 @@ import (
 // nothing here can disturb host networking. Root is required for both
 // CAP_NET_ADMIN and BPF program load.
 
-func requireRoot(t *testing.T) {
+// requireBPFCapabilities skips unless this process can load and attach the
+// programs. It asks the same question the gateway does -- capabilities, not the
+// uid -- so the suite also runs as a non-root user holding only CAP_BPF and
+// CAP_NET_ADMIN, which is what proves that pair is enough.
+func requireBPFCapabilities(t *testing.T) {
 	t.Helper()
-	if os.Geteuid() != 0 {
-		t.Skip("needs root for CAP_NET_ADMIN and BPF program load")
+	if missing := MissingPrivileges(); len(missing) > 0 {
+		t.Skipf("needs %v to load and attach BPF programs", missing)
 	}
 }
 
 // newDummyIface creates an isolated dummy interface and removes it afterwards.
 func newDummyIface(t *testing.T, name string) *net.Interface {
 	t.Helper()
-	requireRoot(t)
+	requireBPFCapabilities(t)
 
 	link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: name}}
 	if err := netlink.LinkAdd(link); err != nil {
@@ -55,6 +58,12 @@ func newDummyIface(t *testing.T, name string) *net.Interface {
 // loadTCProgram loads the compiled object and returns the TC ingress program.
 func loadTCProgram(t *testing.T) *ebpf.Program {
 	t.Helper()
+	return loadProgram(t, tcProgName)
+}
+
+// loadProgram loads the compiled object and returns the named program.
+func loadProgram(t *testing.T, name string) *ebpf.Program {
+	t.Helper()
 	// Not fatal, and not a skip: the loader does not treat it as fatal either.
 	// Running this test in a container that lacks CAP_SYS_RESOURCE is precisely
 	// what guards against someone reinstating the hard failure.
@@ -71,9 +80,9 @@ func loadTCProgram(t *testing.T) *ebpf.Program {
 	}
 	t.Cleanup(coll.Close)
 
-	prog := coll.Programs[tcProgName]
+	prog := coll.Programs[name]
 	if prog == nil {
-		t.Fatalf("program %q missing from collection", tcProgName)
+		t.Fatalf("program %q missing from collection", name)
 	}
 	return prog
 }

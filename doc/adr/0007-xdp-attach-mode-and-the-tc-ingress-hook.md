@@ -4,7 +4,9 @@ Date: 2026-08-25
 
 ## Status
 
-Accepted.
+Accepted. The TC parts -- that TC is opt-in behind `tc_filtering`, and that it
+decides on the IP header alone -- are superseded by
+[0017](./0017-ebpf-falls-back-to-tc-on-its-own.md).
 
 ## Context
 

@@ -20,9 +20,9 @@ import (
 //
 // That is reachable by ordinary misconfiguration, not by malice:
 // ManagementConfig.AllowedIps, the list an operator would reach for, defaults
-// to 0.0.0.0/0 and ::/0, and neither a CIDR nor an IPv6 address can be encoded
-// as a __u32 key. So the count of what actually reached the kernel, not the
-// operator's intent, is what may switch the branch on.
+// to 0.0.0.0/0 and ::/0, and a CIDR cannot be encoded as either map's key. So
+// the count of what actually reached the kernel, not the operator's intent, is
+// what may switch the branch on.
 func TestSeedManagementWhitelistRefusesToEnableAgainstAnEmptyAllowlist(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -30,7 +30,6 @@ func TestSeedManagementWhitelistRefusesToEnableAgainstAnEmptyAllowlist(t *testin
 	}{
 		{"nothing configured", nil},
 		{"the management default, which is a CIDR", []string{"0.0.0.0/0", "::/0"}},
-		{"IPv6, which this map cannot key", []string{"2001:db8::1"}},
 		{"not an address at all", []string{"admin.example.com"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,24 +67,27 @@ func TestSeedManagementWhitelistIsOffWhenNotAskedFor(t *testing.T) {
 // TestWhitelistKeysTakesOnlyWhatTheMapCanExpress covers the encoder directly:
 // an unencodable entry must be skipped, not approximated. Widening a /24 to
 // its network address would admit an address the operator did not name, and
-// narrowing it would lock out ones they did.
+// narrowing it would lock out ones they did. A bare IPv6 address is exact, and
+// goes to the IPv6 map.
 func TestWhitelistKeysTakesOnlyWhatTheMapCanExpress(t *testing.T) {
 	keys := whitelistKeys([]string{
 		"203.0.113.7",     // kept
 		"198.51.100.0/24", // CIDR: no
-		"2001:db8::1",     // IPv6: no
+		"2001:db8::/64",   // CIDR: no
+		"2001:db8::1",     // IPv6: kept, in the IPv6 map
 		"",                // empty: no
 		"203.0.113.7",     // duplicate of the first
 	})
 
-	if len(keys) != 1 {
-		t.Fatalf("whitelistKeys returned %d key(s), want exactly the one encodable address", len(keys))
+	if len(keys.v4) != 1 || len(keys.v6) != 1 {
+		t.Fatalf("whitelistKeys returned %d IPv4 and %d IPv6 key(s), want exactly one of each",
+			len(keys.v4), len(keys.v6))
 	}
 	want, err := ipToUint32("203.0.113.7")
 	if err != nil {
 		t.Fatalf("ipToUint32: %v", err)
 	}
-	if _, ok := keys[want]; !ok {
+	if _, ok := keys.v4[want]; !ok {
 		t.Error("the one bare IPv4 address configured is not among the keys")
 	}
 }

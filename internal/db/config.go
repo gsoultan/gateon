@@ -4,11 +4,42 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
+
+// ErrNoDatabase is Probe's answer when neither the url nor the config names a
+// database it can build a DSN for.
+var ErrNoDatabase = errors.New("missing database configuration")
+
+// Probe proves a database named over the network can be opened: databaseURL
+// wins over cfg, a SQLite one must be a plain file inside dataDir (see
+// ConfineSQLite), and the connection is closed as soon as it answers.
+//
+// It is what the first-run wizard's connection test and Setup itself run, so
+// the database an operator tested is judged by the same rules as the one they
+// submit.
+func Probe(databaseURL string, cfg *gateonv1.DatabaseConfig, dataDir string) error {
+	dsn := databaseURL
+	if dsn == "" {
+		dsn = BuildURLFromConfig(cfg)
+	}
+	if dsn == "" {
+		return ErrNoDatabase
+	}
+	if err := ConfineSQLite(dsn, dataDir); err != nil {
+		return err
+	}
+	conn, _, err := Open(dsn)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	_ = conn.Close()
+	return nil
+}
 
 // AuthDatabaseURL returns the database URL from AuthConfig.
 // Prefers database_config (builds URL); else database_url; else sqlite_path.

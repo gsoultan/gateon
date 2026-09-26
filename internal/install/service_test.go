@@ -179,7 +179,7 @@ func TestSecureOwnerReachesEveryEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := secureOwner(dir)
+	err := secureOwner(dir, 0, 0)
 
 	if os.Geteuid() == 0 {
 		if err != nil {
@@ -206,7 +206,7 @@ func TestSecureOwnerReachesEveryEntry(t *testing.T) {
 // TestSecureOwnerReportsAMissingDirectory keeps a typo'd path from looking like
 // a successful install.
 func TestSecureOwnerReportsAMissingDirectory(t *testing.T) {
-	err := secureOwner(filepath.Join(t.TempDir(), "does-not-exist"))
+	err := secureOwner(filepath.Join(t.TempDir(), "does-not-exist"), 0, 0)
 	if err == nil {
 		t.Fatal("secureOwner returned nil for a directory that is not there")
 	}

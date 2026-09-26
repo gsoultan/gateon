@@ -539,10 +539,19 @@ var geoIPDownloadURL = "https://download.maxmind.com/app/geoip_download"
 // downloadGeoIPEdition downloads a single MaxMind edition, extracts the embedded
 // .mmdb file to its destination and reloads the associated reader.
 func downloadGeoIPEdition(licenseKey string, edition geoIPEdition) error {
-	downloadURL := fmt.Sprintf("%s?edition_id=%s&license_key=%s&suffix=tar.gz", geoIPDownloadURL, edition.id, licenseKey)
+	// Encoded, not formatted in: the key comes from the settings card as well as
+	// from global config, and a formatted one containing "&" or "#" added
+	// parameters to the request sent to MaxMind, or cut it short.
+	query := url.Values{}
+	query.Set("edition_id", edition.id)
+	query.Set("license_key", licenseKey)
+	query.Set("suffix", "tar.gz")
+	downloadURL := geoIPDownloadURL + "?" + query.Encode()
 
-	// #nosec G107 -- url is built from MaxMind's fixed download endpoint plus
-	// the operator's licence key; no request input reaches it.
+	// #nosec G107 -- the scheme, host and path are MaxMind's fixed download
+	// endpoint. The licence key -- from global config, or typed into the
+	// settings card by an operator with write access -- is query-encoded, so it
+	// cannot change them.
 	resp, err := http.Get(downloadURL)
 	if err != nil {
 		// A transport failure is a *url.Error whose message embeds the full
