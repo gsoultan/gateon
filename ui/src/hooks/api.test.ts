@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test, mock } from "bun:test";
+import { Code, ConnectError } from "@connectrpc/connect";
 import type {
   DatabaseConfig,
   DeepScanStatus,
@@ -38,6 +39,8 @@ import type {
   DeepScanStatus as WireDeepScanStatus,
   RunDeepScanResponse as WireRunDeepScanResponse,
 } from "../services/gen/gateon/v1/api_pb";
+import type { Trace as WireTrace } from "../services/gen/gateon/v1/trace_pb";
+import type { Trace } from "./useTraces";
 
 // Compiles only when T is never; otherwise the type checker names what T is.
 function assertNone<T extends never>(): T[] {
@@ -50,7 +53,7 @@ mock.module("../services/client", () => ({
   api: { setup: async () => ({ success: true, error: "" }) },
 }));
 
-const { setupGateon } = await import("./api");
+const { setupGateon, getApiErrorMessage } = await import("./api");
 const { queryClient } = await import("../queryClient");
 
 describe("setupGateon", () => {
@@ -97,5 +100,25 @@ describe("hand-written types at the generated client", () => {
     // And the messages those responses carry.
     expect(assertNone<Exclude<keyof TraceHop, keyof WireTraceHop>>()).toEqual([]);
     expect(assertNone<Exclude<keyof DeepScanStatus, keyof WireDeepScanStatus>>()).toEqual([]);
+    // The traces page reads traces from the generated client as this type.
+    expect(assertNone<Exclude<keyof Trace, keyof WireTrace>>()).toEqual([]);
+  });
+});
+
+// A Connect call's error message is prefixed with its code, "[permission_denied]"
+// and the like; the helper every page shows errors through reads the error
+// itself instead.
+describe("getApiErrorMessage", () => {
+  test("says what a Connect error means, not its wire code", () => {
+    expect(getApiErrorMessage(new ConnectError("insufficient permissions", Code.PermissionDenied))).toBe(
+      "Insufficient permissions. You do not have access to perform this action.",
+    );
+    expect(getApiErrorMessage(new ConnectError("trace not found", Code.NotFound))).toBe("trace not found");
+  });
+
+  test("still reads the JSON error body a REST call answers with", () => {
+    expect(getApiErrorMessage(new Error('{"error":"missing database configuration"}'))).toBe(
+      "missing database configuration",
+    );
   });
 });
