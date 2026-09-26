@@ -336,16 +336,25 @@ func secureOwner(dir string, uid, gid int) error {
 // hostile traffic, and nothing it does needs more than three capabilities.
 const serviceUser = "gateon"
 
+// Seams for ensureServiceUser, replaced in tests: creating a real account needs
+// root and changes the host it runs on.
+var (
+	lookupAccount = user.Lookup
+	runUseradd    = func(args ...string) error {
+		// #nosec G204 -- every argument is a constant or a fixed system path.
+		return runCmd(exec.Command("useradd", args...))
+	}
+)
+
 // ensureServiceUser creates the service account unless it exists, and returns
 // its uid and gid.
 func ensureServiceUser() (uid, gid int, err error) {
-	if _, err := user.Lookup(serviceUser); err != nil {
-		// #nosec G204 -- every argument is a constant or a fixed system path.
-		if err := runCmd(exec.Command("useradd", useraddArgs(nologinShell())...)); err != nil {
+	if _, err := lookupAccount(serviceUser); err != nil {
+		if err := runUseradd(useraddArgs(nologinShell())...); err != nil {
 			return 0, 0, fmt.Errorf("create the %s account: %w", serviceUser, err)
 		}
 	}
-	u, err := user.Lookup(serviceUser)
+	u, err := lookupAccount(serviceUser)
 	if err != nil {
 		return 0, 0, fmt.Errorf("look up the %s account: %w", serviceUser, err)
 	}
