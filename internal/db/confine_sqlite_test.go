@@ -5,6 +5,7 @@ package db
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,5 +51,32 @@ func TestConfineSQLite(t *testing.T) {
 		if err != nil && !errors.Is(err, ErrSQLiteNotConfined) {
 			t.Errorf("ConfineSQLite(%q) = %v, want ErrSQLiteNotConfined", tc.url, err)
 		}
+	}
+}
+
+// ConfineSQLite compares where the paths are, not how they are written. Abs
+// resolves a relative path against Getwd, which answers with the directory
+// symlinks resolve to; the data directory is named as configured. So a data
+// directory reached through a symlink refused every relative path, the wizard's
+// default gateon.db among them -- found by the first-run e2e spec, whose temp
+// directory sits under macOS's /var -> /private/var. The same comparison let a
+// symlink inside the directory lead out of it.
+func TestConfineSQLiteComparesWhereThePathsAre(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "data")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Chdir(real) // where a process in the linked directory finds itself
+	if err := ConfineSQLite("gateon.db", link); err != nil {
+		t.Errorf("a relative path in a data directory named through a symlink was refused: %v", err)
+	}
+
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(real, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfineSQLite(filepath.Join(real, "out", "escape.db"), real); !errors.Is(err, ErrSQLiteNotConfined) {
+		t.Errorf("a path through a symlink out of the data directory = %v, want ErrSQLiteNotConfined", err)
 	}
 }

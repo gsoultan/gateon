@@ -11,6 +11,20 @@ here after the fact.
 
 ## Unreleased
 
+### The setup wizard accepts a SQLite file in a data directory reached through a symlink
+
+The wizard only takes a SQLite database inside the data directory, and it
+compared the two paths as written. A relative path is resolved against the
+working directory, which the operating system reports with its symlinks
+resolved, so a data directory reached through one -- `/var/lib/gateon` linked
+to a data disk, or anything under macOS's `/var` -- refused every relative
+path, the wizard's default `gateon.db` included. Paths are now compared where
+they actually are. A path that leaves the data directory through a symlink
+inside it, which the written path hid, is now refused.
+
+**Who is affected:** an install whose data directory is a symlink or sits below
+one, which can now use the wizard's SQLite defaults.
+
 ### The setup wizard's connection test no longer says why an address that is not Postgres failed
 
 Until setup completes, anyone who can reach the management port can use the
