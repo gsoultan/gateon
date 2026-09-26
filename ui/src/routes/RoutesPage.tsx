@@ -10,6 +10,7 @@ import { usePermissions } from "../hooks/usePermissions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { ListRoutesResponse, Route } from "../types/gateon";
+import { withRouteDisabled } from "../utils/routeCache";
 
 const RouteForm = lazy(() => import("../components/RouteForm"));
 const RouteList = lazy(() => import("../components/RouteList"));
@@ -106,20 +107,14 @@ export default function RoutesPage() {
     // roll back if the server rejects the change.
     onMutate: async (route: Route) => {
       await queryClient.cancelQueries({ queryKey: ["routes"] });
-      const snapshots = queryClient.getQueriesData<ListRoutesResponse>({
+      const snapshots = queryClient.getQueriesData<ListRoutesResponse | Route[]>({
         queryKey: ["routes"],
       });
-      queryClient.setQueriesData<ListRoutesResponse>(
+      // Every routes query: pages of the list here, and the topology view's
+      // array of all routes, which this used to throw on.
+      queryClient.setQueriesData<ListRoutesResponse | Route[]>(
         { queryKey: ["routes"] },
-        (current) =>
-          current
-            ? {
-                ...current,
-                routes: current.routes.map((r) =>
-                  r.id === route.id ? { ...r, disabled: !route.disabled } : r,
-                ),
-              }
-            : current,
+        (current) => withRouteDisabled(current, route.id, !route.disabled),
       );
       return { snapshots };
     },
