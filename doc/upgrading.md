@@ -11,6 +11,17 @@ here after the fact.
 
 ## Unreleased
 
+### `GET /v1/system/interfaces` reports `ebpf.attachMode` and `ebpf.loadError`
+
+They were `attach_mode` and `load_error`, which the dashboard's eBPF card never
+read: an attached program always showed as "XDP attached (native mode)", and a
+failed attach never showed its reason. On a NIC that falls back to the TC hook
+the card now says so, including that port knocking, phantom ports and load
+balancing are not in force there.
+
+**Who is affected:** anything outside the dashboard that reads the two old keys
+from this endpoint. `GET /v1/security/posture` already used `attachMode`.
+
 ### "Update now" in the GeoIP settings uses the licence key in the form
 
 The GeoIP card sends the licence key it shows, so a key can be tried before it

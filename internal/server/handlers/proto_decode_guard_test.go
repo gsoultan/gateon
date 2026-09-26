@@ -41,7 +41,9 @@ import (
 //
 // Anonymous structs are fine and are the reason this checks the declared type
 // rather than banning encoding/json outright: a handler that declares its own
-// shape owns its own tags.
+// shape owns its own tags -- but only their spelling is its to choose, not
+// their convention. TestHandlerJSONTagsUseTheDashboardsSpelling holds those
+// tags to the dashboard's lowerCamel.
 
 var (
 	// var req gateonv1.SomeRequest
@@ -125,5 +127,77 @@ func TestProtoDecodeGuardDetectsTheShapeItLooksFor(t *testing.T) {
 	// legitimate use of encoding/json still present in this package.
 	if protoVarDecl.MatchString(`	var req struct {`) {
 		t.Error("declaration pattern matches an anonymous struct; those own their own tags")
+	}
+}
+
+// The dashboard, which calls every handler in this package, writes and reads
+// protojson's lowerCamel, so a handler-declared tag with an underscore never
+// matches it -- in either direction. Four shipped that way and all four passed
+// the check above, because each was a struct of the handler's own:
+// POST /v1/setup/test-db answered "missing database configuration" to every
+// test the setup wizard ran, POST /v1/setup saved none of the databases it
+// chose, POST /v1/geoip/update ignored the licence key the settings card sent,
+// and GET /v1/system/interfaces reported the eBPF attach mode under a key the
+// card never read.
+var snakeCaseJSONTag = regexp.MustCompile(`json:"([a-z0-9]+_[a-z0-9_]*)[",]`)
+
+// snakeCaseTagsAllowed names, as "file:key", the keys that are not the
+// dashboard's to spell.
+var snakeCaseTagsAllowed = map[string]bool{
+	// The export file's own format: GET /v1/config/export writes it, and import
+	// and validate read it back. The dashboard uploads the file it downloaded
+	// without reading it, and renaming the key would break every export on disk.
+	"config_import_export.go:entry_points": true,
+}
+
+func TestHandlerJSONTagsUseTheDashboardsSpelling(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f) // #nosec G304 -- test-time read of this package's own sources
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue // a comment may quote a tag; only a declaration carries one
+			}
+			for _, m := range snakeCaseJSONTag.FindAllStringSubmatch(line, -1) {
+				if snakeCaseTagsAllowed[f+":"+m[1]] {
+					continue
+				}
+				t.Errorf("%s:%d declares the JSON key %q.\n"+
+					"    The dashboard sends and reads protojson's lowerCamel, which never matches it.\n"+
+					"    Decode a proto message with DecodeProtoRequest, or spell the tag in lowerCamel.",
+					f, i+1, m[1])
+			}
+		}
+	}
+}
+
+// The tag check has to see the shapes that shipped, and let the right ones by.
+func TestSnakeCaseTagGuardDetectsTheShapeItLooksFor(t *testing.T) {
+	for _, shipped := range []string{
+		"LicenseKey string `json:\"maxmind_license_key\"`",
+		"DatabaseConfig *gateonv1.DatabaseConfig `json:\"database_config\"`",
+		"AttachMode string `json:\"attach_mode,omitempty\"`",
+	} {
+		if !snakeCaseJSONTag.MatchString(shipped) {
+			t.Errorf("did not flag %s", shipped)
+		}
+	}
+	for _, fine := range []string{
+		"AttachMode string `json:\"attachMode,omitempty\"`",
+		"Success bool `json:\"success,omitzero\"`",
+		"Path string `json:\"path\"`",
+	} {
+		if snakeCaseJSONTag.MatchString(fine) {
+			t.Errorf("flagged %s", fine)
+		}
 	}
 }

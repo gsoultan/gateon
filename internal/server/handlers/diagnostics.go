@@ -218,12 +218,18 @@ type netInterfaceInfo struct {
 // ebpfStatusInfo surfaces whether XDP is configured and actually attached, plus
 // the load error if it failed — the operator's answer to "why are my eBPF drop
 // metrics zero?".
+//
+// Keys in the dashboard's lowerCamel (EbpfStatus in useNetworkInterfaces.ts).
+// They were load_error and attach_mode, which the settings card never read: an
+// attached program always rendered as native XDP, so a TC-hook fallback hid
+// that port knocking, phantom ports and load balancing were not in force, and a
+// failed attach never showed its reason.
 type ebpfStatusInfo struct {
 	Enabled    bool   `json:"enabled"`
 	Attached   bool   `json:"attached"`
 	Interface  string `json:"interface,omitempty"`
-	LoadError  string `json:"load_error,omitempty"`
-	AttachMode string `json:"attach_mode,omitempty"`
+	LoadError  string `json:"loadError,omitempty"`
+	AttachMode string `json:"attachMode,omitempty"`
 }
 
 // describeInterface is one row of the picker, and whether the interface has a
