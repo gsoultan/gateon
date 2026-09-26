@@ -46,6 +46,9 @@ func validateDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) error {
 	if dsn == "" {
 		return errors.New("invalid database configuration")
 	}
+	if err := db.ConfineSQLite(dsn, config.DataDir()); err != nil {
+		return err
+	}
 	conn, _, err := db.Open(dsn)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
@@ -456,6 +459,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		if dsn == "" {
 			WriteHTTPError(w, http.StatusBadRequest, "missing database configuration")
+			return
+		}
+		// Before anything opens it: see db.ConfineSQLite.
+		if err := db.ConfineSQLite(dsn, config.DataDir()); err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		conn, _, err := db.Open(dsn)

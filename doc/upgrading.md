@@ -300,6 +300,27 @@ peer, which behind a load balancer is the balancer.
   `/metrics`, which Prometheus answers — a bookmark or reload of the old path
   showed exposition text. Update bookmarks.
 
+### The setup wizard's SQLite database must be a file in the data directory
+
+During first run the wizard's database step — `POST /v1/setup`, and its "Test
+connection" button, `POST /v1/setup/test-db` — opens the database it is given
+before anyone has signed in. A SQLite url there could reach any file the
+gateway can write: opening it created the file, or narrowed the permissions of
+one that existed; a `?_pragma=` query ran as SQL when the database opened, and
+could `ATTACH` a database anywhere; and SQLite percent-decodes a `file:` URI
+after any check on the string, so `..%2F` climbed out of a directory. The
+wizard now takes a SQLite database only as a plain file path inside the data
+directory — no query string, no `file:` URI — and answers anything else with
+`400`.
+
+**Who is affected:** an install that runs the wizard from a working directory
+outside its data directory (`GATEON_DATA_DIR`; otherwise `/var/lib/gateon` on
+Linux when it exists, otherwise the working directory), where the default
+`gateon.db` resolves outside it. The packaged unit and image run from
+`/var/lib/gateon`. Give the wizard an absolute path inside the data directory,
+or set the url in `global.json`: a database the operator configures on disk is
+not restricted.
+
 ### `mysql://` and `mariadb://` are refused at startup — **they never worked**
 
 `Open` accepted both schemes, and most migrations carry a `DriverMySQL` branch,

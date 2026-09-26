@@ -48,6 +48,8 @@ func (c *configuredGatewayAPI) Setup(context.Context, *gateonv1.SetupRequest) (*
 // connection to an arbitrary DSN on the way.
 func TestSetupCannotRepointTheDatabasesOnceSetupIsComplete(t *testing.T) {
 	dir := t.TempDir()
+	// Inside the data directory, so db.ConfineSQLite cannot be what refuses.
+	t.Setenv("GATEON_DATA_DIR", dir)
 	globals := config.NewGlobalRegistry(filepath.Join(dir, "global.json"))
 	legit := filepath.Join(dir, "gateon.db")
 	gc := globals.Get(t.Context())
@@ -90,6 +92,8 @@ func (u *unknownSetupStateAPI) IsSetupRequired(context.Context, *gateonv1.IsSetu
 // write global config while the gateway cannot say whether it is configured.
 func TestSetupRefusesWhenTheSetupStateIsUnknown(t *testing.T) {
 	dir := t.TempDir()
+	// Inside the data directory, so db.ConfineSQLite cannot be what refuses.
+	t.Setenv("GATEON_DATA_DIR", dir)
 	globals := config.NewGlobalRegistry(filepath.Join(dir, "global.json"))
 	attacker := filepath.Join(dir, "attacker.db")
 	body := `{"paseto_secret":"` + strings.Repeat("k", 32) + `","database_url":` + strconv.Quote(attacker) + `}`

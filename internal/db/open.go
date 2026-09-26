@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	neturl "net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -205,6 +206,59 @@ func restrictSQLiteFiles(dsn string) error {
 			logger.L.LogWarn("sqlite file is readable by other accounts and could not be restricted",
 				"path", p, "mode", fmt.Sprintf("%#o", info.Mode().Perm()), "error", err)
 		}
+	}
+	return nil
+}
+
+// ErrSQLiteNotConfined refuses a SQLite database named over the network that
+// is not a plain file path inside the data directory.
+var ErrSQLiteNotConfined = errors.New("a SQLite database set up from the network must be a plain file path inside the data directory")
+
+// ConfineSQLite refuses a SQLite database url that is not a plain file path
+// inside dir.
+//
+// It is for a database named over the network: the first-run setup wizard,
+// which opens the caller's database before anyone has authenticated. Opening
+// a SQLite database creates its file when it is missing, and
+// restrictSQLiteFiles strips group and other permissions from one that
+// exists, so the path decided which file on the host the gateway created or
+// chmodded -- any file it could write, /etc/passwd for a gateway running as
+// root.
+//
+// The rest of a url reaches further than its path, so it is refused rather
+// than checked. Every _pragma in a query string runs as SQL when the database
+// opens, and a percent-encoded semicolon lets one carry an ATTACH, which
+// creates a database wherever it names. SQLite percent-decodes a file: URI
+// after any check on the string, so "..%2F" climbs out of a directory the
+// string never left. And C reads a name only as far as its first NUL, which
+// need not be as far as the path checked here. A wizard needs none of them.
+//
+// A relative path is resolved the way the opener resolves it, against the
+// working directory, which the packaged unit and image set to the data
+// directory. A url for another engine is not its concern.
+func ConfineSQLite(url, dir string) error {
+	driver, dsn := parseURL(url)
+	if driver != DriverSQLite {
+		return nil
+	}
+	path, _, _ := strings.Cut(dsn, "?")
+	if strings.ContainsAny(url, "?\x00") || (len(path) >= 5 && strings.EqualFold(path[:5], "file:")) {
+		return ErrSQLiteNotConfined
+	}
+	if path == ":memory:" {
+		return nil
+	}
+	file, err := filepath.Abs(path)
+	if err != nil {
+		return ErrSQLiteNotConfined
+	}
+	base, err := filepath.Abs(dir)
+	if err != nil {
+		return ErrSQLiteNotConfined
+	}
+	rel, err := filepath.Rel(base, file)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w (%s)", ErrSQLiteNotConfined, base)
 	}
 	return nil
 }

@@ -78,6 +78,8 @@ func attackerDatabaseBody(dir string) string {
 // against the real binary before this test was written.
 func TestSetupDoesNotRewriteTheDatabaseOfAConfiguredGateway(t *testing.T) {
 	dir := t.TempDir()
+	// Inside the data directory, so db.ConfineSQLite cannot be what refuses.
+	t.Setenv("GATEON_DATA_DIR", dir)
 	path := filepath.Join(dir, "global.json")
 	original := []byte(`{"auth": {"enabled": true, "sqlite_path": "gateon.db"}}`)
 	if err := os.WriteFile(path, original, 0o600); err != nil {
@@ -113,6 +115,8 @@ func TestSetupDoesNotRewriteTheDatabaseOfAConfiguredGateway(t *testing.T) {
 // on a first run the wizard's database choice must still be persisted.
 func TestSetupDatabaseSettingsReachTheWizard(t *testing.T) {
 	dir := t.TempDir()
+	// A database set up from the network lives in the data directory.
+	t.Setenv("GATEON_DATA_DIR", dir)
 	path := filepath.Join(dir, "global.json")
 	globals := config.NewGlobalRegistry(path)
 
