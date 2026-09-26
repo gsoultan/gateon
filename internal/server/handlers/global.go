@@ -613,12 +613,16 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			}
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":             id,
-			"secret":         secret,
-			"qr_code_url":    qr,
-			"recovery_codes": recovery,
-		})
+		// Keys as the login page reads them (enrollData in LoginPage.tsx). They
+		// were qr_code_url and recovery_codes, which it never read: an account
+		// made to enroll saw a broken QR image and was never shown its recovery
+		// codes, only the secret to type in by hand.
+		WriteJSON(w, http.StatusOK, struct {
+			ID            string   `json:"id"`
+			Secret        string   `json:"secret"`
+			QRCodeURL     string   `json:"qrCodeUrl"`
+			RecoveryCodes []string `json:"recoveryCodes"`
+		}{ID: id, Secret: secret, QRCodeURL: qr, RecoveryCodes: recovery})
 	})
 	mux.HandleFunc("POST /v1/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

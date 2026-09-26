@@ -11,6 +11,20 @@ here after the fact.
 
 ## Unreleased
 
+### Required 2FA enrollment shows its QR code and recovery codes — **accounts that enrolled that way never saw theirs**
+
+When an administrator required 2FA, the login page enrolled the account through
+`POST /v1/auth/2fa/enroll`, which answered `qr_code_url` and `recovery_codes`
+while the page reads `qrCodeUrl` and `recoveryCodes`. The QR image was blank
+and the recovery codes were never displayed, so enrollment went through on the
+secret typed in by hand. The endpoint now answers in the page's spelling.
+
+**Who is affected:** every account that enrolled through a required-2FA login
+from v2.4.2 on. Its recovery codes exist and nobody has seen them. Each such
+user can get a new set by setting 2FA up again from their own row in Users
+("Manage your two-factor authentication"). Anything outside the dashboard that
+reads the two old keys from this endpoint must switch to the new ones.
+
 ### eBPF filters IPv6 — **an IPv4-only kernel allowlist now closes the management port to IPv6**
 
 Both eBPF programs passed every IPv6 packet: no shun, no rate limit, no SYN
