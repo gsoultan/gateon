@@ -55,6 +55,12 @@ func newDummyIface(t *testing.T, name string) *net.Interface {
 // loadTCProgram loads the compiled object and returns the TC ingress program.
 func loadTCProgram(t *testing.T) *ebpf.Program {
 	t.Helper()
+	return loadProgram(t, tcProgName)
+}
+
+// loadProgram loads the compiled object and returns the named program.
+func loadProgram(t *testing.T, name string) *ebpf.Program {
+	t.Helper()
 	// Not fatal, and not a skip: the loader does not treat it as fatal either.
 	// Running this test in a container that lacks CAP_SYS_RESOURCE is precisely
 	// what guards against someone reinstating the hard failure.
@@ -71,9 +77,9 @@ func loadTCProgram(t *testing.T) *ebpf.Program {
 	}
 	t.Cleanup(coll.Close)
 
-	prog := coll.Programs[tcProgName]
+	prog := coll.Programs[name]
 	if prog == nil {
-		t.Fatalf("program %q missing from collection", tcProgName)
+		t.Fatalf("program %q missing from collection", name)
 	}
 	return prog
 }

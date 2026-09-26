@@ -26,3 +26,7 @@ func (m *EbpfManager) Start(ctx context.Context) {
 		m.close()
 	}()
 }
+
+// DefaultInterface is "" where eBPF cannot attach: there is no interface it
+// would pick.
+func DefaultInterface() string { return "" }

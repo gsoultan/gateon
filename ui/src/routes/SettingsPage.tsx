@@ -2132,8 +2132,8 @@ export default function SettingsPage() {
                 // unavailable (e.g. air-gapped or restricted environments).
                 <TextInput
                   label="Network Interface"
-                  description="The network interface to attach eBPF programs to (e.g. eth0)"
-                  placeholder="eth0"
+                  description="The network interface to attach eBPF programs to. Leave empty to use the one carrying the default route: ens5 on an EC2 host, eth0 inside a container."
+                  placeholder="default-route interface"
                   value={config.ebpf.interface || ""}
                   onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, interface: e.currentTarget.value}})}
                   disabled={formDisabled}
@@ -2141,7 +2141,7 @@ export default function SettingsPage() {
               ) : (
                 <Select
                   label="Network Interface"
-                  description="The NIC to attach eBPF/XDP programs to. Pick the interface that carries your traffic."
+                  description="The NIC to attach eBPF programs to. Left unset, the gateway uses the recommended one: the interface carrying the default route."
                   placeholder={
                     netInfo.interfaces.find((i) => i.recommended)
                       ? `${netInfo.interfaces.find((i) => i.recommended)!.name} (recommended)`
@@ -2167,6 +2167,13 @@ export default function SettingsPage() {
                     {netInfo.ebpf.interface} in generic (SKB) mode — native driver mode is
                     unavailable on this NIC, so throughput is reduced. Drop metrics are live.
                   </Text>
+                ) : netInfo.ebpf.attachMode === "tcx" || netInfo.ebpf.attachMode === "clsact" ? (
+                  <Text size="xs" c="teal">
+                    <IconCheck size={12} style={{ verticalAlign: "middle" }} /> Attached to{" "}
+                    {netInfo.ebpf.interface} at the TC ingress hook ({netInfo.ebpf.attachMode}): packets are
+                    dropped in the kernel before Gateon sees them, though after the NIC driver. Port knocking,
+                    phantom ports and load balancing need native XDP and are not in force. Drop metrics are live.
+                  </Text>
                 ) : (
                   <Text size="xs" c="teal">
                     <IconCheck size={12} style={{ verticalAlign: "middle" }} /> XDP attached to{" "}
@@ -2174,31 +2181,31 @@ export default function SettingsPage() {
                   </Text>
                 )
               ) : netInfo?.ebpf?.enabled ? (
-                <Alert color="red" variant="light" icon={<IconAlertTriangle size="1rem" />} title="XDP not attached">
+                <Alert color="red" variant="light" icon={<IconAlertTriangle size="1rem" />} title="eBPF not attached">
                   <Text size="sm">
-                    eBPF is enabled but the XDP program is not attached, so eBPF drop
+                    eBPF is enabled but no eBPF program is attached, so eBPF drop
                     metrics will read 0.
-                    {netInfo.ebpf.loadError ? ` Reason: ${netInfo.ebpf.loadError}` : " Verify the selected interface exists and the gateway has CAP_NET_ADMIN."}
+                    {netInfo.ebpf.loadError ? ` Reason: ${netInfo.ebpf.loadError}` : " Verify the selected interface exists and the gateway has CAP_BPF and CAP_NET_ADMIN."}
                   </Text>
                 </Alert>
               ) : null}
               <Switch
                 label="XDP Rate Limiting"
-                description="Drop packets at the network driver level"
+                description="Drop floods in the kernel, before Gateon sees them"
                 checked={config.ebpf.xdpRateLimit || false}
                 onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdpRateLimit: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
               <Switch
                 label="XDP IP Shunning"
-                description="Automatically shun malicious IPs at the driver level (IPS)"
+                description="Automatically shun malicious IPs in the kernel (IPS)"
                 checked={config.ebpf.xdpIpShunning || false}
                 onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, xdpIpShunning: e.currentTarget.checked}})}
                 disabled={formDisabled}
               />
               <Switch
                 label="TC Filtering"
-                description="Kernel-level traffic classification and filtering"
+                description="Attach at the TC ingress hook even with no XDP feature on. With one on, the gateway uses TC by itself wherever native XDP is unavailable."
                 checked={config.ebpf.tcFiltering || false}
                 onChange={(e) => setConfig({...config, ebpf: {...config.ebpf!, tcFiltering: e.currentTarget.checked}})}
                 disabled={formDisabled}

@@ -74,6 +74,25 @@ func sysfsRXQueues(name string) int {
 	return n
 }
 
+// procNetRoute is the running network namespace's IPv4 routing table.
+const procNetRoute = "/proc/net/route"
+
+// readDefaultRouteInterface names the interface carrying this namespace's
+// default route, or "" when the table is unreadable or has none.
+func readDefaultRouteInterface() string {
+	table, err := os.ReadFile(procNetRoute)
+	if err != nil {
+		return ""
+	}
+	return defaultRouteInterface(string(table))
+}
+
+// DefaultInterface is the interface eBPF attaches to when none is configured,
+// so the dashboard can recommend the one the gateway will actually use.
+func DefaultInterface() string {
+	return targetInterface("", readDefaultRouteInterface())
+}
+
 // probeNIC gathers what the diagnosis needs. Every lookup degrades to a zero
 // value, because a missing fact must narrow the explanation, never invent one.
 func probeNIC(iface *net.Interface) nicFacts {
@@ -99,9 +118,11 @@ func probeNIC(iface *net.Interface) nicFacts {
 // interface that is two extra allocations and two copies per packet in exchange
 // for nothing, which is why it now takes an explicit opt-in.
 func attachXDP(prog *ebpf.Program, iface *net.Interface, allowGeneric bool) (link.Link, string, error) {
-	// Default flags (0) ask the kernel for the best available native attach; it
-	// does not fall back to generic on its own.
-	l, err := link.AttachXDP(link.XDPOptions{Program: prog, Interface: iface.Index})
+	// Driver mode by name. With no mode flag the kernel picks driver mode when
+	// the driver implements it and generic (SKB) mode when it does not
+	// (dev_xdp_mode), so a NIC without native XDP used to get a generic attach
+	// that this function reported as native -- the very degrade it refuses.
+	l, err := link.AttachXDP(link.XDPOptions{Program: prog, Interface: iface.Index, Flags: link.XDPDriverMode})
 	if err == nil {
 		return l, attachModeNative, nil
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/gsoultan/gateon/internal/logger"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Entry-point program names in bpf/xdp_rate_limit.c.
@@ -65,50 +66,58 @@ func (f closerFunc) Close() error { return f() }
 // XDP and TC are alternatives, not layers. Both hooks read the same maps and
 // make the same drop decisions, and XDP sits strictly earlier in the stack, so
 // running both would mean TC re-checking only the packets XDP already passed.
-// TC is therefore loaded when XDP is not wanted, or when XDP was wanted and
-// could not attach — which is exactly the EC2 case the diagnosis points at.
+// TC is loaded when XDP was wanted and could not attach -- which is the EC2
+// default, where the ENA driver refuses native XDP -- or when tc_filtering asks
+// for it with no XDP feature on. See tryTC.
 func (m *EbpfManager) Start(ctx context.Context) {
 	if m.config == nil || !m.config.Enabled {
 		return
 	}
+	// Resolved once, so a route change mid-Start cannot put the XDP attempt and
+	// the TC fallback on two different interfaces.
+	target := targetInterface(m.config.GetInterface(), readDefaultRouteInterface())
 
 	logger.L.LogInfo("Initializing eBPF performance offloading subsystem",
+		"interface", target,
 		"xdp_rate_limit", m.config.XdpRateLimit,
 		"xdp_ip_shunning", m.config.XdpIpShunning,
 		"xdp_load_balancing", m.config.XdpLoadBalancing,
 		"tc_filtering", m.config.TcFiltering)
+	warnLoadBalancingUnimplemented(m.config)
 
-	if xdpLoadBalancingUnimplemented(m.config) {
-		logger.L.LogError("xdp_load_balancing is enabled but not implemented: no destination MAC can "+
-			"be resolved for a backend, so no backend will be installed and no packet will be "+
-			"redirected. Nothing is silently dropped -- traffic keeps taking the normal path -- but "+
-			"this setting is doing nothing. Turn it off and balance in the proxy instead.",
-			"setting", "xdp_load_balancing")
+	if wantsXDP(m.config) {
+		m.loadXDP(ctx, target)
 	}
+	attached := m.isAttached()
+	if attached && m.config.TcFiltering {
+		logger.L.LogInfo("tc_filtering ignored: XDP is attached and filters strictly earlier",
+			"interface", target)
+	}
+	if !tryTC(m.config, attached) {
+		return
+	}
+	if wantsXDP(m.config) {
+		logger.L.LogWarn("XDP did not attach; falling back to the TC ingress hook", "interface", target)
+	}
+	m.loadTC(ctx, target)
+	if gaps := tcUnsupported(m.config); m.isAttached() && len(gaps) > 0 {
+		logger.L.LogWarn("TC ingress cannot enforce every configured eBPF feature; "+
+			"these are NOT in force on this hook and need native XDP",
+			"interface", target, "unenforced", gaps)
+	}
+}
 
-	if m.config.XdpRateLimit || m.config.XdpIpShunning || m.config.XdpLoadBalancing {
-		m.loadXDP(ctx)
-		if m.isAttached() {
-			if m.config.TcFiltering {
-				logger.L.LogInfo("tc_filtering ignored: XDP is attached and filters strictly earlier",
-					"interface", m.ifaceName())
-			}
-			return
-		}
-		if m.config.TcFiltering {
-			logger.L.LogInfo("XDP did not attach; falling back to the TC ingress hook as configured",
-				"interface", m.ifaceName())
-		}
+// warnLoadBalancingUnimplemented says so when xdp_load_balancing is on; see
+// xdpLoadBalancingUnimplemented.
+func warnLoadBalancingUnimplemented(cfg *gateonv1.EbpfConfig) {
+	if !xdpLoadBalancingUnimplemented(cfg) {
+		return
 	}
-
-	if m.config.TcFiltering {
-		m.loadTC(ctx)
-		if gaps := tcUnsupported(m.config); m.isAttached() && len(gaps) > 0 {
-			logger.L.LogWarn("TC ingress cannot enforce every configured eBPF feature; "+
-				"these are NOT in force on this hook and need native XDP",
-				"interface", m.ifaceName(), "unenforced", gaps)
-		}
-	}
+	logger.L.LogError("xdp_load_balancing is enabled but not implemented: no destination MAC can "+
+		"be resolved for a backend, so no backend will be installed and no packet will be "+
+		"redirected. Nothing is silently dropped -- traffic keeps taking the normal path -- but "+
+		"this setting is doing nothing. Turn it off and balance in the proxy instead.",
+		"setting", "xdp_load_balancing")
 }
 
 // isAttached reports whether a hook is currently attached.
@@ -118,30 +127,22 @@ func (m *EbpfManager) isAttached() bool {
 	return m.attached
 }
 
-// ifaceName is the configured interface, defaulting to eth0. Note that modern
-// EC2 AMIs name the primary interface ens5 or enX0, so the default is only
-// right inside a container netns.
-func (m *EbpfManager) ifaceName() string {
-	if m.config != nil && m.config.Interface != "" {
-		return m.config.Interface
-	}
-	return "eth0"
-}
-
 // hookSpec describes one attachable program. XDP and TC differ only in which
 // program they pull from the collection and how they attach it, so they share
 // the load path rather than duplicating the collection lifecycle — two
 // collections would mean two independent sets of maps, and the Go-side mutators
 // would silently only reach one of them.
 type hookSpec struct {
+	iface    string // the interface Start resolved; see targetInterface
 	progName string
 	label    string
 	attach   func(prog *ebpf.Program, iface *net.Interface) (io.Closer, string, error)
 }
 
 // loadXDP loads and attaches the XDP program.
-func (m *EbpfManager) loadXDP(ctx context.Context) {
+func (m *EbpfManager) loadXDP(ctx context.Context, iface string) {
 	m.loadHook(ctx, hookSpec{
+		iface:    iface,
 		progName: xdpProgName,
 		label:    "XDP",
 		attach: func(prog *ebpf.Program, iface *net.Interface) (io.Closer, string, error) {
@@ -155,8 +156,9 @@ func (m *EbpfManager) loadXDP(ctx context.Context) {
 }
 
 // loadTC loads and attaches the TC (clsact ingress) program.
-func (m *EbpfManager) loadTC(ctx context.Context) {
+func (m *EbpfManager) loadTC(ctx context.Context, iface string) {
 	m.loadHook(ctx, hookSpec{
+		iface:    iface,
 		progName: tcProgName,
 		label:    "TC",
 		attach: func(prog *ebpf.Program, iface *net.Interface) (io.Closer, string, error) {
@@ -166,10 +168,10 @@ func (m *EbpfManager) loadTC(ctx context.Context) {
 }
 
 // loadHook loads the compiled object, resolves the hook's program, attaches it
-// to the configured interface, and hands off to commit for map registration and
+// to the resolved interface, and hands off to commit for map registration and
 // teardown wiring.
 func (m *EbpfManager) loadHook(ctx context.Context, h hookSpec) {
-	ifaceName := m.ifaceName()
+	ifaceName := h.iface
 
 	// setErr records why the load failed so GetMapStats can surface it (the
 	// real answer to "why are the metrics zero?").
@@ -267,7 +269,8 @@ func (m *EbpfManager) commit(ctx context.Context, coll *ebpf.Collection, l io.Cl
 
 	if mode == attachModeGeneric {
 		logger.L.LogWarn("XDP attached in generic (SKB) mode by explicit opt-in; every packet now pays the "+
-			"program cost without being dropped any earlier — prefer tc_filtering on this NIC",
+			"program cost without being dropped any earlier — prefer the TC ingress hook on this NIC, "+
+			"which Gateon falls back to on its own once allow_generic_xdp is unset",
 			"interface", ifaceName)
 	} else {
 		logger.L.LogInfo("eBPF offloading attached", "hook", label, "interface", ifaceName, "mode", mode)

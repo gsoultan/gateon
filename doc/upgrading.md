@@ -11,6 +11,41 @@ here after the fact.
 
 ## Unreleased
 
+### eBPF attaches at the TC hook when native XDP is refused — **it now filters where it did nothing**
+
+With eBPF on and an XDP feature on (`xdp_ip_shunning`, `xdp_rate_limit`), a
+NIC that refused native XDP ended up with nothing attached unless
+`tc_filtering` was also set — and every EC2 instance refuses it at its
+defaults. The gateway now falls back to the TC ingress hook on its own and
+enforces there what was configured: shunned addresses, the rate limiter if it
+is on, the management allowlist if it is on. See ADR 0017.
+
+**Who is affected:** an install with eBPF on, on a NIC without native XDP — on
+EC2, all of them. Its eBPF counters read zero; they now move, and every packet
+pays the TC program's cost. To keep the old behaviour, turn eBPF off. Generic
+XDP stays opt-in (`allow_generic_xdp`) and is slower than TC.
+
+### A NIC without native XDP no longer runs generic XDP labelled "native"
+
+The native attach passed no mode flag, and with none the kernel attaches in
+generic (SKB) mode whenever the driver has no native XDP — e1000, r8169,
+bridges — which the gateway and the dashboard reported as native. The attach
+now asks for driver mode by name, is refused on such a NIC, and falls back to
+TC as above. ENA was never affected.
+
+**Who is affected:** an install with eBPF on, on such a NIC. Its attach moves
+from generic XDP, mislabelled, to TC, which is cheaper.
+
+### With no interface set, eBPF attaches to the default-route interface
+
+`ebpf.interface` defaulted to `eth0`, which no current EC2 host has, so an
+unconfigured install there failed with "no such network interface". Empty now
+means the interface carrying the IPv4 default route: `ens5` on an EC2 host,
+still `eth0` inside a container. A configured interface is used as before.
+
+**Who is affected:** an install with eBPF on and no interface set, on a host
+whose default route is not on `eth0`. It now attaches where it did not.
+
 ### The TC hook enforces the kernel management allowlist — **check `mgmt_whitelist_ips`**
 
 On the TC hook, `enable_mgmt_whitelist` let every address reach the management
