@@ -329,16 +329,7 @@ func (w *breadcrumbWriter) Write(b []byte) (int, error) {
 	// Generate a unique trap path
 	trapID := newTrapID()
 	trapLink := fmt.Sprintf("\n<!-- Gateon Breadcrumb -->\n<a href=\"/_gateon_trap_%d\" style=\"display:none\" aria-hidden=\"true\" tabIndex=\"-1\"></a>\n", trapID)
-
-	newBody := make([]byte, 0, len(b)+len(trapLink))
-	newBody = append(newBody, b[:idx]...)
-	newBody = append(newBody, []byte(trapLink)...)
-	newBody = append(newBody, b[idx:]...)
-
-	_, err := w.ResponseWriter.Write(newBody)
-	// We return len(b) to pretend we wrote exactly what was given,
-	// although we wrote more. Some middlewares might care.
-	return len(b), err
+	return writeAround(w.ResponseWriter, b, idx, trapLink)
 }
 
 // Honeypot returns a middleware that detects access to "trap" paths and blocks them.

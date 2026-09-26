@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -199,12 +200,23 @@ func (w *deceptionResponseWriter) Write(b []byte) (int, error) {
 	for _, form := range w.cfg.HoneyForms {
 		fmt.Fprintf(&sb, `<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form)
 	}
-	newContent := make([]byte, 0, len(b)+sb.Len())
-	newContent = append(newContent, b[:idx]...)
-	newContent = append(newContent, sb.String()...)
-	newContent = append(newContent, b[idx:]...)
-	if _, err := w.ResponseWriter.Write(newContent); err != nil {
-		return 0, err
+	return writeAround(w.ResponseWriter, b, idx, sb.String())
+}
+
+// writeAround writes b to dst with insert in front of b[idx:], and reports
+// how much of b it wrote, as io.Writer requires.
+//
+// The page goes out in place, around the markup, rather than spliced into a
+// new buffer: that was a copy of the proxy's chunk, up to 32 KiB, on every
+// HTML response an injecting writer touched.
+func writeAround(dst io.Writer, b []byte, idx int, insert string) (int, error) {
+	n, err := dst.Write(b[:idx])
+	if err != nil {
+		return n, err
 	}
-	return len(b), nil
+	if _, err := io.WriteString(dst, insert); err != nil {
+		return n, err
+	}
+	m, err := dst.Write(b[idx:])
+	return n + m, err
 }
