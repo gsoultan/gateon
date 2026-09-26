@@ -23,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // decodeGlobalConfig decodes body as protobuf JSON first, then plain JSON.
@@ -43,7 +44,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		gc := svc.GetGlobals().Get(r.Context())
+		// A copy: the registry hands out its stored pointer, and the validation
+		// stamped below belongs to this response. Stamped on the original it was
+		// an unsynchronised write to the live config, and the next save
+		// persisted it into global.json.
+		gc, ok := proto.Clone(svc.GetGlobals().Get(r.Context())).(*gateonv1.GlobalConfig)
+		if !ok || gc == nil {
+			WriteHTTPError(w, http.StatusInternalServerError, "failed to read global config")
+			return
+		}
 
 		if gc.Tls != nil && len(gc.Tls.Certificates) > 0 {
 			tm := svc.GetTLSManager()
