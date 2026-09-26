@@ -83,6 +83,17 @@ func blockedProbeTarget(ip net.IP) (string, bool) {
 	return "", false
 }
 
+// BlockedProbeTarget reports whether an outbound probe must refuse a resolved
+// address, and why. It is the SSRF policy the tech probe's dialer enforces,
+// exported so other outbound diagnostic tools (the gRPC service discovery in
+// internal/api) install the same rule as a net.Dialer.Control hook rather than
+// re-deriving a weaker string check against the URL -- which is bypassable by
+// an alternate loopback address, a bracketed literal, a name that resolves to a
+// blocked range, or DNS rebinding between the check and the dial.
+func BlockedProbeTarget(ip net.IP) (string, bool) {
+	return blockedProbeTarget(ip)
+}
+
 // allowLoopbackProbes reports whether probing 127.0.0.0/8 and ::1 is permitted.
 //
 // Read per probe rather than cached: DiscoverTech is an operator-initiated RPC,

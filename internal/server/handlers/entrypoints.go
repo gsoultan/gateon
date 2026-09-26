@@ -41,7 +41,7 @@ func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "save", "entrypoint", "Saved entrypoint: "+ep.Id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "save", "entrypoint", "Saved entrypoint: "+ep.Id, request.ClientAddr(r))
 
 		WriteProtoResponse(w, http.StatusOK, &ep)
 	})
@@ -61,7 +61,7 @@ func registerEntryPointHandlers(mux *http.ServeMux, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "delete", "entrypoint", "Deleted entrypoint: "+id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "delete", "entrypoint", "Deleted entrypoint: "+id, request.ClientAddr(r))
 
 		w.WriteHeader(http.StatusNoContent)
 	})

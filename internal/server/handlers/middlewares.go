@@ -146,7 +146,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "save", "middleware", "Saved middleware: "+mw.Id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "save", "middleware", "Saved middleware: "+mw.Id, request.ClientAddr(r))
 
 		WriteProtoResponse(w, http.StatusOK, &mw)
 	})
@@ -166,7 +166,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "delete", "middleware", "Deleted middleware: "+id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "delete", "middleware", "Deleted middleware: "+id, request.ClientAddr(r))
 
 		w.WriteHeader(http.StatusNoContent)
 	})

@@ -25,7 +25,7 @@ func NewCache(cfg map[string]string, redisClient redis.Client) (kind.Middleware,
 	if storage == "" {
 		storage = CacheStorageMemory
 	}
-	// The route reaches the middleware through cfg["route_id"], set by
+	// The route reaches the middleware through cfg[kind.RouteIDKey], set by
 	// Factory.Create. Cache() hardcodes an empty route, which left every
 	// factory-built cache reporting its hit/miss metrics under the empty label
 	// and, on the shared Redis backend, keying entries with no route at all.
@@ -35,5 +35,6 @@ func NewCache(cfg map[string]string, redisClient redis.Client) (kind.Middleware,
 		MaxBodyKB:   int64(maxBodyKB),
 		Storage:     storage,
 		RedisClient: redisClient,
-	}, cfg["route_id"]), nil
+		RouteKey:    cfg[kind.RouteStateKey],
+	}, cfg[kind.RouteIDKey]), nil
 }

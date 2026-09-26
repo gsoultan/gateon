@@ -11,7 +11,16 @@ import (
 
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
+
+// Severities anomaly findings are filed with. They are kind.SeverityHigh and
+// kind.SeverityMedium, the vocabulary the correlation engine, SIEM and
+// dashboard read; telemetry cannot import kind, which imports it.
+const (
+	severityHigh   = "high"
+	severityMedium = "medium"
 )
 
 // AnomalyDetector monitors metrics and detects unusual patterns using ML-inspired thresholds.
@@ -40,8 +49,10 @@ func (ad *AnomalyDetector) Start(ctx context.Context) {
 	// Start the aggregator's collection loop
 	go ad.aggregator.Start(ctx)
 
+	// Non-positive, not just zero: the API stores a negative value as given,
+	// and time.NewTicker panics on it on a goroutine with no recover.
 	interval := time.Duration(ad.config.CheckIntervalSeconds)
-	if interval == 0 {
+	if interval <= 0 {
 		interval = 60
 	}
 
@@ -95,36 +106,26 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 				"ip", s.IP,
 				"auth_failure_rate", rate)
 
-			// Auto-shun at eBPF level for critical threat
-			if ad.ebpfManager != nil && rate > 0.8 {
-				_ = ad.ebpfManager.ShunIP(s.IP)
-				RecordSecurityThreat(SecurityThreat{
-					ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
-					Type:        "brute_force_attempt",
-					SourceIP:    s.IP,
-					Score:       rate * 100,
-					Details:     fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate),
-					Time:        now,
-					Category:    "brute_force",
-					Severity:    "critical",
-					ActionTaken: ActionShunned,
-				})
+			details := fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate)
+			severity, action := severityMedium, ""
+			if rate > 0.8 {
+				// Shun for a critical threat.
+				severity = "critical"
+				action = ad.shun(s.IP, details)
 			} else {
-				RecordSecurityThreat(SecurityThreat{
-					ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
-					Type:        "brute_force_attempt",
-					SourceIP:    s.IP,
-					Score:       rate * 100,
-					Details:     fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate),
-					Time:        now,
-					Category:    "brute_force",
-					Severity:    "medium",
-					ActionTaken: ActionThrottled,
-				})
-				if ad.ebpfManager != nil {
-					_ = ad.ebpfManager.SetAdaptiveRateLimit(s.IP, 1*time.Second) // Limit to 1 req/sec
-				}
+				action = ad.throttle(s.IP, 1*time.Second) // Limit to 1 req/sec
 			}
+			RecordSecurityThreat(SecurityThreat{
+				ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
+				Type:        "brute_force_attempt",
+				SourceIP:    s.IP,
+				Score:       rate * 100,
+				Details:     details,
+				Time:        now,
+				Category:    "brute_force",
+				Severity:    severity,
+				ActionTaken: action,
+			})
 		}
 	}
 }
@@ -149,37 +150,73 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 				"waf_blocks", s.WafBlocks,
 				"block_rate", fmt.Sprintf("%.2f%%", blockRate*100))
 
-			if ad.ebpfManager != nil && blockRate > 0.5 && s.WafBlocks > absoluteThreshold*5 {
-				_ = ad.ebpfManager.ShunIP(s.IP)
-				RecordSecurityThreat(SecurityThreat{
-					ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
-					Type:        "exploit_scan",
-					SourceIP:    s.IP,
-					Score:       math.Min(100, s.WafBlocks*10),
-					Details:     fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks),
-					Time:        now,
-					Category:    "exploit_scanning",
-					Severity:    "critical",
-					ActionTaken: ActionShunned,
-				})
+			details := fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks)
+			severity, score, action := severityHigh, math.Min(100, s.WafBlocks*5), ""
+			if blockRate > 0.5 && s.WafBlocks > absoluteThreshold*5 {
+				severity, score = "critical", math.Min(100, s.WafBlocks*10)
+				action = ad.shun(s.IP, details)
 			} else {
-				RecordSecurityThreat(SecurityThreat{
-					ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
-					Type:        "exploit_scan",
-					SourceIP:    s.IP,
-					Score:       math.Min(100, s.WafBlocks*5),
-					Details:     fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks),
-					Time:        now,
-					Category:    "exploit_scanning",
-					Severity:    "high",
-					ActionTaken: ActionThrottled,
-				})
-				if ad.ebpfManager != nil {
-					_ = ad.ebpfManager.SetAdaptiveRateLimit(s.IP, 500*time.Millisecond) // Limit to 2 req/sec
-				}
+				action = ad.throttle(s.IP, 500*time.Millisecond) // Limit to 2 req/sec
 			}
+			RecordSecurityThreat(SecurityThreat{
+				ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
+				Type:        "exploit_scan",
+				SourceIP:    s.IP,
+				Score:       score,
+				Details:     details,
+				Time:        now,
+				Category:    "exploit_scanning",
+				Severity:    severity,
+				ActionTaken: action,
+			})
 		}
 	}
+}
+
+// shun blocks an address for the detector and returns the ActionTaken that
+// describes what actually happened.
+//
+// This used to call the eBPF manager's ShunIP, discard the error, and record
+// "shunned" whatever the outcome. The manager the detector is given is the
+// eBPF Holder, whose ShunIP answers nil when eBPF is disabled -- the default,
+// and the only possibility off Linux -- and the manager's own fails when the
+// program is not loaded. Either way the threat was counted as mitigated and
+// shown as blocked while nothing refused the source.
+//
+// MarkIPMitigated is the block the request path reads on every entrypoint and
+// route; it survives a restart, appears on the mitigation list where an
+// operator can release it, and pushes the address to the kernel as well when
+// eBPF is running. An address the operator allowlisted or has released is
+// flagged instead of blocked, as escalateMitigation and the responder already
+// treat them.
+func (ad *AnomalyDetector) shun(ip, reason string) string {
+	if mitigation.IsAllowlisted(ip) || IsIPUnmitigated(ip) {
+		return ActionFlagged
+	}
+	if err := MarkIPMitigated(ip, "Anomaly detection: "+reason); err != nil {
+		logger.L.LogError("anomaly shun did not persist; the source is not blocked", "ip", ip, "error", err)
+		return ActionDetected
+	}
+	return ActionShunned
+}
+
+// throttle installs an adaptive kernel rate limit and returns the ActionTaken
+// that describes what actually happened. Only an attached eBPF program can
+// throttle, and the Holder answers nil when there is none, so success is read
+// from the attachment rather than from the call; without one the threat is
+// flagged for review rather than recorded as throttled.
+func (ad *AnomalyDetector) throttle(ip string, interval time.Duration) string {
+	if ad.ebpfManager == nil || mitigation.IsAllowlisted(ip) {
+		return ActionFlagged
+	}
+	if st, err := ad.ebpfManager.GetMapStats(); err != nil || !st.Attached {
+		return ActionFlagged
+	}
+	if err := ad.ebpfManager.SetAdaptiveRateLimit(ip, interval); err != nil {
+		logger.L.LogWarn("anomaly throttle was not applied", "ip", ip, "error", err)
+		return ActionFlagged
+	}
+	return ActionThrottled
 }
 
 func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
@@ -197,7 +234,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 	baselineRequests := ad.aggregator.GetRate("requests", 1*time.Hour)
 
 	if baselineRequests > 5 {
-		z := ad.aggregator.StatsErrors.ZScore(currentErrors)
+		z := ad.aggregator.errorZScore(currentErrors)
 		// If Z-Score is > 3.0 (standard statistical anomaly threshold)
 		if z > 3.0/ad.config.Sensitivity && currentErrors > 5 {
 			logger.L.LogWarn("ANOMALY DETECTED: 5xx error rate is statistically anomalous",
@@ -211,7 +248,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 				Details:     fmt.Sprintf("Error rate spike detected: Z-Score %.2f (Current %.2f eps)", z, currentErrors),
 				Time:        now,
 				Category:    "service_instability",
-				Severity:    "high",
+				Severity:    severityHigh,
 				ActionTaken: ActionFlagged,
 			})
 		}
@@ -228,7 +265,7 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 	baselineP99 := ad.aggregator.GetP99Latency(1 * time.Hour)
 
 	if baselineP99 > 0 {
-		z := ad.aggregator.StatsLatency.ZScore(currentP99)
+		z := ad.aggregator.latencyZScore(currentP99)
 		// If Z-Score is > 3.0
 		if z > 3.0/ad.config.Sensitivity && currentP99 > 0.5 { // ignore spikes below 500ms
 			logger.L.LogWarn("ANOMALY DETECTED: P99 latency is statistically anomalous",
@@ -242,7 +279,7 @@ func (ad *AnomalyDetector) checkLatency(ctx context.Context, now time.Time) {
 				Details:     fmt.Sprintf("High latency spike detected: Z-Score %.2f (Current %.2fs)", z, currentP99),
 				Time:        now,
 				Category:    "latency_spike",
-				Severity:    "medium",
+				Severity:    severityMedium,
 				ActionTaken: ActionFlagged,
 			})
 		}

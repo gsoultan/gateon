@@ -4,11 +4,13 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/domain/canary"
 	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -40,7 +42,7 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "save", "service", "Saved service: "+svc.Id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "save", "service", "Saved service: "+svc.Id, request.ClientAddr(r))
 
 		WriteProtoResponse(w, http.StatusOK, &svc)
 	})
@@ -54,6 +56,11 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 			return
 		}
 		taskID, err := d.CanaryService.StartCanary(r.Context(), &req)
+		if errors.Is(err, canary.ErrNotRunnable) {
+			// Our own message, saying what to change -- not an internal error.
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to start canary deployment")
 			return
@@ -76,7 +83,7 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "delete", "service", "Deleted service: "+id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "delete", "service", "Deleted service: "+id, request.ClientAddr(r))
 
 		w.WriteHeader(http.StatusNoContent)
 	})

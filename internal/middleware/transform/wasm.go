@@ -19,6 +19,14 @@ import (
 type wasmMiddleware struct {
 	runtime wazero.Runtime
 	module  wazero.CompiledModule
+	// instance configures the per-request instance. The empty name is
+	// deliberate: without WithName an instance takes the module's own name,
+	// wazero holds only one live instance per name in a runtime, and every
+	// request keeps its instance until the rest of the chain returns -- so
+	// while one request was in flight, every concurrent one failed to
+	// instantiate and reached the backend without the guest having run. An
+	// anonymous instance can exist any number of times.
+	instance wazero.ModuleConfig
 }
 
 func Wasm(ctx context.Context, blob []byte) (kind.Middleware, error) {
@@ -39,14 +47,15 @@ func Wasm(ctx context.Context, blob []byte) (kind.Middleware, error) {
 	}
 
 	mw := &wasmMiddleware{
-		runtime: r,
-		module:  m,
+		runtime:  r,
+		module:   m,
+		instance: wazero.NewModuleConfig().WithName(""),
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := context.WithValue(r.Context(), wasmRequestContextKey, r)
-			mod, err := mw.runtime.InstantiateModule(ctx, mw.module, wazero.NewModuleConfig())
+			mod, err := mw.runtime.InstantiateModule(ctx, mw.module, mw.instance)
 			if err != nil {
 				logger.L.LogError("failed to instantiate wasm module for request", "error", err)
 				next.ServeHTTP(w, r)

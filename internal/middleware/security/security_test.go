@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBotManagement_Challenge(t *testing.T) {
@@ -40,7 +41,7 @@ func TestBotManagement_Challenge(t *testing.T) {
 	// 2. Request with valid token should pass
 	ip := "192.0.2.1"
 	req.RemoteAddr = ip + ":1234"
-	token := GenerateChallengeSeed(secret, "Mozilla/5.0", ip)
+	token := passFor(secret, "Mozilla/5.0", ip, time.Now())
 	req = httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 	req.RemoteAddr = ip + ":1234"

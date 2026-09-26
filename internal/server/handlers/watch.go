@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -69,7 +70,11 @@ func forwardWatchEvents(ctx context.Context, src watchSources, out chan<- WatchE
 			if !ok {
 				return
 			}
-			ev = WatchEvent{Type: "threat", Data: threat}
+			// The list shape, not the telemetry struct: the dashboard prepends
+			// this to the list ListSecurityThreats returned, and the struct's
+			// JSON names the source, description, method and fingerprint
+			// differently, so live rows rendered with those fields empty.
+			ev = WatchEvent{Type: "threat", Data: api.ThreatToAnomaly(&threat)}
 		case snap, ok := <-src.metrics:
 			if !ok {
 				return
@@ -128,20 +133,23 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 					_, _ = w.Write([]byte(": heartbeat\n\n"))
 				} else {
 					_, _ = w.Write([]byte("data: "))
-					var jsonData []byte
-					if msg, ok := ev.Data.(proto.Message); ok {
-						// Protobuf message: use protojson for camelCase
-						data, _ := ProtojsonOptions().Marshal(msg)
-						jsonData = []byte(`{"type":"` + ev.Type + `","data":` + string(data) + `}`)
-					} else {
-						// Native struct (like AuditEntry) already has camelCase tags
-						jsonData, _ = json.Marshal(ev)
-					}
-					_, _ = w.Write(jsonData)
+					_, _ = w.Write(encodeWatchEvent(ev))
 					_, _ = w.Write([]byte("\n\n"))
 				}
 				flusher.Flush()
 			}
 		}
 	})
+}
+
+// encodeWatchEvent is the JSON body of one data frame on /v1/watch.
+func encodeWatchEvent(ev WatchEvent) []byte {
+	if msg, ok := ev.Data.(proto.Message); ok {
+		// Protobuf message: use protojson for camelCase
+		data, _ := ProtojsonOptions().Marshal(msg)
+		return []byte(`{"type":"` + ev.Type + `","data":` + string(data) + `}`)
+	}
+	// Native struct (like AuditEntry) already has camelCase tags
+	jsonData, _ := json.Marshal(ev)
+	return jsonData
 }

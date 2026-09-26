@@ -6,6 +6,7 @@ package db
 import (
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Driver names for database/sql.
@@ -43,4 +44,23 @@ func (d Dialect) Rebind(query string) string {
 // Callers write queries with ? and pass through Rebind before Exec/Query.
 func (d Dialect) Params(query string) string {
 	return d.Rebind(query)
+}
+
+// SafeText returns s in a form every supported engine will store.
+//
+// Postgres refuses a TEXT or VARCHAR value that is not valid UTF-8 or that
+// contains a NUL byte, and refuses the whole statement for it -- inside a
+// transaction, the whole transaction. SQLite stores either without complaint.
+// A lot of what gateon persists is copied from requests, and Go's HTTP server
+// hands a handler both: a percent-encoded %00 or %FF decodes into r.URL.Path,
+// and a header value may carry any byte above 0x7F. So on Postgres a client
+// could decide which of its own requests were not recorded. Invalid sequences
+// and NUL become U+FFFD, which is what encoding/json turns them into on the way
+// to the dashboard anyway. Text that is already storable is returned as is,
+// without allocating.
+func SafeText(s string) string {
+	if utf8.ValidString(s) && strings.IndexByte(s, 0) < 0 {
+		return s
+	}
+	return strings.ReplaceAll(strings.ToValidUTF8(s, "�"), "\x00", "�")
 }

@@ -153,7 +153,7 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 		EnableFingerprintValidation: w.GetEnableFingerprintValidation(),
 		EnableConfidenceScoring:     w.GetEnableConfidenceScoring(),
 		AuditOnly:                   w.GetAuditOnly(),
-		TrustCloudflare:             w.GetTrustCloudflareHeaders(),
+		TrustCloudflare:             config.TrustCloudflare(w),
 		AppProfiles:                 w.GetAppProfiles(),
 		EnableSSRFProtection:        w.GetSsrfProtection(),
 		Origins:                     resolveOrigins(w.GetOrigins()),
@@ -211,10 +211,28 @@ func mergeGlobalWAFDefaults(cfg map[string]string, d security.Deps) string {
 	if global == nil || global.Waf == nil || !global.Waf.Enabled {
 		return ""
 	}
+	// A route with its own WAF skips the global one (router.go), so response
+	// DLP has to be inherited whatever use_crs says, and as the global WAF
+	// actually runs it -- its tier baseline included. Taken only with use_crs
+	// and only from the raw flag, attaching a WAF to a route switched off the
+	// response inspection the global WAF had been giving it.
+	setIfMissing(cfg, "dlp", strconv.FormatBool(globalWAFRunsDLP(global.Waf)))
+	// Cloudflare trust is a fact about where the gateway sits, not a CRS
+	// setting, so it is inherited on the same terms.
+	setIfMissing(cfg, "trust_cloudflare_headers", strconv.FormatBool(config.TrustCloudflare(global.Waf)))
+	if global.Waf.DlpAction != "" {
+		setIfMissing(cfg, "dlp_action", global.Waf.DlpAction)
+	}
 	if global.Waf.UseCrs {
 		applyGlobalCRSDefaults(cfg, global.Waf, d.DataDir)
 	}
 	return global.Waf.CustomDirectives
+}
+
+// globalWAFRunsDLP reports whether NewGlobalWAF inspects responses for data
+// leaks: when DLP is switched on, or when the tier's baseline turns it on.
+func globalWAFRunsDLP(w *gateonv1.WafConfig) bool {
+	return w.GetDlp() || resolveWAFTier(w) == config.TierEnterprise
 }
 
 // applyGlobalCRSDefaults copies the gateway-wide ruleset and tuning settings
@@ -245,7 +263,6 @@ func applyGlobalCRSToggles(cfg map[string]string, w *gateonv1.WafConfig) {
 		"dlp":                           w.Dlp,
 		"audit_log_relevant_only":       w.AuditLogRelevantOnly,
 		"disable_entropy":               w.DisableEntropy,
-		"trust_cloudflare_headers":      w.TrustCloudflareHeaders,
 		"enable_body_entropy":           w.EnableBodyEntropy,
 		"enable_fingerprint_validation": w.EnableFingerprintValidation,
 		"enable_confidence_scoring":     w.EnableConfidenceScoring,

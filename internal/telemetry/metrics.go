@@ -192,6 +192,15 @@ var MiddlewareAuthFailuresTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total authentication/authorization failures.",
 }, []string{"route", "auth_type"})
 
+// CircuitBreakerState is 1 for the state a route's circuit breaker is in and 0
+// for the other two ("closed", "open", "half-open"). The dashboard's open and
+// half-open circuit tiles are summed from it; they read a family nothing
+// registered, so they showed zero whatever the breakers were doing.
+var CircuitBreakerState = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "gateon_circuit_breaker_state",
+	Help: "Route circuit breaker state (1 = the breaker is in this state).",
+}, []string{"route", "state"})
+
 // CircuitBreakerStateChangesTotal counts circuit breaker state transitions.
 var CircuitBreakerStateChangesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_circuit_breaker_state_changes_total",

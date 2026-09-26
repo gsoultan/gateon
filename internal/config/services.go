@@ -164,3 +164,28 @@ func (r *ServiceRegistry) Mu() *sync.RWMutex {
 func (r *ServiceRegistry) Services() map[string]*gateonv1.Service {
 	return r.services
 }
+
+// CanonicalLBPolicy maps a service's load_balancer_policy onto the spelling the
+// balancers switch on: round_robin, least_conn, weighted_round_robin,
+// ai_predictive or intelligent.
+//
+// The dashboard stores camelCase -- roundRobin, leastConn, weightedRoundRobin --
+// and the HTTP and L4 balancers matched snake_case only, so every service made
+// in the dashboard was balanced round robin, weights ignored, whatever policy
+// its page showed. Case, underscores and hyphens no longer matter.
+func CanonicalLBPolicy(policy string) string {
+	key := strings.ToLower(strings.TrimSpace(policy))
+	key = strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", "")
+	switch key {
+	case "", "roundrobin", "rr":
+		return "round_robin"
+	case "leastconn", "leastconnections":
+		return "least_conn"
+	case "weightedroundrobin", "wrr":
+		return "weighted_round_robin"
+	case "aipredictive":
+		return "ai_predictive"
+	default:
+		return key
+	}
+}

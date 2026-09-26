@@ -98,6 +98,23 @@ func isTrustedProxy(remoteAddr string) bool {
 	return IsTrusted(remoteAddr, false)
 }
 
+// ClientAddr is the client's address for anything that reads it rather than
+// decides it: the address the entrypoint resolved, under the operator's trust
+// setting for forwarding headers. Where no entrypoint has resolved one -- a
+// handler served on its own, a test -- it is the TCP peer: nothing has
+// decided which forwarding headers to believe, so none are.
+//
+// It replaces GetClientIP(r, true) at every site that is not the resolver.
+// Those forced Cloudflare trust on whatever the operator had configured, which
+// the entrypoint's answer happened to override; the SQLi and XSS scanners,
+// which skip loopback, could be told the client was 127.0.0.1 by a header.
+func ClientAddr(r *http.Request) string {
+	if rs := GetRequestState(r); rs != nil && rs.ClientRemoteAddr != "" {
+		return rs.ClientRemoteAddr
+	}
+	return httputil.StripPort(r.RemoteAddr)
+}
+
 // GetClientIP returns the real client IP from the request.
 //
 // When the immediate peer is a trusted proxy it consults forwarding headers:
@@ -138,46 +155,71 @@ func GetClientIP(r *http.Request, trustCloudflare bool) string {
 		}
 	}
 
-	if xff := r.Header.Get(HeaderXForwardedFor); xff != "" {
-		// Zero-allocation right-to-left parsing of X-Forwarded-For
-		for {
-			lastComma := strings.LastIndexByte(xff, ',')
-			part := xff
-			if lastComma != -1 {
-				part = xff[lastComma+1:]
-				xff = xff[:lastComma]
-			}
-
-			token := strings.TrimSpace(part)
-			if token == "" {
-				if lastComma == -1 {
-					break
-				}
-				continue
-			}
-
-			// Strip port if present in XFF (sometimes happens)
-			cleanIP := httputil.StripPort(token)
-			parsed, err := netip.ParseAddr(cleanIP)
-			if err != nil {
-				if lastComma == -1 {
-					break
-				}
-				continue
-			}
-
-			if isTrustedIP(parsed) {
-				if lastComma == -1 {
-					// Every hop was trusted, return the leftmost
-					return cleanIP
-				}
-				continue // Keep walking left
-			}
-
-			return cleanIP // Found the first untrusted IP
-		}
+	if ip, ok := clientFromForwardedFor(r.Header[HeaderXForwardedFor]); ok {
+		return ip
 	}
 	return host
+}
+
+// clientFromForwardedFor walks an X-Forwarded-For chain right to left and
+// returns the first address that is not a trusted proxy, or the leftmost one
+// when every hop is trusted.
+//
+// The chain is every X-Forwarded-For header line, in order, not only the
+// first: repeated fields are one comma-separated list (RFC 9110 section 5.3).
+// A trusted proxy that adds its own line rather than extending the one it
+// received -- HAProxy's "option forwardfor" does, and says so -- leaves the
+// client's line first and its own last, so reading only the first line
+// returned exactly the address the client chose. The walk starts at the last
+// line for the same reason it starts at the right of one.
+func clientFromForwardedFor(lines []string) (string, bool) {
+	// Zero-allocation right-to-left parsing of X-Forwarded-For
+	for i := len(lines) - 1; i >= 0; i-- {
+		if ip, ok := clientFromForwardedLine(lines[i], i == 0); ok {
+			return ip, true
+		}
+	}
+	return "", false
+}
+
+// clientFromForwardedLine walks one X-Forwarded-For line right to left.
+// firstLine says it is the first line of the chain, whose leftmost address is
+// the client when every hop is trusted.
+func clientFromForwardedLine(xff string, firstLine bool) (string, bool) {
+	for {
+		lastComma := strings.LastIndexByte(xff, ',')
+		part := xff
+		if lastComma != -1 {
+			part = xff[lastComma+1:]
+			xff = xff[:lastComma]
+		}
+		if ip, ok := forwardedClient(part, firstLine && lastComma == -1); ok {
+			return ip, true
+		}
+		if lastComma == -1 {
+			return "", false // keep walking left, onto the previous line
+		}
+	}
+}
+
+// forwardedClient returns the hop's address when it is the client: the first
+// untrusted address, or the leftmost of a chain whose every hop was trusted.
+// A port is stripped (it sometimes appears); an empty or unparseable token is
+// skipped.
+func forwardedClient(part string, chainStart bool) (string, bool) {
+	token := strings.TrimSpace(part)
+	if token == "" {
+		return "", false
+	}
+	cleanIP := httputil.StripPort(token)
+	parsed, err := netip.ParseAddr(cleanIP)
+	if err != nil {
+		return "", false
+	}
+	if !isTrustedIP(parsed) || chainStart {
+		return cleanIP, true
+	}
+	return "", false
 }
 
 // TrustCloudflareFromEnv returns true if GATEON_TRUST_CLOUDFLARE_HEADERS is set

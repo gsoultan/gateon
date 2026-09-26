@@ -7,10 +7,13 @@ import (
 	"context"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -22,6 +25,10 @@ func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalC
 	conf := s.Globals.Get(ctx)
 	if !callerMayWrite(ctx, auth.ResourceGlobal) {
 		conf = RedactGlobalSecrets(conf)
+	} else {
+		// A writer sees a referenced secret as its reference, so saving the
+		// settings stores the reference back rather than the secret.
+		conf = config.WithSecretReferences(s.Globals, conf)
 	}
 	return &gateonv1.GetGlobalConfigResponse{Config: conf}, nil
 }
@@ -120,10 +127,49 @@ func redactSecuritySecrets(out *gateonv1.GlobalConfig) {
 	}
 }
 
+// KeepOmittedSections gives every top-level section an update leaves out the
+// value already stored, so an update changes what it carries and nothing else.
+//
+// Both transports used to store the request as the whole configuration. A body
+// carrying one section -- `{"waf": {...}}`, which is what doc/waf-origins.md
+// shows, and what the certificate pages send when their initial read failed --
+// therefore deleted every other one: the auth block with its database settings
+// and session key, the management allowlist, every certificate. Nothing failed
+// at the time. On the next start the bootstrap found no auth database, pointed
+// auth at a fresh local SQLite file with no administrator -- reopening Setup,
+// which is served before authentication -- and the management plane came back
+// on its default of every interface and every address.
+//
+// Absence is only readable for message fields, which proto3 tracks, and every
+// top-level field is one except profile, whose empty value is not a choice the
+// dashboard can make (it always sends a named tier). A section that is present
+// replaces the stored one outright, empty or not: this merges sections, not the
+// fields inside them. Carried sections are clones, because the registry keeps
+// the previous config for its change listeners and the update becomes the live
+// one; sharing a message between them would let a write to either reach both.
+func KeepOmittedSections(update, stored *gateonv1.GlobalConfig) {
+	if update == nil || stored == nil {
+		return
+	}
+	u, s := update.ProtoReflect(), stored.ProtoReflect()
+	fields := u.Descriptor().Fields()
+	for i := range fields.Len() {
+		fd := fields.Get(i)
+		if fd.Message() == nil || fd.IsList() || fd.IsMap() || u.Has(fd) || !s.Has(fd) {
+			continue
+		}
+		u.Set(fd, protoreflect.ValueOfMessage(proto.Clone(s.Get(fd).Message().Interface()).ProtoReflect()))
+	}
+	if update.Profile == "" {
+		update.Profile = stored.Profile
+	}
+}
+
 func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.UpdateGlobalConfigRequest) (*gateonv1.UpdateGlobalConfigResponse, error) {
 	if s.Globals == nil || req == nil || req.Config == nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, nil
 	}
+	KeepOmittedSections(req.Config, s.Globals.Get(ctx))
 
 	// If audit signing is enabled with no key, generate a random one BEFORE
 	// persisting so it is saved to disk (chain stays verifiable across restarts)
@@ -159,11 +205,17 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	}
 
 	// Invalidate cache if needed
+	if req.Config.Waf != nil {
+		wafmw.InvalidateWAFCache()
+	}
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool { return true })
 		if req.Config.Tls != nil {
 			s.Invalidator.InvalidateTLS()
 		}
+	}
+	if g := req.Config.Geoip; g != nil && g.Enabled && g.DbPath != "" {
+		_ = telemetry.InitGeoIP(g.DbPath)
 	}
 
 	// Update eBPF Port Knocking sequence

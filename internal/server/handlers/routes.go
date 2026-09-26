@@ -97,7 +97,7 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "save", "route", "Saved route: "+rt.Id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "save", "route", "Saved route: "+rt.Id, request.ClientAddr(r))
 
 		WriteProtoResponse(w, http.StatusOK, &rt)
 	})
@@ -117,7 +117,7 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "delete", "route", "Deleted route: "+id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "delete", "route", "Deleted route: "+id, request.ClientAddr(r))
 
 		w.WriteHeader(http.StatusNoContent)
 	})

@@ -4,6 +4,8 @@
 package transform
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/middleware/kind"
@@ -54,6 +56,40 @@ var corsPresets = map[string]CORSPreset{
 	},
 }
 
+// CORSPresetBackend hands a route's CORS to its backend: the cors middleware
+// answers no preflight, adds no header, and the proxy strips none of the
+// backend's. It is what a route whose backend enforces its own origin
+// allowlist needs -- such a backend refuses an origin by leaving
+// Access-Control-Allow-Origin off, and a route with no cors middleware reads
+// that silence as "no CORS here" and supplies the permissive default
+// (ADR-0015).
+const CORSPresetBackend = "backend"
+
+// IsBackendCORS reports whether a cors middleware's config hands the route's
+// CORS to its backend.
+func IsBackendCORS(cfg map[string]string) bool {
+	return strings.EqualFold(strings.TrimSpace(cfg["preset"]), CORSPresetBackend)
+}
+
+// CheckCORSPreset refuses a preset name that names no preset. One was ignored,
+// leaving the lists empty, which rs/cors reads as every origin: "restriced",
+// a letter short of the locked-down preset, allowed anyone.
+func CheckCORSPreset(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	if _, ok := GetCORSPreset(name); ok {
+		return nil
+	}
+	names := make([]string, 0, len(corsPresets))
+	for n := range corsPresets {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return fmt.Errorf("no such preset; the presets are %s, and %q for a cors middleware",
+		strings.Join(names, ", "), CORSPresetBackend)
+}
+
 // GetCORSPreset returns a CORS preset by name.
 func GetCORSPreset(name string) (CORSPreset, bool) {
 	p, ok := corsPresets[strings.ToLower(name)]
@@ -90,6 +126,12 @@ func ApplyCORSPreset(cfg map[string]string, base CORSConfig) CORSConfig {
 	}
 	if _, ok := cfg["max_age"]; !ok && base.MaxAge == 0 {
 		base.MaxAge = preset.MaxAge
+	}
+	// "Restricted" lists no origins because it means none, and rs/cors reads
+	// an empty list as every origin: the preset the dashboard offers as the
+	// locked-down choice answered any Origin with Access-Control-Allow-Origin: *.
+	if presetName == "restricted" && len(base.AllowedOrigins) == 0 {
+		base.DenyAllOrigins = true
 	}
 
 	return base

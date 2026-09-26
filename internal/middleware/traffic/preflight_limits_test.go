@@ -34,21 +34,35 @@ func preflightReq(method, body string) *http.Request {
 // any other method, and exemptFromBodyLimit waved one through for the price of
 // two headers -- while its own comment said a protocol upgrade was the only
 // exemption.
+//
+// The limit holds in one of two ways: a body declared over it is refused with
+// 413 before the handler runs, and one with no declared length fails the
+// handler's read. Either is the cap applying; the body arriving whole is not.
 func TestBodyLimitAppliesToAPreflightShapedRequest(t *testing.T) {
 	const limit = 64
+	for _, declared := range []bool{true, false} {
+		reached, intact := false, false
+		h := MaxBodySize(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reached = true
+			_, err := io.ReadAll(r.Body)
+			intact = err == nil
+			w.WriteHeader(http.StatusOK)
+		}))
 
-	var readErr error
-	h := MaxBodySize(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, readErr = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-	}))
+		req := preflightReq(http.MethodOptions, strings.Repeat("A", limit*4))
+		if !declared {
+			req.ContentLength = -1
+		}
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
 
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, preflightReq(http.MethodOptions, strings.Repeat("A", limit*4)))
-
-	if readErr == nil {
-		t.Errorf("a %d-byte body arrived intact under a %d-byte limit; naming a "+
-			"preflight lifted the cap", limit*4, limit)
+		switch {
+		case intact:
+			t.Errorf("declared=%v: a %d-byte body arrived intact under a %d-byte "+
+				"limit; naming a preflight lifted the cap", declared, limit*4, limit)
+		case !reached && rr.Code != http.StatusRequestEntityTooLarge:
+			t.Errorf("declared=%v: refused with %d, want 413", declared, rr.Code)
+		}
 	}
 }
 

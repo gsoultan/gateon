@@ -488,6 +488,9 @@ type ThreatFilter struct {
 }
 
 type pathStatsStore struct {
+	// domains bounds the distinct Host values domain_stats will hold. The Host
+	// header is the client's to choose; see storedDomain.
+	domains                     *boundedLabels
 	db                          *sql.DB
 	pebble                      *pebble.DB
 	dialect                     db.Dialect
@@ -619,6 +622,7 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 
 	st := &pathStatsStore{
+		domains:      &boundedLabels{max: maxDistinctDomains},
 		db:           database,
 		pebble:       pdb,
 		dialect:      dialect,
@@ -958,11 +962,7 @@ func (s *pathStatsStore) execThreat(tx *sql.Tx, stmt *sql.Stmt, th *SecurityThre
 		savepointed = false
 	}
 
-	_, err := stmt.Exec(th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time,
-		th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken,
-		th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody,
-		th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy,
-		th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs)
+	_, err := stmt.Exec(threatInsertArgs(th, sourceIPs)...)
 	if err == nil {
 		if savepointed {
 			_, _ = tx.Exec("RELEASE SAVEPOINT " + sp)
@@ -979,6 +979,25 @@ func (s *pathStatsStore) execThreat(tx *sql.Tx, stmt *sql.Stmt, th *SecurityThre
 		}
 	}
 	return false
+}
+
+// threatInsertArgs is the argument list for threatInsertStmt, with every text
+// value made storable. Most of them are copied from the request that caused
+// the threat -- user agent, headers, body, the payload quoted in Details -- and
+// Postgres refuses a row containing NUL or a byte that is not valid UTF-8, so
+// the request that carried one used to be the request that was not recorded.
+func threatInsertArgs(th *SecurityThreat, sourceIPs string) []any {
+	args := []any{th.ID, th.Type, th.SourceIP, th.Fingerprint, th.Score, th.Details, th.Time,
+		th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken,
+		th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody,
+		th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy,
+		th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs}
+	for i, arg := range args {
+		if text, ok := arg.(string); ok {
+			args[i] = db.SafeText(text)
+		}
+	}
+	return args
 }
 
 func (s *pathStatsStore) loop() {
@@ -1025,6 +1044,7 @@ func (s *pathStatsStore) loop() {
 			flush()
 			timer.Reset(flushInterval())
 		case ack := <-s.flushCh:
+			batch, traceBatch, threatBatch = s.drainQueued(batch, traceBatch, threatBatch)
 			flush()
 			close(ack)
 		case <-pruneTicker.C:
@@ -1034,6 +1054,36 @@ func (s *pathStatsStore) loop() {
 			return
 		}
 	}
+}
+
+// drainQueued takes everything already waiting on the intake channels, so that
+// a flush request cannot overtake the records queued ahead of it.
+//
+// FlushThreats promises that what was enqueued before it has been processed
+// when it returns, and the release path depends on that: it flushes so that a
+// threat still in the queue cannot re-penalise a client after the operator
+// releases it. But the loop takes the intake and the flush request from one
+// select, which picks at random among ready cases, so the flush usually ran
+// with most of the queue still behind it.
+//
+// Bounded by what is queued on entry: the loop is the only receiver, so that
+// many receives cannot block, and a producer that keeps sending cannot keep
+// the flush waiting.
+func (s *pathStatsStore) drainQueued(batch []increment, traces []*TraceRecord, threats []*SecurityThreat) ([]increment, []*TraceRecord, []*SecurityThreat) {
+	for range len(s.threatInCh) {
+		th := <-s.threatInCh
+		s.processThreat(th)
+		threats = append(threats, th)
+	}
+	for range len(s.traceInCh) {
+		tr := <-s.traceInCh
+		s.processTrace(tr)
+		traces = append(traces, tr)
+	}
+	for range len(s.inCh) {
+		batch = append(batch, <-s.inCh)
+	}
+	return batch, traces, threats
 }
 
 // flushInterval is how long the writer waits between timed flushes, taken from
@@ -1107,17 +1157,28 @@ func (s *pathStatsStore) flushIncrements(batch []increment) []increment {
 	// for the paths that return before committing.
 	defer func() { _ = tx.Rollback() }()
 
-	pathStmt, _ := s.upsertStmt(tx)
-	domainStmt, _ := s.domainUpsertStmt(tx)
+	// A statement that fails to prepare used to be dropped silently, and with
+	// it every row of its kind: on Postgres both upserts named their columns
+	// unqualified inside ON CONFLICT DO UPDATE, which Postgres refuses as
+	// ambiguous, so no path or domain statistic was ever stored there and
+	// nothing said so.
+	pathStmt, err := s.upsertStmt(tx)
+	if err != nil {
+		logger.Default().LogError("path stats: prepare upsert failed; this flush's path statistics are lost", "error", err)
+	}
+	domainStmt, err := s.domainUpsertStmt(tx)
+	if err != nil {
+		logger.Default().LogError("domain stats: prepare upsert failed; this flush's domain statistics are lost", "error", err)
+	}
 
 	for key, val := range aggregateIncrements(batch) {
 		switch {
 		case key.isDomain && domainStmt != nil:
-			if _, err := domainStmt.Exec(key.day, key.bucket, key.host, val.count, val.latS, val.bytes); err != nil {
+			if _, err := domainStmt.Exec(key.day, key.bucket, s.storedDomain(key.host), val.count, val.latS, val.bytes); err != nil {
 				logger.Default().LogError("domain stats: upsert failed", "error", err)
 			}
 		case !key.isDomain && pathStmt != nil:
-			if _, err := pathStmt.Exec(key.day, key.host, key.path, val.count, val.latS, val.bytes); err != nil {
+			if _, err := pathStmt.Exec(key.day, db.SafeText(key.host), db.SafeText(key.path), val.count, val.latS, val.bytes); err != nil {
 				logger.Default().LogError("path stats: upsert failed", "error", err)
 			}
 		}
@@ -1129,8 +1190,29 @@ func (s *pathStatsStore) flushIncrements(batch []increment) []increment {
 	if domainStmt != nil {
 		_ = domainStmt.Close()
 	}
-	_ = tx.Commit()
+	if err := tx.Commit(); err != nil {
+		logger.Default().LogError("telemetry: stats commit failed; this flush's statistics are lost", "error", err)
+	}
 	return batch[:0]
+}
+
+// storedDomain is the domain_stats key for a Host value: the first
+// maxDistinctDomains distinct values as themselves, the rest folded into
+// LabelOverflow, each cut to a length domain_stats.domain (VARCHAR(255) on
+// Postgres) accepts and made storable text.
+//
+// The Host header is the client's, and it was written raw. Every distinct value
+// was a new row per half-hour bucket at whatever length the client sent, read
+// back in full by every dashboard snapshot; and on Postgres one value longer
+// than the column, or holding NUL or a byte that is not UTF-8, failed its
+// upsert, which aborts the transaction -- every later statement in the flush
+// failed with it and the commit rolled back every counter gathered since the
+// last flush. One request per flush interval blinded the traffic charts.
+func (s *pathStatsStore) storedDomain(host string) string {
+	if s.domains == nil {
+		return db.SafeText(truncateLabel(host))
+	}
+	return db.SafeText(s.domains.value(host))
 }
 
 // flushTraces writes buffered traces to Pebble and returns the batch truncated
@@ -1819,9 +1901,18 @@ func IsIPUnmitigated(ip string) bool {
 	if s == nil {
 		return false
 	}
+	// Only a cached "mitigated" answers without the database. The cache is
+	// shared with IsIPMitigated, which stores true for every address it looked
+	// up and found no row for -- and IPMitigation looks up every request -- so a
+	// cached true means "not blocked", not "an operator released it". Read as
+	// the second, it told escalateMitigation and the alerting shunner that every
+	// address that had ever sent a request had been released by hand, and
+	// neither ever shunned one. Both callers are off the request path.
 	if s.unmitigatedCache != nil {
 		if val, ok := s.unmitigatedCache.Get(ip); ok {
-			return val.(bool)
+			if unmitigated, isBool := val.(bool); isBool && !unmitigated {
+				return false
+			}
 		}
 	}
 
@@ -2837,7 +2928,13 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		return nil
 	}
 	defer rows.Close()
-	res := make([]*SecurityThreat, 0, min(limit, 100))
+	// min(limit, 100), spelled as a comparison: CodeQL does not read the
+	// builtin as a bound and reports a caller-sized allocation.
+	capacity := defaultThreatQueryLimit
+	if limit < capacity {
+		capacity = limit
+	}
+	res := make([]*SecurityThreat, 0, capacity)
 	for rows.Next() {
 		if ctx.Err() != nil {
 			break

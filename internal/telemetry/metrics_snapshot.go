@@ -53,13 +53,72 @@ type governorProviderContainer struct {
 	p GovernorProvider
 }
 
+// TargetHealthCounts is the live state of the gateway's backend targets, as
+// the dashboard's target and circuit tiles count it: an alive target is
+// healthy with its circuit closed, any other is down with its circuit open.
+type TargetHealthCounts struct {
+	Healthy int
+	Down    int
+	Total   int
+}
+
+// TargetHealthProvider reports TargetHealthCounts from the load balancers'
+// own state. The snapshot used to count gateon_target_health instead, which
+// exists only for health-checked targets and has no "status" label to read, so
+// realtime updates showed zero healthy targets whatever the backends did.
+type TargetHealthProvider interface {
+	TargetHealthCounts() TargetHealthCounts
+}
+
+type targetHealthProviderContainer struct {
+	p TargetHealthProvider
+}
+
 var (
-	globalEbpfManager atomic.Value // stores *ebpfProviderContainer
-	globalTitan       atomic.Value // stores *titanProviderContainer
-	globalGovernor    atomic.Value // stores *governorProviderContainer
-	globalVersion     atomic.Value // stores string
-	lastSnapshot      atomic.Pointer[MetricsSnapshot]
+	globalEbpfManager  atomic.Value // stores *ebpfProviderContainer
+	globalTitan        atomic.Value // stores *titanProviderContainer
+	globalGovernor     atomic.Value // stores *governorProviderContainer
+	globalTargetHealth atomic.Value // stores *targetHealthProviderContainer
+	globalVersion      atomic.Value // stores string
+	lastSnapshot       atomic.Pointer[MetricsSnapshot]
 )
+
+// SetTargetHealthProvider registers where the snapshot reads target health.
+func SetTargetHealthProvider(p TargetHealthProvider) {
+	globalTargetHealth.Store(&targetHealthProviderContainer{p: p})
+}
+
+// CurrentTargetHealth is the registered provider's counts, or zero before one
+// is registered.
+func CurrentTargetHealth() TargetHealthCounts {
+	if c, ok := globalTargetHealth.Load().(*targetHealthProviderContainer); ok && c.p != nil {
+		return c.p.TargetHealthCounts()
+	}
+	return TargetHealthCounts{}
+}
+
+// RouteBreakerCounts is how many route circuit breakers are open and how many
+// half-open, read from gateon_circuit_breaker_state.
+func RouteBreakerCounts() (open, halfOpen int) {
+	ch := make(chan prometheus.Metric, 64)
+	go func() {
+		CircuitBreakerState.Collect(ch)
+		close(ch)
+	}()
+	for m := range ch {
+		var d dto.Metric
+		if m.Write(&d) != nil || d.GetGauge().GetValue() < 1 {
+			continue
+		}
+		switch labelValue(&d, "state") {
+		case "open":
+			open++
+		case "half-open":
+			halfOpen++
+		}
+	}
+	return open, halfOpen
+}
 
 func SetEbpfManager(m EbpfProvider) {
 	globalEbpfManager.Store(&ebpfProviderContainer{p: m})
@@ -517,30 +576,15 @@ func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) G
 	gs.RequestsToday = req24h
 	gs.BytesToday = bytes24h
 
-	// Circuit breaker and health stats (process-wide)
-	if fam, ok := idx["gateon_circuit_breaker_state"]; ok {
-		for _, m := range fam.GetMetric() {
-			state := labelValue(m, "state")
-			val := m.GetGauge().GetValue()
-			switch state {
-			case "open":
-				gs.OpenCircuits += val
-			case "half-open":
-				gs.HalfOpenCircuits += val
-			}
-		}
-	}
-
-	if fam, ok := idx["gateon_target_health"]; ok {
-		for _, m := range fam.GetMetric() {
-			status := labelValue(m, "status")
-			val := m.GetGauge().GetValue()
-			gs.TotalTargets += val
-			if status == "healthy" {
-				gs.HealthyTargets += val
-			}
-		}
-	}
+	// Circuits and targets, counted the way /v1/diag/agg-stats counts them so
+	// that a realtime update does not contradict the page it lands on: a down
+	// target is an open circuit, and so is an open route breaker.
+	targets := CurrentTargetHealth()
+	breakersOpen, breakersHalfOpen := RouteBreakerCounts()
+	gs.HealthyTargets = float64(targets.Healthy)
+	gs.TotalTargets = float64(targets.Total)
+	gs.OpenCircuits = float64(targets.Down + breakersOpen)
+	gs.HalfOpenCircuits = float64(breakersHalfOpen)
 
 	return gs
 }

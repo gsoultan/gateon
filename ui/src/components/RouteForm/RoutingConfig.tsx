@@ -80,7 +80,7 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
       />
 
       <form.Field
-        name="entryPoints"
+        name="entrypoints"
         children={(field: any) => (
           <MultiSelect
             label="EntryPoints"

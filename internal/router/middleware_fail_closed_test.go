@@ -152,3 +152,35 @@ func TestEveryMiddlewareTypeIsClassified(t *testing.T) {
 		}
 	}
 }
+
+// TestRouteRefusesWhenALimitCannotBeBuilt: rate, concurrency and body-size
+// limits were classed cosmetic, so one that failed to build left its route
+// serving with no limit at all -- and since the strict config parsers landed,
+// a typo in a limit is exactly what fails the build. A WASM module runs
+// whatever the operator wrote, authentication included, so dropping it is not
+// a rendering problem either. Each now takes the route out of service, as the
+// other boundaries do.
+func TestRouteRefusesWhenALimitCannotBeBuilt(t *testing.T) {
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot) // reached the origin
+	})
+	for _, mw := range []*gateonv1.Middleware{
+		{Type: "ratelimit", Config: map[string]string{"requests_per_minute": "ten"}},
+		{Type: "inflightreq", Config: map[string]string{"amount": "many"}},
+		{Type: "buffering", Config: map[string]string{"max_request_body_bytes": "-1"}},
+		{Type: "wasm"},
+	} {
+		t.Run(mw.Type, func(t *testing.T) {
+			mw.Id, mw.Name = "broken-"+mw.Type, "broken-"+mw.Type
+			store := &stubMiddlewareStore{mws: map[string]*gateonv1.Middleware{mw.Id: mw}}
+			rt := &gateonv1.Route{Id: "r1", Name: "r1", Middlewares: []string{mw.Id}}
+			rec := httptest.NewRecorder()
+			ApplyRouteMiddlewares(backend, rt, nil, store, nil, nil, nil).
+				ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://x/", nil))
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Errorf("status = %d, want 503: a route whose %s failed to build "+
+					"served without it", rec.Code, mw.Type)
+			}
+		})
+	}
+}

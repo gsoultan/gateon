@@ -11,7 +11,6 @@ import (
 	"net/http/httputil"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	gateonhttputil "github.com/gsoultan/gateon/internal/httputil"
@@ -19,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy/health"
@@ -39,6 +39,7 @@ type ProxyHandler struct {
 	healthCheckProtocol string
 	healthCheckType     gateonv1.HealthCheckType
 	healthThresholds    *health.Tracker
+	healthChecked       bool
 	discoveryURL        string
 	routeName           string
 	stopDiscovery       chan struct{}
@@ -110,6 +111,39 @@ finish:
 	h.Close()
 }
 
+// HealthSnapshot is what this handler's health checks have concluded about its
+// targets, by URL, for the handler built to replace it. Nil when it checks no
+// health: its targets are alive by default, not by any conclusion.
+func (h *ProxyHandler) HealthSnapshot() map[string]bool {
+	if !h.healthChecked {
+		return nil
+	}
+	return h.healthThresholds.Snapshot()
+}
+
+// InheritHealth starts this handler's targets where the handler it replaces
+// left them. A rebuilt handler used to start every target alive and learn
+// otherwise at its first check, fifteen seconds later, so every configuration
+// change sent traffic back to backends already known to be down.
+//
+// Nothing is inherited unless this handler checks health itself: a target
+// marked down with nothing to check it would stay down for good.
+func (h *ProxyHandler) InheritHealth(prev map[string]bool) {
+	if !h.healthChecked || len(prev) == 0 {
+		return
+	}
+	for _, s := range h.lb.GetStats() {
+		alive, known := prev[s.URL]
+		if !known {
+			continue
+		}
+		h.healthThresholds.Seed(s.URL, alive)
+		if !alive {
+			h.lb.SetAlive(s.URL, false)
+		}
+	}
+}
+
 // RouteName returns the label of the route this handler serves.
 func (h *ProxyHandler) RouteName() string {
 	return h.routeName
@@ -121,6 +155,19 @@ func (h *ProxyHandler) activeConnCount() int32 {
 		total += s.ActiveConn
 	}
 	return total
+}
+
+// backendCORSHeaders are the CORS headers a route with its own policy strips
+// from its backend's responses, so the browser reads one policy. The list
+// named Access-Control-Exposed-Headers, which is no header, so the backend's
+// Access-Control-Expose-Headers went out beside the route's.
+var backendCORSHeaders = [...]string{
+	"Access-Control-Allow-Origin",
+	"Access-Control-Allow-Methods",
+	"Access-Control-Allow-Headers",
+	"Access-Control-Expose-Headers",
+	"Access-Control-Allow-Credentials",
+	"Access-Control-Max-Age",
 }
 
 // getOrCreateProxy returns a cached ReverseProxy for the target, creating one if needed.
@@ -145,12 +192,9 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 
 	if h.StripCORS {
 		rp.ModifyResponse = func(resp *http.Response) error {
-			resp.Header.Del("Access-Control-Allow-Origin")
-			resp.Header.Del("Access-Control-Allow-Methods")
-			resp.Header.Del("Access-Control-Allow-Headers")
-			resp.Header.Del("Access-Control-Exposed-Headers")
-			resp.Header.Del("Access-Control-Allow-Credentials")
-			resp.Header.Del("Access-Control-Max-Age")
+			for _, name := range backendCORSHeaders {
+				resp.Header.Del(name)
+			}
 			return nil
 		}
 	}
@@ -160,13 +204,23 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 			w.WriteHeader(499)
 			return
 		}
+		// A body limit tripped while the body was streaming (one with no
+		// declared length). The client sent too much; the backend did nothing
+		// wrong, so this is not logged as a proxy error or answered 502.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
 
 		status := http.StatusBadGateway
 		if errors.Is(err, context.DeadlineExceeded) {
 			status = http.StatusGatewayTimeout
 		}
 
-		atomic.AddUint64(&state.errorCount, 1)
+		// Not counted here: this answers 502 or 504, and recordMetrics counts
+		// every 5xx the target produced. Counting it in both places made each
+		// transport error two errors against one request.
 		routeID := middleware.GetRouteName(r)
 		if routeID != "" {
 			telemetry.RequestFailuresTotal.WithLabelValues(routeID, "service_down").Inc()
@@ -189,6 +243,18 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 
 func (h *ProxyHandler) GetStats() []TargetStats {
 	return h.lb.GetStats()
+}
+
+// ClientIdentityHeaders names the request headers this handler chooses the
+// client certificate it presents to the backend by: the match headers of a
+// service whose identities are selected BY_HEADER, and nil for any other.
+// They are the gateway's to set, so the route chain removes a client's copies
+// before the route's own middlewares run (ADR-0014).
+func (h *ProxyHandler) ClientIdentityHeaders() []string {
+	if h.transportFactory == nil || h.transportFactory.identitySelector == nil {
+		return nil
+	}
+	return h.transportFactory.identitySelector.headers
 }
 
 func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetState) {
@@ -218,9 +284,7 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 	if scheme == "https" {
 		pr.Out.Header.Set("X-Forwarded-Ssl", "on")
 	}
-	if ja4 := telemetry.GetCachedJA4H(pr.In); ja4 != "" {
-		pr.Out.Header.Set("X-Gateon-JA4", ja4)
-	}
+	setGatewayJA4(pr.Out.Header, pr.In)
 
 	// 2. Handle gRPC and HTTP/2 protocol specifics
 	origURL := state.url
@@ -257,5 +321,21 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 	// 4. Ensure User-Agent isn't automatically set by Go's default if missing
 	if _, ok := pr.In.Header["User-Agent"]; !ok {
 		pr.Out.Header.Set("User-Agent", "")
+	}
+}
+
+// gatewayJA4Header is where the proxy tells a backend the client's HTTP
+// fingerprint.
+const gatewayJA4Header = kind.HeaderGatewayJA4
+
+// setGatewayJA4 sets gatewayJA4Header from the fingerprint the gateway
+// computed, after removing any the client sent. The value is the gateway's to
+// set: the websocket upgrade path copied the client's headers verbatim and
+// never touched it, so a backend trusting it read the client's claim, and the
+// HTTP path only overwrote it when the gateway had a value.
+func setGatewayJA4(out http.Header, in *http.Request) {
+	out.Del(gatewayJA4Header)
+	if ja4 := telemetry.GetCachedJA4H(in); ja4 != "" {
+		out.Set(gatewayJA4Header, ja4)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -147,8 +148,9 @@ func ShouldSkipMetrics(r *http.Request) bool {
 // deny decision.** A boundary that waves a request through on this predicate is
 // opt-out by request -- the caller states the shape that exempts it -- and that
 // is how a shunned IP, a mitigated fingerprint, a blocked country and the WAF
-// itself were each reachable by naming a preflight on the smart-TCP listener,
-// which does not run transform.GlobalCORS ahead of its chain.
+// itself were each reachable by naming a preflight on the smart-TCP listener.
+// No listener answers preflights ahead of its chain any more (ADR-0015), so on
+// every one of them a preflight meets every deny decision a request does.
 //
 // It has two legitimate uses, and they share a property the deny decisions do
 // not: the request genuinely cannot satisfy the check.
@@ -215,9 +217,24 @@ func Recovery() Middleware {
 	}
 }
 
+// SecurityHeadersPresets are the presets SecurityHeaders knows. "" and
+// "legacy" are the same: the headers an unset preset has always meant.
+var SecurityHeadersPresets = []string{"", "legacy", "recommended", "strict", "none"}
+
+// ParseSecurityHeadersPreset normalises a stored preset and refuses one that is
+// not a preset. A misspelt preset used to run as the legacy default while the
+// configuration read as a preset someone had chosen.
+func ParseSecurityHeadersPreset(s string) (string, error) {
+	p := strings.ToLower(strings.TrimSpace(s))
+	if !slices.Contains(SecurityHeadersPresets, p) {
+		return "", fmt.Errorf("not a preset; use one of legacy, recommended, strict or none")
+	}
+	return p, nil
+}
+
 // SecurityHeadersConfig defines presets for common security headers.
 type SecurityHeadersConfig struct {
-	Preset string // "recommended", "strict", "none"
+	Preset string // "legacy" (or ""), "recommended", "strict", "none"
 	// ExtraImgSrc adds additional sources to the CSP img-src directive on top
 	// of the preset baseline. It is intended for first-party surfaces that must
 	// load images from a known third party (e.g. the management UI's diagnostics
@@ -260,11 +277,17 @@ func SecurityHeaders(cfg SecurityHeadersConfig) Middleware {
 					h.Set("Content-Security-Policy", contentSecurityPolicy(false, cfg.ExtraImgSrc, nonce))
 				}
 				h.Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
+			case "none":
+				// The operator chose to leave the backend's headers alone. This
+				// had no case and fell through to the legacy set below.
 			default:
-				// Default legacy behavior if preset is empty or unknown
+				// "legacy", or unset: what an unset preset has always meant.
+				// X-XSS-Protection is 0, as in the other presets: "1; mode=block"
+				// asks for the XSS auditor, which browsers have removed and whose
+				// old implementations could be used to detect content cross-site.
 				h.Set("X-Content-Type-Options", "nosniff")
 				h.Set("X-Frame-Options", "SAMEORIGIN")
-				h.Set("X-XSS-Protection", "1; mode=block")
+				h.Set("X-XSS-Protection", "0")
 				h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			}
 			next.ServeHTTP(w, r)

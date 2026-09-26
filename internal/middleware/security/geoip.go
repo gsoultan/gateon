@@ -86,8 +86,7 @@ func (g geoIPRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Re
 	//
 	// Nor gated on kind.IsCorsPreflight, for the reason that predicate now
 	// documents: a geofence is a deny decision, and this one sits in the route
-	// chain, which a preflight reaches on any listener that does not run
-	// transform.GlobalCORS ahead of it.
+	// chain, which every preflight reaches (ADR-0015).
 	clientIP := request.GetClientIP(r, g.trust)
 	ip := net.ParseIP(clientIP)
 	if ip == nil {

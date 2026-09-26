@@ -4,7 +4,6 @@
 package server
 
 import (
-	"cmp"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -61,7 +60,7 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, grpc
 				logger.L.LogDebug("Route matched",
 					"flow_step", "route_match",
 					"request_id", middleware.GetRequestID(r),
-					"route", cmp.Or(rt.Name, rt.Id),
+					"route", router.RouteLabel(rt),
 					"rule", rt.Rule)
 			}
 
@@ -69,6 +68,15 @@ func (s *Server) HandleProxyOrLocal(w http.ResponseWriter, r *http.Request, grpc
 			if rt.Tls != nil && r.TLS == nil {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("HTTPS required"))
+				return
+			}
+			// The route's TLS option (its client-certificate requirement above
+			// all) was enforced on whichever route the SNI name selected; refuse
+			// a request whose Host picked a route the handshake was not for.
+			// 421 is what tells a client that coalesced connections to retry.
+			tlsDeps := SNIDeps{RouteStore: s.RouteStore, GlobalStore: s.GlobalStore, TLSOptStore: s.TLSOptStore}
+			if !tlsDeps.routeTLSPolicyHonoured(r, rt) {
+				http.Error(w, "Misdirected Request", http.StatusMisdirectedRequest)
 				return
 			}
 

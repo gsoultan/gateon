@@ -11,8 +11,8 @@ SPDX-License-Identifier: MIT
 > push it yourself and point `image.repository` at it:
 >
 > ```bash
-> docker build -t your-registry/gateon:2.6.0 .
-> docker push your-registry/gateon:2.6.0
+> docker build -t your-registry/gateon:2.7.0 .
+> docker push your-registry/gateon:2.7.0
 > helm install gateon ./charts/gateon --set image.repository=your-registry/gateon
 > ```
 
@@ -99,7 +99,9 @@ HTTPRoute and writes only into gateon's own stores — so the role grants
 they would be unused authority on a component that terminates hostile traffic.
 
 Set `kubernetesIntegration.watchNamespace` to scope it to one namespace, which
-swaps the ClusterRole for a Role.
+swaps the ClusterRole for a Role and sets `GATEON_K8S_WATCH_NAMESPACE` so the
+controller lists only there — before that variable existed it listed every
+namespace, the Role refused it, and nothing synced.
 
 `gatewayAPI` is **off by default**. The controller waits for both informers to
 sync and the Gateway one never will without its CRDs, so the client retries in a

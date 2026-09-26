@@ -173,8 +173,8 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	}
 
 	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(func(context.Context) error {
-			return server.Shutdown(context.Background())
+		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return shutdownHTTPServer(ctx, server)
 		})
 	}
 
@@ -215,9 +215,12 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
 		return
 	}
+	conns := newOpenConns()
 	if shutdownReg != nil {
-		shutdownReg.Register(func(context.Context) error {
-			return l.Close()
+		shutdownReg.Register(func(ctx context.Context) error {
+			err := l.Close()
+			conns.shutdown(ctx)
+			return err
 		})
 	}
 	wg.Go(func() {
@@ -229,10 +232,15 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 				telemetry.GlobalDiagnostics.RecordEPError(ep.Id, err.Error())
 				return
 			}
+			if !conns.add(conn) {
+				_ = conn.Close()
+				continue
+			}
 			telemetry.GlobalDiagnostics.RecordConnection(ep.Id)
 			c := conn
 			if plaintext {
 				wg.Go(func() {
+					defer conns.remove(c)
 					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
 					if deps.Phantom != nil {
 						// For plaintext TCP, attempt TITAN L4 hardware offload (AF_XDP/io_uring)
@@ -248,6 +256,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 					p = deps.L4Resolver.ResolveTCP(ep, "")
 				}
 				wg.Go(func() {
+					defer conns.remove(c)
 					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
 					defer c.Close()
 					if p != nil {

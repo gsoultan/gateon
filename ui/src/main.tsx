@@ -175,6 +175,14 @@ function applyInitialColorScheme() {
 
 applyInitialColorScheme()
 
+// The service worker used to keep GET /v1/config/export in this cache, and the
+// copy outlived logout. The rule is gone, but Workbox only clears outdated
+// precaches, so browsers that ran the old worker still hold the export until
+// something deletes it.
+if ('caches' in window) {
+  void caches.delete('gateon-config-cache').catch(() => undefined)
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Root />

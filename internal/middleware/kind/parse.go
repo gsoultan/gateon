@@ -21,6 +21,30 @@ import (
 // out as Stage 0's purpose; the traffic stage is simply the first one to need
 // them.
 
+// RouteIDKey is the config key under which Factory.Create hands a middleware
+// the route it is being built for.
+//
+// A constant rather than a literal retyped at each end, because the two ends
+// once disagreed: a rename moved the writer to "route_id" and left three
+// readers on "_route_id", so they ran with an empty route. OIDC named its state
+// cookie "gateon_state_" while its callback looked for "gateon_state_<route>",
+// so no login could complete, and bot-management and file-security threats
+// were filed against no route. Nothing could see it: both ends were strings.
+const RouteIDKey = "route_id"
+
+// RouteStateKey is the config key under which Factory.Create hands a
+// middleware the key to keep per-route state under: the route's ID, which is
+// unique by construction. RouteIDKey carries the route's label -- its name, or
+// its ID when it has none -- and is for what a person reads: metrics, logs,
+// threat records. Names are not unique, and while state was keyed by them two
+// routes called alike shared a circuit breaker and Redis cache entries.
+const RouteStateKey = "route_state_key"
+
+// MiddlewareIDKey is the config key under which Factory.Create hands a
+// middleware its own ID, for state that belongs to one middleware on one
+// route rather than to the route.
+const MiddlewareIDKey = "middleware_id"
+
 func ParsePositiveInt(s string, defaultVal int) int {
 	if s == "" {
 		return defaultVal
@@ -41,16 +65,46 @@ func ParseIntStrict(s string, defaultVal int) (int, error) {
 	}
 	return int(n), nil
 }
-func ParseBoolStrict(s string, defaultVal bool) bool {
-	if s == "" {
-		return defaultVal
+
+// ParseBoolStrict reads a boolean setting. Absent is defaultVal; present and
+// not a boolean strconv accepts (true, false, 1, 0, t, f, in any case) is an
+// error. It used to return defaultVal for that too, unlike its int, float and
+// duration siblings, so "yes" for fail_open read as false and a typo in a
+// security switch read as its default, while the dashboard showed what was
+// typed.
+func ParseBoolStrict(s string, defaultVal bool) (bool, error) {
+	if strings.TrimSpace(s) == "" {
+		return defaultVal, nil
 	}
 	parsed, err := strconv.ParseBool(strings.TrimSpace(s))
 	if err != nil {
-		return defaultVal
+		return defaultVal, err
 	}
-	return parsed
+	return parsed, nil
 }
+
+// BoolFields reads several boolean settings from one config and keeps the
+// first malformed one, so a factory can read them inline and check once.
+type BoolFields struct {
+	cfg map[string]string
+	err error
+}
+
+// NewBoolFields reads booleans from cfg.
+func NewBoolFields(cfg map[string]string) *BoolFields { return &BoolFields{cfg: cfg} }
+
+// Get returns key's value, or defaultVal when it is absent. A malformed value
+// also yields defaultVal and is reported by Err.
+func (b *BoolFields) Get(key string, defaultVal bool) bool {
+	v, err := ParseBoolStrict(b.cfg[key], defaultVal)
+	if err != nil && b.err == nil {
+		b.err = CfgError(key, b.cfg[key], err)
+	}
+	return v
+}
+
+// Err is the first malformed setting Get saw, naming its key and value.
+func (b *BoolFields) Err() error { return b.err }
 
 // ParseFloatStrict and ParseDurationStrict complete the strict set.
 //
@@ -146,4 +200,9 @@ func ParseListStrict(val string) []string {
 const (
 	HeaderAccept        = "Accept"
 	HeaderAuthorization = "Authorization"
+	// HeaderGatewayJA4 carries the client's HTTP fingerprint to a backend.
+	// Spelled as net/http stores it: written "X-Gateon-JA4", every Set and
+	// Del on the request path rebuilt the canonical form, an allocation per
+	// request. The name on the wire is the same either way.
+	HeaderGatewayJA4 = "X-Gateon-Ja4"
 )

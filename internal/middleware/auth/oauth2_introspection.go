@@ -82,6 +82,7 @@ func NewOAuth2IntrospectionValidator(cfg OAuth2IntrospectionConfig) (*OAuth2Intr
 func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if IsCorsPreflight(r) {
+			v.config.stripMappedHeaders(r)
 			next.ServeHTTP(w, r)
 			return
 		}

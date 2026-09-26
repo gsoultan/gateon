@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -120,14 +121,25 @@ type deceptionResponseWriter struct {
 	http.ResponseWriter
 	cfg         DeceptionConfig
 	wroteHeader bool
+	injected    bool
 }
 
+// rewritable reports whether this response's body may be edited: HTML, and
+// not content-encoded, since a trap link spliced into gzip bytes corrupts the
+// stream rather than hiding in the page.
+func (w *deceptionResponseWriter) rewritable() bool {
+	h := w.Header()
+	return strings.Contains(h.Get("Content-Type"), "text/html") && h.Get("Content-Encoding") == ""
+}
+
+// WriteHeader drops Content-Length from any response whose body may grow.
+// It used to do so for 200 only, while Write injects whatever the status, so
+// an HTML error page overran the length it had declared.
 func (w *deceptionResponseWriter) WriteHeader(code int) {
 	if w.wroteHeader {
 		return
 	}
-	contentType := w.Header().Get("Content-Type")
-	if code == http.StatusOK && strings.Contains(contentType, "text/html") {
+	if w.rewritable() {
 		w.Header().Del("Content-Length")
 	}
 	w.wroteHeader = true
@@ -161,29 +173,50 @@ func (w *deceptionResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) 
 	return hj.Hijack()
 }
 
+// Write splices the trap links and forms in before the page's closing body
+// tag, once.
+//
+// It reports len(b) written, not the length of the enlarged buffer. io.Writer
+// requires n <= len(p), and httputil.ReverseProxy reads anything else as
+// io.ErrShortWrite and aborts the handler -- which is what this did to every
+// proxied HTML page, the client seeing a dropped connection.
 func (w *deceptionResponseWriter) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-
-	contentType := w.Header().Get("Content-Type")
-	if strings.Contains(contentType, "text/html") {
-		if idx := bytes.LastIndex(b, []byte("</body>")); idx != -1 {
-			var sb strings.Builder
-			for _, link := range w.cfg.InvisibleLinkPaths {
-				fmt.Fprintf(&sb, `<a href="%s" style="display:none" aria-hidden="true" tabIndex="-1"></a>`, link)
-			}
-			for _, form := range w.cfg.HoneyForms {
-				fmt.Fprintf(&sb, `<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form)
-			}
-
-			newContent := make([]byte, 0, len(b)+sb.Len())
-			newContent = append(newContent, b[:idx]...)
-			newContent = append(newContent, sb.String()...)
-			newContent = append(newContent, b[idx:]...)
-			return w.ResponseWriter.Write(newContent)
-		}
+	if w.injected || !w.rewritable() {
+		return w.ResponseWriter.Write(b)
 	}
+	idx := bytes.LastIndex(b, []byte("</body>"))
+	if idx == -1 {
+		return w.ResponseWriter.Write(b)
+	}
+	w.injected = true
 
-	return w.ResponseWriter.Write(b)
+	var sb strings.Builder
+	for _, link := range w.cfg.InvisibleLinkPaths {
+		fmt.Fprintf(&sb, `<a href="%s" style="display:none" aria-hidden="true" tabIndex="-1"></a>`, link)
+	}
+	for _, form := range w.cfg.HoneyForms {
+		fmt.Fprintf(&sb, `<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form)
+	}
+	return writeAround(w.ResponseWriter, b, idx, sb.String())
+}
+
+// writeAround writes b to dst with insert in front of b[idx:], and reports
+// how much of b it wrote, as io.Writer requires.
+//
+// The page goes out in place, around the markup, rather than spliced into a
+// new buffer: that was a copy of the proxy's chunk, up to 32 KiB, on every
+// HTML response an injecting writer touched.
+func writeAround(dst io.Writer, b []byte, idx int, insert string) (int, error) {
+	n, err := dst.Write(b[:idx])
+	if err != nil {
+		return n, err
+	}
+	if _, err := io.WriteString(dst, insert); err != nil {
+		return n, err
+	}
+	m, err := dst.Write(b[idx:])
+	return n + m, err
 }

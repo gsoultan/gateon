@@ -40,8 +40,8 @@ func assertNotCredentialedWildcard(t *testing.T, res *http.Response, label strin
 	}
 }
 
-func TestGlobalCORS_DoesNotReflectArbitraryOriginWithCredentials(t *testing.T) {
-	handler := GlobalCORS()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestDefaultCORS_DoesNotReflectArbitraryOriginWithCredentials(t *testing.T) {
+	handler := DefaultCORS()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -50,7 +50,7 @@ func TestGlobalCORS_DoesNotReflectArbitraryOriginWithCredentials(t *testing.T) {
 		req.Header.Set("Origin", evilOrigin)
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
-		assertNotCredentialedWildcard(t, rr.Result(), "GlobalCORS simple request")
+		assertNotCredentialedWildcard(t, rr.Result(), "DefaultCORS simple request")
 	})
 
 	t.Run("preflight", func(t *testing.T) {
@@ -59,27 +59,15 @@ func TestGlobalCORS_DoesNotReflectArbitraryOriginWithCredentials(t *testing.T) {
 		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
-		assertNotCredentialedWildcard(t, rr.Result(), "GlobalCORS preflight")
+		assertNotCredentialedWildcard(t, rr.Result(), "DefaultCORS preflight")
 	})
-}
-
-func TestBypassCORS_DoesNotReflectArbitraryOriginWithCredentials(t *testing.T) {
-	handler := BypassCORS()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/account", nil)
-	req.Header.Set("Origin", evilOrigin)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	assertNotCredentialedWildcard(t, rr.Result(), "BypassCORS simple request")
 }
 
 // A permissive gateway default may still expose Authorization to any origin,
 // but only when credentials are off. Exposing it *and* allowing credentials
 // hands the caller's bearer token to any page that asks.
-func TestGlobalCORS_DoesNotExposeAuthorizationToArbitraryOriginWithCredentials(t *testing.T) {
-	handler := GlobalCORS()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestDefaultCORS_DoesNotExposeAuthorizationToArbitraryOriginWithCredentials(t *testing.T) {
+	handler := DefaultCORS()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

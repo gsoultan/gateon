@@ -36,6 +36,7 @@ import {
   IconRoute,
 } from "@tabler/icons-react";
 import { RoutingConfig, UpstreamConfig, PipelineConfig, RoutePreview } from "./";
+import { formValuesToRoute, routeToFormValues } from "./routePayload";
 
 export default function RouteForm({
   onSuccess,
@@ -90,7 +91,7 @@ export default function RouteForm({
       type: "http" as const,
       rule: "",
       priority: 0,
-      entryPoints: [] as string[],
+      entrypoints: [] as string[],
       middlewares: [] as string[],
       serviceId: "",
       tls: {
@@ -100,33 +101,23 @@ export default function RouteForm({
       disabled: false,
     } as Route,
     onSubmit: async ({ value }) => {
-      const v = { ...value };
-      if (v.type === "tcp" || v.type === "udp") {
-        v.rule = "L4()";
-      }
-      mutation.mutate(v);
+      mutation.mutate(formValuesToRoute(value));
     },
   });
 
   useEffect(() => {
     if (initialData) {
-      form.setFieldValue("id", initialData.id);
-      form.setFieldValue("name", initialData.name || "");
-      form.setFieldValue("type", initialData.type || "http");
-      const t = initialData.type || "http";
-      form.setFieldValue(
-        "rule",
-        t === "tcp" || t === "udp" ? "L4()" : (initialData.rule || ""),
-      );
-      form.setFieldValue("priority", initialData.priority || 0);
-      form.setFieldValue("entryPoints", initialData.entryPoints || []);
-      form.setFieldValue("middlewares", initialData.middlewares || []);
-      form.setFieldValue("serviceId", initialData.serviceId || "");
-      form.setFieldValue(
-        "tls",
-        initialData.tls || { certificateIds: [], optionId: "" },
-      );
-      form.setFieldValue("disabled", initialData.disabled ?? false);
+      const v = routeToFormValues(initialData);
+      form.setFieldValue("id", v.id);
+      form.setFieldValue("name", v.name);
+      form.setFieldValue("type", v.type);
+      form.setFieldValue("rule", v.rule);
+      form.setFieldValue("priority", v.priority);
+      form.setFieldValue("entrypoints", v.entrypoints);
+      form.setFieldValue("middlewares", v.middlewares);
+      form.setFieldValue("serviceId", v.serviceId);
+      form.setFieldValue("tls", v.tls);
+      form.setFieldValue("disabled", v.disabled);
     }
   }, [initialData, form]);
 

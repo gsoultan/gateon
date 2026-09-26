@@ -6,8 +6,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -103,7 +106,11 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 			return
 		}
 
-		dryRun := r.URL.Query().Get("dry_run") == "true"
+		dryRun, err := importPreviewRequested(r.URL.Query())
+		if err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if dryRun {
 			diff := calculateConfigDiff(r.Context(), d, &exp)
 			w.Header().Set("Content-Type", "application/json")
@@ -143,6 +150,32 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 		}
 		writeValidateResponse(w, true, nil, "")
 	})
+}
+
+// importPreviewRequested reports whether an import request asked only for a preview.
+//
+// Both spellings, because the dashboard sends "dryRun" and this used to read
+// only "dry_run": the dashboard's "Dry Run Preview" button therefore applied
+// the import it was meant to preview, and since the card only renders a diff,
+// it showed nothing while doing it. ParsePagination accepts both spellings of
+// pageSize for the same reason.
+//
+// A value that is present but not a boolean is refused rather than read as
+// false. The two readings are not symmetric -- a mistaken preview is repeated,
+// a mistaken import overwrites the live configuration -- so the one that
+// cannot be undone must not be what a typo gets.
+func importPreviewRequested(q url.Values) (bool, error) {
+	dryRun := false
+	for _, key := range []string{"dry_run", "dryRun"} {
+		for _, v := range q[key] {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return false, fmt.Errorf("%s must be true or false, got %q", key, v)
+			}
+			dryRun = dryRun || b
+		}
+	}
+	return dryRun, nil
 }
 
 // runConfigImport saves services, entrypoints, middlewares, and routes; returns collected errors.

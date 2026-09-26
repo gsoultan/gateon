@@ -63,39 +63,29 @@ func TestLoginRateLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset limiter for each test case by creating a new one
-			deps.LoginLimiter = traffic.NewRateLimiter(rate.Every(time.Minute/2), 1)
+			// Reset limiter for each test case by creating a new one. The
+			// burst is exactly how many attempts pass: this test used to
+			// build a burst of 1 and require two attempts to pass, which held
+			// only while the limiter doubled every limit it was given.
+			deps.LoginLimiter = traffic.NewRateLimiter(rate.Every(time.Minute/2), 2)
 			handler = CreateBaseHandler(uiHandler, deps, nil, http.NewServeMux())
 
+			attempt := func() int {
+				req := httptest.NewRequest("POST", tt.path, nil)
+				req.RemoteAddr = "1.2.3.4:1234"
+				ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")
+				req = req.WithContext(ctx)
+				rr := httptest.NewRecorder()
+				handler.ServeHTTP(rr, req)
+				return rr.Code
+			}
 			for i := range 2 {
-				req := httptest.NewRequest("POST", tt.path, nil)
-				req.RemoteAddr = "1.2.3.4:1234"
-				ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")
-				req = req.WithContext(ctx)
-				rr := httptest.NewRecorder()
-				handler.ServeHTTP(rr, req)
-				if rr.Code != http.StatusOK {
-					t.Fatalf("Attempt %d: expected status 200, got %d", i+1, rr.Code)
+				if code := attempt(); code != http.StatusOK {
+					t.Fatalf("Attempt %d: expected status 200, got %d", i+1, code)
 				}
 			}
-
-			// Subsequent attempts should be rate limited eventually
-			limitReached := false
-			for i := 0; i < 5; i++ {
-				req := httptest.NewRequest("POST", tt.path, nil)
-				req.RemoteAddr = "1.2.3.4:1234"
-				ctx := context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management")
-				req = req.WithContext(ctx)
-				rr := httptest.NewRecorder()
-				handler.ServeHTTP(rr, req)
-				if rr.Code == http.StatusTooManyRequests {
-					limitReached = true
-					break
-				}
-			}
-
-			if !limitReached {
-				t.Errorf("expected status 429 eventually, never got it")
+			if code := attempt(); code != http.StatusTooManyRequests {
+				t.Errorf("Attempt 3 against a burst of 2: expected status 429, got %d", code)
 			}
 		})
 	}

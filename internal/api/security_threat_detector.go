@@ -87,7 +87,9 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			// Check IP Reputation
 			if d.Reputation != nil {
 				if bad, repScore := d.Reputation.IsBad(ip); bad {
-					score += int(repScore * 50)
+					// Feed scores are on the 0-100 scale the block threshold
+					// uses, so a listing (100) contributes the 50 it always has.
+					score += int(repScore / 2)
 					reasons = append(reasons, fmt.Sprintf("IP has bad reputation (score: %.2f)", repScore))
 					primaryType = "reputation_hit"
 				}

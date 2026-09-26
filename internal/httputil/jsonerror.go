@@ -19,6 +19,9 @@ type ErrorBody struct {
 // WriteJSONError writes a JSON error response with the given status code and message.
 func WriteJSONError(w http.ResponseWriter, statusCode int, message string, code string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	// The gateway's own error pages carry nosniff themselves, rather than
+	// through a preset applied to every response the entrypoint serves.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	requestID := w.Header().Get("X-Request-ID")
 	w.WriteHeader(statusCode)
 

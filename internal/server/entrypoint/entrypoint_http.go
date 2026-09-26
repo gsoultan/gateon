@@ -20,7 +20,6 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
-	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -100,25 +99,30 @@ func dynamicTimeouts(ep *gateonv1.EntryPoint, deps *Deps, next http.Handler) htt
 	})
 }
 
-type httpRunner struct{}
-
-func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
-	addr := ep.Address
-	if addr == "" {
-		return
-	}
-	hasTCP, hasUDP := protocols(ep)
-	var epHandler = deps.BaseHandler
+// entrypointChain is what every request on an HTTP entrypoint passes through
+// before it is routed.
+//
+// It sets no security headers. It used to apply the "recommended" preset here,
+// to every response -- so every proxied page that did not send its own CSP got
+// the gateway's, which was written for the dashboard: script-src 'self' with a
+// nonce no backend can know (inline and CDN scripts blocked), fonts and images
+// from its own origin only, form-action 'self' (a login form posting to an
+// identity provider blocked), frame-ancestors 'none', and HSTS with
+// includeSubDomains pinning every subdomain to HTTPS for a year. The dashboard
+// and management API apply their own headers in BaseHandler; a route that wants
+// headers on its backend's responses attaches a security_headers middleware.
+//
+// It answers no CORS either. It used to, first in the chain and before a route
+// was chosen, which pre-empted every route's own policy, every backend's, and
+// the management API's; CORS is decided per route now (ADR-0015).
+func entrypointChain(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps) []middleware.Middleware {
 	epLabel := cmp.Or(ep.Name, ep.Id)
-	isMgmt := IsManagementAddress(ep.Address, deps)
 	chain := []middleware.Middleware{
-		transform.GlobalCORS(),
-		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
+		middleware.EntryPoint(ep.Id, epLabel, IsManagementAddress(ep.Address, deps)),
 		middleware.Metrics("gateon-" + epLabel),
 		identity.IPMitigation(),
 		identity.UserMitigation(),
 		middleware.Recovery(),
-		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		security.HoneypotGlobal(deps.GlobalStore),
 		security.GeoIPGlobal(ctx, deps.GlobalStore),
 	}
@@ -126,66 +130,102 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
 	}
 	// Global per-IP connection limit to prevent Slowloris and basic DDOS.
-	chain = append(chain, entrypointConnLimiter())
+	return append(chain, entrypointConnLimiter())
+}
 
-	// Final handler: wrap with monitoring, global rate limiter.
-	// CORS is handled at the route level for proxy traffic, and in BaseHandler for internal traffic.
-	finalEPHandler := middleware.Chain(chain...)(deps.Limiter.Handler(traffic.PerIP)(epHandler))
-	var epTLSConfig *tls.Config
-	if ep.Tls != nil && ep.Tls.Enabled {
-		epTLSConfig = deps.TLSConfig.Clone()
+type httpRunner struct{}
+
+func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
+	if ep.Address == "" {
+		return
 	}
+	e := &httpEntrypoint{ep: ep, deps: deps, wg: wg}
+	if ep.Tls != nil && ep.Tls.Enabled {
+		e.tlsConfig = deps.TLSConfig.Clone()
+	}
+	server := e.newServer(dynamicTimeouts(ep, deps, e.startHTTP3(e.frontHandler(ctx))))
+	if deps.ShutdownRegistry != nil {
+		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return shutdownHTTPServer(ctx, server)
+		})
+	}
+	if hasTCP, _ := protocols(ep); hasTCP {
+		e.serveTCP(server)
+	}
+}
+
+// httpEntrypoint is what Run's steps share for one entrypoint.
+type httpEntrypoint struct {
+	ep        *gateonv1.EntryPoint
+	deps      *Deps
+	wg        *syncutil.WaitGroup
+	tlsConfig *tls.Config
+}
+
+// frontHandler is the entrypoint chain around the base handler and the global
+// rate limiter. CORS is handled at the route level for proxy traffic, and in
+// BaseHandler for internal traffic.
+func (e *httpEntrypoint) frontHandler(ctx context.Context) http.Handler {
+	ep, deps := e.ep, e.deps
+	h := middleware.Chain(entrypointChain(ctx, ep, deps)...)(deps.Limiter.Handler(traffic.PerIP)(deps.BaseHandler))
 
 	// tls.auto_redirect: send plaintext traffic to the TLS entrypoint. Inserted
 	// here, *inside* the ACME wrapper below, so the HTTP-01 challenge still
 	// answers on port 80 — redirecting the challenge would break certificate
 	// issuance for the very entrypoint being redirected to.
+	isMgmt := IsManagementAddress(ep.Address, deps)
 	if port := httpsRedirectTargetFor(ctx, deps); shouldRedirectToHTTPS(ep, isMgmt, autoRedirectEnabled(ctx, deps), port) {
-		finalEPHandler = httpsRedirect(port)
+		h = httpsRedirect(port)
 		logger.L.LogInfo("entrypoint redirects plaintext traffic to HTTPS",
 			"entrypoint", ep.Id, "address", ep.Address, "target_port", port)
 	}
+	return deps.TLSManager.HTTPChallengeHandler(h)
+}
 
-	finalEPHandler = deps.TLSManager.HTTPChallengeHandler(finalEPHandler)
-
-	// Start HTTP/3 (QUIC) in parallel with TCP when configured — production-ready settings.
-	needH3 := ep.Type == gateonv1.EntryPoint_HTTP3 && hasUDP && epTLSConfig != nil
-	var tcpHandler = finalEPHandler
-	if needH3 {
-		h3Server := newHTTP3Server(addr, finalEPHandler, epTLSConfig)
-		tcpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.ProtoMajor < 3 {
-				_ = h3Server.SetQUICHeaders(w.Header())
-			}
-			finalEPHandler.ServeHTTP(w, r)
-		})
-		if deps.ShutdownRegistry != nil {
-			deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-				return h3Server.Close()
-			})
-		}
-		wg.Go(func() {
-			logger.L.LogInfo("starting HTTP/3 (QUIC) entrypoint", "addr", addr)
-			if err := h3Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.L.LogError("HTTP/3 server failed", "error", err, "addr", addr)
-			}
+// startHTTP3 starts HTTP/3 (QUIC) beside TCP when the entrypoint is configured
+// for it, and returns the TCP handler, which then advertises HTTP/3 to HTTP/1
+// and HTTP/2 clients.
+func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
+	_, hasUDP := protocols(e.ep)
+	if e.ep.Type != gateonv1.EntryPoint_HTTP3 || !hasUDP || e.tlsConfig == nil {
+		return h
+	}
+	addr := e.ep.Address
+	h3Server := newHTTP3Server(addr, h, e.tlsConfig)
+	if e.deps.ShutdownRegistry != nil {
+		e.deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return h3Server.Close()
 		})
 	}
+	e.wg.Go(func() {
+		logger.L.LogInfo("starting HTTP/3 (QUIC) entrypoint", "addr", addr)
+		if err := h3Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.L.LogError("HTTP/3 server failed", "error", err, "addr", addr)
+		}
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor < 3 {
+			_ = h3Server.SetQUICHeaders(w.Header())
+		}
+		h.ServeHTTP(w, r)
+	})
+}
 
-	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
-	// In Go 1.26+, this is handled natively via the Protocols field.
-	handler := dynamicTimeouts(ep, deps, tcpHandler)
+// newServer builds the TCP server with every limit set explicitly. H2C
+// (HTTP/2 cleartext) is enabled for gRPC and modern HTTP clients through the
+// Protocols field.
+func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
+	ep := e.ep
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	if epTLSConfig != nil {
+	if e.tlsConfig != nil {
 		protocols.SetHTTP2(true)
 	}
-
 	server := &http.Server{
-		Addr:      addr,
-		Handler:   handler,
-		TLSConfig: epTLSConfig,
+		Addr:      ep.Address,
+		Handler:   h,
+		TLSConfig: e.tlsConfig,
 		HTTP2: &http.HTTP2Config{
 			MaxConcurrentStreams: h2MaxConcurrentStreams,
 			MaxReadFrameSize:     h2MaxReadFrameSize,
@@ -214,46 +254,45 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	// Explicitly bound HTTP/2 on the public TLS server (h2 is negotiated via ALPN
 	// over TLS). This caps concurrent streams and frame size instead of relying on
 	// Go's defaults, hardening against HTTP/2 stream-flood DoS.
-	if epTLSConfig != nil {
+	if e.tlsConfig != nil {
 		if err := http2.ConfigureServer(server, &http2.Server{
 			MaxConcurrentStreams: h2MaxConcurrentStreams,
 			MaxReadFrameSize:     h2MaxReadFrameSize,
 			IdleTimeout:          h2IdleTimeout,
 		}); err != nil {
-			logger.L.LogError("failed to configure HTTP/2 limits", "error", err, "addr", addr)
+			logger.L.LogError("failed to configure HTTP/2 limits", "error", err, "addr", ep.Address)
 		}
 	}
-	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(func(context.Context) error {
-			return server.Shutdown(context.Background())
-		})
-	}
-	if hasTCP {
-		l, err := net.Listen("tcp", addr)
-		if err != nil {
-			logger.L.LogError("HTTP/S listen failed", "error", err, "addr", addr)
-			return
-		}
-		if deps.Phantom != nil {
-			l = deps.Phantom.OptimizeListener(l)
-		}
+	return server
+}
 
-		if epTLSConfig != nil {
-			logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", ep.Type.String())
-			wg.Go(func() {
-				if err := server.ServeTLS(l, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					logger.L.LogError("HTTPS server failed", "error", err, "addr", addr)
-				}
-			})
-		} else {
-			logger.L.LogInfo("starting HTTP entrypoint", "addr", addr, "type", ep.Type.String())
-			wg.Go(func() {
-				if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					logger.L.LogError("HTTP server failed", "error", err, "addr", addr)
-				}
-			})
-		}
+// serveTCP listens on the entrypoint's address and serves, over TLS when the
+// entrypoint has it.
+func (e *httpEntrypoint) serveTCP(server *http.Server) {
+	addr := e.ep.Address
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.L.LogError("HTTP/S listen failed", "error", err, "addr", addr)
+		return
 	}
+	if e.deps.Phantom != nil {
+		l = e.deps.Phantom.OptimizeListener(l)
+	}
+	if e.tlsConfig != nil {
+		logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", e.ep.Type.String())
+		e.wg.Go(func() {
+			if err := server.ServeTLS(l, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.L.LogError("HTTPS server failed", "error", err, "addr", addr)
+			}
+		})
+		return
+	}
+	logger.L.LogInfo("starting HTTP entrypoint", "addr", addr, "type", e.ep.Type.String())
+	e.wg.Go(func() {
+		if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.L.LogError("HTTP server failed", "error", err, "addr", addr)
+		}
+	})
 }
 
 func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *http3.Server {

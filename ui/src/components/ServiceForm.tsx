@@ -24,6 +24,7 @@ import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
+import { defaultTlsClientConfig } from "./serviceTlsDefaults";
 
 export function ServiceForm({
   onSuccess,
@@ -118,14 +119,7 @@ export function ServiceForm({
       l4UdpSessionTimeoutS: 60,
       l4ProxyProtocol: false,
       discoveryUrl: "",
-      tlsClientConfig: {
-        enabled: false,
-        certFile: "",
-        keyFile: "",
-        caFile: "",
-        skipVerify: true,
-        serverName: "",
-      },
+      tlsClientConfig: defaultTlsClientConfig(),
     } as Service,
     onSubmit: async ({ value }) => {
       const bt = value.backendType || "http";
@@ -245,14 +239,7 @@ export function ServiceForm({
       );
       form.setFieldValue("l4ProxyProtocol", initialData.l4ProxyProtocol ?? false);
       form.setFieldValue("discoveryUrl", initialData.discoveryUrl || "");
-      form.setFieldValue("tlsClientConfig", initialData.tlsClientConfig || {
-        enabled: false,
-        certFile: "",
-        keyFile: "",
-        caFile: "",
-        skipVerify: true,
-        serverName: "",
-      });
+      form.setFieldValue("tlsClientConfig", initialData.tlsClientConfig || defaultTlsClientConfig());
     }
   }, [initialData, form]);
 

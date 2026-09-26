@@ -25,11 +25,11 @@ func asPreflight(r *http.Request) *http.Request {
 // TestIPMitigationRefusesAPreflightFromAShunnedIP closes the first half of a
 // bypass that was live on the smart-TCP listener.
 //
-// transform.GlobalCORS terminates preflights ahead of the HTTP entrypoint's
-// chain, so there the skip below was unreachable. But GlobalCORS has exactly
-// one call site, and buildPlainHTTPHandler does not include it -- so on a
-// plaintext smart-TCP entrypoint a shunned address reached deps.BaseHandler,
-// and from there the route chain, by sending OPTIONS with two headers.
+// A CORS middleware answered preflights ahead of the HTTP entrypoint's chain
+// when this was found (removed since, ADR-0015), so there the skip below was
+// unreachable. buildPlainHTTPHandler did not include it -- so on a plaintext
+// smart-TCP entrypoint a shunned address reached deps.BaseHandler, and from
+// there the route chain, by sending OPTIONS with two headers.
 func TestIPMitigationRefusesAPreflightFromAShunnedIP(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "ipmit.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)

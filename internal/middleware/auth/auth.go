@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
@@ -17,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"golang.org/x/sync/singleflight"
 )
 
 type contextKey string
@@ -46,7 +48,7 @@ type JWTValidator struct {
 func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 	v := &JWTValidator{config: cfg}
 	if cfg.JWKSURL != "" {
-		kf, err := keyfunc.NewDefault([]string{cfg.JWKSURL})
+		kf, err := sharedJWKSKeyfunc(cfg.JWKSURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create keyfunc: %w", err)
 		}
@@ -55,11 +57,55 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 	return v, nil
 }
 
+// jwksKeyfuncs holds one keyfunc per JWKS URL, for the life of the process
+// (map[string]keyfunc.Keyfunc).
+//
+// keyfunc.NewDefault starts a goroutine that refreshes the key set every hour
+// and stops only when its context ends -- and NewDefault's is Background, so
+// it never does. A validator is built every time a route's chain is: on every
+// route, service or middleware change and after every memory-pressure purge,
+// and chains have no teardown that could stop one. Building a keyfunc per
+// validator therefore left another refresher running on every rebuild, and put
+// a synchronous JWKS fetch into every chain build as well.
+//
+// Validators for the same URL share one instead: a keyfunc is read-only to
+// them and safe for concurrent use. The map is bounded by the JWKS URLs an
+// operator has configured, not by anything a request can influence.
+var (
+	jwksKeyfuncs sync.Map
+	jwksFlight   singleflight.Group
+)
+
+// sharedJWKSKeyfunc returns the keyfunc for url, creating it on first use.
+// singleflight makes concurrent first uses of one URL share a single fetch
+// without a lock held across it.
+func sharedJWKSKeyfunc(url string) (keyfunc.Keyfunc, error) {
+	if kf, ok := jwksKeyfuncs.Load(url); ok {
+		return kf.(keyfunc.Keyfunc), nil
+	}
+	v, err, _ := jwksFlight.Do(url, func() (any, error) {
+		if kf, ok := jwksKeyfuncs.Load(url); ok {
+			return kf, nil
+		}
+		kf, err := keyfunc.NewDefault([]string{url})
+		if err != nil {
+			return nil, err
+		}
+		jwksKeyfuncs.Store(url, kf)
+		return kf, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(keyfunc.Keyfunc), nil
+}
+
 // Handler returns a middleware that validates JWT tokens. Supports Authorization
 // Bearer, query param token, and query param access_token (for WebSocket clients).
 func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if IsCorsPreflight(r) {
+			v.config.stripMappedHeaders(r)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -231,6 +277,7 @@ func NewAPIKeyValidator(store APIKeyStore, header, query string, baseCfg AuthBas
 func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if IsCorsPreflight(r) {
+			v.config.stripMappedHeaders(r)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -254,6 +301,17 @@ func (v *APIKeyValidator) Handler(next http.Handler) http.Handler {
 			telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:api_key").Inc()
 			v.config.HandleFailure(w, r, next, errors.New("invalid API key"))
 			return
+		}
+
+		// The key's tenant is the claim it can offer to the route's required
+		// scopes and roles and to its claim-to-header mapping.
+		if v.config.usesClaims() {
+			if err := v.config.authorizeCredential(r, map[string]any{"tenant_id": tenantID}); err != nil {
+				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "api_key").Inc()
+				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:api_key").Inc()
+				v.config.HandleFailure(w, r, next, err)
+				return
+			}
 		}
 
 		// Set tenant ID in context
@@ -383,6 +441,7 @@ func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if IsCorsPreflight(r) {
+				cfg.stripMappedHeaders(r)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -460,37 +519,55 @@ func BasicAuthWithConfig(username, password, realm string, cfg AuthBaseConfig) M
 	if username == "" || password == "" {
 		logger.L.LogError("basic auth configured with an empty username or password; " +
 			"refusing every request rather than accepting empty credentials")
-		return func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if IsCorsPreflight(r) {
-					next.ServeHTTP(w, r)
-					return
-				}
-				telemetry.MiddlewareAuthFailuresTotal.
-					WithLabelValues(GetRouteName(r), "basic").Inc()
-				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
-			})
+		return basicAuthenticator{realm: realm, cfg: cfg, verify: func(string, string) bool { return false }}.middleware
+	}
+	return basicAuthenticator{realm: realm, cfg: cfg, verify: func(u, p string) bool {
+		return subtle.ConstantTimeCompare([]byte(u), []byte(username)) == 1 &&
+			subtle.ConstantTimeCompare([]byte(p), []byte(password)) == 1
+	}}.middleware
+}
+
+// basicAuthenticator is one configured basic-auth check. The single-user,
+// multi-user and refuse-everything variants differ only in how a login is
+// verified; they were three copies of one handler, and none of the three
+// applied the route's required scopes and roles or its claim-to-header mapping.
+type basicAuthenticator struct {
+	realm  string
+	cfg    AuthBaseConfig
+	verify func(user, pass string) bool
+}
+
+func (b basicAuthenticator) middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.serve(next, w, r)
+	})
+}
+
+func (b basicAuthenticator) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if IsCorsPreflight(r) {
+		b.cfg.stripMappedHeaders(r)
+		next.ServeHTTP(w, r)
+		return
+	}
+	activeRouteID := GetRouteName(r)
+
+	u, p, ok := r.BasicAuth()
+	if !ok || !b.verify(u, p) {
+		telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
+		w.Header().Set("WWW-Authenticate", `Basic realm="`+b.realm+`"`)
+		b.cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
+		return
+	}
+	// The login's username is the claim it can offer to the route's required
+	// scopes and roles and to its claim-to-header mapping.
+	if b.cfg.usesClaims() {
+		if err := b.cfg.authorizeCredential(r, map[string]any{"sub": u}); err != nil {
+			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
+			b.cfg.HandleFailure(w, r, next, err)
+			return
 		}
 	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			activeRouteID := GetRouteName(r)
-
-			u, p, ok := r.BasicAuth()
-			if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(password)) != 1 {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
-				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
+	next.ServeHTTP(w, r)
 }
 
 // BasicAuthUsers validates against multiple users. users is "user1:pass1,user2:pass2".
@@ -522,29 +599,8 @@ func BasicAuthUsersWithConfig(users string, realm string, cfg AuthBaseConfig) (M
 	if len(pairs) == 0 {
 		return nil, fmt.Errorf("basic auth requires at least one user")
 	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			activeRouteID := GetRouteName(r)
-
-			u, p, ok := r.BasicAuth()
-			if !ok {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
-				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
-				return
-			}
-			expected, found := pairs[u]
-			if !found || subtle.ConstantTimeCompare([]byte(p), []byte(expected)) != 1 {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
-				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
-				cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}, nil
+	return basicAuthenticator{realm: realm, cfg: cfg, verify: func(u, p string) bool {
+		expected, found := pairs[u]
+		return found && subtle.ConstantTimeCompare([]byte(p), []byte(expected)) == 1
+	}}.middleware, nil
 }

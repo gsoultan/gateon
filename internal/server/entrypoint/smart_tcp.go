@@ -4,19 +4,16 @@
 package entrypoint
 
 import (
-	"cmp"
 	"context"
 	"io"
 	"net"
 	"net/http"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
-	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
-	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -54,20 +51,44 @@ func (b *bufFix) Read(p []byte) (int, error) {
 
 // sharedHTTPDispatcher implements net.Listener to feed connections into a shared http.Server.
 type sharedHTTPDispatcher struct {
-	conns chan net.Conn
-	addr  net.Addr
+	conns     chan net.Conn
+	addr      net.Addr
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func newSharedHTTPDispatcher(addr net.Addr) *sharedHTTPDispatcher {
+	return &sharedHTTPDispatcher{
+		conns: make(chan net.Conn, 4096),
+		addr:  addr,
+		done:  make(chan struct{}),
+	}
 }
 
 func (d *sharedHTTPDispatcher) Accept() (net.Conn, error) {
-	c, ok := <-d.conns
-	if !ok {
-		return nil, io.EOF
+	// A closed dispatcher wins over a queued connection, so Serve stops
+	// promptly instead of draining the queue first.
+	select {
+	case <-d.done:
+		return nil, net.ErrClosed
+	default:
 	}
-	return c, nil
+	select {
+	case c := <-d.conns:
+		return c, nil
+	case <-d.done:
+		return nil, net.ErrClosed
+	}
 }
 
+// Close unblocks Accept. It has to: http.Server.Shutdown closes its listeners
+// and then waits -- without consulting its context -- for every Serve loop to
+// return, and Serve returns only when Accept does. This used to return nil and
+// do nothing, so the first HTTP request a plaintext TCP entrypoint inspected
+// left the process unable to finish a graceful shutdown at all.
 func (d *sharedHTTPDispatcher) Close() error {
-	return nil // Server shutdown closes the dispatcher conceptually
+	d.closeOnce.Do(func() { close(d.done) })
+	return nil
 }
 
 func (d *sharedHTTPDispatcher) Addr() net.Addr {
@@ -85,19 +106,11 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 		}
 		deps.BaseHandler.ServeHTTP(w, r)
 	})
-	isMgmt := IsManagementAddress(ep.Address, deps)
-	epLabel := cmp.Or(ep.Name, ep.Id)
-	chain := []middleware.Middleware{
-		middleware.EntryPoint(ep.Id, epLabel, isMgmt),
-		middleware.Metrics("gateon-" + epLabel),
-		identity.IPMitigation(),
-		identity.UserMitigation(),
-		middleware.Recovery(),
-	}
-	if ep.AccessLogEnabled {
-		chain = append(chain, middleware.AccessLog("gateon-"+epLabel))
-	}
-	// CORS is handled at the route level for proxy traffic, and in BaseHandler for internal traffic.
+	// The HTTP entrypoint's chain, not a copy of it. The copy this used to be
+	// had fallen behind: no global honeypot, no global GeoIP country block and
+	// no per-IP connection limit, so plain HTTP to a TCP entrypoint skipped all
+	// three. The shared server lives as long as the process, hence Background.
+	chain := entrypointChain(context.Background(), ep, deps)
 	return middleware.Chain(chain...)(deps.Limiter.Handler(traffic.PerIP)(epHandler))
 }
 
@@ -106,29 +119,27 @@ func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
 func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps *Deps) {
 	val, ok := deps.SharedServers.Load(ep.Id)
 	if !ok {
-		d := &sharedHTTPDispatcher{
-			conns: make(chan net.Conn, 4096),
-			addr:  conn.LocalAddr(),
-		}
+		d := newSharedHTTPDispatcher(conn.LocalAddr())
 		var loaded bool
 		val, loaded = deps.SharedServers.LoadOrStore(ep.Id, d)
 		if !loaded {
 			// Start the shared server for this entrypoint
 			go func() {
-				handler := deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps))
-				readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
-				server := &http.Server{
-					ReadHeaderTimeout: 10 * time.Second,
-					ReadTimeout:       readTimeout,
-					WriteTimeout:      writeTimeout,
-					Handler:           handler,
-					ErrorLog: logger.NewFilteredHandshakeLogger(logger.L, func(addr, err string) {
-						telemetry.GlobalDiagnostics.RecordTLSError(ep.Id, addr, err)
-					}),
-				}
+				// The HTTP entrypoint's server and its per-request deadlines,
+				// not a server of its own. This one set the entrypoint's
+				// timeouts on the server, where a write timeout bounds the
+				// whole response and survives a hijack -- so an event stream
+				// or a WebSocket through a TCP entrypoint was cut after
+				// fifteen seconds -- and it did not speak cleartext HTTP/2,
+				// so the gRPC branch of the handler below could not be
+				// reached. newServer also bounds HTTP/2 streams, which a
+				// server of its own would have had to repeat.
+				handler := dynamicTimeouts(ep, deps,
+					deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps)))
+				server := (&httpEntrypoint{ep: ep, deps: deps}).newServer(handler)
 				if deps.ShutdownRegistry != nil {
 					deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-						return server.Shutdown(ctx)
+						return shutdownHTTPServer(ctx, server)
 					})
 				}
 				if err := server.Serve(d); err != nil && err != http.ErrServerClosed {
@@ -139,6 +150,13 @@ func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps
 	}
 
 	d := val.(*sharedHTTPDispatcher)
+	select {
+	case <-d.done:
+		// Shut down: nothing will ever accept from the queue again.
+		_ = conn.Close()
+		return
+	default:
+	}
 	select {
 	case d.conns <- newPeekedConn(conn, peeked):
 	default:

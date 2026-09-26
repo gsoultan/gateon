@@ -714,8 +714,11 @@ export function PolicyConfigEditor({ config, onChange }: { config: Record<string
   return (
     <Stack gap="md">
       <Text size="sm">
-        Evaluate CEL (Common Expression Language) expressions against the request and auth context.
-        Variables: `request.method`, `request.path`, `request.header`, `auth.claims`.
+        Each rule is a CEL expression that must be true for the request to pass. Variables:
+        `request.method`, `request.path`, `request.host`, `request.query` and `request.header`
+        (maps of lists), and `auth`, which is the verified caller's claims themselves — `auth.sub`,
+        `auth.role` — and is empty unless an auth middleware runs before this one. Reading a key
+        that is not there is an error, which refuses the request: guard it with `has(auth.role)`.
       </Text>
       {rules.map((rule, index) => (
         <Stack key={index} gap="xs" style={{ border: '1px solid var(--mantine-color-gray-2)', padding: '12px', borderRadius: '8px' }}>
@@ -873,15 +876,16 @@ export function SecurityHeadersConfigEditor({ config, updateConfig }: EditorProp
     <Stack gap="md">
       <Select
         label="Security Headers Preset"
-        description="Recommended applies HSTS (1y), NoSniff, SameOrigin FrameOptions. Strict adds CSP and DENY FrameOptions."
+        description="Legacy: nosniff, same-origin framing and a referrer policy, with no CSP. Recommended adds a same-origin CSP, a permissions policy and, over HTTPS, one year of HSTS. Strict denies framing, sends no referrer and preloads two years of HSTS. None leaves the backend's headers alone."
         placeholder="Select preset"
         data={[
+          { value: "legacy", label: "Legacy (default)" },
           { value: "recommended", label: "Recommended" },
           { value: "strict", label: "Strict (Maximum Security)" },
           { value: "none", label: "None" },
         ]}
-        value={config.preset || "recommended"}
-        onChange={(val) => updateConfig("preset", val || "recommended")}
+        value={config.preset || "legacy"}
+        onChange={(val) => updateConfig("preset", val || "legacy")}
         allowDeselect={false}
       />
     </Stack>

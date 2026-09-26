@@ -5,8 +5,10 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"maps"
 	"net"
@@ -32,11 +34,28 @@ func isUpgradeRequest(r *http.Request) bool {
 	return r.Header.Get("Upgrade") != ""
 }
 
-// proxyUpgrade hijacks the client connection and tunnels upgraded traffic to the backend.
-// It handles the handshake and bidirectional byte streaming. Used when ReverseProxy would
-// strip Upgrade headers. Caller must have already selected the target (targetURL).
+// These are what a client is told when the backend leg of an upgrade fails:
+// the same three messages as before, naming no address or cause.
+var (
+	errUpgradeDial  = errors.New("backend unreachable")
+	errUpgradeWrite = errors.New("failed to send request to backend")
+	errUpgradeRead  = errors.New("failed to read backend response")
+)
+
+// proxyUpgrade relays a protocol upgrade to the backend and, only once the
+// backend has agreed to switch, hijacks the client connection and tunnels it.
+// Caller must have already selected the target (targetURL).
+//
+// The order is the security property. The Upgrade header is the client's to
+// write, and a backend that does not speak the named protocol answers the
+// request like any other. That answer is an ordinary response, so it goes back
+// through w -- and through every response-phase control the middleware chain
+// wrapped around w: the WAF's data-leak inspection, header rewriting, CORS.
+// This used to hijack first and write whatever the backend said straight onto
+// the socket, past all of them, so adding "Upgrade: x" to any request was
+// enough to read a response the WAF would have refused.
 func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targetURL *url.URL, state *targetState, start time.Time) {
-	logger.L.LogDebug("Hijacking for protocol upgrade",
+	logger.L.LogDebug("Relaying protocol upgrade",
 		"request_id", request.GetID(r),
 		"upgrade", r.Header.Get("Upgrade"))
 
@@ -46,6 +65,26 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 		return
 	}
 
+	backendConn, backendBuf, resp, err := h.startUpgrade(r, targetURL, state)
+	atomic.AddUint64(&state.requestCount, 1)
+	if err != nil {
+		atomic.AddUint64(&state.errorCount, 1)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer backendConn.Close()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		// Forward non-101 response to client (e.g. 4xx, 5xx from backend),
+		// through the chain like any other response.
+		atomic.AddUint64(&state.errorCount, 1)
+		writeBackendResponse(w, resp)
+		return
+	}
+
+	// 101 Switching Protocols: record metrics, then tunnel
+	atomic.AddUint64(&state.latencySumUs, uint64(time.Since(start).Microseconds()))
 	clientConn, bufrw, err := hj.Hijack()
 	if err != nil {
 		http.Error(w, "hijack failed", http.StatusInternalServerError)
@@ -53,13 +92,58 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	}
 	defer clientConn.Close()
 
-	// Ensure HTTP/1.1 for WebSocket (upgrade not supported over HTTP/2)
-	scheme := targetURL.Scheme
-	host := targetURL.Host
-	if scheme == "" {
-		scheme = "http"
+	// Forward headers to client, then tunnel
+	if err := resp.Write(clientConn); err != nil {
+		return
 	}
-	addr := host
+	_ = bufrw.Flush()
+	tunnelUpgrade(clientConn, clientReader(clientConn, bufrw.Reader), backendConn, backendBuf)
+}
+
+// startUpgrade dials the backend, sends it the upgrade request and reads its
+// answer, without touching the client connection. On success the caller owns
+// the connection; backendBuf holds any bytes the backend sent past the head.
+func (h *ProxyHandler) startUpgrade(r *http.Request, targetURL *url.URL, state *targetState) (net.Conn, *bufio.Reader, *http.Response, error) {
+	backendConn, err := h.dialUpgradeBackend(r, targetURL)
+	if err != nil {
+		return nil, nil, nil, errUpgradeDial
+	}
+
+	// 1. PROXY Protocol: If enabled for the target, write the PROXY header before any HTTP data.
+	if state.proxyProtocolEnabled {
+		writeUpgradeProxyHeader(r, backendConn, state)
+	}
+
+	backendReq := newUpgradeRequest(r, targetURL)
+	if err := backendReq.Write(backendConn); err != nil {
+		_ = backendConn.Close()
+		return nil, nil, nil, errUpgradeWrite
+	}
+
+	backendBuf := bufio.NewReader(backendConn)
+	resp, err := http.ReadResponse(backendBuf, backendReq)
+	if err != nil {
+		_ = backendConn.Close()
+		return nil, nil, nil, errUpgradeRead
+	}
+	return backendConn, backendBuf, resp, nil
+}
+
+// upgradeScheme returns the scheme the backend is dialled with, defaulting to
+// plain HTTP.
+func upgradeScheme(targetURL *url.URL) string {
+	if targetURL.Scheme == "" {
+		return "http"
+	}
+	return targetURL.Scheme
+}
+
+// dialUpgradeBackend opens the backend connection for an upgrade, over TLS for
+// an https target.
+func (h *ProxyHandler) dialUpgradeBackend(r *http.Request, targetURL *url.URL) (net.Conn, error) {
+	// Ensure HTTP/1.1 for WebSocket (upgrade not supported over HTTP/2)
+	scheme := upgradeScheme(targetURL)
+	addr := targetURL.Host
 	if !strings.Contains(addr, ":") {
 		if scheme == "https" {
 			addr = net.JoinHostPort(addr, "443")
@@ -71,62 +155,60 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	ctx, cancel := context.WithTimeout(r.Context(), upgradeDialTimeout)
 	defer cancel()
 
-	var backendConn net.Conn
 	var d net.Dialer
 	rawConn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		// err set above
-	} else if scheme == "https" {
-		// Reuse the route's backend TLS config (verification ON by default unless
-		// the operator set skip_verify); never hardcode InsecureSkipVerify here.
-		var tlsCfg *tls.Config
-		if h.tlsConfig != nil {
-			tlsCfg = h.tlsConfig.Clone()
-		} else {
-			tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
-		}
-		if tlsCfg.ServerName == "" {
-			tlsCfg.ServerName = targetURL.Hostname()
-		}
-		tlsConn := tls.Client(rawConn, tlsCfg)
-		if err = tlsConn.HandshakeContext(ctx); err != nil {
-			_ = rawConn.Close()
-		} else {
-			backendConn = tlsConn
-		}
-	} else {
-		backendConn = rawConn
+	if err != nil || scheme != "https" {
+		return rawConn, err
 	}
-	if err != nil {
-		atomic.AddUint64(&state.requestCount, 1)
-		atomic.AddUint64(&state.errorCount, 1)
-		writeHijackedError(clientConn, bufrw, http.StatusBadGateway, "backend unreachable")
-		return
+	// Reuse the route's backend TLS config (verification ON by default unless
+	// the operator set skip_verify); never hardcode InsecureSkipVerify here.
+	// The client certificate is chosen for the upgrade exactly as the
+	// transport chooses it for any other request: this used to dial with the
+	// static config alone, so a service whose identities are selected per
+	// request presented no certificate on any upgrade.
+	var identity *tlsClientIdentity
+	if h.transportFactory != nil {
+		identity = h.transportFactory.identitySelector.Select(r)
 	}
-	defer backendConn.Close()
+	tlsCfg := cloneTLSConfigWithIdentity(h.tlsConfig, identity)
+	if tlsCfg.ServerName == "" {
+		tlsCfg.ServerName = targetURL.Hostname()
+	}
+	tlsConn := tls.Client(rawConn, tlsCfg)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = rawConn.Close()
+		return nil, err
+	}
+	return tlsConn, nil
+}
 
-	// 1. PROXY Protocol: If enabled for the target, write the PROXY header before any HTTP data.
-	if state.proxyProtocolEnabled {
-		// Use r.RemoteAddr which is already resolved to the real client IP by RealIP middleware.
-		srcIP, srcPort, srcOK := parseTCPAddr(r.RemoteAddr)
-		if conn, ok := r.Context().Value(identity.ConnContextKey).(net.Conn); ok {
-			if tcp, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
-				srcIP, srcPort, srcOK = tcp.IP, uint16(tcp.Port), true
-			}
-		}
-		dstIP, dstPort, dstOK := parseTCPAddrFromNetAddr(backendConn.RemoteAddr())
-
-		if err := writeProxyHeader(backendConn, srcIP, srcPort, srcOK, dstIP, dstPort, dstOK, state.proxyProtocolVersion); err != nil {
-			logger.L.LogWarn("Failed to write PROXY header to backend", "error", err, "target", host)
-			// Non-fatal, continue with the request
+// writeUpgradeProxyHeader writes the PROXY protocol header for the client
+// connection ahead of the upgrade request.
+func writeUpgradeProxyHeader(r *http.Request, backendConn net.Conn, state *targetState) {
+	// Use r.RemoteAddr which is already resolved to the real client IP by RealIP middleware.
+	srcIP, srcPort, srcOK := parseTCPAddr(r.RemoteAddr)
+	if conn, ok := r.Context().Value(identity.ConnContextKey).(net.Conn); ok {
+		if tcp, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+			srcIP, srcPort, srcOK = tcp.IP, uint16(tcp.Port), true
 		}
 	}
+	dstIP, dstPort, dstOK := parseTCPAddrFromNetAddr(backendConn.RemoteAddr())
 
+	if err := writeProxyHeader(backendConn, srcIP, srcPort, srcOK, dstIP, dstPort, dstOK, state.proxyProtocolVersion); err != nil {
+		logger.L.LogWarn("Failed to write PROXY header to backend", "error", err, "target", backendConn.RemoteAddr().String())
+		// Non-fatal, continue with the request
+	}
+}
+
+// newUpgradeRequest builds the HTTP/1.1 request sent to the backend for an
+// upgrade: the client's request with the identity headers normalised.
+func newUpgradeRequest(r *http.Request, targetURL *url.URL) *http.Request {
+	host := targetURL.Host
 	// Build backend request: preserve Upgrade, Connection, Sec-WebSocket-*; set URL/host
 	backendReq := &http.Request{
 		Method: r.Method,
 		URL: &url.URL{
-			Scheme:   scheme,
+			Scheme:   upgradeScheme(targetURL),
 			Host:     host,
 			Path:     r.URL.Path,
 			RawPath:  r.URL.RawPath,
@@ -155,8 +237,17 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 	if request.Scheme(r) == "https" {
 		backendReq.Header.Set("X-Forwarded-Ssl", "on")
 	}
+	backendReq.Header.Set("X-Forwarded-For", upgradeForwardedFor(r))
+	setGatewayJA4(backendReq.Header, r)
 
-	// X-Forwarded-For: append the immediate peer IP to the chain.
+	// Force HTTP/1.1 and Upgrade headers for the backend handshake.
+	// Many backends (like GitLab) require Connection: upgrade explicitly.
+	backendReq.Header.Set("Connection", "upgrade")
+	return backendReq
+}
+
+// upgradeForwardedFor appends the immediate peer IP to the X-Forwarded-For chain.
+func upgradeForwardedFor(r *http.Request) string {
 	// We use the underlying connection's remote address if available to ensure we
 	// append the actual peer, even if RealIP middleware updated r.RemoteAddr.
 	peerIP := ""
@@ -169,60 +260,68 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 		peerIP = httputil.StripPort(r.RemoteAddr)
 	}
 
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		var sb strings.Builder
-		sb.Grow(len(xff) + len(peerIP) + 2)
-		sb.WriteString(xff)
-		sb.WriteString(", ")
-		sb.WriteString(peerIP)
-		backendReq.Header.Set("X-Forwarded-For", sb.String())
-	} else {
-		backendReq.Header.Set("X-Forwarded-For", peerIP)
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff == "" {
+		return peerIP
 	}
+	var sb strings.Builder
+	sb.Grow(len(xff) + len(peerIP) + 2)
+	sb.WriteString(xff)
+	sb.WriteString(", ")
+	sb.WriteString(peerIP)
+	return sb.String()
+}
 
-	// Force HTTP/1.1 and Upgrade headers for the backend handshake.
-	// Many backends (like GitLab) require Connection: upgrade explicitly.
-	backendReq.Proto = "HTTP/1.1"
-	backendReq.ProtoMajor = 1
-	backendReq.ProtoMinor = 1
-	backendReq.Header.Set("Connection", "upgrade")
+// hopByHopHeaders describe one connection, not the message, so a response
+// relayed from the backend's connection must not carry them onto the
+// client's (RFC 9110 section 7.6.1).
+var hopByHopHeaders = []string{
+	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+}
 
-	if err := backendReq.Write(backendConn); err != nil {
-		atomic.AddUint64(&state.requestCount, 1)
-		atomic.AddUint64(&state.errorCount, 1)
-		writeHijackedError(clientConn, bufrw, http.StatusBadGateway, "failed to send request to backend")
-		return
+// writeBackendResponse relays a backend response through w, which is what
+// puts it in front of the middleware chain's response-phase controls.
+func writeBackendResponse(w http.ResponseWriter, resp *http.Response) {
+	for _, field := range resp.Header["Connection"] {
+		for _, name := range strings.Split(field, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				resp.Header.Del(name)
+			}
+		}
 	}
-
-	backendBuf := bufio.NewReader(backendConn)
-	resp, err := http.ReadResponse(backendBuf, backendReq)
-	if err != nil {
-		atomic.AddUint64(&state.requestCount, 1)
-		atomic.AddUint64(&state.errorCount, 1)
-		writeHijackedError(clientConn, bufrw, http.StatusBadGateway, "failed to read backend response")
-		return
+	for _, name := range hopByHopHeaders {
+		resp.Header.Del(name)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		// Forward non-101 response to client (e.g. 4xx, 5xx from backend)
-		atomic.AddUint64(&state.requestCount, 1)
-		atomic.AddUint64(&state.errorCount, 1)
-		_ = resp.Write(clientConn)
-		_ = bufrw.Flush()
-		return
+	dst := w.Header()
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			dst.Add(k, v)
+		}
 	}
+	w.WriteHeader(resp.StatusCode)
+	copyWithPooledBuffer(w, resp.Body)
+}
 
-	// 101 Switching Protocols: record metrics, then tunnel
-	atomic.AddUint64(&state.requestCount, 1)
-	atomic.AddUint64(&state.latencySumUs, uint64(time.Since(start).Microseconds()))
-
-	// Forward headers to client, then tunnel
-	if err := resp.Write(clientConn); err != nil {
-		return
+// clientReader returns the client side of a hijacked connection as a reader
+// that starts with whatever net/http had already buffered from it.
+//
+// The hijack happens only after the backend has answered, and until then the
+// server's background read is live on the connection. A byte it took, or
+// anything a client sent early, sits in the hijacked bufio.Reader; reading
+// the bare connection instead would drop it and corrupt the tunnel's first
+// frame.
+func clientReader(conn net.Conn, buffered *bufio.Reader) io.Reader {
+	n := buffered.Buffered()
+	if n == 0 {
+		return conn
 	}
-	_ = bufrw.Flush()
+	head, _ := buffered.Peek(n)
+	return io.MultiReader(bytes.NewReader(head), conn)
+}
 
+// tunnelUpgrade relays bytes both ways until each side has finished.
+func tunnelUpgrade(clientConn net.Conn, fromClient io.Reader, backendConn net.Conn, backendBuf *bufio.Reader) {
 	// Bidirectional tunnel: backendBuf has any bytes after response headers,
 	// then backendConn streams the rest. Client writes go to backend.
 	//
@@ -236,7 +335,7 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 
 	done := make(chan struct{})
 	go func() {
-		copyWithPooledBuffer(backendConn, clientConn)
+		copyWithPooledBuffer(backendConn, fromClient)
 		closeWrite(backendConn)
 		close(done)
 	}()
@@ -265,20 +364,4 @@ func closeWrite(c net.Conn) {
 	if wc, ok := under.(writeCloser); ok {
 		_ = wc.CloseWrite()
 	}
-}
-
-func writeHijackedError(conn net.Conn, bufrw *bufio.ReadWriter, code int, msg string) {
-	resp := &http.Response{
-		StatusCode: code,
-		Status:     http.StatusText(code),
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Header:     http.Header{},
-		Body:       io.NopCloser(strings.NewReader(msg)),
-	}
-	resp.Header.Set("Content-Type", "text/plain")
-	resp.ContentLength = int64(len(msg))
-	_ = resp.Write(conn)
-	_ = bufrw.Flush()
 }

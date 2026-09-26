@@ -73,14 +73,26 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 	return m, nil
 }
 
+// IsSetupDone reports whether an administrator account exists.
+//
+// A failed read answers true. IsSetupRequired turns this into "may Setup run",
+// and Setup -- public, served before authentication -- creates an administrator
+// and installs the caller's PASETO secret. This used to answer with rows.Next(),
+// which is false for an empty table and equally false for a query that failed,
+// so a locked SQLite file, a restarting Postgres or an exhausted pool read as
+// "no users yet" and reopened Setup on a configured gateway for as long as the
+// error lasted. Only sql.ErrNoRows means the table is empty.
 func (m *Manager) IsSetupDone() bool {
-	q := m.dialect.Rebind(QueryCountUsers)
-	rows, err := m.db.Query(q)
-	if err != nil {
+	var one int
+	err := m.db.QueryRow(m.dialect.Rebind(QueryCountUsers)).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false
 	}
-	defer rows.Close()
-	return rows.Next()
+	if err != nil {
+		m.logger.LogError("cannot tell whether an administrator exists; first-run setup "+
+			"stays closed until the user table can be read", "error", err)
+	}
+	return true
 }
 
 func (m *Manager) Authenticate(username, password string) (string, *gateonv1.User, error) {
@@ -597,7 +609,11 @@ func (m *Manager) setTwoFactorPending(id string, pending bool) error {
 func (m *Manager) handleFailedLogin(username string, currentAttempts int) {
 	var lockedUntil any
 	if currentAttempts+1 >= MaxFailedAttempts {
-		lockedUntil = time.Now().Add(LockoutDuration)
+		// UTC, because locked_until is TIMESTAMP without time zone on
+		// Postgres: the offset of a local time is dropped on the way in and
+		// the wall clock comes back as UTC, so on a host behind UTC the lock
+		// was already over when it was read and the account never locked.
+		lockedUntil = time.Now().UTC().Add(LockoutDuration)
 	}
 	q := m.dialect.Rebind(QueryIncrementFailedAttempts)
 	if _, err := m.db.Exec(q, lockedUntil, username); err != nil {

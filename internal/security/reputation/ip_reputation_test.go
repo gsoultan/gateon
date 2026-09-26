@@ -151,3 +151,45 @@ func TestIPReputationStore_ExternalScore(t *testing.T) {
 	assert.Equal(t, 95, score)
 	assert.Equal(t, "AbuseIPDB", provider)
 }
+
+// Start built its ticker from update_interval_hours before looking at the
+// value, and time.NewTicker panics on anything but a positive duration. Zero
+// is what an operator gets by switching IP reputation on in the dashboard
+// without touching the interval, and main calls Start synchronously at boot,
+// so that configuration crashed the gateway on every start. A negative value
+// did the same, and so did one large enough to wrap time.Duration negative.
+//
+// The store is built disabled so Reconfigure's background refresh cannot be
+// what populates it: after Start returns, the feed must already be loaded,
+// which only Start's own synchronous update can have done.
+func TestIPReputationStartSurvivesAnyUpdateInterval(t *testing.T) {
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("203.0.113.7\n"))
+	}))
+	defer feed.Close()
+
+	for _, tc := range []struct {
+		name  string
+		hours int32
+	}{
+		{name: "unset", hours: 0},
+		{name: "negative", hours: -1},
+		{name: "wraps time.Duration negative", hours: 2562048},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &gateonv1.IPReputationConfig{
+				FeedUrls:            []string{feed.URL},
+				UpdateIntervalHours: tc.hours,
+			}
+			store := NewIPReputationStore(cfg)
+			cfg.Enabled = true
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			store.Start(ctx)
+
+			bad, _ := store.IsBad("203.0.113.7")
+			assert.True(t, bad, "Start must load the feed before it returns")
+		})
+	}
+}

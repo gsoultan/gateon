@@ -214,14 +214,18 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		return
 	}
 
+	// Made storable before signing, so the signature covers what is written.
+	// Every security threat lands here with its resource and details copied
+	// from the request, and Postgres refuses NUL and invalid UTF-8 -- so the
+	// entry for a request carrying either was the entry that failed to insert.
 	entry := AuditEntry{
 		ID:           uuid.NewString(),
-		UserID:       userID,
-		Action:       action,
-		Resource:     resource,
-		Details:      details,
+		UserID:       db.SafeText(userID),
+		Action:       db.SafeText(action),
+		Resource:     db.SafeText(resource),
+		Details:      db.SafeText(details),
 		Timestamp:    time.Now(),
-		IPAddress:    ip,
+		IPAddress:    db.SafeText(ip),
 		PreviousHash: m.lastHash,
 	}
 

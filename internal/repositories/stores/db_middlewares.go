@@ -33,7 +33,7 @@ func (r *DBMiddlewareRegistry) loadFromDB() {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
-	query := "SELECT id, name, type, config FROM middlewares"
+	query := "SELECT id, name, type, config, wasm_blob FROM middlewares"
 	rows, err := r.db.Query(query)
 	if err != nil {
 		logLoadQueryFailed("middlewares", err)
@@ -44,7 +44,7 @@ func (r *DBMiddlewareRegistry) loadFromDB() {
 	for rows.Next() {
 		var m gateonv1.Middleware
 		var configStr string
-		if err := rows.Scan(&m.Id, &m.Name, &m.Type, &configStr); err != nil {
+		if err := rows.Scan(&m.Id, &m.Name, &m.Type, &configStr, &m.WasmBlob); err != nil {
 			logRecordDropped("middleware", "", "", err)
 			continue
 		}
@@ -80,19 +80,20 @@ func (r *DBMiddlewareRegistry) Update(ctx context.Context, m *gateonv1.Middlewar
 
 	var query string
 	if r.dialect.Driver == db.DriverPostgres {
-		query = `INSERT INTO middlewares (id, name, type, config, updated_at)
-			VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		query = `INSERT INTO middlewares (id, name, type, config, wasm_blob, updated_at)
+			VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT (id) DO UPDATE SET
 				name = EXCLUDED.name,
 				type = EXCLUDED.type,
 				config = EXCLUDED.config,
+				wasm_blob = EXCLUDED.wasm_blob,
 				updated_at = CURRENT_TIMESTAMP`
 	} else {
-		query = `REPLACE INTO middlewares (id, name, type, config, updated_at)
-			VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`
+		query = `REPLACE INTO middlewares (id, name, type, config, wasm_blob, updated_at)
+			VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 	}
 
-	_, err := r.db.Exec(r.dialect.Rebind(query), m.Id, m.Name, m.Type, configStr)
+	_, err := r.db.Exec(r.dialect.Rebind(query), m.Id, m.Name, m.Type, configStr, m.WasmBlob)
 	if err != nil {
 		return err
 	}

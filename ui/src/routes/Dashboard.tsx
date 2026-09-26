@@ -964,7 +964,7 @@ export default function Dashboard() {
               radius="lg"
               withBorder
               component={Link}
-              to="/metrics"
+              to="/metrics-dashboard"
               style={{
                 textDecoration: "none",
                 transition: "background-color 150ms ease",

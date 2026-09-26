@@ -8,8 +8,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net/http"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+
+	"golang.org/x/crypto/acme"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -23,7 +28,32 @@ var (
 	certCache      sync.Map // string (certId) -> *tls.Certificate
 	certPoolCache  sync.Map // string (joined IDs) -> *x509.CertPool
 	tlsConfigCache sync.Map // string (routeId or "fallback") -> *tls.Config
+
+	// sniBase is what every per-handshake config is cloned from: the global
+	// settings -- version floor and ceiling, cipher suites, client
+	// certificates, the certificate source. SetupSNI installs the startup
+	// base and refreshSNIBase replaces it when TLS is invalidated. It used to
+	// be the startup base for the life of the process, so those settings,
+	// saved from the dashboard, applied to nothing until a restart.
+	sniBase atomic.Pointer[tls.Config]
 )
+
+// refreshSNIBase rebuilds the base from the manager's current configuration.
+// A configuration that cannot be built -- a certificate file that will not
+// load -- keeps the base in use rather than leaving handshakes with none; so
+// does global TLS being off, where the base is the minimal one Run made for
+// entrypoint-level TLS.
+func refreshSNIBase(manager gtls.TLSManager) {
+	cfg, err := manager.GetTLSConfig()
+	if err != nil {
+		logger.L.LogError("TLS settings could not be applied; handshakes keep the previous settings",
+			"error", err)
+		return
+	}
+	if cfg != nil && sniBase.Load() != nil {
+		sniBase.Store(cfg)
+	}
+}
 
 // InvalidateTLSCache clears the certificate and pool caches.
 // This is called when TLS configuration or certificates change.
@@ -46,14 +76,20 @@ func InvalidateRouteTLSConfig(routeID string) {
 func CreateTLSManager(s *Server) *gtls.Manager {
 	cfg := BuildGtlsConfig(s)
 	m := gtls.NewManager(cfg)
+	envDomains := gtls.InitFromEnv().Domains
 
 	// Set dynamic host policy for ACME
 	m.SetHostPolicy(func(ctx context.Context, host string) error {
-		// Check global whitelist first
-		for _, d := range cfg.Domains {
-			if host == d {
-				return nil
-			}
+		// The global whitelist as it is now. It was the one the gateway
+		// started with, captured here, so a domain added from the dashboard
+		// was refused until a restart. The same precedence as
+		// BuildGtlsConfig: the stored list, else the environment's.
+		domains := envDomains
+		if gc := s.GlobalStore.Get(ctx); gc != nil && gc.Tls != nil && len(gc.Tls.Domains) > 0 {
+			domains = gc.Tls.Domains
+		}
+		if slices.Contains(domains, host) {
+			return nil
 		}
 		// Check routes for ACME enablement
 		routes := s.RouteStore.List(ctx)
@@ -152,14 +188,15 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	if tlsConfig == nil {
 		return
 	}
+	sniBase.Store(tlsConfig.Clone())
 	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		base := sniBase.Load()
 		// Per-handshake, not a Background hoisted out of the closure. These
 		// store reads happen while a client is waiting on a TLS handshake; if
 		// that client goes away, the lookups should stop with it rather than
 		// run on behalf of a connection that no longer exists. hello.Context()
 		// is cancelled when the handshake concludes either way.
 		ctx := hello.Context()
-		sniHost := strings.TrimSpace(hello.ServerName)
 		var fingerprints *identity.Fingerprints // lazy-calc fingerprints
 
 		getFp := func() identity.Fingerprints {
@@ -170,53 +207,24 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 			return *fingerprints
 		}
 
-		if sniHost != "" {
-			// Strip port from SNI if present
-			if idx := strings.LastIndex(sniHost, ":"); idx > 0 {
-				sniHost = sniHost[:idx]
+		// Exact-host routes first (O(1) lookup), then wildcards; the first
+		// route whose configuration is cached or builds is the one served.
+		var selected *tls.Config
+		deps.eachRouteForSNI(ctx, normalizeSNI(hello.ServerName), func(rt *gateonv1.Route) bool {
+			if cached, ok := tlsConfigCache.Load(rt.Id); ok {
+				identity.SetFingerprints(hello.Conn, getFp())
+				selected = cached.(*tls.Config)
+				return false
 			}
-			sniHost = strings.ToLower(sniHost)
-
-			// Fast-path: O(1) exact host lookup
-			exactRoutes := deps.RouteStore.GetByHost(sniHost)
-			for _, rt := range exactRoutes {
-				if rt.Disabled || rt.Tls == nil {
-					continue
-				}
-
-				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
-					identity.SetFingerprints(hello.Conn, getFp())
-					return cached.(*tls.Config), nil
-				}
-
-				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
-					tlsConfigCache.Store(rt.Id, newCfg)
-					return newCfg, nil
-				}
+			if newCfg := buildTLSConfigForRoute(hello, rt, base, tlsManager, deps, getFp); newCfg != nil {
+				tlsConfigCache.Store(rt.Id, newCfg)
+				selected = newCfg
+				return false
 			}
-
-			for _, rt := range deps.RouteStore.ListWildcards(ctx) {
-				if rt.Disabled || rt.Tls == nil {
-					continue
-				}
-				routeHost := router.HostFromRule(rt.Rule)
-				if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
-					continue
-				}
-				if rt.Tls.OptionId != "" {
-					if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok && opt.SniStrict {
-						continue
-					}
-				}
-				if cached, ok := tlsConfigCache.Load(rt.Id); ok {
-					identity.SetFingerprints(hello.Conn, getFp())
-					return cached.(*tls.Config), nil
-				}
-				if newCfg := buildTLSConfigForRoute(hello, rt, tlsConfig, tlsManager, deps, getFp); newCfg != nil {
-					tlsConfigCache.Store(rt.Id, newCfg)
-					return newCfg, nil
-				}
-			}
+			return true
+		})
+		if selected != nil {
+			return selected, nil
 		}
 
 		// Fallback: use global TLS config
@@ -227,7 +235,7 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 				return cached.(*tls.Config), nil
 			}
 
-			if newCfg := buildFallbackTLSConfig(hello, gc, tlsConfig, tlsManager, getFp); newCfg != nil {
+			if newCfg := buildFallbackTLSConfig(hello, gc, base, tlsManager, getFp); newCfg != nil {
 				tlsConfigCache.Store("fallback", newCfg)
 				return newCfg, nil
 			}
@@ -236,33 +244,152 @@ func SetupSNI(tlsConfig *tls.Config, tlsManager gtls.TLSManager, deps SNIDeps) {
 	}
 }
 
+// normalizeSNI puts a handshake's server name into the spelling routes are
+// looked up by: trimmed, port removed, lower-cased.
+func normalizeSNI(serverName string) string {
+	sniHost := strings.TrimSpace(serverName)
+	if idx := strings.LastIndex(sniHost, ":"); idx > 0 {
+		sniHost = sniHost[:idx]
+	}
+	return strings.ToLower(sniHost)
+}
+
+// eachRouteForSNI visits, in the order a handshake tries them, the routes
+// whose TLS configuration a handshake naming sniHost may be served under:
+// enabled TLS routes for exactly that host, then wildcard TLS routes covering
+// it whose option is not sni_strict. visit returns false to stop.
+//
+// It is the one enumeration both the handshake and routeTLSPolicyHonoured use,
+// so the name a request is checked against cannot drift from the name its
+// connection was negotiated under.
+func (d SNIDeps) eachRouteForSNI(ctx context.Context, sniHost string, visit func(*gateonv1.Route) bool) {
+	if sniHost == "" {
+		return
+	}
+	for _, rt := range d.RouteStore.GetByHost(sniHost) {
+		if rt.Disabled || rt.Tls == nil {
+			continue
+		}
+		if !visit(rt) {
+			return
+		}
+	}
+	for _, rt := range d.RouteStore.ListWildcards(ctx) {
+		if d.wildcardServesSNI(ctx, rt, sniHost) && !visit(rt) {
+			return
+		}
+	}
+}
+
+// wildcardServesSNI reports whether wildcard route rt may serve a handshake
+// naming sniHost: enabled, with TLS, a host pattern covering sniHost, and no
+// sni_strict option.
+func (d SNIDeps) wildcardServesSNI(ctx context.Context, rt *gateonv1.Route, sniHost string) bool {
+	if rt.Disabled || rt.Tls == nil {
+		return false
+	}
+	routeHost := router.HostFromRule(rt.Rule)
+	if routeHost == "" || !router.HostMatches(routeHost, sniHost) {
+		return false
+	}
+	if rt.Tls.OptionId != "" && d.TLSOptStore != nil {
+		if opt, ok := d.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok && opt.SniStrict {
+			return false
+		}
+	}
+	return true
+}
+
+// routeTLSPolicyHonoured reports whether the TLS handshake that carried r was
+// negotiated under rt's TLS option.
+//
+// A route's option -- above all its client-certificate requirement -- is
+// enforced during the handshake, and the handshake chooses its configuration
+// from the SNI name before any HTTP is read. The route that serves the request
+// is chosen afterwards, from the Host header. The client writes both, so a
+// client could complete the handshake under a route that asks for no
+// certificate and then name an mTLS route in Host: domain fronting, and the
+// route's requirement was never applied to the request it served.
+//
+// Two checks, skipped entirely for a route without an option. The SNI name
+// must select a route carrying the same option: the policy the handshake ran
+// is the policy this route asked for. And a route whose option requires a
+// client certificate must find one on the connection, which also covers a
+// handshake that fell through to another route's configuration because this
+// route's own certificate could not be loaded.
+func (d SNIDeps) routeTLSPolicyHonoured(r *http.Request, rt *gateonv1.Route) bool {
+	optID := rt.GetTls().GetOptionId()
+	if optID == "" || r.TLS == nil {
+		return true
+	}
+	var sniRoute *gateonv1.Route
+	d.eachRouteForSNI(r.Context(), normalizeSNI(r.TLS.ServerName), func(first *gateonv1.Route) bool {
+		sniRoute = first
+		return false
+	})
+	if sniRoute.GetTls().GetOptionId() != optID {
+		return false
+	}
+	if d.TLSOptStore == nil {
+		return true
+	}
+	opt, ok := d.TLSOptStore.Get(r.Context(), optID)
+	if !ok {
+		return true
+	}
+	return clientCertRequirementMet(gtls.ParseClientAuthType(opt.ClientAuthType), r.TLS)
+}
+
+// clientCertRequirementMet reports whether a connection carries the client
+// certificate a client-auth mode demands. Modes that do not demand one are met
+// by any connection.
+func clientCertRequirementMet(mode tls.ClientAuthType, cs *tls.ConnectionState) bool {
+	switch mode {
+	case tls.RequireAndVerifyClientCert:
+		return len(cs.VerifiedChains) > 0
+	case tls.RequireAnyClientCert:
+		return len(cs.PeerCertificates) > 0
+	default:
+		return true
+	}
+}
+
 func buildTLSConfigForRoute(hello *tls.ClientHelloInfo, rt *gateonv1.Route, base *tls.Config, manager gtls.TLSManager, deps SNIDeps, getFp func() identity.Fingerprints) *tls.Config {
 	// Same reasoning as SetupSNI: this runs inside the handshake, so the TLS
 	// option lookup below belongs to the connection being negotiated.
 	ctx := hello.Context()
-	var certs []tls.Certificate
 
-	// Handle ACME if enabled for this route
+	// Where the certificate comes from is the only thing ACME changes. The
+	// ACME branch used to return here, before the route's TLS option was
+	// applied, so an ACME route configured for mTLS asked no client for a
+	// certificate and ignored the option's version and cipher floor too.
+	var cfg *tls.Config
 	if rt.Tls.AcmeEnabled && len(rt.Tls.CertificateIds) == 0 {
-		cfg := base.Clone()
+		cfg = base.Clone()
 		cfg.GetCertificate = manager.GetCertificate
-		identity.SetFingerprints(hello.Conn, getFp())
-		return cfg
+	} else {
+		certs := routeCertificates(rt, manager, deps)
+		if len(certs) == 0 {
+			return nil
+		}
+		cfg = base.Clone()
+		cfg.Certificates = certs
+		// The route's own certificates, not the base's ACME source: cloned
+		// in, it answered first for every host ACME covers, and the
+		// certificate the route names was never presented.
+		cfg.GetCertificate = nil
 	}
-
-	certs = routeCertificates(rt, manager, deps)
-	if len(certs) == 0 {
-		return nil
-	}
-
-	cfg := base.Clone()
-	cfg.Certificates = certs
 	identity.SetFingerprints(hello.Conn, getFp())
 
 	if rt.Tls.OptionId != "" {
 		if opt, ok := deps.TLSOptStore.Get(ctx, rt.Tls.OptionId); ok {
 			applyTLSOption(cfg, opt, ctx, manager, deps)
 		}
+	}
+	if rt.Tls.AcmeEnabled && !slices.Contains(cfg.NextProtos, acme.ALPNProto) {
+		// An option's own ALPN list replaces the base one; an ACME route still
+		// has to answer the CA's TLS-ALPN-01 validation on acme-tls/1.
+		cfg.NextProtos = append(slices.Clone(cfg.NextProtos), acme.ALPNProto)
 	}
 	failClosedClientCAs(cfg, rt.Id)
 	return cfg
@@ -379,10 +506,12 @@ func failClosedClientCAs(cfg *tls.Config, routeID string) {
 }
 
 func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfig, base *tls.Config, manager gtls.TLSManager, getFp func() identity.Fingerprints) *tls.Config {
+	globalACME := gc.Tls.Acme != nil && gc.Tls.Acme.Enabled
 	// Handle global ACME if enabled and no manual certificates are provided
-	if gc.Tls.Acme != nil && gc.Tls.Acme.Enabled && len(gc.Tls.Certificates) == 0 {
+	if globalACME && len(gc.Tls.Certificates) == 0 {
 		cfg := base.Clone()
 		cfg.GetCertificate = manager.GetCertificate
+		withACMEProtocol(cfg)
 		identity.SetFingerprints(hello.Conn, getFp())
 		return cfg
 	}
@@ -401,8 +530,20 @@ func buildFallbackTLSConfig(hello *tls.ClientHelloInfo, gc *gateonv1.GlobalConfi
 	}
 	cfg := base.Clone()
 	cfg.Certificates = certs
+	if globalACME {
+		withACMEProtocol(cfg)
+	}
 	identity.SetFingerprints(hello.Conn, getFp())
 	return cfg
+}
+
+// withACMEProtocol offers acme-tls/1, the protocol a CA's TLS-ALPN-01
+// validation negotiates. The base config carries it only when ACME was on at
+// startup, so turning ACME on later left that challenge unable to complete.
+func withACMEProtocol(cfg *tls.Config) {
+	if !slices.Contains(cfg.NextProtos, acme.ALPNProto) {
+		cfg.NextProtos = append(slices.Clone(cfg.NextProtos), acme.ALPNProto)
+	}
 }
 
 // acmeChallengeType validates the configured ACME challenge.

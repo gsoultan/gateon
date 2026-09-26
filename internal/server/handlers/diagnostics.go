@@ -24,6 +24,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -516,32 +517,19 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		// registerDiagnosticHandlers receives same d - Deps has RouteService.
 		routes, _ := d.RouteService.ListPaginated(ctx, 0, 500, "", nil)
 		var totalReqs, totalErrs, activeConn uint64
-		var openCircuits, halfOpenCircuits, healthyTargets, totalTargets int
+		var targets telemetry.TargetHealthCounts
 		for _, rt := range routes {
 			stats := d.RouteStatsProvider(rt.Id)
 			for _, s := range stats {
 				totalReqs += s.RequestCount
 				totalErrs += s.ErrorCount
 				activeConn += uint64(s.ActiveConn)
-				totalTargets++
-				circuit := s.CircuitState
-				if circuit == "" {
-					if s.Alive {
-						circuit = "CLOSED"
-					} else {
-						circuit = "OPEN"
-					}
-				}
-				switch circuit {
-				case "OPEN":
-					openCircuits++
-				case "HALF-OPEN":
-					halfOpenCircuits++
-				case "CLOSED":
-					healthyTargets++
-				}
 			}
+			proxy.TallyTargets(stats, &targets)
 		}
+		// Counted as the realtime snapshot counts them (buildGoldenSignals),
+		// which overwrites these on the dashboard at its next tick.
+		breakersOpen, breakersHalfOpen := telemetry.RouteBreakerCounts()
 		pathStats := telemetry.GetPathStats(ctx)
 		var pathTotalReqs uint64
 		var pathTotalBandwidth uint64
@@ -570,10 +558,10 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			"total_bandwidth_bytes": pathTotalBandwidth,
 			"total_errors":          totalErrs,
 			"active_connections":    activeConn,
-			"open_circuits":         openCircuits,
-			"half_open_circuits":    halfOpenCircuits,
-			"healthy_targets":       healthyTargets,
-			"total_targets":         totalTargets,
+			"open_circuits":         targets.Down + breakersOpen,
+			"half_open_circuits":    breakersHalfOpen,
+			"healthy_targets":       targets.Healthy,
+			"total_targets":         targets.Total,
 			"cpu_usage":             cpuUsage,
 			"memory_usage":          memUsage,
 		})

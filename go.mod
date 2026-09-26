@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	aidanwoods.dev/go-paseto v1.6.0
+	cel.dev/cel-go v0.32.0
 	connectrpc.com/connect v1.20.0
 	github.com/MicahParks/keyfunc/v3 v3.8.0
 	github.com/andybalholm/brotli v1.2.1
@@ -21,7 +22,6 @@ require (
 	github.com/go-zookeeper/zk v1.0.4
 	github.com/godzie44/go-uring v0.0.0-20250501163612-d16a9e597639
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/google/cel-go v0.29.2
 	github.com/google/go-tpm v0.9.8
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -170,6 +170,7 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.1.3 // indirect
+	github.com/google/cel-go v0.31.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-containerregistry v0.21.7 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect

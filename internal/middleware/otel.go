@@ -5,6 +5,8 @@ package middleware
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
@@ -23,7 +25,7 @@ func Telemetry(serviceName string) Middleware {
 			ctx, span := tracer.Start(r.Context(), r.Method+" "+r.URL.Path,
 				trace.WithAttributes(
 					attribute.String("http.method", r.Method),
-					attribute.String("http.url", r.URL.String()),
+					attribute.String("http.url", spanURL(r.URL)),
 					attribute.String("http.host", r.Host),
 					attribute.String("http.user_agent", r.UserAgent()),
 					attribute.String("http.remote_addr", r.RemoteAddr),
@@ -79,11 +81,34 @@ func Telemetry(serviceName string) Middleware {
 				}
 				repID, _ := rs.Fingerprint.(string)
 				if repID == "" {
-					repID = request.GetClientIP(r, true)
+					repID = request.ClientAddr(r)
 				}
 				reputation := telemetry.GetReputation(repID)
 				span.SetAttributes(attribute.Float64("security.trust_score", reputation))
 			}
 		})
 	}
+}
+
+// spanURL is the request URL as a span may carry it. Query values are
+// replaced, keys kept: they are where API keys and tokens travel (?token=,
+// ?access_token=, ?api_key=), and a span goes to whatever collector
+// OTEL_EXPORTER_OTLP_ENDPOINT names, with none of the gateway's secret masking.
+// Userinfo is dropped for the same reason.
+func spanURL(u *url.URL) string {
+	if u.RawQuery == "" && u.User == nil {
+		return u.String()
+	}
+	c := *u
+	c.User = nil
+	if c.RawQuery != "" {
+		pairs := strings.Split(c.RawQuery, "&")
+		for i, pair := range pairs {
+			if key, _, hasValue := strings.Cut(pair, "="); hasValue {
+				pairs[i] = key + "=REDACTED"
+			}
+		}
+		c.RawQuery = strings.Join(pairs, "&")
+	}
+	return c.String()
 }

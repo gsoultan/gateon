@@ -11,19 +11,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// globalsAPI serves one registry and nothing else.
+// globalsAPI serves one registry, and saves through the API's own path.
 type globalsAPI struct {
 	GlobalAndAuthAPI
 	store config.GlobalConfigStore
 }
 
 func (g *globalsAPI) GetGlobals() config.GlobalConfigStore { return g.store }
+
+// UpdateGlobalConfig is the API's own: PUT /v1/global stores and applies a
+// save through it, and the tests using this fake are about what that stores.
+func (g *globalsAPI) UpdateGlobalConfig(ctx context.Context, req *gateonv1.UpdateGlobalConfigRequest) (*gateonv1.UpdateGlobalConfigResponse, error) {
+	return (&api.ApiService{Globals: g.store}).UpdateGlobalConfig(ctx, req)
+}
 
 var restGlobalCredentials = []string{"PASETO-KEY-32-BYTES-LONG-SECRET!", "AUDIT-HMAC-KEY", "redis-pass", "TG-TOKEN"}
 

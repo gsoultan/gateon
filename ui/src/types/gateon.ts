@@ -167,7 +167,10 @@ export type Route = {
   id: string;
   name?: string;
   type: "http" | "grpc" | "graphql" | "tcp" | "udp";
-  entryPoints: string[];
+  // One word, as the proto field is. This said entryPoints, which the gateway
+  // discards as an unknown key, so every route saved from the dashboard lost
+  // its entrypoint restriction and was published on every entrypoint.
+  entrypoints: string[];
   rule: string;
   priority: number;
   middlewares: string[];
@@ -498,7 +501,6 @@ export type EbpfConfig = {
   mgmtPort?: number;
   knockingSequence?: number[];
   afXdpPhantom?: boolean;
-  xdpJa4Blocklist?: boolean;
   enableMgmtWhitelist?: boolean;
   mgmtWhitelistIps?: string[];
 };

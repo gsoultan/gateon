@@ -146,8 +146,8 @@ func hasRemedyContaining(remedies []string, want string) bool {
 }
 
 // Falling back to TC narrows what is enforced. Whatever else changes, that
-// narrowing must stay visible — a silent gap here is a security hole, since the
-// operator's ShunJA4 call would appear to succeed while nothing enforced it.
+// narrowing must stay visible — a silent gap here is a security hole, since an
+// operator would go on believing a feature was in force when nothing enforced it.
 func TestTCUnsupportedNamesTheGaps(t *testing.T) {
 	if gaps := tcUnsupported(nil); gaps != nil {
 		t.Errorf("tcUnsupported(nil) = %v, want nil", gaps)
@@ -162,10 +162,10 @@ func TestTCUnsupportedNamesTheGaps(t *testing.T) {
 	}
 
 	full := &gateonv1.EbpfConfig{
-		EnableKnocking: true, XdpJa4Blocklist: true,
-		AfXdpPhantom: true, XdpLoadBalancing: true,
+		EnableKnocking: true,
+		AfXdpPhantom:   true, XdpLoadBalancing: true,
 	}
-	want := []string{"enable_knocking", "xdp_ja4_blocklist", "af_xdp_phantom", "xdp_load_balancing"}
+	want := []string{"enable_knocking", "af_xdp_phantom", "xdp_load_balancing"}
 	gaps := tcUnsupported(full)
 	if len(gaps) != len(want) {
 		t.Fatalf("tcUnsupported() = %v, want %v", gaps, want)

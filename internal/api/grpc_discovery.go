@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/discovery"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc"
@@ -18,6 +20,20 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	reflectionv1 "google.golang.org/grpc/reflection/grpc_reflection_v1"
 )
+
+// refuseBlockedGrpcAddress is the net.Dialer Control hook for gRPC service
+// discovery. It runs after resolution and before connect, with the address the
+// socket is about to use, and enforces the same SSRF policy as the tech probe.
+func refuseBlockedGrpcAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("refusing to probe %q: cannot read its address: %w", address, err)
+	}
+	if reason, deny := discovery.BlockedProbeTarget(net.ParseIP(host)); deny {
+		return fmt.Errorf("refusing to probe %s: %s address", host, reason)
+	}
+	return nil
+}
 
 func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.DiscoverGrpcServicesRequest) (*gateonv1.DiscoverGrpcServicesResponse, error) {
 	if req == nil {
@@ -39,16 +55,24 @@ func (s *ApiService) DiscoverGrpcServices(ctx context.Context, req *gateonv1.Dis
 		useTLS = true
 	}
 
-	// SSRF prevention: validate host
-	h, _, err := net.SplitHostPort(host)
-	if err != nil {
-		h = host
-	}
-	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
-		return nil, errors.New("access to localhost is forbidden")
+	// SSRF prevention. A literal loopback/link-local/unspecified target is
+	// rejected up front for a clear error, but the guarantee is the dialer's
+	// Control hook below: it runs after the name is resolved and before the
+	// socket connects, on every address gRPC actually dials, so a hostname that
+	// resolves to a blocked range -- or rebinds between a URL check and the dial
+	// -- cannot slip past. The weak check this replaces compared the raw host
+	// string to three literals, so 127.0.0.2, 169.254.169.254 (cloud instance
+	// metadata) and any name resolving to them went straight through.
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		if reason, deny := discovery.BlockedProbeTarget(net.ParseIP(h)); deny {
+			return nil, fmt.Errorf("refusing to probe %s: %s address", h, reason)
+		}
 	}
 
 	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithContextDialer(func(dialCtx context.Context, addr string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: 5 * time.Second, Control: refuseBlockedGrpcAddress}).DialContext(dialCtx, "tcp", addr)
+	}))
 	if useTLS {
 		tlsCfg, err := gtls.CreateTLSClientConfig(req.TlsConfig)
 		if err != nil {

@@ -18,6 +18,7 @@ const {
   BotManagementConfigEditor,
   FileSecurityConfigEditor,
   PolicyConfigEditor,
+  SecurityHeadersConfigEditor,
   WAFConfigEditor,
 } = await import("./SecurityConfigEditors");
 const { CORSConfigEditor, CORS_PRESETS, StripPrefixConfigEditor } =
@@ -274,6 +275,26 @@ describe("CORS presets", () => {
     expect(c.last.allowed_origins).toBe("*");
     expect(c.last.preset).toBe("standard");
   });
+
+  test("the backend preset clears the policy and says the backend answers", () => {
+    const c = capture();
+    const tree = CORSConfigEditor({
+      config: { preset: "standard", allowed_origins: "*" },
+      updateConfig: c.updateConfig,
+      onChange: c.onChange,
+    });
+    const select = findElement(tree, byLabel("CORS Preset"));
+    (select!.props.onChange as (value: string | null) => void)("backend");
+    expect(c.last).toEqual({ preset: "backend" });
+
+    const html = renderToString(
+      <MantineProvider>
+        <CORSConfigEditor config={{ preset: "backend" }} updateConfig={() => {}} onChange={() => {}} />
+      </MantineProvider>,
+    );
+    expect(html).toContain("The backend answers CORS for this route");
+    expect(html).not.toContain("Allowed Origins");
+  });
 });
 
 describe("middleware kind names", () => {
@@ -290,5 +311,56 @@ describe("middleware kind names", () => {
       </MantineProvider>,
     );
     expect(html).not.toContain("Unknown middleware type");
+  });
+});
+
+describe("security headers preset", () => {
+  // An unset preset is the gateway's legacy set -- nosniff, SAMEORIGIN framing
+  // and a referrer policy, no CSP. The editor showed it as Recommended, which
+  // adds a CSP and HSTS the route did not have.
+  test("an unset preset shows what the gateway applies", () => {
+    const tree = SecurityHeadersConfigEditor({ config: {}, updateConfig: () => {} });
+    const select = findElement(tree, byLabel("Security Headers Preset"));
+    expect(select).not.toBeNull();
+    expect(select!.props.value).toBe("legacy");
+    const values = (select!.props.data as { value: string }[]).map((d) => d.value);
+    expect(values).toEqual(["legacy", "recommended", "strict", "none"]);
+  });
+});
+
+describe("custom error pages", () => {
+  // The gateway serves each page value verbatim as the response body. The form
+  // asked for a "Page Path" with /path/to/404.html as its example, so an
+  // operator following it published a page reading "/path/to/404.html".
+  test("asks for the page's HTML, which is what the gateway serves", () => {
+    const html = renderToString(
+      <MantineProvider>
+        <MiddlewareConfigEditor
+          type="errors"
+          config={{ status_codes: "404", page_404: "<h1>Gone</h1>" }}
+          onChange={() => {}}
+        />
+      </MantineProvider>,
+    );
+    expect(html).toContain("Page HTML");
+    expect(html).not.toContain("Page Path");
+    expect(html).not.toContain("/path/to/404.html");
+  });
+});
+
+describe("policy help", () => {
+  // The gateway hands CEL `auth` as the claims map itself; the help text said
+  // `auth.claims`, so a rule written from it read a key that does not exist
+  // and refused every request.
+  test("documents the variables the gateway provides", () => {
+    const html = renderToString(
+      <MantineProvider>
+        <PolicyConfigEditor config={{}} onChange={() => {}} />
+      </MantineProvider>,
+    );
+    expect(html).not.toContain("auth.claims");
+    for (const v of ["request.host", "request.query", "auth.role", "has(auth.role)"]) {
+      expect(html).toContain(v);
+    }
   });
 });

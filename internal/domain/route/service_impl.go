@@ -4,8 +4,10 @@
 package route
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -49,10 +51,32 @@ func (s *serviceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 	if rt.Id == "" {
 		rt.Id = uuid.NewString()
 	}
+	if err := s.nameIsFree(ctx, rt); err != nil {
+		return err
+	}
 	if err := s.store.Update(ctx, rt); err != nil {
 		return err
 	}
 	s.invalidator.InvalidateRoute(rt.Id)
+	return nil
+}
+
+// ErrRouteNameTaken is returned when a route would share its name with another.
+var ErrRouteNameTaken = errors.New("route name is already in use")
+
+// nameIsFree refuses a route whose label -- its name, or its ID when it has
+// none, as router.RouteLabel defines it -- another route already has. The
+// label is what a route's metrics, access logs and threat records carry, so
+// two routes sharing one cannot be told apart in any of them; and until
+// per-route state was keyed by ID, they shared a circuit breaker and Redis
+// cache entries as well.
+func (s *serviceImpl) nameIsFree(ctx context.Context, rt *gateonv1.Route) error {
+	label := cmp.Or(rt.Name, rt.Id)
+	for _, other := range s.store.List(ctx) {
+		if other.Id != rt.Id && cmp.Or(other.Name, other.Id) == label {
+			return fmt.Errorf("%w: route %s is already called %q", ErrRouteNameTaken, other.Id, label)
+		}
+	}
 	return nil
 }
 

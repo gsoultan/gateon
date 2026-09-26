@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
+	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/types"
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
@@ -89,7 +90,7 @@ func servePolicy(rules []compiledRule, next http.Handler, w http.ResponseWriter,
 	// denies is a deny decision, so naming a preflight must not skip it.
 	data := policyInput(r)
 	for _, cr := range rules {
-		if !evalPolicyRule(cr, data, w) {
+		if !evalPolicyRule(cr, data, w, r) {
 			return
 		}
 	}
@@ -101,10 +102,14 @@ func servePolicy(rules []compiledRule, next http.Handler, w http.ResponseWriter,
 // writes its own refusal, so every path that is not a clear allow denies: an
 // expression that fails to evaluate is a policy whose verdict is unknown, and
 // unknown is not permission.
-func evalPolicyRule(cr compiledRule, data map[string]any, w http.ResponseWriter) bool {
+func evalPolicyRule(cr compiledRule, data map[string]any, w http.ResponseWriter, r *http.Request) bool {
 	out, _, err := cr.program.Eval(data)
 	if err != nil {
-		httputil.WriteJSONError(w, http.StatusInternalServerError, "Policy evaluation error", err.Error())
+		// Logged, not returned: the error names the keys the rule reads and
+		// how, and it used to go to the client in the response body.
+		logger.L.LogWarn("policy rule could not be evaluated; refusing the request",
+			"path", r.URL.Path, "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "Policy evaluation error", "")
 		return false
 	}
 

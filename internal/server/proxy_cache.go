@@ -5,9 +5,10 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,9 +18,11 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -38,7 +41,34 @@ type ProxyCache struct {
 	proxyHandlers atomic.Value // map[string]*proxy.ProxyHandler
 	mu            sync.Mutex   // only for writes
 	sf            singleflight.Group
+	// epoch is bumped, under mu, by every change that removes cached chains.
+	// A build records it when it starts and caches its result only if it is
+	// unchanged, which is how a chain compiled from configuration that changed
+	// mid-build is kept out of the cache without holding mu across the build.
+	epoch atomic.Uint64
+	// refusalRetry is how long a refused chain is served before the next
+	// request, or the next Sync, builds the route again.
+	refusalRetry time.Duration
+	// retiredHealth holds, under mu, what an invalidated route's health checks
+	// had concluded about its targets, until the route's next build takes it.
+	// One entry per route at most; Sync drops those of deleted routes.
+	retiredHealth map[string]map[string]bool
+	// sharedLabels holds, under mu, each route name more than one route
+	// carries, with the IDs that carry it, so Sync warns when that changes
+	// rather than every thirty seconds. At most one entry per route.
+	sharedLabels map[string]string
 }
+
+// defaultRefusalRetry bounds how long a route stays refused after the
+// dependency that failed its build has come back. Sync runs every 30 seconds,
+// so a route with no traffic recovers within that; one with traffic within
+// this.
+const defaultRefusalRetry = 15 * time.Second
+
+// maxBuildAttempts caps how often a build is thrown away because an
+// invalidation landed while it ran, before the last attempt is made under mu,
+// which holds invalidations off and so always completes.
+const maxBuildAttempts = 3
 
 // NewProxyCache creates a proxy cache with the given dependencies.
 func NewProxyCache(
@@ -59,6 +89,7 @@ func NewProxyCache(
 		ebpfManager:  ebpfManager,
 		reputation:   rep,
 		redisClient:  redisClient,
+		refusalRetry: defaultRefusalRetry,
 	}
 	c.proxies.Store(make(map[string]http.Handler))
 	c.proxyHandlers.Store(make(map[string]*proxy.ProxyHandler))
@@ -93,61 +124,171 @@ func (c *ProxyCache) Count() int {
 func (c *ProxyCache) GetOrCreate(rt *gateonv1.Route) http.Handler {
 	// Lock-free read path
 	m := c.proxies.Load().(map[string]http.Handler)
-	if h, ok := m[rt.Id]; ok {
+	if h, ok := m[rt.Id]; ok && !c.retryDue(h) {
 		return h
 	}
 
 	// Use singleflight to prevent thundering herd during cold start or invalidation
 	res, _, _ := c.sf.Do(rt.Id, func() (any, error) {
-		// Double check under write lock
-		c.mu.Lock()
-		defer c.mu.Unlock()
-
-		m := c.proxies.Load().(map[string]http.Handler)
-		if h, ok := m[rt.Id]; ok {
-			return h, nil
-		}
-
-		var transportCfg *proxy.TransportConfig
-		if c.globalStore != nil {
-			if gc := c.globalStore.Get(context.Background()); gc != nil {
-				transportCfg = transportConfigFromGlobal(gc)
-			}
-		}
-
-		stripCORS := router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "cors") ||
-			router.RouteHasMiddlewareType(context.Background(), rt, c.mwStore, "grpcweb")
-		pHandler := proxy.NewProxyHandlerBuilder(rt, c.serviceStore, nil).
-			SetTransportConfig(transportCfg).
-			SetStripCORS(stripCORS).
-			Build()
-
-		h := router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)
-
-		if h == nil {
-			return nil, fmt.Errorf("failed to apply route middlewares")
-		}
-
-		// Atomic update: swap maps
-		newProxies := maps.Clone(m)
-		if newProxies == nil {
-			newProxies = make(map[string]http.Handler)
-		}
-		newProxies[rt.Id] = h
-		c.proxies.Store(newProxies)
-
-		phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
-		newPhMap := maps.Clone(phMap)
-		if newPhMap == nil {
-			newPhMap = make(map[string]*proxy.ProxyHandler)
-		}
-		newPhMap[rt.Id] = pHandler
-		c.proxyHandlers.Store(newPhMap)
-
-		return h, nil
+		return c.build(rt), nil
 	})
+	h, _ := res.(http.Handler)
+	return h
+}
 
-	return res.(http.Handler)
+// retryDue reports whether h is a refused chain old enough to build again.
+func (c *ProxyCache) retryDue(h http.Handler) bool {
+	rc, ok := h.(*router.RefusedChain)
+	return ok && time.Since(rc.BuiltAt()) >= c.refusalRetry
+}
+
+// build compiles rt's chain without holding mu. It used to hold it throughout,
+// so one slow build — a WAF compiling its rules, an identity provider that
+// never answered — stalled the first request of every other route and every
+// invalidation, which after a global change meant every route in the gateway.
+// The lock was also what kept a build from caching configuration that changed
+// while it ran; the epoch does that now.
+func (c *ProxyCache) build(rt *gateonv1.Route) http.Handler {
+	for range maxBuildAttempts - 1 {
+		epoch := c.epoch.Load()
+		if h, ok := c.cached(rt.Id); ok {
+			return h
+		}
+		h, ph := c.compile(c.current(rt))
+		if h == nil || c.storeIfCurrent(rt.Id, h, ph, epoch) {
+			return h
+		}
+		// An invalidation landed mid-build, so this chain reflects
+		// configuration that has since changed. Discard it and build again.
+		ph.Close()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if h, ok := c.cached(rt.Id); ok {
+		return h
+	}
+	h, ph := c.compile(c.current(rt))
+	if h != nil {
+		c.storeLocked(rt.Id, h, ph)
+	}
+	return h
+}
+
+// current returns the route as it is stored now, read after the build has
+// recorded the epoch. The caller selected its copy before asking, which can be
+// before an edit whose invalidation has already run; compiling that copy would
+// cache the old route under the new epoch, and serve it until the next edit.
+// A route missing from the store (deleted mid-request) is built as given and
+// left for Sync to collect.
+func (c *ProxyCache) current(rt *gateonv1.Route) *gateonv1.Route {
+	if fresh, ok := c.routeStore.Get(context.Background(), rt.Id); ok && fresh != nil {
+		return fresh
+	}
+	return rt
+}
+
+// cached returns the route's chain if one is cached and not a refusal due for
+// a retry.
+func (c *ProxyCache) cached(id string) (http.Handler, bool) {
+	m := c.proxies.Load().(map[string]http.Handler)
+	h, ok := m[id]
+	if !ok || c.retryDue(h) {
+		return nil, false
+	}
+	return h, true
+}
+
+// compile builds the proxy handler and the middleware chain around it.
+func (c *ProxyCache) compile(rt *gateonv1.Route) (http.Handler, *proxy.ProxyHandler) {
+	var transportCfg *proxy.TransportConfig
+	if c.globalStore != nil {
+		if gc := c.globalStore.Get(context.Background()); gc != nil {
+			transportCfg = transportConfigFromGlobal(gc)
+		}
+	}
+
+	stripCORS := router.RouteReplacesBackendCORS(context.Background(), rt, c.mwStore)
+	pHandler := proxy.NewProxyHandlerBuilder(rt, c.serviceStore, nil).
+		SetTransportConfig(transportCfg).
+		SetStripCORS(stripCORS).
+		Build()
+
+	h := router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)
+	if h == nil {
+		pHandler.Close()
+		return nil, nil
+	}
+	return h, pHandler
+}
+
+// storeIfCurrent caches a chain unless an invalidation has landed since the
+// build that produced it began.
+func (c *ProxyCache) storeIfCurrent(id string, h http.Handler, ph *proxy.ProxyHandler, epoch uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.epoch.Load() != epoch {
+		return false
+	}
+	c.storeLocked(id, h, ph)
+	return true
+}
+
+// storeLocked caches a chain, draining the proxy handler it replaces — a
+// refused chain being retried still owns one.
+func (c *ProxyCache) storeLocked(id string, h http.Handler, ph *proxy.ProxyHandler) {
+	m := c.proxies.Load().(map[string]http.Handler)
+	newProxies := maps.Clone(m)
+	if newProxies == nil {
+		newProxies = make(map[string]http.Handler)
+	}
+	newProxies[id] = h
+	c.proxies.Store(newProxies)
+
+	phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
+	old := phMap[id]
+	newPhMap := maps.Clone(phMap)
+	if newPhMap == nil {
+		newPhMap = make(map[string]*proxy.ProxyHandler)
+	}
+	c.inheritHealthLocked(id, ph, old)
+	newPhMap[id] = ph
+	c.proxyHandlers.Store(newPhMap)
+	if old != nil && old != ph {
+		go old.DrainAndClose(drainTimeout)
+	}
+}
+
+// inheritHealthLocked starts a newly built handler's targets where the
+// handler before it left them -- the one it replaces directly, or the one an
+// invalidation retired -- before any request can reach it.
+func (c *ProxyCache) inheritHealthLocked(id string, ph, old *proxy.ProxyHandler) {
+	if ph == nil {
+		return
+	}
+	if old != nil && old != ph {
+		ph.InheritHealth(old.HealthSnapshot())
+		return
+	}
+	if snap, ok := c.retiredHealth[id]; ok {
+		delete(c.retiredHealth, id)
+		ph.InheritHealth(snap)
+	}
+}
+
+// retireHandlerLocked drains a handler that is leaving the cache, keeping what
+// its health checks concluded for the route's next handler to start from.
+// Purge used to drain without keeping it, so after a purge -- which comes
+// under memory pressure -- every route sent traffic to backends known to be
+// down until each new handler's first check. At most one snapshot per route;
+// Sync drops those of deleted routes. Caller holds c.mu.
+func (c *ProxyCache) retireHandlerLocked(id string, ph *proxy.ProxyHandler) {
+	if snap := ph.HealthSnapshot(); len(snap) > 0 {
+		if c.retiredHealth == nil {
+			c.retiredHealth = make(map[string]map[string]bool)
+		}
+		c.retiredHealth[id] = snap
+	}
+	go ph.DrainAndClose(drainTimeout)
 }
 
 // InvalidateRoute removes the cached proxy for the given route ID.
@@ -177,6 +318,10 @@ func (c *ProxyCache) InvalidateRoutes(strategy func(*gateonv1.Route) bool) {
 const drainTimeout = 30 * time.Second
 
 func (c *ProxyCache) invalidateLocked(id string) {
+	// Bumped even when nothing is cached: the route may be mid-build, and that
+	// build must not cache what it compiled from the configuration being
+	// replaced.
+	c.epoch.Add(1)
 	phMap := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
 	m := c.proxies.Load().(map[string]http.Handler)
 
@@ -196,7 +341,7 @@ func (c *ProxyCache) invalidateLocked(id string) {
 	c.proxyHandlers.Store(newPhMap)
 
 	if ph != nil {
-		go ph.DrainAndClose(drainTimeout)
+		c.retireHandlerLocked(id, ph)
 		return
 	}
 	type closer interface{ Close() }
@@ -205,6 +350,18 @@ func (c *ProxyCache) invalidateLocked(id string) {
 			cl.Close()
 		}
 	}
+}
+
+// TargetHealthCounts tallies the targets of every route with a built proxy,
+// for the realtime snapshot's target and circuit tiles. It reads the load
+// balancers' own state, which covers targets with no health check -- the
+// gateon_target_health gauge exists only for those that have one.
+func (c *ProxyCache) TargetHealthCounts() telemetry.TargetHealthCounts {
+	var counts telemetry.TargetHealthCounts
+	for _, ph := range c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler) {
+		proxy.TallyTargets(ph.GetStats(), &counts)
+	}
+	return counts
 }
 
 // GetRouteStats returns target stats for a route, or nil if not found.
@@ -231,16 +388,46 @@ func (c *ProxyCache) Purge() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.epoch.Add(1)
 	handlers := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
-	for _, ph := range handlers {
+	for id, ph := range handlers {
 		if ph != nil {
-			go ph.DrainAndClose(drainTimeout)
+			c.retireHandlerLocked(id, ph)
 		}
 	}
 
 	c.proxies.Store(make(map[string]http.Handler))
 	c.proxyHandlers.Store(make(map[string]*proxy.ProxyHandler))
 	logger.L.LogInfo("proxy cache purged due to resource pressure")
+}
+
+// warnSharedRouteLabelsLocked logs, once per change, each route name that more
+// than one route carries. Per-route state is kept by ID, so such routes no
+// longer share a circuit breaker or cache entries, but their metrics, access
+// logs and threat records are reported under the one name and cannot be told
+// apart. Saving a route refuses a name another route has; this is for routes
+// that got one before that, or from a config file. Caller holds c.mu.
+func (c *ProxyCache) warnSharedRouteLabelsLocked(routes []*gateonv1.Route) {
+	byLabel := make(map[string][]string, len(routes))
+	for _, rt := range routes {
+		label := router.RouteLabel(rt)
+		byLabel[label] = append(byLabel[label], rt.Id)
+	}
+	shared := make(map[string]string)
+	for label, ids := range byLabel {
+		if len(ids) < 2 {
+			continue
+		}
+		slices.Sort(ids)
+		joined := strings.Join(ids, ",")
+		shared[label] = joined
+		if c.sharedLabels[label] != joined {
+			logger.L.LogWarn("routes share a name, so their metrics, access logs and threat "+
+				"records are reported together; rename all but one",
+				"name", label, "routes", joined)
+		}
+	}
+	c.sharedLabels = shared
 }
 
 // Sync runs periodic proxy cache maintenance: pre-warms new routes and cleans up orphans.
@@ -253,7 +440,8 @@ func (c *ProxyCache) Sync() {
 		}
 	}
 
-	// 2. Cleanup: Remove cached proxies for routes that no longer exist.
+	// 2. Cleanup: Remove cached proxies and circuit breakers of routes that no
+	// longer exist.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -261,8 +449,16 @@ func (c *ProxyCache) Sync() {
 	handlers := c.proxyHandlers.Load().(map[string]*proxy.ProxyHandler)
 
 	activeRoutes := make(map[string]bool)
-	for _, rt := range c.routeStore.List(context.Background()) {
+	routes := c.routeStore.List(context.Background())
+	for _, rt := range routes {
 		activeRoutes[rt.Id] = true
+	}
+	c.warnSharedRouteLabelsLocked(routes)
+	middleware.RetainCircuitBreakers(activeRoutes)
+	for id := range c.retiredHealth {
+		if !activeRoutes[id] {
+			delete(c.retiredHealth, id)
+		}
 	}
 
 	orphans := make([]string, 0)
@@ -273,6 +469,7 @@ func (c *ProxyCache) Sync() {
 	}
 
 	if len(orphans) > 0 {
+		c.epoch.Add(1)
 		newProxies := maps.Clone(proxies)
 		newHandlers := maps.Clone(handlers)
 		for _, id := range orphans {

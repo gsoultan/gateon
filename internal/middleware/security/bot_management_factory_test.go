@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/request"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -48,16 +50,19 @@ func TestFallbackSecretIsStableWithinTheProcess(t *testing.T) {
 // is what made the global toggles inert: routes omit most keys, so a global
 // setting could never reach any of them.
 func TestGlobalSettingsApplyOnlyWhenTheRouteIsSilent(t *testing.T) {
-	if got := boolSetting(map[string]string{}, "enable_js_challenge", true); !got {
+	read := func(cfg map[string]string, global bool) bool {
+		return kind.NewBoolFields(cfg).Get("enable_js_challenge", global)
+	}
+	if got := read(map[string]string{}, true); !got {
 		t.Error("a global true did not apply to a route that never mentions the key")
 	}
-	if got := boolSetting(map[string]string{"enable_js_challenge": "false"}, "enable_js_challenge", true); got {
+	if got := read(map[string]string{"enable_js_challenge": "false"}, true); got {
 		t.Error("an explicit route false was overridden by the global value")
 	}
-	if got := boolSetting(map[string]string{"enable_js_challenge": "true"}, "enable_js_challenge", false); !got {
+	if got := read(map[string]string{"enable_js_challenge": "true"}, false); !got {
 		t.Error("an explicit route true was not honoured")
 	}
-	if got := boolSetting(map[string]string{}, "enable_js_challenge", false); got {
+	if got := read(map[string]string{}, false); got {
 		t.Error("a global false became true")
 	}
 }
@@ -69,7 +74,7 @@ func TestNilGlobalBlockIsTreatedAsUnset(t *testing.T) {
 	if g.GetEnableJsChallenge() || g.GetSecretKey() != "" || g.GetChallengeTimeoutSeconds() != 0 {
 		t.Fatal("nil global block did not read as unset")
 	}
-	if got := boolSetting(map[string]string{}, "enabled", g.GetEnabled()); got {
+	if got := kind.NewBoolFields(map[string]string{}).Get("enabled", g.GetEnabled()); got {
 		t.Error("nil global block enabled bot management")
 	}
 }
@@ -102,7 +107,7 @@ func TestForgedTokenFromThePublishedSecretIsRejected(t *testing.T) {
 	clientIP := request.GetClientIP(req, false)
 	req.AddCookie(&http.Cookie{
 		Name:  ChallengeCookieName,
-		Value: GenerateChallengeSeed(publishedSecret, ua, clientIP),
+		Value: passFor(publishedSecret, ua, clientIP, time.Now()),
 	})
 
 	h.ServeHTTP(httptest.NewRecorder(), req)

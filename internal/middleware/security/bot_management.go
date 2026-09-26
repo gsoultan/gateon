@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"html"
@@ -64,7 +65,7 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 
 	// 2. Check if challenge is already solved
 	if cookie, err := r.Cookie(ChallengeCookieName); err == nil &&
-		verifyChallengeToken(cookie.Value, cfg.SecretKey, r.UserAgent(), clientIP) {
+		verifyPass(cookie.Value, cfg.SecretKey, r.UserAgent(), clientIP, time.Now(), passLifetime(cfg)) {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -80,6 +81,9 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 	if r.URL.Path == "/_gateon/seed" {
 		seed := GenerateChallengeSeed(cfg.SecretKey, r.UserAgent(), clientIP)
 		w.Header().Set("Content-Type", "text/plain")
+		// #nosec G705 -- the User-Agent and address reach the seed only as MAC
+		// input; the seed is "<unix ms>.<hex MAC>", digits, a dot and hex,
+		// served as text/plain. Nothing the client wrote is echoed.
 		_, _ = w.Write([]byte(seed))
 		return
 	}
@@ -100,8 +104,8 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 // redirects, an invalid one is recorded and falls through to be re-challenged
 // rather than being served.
 func handleChallengeSubmission(cfg BotManagementConfig, clientIP string, w http.ResponseWriter, r *http.Request) bool {
-	token := r.FormValue("token")
-	if !verifyChallengeToken(token, cfg.SecretKey, r.UserAgent(), clientIP) {
+	now := time.Now()
+	if !verifySeed(r.FormValue("token"), cfg.SecretKey, r.UserAgent(), clientIP, now) {
 		telemetry.ActiveUnverifiedClientsTotal.Dec()
 		recordBotThreat(r, cfg, clientIP, "challenge-fail", 60,
 			"Failed JavaScript challenge submission", kind.SeverityHigh)
@@ -120,7 +124,7 @@ func handleChallengeSubmission(cfg BotManagementConfig, clientIP string, w http.
 	// below; gosec cannot see through the variable.
 	http.SetCookie(w, &http.Cookie{
 		Name:     ChallengeCookieName,
-		Value:    token,
+		Value:    passFor(cfg.SecretKey, r.UserAgent(), clientIP, now),
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   request.IsSecure(r),
@@ -224,17 +228,14 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
     <script nonce="%s">
         (function() {
             // Simple proof of work or just a delay to foil simple scrapers
-            setTimeout(function() {
-                var ua = navigator.userAgent;
-                var ts = Math.floor(Date.now() / 1000);
-                // We'd normally get a seed from the server to prevent replay
-                // For now, we'll just simulate a token generation
-                // Real implementation would use an XHR to get a signed seed
-                fetch('/_gateon/seed').then(r => r.text()).then(seed => {
-                    document.getElementById('token').value = seed;
+            // The seed is only redeemable once it has aged past the
+            // gateway's minimum solve time, so wait after fetching it.
+            fetch('/_gateon/seed').then(r => r.text()).then(seed => {
+                document.getElementById('token').value = seed;
+                setTimeout(function() {
                     document.getElementById('challenge-form').submit();
-                });
-            }, 2000);
+                }, 2000);
+            });
         })();
     </script>
 </body>
@@ -246,56 +247,102 @@ func serveJSChallenge(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(page))
 }
 
-func verifyChallengeToken(token, secret, ua, ip string) bool {
-	// Simple verification logic
-	// Token format: payload.signature
-	payload, signature, ok := strings.Cut(token, ".")
-	if !ok {
-		return false
-	}
+// The seed and the pass are two different tokens, signed in two different
+// contexts, and the only way from one to the other is POST /_gateon/challenge.
+//
+// They used to be one token. The page fetched /_gateon/seed and posted it back,
+// and the value it fetched was exactly what the cookie check accepted, so any
+// client could skip the page: fetch the seed and send it as the cookie, one
+// request, no JavaScript. The MAC also ran the timestamp, User-Agent and IP
+// together with no separators, so a client whose User-Agent began with digits
+// was handed a valid signature for a timestamp centuries ahead, and future
+// timestamps were never refused.
+const (
+	seedContext = "gateon-bot-seed-v2"
+	// #nosec G101 -- a domain-separation label mixed into the MAC so a seed
+	// can never verify as a pass. It is public by design; the secret is
+	// cfg.SecretKey.
+	passContext = "gateon-bot-pass-v2"
+	// minSolveTime is how long a seed must age before it is redeemed; the
+	// challenge page waits two seconds after fetching it.
+	minSolveTime = 1500 * time.Millisecond
+	// seedLifetime bounds how long a fetched seed stays redeemable.
+	seedLifetime = 5 * time.Minute
+	// clockSkew is how far ahead of this gateway's clock a token's issue time
+	// may be; in a cluster another instance may have issued it.
+	clockSkew = 5 * time.Second
+	// defaultPassLifetime is used when the route configures no timeout.
+	defaultPassLifetime = time.Hour
+)
 
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = io.WriteString(mac, payload)
-	_, _ = io.WriteString(mac, ua)
-	_, _ = io.WriteString(mac, ip)
-	expectedSignature := mac.Sum(nil)
-
-	// signature is hex encoded, let's decode it safely
-	if len(signature) != hex.EncodedLen(len(expectedSignature)) {
-		return false
-	}
-
-	var sigBuf [32]byte // sha256 is 32 bytes
-	sigBytes := sigBuf[:]
-	n, err := hex.Decode(sigBytes, []byte(signature))
-	if err != nil || n != len(expectedSignature) || subtle.ConstantTimeCompare(sigBytes, expectedSignature) != 1 {
-		return false
-	}
-
-	// Verify timestamp in payload
-	tsStr := payload
-	ts, err := strconv.ParseInt(tsStr, 10, 64)
-	if err != nil {
-		return false
-	}
-
-	// Token valid for 2 hours
-	if time.Since(time.Unix(ts, 0)) > 2*time.Hour {
-		return false
-	}
-
-	return true
+// GenerateChallengeSeed returns the seed the challenge page fetches.
+func GenerateChallengeSeed(secret, ua, ip string) string {
+	return seedFor(secret, ua, ip, time.Now())
 }
 
-func GenerateChallengeSeed(secret, ua, ip string) string {
-	ts := time.Now().Unix()
-	payload := strconv.FormatInt(ts, 10)
+func seedFor(secret, ua, ip string, at time.Time) string {
+	return signBotToken(seedContext, secret, ua, ip, at)
+}
+
+func passFor(secret, ua, ip string, at time.Time) string {
+	return signBotToken(passContext, secret, ua, ip, at)
+}
+
+func passLifetime(cfg BotManagementConfig) time.Duration {
+	if cfg.ChallengeTimeoutSeconds > 0 {
+		return time.Duration(cfg.ChallengeTimeoutSeconds) * time.Second
+	}
+	return defaultPassLifetime
+}
+
+// signBotToken returns "<issued unix ms>.<hex MAC>". Every field is written
+// length-prefixed, so no field can borrow bytes from its neighbour.
+func signBotToken(context, secret, ua, ip string, at time.Time) string {
+	issued := strconv.FormatInt(at.UnixMilli(), 10)
+	return issued + "." + hex.EncodeToString(botMAC(context, secret, issued, ua, ip))
+}
+
+func botMAC(context, secret string, fields ...string) []byte {
 	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = io.WriteString(mac, payload)
-	_, _ = io.WriteString(mac, ua)
-	_, _ = io.WriteString(mac, ip)
-	signature := hex.EncodeToString(mac.Sum(nil))
-	return payload + "." + signature
+	for _, f := range append([]string{context}, fields...) {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(f)))
+		_, _ = mac.Write(n[:])
+		_, _ = io.WriteString(mac, f)
+	}
+	return mac.Sum(nil)
+}
+
+// tokenAge checks token's MAC in context and returns how long ago it was
+// issued. A token issued in the future, beyond clock skew, is invalid.
+func tokenAge(context, token, secret, ua, ip string, now time.Time) (time.Duration, bool) {
+	issued, sig, ok := strings.Cut(token, ".")
+	if !ok || len(sig) != hex.EncodedLen(sha256.Size) {
+		return 0, false
+	}
+	var got [sha256.Size]byte
+	if _, err := hex.Decode(got[:], []byte(sig)); err != nil {
+		return 0, false
+	}
+	if subtle.ConstantTimeCompare(got[:], botMAC(context, secret, issued, ua, ip)) != 1 {
+		return 0, false
+	}
+	ms, err := strconv.ParseInt(issued, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	age := now.Sub(time.UnixMilli(ms))
+	return age, age >= -clockSkew
+}
+
+func verifySeed(seed, secret, ua, ip string, now time.Time) bool {
+	age, ok := tokenAge(seedContext, seed, secret, ua, ip, now)
+	return ok && age >= minSolveTime && age <= seedLifetime
+}
+
+func verifyPass(token, secret, ua, ip string, now time.Time, lifetime time.Duration) bool {
+	age, ok := tokenAge(passContext, token, secret, ua, ip, now)
+	return ok && age <= lifetime
 }
 
 func checkBrowserIntegrity(r *http.Request) bool {

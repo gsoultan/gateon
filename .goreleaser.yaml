@@ -64,10 +64,13 @@ nfpms:
       - src: packaging/gateon-service.xml
         dst: /etc/gateon/gateon-service.xml
         type: config
+      # 0750, as `gateon install` and scripts/postinstall.sh set it: the
+      # directory holds global.json. internal/install's tests hold all three
+      # to the same mode.
       - dst: /etc/gateon
         type: dir
         file_info:
-          mode: 0755
+          mode: 0750
     scripts:
       postinstall: scripts/postinstall.sh
       postremove: scripts/postremove.sh

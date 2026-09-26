@@ -30,6 +30,13 @@ func (f *fakeRouteStore) Update(_ context.Context, rt *gateonv1.Route) error {
 	f.saved[rt.Id] = rt
 	return nil
 }
+func (f *fakeRouteStore) List(context.Context) []*gateonv1.Route {
+	out := make([]*gateonv1.Route, 0, len(f.saved))
+	for _, rt := range f.saved {
+		out = append(out, rt)
+	}
+	return out
+}
 func (f *fakeRouteStore) Delete(_ context.Context, id string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
@@ -167,5 +174,39 @@ func TestDeleteRouteRefusesAnEmptyID(t *testing.T) {
 	}
 	if len(inv.routes) != 0 {
 		t.Errorf("invalidated %v after the delete failed", inv.routes)
+	}
+}
+
+// A route's name is what its metrics, access logs and threat records are
+// reported under, and was what its circuit breaker and cache entries were kept
+// under. Nothing refused a second route of the same name, so two routes called
+// "api" could not be told apart anywhere, and shared that state.
+func TestSaveRouteRefusesANameAnotherRouteHas(t *testing.T) {
+	store := newFakeRouteStore()
+	s := NewService(store, &recordingInvalidator{}, nil)
+	ctx := context.Background()
+	save := func(id, name string) error {
+		return s.SaveRoute(ctx, &gateonv1.Route{Id: id, Name: name, ServiceId: "svc", Rule: "PathPrefix(`/`)"})
+	}
+
+	if err := save("r1", "api"); err != nil {
+		t.Fatalf("first route: %v", err)
+	}
+	if err := save("r1", "api"); err != nil {
+		t.Fatalf("saving a route again under its own name was refused: %v", err)
+	}
+	if err := save("r2", "api"); !errors.Is(err, ErrRouteNameTaken) {
+		t.Fatalf("a second route called %q was accepted (err = %v)", "api", err)
+	}
+	if _, stored := store.saved["r2"]; stored {
+		t.Fatal("the refused route was stored anyway")
+	}
+	// An unnamed route is labelled by its ID, so a name equal to another
+	// route's ID is the same collision.
+	if err := save("r3", ""); err != nil {
+		t.Fatalf("unnamed route: %v", err)
+	}
+	if err := save("r4", "r3"); !errors.Is(err, ErrRouteNameTaken) {
+		t.Fatalf("a route named after an unnamed route's ID was accepted (err = %v)", err)
 	}
 }

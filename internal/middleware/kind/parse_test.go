@@ -138,27 +138,32 @@ func TestCfgErrorNamesTheKeyAndValue(t *testing.T) {
 
 func TestParseBoolStrict(t *testing.T) {
 	cases := []struct {
-		in   string
-		def  bool
-		want bool
+		in      string
+		def     bool
+		want    bool
+		wantErr bool
 	}{
-		{"", true, true},
-		{"", false, false},
-		{"true", false, true},
-		{"false", true, false},
-		{"1", false, true},
-		{"0", true, false},
-		{"TRUE", false, true},
+		{"", true, true, false},
+		{"", false, false, false},
+		{"true", false, true, false},
+		{"false", true, false, false},
+		{"1", false, true, false},
+		{"0", true, false, false},
+		{"TRUE", false, true, false},
 		// Unlike the int parsers, this one trims. The asymmetry is the point of
 		// testing it: the same stray space that defaults an int is tolerated here.
-		{"  true  ", false, true},
-		{"yes", false, false},
-		{"on", true, true},
+		{"  true  ", false, true, false},
+		// Present and not a boolean is an error, not the default. This read
+		// "yes" as false and "on" as true -- whatever the default happened to
+		// be -- while the dashboard showed what was typed.
+		{"yes", false, false, true},
+		{"on", true, true, true},
 	}
 
 	for _, tc := range cases {
-		if got := ParseBoolStrict(tc.in, tc.def); got != tc.want {
-			t.Errorf("ParseBoolStrict(%q, %v) = %v, want %v", tc.in, tc.def, got, tc.want)
+		got, err := ParseBoolStrict(tc.in, tc.def)
+		if got != tc.want || (err != nil) != tc.wantErr {
+			t.Errorf("ParseBoolStrict(%q, %v) = %v, %v; want %v, error %v", tc.in, tc.def, got, err, tc.want, tc.wantErr)
 		}
 	}
 }

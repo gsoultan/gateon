@@ -42,7 +42,7 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 - **Bot Management**: JS Challenges, Browser Integrity checks, and Cloudflare Turnstile integration.
 - **Identity & Access**: Comprehensive AuthN/Z via **JWT (HMAC/JWKS), PASETO, API Keys**, and Forward Auth.
 - **Traffic Deception**: Honeypots and deception layers to trap and identify malicious actors.
-- **Advanced TLS**: Automatic TLS (Let's Encrypt), **mTLS** for backends, and **JA3/JA4 Fingerprinting**.
+- **Advanced TLS**: Automatic TLS (Let's Encrypt), **mTLS** for backends, and **JA4/JA4H fingerprinting** (JA3 is no longer computed).
 
 ### 📊 Cloud-Native Observability & AI
 - **AI Anomaly Detection**: Proactive threat detection using traffic pattern analysis and Prometheus metrics.
@@ -51,8 +51,8 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 - **Management TUI**: A terminal-based dashboard (`gateon top`) for real-time monitoring.
 
 ### ⚙️ Automation & Scalability
-- **Kubernetes Native** `[experimental]`: Full support for the **Kubernetes Gateway API** (`Gateway`, `HTTPRoute`).
-- **High Availability** `[experimental]`: Active-Passive failover (VRRP) and multi-cluster configuration sync via Redis.
+- **Kubernetes Native** `[experimental]`: Watches **Ingress** and Gateway API **`HTTPRoute`** resources and turns them into routes. `Gateway` and `GatewayClass` objects are not read, so listener and class selection come from Gateon's own entrypoints.
+- **High Availability** `[experimental]`: Active-Passive failover (VRRP). Instances that share one database propagate cache invalidations over Redis; configuration itself is read from the database at startup, so another instance's route or service edits reach an instance when it restarts.
 - **Secrets Management**: Securely resolve secrets from **HashiCorp Vault, AWS Secrets Manager**, and environment variables at runtime.
 - **WASM Extensibility**: Custom traffic manipulation using WebAssembly-based middlewares.
 
@@ -168,25 +168,27 @@ make proto
 3) Services are fully implemented and registered in `internal/server` and wired from `cmd/gateon`.
 
 ## Environment Variables
-- `PORT`: API Gateway port (default 8080)
+- `PORT`: fallback management port, used only when neither `GATEON_MANAGEMENT_PORT` nor `management.port` is set. The config file fills `management.port` with `8080` by default, so in practice this does nothing; set `GATEON_MANAGEMENT_PORT` to move the dashboard, and give each entrypoint its own address for proxy traffic.
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: Endpoint for OTLP traces (e.g., http://localhost:4318). If empty, tracing is disabled.
 - `GATEON_JWT_SECRET`: Shared secret for HMAC-based JWT validation.
 - `GATEON_API_KEYS`: Comma-separated list of `key:tenant_id` pairs for static API key management (e.g., `key1:tenantA,key2:tenantB`).
 - `GATEON_ENTRYPOINT_RATE_LIMIT_QPS`: Per-IP requests per second for entrypoints. Use `0` to disable (recommended for high throughput, e.g. 100k req/s).
 - `GATEON_ENTRYPOINT_RATE_LIMIT_BURST`: Burst size when rate limiting is enabled (default 2× QPS).
 - `GATEON_ACCESS_LOG_SAMPLE_RATE`: Access log sampling. `1` = log all; `N` = log 1 in N requests; `0` = no access log. Use `1000`+ for high-throughput to reduce I/O.
-- `GATEON_TRUST_CLOUDFLARE_HEADERS`: Set to `true`, `1`, or `yes` when Gateon is behind Cloudflare; IPFilter and ratelimit will use `CF-Connecting-IP` for client IP.
+- `GATEON_TRUST_CLOUDFLARE_HEADERS`: Set to `true`, `1`, or `yes` when Gateon is behind Cloudflare. A request arriving from one of Cloudflare's published address ranges, or from an address in `GATEON_TRUSTED_PROXIES`, is then attributed to its `CF-Connecting-IP` everywhere the client address is used: rate limits, IP filters, the management allowlist, the WAF, reputation and logs. The same switch is `waf.trust_cloudflare_headers` in the config; either turns it on. A request from any other address keeps its own, so a client that reaches Gateon directly cannot pick its address with the header.
+- `GATEON_K8S_WATCH_NAMESPACE`: namespace the Kubernetes controller watches for Ingresses and HTTPRoutes; empty watches every namespace. The Helm chart sets it from `kubernetesIntegration.watchNamespace`, which also narrows the controller's RBAC to that namespace.
+- `GATEON_TRUSTED_PROXIES`: Comma-separated IPs or CIDRs of proxies in front of Gateon whose `X-Forwarded-For` (and, with the setting above, `CF-Connecting-IP`) is believed. A Cloudflare Tunnel's `cloudflared` connects from your own network rather than a Cloudflare range, so its address belongs here.
 - `GATEON_ALLOW_LOOPBACK_PROBE`: Set to `true`, `1`, or `yes` to let the "Discover tech" probe reach `127.0.0.0/8` and `::1`. Default off, because the probe follows a URL an API caller supplies and loopback is where the gateway's own management API lives. Turn it on only when the backend really is on the same host — a sidecar, or a gateway sharing a pod with the app it fronts. It permits loopback and nothing else: link-local (`169.254.0.0/16`, `fe80::/10`) stays refused however this is set, because that is where cloud instance metadata hands out IAM credentials.
 - `GATEON_TURNSTILE_SECRET`: Cloudflare Turnstile secret key (fallback when middleware config omits it).
 - `GATEON_GEOIP_DB_PATH`: Path to GeoLite2-Country.mmdb for GeoIP middleware (fallback when config omits db_path).
 - `GATEON_HMAC_SECRET`: HMAC secret for webhook signature verification (fallback when middleware config omits it).
 - `GATEON_ENCRYPTION_KEY`: Optional. When set (min 16 chars), `database_url`, `paseto_secret`, and database password are encrypted in global.json.
-- `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server (default `127.0.0.1`). Use `0.0.0.0` for remote access (e.g. via Cloudflare Tunnel on another machine).
-- `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated list of allowed IPs for management access (default `127.0.0.1,::1`). Use `0.0.0.0/0` with caution for initial setup via tunnel.
+- `GATEON_MANAGEMENT_BIND`: IP address for the dedicated management server. **The effective default is `0.0.0.0`** (every interface), because a loopback bind inside a container is unreachable through a published port; set `127.0.0.1` to keep the dashboard local. See [doc/management-entrypoint.md](doc/management-entrypoint.md#network-exposure).
+- `GATEON_MANAGEMENT_ALLOWED_IPS`: Comma-separated IPs or CIDRs allowed to reach the management server. **The effective default allows every address** (`0.0.0.0/0,::/0`); set it to your admin network.
 - `GATEON_WAF_DLP_ACTION`: What to do when a data-leak rule fires — `block` (default), `redact` (remove the finding, forward the rest) or `audit` (record it, forward untouched). Applies to data-leak rules only; an injection is still refused. Any unrecognised value means `block`. Overridden per route by the `dlp_action` middleware key, and globally by `waf.dlp_action` in the config file.
 - `GATEON_TRACE_DIR`: Directory for the Pebble request-trace store. Defaults to `telemetry_pebble` next to a file-backed SQLite database, or relative to the working directory for Postgres. Set this to place traces on a dedicated volume without changing the database URL.
 
-> **Note on Cloudflare Tunnels**: If you experience a `502 Bad Gateway` when accessing Gateon via a Cloudflare Tunnel, ensure `GATEON_TRUST_CLOUDFLARE_HEADERS=true` is set and `GATEON_MANAGEMENT_ALLOWED_IPS` includes your tunnel's IP (or use `0.0.0.0/0` to troubleshoot). See [doc/management-entrypoint.md](doc/management-entrypoint.md) for details.
+> **Note on Cloudflare Tunnels**: If you get a `502 Bad Gateway` or `403` through a Cloudflare Tunnel, the management allowlist is refusing the address Gateon attributes the request to. Unless `cloudflared`'s address is in `GATEON_TRUSTED_PROXIES`, that is the tunnel's own address, so put it in `GATEON_MANAGEMENT_ALLOWED_IPS`. See [doc/management-entrypoint.md](doc/management-entrypoint.md) for the two ways to set this up.
 
 ## UI (React + Vite + Mantine + Tailwind)
 The UI is automatically built and embedded into the Go binary during the build process. When Gateon is running, the dashboard is accessible on the same port as the gateway (default: `http://localhost:8080`).

@@ -65,11 +65,10 @@ func xdpLoadBalancingUnimplemented(cfg *gateonv1.EbpfConfig) bool {
 // tcUnsupported lists configured features the TC ingress hook cannot enforce.
 //
 // The hook decides on the IP header alone: port knocking mutates per-source
-// state across packets, JA4/JA3 matching needs the TLS ClientHello, and phantom
-// ports and load balancing need XDP_TX/redirect. Falling back from XDP to TC
-// therefore silently narrows what is being enforced, and an operator who called
-// ShunJA4 would go on believing it was in force. Naming the gap at attach time
-// is the difference between a documented trade-off and a hole.
+// state across packets, and phantom ports and load balancing need
+// XDP_TX/redirect. Falling back from XDP to TC therefore silently narrows what
+// is being enforced. Naming the gap at attach time is the difference between a
+// documented trade-off and a hole.
 func tcUnsupported(cfg *gateonv1.EbpfConfig) []string {
 	if cfg == nil {
 		return nil
@@ -80,7 +79,6 @@ func tcUnsupported(cfg *gateonv1.EbpfConfig) []string {
 		name string
 	}{
 		{cfg.GetEnableKnocking(), "enable_knocking"},
-		{cfg.GetXdpJa4Blocklist(), "xdp_ja4_blocklist"},
 		{cfg.GetAfXdpPhantom(), "af_xdp_phantom"},
 		{cfg.GetXdpLoadBalancing(), "xdp_load_balancing"},
 	} {

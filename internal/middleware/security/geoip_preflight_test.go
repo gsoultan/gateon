@@ -59,10 +59,11 @@ func TestGeoIPGlobalDoesNotSkipAPreflight(t *testing.T) {
 }
 
 // TestGeoIPRouteLevelDoesNotSkipAPreflight covers the route-chain copy, which
-// is the one a preflight actually reached: the global geofence runs in the
-// HTTP entrypoint's chain, behind transform.GlobalCORS, but this one sits in
-// the router's chain, which a plaintext smart-TCP entrypoint reaches through
-// BaseHandler with no CORS termination in front of it.
+// is the one a preflight actually reached when this was found: the global
+// geofence ran in the HTTP entrypoint's chain, behind a CORS middleware that
+// answered preflights first (removed since, ADR-0015), but this one sits in the
+// router's chain, which a plaintext smart-TCP entrypoint reached through
+// BaseHandler with nothing in front of it. Now every preflight reaches both.
 //
 // The runtime is built directly with no database. serve refuses an
 // unparseable client address before it consults one, so that refusal is enough

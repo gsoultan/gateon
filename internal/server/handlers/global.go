@@ -16,10 +16,10 @@ import (
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
-	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -45,6 +45,9 @@ func validateDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) error {
 	}
 	if dsn == "" {
 		return errors.New("invalid database configuration")
+	}
+	if err := db.ConfineSQLite(dsn, config.DataDir()); err != nil {
+		return err
 	}
 	conn, _, err := db.Open(dsn)
 	if err != nil {
@@ -83,6 +86,10 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		// audit signing key and every stored password and API token.
 		if !callerMayWrite(r, auth.ResourceGlobal) {
 			gc = api.RedactGlobalSecrets(gc)
+		} else {
+			// A writer sees a referenced secret as its reference, so saving
+			// the page stores the reference back rather than the secret.
+			gc = config.WithSecretReferences(svc.GetGlobals(), gc)
 		}
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
@@ -193,35 +200,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := svc.GetGlobals().Update(r.Context(), &conf); err != nil {
+		// Stored and applied by the code the API's UpdateGlobalConfig runs --
+		// omitted sections kept, the audit key generated, TLS, alerting, IP
+		// reputation, retention, eBPF and the WAF reconfigured, the change
+		// audited. This handler used to store the body and apply a few of
+		// those itself, so an ACME switch, a certificate or a client authority
+		// saved from the dashboard did nothing until a restart.
+		if _, err := svc.UpdateGlobalConfig(r.Context(), &gateonv1.UpdateGlobalConfigRequest{Config: &conf}); err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to update global config")
 			return
-		}
-
-		// Audit Log
-		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "update", "global_config", "Updated global configuration", request.GetClientIP(r, true))
-
-		// Apply settings that require immediate action
-		if conf.Audit != nil {
-			audit.UpdateConfig(conf.Audit)
-		}
-		if conf.Log != nil && conf.Log.PathStatsRetentionDays > 0 {
-			telemetry.ConfigureRetention(int(conf.Log.PathStatsRetentionDays))
-		}
-		if conf.Waf != nil {
-			wafmw.InvalidateWAFCache()
-		}
-		// WAF and advanced-security middlewares are composed into each route's
-		// handler at build time (router.ApplyRouteMiddlewares), so toggling them
-		// only takes effect once the cached route proxies are rebuilt.
-		if (conf.Waf != nil || conf.SecurityAdvanced != nil) && d.InvalidateAllProxies != nil {
-			d.InvalidateAllProxies()
-		}
-		if conf.Geoip != nil && conf.Geoip.Enabled {
-			if conf.Geoip.DbPath != "" {
-				_ = telemetry.InitGeoIP(conf.Geoip.DbPath)
-			}
 		}
 
 		_ = json.NewEncoder(w).Encode(struct {
@@ -474,6 +461,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "missing database configuration")
 			return
 		}
+		// Before anything opens it: see db.ConfineSQLite.
+		if err := db.ConfineSQLite(dsn, config.DataDir()); err != nil {
+			WriteHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		conn, _, err := db.Open(dsn)
 		if err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, "connection failed: "+err.Error())
@@ -486,6 +478,18 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	})
 	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		// Refuse before anything else once setup is done. This path skips
+		// authentication for the life of the process, and the database branch
+		// below writes global config: it used to persist a caller-supplied
+		// authentication and audit database before Setup's own "already
+		// completed" check ran, so on a configured gateway an unauthenticated
+		// request could repoint both at a server it controls -- and the gateway
+		// trusts that server's users on its next start. An unknown setup state
+		// is refused for the reason test-db gives.
+		if setupReq, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{}); err != nil || !setupReq.Required {
+			WriteHTTPError(w, http.StatusForbidden, "setup already completed")
+			return
+		}
 		// Accept extended payload including database settings for first-run wizard
 		type setupBody struct {
 			AdminUsername         string                   `json:"admin_username"`
@@ -651,11 +655,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			switch {
 			case errors.Is(err, auth.ErrAccountLocked):
 				logger.SecurityEvent("auth_2fa_locked", r, "account_locked")
-				audit.Log(r.Context(), req.Id, "2fa_locked", "auth", "Account locked during 2FA", request.GetClientIP(r, true))
+				audit.Log(r.Context(), req.Id, "2fa_locked", "auth", "Account locked during 2FA", request.ClientAddr(r))
 				WriteHTTPError(w, http.StatusTooManyRequests, err.Error())
 			case errors.Is(err, auth.ErrInvalidTwoFactorCode):
 				logger.SecurityEvent("auth_2fa_failure", r, "invalid_2fa_code")
-				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.GetClientIP(r, true))
+				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.ClientAddr(r))
 				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
 			default:
 				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
@@ -723,13 +727,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidCredentials) {
 				logger.SecurityEvent("auth_failure", r, "invalid_credentials")
-				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.GetClientIP(r, true))
+				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.ClientAddr(r))
 			}
 			WriteHTTPError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
 
-		audit.Log(r.Context(), req.Username, "login", "auth", "User logged in", request.GetClientIP(r, true))
+		audit.Log(r.Context(), req.Username, "login", "auth", "User logged in", request.ClientAddr(r))
 
 		if !resp.TwoFactorRequired && !resp.TwoFactorSetupRequired {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
@@ -776,7 +780,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "update", "user", "Updated user: "+req.Username, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "update", "user", "Updated user: "+req.Username, request.ClientAddr(r))
 
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
@@ -833,7 +837,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		// Audit Log
 		userID := auditUser(r)
-		audit.Log(r.Context(), userID, "delete", "user", "Deleted user ID: "+id, request.GetClientIP(r, true))
+		audit.Log(r.Context(), userID, "delete", "user", "Deleted user ID: "+id, request.ClientAddr(r))
 
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
@@ -841,7 +845,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("POST /v1/logout", func(w http.ResponseWriter, r *http.Request) {
 		// Audit Log
 		if claims, _ := callerClaims(r); claims != nil {
-			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.GetClientIP(r, true))
+			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.ClientAddr(r))
 		}
 		middleware.ClearSessionCookie(w, r)
 		w.Header().Set("Content-Type", "application/json")

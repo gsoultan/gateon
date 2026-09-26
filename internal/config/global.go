@@ -6,6 +6,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -39,6 +40,15 @@ type GlobalRegistry struct {
 	// proof-of-work secret, and regenerating it on each load would invalidate
 	// every challenge in flight.
 	defaults *gateonv1.GlobalConfig
+
+	// loadErr is why the file at path exists and did not become the
+	// configuration. See LoadErr.
+	loadErr error
+
+	// refs maps each secret field that was resolved from a reference ($env:,
+	// $vault:, $aws-sm:) to that reference. The live config holds the resolved
+	// value; the file and a writer's view hold the reference. Guarded by mu.
+	refs map[string]string
 }
 
 var (
@@ -130,6 +140,7 @@ func (r *GlobalRegistry) load() {
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
+			r.loadErr = fmt.Errorf("read %s: %w", r.path, err)
 			logger.L.LogError("failed to read global config file", "error", err, "path", r.path)
 		}
 		return
@@ -153,16 +164,24 @@ func (r *GlobalRegistry) load() {
 
 	if strings.HasSuffix(r.path, ".yaml") || strings.HasSuffix(r.path, ".yml") {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
+			r.loadErr = fmt.Errorf("parse %s: %w", r.path, err)
 			logger.L.LogError("failed to unmarshal global config yaml", "error", err, "path", r.path)
 			return
 		}
 	} else {
 		if err := json.Unmarshal(data, cfg); err != nil {
+			r.loadErr = fmt.Errorf("parse %s: %w", r.path, err)
 			logger.L.LogError("failed to unmarshal global config json", "error", err, "path", r.path)
 			return
 		}
 	}
-	decryptSensitiveFields(cfg)
+	refs := secretReferences(cfg)
+	if err := decryptSensitiveFields(cfg); err != nil {
+		r.loadErr = fmt.Errorf("resolve secrets in %s: %w", r.path, err)
+		logger.L.LogError("global config holds a secret that cannot be read", "error", err, "path", r.path)
+		return
+	}
+	r.refs = refs
 	r.config.Store(cfg)
 	r.rebuildCertIndexLocked()
 	logger.L.LogInfo("loaded global config", "path", r.path)
@@ -179,13 +198,35 @@ func (r *GlobalRegistry) rebuildCertIndexLocked() {
 	r.certIndex.Store(&idx)
 }
 
+// LoadErr reports why the global config file exists and was not loaded -- it
+// could not be read, or could not be parsed -- or nil when it was loaded or does
+// not exist. An absent file is the first run, which reaches the setup wizard
+// through it; a present one that failed is not, and the registry is then
+// serving the built-in defaults: the WAF off, the management plane open to
+// every address, no auth database. Startup refuses on it rather than run a
+// configuration nobody chose while the file on disk says otherwise.
+func (r *GlobalRegistry) LoadErr() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.loadErr
+}
+
 func (r *GlobalRegistry) saveLocked() error {
+	// The file holds the operator's configuration, and the registry holds the
+	// defaults it fell back to. Writing would replace the one with the other --
+	// which the startup bootstrap did, filling in the auth block it found
+	// missing -- so that correcting the typo afterwards had nothing left to
+	// correct. Nothing is written over a file that was never read.
+	if r.loadErr != nil {
+		return fmt.Errorf("refusing to overwrite a global config that failed to load: %w", r.loadErr)
+	}
 	cfg := r.config.Load()
 	if cfg == nil {
 		return nil
 	}
 	conf := proto.Clone(cfg).(*gateonv1.GlobalConfig)
 	encryptSensitiveFields(conf)
+	applySecretReferences(conf, r.refs)
 
 	var data []byte
 	var err error
@@ -203,22 +244,39 @@ func (r *GlobalRegistry) saveLocked() error {
 	return nil
 }
 
-func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
+// decryptSensitiveFields decrypts and resolves the secret fields in place. A
+// field that cannot be -- ciphertext without its key, a reference nothing can
+// resolve -- is an error rather than the unusable value it holds: an
+// unresolved database_url used to open a SQLite file named after the
+// reference, and an unresolved PASETO secret signed sessions with it.
+func decryptSensitiveFields(c *gateonv1.GlobalConfig) error {
 	if c == nil {
-		return
+		return nil
+	}
+	var errs []error
+	resolve := func(field string, v *string) {
+		if *v == "" {
+			return
+		}
+		out, err := ResolveSecretStrict(*v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", field, err))
+			return
+		}
+		*v = out
 	}
 	if c.Auth != nil {
-		c.Auth.PasetoSecret = ResolveSecret(c.Auth.PasetoSecret)
-		c.Auth.DatabaseUrl = ResolveSecret(c.Auth.DatabaseUrl)
-		if c.Auth.DatabaseConfig != nil && c.Auth.DatabaseConfig.Password != "" {
-			c.Auth.DatabaseConfig.Password = ResolveSecret(c.Auth.DatabaseConfig.Password)
+		resolve("auth.paseto_secret", &c.Auth.PasetoSecret)
+		resolve("auth.database_url", &c.Auth.DatabaseUrl)
+		if c.Auth.DatabaseConfig != nil {
+			resolve("auth.database_config.password", &c.Auth.DatabaseConfig.Password)
 		}
 	}
 	if c.Geoip != nil {
-		c.Geoip.MaxmindLicenseKey = ResolveSecret(c.Geoip.MaxmindLicenseKey)
+		resolve("geoip.maxmind_license_key", &c.Geoip.MaxmindLicenseKey)
 	}
 	if c.SecurityAdvanced != nil && c.SecurityAdvanced.Pow != nil {
-		c.SecurityAdvanced.Pow.Secret = ResolveSecret(c.SecurityAdvanced.Pow.Secret)
+		resolve("security_advanced.pow.secret", &c.SecurityAdvanced.Pow.Secret)
 		// Older installs persisted the shipped literal into global.json before
 		// the default became per-install. Re-key them on load rather than
 		// leaving a published HMAC key in service; an operator who never
@@ -230,6 +288,7 @@ func decryptSensitiveFields(c *gateonv1.GlobalConfig) {
 				"action", "rotated", "reason", "placeholder_secret")
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // DefaultPowSecret is the literal that shipped as the proof-of-work secret
@@ -294,9 +353,17 @@ func (r *GlobalRegistry) Subscribe(fn ConfigChangeFunc) {
 func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error {
 	r.mu.Lock()
 	oldCfg := r.config.Load()
+	refs, err := r.adoptSecretsLocked(conf, oldCfg)
+	if err != nil {
+		r.mu.Unlock()
+		return err
+	}
+	oldRefs := r.refs
+	r.refs = refs
 	r.config.Store(conf)
 	r.rebuildCertIndexLocked()
 	if err := r.saveLocked(); err != nil {
+		r.refs = oldRefs
 		r.config.Store(oldCfg)
 		r.rebuildCertIndexLocked()
 		r.mu.Unlock()
@@ -351,10 +418,143 @@ var trustCloudflareFromEnv = sync.OnceValue(func() bool {
 	return v == "true" || v == "1" || v == "yes"
 })
 
+// EffectiveTrustCloudflare reports whether CF-Connecting-IP is trusted when a
+// request arrives from Cloudflare's own addresses. See TrustCloudflare.
 func EffectiveTrustCloudflare() bool {
-	gc := GetGlobalConfig()
-	if gc != nil && gc.Waf != nil {
-		return gc.Waf.TrustCloudflareHeaders
+	return TrustCloudflare(GetGlobalConfig().GetWaf())
+}
+
+// TrustCloudflare reports whether GATEON_TRUST_CLOUDFLARE_HEADERS or the WAF
+// config turns Cloudflare trust on; either is enough. The variable used to be
+// read only when the global config had no WAF section, which NewGlobalRegistry
+// always creates, so the setting the README and the Cloudflare Tunnel guide
+// prescribe did nothing and every client looked like a Cloudflare edge address.
+// Trust never extends past Cloudflare's published ranges and the configured
+// trusted proxies (request.IsTrusted), so a client reaching the gateway
+// directly cannot use the header to choose its own address.
+func TrustCloudflare(w *gateonv1.WafConfig) bool {
+	return trustCloudflareFromEnv() || w.GetTrustCloudflareHeaders()
+}
+
+// secretField is one global-config field that may hold a secret. ptr finds it
+// in a config, or returns nil when its section is absent.
+type secretField struct {
+	name string
+	ptr  func(*gateonv1.GlobalConfig) *string
+}
+
+var secretFields = []secretField{
+	{"auth.paseto_secret", func(c *gateonv1.GlobalConfig) *string {
+		if c.GetAuth() == nil {
+			return nil
+		}
+		return &c.Auth.PasetoSecret
+	}},
+	{"auth.database_url", func(c *gateonv1.GlobalConfig) *string {
+		if c.GetAuth() == nil {
+			return nil
+		}
+		return &c.Auth.DatabaseUrl
+	}},
+	{"auth.database_config.password", func(c *gateonv1.GlobalConfig) *string {
+		if c.GetAuth().GetDatabaseConfig() == nil {
+			return nil
+		}
+		return &c.Auth.DatabaseConfig.Password
+	}},
+	{"geoip.maxmind_license_key", func(c *gateonv1.GlobalConfig) *string {
+		if c.GetGeoip() == nil {
+			return nil
+		}
+		return &c.Geoip.MaxmindLicenseKey
+	}},
+	{"security_advanced.pow.secret", func(c *gateonv1.GlobalConfig) *string {
+		if c.GetSecurityAdvanced().GetPow() == nil {
+			return nil
+		}
+		return &c.SecurityAdvanced.Pow.Secret
+	}},
+}
+
+// secretReferences returns the secret fields of c that hold a reference.
+func secretReferences(c *gateonv1.GlobalConfig) map[string]string {
+	refs := map[string]string{}
+	for _, f := range secretFields {
+		if p := f.ptr(c); p != nil && IsSecretReference(*p) {
+			refs[f.name] = *p
+		}
 	}
-	return trustCloudflareFromEnv()
+	return refs
+}
+
+// applySecretReferences writes each reference back over its field in c.
+func applySecretReferences(c *gateonv1.GlobalConfig, refs map[string]string) {
+	for _, f := range secretFields {
+		if ref, ok := refs[f.name]; ok {
+			if p := f.ptr(c); p != nil {
+				*p = ref
+			}
+		}
+	}
+}
+
+// adoptSecretsLocked resolves the secret references an update carries, in
+// place, and returns which fields came from references. A field holding
+// exactly the value the live config resolved from a reference keeps that
+// reference: that is what a client that read the resolved config sends back,
+// and what KeepOmittedSections copies into an update from the live config.
+//
+// Update used to store the body as it came. The Settings page read the
+// resolved secrets and saved them back, so after one unrelated change
+// global.json carried the database password and the signing key in place of
+// their $env: references -- and a reference sent back as it was read became the
+// live secret verbatim.
+func (r *GlobalRegistry) adoptSecretsLocked(conf, live *gateonv1.GlobalConfig) (map[string]string, error) {
+	refs := map[string]string{}
+	var errs []error
+	for _, f := range secretFields {
+		p := f.ptr(conf)
+		if p == nil || *p == "" {
+			continue
+		}
+		switch {
+		case IsSecretReference(*p):
+			resolved, err := ResolveSecretStrict(*p)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", f.name, err))
+				continue
+			}
+			refs[f.name] = *p
+			*p = resolved
+		case r.refs[f.name] != "" && live != nil && f.ptr(live) != nil && *f.ptr(live) == *p:
+			refs[f.name] = r.refs[f.name]
+		}
+	}
+	return refs, errors.Join(errs...)
+}
+
+// WithSecretReferences returns c with every secret that was resolved from a
+// reference shown as that reference, which is what a caller who may write the
+// config should read and send back. c itself is never modified.
+func (r *GlobalRegistry) WithSecretReferences(c *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if c == nil || len(r.refs) == 0 {
+		return c
+	}
+	out := proto.Clone(c).(*gateonv1.GlobalConfig)
+	applySecretReferences(out, r.refs)
+	return out
+}
+
+// WithSecretReferences returns c as store would show it to a writer: secrets
+// that came from references shown as the references. A store that does not
+// track references returns c unchanged.
+func WithSecretReferences(store GlobalConfigStore, c *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
+	if sr, ok := store.(interface {
+		WithSecretReferences(*gateonv1.GlobalConfig) *gateonv1.GlobalConfig
+	}); ok {
+		return sr.WithSecretReferences(c)
+	}
+	return c
 }

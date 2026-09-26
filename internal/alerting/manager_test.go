@@ -62,8 +62,6 @@ func (s *stubEbpf) SetAdaptiveRateLimit(string, time.Duration) error { return ni
 func (s *stubEbpf) ClearAdaptiveRateLimit(string) error              { return nil }
 func (s *stubEbpf) ApplyRLFeedback(string, float64) error            { return nil }
 func (s *stubEbpf) SetRLFeedbackHandler(func(string, float64))       {}
-func (s *stubEbpf) ShunJA4(string) error                             { return nil }
-func (s *stubEbpf) UnshunJA4(string) error                           { return nil }
 func (s *stubEbpf) RegisterPhantomPort(uint32) error                 { return nil }
 func (s *stubEbpf) UnregisterPhantomPort(uint32) error               { return nil }
 func (s *stubEbpf) GetTopIPs(int) ([]ebpf.IPStat, error)             { return nil, nil }

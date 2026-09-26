@@ -168,51 +168,109 @@ func (r *AWSSecretResolver) Resolve(s string) (string, error) {
 	return "", fmt.Errorf("key %s not found in AWS secret %s", key, name)
 }
 
-// ChainSecretResolver resolves secrets by trying multiple resolvers.
-type ChainSecretResolver struct {
-	resolvers []SecretResolver
+// secretReferencePrefixes are the value prefixes that name a secret held
+// elsewhere rather than being the secret.
+var secretReferencePrefixes = []string{"$env:", "$vault:", "$aws-sm:"}
+
+// IsSecretReference reports whether s names a secret held elsewhere.
+func IsSecretReference(s string) bool {
+	for _, p := range secretReferencePrefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
+// ChainSecretResolver resolves secret references by trying multiple resolvers.
+type ChainSecretResolver struct {
+	resolvers []SecretResolver
+	// unavailable records why a resolver could not be built, so a reference
+	// that needed it fails with the reason rather than with "not found".
+	unavailable []error
+}
+
+// Resolve returns s unchanged when it is not a secret reference, and the
+// secret it names when it is. A reference no resolver can answer is an error.
+//
+// It used to hand back the reference itself, with a nil error: with Vault
+// unreachable, "$vault:secret/data/api#jwt" became the JWT signing secret, so a
+// token HMAC-signed with that literal string was accepted, and an unresolved
+// database_url opened a SQLite file named after the reference. A secret that
+// cannot be read must stop what depends on it, not be replaced by its name.
 func (r *ChainSecretResolver) Resolve(s string) (string, error) {
+	if !IsSecretReference(s) {
+		return s, nil
+	}
+	errs := append([]error(nil), r.unavailable...)
 	for _, res := range r.resolvers {
+		if res == nil {
+			continue
+		}
 		resolved, err := res.Resolve(s)
-		if err == nil && resolved != s {
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if resolved != s {
 			return resolved, nil
 		}
 	}
-	return s, nil
+	if len(errs) == 0 {
+		return "", fmt.Errorf("no secret resolver handles %q", referenceKind(s))
+	}
+	return "", fmt.Errorf("resolve %s reference: %w", referenceKind(s), errors.Join(errs...))
+}
+
+// referenceKind is the prefix of a reference, which is safe to log where the
+// rest of it -- a path or variable name -- may not be.
+func referenceKind(s string) string {
+	for _, p := range secretReferencePrefixes {
+		if strings.HasPrefix(s, p) {
+			return p
+		}
+	}
+	return "unknown"
+}
+
+// newDefaultResolver builds the chain from the resolvers this process can
+// construct. A constructor that fails -- a malformed VAULT_SKIP_VERIFY, an
+// unreadable AWS profile -- used to leave a nil in the chain, and the first
+// reference to reach it was a nil-interface call at boot.
+func newDefaultResolver() *ChainSecretResolver {
+	chain := &ChainSecretResolver{resolvers: []SecretResolver{&EnvSecretResolver{}}}
+	if v, err := NewVaultSecretResolver(); err == nil && v != nil {
+		chain.resolvers = append(chain.resolvers, v)
+	} else if err != nil {
+		chain.unavailable = append(chain.unavailable, fmt.Errorf("vault resolver unavailable: %w", err))
+	}
+	if a, err := NewAWSSecretResolver(); err == nil && a != nil {
+		chain.resolvers = append(chain.resolvers, a)
+	} else if err != nil {
+		chain.unavailable = append(chain.unavailable, fmt.Errorf("aws secrets manager resolver unavailable: %w", err))
+	}
+	return chain
 }
 
 // DefaultResolver is the default secret resolver.
-var DefaultResolver SecretResolver = &ChainSecretResolver{
-	resolvers: []SecretResolver{
-		&EnvSecretResolver{},
-		func() SecretResolver {
-			v, _ := NewVaultSecretResolver()
-			if v != nil {
-				return v
-			}
-			return nil
-		}(),
-		func() SecretResolver {
-			a, _ := NewAWSSecretResolver()
-			if a != nil {
-				return a
-			}
-			return nil
-		}(),
-	},
-}
+var DefaultResolver SecretResolver = newDefaultResolver()
 
-// ResolveSecret resolves s using DecryptIfEncrypted and the DefaultResolver.
-func ResolveSecret(s string) string {
-	s = DecryptIfEncrypted(s)
-	if DefaultResolver != nil {
-		if resolved, err := DefaultResolver.Resolve(s); err == nil {
-			return resolved
-		}
+// ResolveSecretStrict decrypts s when it is encrypted and resolves it when it
+// is a secret reference. It never returns an unusable value in place of the
+// secret: ciphertext that cannot be decrypted and a reference that cannot be
+// resolved are errors.
+func ResolveSecretStrict(s string) (string, error) {
+	plain, err := decryptStrict(s)
+	if err != nil {
+		return "", err
 	}
-	return s
+	if !IsSecretReference(plain) {
+		return plain, nil
+	}
+	if DefaultResolver == nil {
+		return "", fmt.Errorf("no secret resolver is configured for %q", referenceKind(plain))
+	}
+	return DefaultResolver.Resolve(plain)
 }
 
 // GenerateRandomSecret generates a random hex string of the specified length in characters.
@@ -271,6 +329,29 @@ func EncryptIfKeySet(s string) string {
 		return s
 	}
 	return encPrefix + base64.RawStdEncoding.EncodeToString(out)
+}
+
+// decryptStrict decrypts s when it carries the "enc:" prefix and returns
+// anything else unchanged. Ciphertext it cannot decrypt -- no key, a short key,
+// the wrong key -- is an error, where DecryptIfEncrypted hands the ciphertext
+// back to be used as the secret.
+func decryptStrict(s string) (string, error) {
+	if !strings.HasPrefix(s, encPrefix) {
+		return s, nil
+	}
+	key := encryptionKey()
+	if key == nil {
+		return "", fmt.Errorf("an encrypted secret needs GATEON_ENCRYPTION_KEY: %w", ErrEncryptionKeyMissing)
+	}
+	b, err := base64.RawStdEncoding.DecodeString(s[len(encPrefix):])
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrDecryptFailed, err)
+	}
+	dec, err := decrypt(b, key)
+	if err != nil {
+		return "", fmt.Errorf("%w (is GATEON_ENCRYPTION_KEY the key it was written with?): %w", ErrDecryptFailed, err)
+	}
+	return string(dec), nil
 }
 
 // DecryptIfEncrypted decrypts s if it has the "enc:" prefix.

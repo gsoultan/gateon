@@ -21,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	redigo "github.com/redis/go-redis/v9"
@@ -166,10 +167,12 @@ func (rl *LocalRateLimiter) getLimiter(key string, reputation float64) *rate.Lim
 	now := time.Now().Unix()
 	s := rl.getShard(key)
 
-	// Adjust base rate and burst based on reputation (0-100)
-	// Neutral reputation (50) gives 100% of the configured rate.
-	// High trust (100) gives 200%, and malicious (0) gives minimum.
-	factor := reputation / 50.0
+	// Scale the configured rate and burst by reputation (0-100). A client with
+	// no history scores 100, so it gets exactly the configured limit and a
+	// penalised one gets proportionally less. This divided by 50 on the belief
+	// that neutral was 50, which gave every well-behaved client twice the rate
+	// and burst the operator configured.
+	factor := reputation / 100.0
 	adjRate := rl.rate * rate.Limit(factor)
 	adjBurst := int32(float64(rl.burst) * factor)
 	if adjBurst < 1 {
@@ -249,7 +252,9 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					if rl.rate > 0 {
 						interval = time.Duration(float64(time.Second) / float64(rl.rate))
 					}
-					_ = rl.ebpf.SetAdaptiveRateLimit(key, interval)
+					// The kernel limits by address; key is a tenant or a
+					// fingerprint under those strategies, never an address.
+					_ = rl.ebpf.SetAdaptiveRateLimit(request.GetClientIP(r, config.EffectiveTrustCloudflare()), interval)
 				}
 				if !kind.ShouldSkipMetrics(r) {
 					routeID := kind.GetRouteName(r)
@@ -287,6 +292,12 @@ type RedisRateLimiter struct {
 	client redis.Client
 	rate   int // requests per minute
 	burst  int
+	// namespace is the route and middleware this limiter belongs to. Every
+	// window lives in one Redis shared by every route and instance, and the
+	// key used to be the client alone, so requests to one route counted
+	// against every other route's limit, and a route with two limiters
+	// counted each request twice.
+	namespace string
 }
 
 func NewRedisRateLimiter(client redis.Client, r int, b int) *RedisRateLimiter {
@@ -319,7 +330,10 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			sb.Reset()
 			defer sbPool.Put(sb)
 
-			sb.WriteString("ratelimit:v2:")
+			sb.WriteString("ratelimit:v3:")
+			sb.WriteString(strconv.Itoa(len(rl.namespace)))
+			sb.WriteByte(':')
+			sb.WriteString(rl.namespace)
 			sb.WriteString(key)
 			redisKey := sb.String()
 
@@ -411,20 +425,36 @@ func PerIPWithTrust(trustCloudflare bool) func(*http.Request) string {
 	}
 }
 
-// PerTenant returns the tenant ID from context.
+// PerTenant returns the tenant ID from context, or the client's address when
+// the request carries none. It used to return "" then, and an empty key skips
+// limiting: every unauthenticated request -- and every request when the limit
+// sits before the auth middleware -- was never limited at all.
 func PerTenant(r *http.Request) string {
-	if tid, ok := r.Context().Value(auth.TenantIDContextKey).(string); ok {
+	if tid, ok := r.Context().Value(auth.TenantIDContextKey).(string); ok && tid != "" {
 		return tid
 	}
-	return ""
+	return "ip:" + request.GetClientIP(r, config.EffectiveTrustCloudflare())
 }
 
-// PerJA4H returns the JA4H fingerprint of the request.
+// PerJA4H keys on the request's JA4H fingerprint within the client's network.
+//
+// JA4H identifies a browser build, not a client. Keyed on it alone, every
+// client running the same browser shared one bucket, so one of them could use
+// up the limit for all the rest -- a denial of service cheaper than being
+// limited. The network scope is the one reputation uses (ADR 0011), and a
+// request with no fingerprint falls back to its address instead of to the
+// empty key, which skips limiting.
 func PerJA4H(r *http.Request) string {
-	return telemetry.GetCachedJA4H(r)
+	return fingerprintInNetwork(telemetry.GetCachedJA4H(r), r)
 }
 
-// PerFingerprint returns the detailed client fingerprint hash.
+// PerFingerprint keys on the detailed client fingerprint within the client's
+// network, for the reason PerJA4H gives: the identity reputation itself is
+// keyed on (ADR 0011), already composed and cached on the request.
 func PerFingerprint(r *http.Request) string {
-	return telemetry.GetFingerprintHash(r)
+	return telemetry.GetReputationID(r)
+}
+
+func fingerprintInNetwork(fingerprint string, r *http.Request) string {
+	return repid.For(fingerprint, request.GetClientIP(r, config.EffectiveTrustCloudflare()))
 }

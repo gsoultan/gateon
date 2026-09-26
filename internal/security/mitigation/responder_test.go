@@ -22,14 +22,6 @@ func (f *fakeShun) ShunIP(ip string) error {
 	return nil
 }
 
-func (f *fakeShun) ShunJA4(ja4 string) error {
-	if f.err != nil {
-		return f.err
-	}
-	f.shunned = append(f.shunned, ja4)
-	return nil
-}
-
 func newTestResponder(cfg Config, shun Shunner) (*Responder, *[]string) {
 	var degraded []string
 	r := New(cfg, Deps{
@@ -168,5 +160,36 @@ func TestResponder_DisabledIsNoop(t *testing.T) {
 	}
 	if len(*degraded) != 0 {
 		t.Errorf("disabled responder must not degrade, got %v", *degraded)
+	}
+}
+
+// TestResponder_CriticalWithJA4ShunsOnlyTheAddress: the kernel cannot match a
+// JA4. The XDP program keys its lookup on the first 32 bytes of the
+// ClientHello -- the version and the per-connection random -- while ShunJA4
+// inserted a hash of the fingerprint string, so no entry could ever match, and
+// ShunJA4 logged "Shunning JA4 fingerprint at XDP level" and returned nil. The
+// fingerprint is enforced at L7 instead, through the reputation the responder
+// degrades for it on each source network.
+func TestResponder_CriticalWithJA4ShunsOnlyTheAddress(t *testing.T) {
+	shun := &fakeShun{}
+	r, degraded := newTestResponder(Config{Enabled: true, AutoShun: true}, shun)
+	got := r.Handle(correlation.Incident{
+		SourceIP:    "198.51.100.10",
+		Fingerprint: "t13d1516h2_8daaf6152771_e5627efa2ab1_ja4h",
+		JA4:         "t13d1516h2_8daaf6152771_e5627efa2ab1",
+		Severity:    "critical",
+		SignalTypes: []string{"exploit_scan", "sql_injection", "brute_force_attempt"},
+	})
+	if got != ActionShun {
+		t.Fatalf("action = %q, want %q", got, ActionShun)
+	}
+	if len(shun.shunned) != 1 || shun.shunned[0] != "198.51.100.10" {
+		t.Errorf("kernel shuns = %v, want only the address: nothing in the kernel "+
+			"can match a JA4", shun.shunned)
+	}
+	want := "t13d1516h2_8daaf6152771_e5627efa2ab1_ja4h@198.51.100.10"
+	if len(*degraded) != 1 || (*degraded)[0] != want {
+		t.Errorf("reputation degraded for %v, want [%s]: that is where the "+
+			"fingerprint is enforced", *degraded, want)
 	}
 }

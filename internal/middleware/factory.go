@@ -6,7 +6,9 @@ package middleware
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -32,6 +34,7 @@ type Factory struct {
 	reputation  *reputation.IPReputationStore
 	dataDir     string
 	routeType   string // trusted route type (e.g. "grpc"); empty = treat as plain HTTP
+	routeKey    string // the route's ID, for per-route state; see kind.RouteStateKey
 }
 
 func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore, dataDir string) *Factory {
@@ -45,6 +48,13 @@ func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, 
 // so this is safe to set before building the chain.
 func (f *Factory) SetRouteType(t string) {
 	f.routeType = t
+}
+
+// SetRouteKey records the ID of the route this factory builds middlewares for,
+// which they keep per-route state under (kind.RouteStateKey). Set before the
+// chain is built, like SetRouteType.
+func (f *Factory) SetRouteKey(id string) {
+	f.routeKey = id
 }
 
 // IsGRPCRoute reports whether this factory builds for a gRPC-typed route.
@@ -81,13 +91,29 @@ func (f *Factory) Validate(m *gateonv1.Middleware) error {
 func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, error) {
 	cfg := make(map[string]string)
 	for k, v := range m.Config {
-		cfg[k] = config.ResolveSecret(v)
+		// A value that cannot be resolved refuses the build rather than
+		// running on the reference's own text: with Vault down a JWT route
+		// used to accept tokens HMAC-signed with "$vault:...". The router
+		// serves a refusal for a security middleware that cannot be built,
+		// and retries it, so the route recovers when the secret is readable.
+		resolved, err := config.ResolveSecretStrict(v)
+		if err != nil {
+			return nil, fmt.Errorf("middleware %q config key %q: %w", m.Id, k, err)
+		}
+		cfg[k] = resolved
 	}
 	if routeID != "" {
-		if _, ok := cfg["route_id"]; !ok {
-			cfg["route_id"] = routeID
+		if _, ok := cfg[kind.RouteIDKey]; !ok {
+			cfg[kind.RouteIDKey] = routeID
 		}
 	}
+	// Set unconditionally: a middleware's own config must not be able to
+	// name the state it shares.
+	delete(cfg, kind.RouteStateKey)
+	if f.routeKey != "" {
+		cfg[kind.RouteStateKey] = f.routeKey
+	}
+	cfg[kind.MiddlewareIDKey] = m.Id
 
 	switch m.Type {
 	case "ratelimit":
@@ -97,10 +123,11 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "headers":
 		return transform.NewHeaders(cfg)
 	case "forwardedheaders":
-		return ForwardedHeaders(ForwardedHeadersConfig{
-			Proto:              cfg["proto"],
-			TrustForwardHeader: parseBoolStrict(cfg["trust_forward_header"], false),
-		}), nil
+		trust, err := kind.ParseBoolStrict(cfg["trust_forward_header"], false)
+		if err != nil {
+			return nil, kind.CfgError("trust_forward_header", cfg["trust_forward_header"], err)
+		}
+		return ForwardedHeaders(ForwardedHeadersConfig{Proto: cfg["proto"], TrustForwardHeader: trust}), nil
 	case "rewrite":
 		return transform.NewRewrite(cfg)
 	case "addprefix":
@@ -115,9 +142,9 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "replacepathregex":
 		return transform.ReplacePathRegex(cfg["pattern"], cfg["replacement"])
 	case "accesslog":
-		return AccessLog(cmp.Or(cfg["route"], cfg["route_id"])), nil
+		return namedRouteView(m.Type, cfg["route"]), nil
 	case "metrics":
-		return Metrics(cmp.Or(cfg["route"], cfg["route_id"])), nil
+		return namedRouteView(m.Type, cfg["route"]), nil
 	case "compress":
 		return traffic.NewCompress(cfg)
 	case "errors":
@@ -179,16 +206,21 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "hmac":
 		return f.createHMAC(cfg)
 	case "deception":
-		return security.Deception(security.DeceptionConfig{
+		bools := kind.NewBoolFields(cfg)
+		dc := security.DeceptionConfig{
 			HoneypotPaths:        kind.ParseListStrict(cmp.Or(cfg["honeypot_paths"], cfg["paths"])),
-			InjectInvisibleLinks: parseBoolStrict(cmp.Or(cfg["inject_invisible_links"], "true"), true),
+			InjectInvisibleLinks: bools.Get("inject_invisible_links", true),
 			InvisibleLinkPaths:   kind.ParseListStrict(cmp.Or(cfg["invisible_link_paths"], cfg["honey_links"])),
 			HoneyForms:           kind.ParseListStrict(cfg["honey_forms"]),
 			RouteID:              routeID,
-			EnableTrollResponse:  parseBoolStrict(cfg["enable_troll_response"], false),
+			EnableTrollResponse:  bools.Get("enable_troll_response", false),
 			CanaryHeader:         cfg["canary_header"],
 			CanaryToken:          cfg["canary_token"],
-		}), nil
+		}
+		if err := bools.Err(); err != nil {
+			return nil, err
+		}
+		return security.Deception(dc), nil
 	case "tarpit":
 		baseDelay, err := kind.ParseDurationStrict(cfg["base_delay"], 0)
 		if err != nil {
@@ -246,32 +278,13 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		}
 		return identity.TlsBinding(cookieName), nil
 	case "security_headers":
-		return SecurityHeaders(SecurityHeadersConfig{Preset: cfg["preset"]}), nil
+		preset, err := kind.ParseSecurityHeadersPreset(cfg["preset"])
+		if err != nil {
+			return nil, kind.CfgError("preset", cfg["preset"], err)
+		}
+		return SecurityHeaders(SecurityHeadersConfig{Preset: preset}), nil
 	case "circuit_breaker":
-		errorThreshold, err := kind.ParseFloatStrict(cfg["error_threshold"], 0)
-		if err != nil {
-			return nil, kind.CfgError("error_threshold", cfg["error_threshold"], err)
-		}
-		minRequestsInt, err := kind.ParseIntStrict(cfg["min_requests"], 0)
-		if err != nil {
-			return nil, kind.CfgError("min_requests", cfg["min_requests"], err)
-		}
-		minRequests := int64(minRequestsInt)
-		windowSize, err := kind.ParseDurationStrict(cfg["window_size"], 0)
-		if err != nil {
-			return nil, kind.CfgError("window_size", cfg["window_size"], err)
-		}
-		sleepWindow, err := kind.ParseDurationStrict(cfg["sleep_window"], 0)
-		if err != nil {
-			return nil, kind.CfgError("sleep_window", cfg["sleep_window"], err)
-		}
-		return CircuitBreaker(CircuitBreakerConfig{
-			ErrorThreshold: errorThreshold,
-			MinRequests:    minRequests,
-			WindowSize:     windowSize,
-			SleepWindow:    sleepWindow,
-			RouteID:        routeID,
-		}), nil
+		return circuitBreakerFromConfig(cfg, routeID, cfg[kind.RouteStateKey])
 	case "wasm":
 		return transform.Wasm(context.Background(), m.WasmBlob)
 	default:
@@ -279,9 +292,28 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	}
 }
 
+// namedRouteView is an attached "accesslog" or "metrics" middleware. Every
+// route already logs and measures itself under its own name (router.go), so
+// one attached without a name of its own only counted and logged each request
+// a second time; it passes the request through. With a name it is a separate
+// view -- a set of routes measured together, say -- and records under it.
+func namedRouteView(typ, name string) Middleware {
+	switch {
+	case name == "":
+		return func(next http.Handler) http.Handler { return next }
+	case typ == "accesslog":
+		return AccessLog(name)
+	default:
+		return Metrics(name)
+	}
+}
+
 func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 	origins := kind.ParseListStrict(cfg["allowed_origins"])
-	allowCredentials := parseBoolStrict(cfg["allow_credentials"], false)
+	allowCredentials, err := kind.ParseBoolStrict(cfg["allow_credentials"], false)
+	if err != nil {
+		return nil, kind.CfgError("allow_credentials", cfg["allow_credentials"], err)
+	}
 	maxAge, err := kind.ParseIntStrict(cfg["max_age"], 0)
 	if err != nil {
 		return nil, kind.CfgError("max_age", cfg["max_age"], err)
@@ -299,6 +331,9 @@ func (f *Factory) createGRPCWeb(cfg map[string]string) (Middleware, error) {
 		cfg["preset"] = "grpc-web"
 	}
 
+	if err := transform.CheckCORSPreset(cfg["preset"]); err != nil {
+		return nil, kind.CfgError("preset", cfg["preset"], err)
+	}
 	corsCfg = transform.ApplyCORSPreset(cfg, corsCfg)
 
 	// If after applying presets and config we still have no origins, return default permissive
@@ -317,7 +352,7 @@ func (f *Factory) createOIDCProxy(cfg map[string]string) (Middleware, error) {
 		ClientSecret: cfg["client_secret"],
 		RedirectURL:  cfg["redirect_url"],
 		Scopes:       scopes,
-		RouteID:      cfg["_route_id"],
+		RouteID:      cfg[kind.RouteIDKey],
 	})
 }
 
@@ -352,19 +387,32 @@ func (f *Factory) createFileSecurity(cfg map[string]string) (Middleware, error) 
 	}
 	maxScanBytes := int64(maxScanBytesInt)
 
-	return security.FileSecurity(security.FileSecurityConfig{
-		EnableClamAV:           parseBoolStrict(cfg["enable_clamav"], false),
+	bools := kind.NewBoolFields(cfg)
+	fsc := security.FileSecurityConfig{
+		EnableClamAV:           bools.Get("enable_clamav", false),
 		ClamAVAddr:             clamavAddr,
 		BlockedMimeTypes:       kind.ParseListStrict(cfg["blocked_mime_types"]),
 		AllowedMimeTypes:       kind.ParseListStrict(cfg["allowed_mime_types"]),
 		MaxFileSize:            maxFileSize,
 		ScanTimeout:            scanTimeout,
-		FailOpen:               parseBoolStrict(cfg["fail_open"], false),
+		FailOpen:               bools.Get("fail_open", false),
 		MaxConcurrentScans:     maxConcurrentScans,
 		MaxScanBytes:           maxScanBytes,
-		EnableSignatureScan:    parseBoolStrict(cfg["enable_signature_scan"], true),
+		EnableSignatureScan:    bools.Get("enable_signature_scan", true),
 		SignatureRulesPath:     cfg["signature_rules_path"],
 		SignatureBlockSeverity: yara.Severity(cfg["signature_block_severity"]),
-		RouteID:                cfg["_route_id"],
-	}), nil
+		RouteID:                cfg[kind.RouteIDKey],
+	}
+	if err := bools.Err(); err != nil {
+		return nil, err
+	}
+	// With ClamAV on and no scanner to ask, the scan was skipped and every
+	// upload came back clean: a route that read as virus-scanned scanned
+	// nothing. Refused instead, which takes the route out of service with
+	// the key named until there is an address.
+	if fsc.EnableClamAV && fsc.ClamAVAddr == "" {
+		return nil, kind.CfgError("clamav_addr", "",
+			errors.New("enable_clamav is on, and neither this middleware nor the global WAF config names a ClamAV address"))
+	}
+	return security.FileSecurity(fsc), nil
 }

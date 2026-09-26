@@ -1556,6 +1556,46 @@ func init() {
 		_, err := db.Exec(query)
 		return err
 	})
+
+	// Service health-check thresholds (proto fields 16 and 17) had no column.
+	// Once setup has run every service is kept here, so the thresholds an
+	// operator set were used until the next restart and then silently read
+	// back as zero -- which health_check.go treats as "use the defaults".
+	Register(63, "services_health_thresholds", func(db *sql.DB, dialect Dialect) error {
+		if dialect.Driver == DriverPostgres {
+			return addColumns(db, dialect,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS unhealthy_threshold INTEGER NOT NULL DEFAULT 0`,
+				`ALTER TABLE services ADD COLUMN IF NOT EXISTS healthy_threshold INTEGER NOT NULL DEFAULT 0`)
+		}
+		return addColumns(db, dialect,
+			`ALTER TABLE services ADD COLUMN unhealthy_threshold INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE services ADD COLUMN healthy_threshold INTEGER NOT NULL DEFAULT 0`)
+	})
+
+	// A WASM middleware's module (proto field wasm_blob) had no column, so after
+	// a restart the middleware came back with no module and every route using
+	// it refused to build.
+	Register(64, "middlewares_wasm_blob", func(db *sql.DB, dialect Dialect) error {
+		if dialect.Driver == DriverPostgres {
+			return addColumns(db, dialect, `ALTER TABLE middlewares ADD COLUMN IF NOT EXISTS wasm_blob BYTEA`)
+		}
+		return addColumns(db, dialect, `ALTER TABLE middlewares ADD COLUMN wasm_blob BLOB`)
+	})
+}
+
+// addColumns runs ADD COLUMN statements. Postgres's carry IF NOT EXISTS;
+// SQLite has no such clause for columns, so its "duplicate column name" error
+// is taken as the same answer.
+func addColumns(db *sql.DB, dialect Dialect, statements ...string) error {
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			if dialect.Driver == DriverSQLite && strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				continue
+			}
+			return fmt.Errorf("%s: %w", stmt, err)
+		}
+	}
+	return nil
 }
 
 // seededWAFRuleIDs are the rules gateon used to seed into waf_rules and now

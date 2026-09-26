@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
+	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/reputation"
@@ -68,10 +69,19 @@ func parseRule(rule string) Matcher {
 		return Matcher{}
 	}
 
-	// Basic negation support
+	// Basic negation support. The '!' chain is peeled in a loop, not by
+	// recursing once per '!': a rule is operator input as long as the API body
+	// allows, and a few hundred thousand frames exhaust the goroutine stack,
+	// which is a fatal error no recover can catch -- on the request path and
+	// inside the TLS handshake, where this is parsed.
 	if strings.HasPrefix(rule, "!") {
-		m := parseRule(strings.TrimSpace(rule[1:]))
-		m.negated = !m.negated
+		negated := false
+		for strings.HasPrefix(rule, "!") {
+			negated = !negated
+			rule = strings.TrimSpace(rule[1:])
+		}
+		m := parseRule(rule)
+		m.negated = negated
 		return m
 	}
 
@@ -484,6 +494,37 @@ func RouteHasMiddlewareType(ctx context.Context, rt *gateonv1.Route, mwStore con
 	return false
 }
 
+// RouteReplacesBackendCORS reports whether a route answers CORS itself, so
+// the proxy strips the backend's CORS headers rather than send two policies:
+// a grpcweb middleware, or a cors middleware that is not the backend preset.
+// A backend-preset route leaves CORS to the backend and must not strip it.
+func RouteReplacesBackendCORS(ctx context.Context, rt *gateonv1.Route, mwStore config.MiddlewareStore) bool {
+	if mwStore == nil {
+		return false
+	}
+	for _, mid := range rt.Middlewares {
+		mwConf, ok := mwStore.Get(ctx, strings.TrimSpace(mid))
+		if !ok || mwConf == nil {
+			continue
+		}
+		switch strings.ToLower(mwConf.Type) {
+		case "grpcweb":
+			return true
+		case "cors":
+			if !transform.IsBackendCORS(mwConf.Config) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RouteLabel is the name a route's middlewares, metrics and per-route state
+// are keyed by: its name, or its ID when it has none.
+func RouteLabel(rt *gateonv1.Route) string {
+	return cmp.Or(rt.Name, rt.Id)
+}
+
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
 func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore) http.Handler {
 	var chain []middleware.Middleware
@@ -491,8 +532,11 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Record the trusted route type so the WAF applies gRPC transport relaxations
 	// only to operator-declared gRPC routes, not based on a spoofable request header.
 	mwFactory.SetRouteType(rt.Type)
+	// Per-route state is kept under the ID, which is unique; the label below
+	// is only what a person reads.
+	mwFactory.SetRouteKey(rt.Id)
 
-	routeLabel := cmp.Or(rt.Name, rt.Id)
+	routeLabel := RouteLabel(rt)
 	ctx := context.Background()
 
 	// 1. Infrastructure Middlewares (Recovery, Logging & Monitoring)
@@ -502,6 +546,11 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		middleware.AccessLog(routeLabel),
 		middleware.MetricsWithService(routeLabel, rt.ServiceId),
 	)
+	// Ahead of every middleware that could set them: the headers a service
+	// chooses its backend client certificate by are the gateway's alone.
+	if guard := clientIdentityGuard(h); guard != nil {
+		chain = append(chain, guard)
+	}
 
 	// 2. Identify and resolve CORS/gRPC-Web early.
 	// We MUST place these outer to security blockers (IP shunning, WAF, etc.)
@@ -592,14 +641,7 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Cosmetic middlewares are exempt and only warn: a route that loses a
 	// header rewrite renders slightly wrong, which is not worth an outage.
 	if len(missingSecurity) > 0 {
-		refused := append([]string(nil), missingSecurity...)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logger.L.LogError("refusing request: route is missing security middleware",
-				"route", routeLabel, "missing", strings.Join(refused, ","),
-				"path", r.URL.Path)
-			http.Error(w, "Service Unavailable: route configuration incomplete",
-				http.StatusServiceUnavailable)
-		})
+		return newRefusedChain(routeLabel, missingSecurity)
 	}
 
 	if hasCORS {
@@ -608,6 +650,12 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		// untouched here: the security middlewares below key their metrics-skip
 		// behavior off an unset name.
 		chain = append(chain, withMatchedRoute(rt), corsMiddleware)
+	} else {
+		// No policy of the route's own: the backend's, or the permissive
+		// default where the backend sends none. Outer to the security
+		// middlewares for the same reason a route's own policy is, so a
+		// refusal made on this route stays readable by the page that caused it.
+		chain = append(chain, transform.DefaultCORS())
 	}
 
 	// 3. Infrastructure Blockers & Lifecycle (inner to CORS)

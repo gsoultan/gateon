@@ -154,7 +154,7 @@ export function MiddlewareConfigEditor({
             placeholder="404, 500, 503"
             value={splitTags(config.status_codes)}
             onChange={(val) => updateConfig("status_codes", joinTags(val))}
-            description="HTTP status codes that should trigger custom error pages."
+            description="HTTP status codes that should trigger custom error pages. Each page below is the HTML served as the response body, not a file path."
             clearable
           />
           <KeyValueList
@@ -163,9 +163,9 @@ export function MiddlewareConfigEditor({
             title="Custom Error Pages"
             prefix="page_"
             placeholderKey="404"
-            placeholderValue="/path/to/404.html"
+            placeholderValue="<h1>Page not found</h1>"
             keyLabel="Status Code"
-            valueLabel="Page Path"
+            valueLabel="Page HTML"
           />
         </Stack>
       );
@@ -174,9 +174,10 @@ export function MiddlewareConfigEditor({
     case "metrics":
       return (
         <TextInput
-          label="Route Name Override (Optional)"
-          placeholder="custom-name"
-          value={config.route || config.route_id || ""}
+          label="Record Under Name"
+          description="Every route is already logged and measured under its own name, so with this empty the middleware does nothing. Set a name to also record the routes it is attached to under that name."
+          placeholder="checkout"
+          value={config.route || ""}
           onChange={(e) => updateConfig("route", e.currentTarget.value)}
         />
       );

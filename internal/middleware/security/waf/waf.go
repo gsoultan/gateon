@@ -384,7 +384,7 @@ func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Req
 	// 5. Adaptive WAF reputation scoring
 	repScore := t.resolveReputation(rs, testRep)
 	r.Header.Set("X-Gateon-Reputation", getReputationString(repScore))
-	r.Header.Set("X-Gateon-JA4", telemetry.GetCachedJA4H(r))
+	r.Header.Set(kind.HeaderGatewayJA4, telemetry.GetCachedJA4H(r))
 
 	// git's smart-HTTP bodies are packfiles: binary, routinely larger
 	// than the body limit, and refusing one as uninspectable would break
@@ -465,7 +465,7 @@ func stripGatewayHeaders(r *http.Request) string {
 	h.Del("X-Gateon-Anomaly-Score")
 	h.Del("X-Gateon-Threat-Type")
 	h.Del("X-Gateon-WAF-Matched")
-	h.Del("X-Gateon-JA4")
+	h.Del(kind.HeaderGatewayJA4)
 	return testRep
 }
 
@@ -491,7 +491,7 @@ func (t *wafRuntime) applyCloudflareTrust(r *http.Request) {
 	if !t.cfg.TrustCloudflare {
 		return
 	}
-	clientIP := request.GetClientIP(r, true)
+	clientIP := request.ClientAddr(r)
 	if last := strings.LastIndexByte(r.RemoteAddr, ':'); last != -1 && !strings.HasSuffix(r.RemoteAddr, "]") {
 		r.RemoteAddr = clientIP + r.RemoteAddr[last:]
 	} else {
@@ -733,7 +733,7 @@ func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r
 	restoreAcceptEncoding(r.Header, prevAE, hadAE)
 }
 func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
-	clientIP := request.GetClientIP(r, true)
+	clientIP := request.ClientAddr(r)
 	category := "general"
 	lowerDetails := strings.ToLower(details)
 	recommendation := "Review your request for suspicious patterns. If this is legitimate traffic, consider adjusting the Fast-Path sensitivity."
@@ -890,7 +890,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		return strings.TrimSpace(strings.ToLower(v)) == "false"
 	}
 
-	routeID := cmp.Or(cfg["route"], cfg["route_id"])
+	routeID := cmp.Or(cfg["route"], cfg[kind.RouteIDKey])
 	if routeID == "" {
 		routeID = "unknown"
 	}
@@ -919,6 +919,12 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 	failOpen := strings.TrimSpace(strings.ToLower(cfg["fail_open"])) == "true" ||
 		strings.TrimSpace(strings.ToLower(cfg["fail_open"])) == "1"
 
+	// DLP runs in the response phase, so asking for it is asking for that
+	// phase -- as NewGlobalWAF already has it. The route path set EnableDLP
+	// alone, which loaded no response rules and buffered no response bodies:
+	// a route WAF configured to stop card numbers leaking passed every one.
+	enableDLP := strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true"
+
 	return WAFConfig{
 		ParanoiaLevel:               pl,
 		TrustCloudflare:             request.ParseTrustCloudflare(cfg["trust_cloudflare_headers"]),
@@ -937,7 +943,8 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		EnableDOSProtection:         strings.TrimSpace(strings.ToLower(cfg["dos_protection"])) == "true",
 		EnableMalwareDetection:      strings.TrimSpace(strings.ToLower(cfg["malware_detection"])) == "true",
 		EnableRansomwareDetection:   strings.TrimSpace(strings.ToLower(cfg["ransomware_detection"])) == "true",
-		EnableDLP:                   strings.TrimSpace(strings.ToLower(cfg["dlp"])) == "true",
+		EnableDLP:                   enableDLP,
+		EnableResponseInspection:    enableDLP,
 		EnableBodyEntropy:           strings.TrimSpace(strings.ToLower(cfg["enable_body_entropy"])) == "true",
 		EnableFingerprintValidation: strings.TrimSpace(strings.ToLower(cfg["enable_fingerprint_validation"])) == "true",
 		EnableConfidenceScoring:     strings.TrimSpace(strings.ToLower(cfg["enable_confidence_scoring"])) != "false", // Default true

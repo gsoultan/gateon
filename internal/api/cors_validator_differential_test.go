@@ -172,3 +172,18 @@ func TestValidateCORSWarnsOnCredentialsWithWildcardOrigin(t *testing.T) {
 		t.Fatalf("operator must still be warned that browsers reject credentials with '*': %v", resp.Suggestions)
 	}
 }
+
+// A route whose cors middleware is the backend preset does not decide CORS at
+// all -- the backend's headers are what the browser reads -- so Diagnostics
+// says that, rather than simulating a policy that does not exist.
+func TestValidateCORSSaysABackendPresetRouteIsTheBackendsCall(t *testing.T) {
+	resp := validateCORSProbe(t, corsProbe{
+		name:   "backend preset",
+		config: map[string]string{"preset": "backend"},
+		origin: "https://anyone.example", method: http.MethodPost,
+		headers: map[string]string{corsRequestMethod: http.MethodPost},
+	})
+	if !strings.Contains(resp.Message, "backend") || strings.Contains(resp.Message, "invalid") {
+		t.Fatalf("Diagnostics said %q for a route that leaves CORS to its backend", resp.Message)
+	}
+}

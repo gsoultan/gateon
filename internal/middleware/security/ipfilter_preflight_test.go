@@ -17,10 +17,10 @@ import (
 // itself for anything matching that shape, which made a network allowlist
 // something a caller could opt out of by naming a preflight.
 //
-// On the HTTP entrypoint the skip was unreachable, because transform.GlobalCORS
-// terminates preflights before anything else runs. But GlobalCORS has exactly
-// one call site, and neither the management listener nor the smart-TCP
-// listener includes it. Measured against the real chain:
+// On the HTTP entrypoint the skip was unreachable at the time, because a CORS
+// middleware there answered preflights before anything else ran (removed
+// since, ADR-0015). Neither the management listener nor the smart-TCP listener
+// had it. Measured against the real chain:
 //
 //	plain GET, blocked IP      status=403  reached_backend=false
 //	OPTIONS + CORS headers     status=418  reached_backend=true

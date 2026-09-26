@@ -24,9 +24,9 @@ const (
 	INSERT INTO path_stats (day, host, path, req_count, latency_sum_s, bytes_total, updated_at)
 	VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	ON CONFLICT(day, host, path) DO UPDATE SET
-	  req_count = req_count + excluded.req_count,
-	  latency_sum_s = latency_sum_s + excluded.latency_sum_s,
-	  bytes_total = bytes_total + excluded.bytes_total,
+	  req_count = path_stats.req_count + excluded.req_count,
+	  latency_sum_s = path_stats.latency_sum_s + excluded.latency_sum_s,
+	  bytes_total = path_stats.bytes_total + excluded.bytes_total,
 	  updated_at = CURRENT_TIMESTAMP;`
 
 	QueryPrunePathStats = "DELETE FROM path_stats WHERE day < ?"
@@ -44,9 +44,9 @@ const (
 	INSERT INTO domain_stats (day, hour, domain, req_count, latency_sum_s, bytes_total, updated_at)
 	VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	ON CONFLICT(day, hour, domain) DO UPDATE SET
-	  req_count = req_count + excluded.req_count,
-	  latency_sum_s = latency_sum_s + excluded.latency_sum_s,
-	  bytes_total = bytes_total + excluded.bytes_total,
+	  req_count = domain_stats.req_count + excluded.req_count,
+	  latency_sum_s = domain_stats.latency_sum_s + excluded.latency_sum_s,
+	  bytes_total = domain_stats.bytes_total + excluded.bytes_total,
 	  updated_at = CURRENT_TIMESTAMP;`
 
 	QueryPruneDomainStats = "DELETE FROM domain_stats WHERE day < ?"

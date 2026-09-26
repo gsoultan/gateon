@@ -4,14 +4,10 @@
 package security
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -80,13 +76,11 @@ func TestServeJSChallengeEscapesRequestURI(t *testing.T) {
 
 // challengeToken mints a token the middleware will accept, so the test can
 // reach the redirect that only runs after a challenge is solved.
-func challengeToken(t *testing.T, secret, payload, ua, ip string) string {
+func challengeToken(t *testing.T, secret, ua, ip string) string {
 	t.Helper()
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = io.WriteString(mac, payload)
-	_, _ = io.WriteString(mac, ua)
-	_, _ = io.WriteString(mac, ip)
-	return payload + "." + hex.EncodeToString(mac.Sum(nil))
+	// A seed old enough to redeem: the submission refuses one younger than
+	// minSolveTime.
+	return seedFor(secret, ua, ip, time.Now().Add(-3*time.Second))
 }
 
 // TestChallengeSubmissionCannotRedirectOffOrigin is the regression test for the
@@ -128,8 +122,7 @@ func TestChallengeSubmissionCannotRedirectOffOrigin(t *testing.T) {
 			// The payload is parsed as a Unix timestamp and rejected if it is
 			// older than the challenge window, so it has to be a real one.
 			clientIP := req.RemoteAddr[:strings.LastIndex(req.RemoteAddr, ":")]
-			ts := strconv.FormatInt(time.Now().Unix(), 10)
-			form.Set("token", challengeToken(t, secret, ts, ua, clientIP))
+			form.Set("token", challengeToken(t, secret, ua, clientIP))
 			req.Body = io.NopCloser(strings.NewReader(form.Encode()))
 			req.ContentLength = int64(len(form.Encode()))
 

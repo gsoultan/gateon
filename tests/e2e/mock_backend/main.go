@@ -110,5 +110,5 @@ func main() {
 	}
 	fmt.Printf("Mock backend listening on :%s\n", port)
 	// #nosec G114 -- dev mock backend; not the shipped server.
-	_ = http.ListenAndServe(":"+port, nil)
+	_ = http.ListenAndServe("127.0.0.1:"+port, nil)
 }

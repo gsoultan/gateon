@@ -40,23 +40,24 @@ export default defineConfig({
           }
         ]
       },
+      // The worker is scoped to "/" on the management origin, which also serves
+      // the API, /healthz, Prometheus' /metrics and any proxied application a
+      // route shadows onto the management entrypoint. What it answers from its
+      // own cache never reaches the server, so it caches hashed static assets
+      // and nothing else:
+      //
+      // - No API responses. A stale-while-revalidate rule over /v1/config* only
+      //   ever matched the config export, so a backup taken after a change was
+      //   the previous export, and the full configuration, credentials
+      //   included, stayed readable from the page after logout.
+      // - No HTML and no navigation fallback. The fallback answered every page
+      //   load on the origin with its install-time index.html — /healthz
+      //   rendered the dashboard — and that copy carried one CSP nonce that
+      //   every page load then reused. The server already answers unknown paths
+      //   with the dashboard, with a fresh nonce each time.
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        // Stale-While-Revalidate for configuration files ensures immediate transition
-        // without loading spinners, while keeping the data fresh in the background.
-        runtimeCaching: [
-          {
-            urlPattern: /\/v1\/config.*/i,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'gateon-config-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 // 24 hours
-              }
-            }
-          }
-        ]
+        globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
+        navigateFallback: null,
       }
     }),
     ...(analyze

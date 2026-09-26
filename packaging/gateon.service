@@ -19,9 +19,14 @@ Environment=GLOBAL_CONFIG_FILE=/etc/gateon/global.json
 # Override with: systemctl edit gateon
 # Environment=PORT=8080
 
-# State and config directories (auto-created with correct permissions)
+# State and config directories. systemd creates them if missing and re-applies
+# the *DirectoryMode on every start, defaulting to 0755 -- which made the
+# database and global.json's directory listable and traversable by every local
+# account. Keep these in step with internal/install (a test holds them there).
 StateDirectory=gateon
+StateDirectoryMode=0700
 ConfigurationDirectory=gateon
+ConfigurationDirectoryMode=0750
 
 # eBPF/XDP offloading: loading and attaching the embedded XDP program needs the
 # BPF capabilities and an unbounded locked-memory limit for BPF map allocation

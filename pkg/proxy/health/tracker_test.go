@@ -221,3 +221,26 @@ func TestHealthThresholdIsSafeUnderConcurrentChecks(t *testing.T) {
 		<-done
 	}
 }
+
+// TestSeededTargetClearsTheThresholdLikeAnyOther: a target seeded from the
+// tracker before it must not have its next result taken as a first -- that is
+// the difference between inheriting a conclusion and discarding it.
+func TestSeededTargetClearsTheThresholdLikeAnyOther(t *testing.T) {
+	tr := New(2, 2)
+	tr.Seed("http://down", false)
+	if alive, changed := tr.Record("http://down", true); alive || changed {
+		t.Fatalf("one good check after a seeded failure: alive=%v changed=%v, want still down", alive, changed)
+	}
+	if alive, changed := tr.Record("http://down", true); !alive || !changed {
+		t.Fatalf("second good check: alive=%v changed=%v, want back up", alive, changed)
+	}
+
+	tr.Record("http://checked", false)
+	tr.Seed("http://checked", true) // history already there wins
+	if snap := tr.Snapshot(); len(snap) != 2 || snap["http://checked"] || !snap["http://down"] {
+		t.Fatalf("snapshot = %v, want checked=false, down=true (now recovered)", snap)
+	}
+	if _, ok := New(0, 0).Snapshot()["http://never"]; ok {
+		t.Fatal("a target never checked appeared in the snapshot")
+	}
+}

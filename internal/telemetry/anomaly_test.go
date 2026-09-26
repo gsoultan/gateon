@@ -5,7 +5,9 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -69,4 +71,46 @@ func TestAnomalyDetector_Local(t *testing.T) {
 
 	// Since runChecks writes to security threats (which is a global or store),
 	// we could verify if threats were recorded, but for now PASS if no crash.
+}
+
+// Start guarded check_interval_seconds against zero only, then handed it to
+// time.NewTicker, which panics on any non-positive duration. The management API
+// stores a negative value as given, and the security supervisor runs Start on
+// its own goroutine with no recover each time the global config is saved, so
+// the save that set it crashed the gateway, and so did every boot after it.
+//
+// Run inside a synctest bubble so "Start is running its loop" is observable
+// without timing: once every goroutine is durably blocked, Start has either
+// returned or is parked on its ticker. A Start that panics fails, and so does
+// one that returns without detecting anything.
+func TestAnomalyDetectorStartSurvivesNonPositiveInterval(t *testing.T) {
+	for _, secs := range []int32{0, -1, -86400} {
+		t.Run(fmt.Sprint(secs), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ad, err := NewAnomalyDetector(&gateonv1.AnomalyDetectionConfig{
+					Enabled:              true,
+					CheckIntervalSeconds: secs,
+				}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				ctx, cancel := context.WithCancel(context.Background())
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					ad.Start(ctx)
+				}()
+
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("Start returned while its context was live: the detection loop is not running")
+				default:
+				}
+				cancel()
+				<-done
+			})
+		})
+	}
 }

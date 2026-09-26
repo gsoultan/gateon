@@ -5,6 +5,8 @@ package proxy
 
 import (
 	"sync/atomic"
+
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // CircuitState represents circuit breaker state for a target.
@@ -44,5 +46,19 @@ func targetStatsFromState(t *targetState) TargetStats {
 		AvgLatencyMs: avgUs / 1000,
 		AvgLatencyUs: avgUs,
 		ActiveConn:   atomic.LoadInt32(&t.activeConn),
+	}
+}
+
+// TallyTargets adds stats to c. It is the one place the dashboard's target
+// counts are classified, shared by /v1/diag/agg-stats and the realtime
+// snapshot so the two cannot disagree about what a target is.
+func TallyTargets(stats []TargetStats, c *telemetry.TargetHealthCounts) {
+	for _, s := range stats {
+		c.Total++
+		if s.Alive {
+			c.Healthy++
+		} else {
+			c.Down++
+		}
 	}
 }

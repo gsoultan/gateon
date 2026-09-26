@@ -107,10 +107,15 @@ func toL4Addr(url string) string {
 	if url == "" {
 		return ""
 	}
-	// L4 targets use host:port. Strip http(s):// prefix if present (legacy).
+	// L4 targets use host:port. Strip a scheme prefix if present. udp:// belongs
+	// here beside tcp://: it is the natural scheme for a UDP backend and the one
+	// the config schema invites, so omitting it made every udp:// target resolve
+	// to zero backends -- the UDP listener bound with an empty pool and dropped
+	// every packet in silence, while the identical address under tcp:// worked.
 	url = strings.TrimPrefix(url, "http://")
 	url = strings.TrimPrefix(url, "https://")
 	url = strings.TrimPrefix(url, "tcp://")
+	url = strings.TrimPrefix(url, "udp://")
 	if url == "" {
 		return ""
 	}
@@ -129,10 +134,7 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 	if len(addrs) == 0 {
 		return nil
 	}
-	lb := svc.LoadBalancerPolicy
-	if lb == "" {
-		lb = "round_robin"
-	}
+	lb := config.CanonicalLBPolicy(svc.LoadBalancerPolicy)
 	interval := int(svc.L4HealthCheckIntervalMs)
 	if interval <= 0 {
 		interval = 10000

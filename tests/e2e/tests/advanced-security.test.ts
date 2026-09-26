@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { execSync } from 'child_process';
 
 /**
@@ -18,7 +18,7 @@ import { execSync } from 'child_process';
  * races the response it is meant to observe, and would hang whenever the config
  * arrived first.
  */
-async function gotoSettingsLoaded(page: import('@playwright/test').Page) {
+async function gotoSettingsLoaded(page: Page) {
   // Not fatal if it never arrives. This runs in afterEach as well as beforeEach,
   // and a cleanup that throws masks the real failure with its own — the run
   // reports "Cleanup failed: waitForResponse timeout" and says nothing about the
@@ -32,6 +32,27 @@ async function gotoSettingsLoaded(page: import('@playwright/test').Page) {
   // The response has landed; give React the tick it needs to commit the state
   // derived from it before anything reads a control.
   await page.waitForTimeout(500);
+}
+
+/**
+ * Click a button that saves the global configuration, and return once the
+ * gateway has accepted it.
+ *
+ * This used to confirm a save with `getByText(/Saved/i)`, which the "Unsaved
+ * Changes" bar at the foot of the page matches on its own. That bar is always
+ * rendered, so the check passed whether the save worked or not, and a rejected
+ * save would have surfaced later as a missing 403, far from its cause. It only
+ * ever failed as a strict-mode violation, once other copy on the page said
+ * "saved". The PUT's status is the fact; the message is what the operator sees.
+ */
+async function saveGlobalConfig(page: Page, button: Locator) {
+  const response = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/v1/global' && r.request().method() === 'PUT',
+  );
+  await button.click();
+  const saved = await response;
+  expect(saved.ok(), `PUT /v1/global answered ${saved.status()}`).toBe(true);
+  await expect(page.getByText('Configuration successfully updated!')).toBeVisible();
 }
 
 test.describe('Advanced Security & Global WAF E2E', () => {
@@ -61,8 +82,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
                 await wafSwitchLabel.click();
                 const saveWafBtn = page.getByRole('button', { name: 'Save WAF Settings' });
                 if (await saveWafBtn.isVisible()) {
-                    await saveWafBtn.click();
-                    await expect(page.getByText(/Saved/i)).toBeVisible();
+                    await saveGlobalConfig(page, saveWafBtn);
                 }
             }
         }
@@ -94,8 +114,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
         if (needsSave) {
             const saveGlobalBtn = page.getByRole('button', { name: 'Save Global Configuration' });
             if (await saveGlobalBtn.isVisible()) {
-                await saveGlobalBtn.click();
-                await expect(page.getByText(/Saved/i)).toBeVisible();
+                await saveGlobalConfig(page, saveGlobalBtn);
             }
         }
     } catch (e) {
@@ -129,8 +148,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
 
     const saveBtn = page.getByRole('button', { name: 'Save WAF Settings' });
     await saveBtn.scrollIntoViewIfNeeded();
-    await saveBtn.click();
-    await expect(page.getByText(/Saved/i)).toBeVisible();
+    await saveGlobalConfig(page, saveBtn);
 
     // 2. Verify Global WAF blocks attack on ANY route
     await new Promise(r => setTimeout(r, 2000));
@@ -162,8 +180,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
 
     const saveBtn = page.getByRole('button', { name: 'Save Global Configuration' });
     await saveBtn.scrollIntoViewIfNeeded();
-    await saveBtn.click();
-    await expect(page.getByText(/Saved/i)).toBeVisible();
+    await saveGlobalConfig(page, saveBtn);
 
     // 2. Verify Honeypot path is blocked/intercepted
     // Wait for config reload
@@ -174,8 +191,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
 
     // 3. Cleanup: Disable Deception
     await deceptionSwitchLabel.click();
-    await saveBtn.click();
-    await expect(page.getByText(/Saved/i)).toBeVisible();
+    await saveGlobalConfig(page, saveBtn);
   });
 
   test('Advanced Protection - Tarpit', async ({ page, request }) => {
@@ -191,8 +207,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
     
     const saveBtn = page.getByRole('button', { name: 'Save Global Configuration' });
     await saveBtn.scrollIntoViewIfNeeded();
-    await saveBtn.click();
-    await expect(page.getByText(/Saved/i)).toBeVisible();
+    await saveGlobalConfig(page, saveBtn);
 
     // Verify it doesn't break normal traffic
     const normalResp = await request.get('http://localhost:8081/test');
@@ -200,7 +215,6 @@ test.describe('Advanced Security & Global WAF E2E', () => {
 
     // Cleanup: Disable Tarpit
     await tarpitSwitchLabel.click();
-    await saveBtn.click();
-    await expect(page.getByText(/Saved/i)).toBeVisible();
+    await saveGlobalConfig(page, saveBtn);
   });
 });

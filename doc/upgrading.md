@@ -9,7 +9,317 @@ here after the fact.
 
 ---
 
-## Unreleased
+## v2.7.0
+
+### Routes saved from the dashboard may be serving on every entrypoint — **check each route**
+
+The dashboard sent a route's entrypoints as `entryPoints`; the gateway reads
+`entrypoints`. Every route saved from the dashboard was stored with no
+entrypoint restriction, and a route with none serves on **every** entrypoint —
+so a route meant only for an internal listener was reachable on the public
+one. The dashboard now sends the right key, but routes saved before this
+release still have nothing stored. **What to do:** open each route whose
+entrypoints matter and save it again, or check `entrypoints` in the API.
+
+### Settings that were silently guessed are now refused — **a route may answer 503**
+
+Several classes of configuration that used to run on a value nobody chose now
+refuse the build, and a route whose security middleware or limit cannot be
+built answers 503 and logs which one:
+
+- A secret reference (`$env:`, `$vault:`, …) that cannot be resolved used to
+  *become* the secret — an HS256 JWT secret of `$vault:…` was accepted. It now
+  refuses the middleware, or startup for global settings.
+- A boolean middleware setting strconv cannot read (`"yes"`, `"on"`, `"maybe"`)
+  used to read as its default. Accepted spellings are `true`/`false`/`1`/`0`/
+  `t`/`f` in any case; the dashboard only ever writes `true` and `false`.
+- Rate limits, in-flight limits, body-size buffering and WASM were served
+  *without* when they failed to build. They now fail closed with the other
+  boundaries.
+- Circuit breaker `error_threshold` outside (0, 1], `min_requests` below 1
+  and non-positive windows, a `security_headers` preset that is not one of
+  `legacy`, `recommended`, `strict` or `none`, and `file_security` with
+  `enable_clamav` on and no ClamAV address anywhere (it scanned nothing).
+
+**Who is affected:** only configurations with such a value, which were not
+doing what they said. The log line names the middleware and key.
+
+### Proxied pages no longer get the dashboard's security headers — **attach `security_headers` where you relied on them**
+
+Every HTTP entrypoint applied the dashboard's *recommended* header preset to
+every response it served, so a proxied page that sent no CSP of its own got the
+gateway's: `script-src 'self'` (inline and CDN scripts blocked), fonts and
+images from its own origin only, `form-action 'self'` (a login form posting to
+an identity provider blocked), `frame-ancestors 'none'`, plus HSTS with
+`includeSubDomains` pinning every subdomain to HTTPS for a year. Web
+applications with any third-party asset broke behind the gateway. Proxied
+responses now carry the headers their backend sends and no others; the
+dashboard and management API keep their own. **What to do:** a route that
+wants gateway-added headers attaches a `security_headers` middleware and picks
+a preset — *legacy* for the low-risk set, *recommended* or *strict* for a CSP
+you have checked against the application.
+
+### Rate limits apply as configured — **effective limits halve**
+
+The limit was scaled by reputation/50 on the belief that a neutral score was
+50; a client with no history scores 100, so every well-behaved client got
+twice the configured rate and burst. The login limiter (5 a minute) was 10.
+The `ja4h` and `fingerprint` strategies are now scoped to the client's
+network, and `tenant` falls back to the client address for a request with no
+tenant instead of not limiting it. **What to do:** if you tuned a limit by
+observation, it may now be half what you expect.
+
+### Response body rewrites start applying — **check every `transform` middleware with a response search**
+
+The transform middleware's response rewrite never applied to proxied traffic:
+the reverse proxy flushes after every write, and the middleware took any flush
+as a stream and passed the body through untouched. With a content-type filter
+set, a GET was skipped before its response was even seen. Rewrites configured
+long ago, and never observed working, now take effect. The backend is also
+asked for plain bytes on such routes (no `Accept-Encoding`), so a compress
+middleware in front does the compressing. Error responses, streams (SSE, gRPC)
+and encodings the gateway cannot decode are still passed through untouched.
+
+### `GATEON_TRUST_CLOUDFLARE_HEADERS` now works — **an allowlist of Cloudflare addresses stops matching**
+
+The variable was ignored whenever the config file had a WAF section, which it
+always does, so every client behind Cloudflare appeared as a Cloudflare edge
+address. Requests from Cloudflare's ranges are now attributed to
+`CF-Connecting-IP`. **Who is affected:** an install that set the variable and,
+seeing edge addresses anyway, allowlisted Cloudflare ranges in
+`GATEON_MANAGEMENT_ALLOWED_IPS` or an IP filter — list client addresses
+instead. A Cloudflare Tunnel is unaffected unless its address is in
+`GATEON_TRUSTED_PROXIES`; see [management-entrypoint.md](management-entrypoint.md).
+
+### A route's own WAF inspects responses — **may start refusing responses**
+
+A route WAF with `dlp=true` never turned on the response phase, so it passed
+every leak; and a route with its own WAF skips the global one, so it lost the
+global WAF's response DLP. Route WAFs now inspect responses when DLP is on,
+and inherit the global WAF's DLP (its flag or the enterprise tier) unless the
+route sets `dlp=false`. Expect the response-phase cost on those routes.
+
+### JA4 fingerprints are the specification's — **fingerprint-keyed state resets**
+
+GREASE values were hashed in, so Chrome's JA4 changed on nearly every
+connection, and the format matched nothing else that computes JA4. Reputation
+scores, mitigations and threat records keyed on the old values stop matching
+and age out. `ebpf.xdp_ja4_blocklist` is removed (field 12 is reserved): the
+kernel lookup compared the ClientHello's random bytes with a hash of the
+fingerprint and never matched. Fingerprints are enforced at L7.
+
+### Kubernetes routes follow their objects — **routes that lingered are removed on the first sync**
+
+- A path or match removed from an Ingress or HTTPRoute now removes its route.
+  Sync used to only add and update, so a removed path kept routing to its old
+  backend until the whole object was deleted; after upgrading, the first sync
+  of each object (within the 30-second resync) removes what it no longer asks
+  for.
+- An HTTPRoute with several hostnames now routes each of them. Its rule was
+  ``Host(`a`, `b`)``, which the router read as one literal host that no request
+  carries, so such a route served nothing.
+- HTTPRoute method and exact-header matches are now enforced. They were
+  dropped, so a route meant for requests carrying a header took every request
+  on its path — expect such routes to match less. Regular-expression header
+  and query matches, which the rule language cannot express, skip the match
+  and log it rather than widen the route. A rule with no matches routes
+  everything under `/`, as the Gateway API defines; it produced no route.
+- With the chart's `watchNamespace`, the controller now lists only that
+  namespace (`GATEON_K8S_WATCH_NAMESPACE`). It listed every namespace, which
+  the namespaced Role refused, so a namespace-scoped install synced nothing.
+
+### A client can no longer choose the certificate the gateway presents to a backend — **set the match header on the route**
+
+A service whose `tls_client_config` selects its client identity `BY_HEADER`
+read the header from the client's request, so a client that sent the header
+chose the identity the gateway authenticated to the backend as. The match
+headers are now the gateway's: a client's copy is removed when the route is
+entered, and only the route's own middlewares — a claim mapping, forward-auth's
+`auth_response_headers`, a `headers` rule — can set one. If something in front
+of the gateway set the header, set it on the route instead. The backend no
+longer receives the client's copy either.
+
+Also fixed in the same feature: `BY_HOST` chooses by the host the request was
+routed on (it read `X-Forwarded-Host`); identities without an `id` no longer
+share one certificate; WebSocket and other upgrades present the selected
+certificate (they presented none). See ADR-0014.
+
+### CORS is decided per route — **a backend's own CORS headers now reach the browser**
+
+The HTTP entrypoint answered every CORS preflight itself, before a route was
+chosen, with a permissive policy that never allows credentials, and added
+`Access-Control-Allow-Origin` to every response. It no longer does (ADR-0015):
+
+- A route's `cors` middleware now receives its preflights, so a policy that
+  allows credentials works for requests that need a preflight. Origins it
+  refuses are refused on the preflight too.
+- On a route **without** a `cors` middleware, preflights and responses go to
+  the backend. Its own CORS headers are sent to the browser as it wrote them —
+  they used to go out beside the gateway's as a second
+  `Access-Control-Allow-Origin`, which browsers reject. Where its answer
+  carries no CORS headers, the gateway supplies the same permissive,
+  credential-free default as before.
+- That default cannot tell a backend that does not do CORS from one that
+  refused an origin by leaving the header off, so it grants such an origin
+  non-credentialed access, as before. **To refuse origins, attach a `cors`
+  middleware** -- with your allowlist, or, when the backend enforces its own,
+  with `preset: backend`, which leaves CORS entirely to the backend: nothing
+  answered, added or stripped.
+- A `cors` or `grpcweb` middleware whose `preset` names no preset is refused.
+  It was ignored, and the empty lists it left allowed every origin, so a
+  misspelt `restricted` allowed anyone. Check stored middlewares for typos.
+- Refusals made before a route is chosen — IP or user mitigation, the global
+  GeoIP block and honeypot, the connection limit — no longer carry CORS
+  headers; browsers show them as CORS errors.
+- `management.cors` now answers preflights to the management API on every
+  entrypoint that serves it.
+
+### Route names are unique, and per-route state is kept per route — **rename routes that share a name**
+
+- Saving a route whose name another route already has is refused (the API
+  answers 400; config import imports the first and reports the rest). Routes
+  that already share a name keep working, and the gateway logs a warning
+  naming them once: their metrics, access logs and threat records are
+  reported together until all but one is renamed.
+- Circuit breakers and Redis cache entries were kept per route *name*, so two
+  routes with the same name shared a breaker (one failing backend opened the
+  other route's circuit) and answered from each other's cached responses.
+  They are now kept per route ID. Redis cache keys change, so the Redis cache
+  starts empty after upgrading.
+- The Redis rate limiter kept one window per client for every route and every
+  rate-limit middleware, so traffic to one route counted against another's
+  limit. Windows are now per route and middleware; each route gets its
+  configured limit, and the old windows are discarded.
+- Routes generated from Kubernetes Ingress paths and HTTPRoute matches get
+  names of their own (`k8s/<ns>/<ingress>/<rule>/<path>`,
+  `k8s-hr/<ns>/<route>/<rule>/<match>[/<host>]`); they shared their rule's
+  name. Metrics and dashboards keyed by the old names need updating.
+
+### TLS settings saved from the dashboard apply without a restart
+
+Saving settings from the dashboard (`PUT /v1/global`) stored them and applied
+almost nothing: it skipped what the API's `UpdateGlobalConfig` applies. It now
+runs the same code, so TLS, alerting, IP reputation, retention, eBPF port
+knocking and a generated audit signing key all apply when saved, and the audit
+entry records the caller's address.
+
+For TLS specifically:
+
+- Turning ACME **off** takes effect: the startup TLS config had ACME's
+  certificate source fixed into it, so ACME kept answering until a restart.
+- Turning ACME **on** also offers `acme-tls/1`, so TLS-ALPN-01 validation
+  works, and domains added to `tls.domains` are authorised at once.
+- The minimum and maximum TLS version, the cipher suites and the
+  client-certificate mode apply to the next handshake.
+- A route that names its own certificates is served them even where global
+  ACME covers its host; ACME answered first. With ACME on and certificates
+  configured too, a host ACME does not cover is served a configured
+  certificate instead of failing the handshake.
+- Changing the ACME **email or CA server** applies to the next certificate
+  ordered, and certificates already issued are renewed with the new settings.
+  The previous ACME manager is retired rather than dropped: its scheduled
+  renewals cannot be cancelled, so it is cut off from its CA instead. An
+  existing ACME account keeps the contact it registered with; the CA does not
+  update it.
+
+### One access log line per request, with the client's address
+
+On an entrypoint with access logging on, every routed request was logged
+twice: once by its route (`route=<route name>`) and again by the entrypoint
+(`route=gateon-<entrypoint>`). The route's line is now the only one; the
+entrypoint logs only requests no route took (404s, refusals made before
+routing). Anything counting requests from access logs counted double.
+
+Each line also carries `client`, the client's address as the entrypoint
+resolved it under your trusted-proxy settings. `remote_addr` is still the TCP
+peer, which behind a load balancer is the balancer.
+
+### Behaviour that now does what it was configured to do
+
+- **Plain HTTP on a TCP entrypoint:** event streams and WebSockets were cut
+  at the entrypoint's write timeout (15 seconds by default); they now run as
+  on an HTTP entrypoint, and the timeouts are read per request, so a change
+  applies without a restart. Cleartext HTTP/2 -- gRPC without TLS -- is served
+  there too; it was refused.
+- **Load balancing:** services saved from the dashboard as least-connections
+  or weighted were running round robin; they now use their policy. A weighted
+  service whose targets have no weights serves them equally instead of 502.
+- **Retry:** the retry middleware retried nothing. It now retries idempotent
+  methods on a 502/503/504 or transport error, up to `attempts`.
+- **Circuit breaker:** half-open admits one probe instead of everything,
+  `min_requests` defaults to 20 instead of 0 (one 5xx opened it), and
+  `Retry-After` is the time left rather than 30.
+- **Headers middleware:** response rules are applied after the backend's
+  headers, so a rule now overrides the backend instead of being overwritten.
+- **API keys and basic auth** are held to the route's roles and scopes.
+- **mTLS:** a request whose `Host` names a different mTLS route than the one
+  its handshake was for is refused.
+- **gRPC-Web** no longer grants credentials to any origin, and the
+  *Restricted* CORS preset with no origins restricts instead of allowing all.
+- **IP filters:** a bare IPv6 address is one host, not a /32.
+- **Security headers:** the *None* preset sets nothing (it fell through to the
+  legacy set, overwriting the backend's own headers); the legacy set, which an
+  unset preset means, now sends `X-XSS-Protection: 0` instead of asking for the
+  browser XSS auditor; and a misspelt preset refuses the build.
+- **TCP entrypoints:** plain HTTP arriving on a TCP entrypoint now passes the
+  global honeypot, GeoIP country block and per-IP connection limit, which the
+  HTTP entrypoint always applied and this path skipped.
+- **Metrics:** a request is counted once in path, domain, country, protocol and
+  per-IP statistics — it was counted by the entrypoint and again by its route,
+  so anomaly detection saw clients at twice their rate. A `metrics` or
+  `accesslog` middleware attached with no name of its own now does nothing
+  (every route already measures and logs itself); give it a name to record a
+  separate view.
+- **Forwarded scheme:** a route's `forwardedheaders` forced scheme now wins over
+  a trusted proxy's `X-Forwarded-Proto` — the case it exists for — so its
+  redirects, Secure cookies and upstream `X-Forwarded-Proto` follow it.
+- **Custom error pages** arrive whole: they kept the backend's Content-Length
+  and Content-Encoding, which cut them short or announced them as gzip. SSE and
+  websockets on routes with the errors middleware now work.
+- **Compression** leaves responses under `min_response_body_bytes` alone; the
+  minimum was ignored, most of all behind the proxy.
+- **ACME on a route** works without the global ACME switch; such routes'
+  handshakes failed with "ACME not initialized". The settings page no longer
+  offers DNS-01, which the gateway never ran.
+- **Canary API:** `POST /v1/services/canary` answers 400 with a reason for a
+  service whose policy ignores weights (anything but weighted round robin), a
+  missing service, or weights naming none of its targets. It used to report
+  success and do nothing.
+- **Buffering:** a body over `max_request_body_bytes` is answered 413 and never
+  reaches the backend. It was forwarded anyway and came back as a 502 counted
+  against the backend.
+- **Bot management:** challenge passes issued before the upgrade are not
+  accepted (the seed was its own pass); visitors are challenged once more.
+- **Postgres** sessions run in UTC, so TTLs no longer drift with the host's
+  zone.
+- **Service health-check thresholds and WASM modules** survive a restart on the
+  database-backed stores (migrations 63 and 64 add the columns).
+- **The management database** is created `0600`, and systemd keeps the state
+  and config directories private.
+- **The dashboard's Metrics page** moved to `/metrics-dashboard`, off
+  `/metrics`, which Prometheus answers — a bookmark or reload of the old path
+  showed exposition text. Update bookmarks.
+
+### The setup wizard's SQLite database must be a file in the data directory
+
+During first run the wizard's database step — `POST /v1/setup`, and its "Test
+connection" button, `POST /v1/setup/test-db` — opens the database it is given
+before anyone has signed in. A SQLite url there could reach any file the
+gateway can write: opening it created the file, or narrowed the permissions of
+one that existed; a `?_pragma=` query ran as SQL when the database opened, and
+could `ATTACH` a database anywhere; and SQLite percent-decodes a `file:` URI
+after any check on the string, so `..%2F` climbed out of a directory. The
+wizard now takes a SQLite database only as a plain file path inside the data
+directory — no query string, no `file:` URI — and answers anything else with
+`400`.
+
+**Who is affected:** an install that runs the wizard from a working directory
+outside its data directory (`GATEON_DATA_DIR`; otherwise `/var/lib/gateon` on
+Linux when it exists, otherwise the working directory), where the default
+`gateon.db` resolves outside it. The packaged unit and image run from
+`/var/lib/gateon`. Give the wizard an absolute path inside the data directory,
+or set the url in `global.json`: a database the operator configures on disk is
+not restricted.
 
 ### `mysql://` and `mariadb://` are refused at startup — **they never worked**
 

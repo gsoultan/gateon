@@ -80,6 +80,13 @@ spec:
               value: {{ .Values.service.managementPort | quote }}
             - name: GATEON_DATA_DIR
               value: {{ .Values.persistence.mountPath | quote }}
+            {{- with .Values.kubernetesIntegration.watchNamespace }}
+            # The Role rbac.yaml grants for a watchNamespace only covers that
+            # namespace; without this the controller lists cluster-wide, is
+            # refused, and never syncs.
+            - name: GATEON_K8S_WATCH_NAMESPACE
+              value: {{ . | quote }}
+            {{- end }}
             - name: GATEON_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:

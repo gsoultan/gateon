@@ -22,7 +22,7 @@ func (s *server) Echo(ctx context.Context, in *testpb.EchoRequest) (*testpb.Echo
 }
 
 func main() {
-	lis, err := net.Listen("tcp", ":8083")
+	lis, err := net.Listen("tcp", "127.0.0.1:8083")
 	if err != nil {
 		panic(err)
 	}

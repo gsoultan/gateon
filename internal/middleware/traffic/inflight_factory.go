@@ -18,7 +18,10 @@ func NewInflightReq(cfg map[string]string) (kind.Middleware, error) {
 	if amount <= 0 {
 		return nil, fmt.Errorf("inflightreq requires amount > 0")
 	}
-	perIP := kind.ParseBoolStrict(cfg["per_ip"], true)
+	perIP, err := kind.ParseBoolStrict(cfg["per_ip"], true)
+	if err != nil {
+		return nil, kind.CfgError("per_ip", cfg["per_ip"], err)
+	}
 	keyFunc := PerIP
 	if !perIP {
 		keyFunc = func(r *http.Request) string { return r.Host }

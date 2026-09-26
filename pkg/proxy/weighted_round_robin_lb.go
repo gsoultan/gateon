@@ -46,23 +46,29 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 		return nil
 	}
 
-	totalWeight := int32(0)
+	totalWeight, weighted := int32(0), false
 	for _, t := range targets {
-		if t.alive.Load() {
-			totalWeight += t.weight
+		if t.weight > 0 {
+			weighted = true
+			if t.alive.Load() {
+				totalWeight += t.weight
+			}
 		}
 	}
-
-	if totalWeight <= 0 {
-		return nil // no alive targets (circuit breaker: all OPEN)
+	if !weighted {
+		// No target carries a weight: the service was saved without any
+		// (proto3's zero), which means "no preference", not "send nothing".
+		// This used to answer 502 "no targets available" to every request.
+		return lb.nextEqual(targets)
 	}
-
+	if totalWeight <= 0 {
+		return nil // every weighted target is down; zero weights stay unused
+	}
 	n := atomic.AddUint64(&lb.current, 1)
 	val := int32((n - 1) % uint64(totalWeight))
-
 	currentSum := int32(0)
 	for _, t := range targets {
-		if !t.alive.Load() {
+		if t.weight <= 0 || !t.alive.Load() {
 			continue
 		}
 		currentSum += t.weight
@@ -71,6 +77,30 @@ func (lb *WeightedRoundRobinLB) NextState() *targetState {
 		}
 	}
 	return nil // defensive: loop should always return; no alive target
+}
+
+// nextEqual rotates through the alive targets with equal weight.
+func (lb *WeightedRoundRobinLB) nextEqual(targets []*targetState) *targetState {
+	alive := 0
+	for _, t := range targets {
+		if t.alive.Load() {
+			alive++
+		}
+	}
+	if alive == 0 {
+		return nil
+	}
+	idx := int((atomic.AddUint64(&lb.current, 1) - 1) % uint64(alive))
+	for _, t := range targets {
+		if !t.alive.Load() {
+			continue
+		}
+		if idx == 0 {
+			return t
+		}
+		idx--
+	}
+	return nil
 }
 
 func (lb *WeightedRoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {

@@ -154,7 +154,7 @@ func TestIntegration_SecurityHub(t *testing.T) {
 		}
 
 		// Wait for batch flush
-		time.Sleep(1500 * time.Millisecond)
+		telemetry.FlushThreats()
 
 		// Verify through GetSecurityThreatsLite, which is the query every API
 		// path actually runs. This used to read the full-blob variant and say it
@@ -269,8 +269,11 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		w := httptest.NewRecorder()
 		finalHandler.ServeHTTP(w, req)
 
-		// Wait for async threat recording
-		time.Sleep(1500 * time.Millisecond)
+		// The violation is queued inside ServeHTTP; FlushThreats returns once
+		// everything queued before it is in the database, which is all a
+		// threat query reads. A fixed sleep here raced the telemetry loop's
+		// flush timer, and lost under -race on a loaded machine.
+		telemetry.FlushThreats()
 
 		results := telemetry.GetSecurityThreatsLite(context.Background(), 10, 0, &telemetry.ThreatFilter{Status: "all"})
 		found := false
@@ -294,7 +297,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		w := httptest.NewRecorder()
 		finalHandler.ServeHTTP(w, req)
 
-		time.Sleep(1500 * time.Millisecond)
+		telemetry.FlushThreats()
 		after := len(telemetry.GetSecurityThreatsLite(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
 
 		if after > before {
@@ -309,7 +312,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		w := httptest.NewRecorder()
 		finalHandler.ServeHTTP(w, req)
 
-		time.Sleep(1500 * time.Millisecond)
+		telemetry.FlushThreats()
 
 		// 2. Get the threat ID
 		results := telemetry.GetSecurityThreatsLite(context.Background(), 1, 0, &telemetry.ThreatFilter{Status: "all"})
@@ -348,7 +351,7 @@ func TestIntegration_CORSViolation(t *testing.T) {
 		w2 := httptest.NewRecorder()
 		finalHandler.ServeHTTP(w2, req)
 
-		time.Sleep(1500 * time.Millisecond)
+		telemetry.FlushThreats()
 		after := len(telemetry.GetSecurityThreatsLite(context.Background(), 100, 0, &telemetry.ThreatFilter{Status: "all"}))
 
 		if after > before {

@@ -33,7 +33,7 @@ func (r *DBServiceRegistry) loadFromDB() {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
-	query := "SELECT id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol FROM services"
+	query := "SELECT id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol, unhealthy_threshold, healthy_threshold FROM services"
 	rows, err := r.db.Query(query)
 	if err != nil {
 		logLoadQueryFailed("services", err)
@@ -44,7 +44,7 @@ func (r *DBServiceRegistry) loadFromDB() {
 	for rows.Next() {
 		var s gateonv1.Service
 		var targetsStr, tlsStr string
-		if err := rows.Scan(&s.Id, &s.Name, &s.BackendType, &s.LoadBalancerPolicy, &s.HealthCheckPath, &targetsStr, &s.DiscoveryUrl, &tlsStr, &s.HealthCheckPort, &s.HealthCheckProtocol, &s.HealthCheckType, &s.L4HealthCheckIntervalMs, &s.L4HealthCheckTimeoutMs, &s.L4UdpSessionTimeoutS, &s.L4ProxyProtocol); err != nil {
+		if err := rows.Scan(&s.Id, &s.Name, &s.BackendType, &s.LoadBalancerPolicy, &s.HealthCheckPath, &targetsStr, &s.DiscoveryUrl, &tlsStr, &s.HealthCheckPort, &s.HealthCheckProtocol, &s.HealthCheckType, &s.L4HealthCheckIntervalMs, &s.L4HealthCheckTimeoutMs, &s.L4UdpSessionTimeoutS, &s.L4ProxyProtocol, &s.UnhealthyThreshold, &s.HealthyThreshold); err != nil {
 			logRecordDropped("service", "", "", err)
 			continue
 		}
@@ -68,6 +68,9 @@ func (r *DBServiceRegistry) loadFromDB() {
 
 		r.Services()[s.Id] = &s
 	}
+	if err := rows.Err(); err != nil {
+		logLoadTruncated("services", err)
+	}
 }
 
 func (r *DBServiceRegistry) Update(ctx context.Context, s *gateonv1.Service) error {
@@ -87,8 +90,8 @@ func (r *DBServiceRegistry) Update(ctx context.Context, s *gateonv1.Service) err
 
 	var query string
 	if r.dialect.Driver == db.DriverPostgres {
-		query = `INSERT INTO services (id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		query = `INSERT INTO services (id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol, unhealthy_threshold, healthy_threshold, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT (id) DO UPDATE SET
 				name = EXCLUDED.name,
 				backend_type = EXCLUDED.backend_type,
@@ -104,13 +107,15 @@ func (r *DBServiceRegistry) Update(ctx context.Context, s *gateonv1.Service) err
 				l4_health_check_timeout_ms = EXCLUDED.l4_health_check_timeout_ms,
 				l4_udp_session_timeout_s = EXCLUDED.l4_udp_session_timeout_s,
 				l4_proxy_protocol = EXCLUDED.l4_proxy_protocol,
+				unhealthy_threshold = EXCLUDED.unhealthy_threshold,
+				healthy_threshold = EXCLUDED.healthy_threshold,
 				updated_at = CURRENT_TIMESTAMP`
 	} else {
-		query = `REPLACE INTO services (id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+		query = `REPLACE INTO services (id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol, unhealthy_threshold, healthy_threshold, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 	}
 
-	_, err := r.db.Exec(r.dialect.Rebind(query), s.Id, s.Name, s.BackendType, s.LoadBalancerPolicy, s.HealthCheckPath, targetsStr, s.DiscoveryUrl, tlsStr, s.HealthCheckPort, s.HealthCheckProtocol, int32(s.HealthCheckType), s.L4HealthCheckIntervalMs, s.L4HealthCheckTimeoutMs, s.L4UdpSessionTimeoutS, s.L4ProxyProtocol)
+	_, err := r.db.Exec(r.dialect.Rebind(query), s.Id, s.Name, s.BackendType, s.LoadBalancerPolicy, s.HealthCheckPath, targetsStr, s.DiscoveryUrl, tlsStr, s.HealthCheckPort, s.HealthCheckProtocol, int32(s.HealthCheckType), s.L4HealthCheckIntervalMs, s.L4HealthCheckTimeoutMs, s.L4UdpSessionTimeoutS, s.L4ProxyProtocol, s.UnhealthyThreshold, s.HealthyThreshold)
 	if err != nil {
 		return err
 	}

@@ -413,7 +413,7 @@ func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, eng
 }
 
 func recordFileSecurityThreat(r *http.Request, routeID, ttype, details string) {
-	clientIP := request.GetClientIP(r, true)
+	clientIP := request.ClientAddr(r)
 	logger.SecurityEvent(ttype, r, details)
 
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
