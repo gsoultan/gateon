@@ -44,13 +44,6 @@ struct {
 } shunned_ips SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 10000);
-    __type(key, __u8[16]); // JA3 MD5 Hash
-    __type(value, __u32);
-} ja3_blocklist SEC(".maps");
-
-struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 65536);
     __type(key, __u32);   // IPv4 address
