@@ -5,10 +5,45 @@ package telemetry
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestDownloadGeoIPEditionEncodesTheLicenceKey: the key reaches the download
+// URL from the settings card as well as from global config, and it was
+// formatted into the query unescaped -- so a key containing "&" or "#" added
+// parameters to the request sent to MaxMind, or cut it short.
+func TestDownloadGeoIPEditionEncodesTheLicenceKey(t *testing.T) {
+	var got url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		w.WriteHeader(http.StatusNotFound) // stop before any archive is read
+	}))
+	t.Cleanup(srv.Close)
+	prev := geoIPDownloadURL
+	geoIPDownloadURL = srv.URL + "/app/geoip_download"
+	t.Cleanup(func() { geoIPDownloadURL = prev })
+
+	const key = "abc&edition_id=GeoLite2-ASN#rest"
+	_ = downloadGeoIPEdition(key, geoIPEdition{
+		id:       editionCity,
+		destPath: filepath.Join(t.TempDir(), "GeoLite2-City.mmdb"),
+		reload:   func(string) error { return nil },
+	})
+	if got == nil {
+		t.Fatal("the download never reached the server")
+	}
+	if k := got.Get("license_key"); k != key {
+		t.Errorf("license_key = %q, want the whole key %q", k, key)
+	}
+	if ids := got["edition_id"]; len(ids) != 1 || ids[0] != editionCity {
+		t.Errorf("edition_id = %q, want only %q", ids, editionCity)
+	}
+}
 
 // TestDownloadGeoIPEditionDoesNotLeakLicenseKey: the licence key travels in the
 // download URL, and a transport failure comes back as *url.Error, whose message

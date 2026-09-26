@@ -11,6 +11,17 @@ here after the fact.
 
 ## Unreleased
 
+### "Update now" in the GeoIP settings uses the licence key in the form
+
+The GeoIP card sends the licence key it shows, so a key can be tried before it
+is saved, and `POST /v1/geoip/update` read it under a name the card does not
+use. The update ran with the saved key instead, and with none saved it answered
+"maxmind license key not configured" to an operator looking at the key they had
+just entered. It now uses the key sent, and the saved one only when none is.
+
+**Who is affected:** anyone who pressed "Update now" with a key in the form
+that was not the saved one: the download used the saved key.
+
 ### The setup wizard's database step takes effect — **a wizard-built install may be on `gateon.db`**
 
 The first-run wizard's "Test connection" button answered `400 missing database
