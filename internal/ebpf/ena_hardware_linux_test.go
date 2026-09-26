@@ -38,9 +38,7 @@ func requireENAHost(t *testing.T) *net.Interface {
 	if os.Getenv("GATEON_VERIFY_ENA") == "" {
 		t.Skip("set GATEON_VERIFY_ENA=1 to run against real ENA hardware")
 	}
-	if os.Geteuid() != 0 {
-		t.Skip("needs root for CAP_NET_ADMIN and BPF program load")
-	}
+	requireBPFCapabilities(t)
 
 	name := os.Getenv("GATEON_VERIFY_IFACE")
 	if name == "" {

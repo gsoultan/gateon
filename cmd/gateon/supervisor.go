@@ -5,8 +5,6 @@ package main
 
 import (
 	"context"
-	"os"
-	"runtime"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -79,6 +77,10 @@ type securitySupervisor struct {
 	ebpfCancel  context.CancelFunc
 	ebpfCfg     *gateonv1.EbpfConfig
 	ebpfApplied bool
+	// missingEbpfPrivileges names the capabilities eBPF lacks; nil means
+	// ebpf.MissingPrivileges. A field so tests do not depend on the privileges
+	// of the host that runs them.
+	missingEbpfPrivileges func() []string
 }
 
 // newSecuritySupervisor builds a supervisor bound to the given config registry,
@@ -265,11 +267,18 @@ func (s *securitySupervisor) reconcileEbpf(cfg *gateonv1.EbpfConfig) {
 		return
 	}
 
-	// eBPF needs elevated privileges (CAP_BPF/CAP_NET_ADMIN/CAP_PERFMON).
-	// Degrade gracefully instead of forcing the process to run as root.
-	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
-		logger.L.LogError("eBPF is enabled but Gateon lacks sufficient privileges; " +
-			"keeping it disabled. Run as root or grant CAP_BPF/CAP_NET_ADMIN/CAP_PERFMON.")
+	// eBPF needs capabilities, not a uid: CAP_BPF and CAP_NET_ADMIN. This used
+	// to require uid 0, which refused a non-root service holding exactly those
+	// and let root with every capability dropped through, only to fail at load.
+	missingPrivileges := s.missingEbpfPrivileges
+	if missingPrivileges == nil {
+		missingPrivileges = ebpf.MissingPrivileges
+	}
+	if missing := missingPrivileges(); len(missing) > 0 {
+		logger.L.LogError("eBPF is enabled but this process lacks the capabilities to load it; keeping it "+
+			"disabled. Grant them to the service. In a container, run as uid 0 with every other "+
+			"capability dropped: Docker and Kubernetes give added capabilities only to uid 0.",
+			"missing", missing)
 		return
 	}
 

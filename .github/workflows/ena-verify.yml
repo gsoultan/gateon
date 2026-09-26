@@ -194,3 +194,13 @@ jobs:
         run: |
           chmod +x ena.test
           sudo ./ena.test -test.skip '^TestENA' -test.v
+
+      - name: Run the eBPF suite with only CAP_BPF and CAP_NET_ADMIN
+        # The capabilities a deployment is told to grant, as an ordinary user:
+        # root hides what the verifier refuses without CAP_PERFMON. See ci.yml.
+        if: ${{ !cancelled() }}
+        run: |
+          command -v capsh >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends libcap2-bin; }
+          sudo capsh --caps='cap_setpcap,cap_setuid,cap_setgid+ep cap_bpf,cap_net_admin+eip' \
+            --keep=1 --user="$(id -un)" --addamb=cap_bpf,cap_net_admin \
+            --shell="$(pwd)/ena.test" -- -test.skip '^TestENA' -test.v

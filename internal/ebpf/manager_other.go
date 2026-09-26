@@ -30,3 +30,7 @@ func (m *EbpfManager) Start(ctx context.Context) {
 // DefaultInterface is "" where eBPF cannot attach: there is no interface it
 // would pick.
 func DefaultInterface() string { return "" }
+
+// MissingPrivileges is nil where eBPF cannot attach: Start is a no-op here, so
+// no capability would change the outcome.
+func MissingPrivileges() []string { return nil }

@@ -202,6 +202,26 @@ jobs:
           go test -c -o "$RUNNER_TEMP/ebpf.test" ./internal/ebpf/
           sudo "$RUNNER_TEMP/ebpf.test" -test.v
 
+      - name: eBPF tests with only CAP_BPF and CAP_NET_ADMIN
+        run: |
+          # Again, as an ordinary user holding only the two capabilities a
+          # deployment is told to grant. Root hides what the verifier refuses
+          # without CAP_PERFMON -- a register added to a packet pointer, a packet
+          # pointer compared against NULL, a loop explored down both sides of
+          # every branch -- and a program that loads only as root fails in every
+          # container that follows the docs. One did, for a day.
+          command -v capsh >/dev/null || sudo apt-get install -y --no-install-recommends libcap2-bin
+          sudo capsh --caps='cap_setpcap,cap_setuid,cap_setgid+ep cap_bpf,cap_net_admin+eip' \
+            --keep=1 --user="$(id -un)" --addamb=cap_bpf,cap_net_admin \
+            --shell="$RUNNER_TEMP/ebpf.test" -- -test.v
+          # The supervisor's own gate, in the one shape where it means something:
+          # a non-root process holding the capabilities. It used to require uid 0.
+          go test -c -o "$RUNNER_TEMP/gateon-main.test" ./cmd/gateon/
+          sudo capsh --caps='cap_setpcap,cap_setuid,cap_setgid+ep cap_bpf,cap_net_admin+eip' \
+            --keep=1 --user="$(id -un)" --addamb=cap_bpf,cap_net_admin \
+            --shell="$RUNNER_TEMP/gateon-main.test" -- \
+            -test.run 'TestReconcileEbpfStartsForANonRootServiceHoldingTheCapabilities' -test.v
+
       - name: Working tree clean after tests
         run: |
           # Four e2e tests used to build binaries into the checkout. Nothing

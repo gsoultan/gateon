@@ -225,6 +225,42 @@ func diagnoseNativeXDP(f nicFacts, allowGeneric bool, nativeErr error) xdpDiagno
 	}
 }
 
+// Capability numbers from include/uapi/linux/capability.h.
+const (
+	capNetAdmin = 12
+	capSysAdmin = 21
+	capBPF      = 39
+)
+
+// effectiveCapabilities reads the CapEff line of a /proc/<pid>/status file.
+func effectiveCapabilities(status string) (uint64, bool) {
+	for _, line := range strings.Split(status, "\n") {
+		if v, ok := strings.CutPrefix(line, "CapEff:"); ok {
+			eff, err := strconv.ParseUint(strings.TrimSpace(v), 16, 64)
+			return eff, err == nil
+		}
+	}
+	return 0, false
+}
+
+// missingCapabilities names what an effective capability set lacks to load and
+// attach the programs: CAP_BPF for the programs and maps, and CAP_NET_ADMIN
+// because XDP and TC are networking program types. CAP_SYS_ADMIN covers both,
+// and was the only way to load BPF before kernel 5.8 added CAP_BPF. Neither the
+// uid nor CAP_PERFMON matters: root with the capabilities dropped cannot load
+// these, and a non-root process holding the two can.
+func missingCapabilities(eff uint64) []string {
+	has := func(c uint) bool { return eff&(1<<c) != 0 }
+	var missing []string
+	if !has(capBPF) && !has(capSysAdmin) {
+		missing = append(missing, "CAP_BPF")
+	}
+	if !has(capNetAdmin) && !has(capSysAdmin) {
+		missing = append(missing, "CAP_NET_ADMIN")
+	}
+	return missing
+}
+
 // rtfUp is RTF_UP from linux/route.h: the route is usable.
 const rtfUp = 0x1
 

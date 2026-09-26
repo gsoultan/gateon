@@ -42,7 +42,7 @@ const (
 // the kernel, and everything torn down when the test ends.
 func loadedManager(t *testing.T, cfg *gateonv1.EbpfConfig) (*EbpfManager, *ebpf.Collection) {
 	t.Helper()
-	requireRoot(t)
+	requireBPFCapabilities(t)
 	if err := rlimit.RemoveMemlock(); err != nil {
 		t.Logf("memlock rlimit not raised (%v); continuing, as the loader does", err)
 	}

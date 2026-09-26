@@ -58,7 +58,7 @@ func TestNativeXDPAttachIsNeverGenericInDisguise(t *testing.T) {
 // TestNativeXDPAttachStillAttachesNatively is the other half: asking for driver
 // mode by name must not cost a driver that has it. veth implements native XDP.
 func TestNativeXDPAttachStillAttachesNatively(t *testing.T) {
-	requireRoot(t)
+	requireBPFCapabilities(t)
 	veth := &netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: "gtn-veth0"}, PeerName: "gtn-veth1"}
 	if err := netlink.LinkAdd(veth); err != nil {
 		t.Skipf("cannot create a veth pair: %v", err)

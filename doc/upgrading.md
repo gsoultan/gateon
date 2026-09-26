@@ -11,6 +11,31 @@ here after the fact.
 
 ## Unreleased
 
+### eBPF starts for a process holding CAP_BPF and CAP_NET_ADMIN, whatever its uid
+
+eBPF used to start only for uid 0, while the error it logged said the
+capabilities would do. It now asks for exactly those: CAP_BPF and CAP_NET_ADMIN,
+or CAP_SYS_ADMIN. CAP_PERFMON is not needed. See ADR 0018.
+
+**Who is affected:** a service run as its own user with the capabilities, which
+was refused and now starts eBPF; and root with the capabilities dropped, which
+was let through to fail at load and is now refused with the missing ones named.
+The packaged systemd unit runs as root and is unaffected. In a container, run
+eBPF as uid 0 with the rest dropped — `--user 0 --cap-drop ALL --cap-add BPF
+--cap-add NET_ADMIN`, plus `--network host` to filter on the host's NIC —
+because a container gives added capabilities to no other user.
+
+### The Helm chart's eBPF mode runs the container as uid 0 — **it never started eBPF before**
+
+`ebpf.enabled` granted NET_ADMIN and BPF to a container running as uid 65532,
+which could not use them, so eBPF never started. It now runs the container as
+uid 0 with every other capability dropped, escalation blocked and the root
+filesystem read-only. The new `ebpf.hostNetwork` (default off) attaches to the
+node's NIC instead of the pod's interface.
+
+**Who is affected:** a release with `ebpf.enabled: true`. Its pod now runs as
+uid 0, and eBPF starts once it is on in gateon's settings.
+
 ### eBPF attaches at the TC hook when native XDP is refused — **it now filters where it did nothing**
 
 With eBPF on and an XDP feature on (`xdp_ip_shunning`, `xdp_rate_limit`), a

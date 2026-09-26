@@ -160,12 +160,19 @@ securityContext:
     drop:
       - ALL
 
-# eBPF and the L4 proxy need capabilities the defaults above deny. Enabling this
-# grants NET_ADMIN and BPF, which is a real privilege increase — eBPF is marked
-# experimental in the README for a reason, and on most virtualised NICs it
-# attaches at the TC hook rather than native XDP anyway. Off by default.
+# eBPF needs capabilities the defaults above deny. Enabling this runs the
+# container as uid 0 with only NET_ADMIN and BPF -- a container passes added
+# capabilities to no other user -- which is a real privilege increase; eBPF is
+# marked experimental in the README for a reason. On most virtualised NICs it
+# attaches at the TC hook rather than native XDP. It also has to be turned on in
+# gateon's own settings. Off by default.
 ebpf:
   enabled: false
+  # Attach to the node's NIC instead of the pod's own interface. Without it the
+  # programs filter traffic to this pod, still before gateon sees it; with it
+  # they sit on the node's interface, and every container port becomes a port
+  # on the node. Only read when enabled is true.
+  hostNetwork: false
 
 # Probes hit /healthz and /readyz on the management port. Both are served before
 # setup completes, so a fresh install becomes Ready and you can reach the setup

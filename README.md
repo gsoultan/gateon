@@ -37,7 +37,8 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
   ingress** hook instead, which runs after `skb` allocation and so drops no earlier than a firewall rule, but carries
   none of generic XDP's per-packet cost. **Generic/SKB XDP is refused by default** (`ebpf.allow_generic_xdp`): it drops
   no earlier than TC while charging every packet the full program cost plus a possible re-allocation and copy, which
-  makes it slower than running no eBPF at all. See
+  makes it slower than running no eBPF at all. It needs CAP_BPF and CAP_NET_ADMIN, not root; in a
+  container that means `--user 0 --cap-drop ALL --cap-add BPF --cap-add NET_ADMIN` (ADR 0018). See
   [ADR 0007](doc/adr/0007-xdp-attach-mode-and-the-tc-ingress-hook.md).
 - **Bot Management**: JS Challenges, Browser Integrity checks, and Cloudflare Turnstile integration.
 - **Identity & Access**: Comprehensive AuthN/Z via **JWT (HMAC/JWKS), PASETO, API Keys**, and Forward Auth.

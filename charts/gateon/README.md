@@ -75,7 +75,8 @@ about in advance.
 | `externalDatabase.*` | disabled | rendered into `global.json`, not env |
 | `redis.*` | disabled | `REDIS_ADDR` + `global.json` |
 | `kubernetesIntegration.gatewayAPI` | `false` | needs the CRDs installed |
-| `ebpf.enabled` | `false` | grants NET_ADMIN and BPF |
+| `ebpf.enabled` | `false` | runs the container as uid 0 with only NET_ADMIN and BPF |
+| `ebpf.hostNetwork` | `false` | attaches to the node's NIC instead of the pod's interface |
 | `globalConfig` | `{}` | merged into `global.json` |
 
 ### Why the database is not configured through environment variables
@@ -118,10 +119,20 @@ The management API is on its own ClusterIP Service. A single LoadBalancer
 carrying both it and the traffic ports would publish the dashboard on the same
 address as the proxy, and the management allowlist ships as `0.0.0.0/0`.
 
-`ebpf.enabled` adds `NET_ADMIN` and `BPF`. That is a real privilege increase on
-a process handling hostile traffic, eBPF is marked experimental in the README,
-and on most virtualised NICs it attaches at the TC hook rather than native XDP
-anyway.
+`ebpf.enabled` runs the container as uid 0 with every capability dropped except
+`NET_ADMIN` and `BPF`. Those two are what loading and attaching the programs
+needs, and uid 0 is how they reach the process: neither Docker nor Kubernetes
+gives added capabilities to any other user, so the non-root image with the two
+added was refused eBPF. That is a real privilege increase on a process handling
+hostile traffic, and eBPF is marked experimental in the README. Turn eBPF on in
+gateon's settings as well; the chart grants the privileges and nothing else.
+See [ADR 0018](../../doc/adr/0018-ebpf-privileges-are-capabilities.md).
+
+Without `ebpf.hostNetwork` the programs attach to the pod's own interface and
+filter traffic to this pod, still before gateon sees it. With it they attach to
+the node's NIC -- on EKS the ENA interface, where they fall back to the TC hook
+-- and every container port becomes a port on the node. On most virtualised NICs
+eBPF attaches at the TC hook rather than native XDP.
 
 ## Upgrading
 

@@ -74,6 +74,22 @@ func sysfsRXQueues(name string) int {
 	return n
 }
 
+// MissingPrivileges names the capabilities this process lacks to load and
+// attach the eBPF programs; see missingCapabilities. It returns nil when they
+// are all there, and also when the status file cannot be read, because the
+// load itself is then the arbiter and says exactly what it was refused.
+func MissingPrivileges() []string {
+	status, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return nil
+	}
+	eff, ok := effectiveCapabilities(string(status))
+	if !ok {
+		return nil
+	}
+	return missingCapabilities(eff)
+}
+
 // procNetRoute is the running network namespace's IPv4 routing table.
 const procNetRoute = "/proc/net/route"
 

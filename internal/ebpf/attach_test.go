@@ -149,6 +149,48 @@ func TestTryTCFallsBackWheneverXDPWasWantedAndDidNotAttach(t *testing.T) {
 	}
 }
 
+// TestMissingCapabilitiesAsksForCapabilitiesNotAUid: the gateway used to start
+// eBPF only for uid 0, so a non-root process holding CAP_BPF and CAP_NET_ADMIN
+// was refused while root with every capability dropped was let through to fail
+// at load time.
+func TestMissingCapabilitiesAsksForCapabilitiesNotAUid(t *testing.T) {
+	const (
+		bpf      = uint64(1) << capBPF
+		netAdmin = uint64(1) << capNetAdmin
+		sysAdmin = uint64(1) << capSysAdmin
+	)
+	cases := []struct {
+		name string
+		eff  uint64
+		want string
+	}{
+		{"the two it needs, uid irrelevant", bpf | netAdmin, ""},
+		{"CAP_SYS_ADMIN covers both (pre-5.8 kernels)", sysAdmin, ""},
+		{"root with every capability dropped", 0, "CAP_BPF,CAP_NET_ADMIN"},
+		{"Docker's default set for root", 0x00000000a80425fb, "CAP_BPF,CAP_NET_ADMIN"},
+		{"CAP_BPF alone", bpf, "CAP_NET_ADMIN"},
+		{"CAP_NET_ADMIN alone", netAdmin, "CAP_BPF"},
+	}
+	for _, c := range cases {
+		if got := strings.Join(missingCapabilities(c.eff), ","); got != c.want {
+			t.Errorf("%s: missing %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestEffectiveCapabilitiesReadsCapEff(t *testing.T) {
+	status := "Name:\tgateon\nUid:\t65532\t65532\t65532\t65532\n" +
+		"CapInh:\t0000000000000000\nCapPrm:\t0000008000001000\n" +
+		"CapEff:\t0000008000001000\nCapBnd:\t0000008000001000\n"
+	eff, ok := effectiveCapabilities(status)
+	if !ok || eff != 0x0000008000001000 {
+		t.Errorf("effectiveCapabilities = %#x, %v; want 0x8000001000, true", eff, ok)
+	}
+	if _, ok := effectiveCapabilities("Name:\tgateon\n"); ok {
+		t.Error("a status with no CapEff line reported a capability set")
+	}
+}
+
 // Tables in /proc/net/route's own format, trailing whitespace and all.
 const (
 	routeHeader = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
