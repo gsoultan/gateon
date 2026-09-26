@@ -28,6 +28,15 @@ for (const f of fs.readdirSync('config')) {
 // they have to be absolute.
 const cfg = (name: string) => path.join(configDir, name);
 
+// A second gateway that has never been set up, for the first-run wizard
+// (tests/first-run.spec.ts): its own data and working directory, so it shares no
+// users and no global.json with the suite's. The spec reads what setup saved
+// from here, so the path travels in the environment -- and a worker, which
+// evaluates this file again, reuses it rather than making another.
+const firstRunDir =
+  process.env.GATEON_E2E_FIRST_RUN_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-first-run-'));
+process.env.GATEON_E2E_FIRST_RUN_DIR = firstRunDir;
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
@@ -71,6 +80,7 @@ export default defineConfig({
     { name: 'setup', testMatch: /.*\.setup\.ts/ },
     {
       name: 'e2e',
+      testIgnore: /first-run\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         // The default identity for specs that do not pin one. The rbac specs
@@ -78,6 +88,12 @@ export default defineConfig({
         storageState: 'tests/.auth/admin.json',
       },
       dependencies: ['setup'],
+    },
+    {
+      // The never-set-up gateway below, with no identity: none exists yet.
+      name: 'first-run',
+      testMatch: /first-run\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:8090' },
     },
   ],
   webServer: [
@@ -125,6 +141,26 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       timeout: 120000,
-    }
+    },
+    {
+      // The first-run gateway: no global.json, no users, the management plane on
+      // loopback. Never an existing server, which would have been set up.
+      command: path.resolve('../../gateon'),
+      cwd: firstRunDir,
+      port: 8090,
+      reuseExistingServer: false,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 120000,
+      env: {
+        PATH: `${process.cwd()}/mockbin:${process.env.PATH}`,
+        GATEON_DATA_DIR: firstRunDir,
+        GLOBAL_CONFIG_FILE: path.join(firstRunDir, 'global.json'),
+        GATEON_MANAGEMENT_BIND: '127.0.0.1',
+        GATEON_MANAGEMENT_PORT: '8090',
+        PORT: '8091',
+        GATEON_TEST: '1',
+      },
+    },
   ],
 });
