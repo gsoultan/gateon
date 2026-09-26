@@ -11,6 +11,26 @@ here after the fact.
 
 ## Unreleased
 
+### The setup wizard's database step takes effect — **a wizard-built install may be on `gateon.db`**
+
+The first-run wizard's "Test connection" button answered `400 missing database
+configuration` whatever was filled in, and finishing the wizard saved neither
+the management database nor the dedicated logging database it asked for: the
+administrator was created in `gateon.db` and the gateway ran there. The
+dashboard sends protojson's lowerCamel (`databaseConfig`, `sqlitePath`), which
+the connection test and the REST setup handler read through snake_case tags,
+and it submits setup over Connect, where the database fields were never read.
+Both now work, and setup saves the databases before it creates the
+administrator, so the account is created in the database that was chosen.
+
+**Who is affected:** an install set up with the wizard from v2.4.2 on that
+chose PostgreSQL, a connection string, a SQLite path other than `gateon.db`, or
+a separate logging database. It is running on `gateon.db` in its data
+directory, with its logs in the same file, and `global.json` names no database.
+Nothing moves on upgrade. The database it asked for, if it was created at all,
+is empty: pointing `auth.database_url` at it reopens first-run setup, because it
+holds no administrator, until setup is run again against it.
+
 ### eBPF starts for a process holding CAP_BPF and CAP_NET_ADMIN, whatever its uid
 
 eBPF used to start only for uid 0, while the error it logged said the

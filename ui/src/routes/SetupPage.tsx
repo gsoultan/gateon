@@ -39,11 +39,12 @@ import {
   IconInfoCircle,
   IconCopy,
 } from "@tabler/icons-react";
-import { setupGateon, testDbConnection } from "../hooks/useGateon";
+import { getApiErrorMessage, setupGateon, testDbConnection } from "../hooks/useGateon";
 import { notifications } from "@mantine/notifications";
 import { useClipboard } from "@mantine/hooks";
 import { useIsMobile } from "../hooks/useMobile";
 import { generateRandomString } from "../utils/random";
+import type { DatabaseConfig, SetupRequest } from "../types/gateon";
 
 const WIZARD_STEPS = 6; // Admin, Security, Database, Logging, Management, Review
 
@@ -60,22 +61,27 @@ type DbFields = {
   sslMode: string;
 };
 
+// The database half of a SetupRequest. It is also the connection test's body,
+// so the database the wizard tests is the one it submits.
+type DbPayload = Pick<SetupRequest, "databaseUrl" | "databaseConfig">;
+
 // buildDbPayload validates a set of database fields and returns either a ready
 // to send payload or a human-readable validation error.
-function buildDbPayload(f: DbFields): { payload?: any; error?: string } {
+function buildDbPayload(f: DbFields): { ok: true; payload: DbPayload } | { ok: false; error: string } {
   if (f.useUrl) {
-    if (!f.url) return { error: "Please provide a database connection string (URL)" };
-    return { payload: { databaseUrl: f.url } };
+    if (!f.url) return { ok: false, error: "Please provide a database connection string (URL)" };
+    return { ok: true, payload: { databaseUrl: f.url } };
   }
   if (f.driver === "sqlite") {
-    if (!f.sqlitePath) return { error: "Please provide a path for the SQLite database file" };
-    return { payload: { databaseConfig: { driver: "sqlite", sqlitePath: f.sqlitePath } } };
+    if (!f.sqlitePath) return { ok: false, error: "Please provide a path for the SQLite database file" };
+    return { ok: true, payload: { databaseConfig: { driver: "sqlite", sqlitePath: f.sqlitePath } } };
   }
-  if (!f.host || !f.port || !f.name) return { error: "Please fill host, port and database" };
+  if (!f.host || !f.port || !f.name) return { ok: false, error: "Please fill host, port and database" };
   return {
+    ok: true,
     payload: {
       databaseConfig: {
-        driver: f.driver,
+        driver: f.driver as DatabaseConfig["driver"],
         host: f.host,
         port: Number(f.port) || 0,
         user: f.user,
@@ -95,13 +101,14 @@ export default function SetupPage() {
   const clipboard = useClipboard({ timeout: 2000 });
   const navigate = useNavigate();
 
-  const testDb = async (payload: any) => {
+  const testDb = async (payload: DbPayload) => {
     setLoading(true);
     try {
       await testDbConnection(payload);
       return true;
-    } catch (e: any) {
-      setError(e?.message ? String(e.message) : "Database connection failed");
+    } catch (e) {
+      // The message from the server's JSON error body, not the body itself.
+      setError(getApiErrorMessage(e) || "Database connection failed");
       return false;
     } finally {
       setLoading(false);
@@ -152,21 +159,21 @@ export default function SetupPage() {
     }
     if (wizardStep === 2) {
       // Database step: test connection before proceeding
-      const { payload, error: dbError } = buildDbPayload(managementDbFields());
-      if (dbError) {
-        setError(dbError);
+      const db = buildDbPayload(managementDbFields());
+      if (!db.ok) {
+        setError(db.error);
         return;
       }
-      if (!(await testDb(payload))) return;
+      if (!(await testDb(db.payload))) return;
     }
     if (wizardStep === 3 && !form.values.loggingUseSame) {
       // Logging step: test the dedicated logging database connection
-      const { payload, error: dbError } = buildDbPayload(loggingDbFields());
-      if (dbError) {
-        setError(dbError);
+      const db = buildDbPayload(loggingDbFields());
+      if (!db.ok) {
+        setError(db.error);
         return;
       }
-      if (!(await testDb(payload))) return;
+      if (!(await testDb(db.payload))) return;
     }
     if (wizardStep === 4 && !managementValid) {
       form.validate();
@@ -228,45 +235,34 @@ export default function SetupPage() {
   }, []);
 
   const handleSubmit = async (values: typeof form.values) => {
+    // Built by the function the connection tests use, so what is submitted is
+    // what was tested.
+    const db = buildDbPayload(managementDbFields());
+    if (!db.ok) {
+      setError(db.error);
+      return;
+    }
+    const payload: SetupRequest = {
+      adminUsername: values.adminUsername,
+      adminPassword: values.adminPassword,
+      pasetoSecret: values.pasetoSecret,
+      managementBind: values.managementBind,
+      managementPort: values.managementPort,
+      ...db.payload,
+    };
+    // Dedicated logging database (when the user opted out of reusing the management store)
+    if (!values.loggingUseSame) {
+      const logs = buildDbPayload(loggingDbFields());
+      if (!logs.ok) {
+        setError(logs.error);
+        return;
+      }
+      payload.loggingDatabaseUrl = logs.payload.databaseUrl;
+      payload.loggingDatabaseConfig = logs.payload.databaseConfig;
+    }
     setLoading(true);
     setError(null);
     try {
-      const payload: any = {
-        adminUsername: values.adminUsername,
-        adminPassword: values.adminPassword,
-        pasetoSecret: values.pasetoSecret,
-        managementBind: values.managementBind,
-        managementPort: values.managementPort,
-      };
-      if (values.databaseUseUrl) {
-        payload.databaseUrl = values.databaseUrl;
-      } else {
-        if (values.databaseDriver === "sqlite") {
-          payload.databaseConfig = {
-            driver: "sqlite",
-            sqlitePath: values.sqlitePath,
-          };
-        } else {
-          payload.databaseConfig = {
-            driver: values.databaseDriver,
-            host: values.dbHost,
-            port: Number(values.dbPort) || 0,
-            user: values.dbUser,
-            password: values.dbPassword,
-            database: values.dbName,
-            sslMode: values.databaseDriver === "postgres" ? values.dbSslMode || "disable" : "",
-          };
-        }
-      }
-      // Dedicated logging database (when the user opted out of reusing the management store)
-      if (!values.loggingUseSame) {
-        const { payload: logPayload } = buildDbPayload(loggingDbFields());
-        if (logPayload?.databaseUrl) {
-          payload.loggingDatabaseUrl = logPayload.databaseUrl;
-        } else if (logPayload?.databaseConfig) {
-          payload.loggingDatabaseConfig = logPayload.databaseConfig;
-        }
-      }
       const res = await setupGateon(payload);
 
       if (res.success) {
@@ -532,33 +528,14 @@ export default function SetupPage() {
                         variant="light"
                         loading={loading}
                         onClick={async () => {
-                          try {
-                            const useUrl = form.values.databaseUseUrl;
-                            const driver = form.values.databaseDriver;
-                            const payload: any = {};
-                            if (useUrl) {
-                              payload.databaseUrl = form.values.databaseUrl;
-                            } else if (driver === 'sqlite') {
-                              payload.databaseConfig = { driver: 'sqlite', sqlitePath: form.values.sqlitePath };
-                            } else {
-                              payload.databaseConfig = {
-                                driver,
-                                host: form.values.dbHost,
-                                port: Number(form.values.dbPort) || 0,
-                                user: form.values.dbUser,
-                                password: form.values.dbPassword,
-                                database: form.values.dbName,
-                                sslMode: driver === 'postgres' ? form.values.dbSslMode || 'disable' : '',
-                              };
-                            }
-                            setLoading(true);
-                            await testDbConnection(payload);
+                          const db = buildDbPayload(managementDbFields());
+                          if (!db.ok) {
+                            setError(db.error);
+                            return;
+                          }
+                          if (await testDb(db.payload)) {
                             notifications.show({ title: 'Database OK', message: 'Connection successful', color: 'green', icon: <IconCheck size={18} /> });
                             setError(null);
-                          } catch (e: any) {
-                            setError(e?.message ? String(e.message) : 'Database connection failed');
-                          } finally {
-                            setLoading(false);
                           }
                         }}
                       >
@@ -644,12 +621,12 @@ export default function SetupPage() {
                             variant="light"
                             loading={loading}
                             onClick={async () => {
-                              const { payload, error: dbError } = buildDbPayload(loggingDbFields());
-                              if (dbError) {
-                                setError(dbError);
+                              const db = buildDbPayload(loggingDbFields());
+                              if (!db.ok) {
+                                setError(db.error);
                                 return;
                               }
-                              if (await testDb(payload)) {
+                              if (await testDb(db.payload)) {
                                 notifications.show({ title: 'Database OK', message: 'Connection successful', color: 'green', icon: <IconCheck size={18} /> });
                                 setError(null);
                               }

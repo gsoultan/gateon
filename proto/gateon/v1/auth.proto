@@ -44,6 +44,15 @@ message SetupRequest {
   // DatabaseConfig is an optional structured database configuration.
   // When DatabaseUrl is empty, this config is used to construct the DSN.
   DatabaseConfig database_config = 8;
+
+  // LoggingDatabaseUrl is an optional connection string for a dedicated audit
+  // and security-log database. If provided, it overrides LoggingDatabaseConfig.
+  // Leaving both empty keeps the logs in the management database.
+  string logging_database_url = 9;
+
+  // LoggingDatabaseConfig is the structured form of LoggingDatabaseUrl, used to
+  // construct the DSN when LoggingDatabaseUrl is empty.
+  DatabaseConfig logging_database_config = 10;
 }
 
 message SetupResponse {

@@ -5,13 +5,16 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error) {
@@ -52,6 +55,12 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	setupReq, err := s.IsSetupRequired(ctx, &gateonv1.IsSetupRequiredRequest{})
 	if err != nil || !setupReq.Required {
 		return &gateonv1.SetupResponse{Success: false, Error: "setup already completed"}, nil
+	}
+	// After the guard, never before it: this writes the auth and audit
+	// databases, and on a configured gateway that would let an unauthenticated
+	// caller point both at a server it controls.
+	if err := applySetupDatabases(ctx, s.Globals, req); err != nil {
+		return &gateonv1.SetupResponse{Success: false, Error: err.Error()}, nil
 	}
 
 	if !auth.Available(s.Auth) {
@@ -103,6 +112,83 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	s.logAudit(ctx, "setup", "system", "System initial setup completed")
 
 	return &gateonv1.SetupResponse{Success: true}, nil
+}
+
+// errPersistSetupDatabases is what a caller sees when the chosen databases
+// opened but could not be saved; the store's own error names file paths.
+var errPersistSetupDatabases = errors.New("failed to persist database settings")
+
+// applySetupDatabases proves the databases the wizard chose can be opened and
+// writes them to the global config. It runs before installAuthManager, which
+// reads the auth database from there, so the administrator is created in the
+// database the operator chose rather than in the default gateon.db.
+//
+// Both are probed before either is written: a management database that saved
+// and a logging one that then failed would leave setup half applied.
+//
+// This used to live only in the REST handler for POST /v1/setup. The dashboard
+// calls Setup over Connect, which never read database_url or database_config,
+// so the wizard's database step was accepted and discarded, and every install
+// ran on gateon.db whatever the operator picked.
+func applySetupDatabases(ctx context.Context, globals config.GlobalConfigStore, req *gateonv1.SetupRequest) error {
+	mgmt, logs, err := probeSetupDatabases(req)
+	if err != nil {
+		return err
+	}
+	if !mgmt && !logs {
+		return nil
+	}
+	// A copy: the registry hands out its stored pointer, and Update only
+	// restores the previous config if the pointer it held was left alone.
+	conf, ok := proto.Clone(globals.Get(ctx)).(*gateonv1.GlobalConfig)
+	if !ok || conf == nil {
+		return errPersistSetupDatabases
+	}
+	if mgmt {
+		if conf.Auth == nil {
+			conf.Auth = &gateonv1.AuthConfig{}
+		}
+		conf.Auth.SqlitePath = ""
+		conf.Auth.DatabaseUrl, conf.Auth.DatabaseConfig = chosenDatabase(req.GetDatabaseUrl(), req.GetDatabaseConfig())
+	}
+	if logs {
+		if conf.Audit == nil {
+			conf.Audit = &gateonv1.AuditConfig{}
+		}
+		conf.Audit.DatabaseUrl, conf.Audit.DatabaseConfig = chosenDatabase(req.GetLoggingDatabaseUrl(), req.GetLoggingDatabaseConfig())
+	}
+	if err := globals.Update(ctx, conf); err != nil {
+		return errPersistSetupDatabases
+	}
+	return nil
+}
+
+// probeSetupDatabases reports which of its two databases req names, having
+// proved that each one it names can be opened.
+func probeSetupDatabases(req *gateonv1.SetupRequest) (mgmt, logs bool, err error) {
+	mgmt = req.GetDatabaseUrl() != "" || req.GetDatabaseConfig() != nil
+	logs = req.GetLoggingDatabaseUrl() != "" || req.GetLoggingDatabaseConfig() != nil
+	if mgmt {
+		if err := db.Probe(req.GetDatabaseUrl(), req.GetDatabaseConfig(), config.DataDir()); err != nil {
+			return false, false, err
+		}
+	}
+	if logs {
+		if err := db.Probe(req.GetLoggingDatabaseUrl(), req.GetLoggingDatabaseConfig(), config.DataDir()); err != nil {
+			return false, false, fmt.Errorf("logging database: %w", err)
+		}
+	}
+	return mgmt, logs, nil
+}
+
+// chosenDatabase keeps exactly one of the two forms. A SetupRequest's url
+// overrides its config, but db.AuthDatabaseURL and db.AuditDatabaseURL read the
+// config first, so storing both would open the one the operator did not pick.
+func chosenDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) (string, *gateonv1.DatabaseConfig) {
+	if databaseURL != "" {
+		return databaseURL, nil
+	}
+	return "", cfg
 }
 
 // installAuthManager builds the auth manager on first run and publishes it so

@@ -36,27 +36,6 @@ func decodeGlobalConfig(body []byte, conf *gateonv1.GlobalConfig) error {
 	return nil
 }
 
-// validateDatabase resolves a DSN from the provided URL/config and verifies a
-// connection can be established. databaseURL takes precedence over cfg.
-func validateDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) error {
-	dsn := databaseURL
-	if dsn == "" {
-		dsn = db.BuildURLFromConfig(cfg)
-	}
-	if dsn == "" {
-		return errors.New("invalid database configuration")
-	}
-	if err := db.ConfineSQLite(dsn, config.DataDir()); err != nil {
-		return err
-	}
-	conn, _, err := db.Open(dsn)
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
-	_ = conn.Close()
-	return nil
-}
-
 // registerGlobalHandlers registers global configuration and utility handlers.
 func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/global", func(w http.ResponseWriter, r *http.Request) {
@@ -427,10 +406,6 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 	})
 	// Test DB connection endpoint for first-run wizard
-	type testDBReq struct {
-		DatabaseUrl    string                   `json:"database_url"`
-		DatabaseConfig *gateonv1.DatabaseConfig `json:"database_config"`
-	}
 	mux.HandleFunc("POST /v1/setup/test-db", func(w http.ResponseWriter, r *http.Request) {
 		// Only allow test-db during setup.
 		//
@@ -448,30 +423,21 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		var body testDBReq
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+		// The database half of the SetupRequest the wizard submits next, read
+		// with protojson as Setup's own transports read it. This was
+		// encoding/json into snake_case tags, which the wizard's "databaseUrl",
+		// "databaseConfig" and "sqlitePath" do not match -- not even
+		// case-insensitively -- so the body decoded empty and every test
+		// answered "missing database configuration", whatever was filled in.
+		var req gateonv1.SetupRequest
+		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
-		dsn := body.DatabaseUrl
-		if dsn == "" {
-			dsn = db.BuildURLFromConfig(body.DatabaseConfig)
-		}
-		if dsn == "" {
-			WriteHTTPError(w, http.StatusBadRequest, "missing database configuration")
-			return
-		}
-		// Before anything opens it: see db.ConfineSQLite.
-		if err := db.ConfineSQLite(dsn, config.DataDir()); err != nil {
+		// Probe confines a SQLite database before opening it: see db.ConfineSQLite.
+		if err := db.Probe(req.GetDatabaseUrl(), req.GetDatabaseConfig(), config.DataDir()); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		conn, _, err := db.Open(dsn)
-		if err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "connection failed: "+err.Error())
-			return
-		}
-		_ = conn.Close()
 		_ = json.NewEncoder(w).Encode(struct {
 			Success bool `json:"success"`
 		}{Success: true})
@@ -479,91 +445,28 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Refuse before anything else once setup is done. This path skips
-		// authentication for the life of the process, and the database branch
-		// below writes global config: it used to persist a caller-supplied
-		// authentication and audit database before Setup's own "already
-		// completed" check ran, so on a configured gateway an unauthenticated
+		// authentication for the life of the process, and Setup writes the
+		// caller's authentication and audit databases to global config. The
+		// handler used to do that write itself, ahead of Setup's own "already
+		// completed" check, so on a configured gateway an unauthenticated
 		// request could repoint both at a server it controls -- and the gateway
-		// trusts that server's users on its next start. An unknown setup state
-		// is refused for the reason test-db gives.
+		// trusts that server's users on its next start. Setup now checks before
+		// it writes; this refuses before the body is even read. An unknown
+		// setup state is refused for the reason test-db gives.
 		if setupReq, err := svc.IsSetupRequired(r.Context(), &gateonv1.IsSetupRequiredRequest{}); err != nil || !setupReq.Required {
 			WriteHTTPError(w, http.StatusForbidden, "setup already completed")
 			return
 		}
-		// Accept extended payload including database settings for first-run wizard
-		type setupBody struct {
-			AdminUsername         string                   `json:"admin_username"`
-			AdminPassword         string                   `json:"admin_password"`
-			PasetoSecret          string                   `json:"paseto_secret"`
-			ManagementBind        string                   `json:"management_bind"`
-			ManagementPort        string                   `json:"management_port"`
-			DatabaseUrl           string                   `json:"database_url"`
-			DatabaseConfig        *gateonv1.DatabaseConfig `json:"database_config"`
-			LoggingDatabaseUrl    string                   `json:"logging_database_url"`
-			LoggingDatabaseConfig *gateonv1.DatabaseConfig `json:"logging_database_config"`
-		}
-		var body setupBody
-		// Bounded to the same 1 MiB the shared decoders use. The outer handler
-		// already caps every request at 10 MiB, so this is not an unbounded
-		// read -- but /v1/setup is one of the handful of paths that skip
-		// authentication entirely, and the loosest limit on the plane sitting
-		// in front of the least-trusted callers is the wrong way round.
-		if err := json.NewDecoder(io.LimitReader(r.Body, MaxRequestBodySize)).Decode(&body); err != nil {
-			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
+		// Decoded whole and handed to Setup, which validates and saves the
+		// databases for every transport. This handler kept its own copy of that
+		// step, read through snake_case encoding/json tags, while the dashboard
+		// called Setup over Connect, where the step did not exist: neither copy
+		// ever saw the wizard's database. DecodeProtoRequest reads both
+		// spellings, and bounds the read to 1 MiB, which matters on one of the
+		// handful of paths that skip authentication entirely.
+		var req gateonv1.SetupRequest
+		if !DecodeProtoRequest(w, r, &req) {
 			return
-		}
-
-		// If DB settings are provided, validate connections and persist to globals before setup.
-		hasManagementDB := body.DatabaseUrl != "" || body.DatabaseConfig != nil
-		hasLoggingDB := body.LoggingDatabaseUrl != "" || body.LoggingDatabaseConfig != nil
-		if hasManagementDB || hasLoggingDB {
-			gc := svc.GetGlobals().Get(r.Context())
-			if hasManagementDB {
-				if err := validateDatabase(body.DatabaseUrl, body.DatabaseConfig); err != nil {
-					WriteHTTPError(w, http.StatusBadRequest, err.Error())
-					return
-				}
-				if gc.Auth == nil {
-					gc.Auth = &gateonv1.AuthConfig{}
-				}
-				if body.DatabaseUrl != "" {
-					gc.Auth.DatabaseUrl = body.DatabaseUrl
-					gc.Auth.DatabaseConfig = nil
-					gc.Auth.SqlitePath = ""
-				} else {
-					gc.Auth.DatabaseConfig = body.DatabaseConfig
-					gc.Auth.DatabaseUrl = ""
-					gc.Auth.SqlitePath = ""
-				}
-			}
-			if hasLoggingDB {
-				if err := validateDatabase(body.LoggingDatabaseUrl, body.LoggingDatabaseConfig); err != nil {
-					WriteHTTPError(w, http.StatusBadRequest, "logging database: "+err.Error())
-					return
-				}
-				if gc.Audit == nil {
-					gc.Audit = &gateonv1.AuditConfig{}
-				}
-				if body.LoggingDatabaseUrl != "" {
-					gc.Audit.DatabaseUrl = body.LoggingDatabaseUrl
-					gc.Audit.DatabaseConfig = nil
-				} else {
-					gc.Audit.DatabaseConfig = body.LoggingDatabaseConfig
-					gc.Audit.DatabaseUrl = ""
-				}
-			}
-			if err := svc.GetGlobals().Update(r.Context(), gc); err != nil {
-				WriteHTTPError(w, http.StatusInternalServerError, "failed to persist database settings")
-				return
-			}
-		}
-
-		req := gateonv1.SetupRequest{
-			AdminUsername:  body.AdminUsername,
-			AdminPassword:  body.AdminPassword,
-			PasetoSecret:   body.PasetoSecret,
-			ManagementBind: body.ManagementBind,
-			ManagementPort: body.ManagementPort,
 		}
 		resp, err := svc.Setup(r.Context(), &req)
 		if err != nil {

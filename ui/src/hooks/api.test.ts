@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test, mock } from "bun:test";
-import type { SetupRequest } from "../types/gateon";
+import type { DatabaseConfig, SetupRequest } from "../types/gateon";
+import type { SetupRequest as WireSetupRequest } from "../services/gen/gateon/v1/auth_pb";
+import type { DatabaseConfig as WireDatabaseConfig } from "../services/gen/gateon/v1/common_pb";
+
+// Compiles only when T is never; otherwise the type checker names what T is.
+function assertNone<T extends never>(): T[] {
+  return [];
+}
 
 // The client reads window.location when it is imported; there is no window
 // under bun:test, and the setup RPC itself is not what is under test.
@@ -23,5 +30,17 @@ describe("setupGateon", () => {
     await setupGateon({} as SetupRequest);
 
     expect(queryClient.getQueryData(["setup-required"])).toBeUndefined();
+  });
+
+  test("sends no key the proto message lacks", () => {
+    // setupGateon hands this hand-written type to the generated client, which
+    // serialises through the proto schema and drops a key the schema lacks --
+    // as protojson does on the server -- without an error. The setup wizard's
+    // logging database was sent that way and went nowhere. The check is the
+    // type checker's, which `bun run build` runs first: a key missing from the
+    // proto fails the build with `Type '"<key>"' does not satisfy the
+    // constraint 'never'`.
+    expect(assertNone<Exclude<keyof SetupRequest, keyof WireSetupRequest>>()).toEqual([]);
+    expect(assertNone<Exclude<keyof DatabaseConfig, keyof WireDatabaseConfig>>()).toEqual([]);
   });
 });
