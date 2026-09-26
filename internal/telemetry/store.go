@@ -2928,7 +2928,13 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		return nil
 	}
 	defer rows.Close()
-	res := make([]*SecurityThreat, 0, min(limit, 100))
+	// min(limit, 100), spelled as a comparison: CodeQL does not read the
+	// builtin as a bound and reports a caller-sized allocation.
+	capacity := defaultThreatQueryLimit
+	if limit < capacity {
+		capacity = limit
+	}
+	res := make([]*SecurityThreat, 0, capacity)
 	for rows.Next() {
 		if ctx.Err() != nil {
 			break
