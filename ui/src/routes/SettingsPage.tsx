@@ -71,7 +71,7 @@ import type { GlobalConfig, DatabaseConfig } from "../types/gateon";
 import { WAF_APP_PROFILES } from "../types/gateon";
 import { generateRandomString } from "../utils/random";
 import { Link } from "@tanstack/react-router";
-import { apiFetch } from "../hooks/useGateon";
+import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { ACME_CHALLENGE_NOTE, ACME_CHALLENGE_TYPES } from "../components/settings/acmeChallenges";
 
 function inferDriver(
@@ -89,7 +89,15 @@ export default function SettingsPage() {
   const { canEditGlobal, canImportConfig, canExportConfig } = usePermissions();
   const { data: status } = useGateonStatus();
   const { data: netInfo, isError: netInfoError } = useNetworkInterfaces();
-  const formDisabled = !canEditGlobal;
+  // Until GET /v1/global succeeds, `config` holds the placeholders set below,
+  // and saving would write them over the gateway's real settings: the server
+  // keeps only the sections a save leaves out, and every one of these is sent.
+  // A failed load used to be swallowed, and a Save after it reset TLS,
+  // Redis, OTel, logging and the management allowlist to these defaults.
+  const [configLoad, setConfigLoad] = useState<"loading" | "loaded" | "failed">("loading");
+  const [configLoadError, setConfigLoadError] = useState<string | null>(null);
+  const [configReload, setConfigReload] = useState(0);
+  const formDisabled = !canEditGlobal || configLoad !== "loaded";
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const apiUrl = useApiConfigStore((s) => s.apiUrl);
   const refreshInterval = useApiConfigStore((s) => s.refreshInterval);
@@ -182,6 +190,7 @@ export default function SettingsPage() {
   useEffect(() => {
     // Fetch current global config
     const controller = new AbortController();
+    setConfigLoad("loading");
     apiFetch("/v1/global", {
       signal: controller.signal,
     })
@@ -189,10 +198,18 @@ export default function SettingsPage() {
         if (!r.ok) throw new Error(await r.text());
         return r.json();
       })
-      .then((cfg: GlobalConfig) => setConfig(cfg || ({} as GlobalConfig)))
-      .catch(() => {});
+      .then((cfg: GlobalConfig) => {
+        setConfig(cfg || ({} as GlobalConfig));
+        setConfigLoad("loaded");
+        setConfigLoadError(null);
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        setConfigLoad("failed");
+        setConfigLoadError(getApiErrorMessage(e));
+      });
     return () => controller.abort();
-  }, [apiUrl]);
+  }, [apiUrl, configReload]);
 
   const handleSave = () => {
     setApiConfig(apiUrlDraft, refreshIntervalDraft);
@@ -201,6 +218,10 @@ export default function SettingsPage() {
   };
 
   const saveGatewayConfig = async () => {
+    if (configLoad !== "loaded") {
+      setError("The gateway's settings have not loaded, so saving would overwrite them with defaults.");
+      return;
+    }
     setSaving(true);
     setError(null);
     setSavedOk(false);
@@ -292,6 +313,22 @@ export default function SettingsPage() {
           Manage your gateway preferences and UI appearance.
         </Text>
       </div>
+
+      {configLoad === "failed" && (
+        <Alert color="red" variant="light" icon={<IconAlertTriangle size="1rem" />} title="Gateway settings could not be loaded">
+          <Stack gap="xs">
+            <Text size="sm">
+              {configLoadError || "The gateway did not answer."} Editing and saving are disabled until they load,
+              so the defaults shown here cannot be written over the gateway's settings.
+            </Text>
+            <Group>
+              <Button size="xs" variant="light" color="red" onClick={() => setConfigReload((n) => n + 1)}>
+                Retry
+              </Button>
+            </Group>
+          </Stack>
+        </Alert>
+      )}
 
       <PresetsCard disabled={formDisabled} onApply={applyPreset} />
 
@@ -2307,7 +2344,12 @@ export default function SettingsPage() {
               <Text fw={600}>Unsaved Changes</Text>
               <Text size="xs" c="dimmed">You have modified the global configuration. Save to apply changes.</Text>
             </div>
-            <Button onClick={saveGatewayConfig} loading={saving} leftSection={<IconCheck size={16} />}>
+            <Button
+              onClick={saveGatewayConfig}
+              loading={saving}
+              disabled={configLoad !== "loaded"}
+              leftSection={<IconCheck size={16} />}
+            >
               Save Global Configuration
             </Button>
           </Group>
