@@ -97,6 +97,9 @@ func (t *SetupToken) Publish(dir string) (string, error) {
 	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
+	// #nosec G304 -- the data directory the operator configured plus a constant
+	// name, with no request input in it; and O_EXCL refuses whatever is already
+	// at the path, a link included.
 	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return "", err
