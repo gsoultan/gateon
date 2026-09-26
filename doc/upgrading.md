@@ -11,6 +11,23 @@ here after the fact.
 
 ## Unreleased
 
+### The setup wizard's connection test no longer says why an address that is not Postgres failed
+
+Until setup completes, anyone who can reach the management port can use the
+wizard's "Test connection", and Setup itself, to make the gateway connect to an
+address of their choosing. Both answered with the driver's error, which told a
+refused port from one that answered and hung up, and both from one that never
+answered: a port scanner for the gateway's network, open until the first
+administrator existed. They now pass on only what a Postgres server said (a
+wrong password, a missing database, a host it refuses), answer everything else
+with one message after the same five seconds, and log the detail. The attempt
+is bounded at five seconds whatever the url asks for; it used to wait as long as
+the far end did.
+
+**Who is affected:** an operator whose connection test fails for any reason
+other than Postgres refusing it. The reason is in the gateway's log, under
+"database connection test failed", rather than in the wizard.
+
 ### Required 2FA enrollment shows its QR code and recovery codes — **accounts that enrolled that way never saw theirs**
 
 When an administrator required 2FA, the login page enrolled the account through
