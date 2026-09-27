@@ -216,37 +216,17 @@ func (p *TCPBackendPool) Release(addr string) {
 }
 
 // ProxyTCP proxies a client connection to a backend from the pool.
+//
+// The client socket belongs to this call, whichever way it ends: the
+// plaintext entrypoint that hands connections here does not close them, so
+// this is the only close.
 func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
-	// The client socket belongs to this call: the error paths below close it
-	// explicitly, and the normal path only half-closed it, leaving the
-	// descriptor to the garbage collector. The plaintext entrypoint that hands
-	// connections here does not close them either, so this is the only close.
-	defer client.Close()
-	addr := p.Pick()
-	if addr == "" {
-		_ = client.Close()
-		return
-	}
-	defer p.Release(addr)
-
-	dialer := net.Dialer{Timeout: 10 * time.Second}
-	backend, err := dialer.DialContext(ctx, "tcp", addr)
+	b, err := p.DialBackend(ctx, client)
 	if err != nil {
 		_ = client.Close()
 		return
 	}
-	defer backend.Close()
-
-	if p.proxyProtocol {
-		if err := writeProxyHeader(backend, client.RemoteAddr(), client.LocalAddr()); err != nil {
-			_ = client.Close()
-			return
-		}
-	}
-	if client, err = takeReadAhead(client, backend); err != nil {
-		return
-	}
-	pipeHalfClose(client, backend)
+	b.Proxy(client, nil)
 }
 
 // takeReadAhead sends a ReadAheadConn's unread bytes to backend and returns the

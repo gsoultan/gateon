@@ -218,6 +218,15 @@ func (a *l4ResolverAdapter) ResolveTCP(ep *gateonv1.EntryPoint, protocol string)
 	return p
 }
 
+// OnlyTCPRoute reports ep's tcp route when it is all ep serves; see
+// l4.Resolver.OnlyTCPRoute.
+func (a *l4ResolverAdapter) OnlyTCPRoute(ep *gateonv1.EntryPoint) l4.TCPProxy {
+	if p := a.r.OnlyTCPRoute(ep); p != nil {
+		return p
+	}
+	return nil
+}
+
 func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) l4.UDPProxy {
 	p := a.r.ResolveUDP(ep)
 	if p == nil {

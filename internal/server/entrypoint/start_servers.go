@@ -382,40 +382,6 @@ var (
 	}
 )
 
-// How long a plaintext TCP entrypoint waits for a client's first bytes. A
-// client of a client-first protocol -- HTTP, TLS, SSH, RDP, PostgreSQL, Redis
-// -- sends them the moment it is connected, and they say where it goes. A
-// client of a server-first protocol -- SMTP, POP3, IMAP, FTP, MySQL, VNC --
-// sends nothing until the server has greeted it, so only silence identifies
-// it, and only the backend can end the silence.
-const (
-	// serverFirstWait is how long a client may say nothing before it is taken
-	// to be waiting for the server, and handed to the entrypoint's TCP route
-	// so the backend can greet it. Every server-first session pays it before
-	// its greeting, which is why it is short. A client that speaks first, but
-	// later than this, goes to that route uninspected: harmless for TLS, which
-	// a plaintext entrypoint sends there anyway, wrong for HTTP -- and for SSH
-	// and RDP where they have routes of their own.
-	//
-	// Measured in network namespaces shaped with netem (curl, OpenSSL,
-	// OpenSSH, Go's HTTP and TLS clients): opening bytes follow the
-	// handshake's last ACK at once whatever the round-trip time, all read
-	// within 11 ms of accept at 300 and 600 ms RTT. They come later behind a
-	// slow uplink -- a full segment, Go's TLS ClientHello, 210 ms at 64
-	// kbit/s; an HTTP request 25 ms -- or when their segment is lost and
-	// resent: 280-310 ms later at 50 ms RTT, 610-660 ms at 200 ms. Half a
-	// second covers a full segment down to ~25 kbit/s and one loss up to
-	// ~150 ms RTT, and is half the second every silent client used to wait
-	// before it was answered at all.
-	serverFirstWait = 500 * time.Millisecond
-
-	// silentLimit is how long a client of an entrypoint without a TCP route
-	// -- nothing a silent client could be waiting for -- may say nothing
-	// before it is told there is no route and closed. It is the second it
-	// always had: such an entrypoint gains nothing from waiting less.
-	silentLimit = time.Second
-)
-
 // noRouteReply is what a connection no route claims is told before it is
 // closed. It used to be "Gateon TCP Entrypoint - " and the time, which said
 // nothing about why the connection was ending -- and time.Time's String form
@@ -425,6 +391,10 @@ const noRouteReply = "Gateon TCP Entrypoint - no route for this connection\n"
 func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
 	if debugLogging() {
 		logger.L.LogDebug("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
+	}
+	if p := onlyTCPRoute(ep, deps); p != nil {
+		proxyUninspected(conn, p, ep)
+		return
 	}
 	// The peek buffer goes back to the pool when this returns, which for an L4
 	// session is when the session ends: only a path that hands the bytes to
@@ -440,59 +410,6 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 		return
 	}
 	answerUnrouted(conn, first, ep)
-}
-
-// awaitFirstBytes returns the first bytes the client sends, to identify its
-// protocol. A client silent for serverFirstWait is waiting for the server to
-// speak first: if the entrypoint has a TCP route it is proxied there, and ok
-// is false. Without one it may speak until silentLimit, and first is empty if
-// it does not. ok is false too when the client went away first, and conn has
-// been closed.
-func awaitFirstBytes(conn net.Conn, peek []byte, ep *gateonv1.EntryPoint, deps *Deps) (first []byte, ok bool) {
-	n, err := readWithin(conn, peek, serverFirstWait)
-	if n == 0 && err == nil {
-		if p := resolveTCPRoute(ep, deps, ""); p != nil {
-			proxyServerFirst(conn, p, ep)
-			return nil, false
-		}
-		n, err = readWithin(conn, peek, silentLimit-serverFirstWait)
-	}
-	if err != nil {
-		// A client hanging up before it says anything -- a port scan, a TCP
-		// health probe -- is routine. It was logged at ERROR, a line per
-		// connection that buried the errors worth reading.
-		if debugLogging() {
-			logger.L.LogDebug("TCP inspection: client left before sending", "ep", ep.Id, "error", err)
-		}
-		_ = conn.Close()
-		return nil, false
-	}
-	return peek[:n], true
-}
-
-// readWithin reads the client's first bytes into peek, waiting at most window.
-// A client that sent nothing in time reads as n == 0 with a nil error, and
-// conn is left with no deadline, ready for whoever serves it next.
-func readWithin(conn net.Conn, peek []byte, window time.Duration) (int, error) {
-	_ = conn.SetReadDeadline(time.Now().Add(window))
-	n, err := conn.Read(peek)
-	_ = conn.SetReadDeadline(time.Time{})
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		return 0, nil
-	}
-	return n, err
-}
-
-// proxyServerFirst hands a client that has said nothing to the entrypoint's
-// TCP route, so that the backend can greet it. The proxy gets the socket
-// itself: nothing was read from it, so nothing needs replaying, and a
-// *net.TCPConn is what the proxy can splice and half-close.
-func proxyServerFirst(conn net.Conn, p l4.TCPProxy, ep *gateonv1.EntryPoint) {
-	if debugLogging() {
-		logger.L.LogDebug("TCP inspection: client silent, proxying so the backend can speak first",
-			"ep", ep.Id, "waited", serverFirstWait, "remote", conn.RemoteAddr().String())
-	}
-	handleTCPProxyL4(conn, p)
 }
 
 // resolveTCPRoute returns the entrypoint's TCP route for protocol -- "" asks

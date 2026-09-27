@@ -101,12 +101,12 @@ func TestATCPEntrypointRefusesConnectionsBeyondItsLimit(t *testing.T) {
 			close(firstDone)
 		}
 	})
-	defer stopBackend()
+	t.Cleanup(stopBackend)
 	deps := mockDepsForInspection(t)
 	ep := tcpEntrypoint(t, "capped-tcp")
 	ep.MaxConnections = 2
 	deps.L4Resolver = l4Resolver(t, ep.Id, backend)
-	e := runEntrypoint(ep, deps)
+	e := runEntrypoint(t, ep, deps)
 
 	first, second := echoSession(t, e.addr, "one\n"), echoSession(t, e.addr, "two\n")
 	third := dialBounded(t, e.addr)
@@ -119,7 +119,11 @@ func TestATCPEntrypointRefusesConnectionsBeyondItsLimit(t *testing.T) {
 	}
 
 	_ = first.Close()
-	<-firstDone // the first session's backend end is closed; its slot is being freed
+	select {
+	case <-firstDone: // the first session's backend end is closed; its slot is being freed
+	case <-time.After(sessionBound):
+		t.Fatal("the first session never ended after its client closed")
+	}
 	fourth := admittedWithin(t, e.addr)
 	_ = fourth.Close()
 	_ = second.Close()

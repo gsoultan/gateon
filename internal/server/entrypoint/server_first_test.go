@@ -38,13 +38,16 @@ func greetThenEcho(c net.Conn) {
 const sessionBound = 10 * time.Second
 
 // dialBounded connects to addr with every later read and write bounded by
-// sessionBound.
+// sessionBound. The connection is also closed when the test ends, so a test
+// that fails half way does not leave a session open for the backends and the
+// entrypoint it started to wait on.
 func dialBounded(t *testing.T, addr string) net.Conn {
 	t.Helper()
 	c, err := net.DialTimeout("tcp", addr, sessionBound)
 	if err != nil {
 		t.Fatalf("dial %s: %v", addr, err)
 	}
+	t.Cleanup(func() { _ = c.Close() })
 	_ = c.SetDeadline(time.Now().Add(sessionBound))
 	return c
 }
@@ -57,17 +60,29 @@ type runningEntrypoint struct {
 	wg   *syncutil.WaitGroup
 }
 
-// mixedEntrypoint starts a plaintext TCP entrypoint whose HTTP server answers
-// "inspected-http" and, when backend is not "", whose generic TCP route --
-// resolved by the l4.Resolver cmd/gateon builds -- leads to backend.
+// mixedEntrypoint starts a plaintext TCP entrypoint that serves an HTTP route,
+// answered "inspected-http" by its HTTP server, and -- when backend is not ""
+// -- a tcp route to backend, resolved by the l4.Resolver cmd/gateon builds.
 func mixedEntrypoint(t *testing.T, backend string) *runningEntrypoint {
 	t.Helper()
+	return entrypointServing(t, tcpEntrypoint(t, "mixed-tcp"), backend, true)
+}
+
+// tcpOnlyEntrypoint starts a plaintext TCP entrypoint whose one route is a
+// tcp route to backend. Its HTTP server is wired as on any other, but no HTTP
+// route is served there.
+func tcpOnlyEntrypoint(t *testing.T, backend string) *runningEntrypoint {
+	t.Helper()
+	return entrypointServing(t, tcpEntrypoint(t, "tcp-only"), backend, false)
+}
+
+// entrypointServing starts ep with a tcp route to backend (none when backend
+// is "") and, withHTTP, an HTTP route listing ep.
+func entrypointServing(t *testing.T, ep *gateonv1.EntryPoint, backend string, withHTTP bool) *runningEntrypoint {
+	t.Helper()
 	deps := mockDepsForInspection(t)
-	ep := tcpEntrypoint(t, "mixed-tcp")
-	if backend != "" {
-		deps.L4Resolver = l4Resolver(t, ep.Id, backend)
-	}
-	return runEntrypoint(ep, deps)
+	deps.L4Resolver = routesResolver(t, ep.Id, backend, withHTTP)
+	return runEntrypoint(t, ep, deps)
 }
 
 // tcpEntrypoint is a TCP entrypoint on a free loopback port.
@@ -81,10 +96,19 @@ func tcpEntrypoint(t *testing.T, id string) *gateonv1.EntryPoint {
 	}
 }
 
-// runEntrypoint starts ep with deps, the way cmd/gateon starts a TCP entrypoint.
-func runEntrypoint(ep *gateonv1.EntryPoint, deps *Deps) *runningEntrypoint {
+// runEntrypoint starts ep with deps, the way cmd/gateon starts a TCP
+// entrypoint. It is also shut down when the test ends, so that a test that
+// fails before drained does not leave it serving.
+func runEntrypoint(t *testing.T, ep *gateonv1.EntryPoint, deps *Deps) *runningEntrypoint {
+	t.Helper()
 	e := &runningEntrypoint{addr: ep.Address, reg: deps.ShutdownRegistry, wg: &syncutil.WaitGroup{}}
 	startTCPServer(e.addr, ep, deps, e.wg, e.reg) // binds before it returns
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), sessionBound)
+		defer cancel()
+		e.reg.ShutdownAll(ctx)
+		e.wg.Wait()
+	})
 	return e
 }
 
@@ -113,7 +137,7 @@ func (e *runningEntrypoint) drained(t *testing.T) {
 // through a plaintext TCP entrypoint at all.
 func TestAServerFirstBackendGreetsAClientThatWaitsForIt(t *testing.T) {
 	backend, stopBackend := serveBackend(t, greetThenEcho)
-	defer stopBackend()
+	t.Cleanup(stopBackend)
 	e := mixedEntrypoint(t, backend)
 
 	c := dialBounded(t, e.addr)
@@ -153,7 +177,7 @@ func TestClientsThatSpeakFirstAreStillRoutedByWhatTheySay(t *testing.T) {
 		_, _ = io.WriteString(tc, "tls backend: "+line)
 		_ = tc.Close()
 	})
-	defer stopBackend()
+	t.Cleanup(stopBackend)
 	e := mixedEntrypoint(t, backend)
 
 	c := dialBounded(t, e.addr)
@@ -216,7 +240,7 @@ func TestAClientThatSpeaksLateButInsideTheWindowIsStillInspected(t *testing.T) {
 			"be allowed", serverFirstWait, lateHTTPClient)
 	}
 	backend, stopBackend := serveBackend(t, greetThenEcho)
-	defer stopBackend()
+	t.Cleanup(stopBackend)
 	e := mixedEntrypoint(t, backend)
 
 	c := dialBounded(t, e.addr)
@@ -282,7 +306,7 @@ func TestATLSEntrypointWithoutARouteSaysSo(t *testing.T) {
 	deps.TLSConfig = serverTLS
 	ep := tcpEntrypoint(t, "tls-tcp")
 	ep.Tls = &gateonv1.TlsConfig{Enabled: true}
-	e := runEntrypoint(ep, deps)
+	e := runEntrypoint(t, ep, deps)
 
 	c, err := tls.DialWithDialer(&net.Dialer{Timeout: sessionBound}, "tcp", e.addr, clientTLS)
 	if err != nil {

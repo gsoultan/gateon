@@ -59,25 +59,38 @@ func serveBackend(tb testing.TB, handle func(net.Conn)) (addr string, stop func(
 	}
 }
 
-// l4Resolver builds the resolver cmd/gateon builds, over registries holding
-// one generic TCP route from entrypoint epID to backend.
+// l4Resolver builds the resolver cmd/gateon builds, over registries holding a
+// generic TCP route from entrypoint epID to backend and an HTTP route on epID:
+// an entrypoint serving both reads each connection's first bytes, which is
+// the path these fixtures exist to exercise. tcpOnlyEntrypoint builds the
+// other kind.
 func l4Resolver(tb testing.TB, epID, backend string) L4Resolver {
+	tb.Helper()
+	return routesResolver(tb, epID, backend, true)
+}
+
+// routesResolver builds the resolver cmd/gateon builds over route and service
+// registries holding a tcp route from epID to backend, unless backend is "",
+// and an HTTP route listing epID when withHTTP.
+func routesResolver(tb testing.TB, epID, backend string, withHTTP bool) L4Resolver {
 	tb.Helper()
 	dir := tb.TempDir()
 	routes := config.NewRouteRegistry(filepath.Join(dir, "routes.json"))
 	services := config.NewServiceRegistry(filepath.Join(dir, "services.json"))
-	svc := &gateonv1.Service{
-		Id:              "l4-svc",
-		Name:            "l4-svc",
-		BackendType:     "tcp",
-		WeightedTargets: []*gateonv1.Target{{Url: "tcp://" + backend, Weight: 1}},
+	ctx := context.Background()
+	if backend != "" {
+		svc := &gateonv1.Service{Id: "l4-svc", Name: "l4-svc", BackendType: "tcp",
+			WeightedTargets: []*gateonv1.Target{{Url: "tcp://" + backend, Weight: 1}}}
+		rt := &gateonv1.Route{Id: "l4-route", Type: "tcp", Entrypoints: []string{epID}, ServiceId: svc.Id}
+		if services.Update(ctx, svc) != nil || routes.Update(ctx, rt) != nil {
+			tb.Fatal("could not store the tcp route")
+		}
 	}
-	if err := services.Update(context.Background(), svc); err != nil {
-		tb.Fatalf("add service: %v", err)
-	}
-	rt := &gateonv1.Route{Id: "l4-route", Type: "tcp", Entrypoints: []string{epID}, ServiceId: svc.Id}
-	if err := routes.Update(context.Background(), rt); err != nil {
-		tb.Fatalf("add route: %v", err)
+	if withHTTP {
+		web := &gateonv1.Route{Id: "web", Type: "http", Entrypoints: []string{epID}, Rule: "PathPrefix(`/`)", ServiceId: "web-svc"}
+		if routes.Update(ctx, web) != nil {
+			tb.Fatal("could not store the HTTP route")
+		}
 	}
 	return WrapL4Resolver(l4.NewResolver(routes, services))
 }
