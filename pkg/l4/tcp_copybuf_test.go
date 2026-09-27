@@ -126,9 +126,21 @@ func TestAPooledCopyBufferHoldsNoConnection(t *testing.T) {
 	backend, stop := echoBackend(t)
 	defer stop()
 	pool := NewTCPBackendPool([]string{backend}, "round_robin", 10000, 1000, false)
-	unsplicedSession(t, pool, []byte("x"), make([]byte, 1))
-
-	cb, _ := copyBufs.Get().(*copyBuf)
+	// Under -race sync.Pool drops a quarter of what it is Put, at random, so
+	// one session's two buffers can both be lost -- which made this test fail
+	// about one run in ten there. Each further session is another chance; the
+	// property checked is the same whichever buffer comes back.
+	sessions := 1
+	if raceDetector {
+		sessions = 8
+	}
+	var cb *copyBuf
+	for range sessions {
+		unsplicedSession(t, pool, []byte("x"), make([]byte, 1))
+		if cb, _ = copyBufs.Get().(*copyBuf); cb != nil {
+			break
+		}
+	}
 	if cb == nil {
 		t.Fatal("the session put no copy buffer back in the pool")
 	}
