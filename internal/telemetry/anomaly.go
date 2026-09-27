@@ -94,14 +94,34 @@ func (ad *AnomalyDetector) runChecks(ctx context.Context, now time.Time) {
 	ad.aggregator.ResetIPStats()
 }
 
+// The failure rate brute force fires above at the default sensitivity. The
+// dashboard's Sensitivity runs from 0 to 1 and ships at 0.5.
+const (
+	defaultSensitivity      = 0.5
+	bruteForceRateAtDefault = 0.75
+)
+
+// bruteForceRateThreshold is the auth-failure rate above which an address is
+// reported, scaled inversely with sensitivity as the exploit, error-rate and
+// latency bars are: a higher setting lowers the bar, and 0 switches it off.
+//
+// It used to be Sensitivity*1.5, which ran the other way. The default kept its
+// 0.75, but from 0.67 up the bar passed 1.0 -- a rate no client can reach -- so
+// the settings an operator chooses to catch more stopped brute-force detection
+// altogether, while 0 flagged any address with six failed logins.
+func (ad *AnomalyDetector) bruteForceRateThreshold() float64 {
+	return bruteForceRateAtDefault * defaultSensitivity / ad.config.Sensitivity
+}
+
 func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 	stats := ad.aggregator.GetIPStats(10) // IPs with at least 10 requests
+	threshold := ad.bruteForceRateThreshold()
 	for _, s := range stats {
 		if s.Requests == 0 {
 			continue
 		}
 		rate := s.AuthFail / s.Requests
-		if rate > ad.config.Sensitivity*1.5 && s.AuthFail > 5 {
+		if rate > threshold && s.AuthFail > 5 {
 			logger.L.LogWarn("ANOMALY DETECTED: Potential brute force detected from IP",
 				"ip", s.IP,
 				"auth_failure_rate", rate)
