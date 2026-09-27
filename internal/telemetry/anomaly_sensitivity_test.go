@@ -96,7 +96,6 @@ func newIsolatedAggregator() *LocalMetricsAggregator {
 		ipStats:       &sync.Map{},
 		maxBuckets:    60,
 		StatsRequests: &RunningStats{},
-		StatsErrors:   &RunningStats{},
 		StatsLatency:  &RunningStats{},
 	}
 }

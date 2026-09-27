@@ -239,9 +239,13 @@ func (ad *AnomalyDetector) throttle(ip string, interval time.Duration) string {
 	return ActionThrottled
 }
 
+// errorRateWindow is the stretch of recent traffic the error-rate check judges
+// against the hour before it.
+const errorRateWindow = 5 * time.Minute
+
 func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
-	currentErrors := ad.aggregator.GetRate("errors", 5*time.Minute)
-	currentRequests := ad.aggregator.GetRate("requests", 5*time.Minute)
+	currentErrors := ad.aggregator.GetRate("errors", errorRateWindow)
+	currentRequests := ad.aggregator.GetRate("requests", errorRateWindow)
 
 	if currentRequests < 1 { // Not enough traffic
 		return
@@ -254,7 +258,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 	baselineRequests := ad.aggregator.GetRate("requests", 1*time.Hour)
 
 	if baselineRequests > 5 {
-		z := ad.aggregator.errorZScore(currentErrors)
+		z := ad.aggregator.errorZScore(currentErrors, errorRateWindow)
 		// If Z-Score is > 3.0 (standard statistical anomaly threshold)
 		if z > 3.0/ad.config.Sensitivity && currentErrors > 5 {
 			logger.L.LogWarn("ANOMALY DETECTED: 5xx error rate is statistically anomalous",
