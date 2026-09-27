@@ -40,6 +40,8 @@ import type { TLSOption } from "../types/gateon";
 import { useTLSOptions, apiFetch, getApiErrorMessage, useClientAuthorities } from "../hooks/useGateon";
 import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
+import { QueryError } from "../components/QueryError";
+import { ConfirmDeleteModal } from "../components/ConfirmDelete";
 
 const TLS_VERSIONS = [
   { label: "TLS 1.0 (Insecure)", value: "TLS1.0" },
@@ -71,11 +73,14 @@ export default function TLSOptionsPage() {
   const queryClient = useQueryClient();
   const [opened, { open, close }] = useDisclosure(false);
   const [editingOption, setEditingOption] = useState<TLSOption | null>(null);
+  // Deleting asked "Are you sure you want to delete this TLS option?" -- the
+  // same question on every row. The confirmation names the option now.
+  const [pendingDelete, setPendingDelete] = useState<TLSOption | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  const { data, isLoading } = useTLSOptions({
+  const { data, isLoading, isError, error, refetch } = useTLSOptions({
     page: page - 1,
     pageSize: pageSize,
     search: search,
@@ -123,6 +128,7 @@ export default function TLSOptionsPage() {
       return true;
     },
     onSuccess: () => {
+      setPendingDelete(null);
       queryClient.invalidateQueries({ queryKey: ["tlsoptions"] });
       notifications.show({
         title: "TLS Option Deleted",
@@ -223,6 +229,13 @@ export default function TLSOptionsPage() {
                     <Text py="xl">Loading...</Text>
                   </Table.Td>
                 </Table.Tr>
+              ) : isError ? (
+                // A failed read used to fall through to "No TLS options configured".
+                <Table.Tr>
+                  <Table.Td colSpan={6}>
+                    <QueryError error={error} what="TLS options" onRetry={() => void refetch()} />
+                  </Table.Td>
+                </Table.Tr>
               ) : tlsOptions.length === 0 ? (
                 <Table.Tr>
                   <Table.Td colSpan={6} align="center">
@@ -295,6 +308,7 @@ export default function TLSOptionsPage() {
                               variant="subtle"
                               color="blue"
                               onClick={() => startEdit(opt)}
+                              aria-label={`Edit TLS option ${opt.name || opt.id}`}
                             >
                               <IconPencil size={16} />
                             </ActionIcon>
@@ -303,15 +317,8 @@ export default function TLSOptionsPage() {
                             <ActionIcon
                               variant="subtle"
                               color="red"
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    "Are you sure you want to delete this TLS option?",
-                                  )
-                                ) {
-                                  deleteMutation.mutate(opt.id);
-                                }
-                              }}
+                              onClick={() => setPendingDelete(opt)}
+                              aria-label={`Remove TLS option ${opt.name || opt.id}`}
                             >
                               <IconTrash size={16} />
                             </ActionIcon>
@@ -500,6 +507,13 @@ export default function TLSOptionsPage() {
           </Button>
         </Stack>
       </Modal>
+
+      <ConfirmDeleteModal
+        target={pendingDelete ? { kind: "TLS option", name: pendingDelete.name || pendingDelete.id, id: pendingDelete.id } : null}
+        loading={deleteMutation.isPending}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
+      />
     </Stack>
   );
 }

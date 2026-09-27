@@ -11,7 +11,8 @@ export function useTLSOptions(params?: PaginationParams) {
     queryKey: ["tlsoptions", params],
     queryFn: async () => {
       const res = await apiFetch(`/v1/tls-options${buildQueryString(params)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // The body, not the status: QueryError shows the gateway's own message.
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       const json = await res.json();
       const opts = json.tlsOptions || json.options || json.tls_options || [];
       return {
