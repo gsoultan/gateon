@@ -6,7 +6,7 @@ package security
 import (
 	"bufio"
 	"bytes"
-	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -86,6 +86,15 @@ func (cfg DeceptionConfig) trapFor(r *http.Request) (threatType, details string,
 		if link != "" && path == link {
 			return "deception_link_triggered",
 				"Access to invisible deception link: " + link, true
+		}
+	}
+
+	// The hidden forms post here. The form was injected into every page and
+	// its action was never checked, so a bot that found the bait and took it
+	// went straight through to the backend.
+	for _, form := range cfg.HoneyForms {
+		if form != "" && path == form {
+			return "deception_form_triggered", "Submission to hidden deception form: " + form, true
 		}
 	}
 
@@ -192,15 +201,30 @@ func (w *deceptionResponseWriter) Write(b []byte) (int, error) {
 		return w.ResponseWriter.Write(b)
 	}
 	w.injected = true
+	return writeAround(w.ResponseWriter, b, idx, w.cfg.markup())
+}
 
+// markup is the hidden links and forms spliced into a page.
+//
+// The paths are escaped: they were written raw, so a quote in one ended the
+// attribute and whoever could edit a middleware could put script into every
+// site behind it. Links carry rel="nofollow" because crawlers read markup, not
+// styles -- a search engine follows a hidden link as readily as a bot does,
+// and one that trips the trap is refused as a critical threat. Well-behaved
+// crawlers honour nofollow; the bots the trap is for do not.
+func (cfg DeceptionConfig) markup() string {
 	var sb strings.Builder
-	for _, link := range w.cfg.InvisibleLinkPaths {
-		fmt.Fprintf(&sb, `<a href="%s" style="display:none" aria-hidden="true" tabIndex="-1"></a>`, link)
+	for _, link := range cfg.InvisibleLinkPaths {
+		sb.WriteString(`<a href="`)
+		sb.WriteString(html.EscapeString(link))
+		sb.WriteString(`" rel="nofollow" style="display:none" aria-hidden="true" tabIndex="-1"></a>`)
 	}
-	for _, form := range w.cfg.HoneyForms {
-		fmt.Fprintf(&sb, `<form action="%s" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`, form)
+	for _, form := range cfg.HoneyForms {
+		sb.WriteString(`<form action="`)
+		sb.WriteString(html.EscapeString(form))
+		sb.WriteString(`" method="POST" style="display:none" aria-hidden="true"><input type="text" name="admin_password"></form>`)
 	}
-	return writeAround(w.ResponseWriter, b, idx, sb.String())
+	return sb.String()
 }
 
 // writeAround writes b to dst with insert in front of b[idx:], and reports
